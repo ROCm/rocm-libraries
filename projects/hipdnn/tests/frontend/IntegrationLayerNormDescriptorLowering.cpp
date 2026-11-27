@@ -162,7 +162,7 @@ TEST_F(IntegrationLayerNormDescriptorLowering, LayerNormGraphRoundTrip)
 
     // -- Verify layernorm operation node --
     ASSERT_EQ(graphT.nodes.size(), 1u);
-    auto& node = graphT.nodes[0];
+    const auto& node = graphT.nodes[0];
     EXPECT_EQ(node->compute_data_type, DataTypeSdk::FLOAT);
     EXPECT_EQ(node->name, "layernorm_op");
     EXPECT_EQ(node->attributes.type, NodeAttrType::LayernormAttributes);
@@ -367,7 +367,7 @@ TEST_F(IntegrationLayerNormDescriptorLowering, InferenceModeOmitsMeanAndInvVaria
 
     // -- Verify layernorm operation node --
     ASSERT_EQ(graphT.nodes.size(), 1u);
-    auto& node = graphT.nodes[0];
+    const auto& node = graphT.nodes[0];
     EXPECT_EQ(node->compute_data_type, DataTypeSdk::FLOAT);
     EXPECT_EQ(node->name, "layernorm_op");
     EXPECT_EQ(node->attributes.type, NodeAttrType::LayernormAttributes);

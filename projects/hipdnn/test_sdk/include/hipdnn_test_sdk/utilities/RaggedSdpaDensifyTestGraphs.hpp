@@ -263,7 +263,7 @@ inline std::vector<uint8_t> raggedQPagedKvGraph(bool sink, bool raggedKv = false
 // mask is drawn at the graph's extents and at positions within the sequence.
 inline std::vector<uint8_t> withPhiloxDropout(const std::vector<uint8_t>& buffer, float p)
 {
-    auto graph = UnPackGraph(buffer.data());
+    const auto graph = UnPackGraph(buffer.data());
     graph->tensors.push_back(tensor(SEED, DataType::INT64, {1, 1, 1, 1}, {1, 1, 1, 1}));
     graph->tensors.push_back(tensor(OFFSET, DataType::INT64, {1, 1, 1, 1}, {1, 1, 1, 1}));
     graph->tensors.push_back(
@@ -282,7 +282,7 @@ inline std::vector<uint8_t> withPhiloxDropout(const std::vector<uint8_t>& buffer
 inline std::vector<uint8_t> editGraph(const std::vector<uint8_t>& buffer,
                                       const std::function<void(GraphT&)>& edit)
 {
-    auto graph = UnPackGraph(buffer.data());
+    const auto graph = UnPackGraph(buffer.data());
     edit(*graph);
     flatbuffers::FlatBufferBuilder builder;
     builder.Finish(Graph::Pack(builder, graph.get()));
@@ -291,7 +291,7 @@ inline std::vector<uint8_t> editGraph(const std::vector<uint8_t>& buffer,
 
 inline TensorAttributesT& tensorOf(GraphT& graph, int64_t uid)
 {
-    for(auto& t : graph.tensors)
+    for(const auto& t : graph.tensors)
     {
         if(t->uid == uid)
         {

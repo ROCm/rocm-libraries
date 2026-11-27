@@ -1061,7 +1061,7 @@ flatbuffers::FlatBufferBuilder editCbaTensor(
     const std::function<void(hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT&)>& edit)
 {
     return mutateGraph(source, [&](hipdnn_flatbuffers_sdk::data_objects::GraphT& graph) {
-        for(auto& tensor : graph.tensors)
+        for(const auto& tensor : graph.tensors)
         {
             if(tensor->name == name)
             {

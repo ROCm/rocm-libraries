@@ -890,7 +890,7 @@ std::ostream& operator<<(std::ostream& os, const TrainingGraphMutation& value)
 
 TensorAttributesT& tensorByUid(GraphT& graph, int64_t uid)
 {
-    for(auto& tensor : graph.tensors)
+    for(const auto& tensor : graph.tensors)
     {
         if(tensor->uid == uid)
         {
@@ -1314,7 +1314,7 @@ TEST_P(TestBatchnormOneNodeVirtualOperand, VirtualOperandIsNotApplicable)
     const auto base = GetParam().makeGraph();
     const auto mutated = hipdnn_test_sdk::utilities::mutateGraph(base, [&](GraphT& graph) {
         const int64_t uid = GetParam().operandUid(graph);
-        for(auto& tensor : graph.tensors)
+        for(const auto& tensor : graph.tensors)
         {
             if(tensor->uid == uid)
             {
@@ -1347,7 +1347,7 @@ using hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT;
 
 TensorAttributesT& tensorNamed(GraphT& graph, const std::string& name)
 {
-    for(auto& tensor : graph.tensors)
+    for(const auto& tensor : graph.tensors)
     {
         if(tensor->name == name)
         {

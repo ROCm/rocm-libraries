@@ -69,7 +69,7 @@ public:
             throw std::out_of_range("TestPluginKnobRecorder::at: index " + std::to_string(index)
                                     + " out of range (count=" + std::to_string(count()) + ")");
         }
-        auto config = UnPackEngineConfig(data);
+        const auto config = UnPackEngineConfig(data);
         sortKnobs(*config);
         return std::move(*config);
     }

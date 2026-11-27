@@ -224,7 +224,7 @@ protected:
         refTensor.setHostValue(reference, 0);
         outTensor.setHostValue(output, 0);
 
-        auto selection = hipdnn_integration_tests::bundle::makeValidator(
+        const auto selection = hipdnn_integration_tests::bundle::makeValidator(
             Format::DATA_TYPE,
             "O",
             hipdnn_integration_tests::bundle::ComparisonTolerance::allClose(tolerance.atol,

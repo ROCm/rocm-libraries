@@ -344,7 +344,7 @@ TEST_F(TestGraphDescriptor, JsonRoundTripPreservesMinimumApiVersionAndRuntimePas
 
     const auto builder = createValidGraph();
     const auto* graph = GetGraph(builder.GetBufferPointer());
-    auto graphT = std::unique_ptr<GraphT>(graph->UnPack());
+    const auto graphT = std::unique_ptr<GraphT>(graph->UnPack());
     ASSERT_NE(graphT, nullptr);
     ASSERT_FALSE(graphT->tensors.empty());
 
@@ -811,7 +811,7 @@ TEST_F(TestGraphDescriptor, BinaryDeserializeRejectsConvBwdStrideInconsistentWit
     // dy [4,4,4,4], w [4,4,1,1], dx [4,4,4,4], no padding: any width stride above 3
     // implies a dy width of 1, so dy width 4 is inconsistent.
     const auto base = hipdnn_test_sdk::utilities::createValidConvBwdGraph();
-    auto graphT = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(base.GetBufferPointer());
+    const auto graphT = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(base.GetBufferPointer());
     ASSERT_NE(graphT, nullptr);
     graphT->nodes.at(0)->attributes.AsConvolutionBwdAttributes()->stride[1] = 1048577;
     flatbuffers::FlatBufferBuilder builder;
@@ -1036,7 +1036,7 @@ TEST_F(TestGraphDescriptor, PreservesOpaqueSerializedGraphId)
 {
     auto builder = createValidGraph();
     auto serialized = builder.Release();
-    auto graph = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(serialized.data());
+    const auto graph = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(serialized.data());
     std::array<uint8_t, 16> opaqueId{};
     opaqueId[6] = 0x30;
     opaqueId[8] = 0x40;
@@ -1429,7 +1429,7 @@ TEST_F(TestGraphDescriptor, RaggedOffsetAuxEmittedIntoTensorsOnReserialize)
     descriptor.buildSerializedGraph();
 
     const auto serialized = descriptor.getSerializedGraph();
-    auto graph = UnPackGraph(static_cast<const uint8_t*>(serialized.ptr));
+    const auto graph = UnPackGraph(static_cast<const uint8_t*>(serialized.ptr));
     ASSERT_NE(graph, nullptr);
 
     std::unordered_map<int64_t, const TensorAttributesT*> tensorMap;
@@ -1479,7 +1479,7 @@ TEST_F(TestGraphDescriptor, RaggedOffsetAuxEmittedIntoTensorsOnJsonRoundTrip)
     fromJson.buildSerializedGraph();
 
     const auto serialized = fromJson.getSerializedGraph();
-    auto graph = UnPackGraph(static_cast<const uint8_t*>(serialized.ptr));
+    const auto graph = UnPackGraph(static_cast<const uint8_t*>(serialized.ptr));
     ASSERT_NE(graph, nullptr);
 
     std::unordered_map<int64_t, const TensorAttributesT*> tensorMap;

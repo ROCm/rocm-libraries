@@ -33,8 +33,8 @@ namespace
 // The flag is omitted from the buffer while false, so it cannot be flipped in place.
 flatbuffers::DetachedBuffer markTensorRuntimePassByValue(const void* graphBuffer, int64_t uid)
 {
-    auto graphT = std::unique_ptr<GraphT>(GetGraph(graphBuffer)->UnPack());
-    for(auto& tensor : graphT->tensors)
+    const auto graphT = std::unique_ptr<GraphT>(GetGraph(graphBuffer)->UnPack());
+    for(const auto& tensor : graphT->tensors)
     {
         if(tensor->uid == uid)
         {

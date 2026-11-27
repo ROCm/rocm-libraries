@@ -572,7 +572,7 @@ void GraphDescriptor::buildSerializedGraph()
         return;
     }
 
-    auto graph = buildGraphFromOperations();
+    const auto graph = buildGraphFromOperations();
     THROW_IF_NULL(graph,
                   HIPDNN_STATUS_INTERNAL_ERROR,
                   "GraphDescriptor::buildSerializedGraph: graph is null");

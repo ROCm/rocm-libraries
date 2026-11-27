@@ -51,7 +51,7 @@ using hipdnn_test_sdk::utilities::CuSeqLenSides;
 
 TensorAttributesT& findTensorByUid(GraphT& graph, int64_t uid)
 {
-    for(auto& tensor : graph.tensors)
+    for(const auto& tensor : graph.tensors)
     {
         if(tensor->uid == uid)
         {

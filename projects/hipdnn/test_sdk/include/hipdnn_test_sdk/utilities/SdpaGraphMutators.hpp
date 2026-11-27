@@ -142,7 +142,7 @@ inline flatbuffers::FlatBufferBuilder withRaggedTensors(flatbuffers::FlatBufferB
         }
     }
 
-    for(auto& tensor : graph->tensors)
+    for(const auto& tensor : graph->tensors)
     {
         if(names.count(tensor->name) != 0)
         {
@@ -160,7 +160,8 @@ inline flatbuffers::FlatBufferBuilder withRaggedTensors(flatbuffers::FlatBufferB
 /// Attach a seq-len tensor and set seq_len_q_tensor_uid on the SDPA node.
 inline flatbuffers::FlatBufferBuilder withSeqLenQ(flatbuffers::FlatBufferBuilder&& builder)
 {
-    auto graph = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(builder.GetBufferPointer());
+    const auto graph
+        = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(builder.GetBufferPointer());
     detail::getSdpaAttributes(*graph).seq_len_q_tensor_uid
         = detail::appendIndexTensor(*graph, "seq_len_q");
     return detail::repack(*graph);
@@ -169,7 +170,8 @@ inline flatbuffers::FlatBufferBuilder withSeqLenQ(flatbuffers::FlatBufferBuilder
 /// Attach a seq-len tensor and set seq_len_kv_tensor_uid on the SDPA node.
 inline flatbuffers::FlatBufferBuilder withSeqLenKv(flatbuffers::FlatBufferBuilder&& builder)
 {
-    auto graph = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(builder.GetBufferPointer());
+    const auto graph
+        = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(builder.GetBufferPointer());
     detail::getSdpaAttributes(*graph).seq_len_kv_tensor_uid
         = detail::appendIndexTensor(*graph, "seq_len_kv");
     return detail::repack(*graph);

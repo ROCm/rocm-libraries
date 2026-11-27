@@ -1194,7 +1194,7 @@ TEST_F(TestSdpaFwdOperationDescriptor, BuildNodeProducesCorrectNodeT)
     desc->setAttribute(HIPDNN_ATTR_SDPA_FWD_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
-    auto node = desc->buildNode();
+    const auto node = desc->buildNode();
     ASSERT_NE(node, nullptr);
     ASSERT_EQ(node->compute_data_type, DataType::FLOAT);
     ASSERT_EQ(node->attributes.type, NodeAttributes::SdpaAttributes);
@@ -1278,7 +1278,7 @@ TEST_F(TestSdpaFwdOperationDescriptor, BuildNodeProducesCorrectNodeTNonDefaults)
 
     desc->finalize();
 
-    auto node = desc->buildNode();
+    const auto node = desc->buildNode();
     ASSERT_NE(node, nullptr);
     ASSERT_EQ(node->compute_data_type, DataType::FLOAT);
     ASSERT_EQ(node->attributes.type, NodeAttributes::SdpaAttributes);
@@ -1311,7 +1311,7 @@ TEST_F(TestSdpaFwdOperationDescriptor, BuildNodeWithHalfComputeType)
     desc->setAttribute(HIPDNN_ATTR_SDPA_FWD_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
-    auto node = desc->buildNode();
+    const auto node = desc->buildNode();
     ASSERT_NE(node, nullptr);
     ASSERT_EQ(node->compute_data_type, DataType::HALF);
 }
@@ -1429,7 +1429,7 @@ TEST_F(TestSdpaFwdOperationDescriptor, SetAndGetBooleanAttributes)
     EXPECT_TRUE(retrieved);
 
     // Verify setting to false works (false != unset)
-    auto desc2 = createDescriptor<SdpaFwdOperationDescriptor>();
+    const auto desc2 = createDescriptor<SdpaFwdOperationDescriptor>();
     const auto sdpa2 = desc2->asDescriptor<SdpaFwdOperationDescriptor>();
     // Set up required attributes on desc2
     sdpa2->setAttribute(

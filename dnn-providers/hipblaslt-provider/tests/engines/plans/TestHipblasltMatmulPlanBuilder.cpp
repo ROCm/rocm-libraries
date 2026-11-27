@@ -38,7 +38,7 @@ flatbuffers::FlatBufferBuilder frontendVirtualLayout(const flatbuffers::FlatBuff
 {
     return hipdnn_test_sdk::utilities::mutateGraph(source, [&flipped](auto& graph) {
         const size_t nodeCount = graph.nodes.size();
-        for(auto& tensor : graph.tensors)
+        for(const auto& tensor : graph.tensors)
         {
             const bool intermediate = (tensor->name == "C_matmul" && nodeCount > 1)
                                       || (tensor->name == "C_bias" && nodeCount > 2);
@@ -53,7 +53,7 @@ flatbuffers::FlatBufferBuilder withTensorStrides(const flatbuffers::FlatBufferBu
                                                  const std::vector<int64_t>& strides)
 {
     return hipdnn_test_sdk::utilities::mutateGraph(source, [&](auto& graph) {
-        for(auto& tensor : graph.tensors)
+        for(const auto& tensor : graph.tensors)
         {
             if(tensor->name == tensorName)
             {
@@ -98,7 +98,7 @@ flatbuffers::FlatBufferBuilder
                        hipdnn_flatbuffers_sdk::data_objects::DataType type)
 {
     return hipdnn_test_sdk::utilities::mutateGraph(source, [&](auto& graph) {
-        for(auto& tensor : graph.tensors)
+        for(const auto& tensor : graph.tensors)
         {
             if(tensor->name == tensorName)
             {
@@ -385,7 +385,7 @@ static flatbuffers::FlatBufferBuilder withTensorDims(const flatbuffers::FlatBuff
                                                      const std::vector<int64_t>& dims)
 {
     return hipdnn_test_sdk::utilities::mutateGraph(source, [&](auto& graph) {
-        for(auto& tensor : graph.tensors)
+        for(const auto& tensor : graph.tensors)
         {
             if(tensor->name == tensorName)
             {
@@ -719,7 +719,7 @@ TEST_P(TestHipblasltMatmulPlanBuilderScalarCases, IsApplicableDeclinesPassByValu
     const auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
     const auto builder = hipdnn_test_sdk::utilities::mutateGraph(base, [&](auto& graph) {
-        for(auto& tensor : graph.tensors)
+        for(const auto& tensor : graph.tensors)
         {
             if(tensor->name == param.tensorName)
             {

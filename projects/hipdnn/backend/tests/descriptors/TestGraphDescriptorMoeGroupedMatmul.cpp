@@ -376,7 +376,7 @@ TEST_F(TestGraphDescriptorMoeGroupedMatmul, MoeGroupedMatmulAttributesPreserved)
                                                   HIPDNN_DATA_FLOAT);
 
     // Create op with non-default parameters to test graph roundtrip
-    auto wrapper = createDescriptor<MoeGroupedMatmulOperationDescriptor>();
+    const auto wrapper = createDescriptor<MoeGroupedMatmulOperationDescriptor>();
     const auto opDesc = wrapper->asDescriptor<MoeGroupedMatmulOperationDescriptor>();
 
     HipdnnBackendDescriptor* tokenPtr = tokenDesc.get();
@@ -605,7 +605,7 @@ TEST_F(TestGraphDescriptorMoeGroupedMatmul, OperationNameRoundTripThroughLifting
                                static_cast<const uint8_t*>(serialized.ptr) + serialized.size);
 
     // Deserialize into a new GraphDescriptor (lifting path)
-    auto liftedWrapper = createDescriptor<GraphDescriptor>();
+    const auto liftedWrapper = createDescriptor<GraphDescriptor>();
     const auto liftedDesc = liftedWrapper->asDescriptor<GraphDescriptor>();
     liftedDesc->deserializeGraph(bytes.data(), bytes.size());
 
@@ -618,7 +618,7 @@ TEST_F(TestGraphDescriptorMoeGroupedMatmul, OperationNameRoundTripThroughLifting
 
     // Re-serialize and verify name survived the round-trip
     const auto reSerialized = liftedDesc->getSerializedGraph();
-    auto graphT = UnPackGraph(reSerialized.ptr);
+    const auto graphT = UnPackGraph(reSerialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1u);
     EXPECT_EQ(graphT->nodes[0]->name, "test_moegroupedmatmul_lifting");

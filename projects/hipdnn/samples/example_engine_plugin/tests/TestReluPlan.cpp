@@ -79,7 +79,7 @@ TEST_F(ReluPlanTest, GetWorkspaceSize_ReturnsZero)
 TEST_F(ReluPlanTest, Compile_CallsCompilerWithCorrectFilename)
 {
     const ReluParams params{INPUT_UID, OUTPUT_UID, NUM_ELEMENTS, NEGATIVE_SLOPE};
-    auto plan = std::make_unique<ReluPlan>(params);
+    const auto plan = std::make_unique<ReluPlan>(params);
 
     auto compiledProgram = std::make_unique<MockCompiledProgram>();
     auto* rawProgram = compiledProgram.get();
@@ -98,7 +98,7 @@ TEST_F(ReluPlanTest, Compile_CallsCompilerWithCorrectFilename)
 
 TEST_F(ReluPlanTest, Execute_SetsGridAndBlockSizeAndLaunches)
 {
-    auto plan = createAndCompilePlan();
+    const auto plan = createAndCompilePlan();
 
     // Expect setBlockSize and setGridSize to be called with correct values
     // blockSize=256, numElements=6, gridSize=ceil(6/256)=1
@@ -120,7 +120,7 @@ TEST_F(ReluPlanTest, Execute_SetsGridAndBlockSizeAndLaunches)
 
 TEST_F(ReluPlanTest, Execute_MissingBuffer_Throws)
 {
-    auto plan = createAndCompilePlan();
+    const auto plan = createAndCompilePlan();
 
     std::vector<float> inputData = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f};
 

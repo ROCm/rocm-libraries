@@ -185,7 +185,7 @@ TEST(TestGpuSdpaFwdPlanZeroDropout, DeclinesAProbabilityAboveZeroWithoutADump)
     hipdnn_integration_tests::gpu_graph_executor::GpuReferenceGraphExecutor executor;
     EXPECT_TRUE(executor.isApplicable(graph.data(), graph.size()));
 
-    auto unpacked = UnPackGraph(graph.data());
+    const auto unpacked = UnPackGraph(graph.data());
     auto* sdpa = unpacked->nodes.front()->attributes.AsSdpaAttributes();
     ASSERT_NE(sdpa, nullptr);
     sdpa->dropout_probability = 0.1F;

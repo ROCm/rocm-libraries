@@ -119,7 +119,7 @@ private:
         const auto shallowIn0Tensor
             = bindOperandOrScalar<Input0Type>(_params.in0Tensor, variantPack);
 
-        auto shallowOut0Tensor = createShallowTensor<OutputType>(
+        const auto shallowOut0Tensor = createShallowTensor<OutputType>(
             _params.out0Tensor, variantPack.at(_params.out0Tensor.uid));
 
         if(_params.mode == hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::GEN_INDEX)
@@ -188,7 +188,7 @@ private:
         const auto shallowIn0Tensor
             = bindOperandOrScalar<Input0Type>(_params.in0Tensor, variantPack);
 
-        auto shallowOut0Tensor = createShallowTensor<OutputType>(
+        const auto shallowOut0Tensor = createShallowTensor<OutputType>(
             _params.out0Tensor, variantPack.at(_params.out0Tensor.uid));
 
         if(hipdnn_flatbuffers_sdk::utilities::isUnaryPointwiseMode(_params.mode))

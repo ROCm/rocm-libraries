@@ -95,7 +95,7 @@ TEST_F(TestNodeFactory, CreateOperationFromNodeConvFwd)
     // Cannot use dynamic_pointer_cast: backend tests compile with -fno-rtti.
     auto* op = graphOp->asGraphOperation();
     ASSERT_NE(op, nullptr);
-    auto rebuiltNode = op->buildNode();
+    const auto rebuiltNode = op->buildNode();
     ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::ConvolutionFwdAttributes);
     const auto desc = std::static_pointer_cast<ConvolutionFwdOperationDescriptor>(graphOp);
     ASSERT_TRUE(desc->isFinalized());
@@ -140,7 +140,7 @@ TEST_F(TestNodeFactory, CreateOperationFromNodeLayernorm)
 
     auto* op = graphOp->asGraphOperation();
     ASSERT_NE(op, nullptr);
-    auto rebuiltNode = op->buildNode();
+    const auto rebuiltNode = op->buildNode();
     ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::LayernormAttributes);
 
     const auto desc = std::static_pointer_cast<LayernormOperationDescriptor>(graphOp);
@@ -204,7 +204,7 @@ TEST_F(TestNodeFactory, CreateOperationFromNodeSdpaBwd)
 
     auto* op = graphOp->asGraphOperation();
     ASSERT_NE(op, nullptr);
-    auto rebuiltNode = op->buildNode();
+    const auto rebuiltNode = op->buildNode();
     ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::SdpaBackwardAttributes);
 
     const auto desc = std::static_pointer_cast<SdpaBwdOperationDescriptor>(graphOp);

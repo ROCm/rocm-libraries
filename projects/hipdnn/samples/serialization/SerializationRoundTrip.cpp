@@ -80,7 +80,7 @@ bool testJsonSerialization(const graph::Graph& originalGraph,
         jsonGraph, handle, xAttrJson, wAttrJson, yAttrJson, xTensor, wTensor, yJson);
     std::cout << "JSON-deserialized graph execution complete.\n";
 
-    auto validator = hipdnn_test_sdk::utilities::createAllCloseValidator<InputType>();
+    const auto validator = hipdnn_test_sdk::utilities::createAllCloseValidator<InputType>();
     const bool passed = validator->allClose(yOriginal, yJson);
     std::cout << "JSON round-trip result: " << (passed ? "PASSED" : "FAILED") << "\n";
     return passed;
@@ -123,7 +123,7 @@ bool testBinarySerialization(const graph::Graph& originalGraph,
         binaryGraph, handle, xAttrBin, wAttrBin, yAttrBin, xTensor, wTensor, yBinary);
     std::cout << "Binary-deserialized graph execution complete.\n";
 
-    auto validator = hipdnn_test_sdk::utilities::createAllCloseValidator<InputType>();
+    const auto validator = hipdnn_test_sdk::utilities::createAllCloseValidator<InputType>();
     const bool passed = validator->allClose(yOriginal, yBinary);
     std::cout << "Binary round-trip result: " << (passed ? "PASSED" : "FAILED") << "\n";
     return passed;

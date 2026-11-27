@@ -62,7 +62,7 @@ TEST(TestBlockScaleDequantizePlan, ExecutePlan)
         = createShallowTensor<float>(params.xTensor, directBundle.getTensor(1).rawHostData());
     const auto directScaleTensor
         = createShallowTensor<float>(params.scaleTensor, directBundle.getTensor(2).rawHostData());
-    auto directYTensor
+    const auto directYTensor
         = createShallowTensor<float>(params.yTensor, directBundle.getTensor(3).rawHostData());
 
     CpuFpReferenceBlockScaleDequantize::dequantize(*directXTensor,
@@ -121,7 +121,7 @@ TEST(TestBlockScaleDequantizePlan, ExecutePlanNegativeScale)
         = createShallowTensor<float>(params.xTensor, directBundle.getTensor(1).rawHostData());
     const auto directScaleTensor
         = createShallowTensor<float>(params.scaleTensor, directBundle.getTensor(2).rawHostData());
-    auto directYTensor
+    const auto directYTensor
         = createShallowTensor<float>(params.yTensor, directBundle.getTensor(3).rawHostData());
 
     CpuFpReferenceBlockScaleDequantize::dequantize(
@@ -294,7 +294,7 @@ TYPED_TEST(BlockScaleDequantizeMxPlan, ExecutePlan)
         = createShallowTensor<XType>(params.xTensor, directBundle.getTensor(1).rawHostData());
     const auto directScaleTensor = createShallowTensor<ScaleType>(
         params.scaleTensor, directBundle.getTensor(2).rawHostData());
-    auto directYTensor
+    const auto directYTensor
         = createShallowTensor<OutputType>(params.yTensor, directBundle.getTensor(3).rawHostData());
 
     CpuFpReferenceBlockScaleDequantize::dequantize(
@@ -387,7 +387,7 @@ TYPED_TEST(BlockScaleDequantizeNonFloatInputPlan, ExecutePlan)
         = createShallowTensor<XType>(params.xTensor, directBundle.getTensor(1).rawHostData());
     const auto directScaleTensor = createShallowTensor<ScaleType>(
         params.scaleTensor, directBundle.getTensor(2).rawHostData());
-    auto directYTensor
+    const auto directYTensor
         = createShallowTensor<OutputType>(params.yTensor, directBundle.getTensor(3).rawHostData());
 
     CpuFpReferenceBlockScaleDequantize::dequantize(

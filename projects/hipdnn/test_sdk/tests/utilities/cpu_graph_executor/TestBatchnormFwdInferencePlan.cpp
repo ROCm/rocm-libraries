@@ -84,7 +84,7 @@ TEST_F(TestBatchnormFwdPlan, ExecutePlan)
     const auto shallowInvVarTensor = createShallowTensor<float>(
         params.invVarianceTensor,
         directTensorBundle.tensors[attributes.inv_variance_tensor_uid()]->rawHostData());
-    auto shallowYTensor = createShallowTensor<float>(
+    const auto shallowYTensor = createShallowTensor<float>(
         params.yTensor, directTensorBundle.tensors[attributes.y_tensor_uid()]->rawHostData());
 
     CpuFpReferenceBatchnorm::fwdInference(*shallowXTensor,

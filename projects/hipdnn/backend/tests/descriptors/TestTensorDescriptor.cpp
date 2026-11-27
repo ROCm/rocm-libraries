@@ -1527,7 +1527,7 @@ TEST_F(TestTensorDescriptor, SetUnfinalizedRaggedOffset)
     const std::vector<int64_t> strides = {1, 1};
     const hipdnnDataType_t dataType = HIPDNN_DATA_FP8_E4M3;
 
-    auto wrapper = createDescriptor<TensorDescriptor>();
+    const auto wrapper = createDescriptor<TensorDescriptor>();
     const auto tensorDesc = wrapper->asDescriptor<TensorDescriptor>();
 
     tensorDesc->setAttribute(HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &uid);

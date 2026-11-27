@@ -242,7 +242,7 @@ TEST(TestFlydslSdpaHeadPad, DeclinesOperandsTheCopyCannotRead)
 flatbuffers::FlatBufferBuilder withKeyAsQuery(const SdpaGraphSpec& spec)
 {
     const auto built = buildFlydslSdpaRdnaGraph(spec);
-    std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT> graph(
+    const std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT> graph(
         hipdnn_flatbuffers_sdk::data_objects::GetGraph(built.GetBufferPointer())->UnPack());
     auto* sdpa = graph->nodes.front()->attributes.AsSdpaAttributes();
     EXPECT_NE(sdpa, nullptr);
@@ -258,7 +258,7 @@ flatbuffers::FlatBufferBuilder withKeyAsQuery(const SdpaGraphSpec& spec)
                 queryTable = tensor->ragged_offset_tensor_uid;
             }
         }
-        for(auto& tensor : graph->tensors)
+        for(const auto& tensor : graph->tensors)
         {
             if(tensor != nullptr && tensor->uid == sdpa->v_tensor_uid)
             {
@@ -342,9 +342,9 @@ TEST(TestFlydslSdpaHeadPad, CopiesReadTheLengthBindingTheKernelsRead)
 flatbuffers::FlatBufferBuilder withHeadDim(const SdpaGraphSpec& spec, int64_t uid, int64_t headDim)
 {
     const auto built = buildFlydslSdpaRdnaGraph(spec);
-    std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT> graph(
+    const std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT> graph(
         hipdnn_flatbuffers_sdk::data_objects::GetGraph(built.GetBufferPointer())->UnPack());
-    for(auto& tensor : graph->tensors)
+    for(const auto& tensor : graph->tensors)
     {
         if(tensor != nullptr && tensor->uid == uid)
         {

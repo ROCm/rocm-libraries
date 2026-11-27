@@ -681,7 +681,7 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, BuildNodeProducesCorrectNodeT)
                        &computeType);
     desc->finalize();
 
-    auto node = desc->buildNode();
+    const auto node = desc->buildNode();
     ASSERT_NE(node, nullptr);
     ASSERT_EQ(node->compute_data_type, DataType::FLOAT);
     ASSERT_EQ(node->attributes.type, NodeAttributes::BlockScaleQuantizeAttributes);
@@ -705,7 +705,7 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, BuildNodeWithHalfComputeType)
                        &computeType);
     desc->finalize();
 
-    auto node = desc->buildNode();
+    const auto node = desc->buildNode();
     ASSERT_NE(node, nullptr);
     ASSERT_EQ(node->compute_data_type, DataType::HALF);
 }
@@ -720,7 +720,7 @@ TEST_F(TestBlockScaleQuantizeOperationDescriptor, BuildNodeWithBlockSizeAndAxis)
         HIPDNN_ATTR_OPERATION_BLOCK_SCALE_QUANTIZE_AXIS_EXT, HIPDNN_TYPE_INT64, 1, &axis);
     desc->finalize();
 
-    auto node = desc->buildNode();
+    const auto node = desc->buildNode();
     ASSERT_NE(node, nullptr);
 
     auto* attrs = node->attributes.AsBlockScaleQuantizeAttributes();

@@ -53,7 +53,7 @@ TEST(TestJson, GraphUuidRoundTripsAsCanonicalString)
         = hipdnn_flatbuffers_sdk::utilities::parseUuid("01234567-89AB-4DEF-8123-456789ABCDEF");
     const auto uuid = hipdnn_flatbuffers_sdk::utilities::toFlatbufferUuid(id);
 
-    auto graphT = std::unique_ptr<GraphT>(graph->UnPack());
+    const auto graphT = std::unique_ptr<GraphT>(graph->UnPack());
     graphT->id = std::make_unique<Uuid>(uuid);
     flatbuffers::FlatBufferBuilder identifiedBuilder;
     identifiedBuilder.Finish(Graph::Pack(identifiedBuilder, graphT.get()));

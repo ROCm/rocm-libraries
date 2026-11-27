@@ -1535,7 +1535,7 @@ flatbuffers::FlatBufferBuilder convFwdGraphWithPassByValueTensor(const std::stri
 {
     return mutateGraph(createValidConvFwdGraph(),
                        [&](hipdnn_flatbuffers_sdk::data_objects::GraphT& graph) {
-                           for(auto& tensor : graph.tensors)
+                           for(const auto& tensor : graph.tensors)
                            {
                                if(tensor->name == tensorName)
                                {

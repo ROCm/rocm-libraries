@@ -164,7 +164,7 @@ public:
             = createShallowTensor<KDataType>(_params.kTensor, variantPack.at(_params.kTensor.uid));
         const auto shallowVTensor
             = createShallowTensor<VDataType>(_params.vTensor, variantPack.at(_params.vTensor.uid));
-        auto shallowOTensor
+        const auto shallowOTensor
             = createShallowTensor<ODataType>(_params.oTensor, variantPack.at(_params.oTensor.uid));
 
         std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<Mask>> shallowAttnMaskTensor;

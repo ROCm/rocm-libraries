@@ -555,7 +555,7 @@ flatbuffers::FlatBufferBuilder rmsNormRow(int64_t columns, bool fused)
 
 TensorAttributesT& tensorNamed(GraphT& graph, const std::string& name)
 {
-    for(auto& tensor : graph.tensors)
+    for(const auto& tensor : graph.tensors)
     {
         if(tensor->name == name)
         {

@@ -364,7 +364,7 @@ TEST_F(TestGraphDescriptorMoeGroupedMatmulBwd, OperationNameRoundTripThroughLift
                                static_cast<const uint8_t*>(serialized.ptr) + serialized.size);
 
     // Deserialize into a new GraphDescriptor (lifting path)
-    auto liftedWrapper = createDescriptor<GraphDescriptor>();
+    const auto liftedWrapper = createDescriptor<GraphDescriptor>();
     const auto liftedDesc = liftedWrapper->asDescriptor<GraphDescriptor>();
     liftedDesc->deserializeGraph(bytes.data(), bytes.size());
 
@@ -377,7 +377,7 @@ TEST_F(TestGraphDescriptorMoeGroupedMatmulBwd, OperationNameRoundTripThroughLift
 
     // Re-serialize and verify name survived the round-trip
     const auto reSerialized = liftedDesc->getSerializedGraph();
-    auto graphT = UnPackGraph(reSerialized.ptr);
+    const auto graphT = UnPackGraph(reSerialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1u);
     EXPECT_EQ(graphT->nodes[0]->name, "test_moegroupedmatmulbwd_lifting");

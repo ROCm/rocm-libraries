@@ -277,7 +277,7 @@ TEST(TestGpuSdpaFwdPlanBuilder, ExecuteWritesLseThroughGraph)
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
     const GpuSdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         floatPlanBuilder;
-    auto plan = floatPlanBuilder.buildNodePlan(graphWrap, graphWrap.getNode(0));
+    const auto plan = floatPlanBuilder.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     Tensor<float> q(DIMS);
     Tensor<float> k(DIMS);
@@ -340,7 +340,7 @@ TEST(TestGpuSdpaFwdPlanBuilder, DeprecatedCausalMaskWithLeftBoundIsSlidingWindow
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
     const GpuSdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         floatPlanBuilder;
-    auto plan = floatPlanBuilder.buildNodePlan(graphWrap, graphWrap.getNode(0));
+    const auto plan = floatPlanBuilder.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     Tensor<float> q(DIMS);
     Tensor<float> k(DIMS);
@@ -406,7 +406,7 @@ TEST(TestGpuSdpaFwdPlanBuilder, ExecuteUsesFloatProbabilityNotProviderRounding)
                                 DataType::BFLOAT16,
                                 DataType::BFLOAT16>
         bfloat16PlanBuilder;
-    auto plan = bfloat16PlanBuilder.buildNodePlan(graphWrap, graphWrap.getNode(0));
+    const auto plan = bfloat16PlanBuilder.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     Tensor<bfloat16> q(qDims);
     Tensor<bfloat16> k(kvDims);
@@ -485,7 +485,7 @@ TEST(TestGpuSdpaFwdPlanBuilder, ExecuteAppliesRuntimePassByValueScale)
     const GpuSdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         floatPlanBuilder;
     ASSERT_TRUE(floatPlanBuilder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
-    auto plan = floatPlanBuilder.buildNodePlan(graphWrap, graphWrap.getNode(0));
+    const auto plan = floatPlanBuilder.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     Tensor<float> q(DIMS);
     Tensor<float> k(DIMS);
@@ -782,7 +782,7 @@ void expectMaskedPlanMatchesReferences()
                                 DataType::FLOAT,
                                 MaskEnum>
         builder;
-    auto plan = builder.buildNodePlan(graphWrap, graphWrap.getNode(0));
+    const auto plan = builder.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     const auto floatGraph = makeGraphWithMask(DataType::FLOAT);
     const auto floatGraphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
@@ -793,7 +793,7 @@ void expectMaskedPlanMatchesReferences()
                                 DataType::FLOAT,
                                 DataType::FLOAT>
         floatBuilder;
-    auto floatPlan = floatBuilder.buildNodePlan(floatGraphWrap, floatGraphWrap.getNode(0));
+    const auto floatPlan = floatBuilder.buildNodePlan(floatGraphWrap, floatGraphWrap.getNode(0));
 
     Tensor<float> q(DIMS);
     Tensor<float> k(DIMS);
@@ -1073,7 +1073,7 @@ TEST(TestGpuSdpaFwdPlanBuilder, ExecutePhiloxDropoutMatchesCpuOnDumpedMask)
     const GpuSdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         floatPlanBuilder;
     ASSERT_TRUE(floatPlanBuilder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
-    auto plan = floatPlanBuilder.buildNodePlan(graphWrap, graphWrap.getNode(0));
+    const auto plan = floatPlanBuilder.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     Tensor<float> q(DIMS);
     Tensor<float> k(DIMS);

@@ -62,7 +62,7 @@ public:
             _params.tokenTensor, variantPack.at(_params.tokenTensor.uid));
         const auto firstTokenOffset = createShallowTensor<int32_t>(
             _params.firstTokenOffsetTensor, variantPack.at(_params.firstTokenOffsetTensor.uid));
-        auto dweight = createShallowTensor<DweightDataType>(
+        const auto dweight = createShallowTensor<DweightDataType>(
             _params.dweightTensor, variantPack.at(_params.dweightTensor.uid));
 
         utilities::CpuFpReferenceMoeGroupedMatmulBwd::

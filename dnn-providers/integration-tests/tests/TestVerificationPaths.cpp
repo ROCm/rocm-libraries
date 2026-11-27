@@ -57,7 +57,7 @@ void verifyGoldenComparison(
         auto& expectedTensor = *goldenOutputs.at(uid);
         const auto dataType = tensorAttrMap.at(uid)->data_type();
 
-        auto validator
+        const auto validator
             = hipdnn_test_sdk::utilities::createAllCloseValidator(dataType, tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expectedTensor, actualTensor))
             << "Golden comparison failed for tensor uid=" << uid;

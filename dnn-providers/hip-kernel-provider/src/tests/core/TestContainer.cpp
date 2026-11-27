@@ -736,14 +736,14 @@ TEST(TestContainer, RanksTheAsmEngineFirstForTheSdpaForwardGraphsItServes)
     };
     const auto mutate
         = [](flatbuffers::FlatBufferBuilder&& builder, const std::function<void(GraphT&)>& change) {
-              auto graph = UnPackGraph(builder.GetBufferPointer());
+              const auto graph = UnPackGraph(builder.GetBufferPointer());
               change(*graph);
               flatbuffers::FlatBufferBuilder mutated;
               mutated.Finish(CreateGraph(mutated, graph.get()));
               return mutated;
           };
     const auto tensorNamed = [](GraphT& graph, const std::string& name) -> TensorAttributesT& {
-        for(auto& tensor : graph.tensors)
+        for(const auto& tensor : graph.tensors)
         {
             if(tensor->name == name)
             {

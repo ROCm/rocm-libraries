@@ -86,7 +86,7 @@ TEST_P(TestRMSnormActivationValidator, DirectionIdentityAndLeakyRelu)
     const auto original = testCase.isBwd
                               ? hipdnn_test_sdk::utilities::createValidRMSNormBwdActivationGraph()
                               : hipdnn_test_sdk::utilities::createValidRMSNormActivationGraph();
-    auto nativeGraph
+    const auto nativeGraph
         = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(original.GetBufferPointer());
     auto* activation
         = nativeGraph->nodes[testCase.isBwd ? 0 : 1]->attributes.AsPointwiseAttributes();

@@ -93,7 +93,7 @@ protected:
         expected.fillWithValue(safeTestTypeCast<OutputType>(TEST_VALUE_3));
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::ADD, TEST_VALUE_2);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -113,7 +113,7 @@ protected:
         expected.fillWithValue(safeTestTypeCast<OutputType>(TEST_VALUE_3));
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::SUB, TEST_VALUE_5);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -146,7 +146,7 @@ protected:
         expected.setHostValue(
             safeTestTypeCast<OutputType>(std::max(-TEST_VALUE_1, TEST_VALUE_4)), 0, 0, 0, 3);
 
-        auto validator = createAllCloseValidator<OutputType>(0.0f, 0.0f);
+        const auto validator = createAllCloseValidator<OutputType>(0.0f, 0.0f);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -179,7 +179,7 @@ protected:
         expected.setHostValue(
             safeTestTypeCast<OutputType>(std::min(-TEST_VALUE_1, TEST_VALUE_4)), 0, 0, 0, 3);
 
-        auto validator = createAllCloseValidator<OutputType>(0.0f, 0.0f);
+        const auto validator = createAllCloseValidator<OutputType>(0.0f, 0.0f);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -254,7 +254,7 @@ protected:
             PointwiseMode::ADD, output, input1, input2);
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::ADD, PI);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -320,7 +320,7 @@ protected:
             PointwiseMode::SUB, output, input1, input2);
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::SUB, E * E);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -373,7 +373,7 @@ protected:
             PointwiseMode::SUB, output, input1, input2);
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::SUB, E * E);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -394,7 +394,7 @@ protected:
             safeTestTypeCast<OutputType>(PRECISION_TEST_A + PRECISION_TEST_B), 0, 0, 0, 0);
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::ADD, PRECISION_TEST_B);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -422,7 +422,7 @@ protected:
         expected.setHostValue(safeTestTypeCast<OutputType>(static_cast<float>(13)), 4);
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::ADD, 8.0f);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -464,7 +464,7 @@ protected:
         }
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::ADD, 40.0f);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -501,7 +501,7 @@ protected:
         }
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::SUB, TEST_VALUE_5);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -539,7 +539,7 @@ protected:
         }
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::SUB, TEST_VALUE_5);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -590,7 +590,7 @@ protected:
         }
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::ADD, 30.0f);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -644,7 +644,7 @@ protected:
         }
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::ADD, 103.0f);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -683,7 +683,7 @@ protected:
             }
         }
 
-        auto validator = createAllCloseValidator<OutputType>(0.0f, 0.0f);
+        const auto validator = createAllCloseValidator<OutputType>(0.0f, 0.0f);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -722,7 +722,7 @@ protected:
             }
         }
 
-        auto validator = createAllCloseValidator<OutputType>(0.0f, 0.0f);
+        const auto validator = createAllCloseValidator<OutputType>(0.0f, 0.0f);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -787,7 +787,7 @@ protected:
         }
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::ADD, 30.0f);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -823,7 +823,7 @@ protected:
             safeTestTypeCast<OutputType>(TEST_VALUE_5 / TEST_VALUE_2), 0, 0, 0, 3);
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::DIV, TEST_VALUE_5);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -858,7 +858,7 @@ protected:
             safeTestTypeCast<OutputType>(TEST_VALUE_3 + TEST_VALUE_1 * TEST_VALUE_1), 0, 0, 0, 3);
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::ADD_SQUARE, TEST_VALUE_5);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -949,7 +949,7 @@ protected:
         }
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::DIV, 12.0f);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -982,7 +982,7 @@ protected:
             PointwiseMode::DIV, output, input1, input2);
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::DIV, 16.0f);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -1018,7 +1018,7 @@ protected:
             PointwiseMode::ADD, output, input1, input2);
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::ADD, 12.0f);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -1068,7 +1068,7 @@ protected:
             safeTestTypeCast<OutputType>(TEST_VALUE_1_5), 0, 2, 1, 1); // max(0, 1.5) = 1.5
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::RELU_FWD, TEST_VALUE_5);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -1146,7 +1146,7 @@ protected:
                               1); // dy=3.0, x=1.5>0: dx=3.0*1=3.0
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::RELU_BWD, TEST_VALUE_5);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -1205,7 +1205,7 @@ protected:
             safeTestTypeCast<OutputType>(TEST_VALUE_1), 0, 1, 1, 1); // 1.0 (in range)
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::RELU_FWD, TEST_VALUE_5);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -1291,7 +1291,7 @@ protected:
         }
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::RELU_BWD, TEST_VALUE_5);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -1365,7 +1365,7 @@ protected:
                               1); // sigmoid(1.5)
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::SIGMOID_FWD, TEST_VALUE_5);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -1428,7 +1428,7 @@ protected:
         }
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::SIGMOID_BWD, TEST_VALUE_4);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -1470,7 +1470,7 @@ protected:
             safeTestTypeCast<OutputType>(std::tanh(TEST_VALUE_1_5)), 0, 1, 1, 1); // tanh(1.5)
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::TANH_FWD, TEST_VALUE_3);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -1532,7 +1532,7 @@ protected:
         }
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::TANH_BWD, TEST_VALUE_4);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -1602,7 +1602,7 @@ protected:
             1); // |-4| = 4
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::ABS, TEST_VALUE_5);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -1637,7 +1637,7 @@ protected:
         expected.setHostValue(safeTestTypeCast<OutputType>(TEST_VALUE_4), 0, 1, 1, 1); // -(-4) = 4
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::NEG, TEST_VALUE_5);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -1710,7 +1710,7 @@ protected:
                               1); // gelu_erf(1.5)
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::GELU_FWD, TEST_VALUE_5);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -1753,7 +1753,7 @@ protected:
 
         const auto tolerance
             = getDynamicTolerance(PointwiseMode::GELU_APPROX_TANH_FWD, TEST_VALUE_5);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -1791,7 +1791,7 @@ protected:
         expected.setHostValue(safeTestTypeCast<OutputType>(swish(TEST_VALUE_1_5)), 0, 1, 1, 1);
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::SWISH_FWD, TEST_VALUE_5);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -1819,7 +1819,7 @@ protected:
         expected.setHostValue(safeTestTypeCast<OutputType>(2.0f), 4); // max(0, 2) = 2
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::RELU_FWD, 2.0f);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -1854,7 +1854,7 @@ protected:
         }
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::ABS, 3.0f);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -1873,7 +1873,7 @@ protected:
         expected.fillWithValue(safeTestTypeCast<OutputType>(TEST_VALUE_2_5));
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::NEG, TEST_VALUE_2_5);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -1892,7 +1892,7 @@ protected:
         expected.setHostValue(safeTestTypeCast<OutputType>(std::tanh(E)), 0, 0, 0, 0);
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::TANH_FWD, E);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -1926,7 +1926,7 @@ protected:
         expected.setHostValue(safeTestTypeCast<OutputType>(SQRT_2), 0, 1, 1, 1); // √2
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::IDENTITY, PI);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -1965,7 +1965,7 @@ protected:
         }
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::EXP, 20.0f);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -2001,7 +2001,7 @@ protected:
         }
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::FLOOR, PI);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -2050,7 +2050,7 @@ protected:
         }
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::ELU_FWD, TEST_VALUE_3);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -2111,7 +2111,7 @@ protected:
         }
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::GELU_BWD, TEST_VALUE_4);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -2170,7 +2170,7 @@ protected:
         }
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::SWISH_BWD, TEST_VALUE_4);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -2255,7 +2255,7 @@ protected:
         }
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::LOG, TEST_VALUE_5);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -2303,7 +2303,7 @@ protected:
         }
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::SOFTPLUS_FWD, TEST_VALUE_3);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -2370,7 +2370,7 @@ protected:
 
         const auto tolerance
             = getDynamicTolerance(PointwiseMode::GELU_APPROX_TANH_BWD, TEST_VALUE_4);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -2434,7 +2434,7 @@ protected:
         }
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::ELU_BWD, TEST_VALUE_4);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -2471,7 +2471,7 @@ protected:
         }
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::SQRT, TEST_VALUE_5);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -2508,7 +2508,7 @@ protected:
         }
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::RSQRT, TEST_VALUE_5);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -2545,7 +2545,7 @@ protected:
         }
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::RECIPROCAL, TEST_VALUE_5);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -2582,7 +2582,7 @@ protected:
         }
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::SIN, TEST_VALUE_3);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -2619,7 +2619,7 @@ protected:
         }
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::TAN, 20.0f);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -2656,7 +2656,7 @@ protected:
         }
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::ERF, TEST_VALUE_3);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -2693,7 +2693,7 @@ protected:
         }
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::CEIL, TEST_VALUE_3);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -2832,7 +2832,7 @@ protected:
         }
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::SOFTPLUS_BWD, TEST_VALUE_4);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
@@ -2864,7 +2864,7 @@ protected:
             PointwiseMode::EXP, output, input);
 
         const auto tolerance = getDynamicTolerance(PointwiseMode::EXP, 20.0f);
-        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        const auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 };

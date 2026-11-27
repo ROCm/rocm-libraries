@@ -345,7 +345,7 @@ void EngineHeuristicDescriptor::finalize()
     bool success = false;
     for(size_t i = 0; i < _policySlots.size(); ++i)
     {
-        auto& selection = _policySlots[i];
+        const auto& selection = _policySlots[i];
         if(selection == nullptr)
         {
             // Policy plugin not loaded - continue to next policy

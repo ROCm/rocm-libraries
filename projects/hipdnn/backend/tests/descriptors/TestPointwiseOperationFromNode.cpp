@@ -109,7 +109,7 @@ TEST_F(TestPointwiseOperationFromNode, NodeFactoryDelegatesCorrectly)
     // Cannot use dynamic_pointer_cast: backend tests compile with -fno-rtti.
     auto* op = graphOp->asGraphOperation();
     ASSERT_NE(op, nullptr);
-    auto rebuiltNode = op->buildNode();
+    const auto rebuiltNode = op->buildNode();
     ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::PointwiseAttributes);
     const auto desc = std::static_pointer_cast<PointwiseOperationDescriptor>(graphOp);
     ASSERT_TRUE(desc->isFinalized());
@@ -210,7 +210,7 @@ TEST_F(TestPointwiseOperationFromNode, BuildNodeRoundTrip)
     const auto node = createStandardNode();
     const auto desc = PointwiseOperationDescriptor::fromNode(node, _tensorMap);
 
-    auto rebuiltNode = desc->buildNode();
+    const auto rebuiltNode = desc->buildNode();
     ASSERT_NE(rebuiltNode, nullptr);
     ASSERT_EQ(rebuiltNode->compute_data_type, DataType::FLOAT);
     ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::PointwiseAttributes);
@@ -350,7 +350,7 @@ TEST_F(TestPointwiseOperationFromNode, BuildNodePreservesName)
     node.name = "test_build_name";
 
     const auto desc = PointwiseOperationDescriptor::fromNode(node, _tensorMap);
-    auto rebuiltNode = desc->buildNode();
+    const auto rebuiltNode = desc->buildNode();
 
     ASSERT_NE(rebuiltNode, nullptr);
     EXPECT_EQ(rebuiltNode->name, "test_build_name");
@@ -420,7 +420,7 @@ TEST_F(TestPointwiseOperationFromNode, FromNodePreservesReluScalars)
     EXPECT_FLOAT_EQ(desc->getData().relu_lower_clip_slope.value(), 0.01F);
 
     // Verify round-trip via buildNode()
-    auto rebuiltNode = desc->buildNode();
+    const auto rebuiltNode = desc->buildNode();
     const auto* rebuiltAttrs = rebuiltNode->attributes.AsPointwiseAttributes();
     ASSERT_NE(rebuiltAttrs, nullptr);
     ASSERT_TRUE(rebuiltAttrs->relu_lower_clip.has_value());
@@ -453,7 +453,7 @@ TEST_F(TestPointwiseOperationFromNode, FromNodePreservesSwishEluSoftplusScalars)
     EXPECT_TRUE(desc->getData().softplus_beta.has_value());
     EXPECT_FLOAT_EQ(desc->getData().softplus_beta.value(), 2.0F);
 
-    auto rebuiltNode = desc->buildNode();
+    const auto rebuiltNode = desc->buildNode();
     const auto* rebuiltAttrs = rebuiltNode->attributes.AsPointwiseAttributes();
     ASSERT_NE(rebuiltAttrs, nullptr);
     ASSERT_TRUE(rebuiltAttrs->swish_beta.has_value());
@@ -480,7 +480,7 @@ TEST_F(TestPointwiseOperationFromNode, FromNodePreservesAxis)
     EXPECT_TRUE(desc->getData().axis_tensor_uid.has_value());
     EXPECT_EQ(desc->getData().axis_tensor_uid.value(), 2);
 
-    auto rebuiltNode = desc->buildNode();
+    const auto rebuiltNode = desc->buildNode();
     const auto* rebuiltAttrs = rebuiltNode->attributes.AsPointwiseAttributes();
     ASSERT_NE(rebuiltAttrs, nullptr);
     ASSERT_TRUE(rebuiltAttrs->axis_tensor_uid.has_value());
@@ -492,7 +492,7 @@ TEST_F(TestPointwiseOperationFromNode, BuildNodeOmitsUnsetOptionalScalars)
     const auto node = createStandardNode();
     const auto desc = PointwiseOperationDescriptor::fromNode(node, _tensorMap);
 
-    auto rebuiltNode = desc->buildNode();
+    const auto rebuiltNode = desc->buildNode();
     const auto* rebuiltAttrs = rebuiltNode->attributes.AsPointwiseAttributes();
     ASSERT_NE(rebuiltAttrs, nullptr);
 

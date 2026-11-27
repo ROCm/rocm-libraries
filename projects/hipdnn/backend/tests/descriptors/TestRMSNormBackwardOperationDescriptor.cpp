@@ -690,7 +690,7 @@ TEST_F(TestRMSNormBackwardOperationDescriptor, BuildNodeProducesCorrectNodeT)
         HIPDNN_ATTR_RMSNORM_BACKWARD_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
-    auto node = desc->buildNode();
+    const auto node = desc->buildNode();
     ASSERT_NE(node, nullptr);
     ASSERT_EQ(node->compute_data_type, DataType::FLOAT);
     ASSERT_EQ(node->attributes.type, NodeAttributes::RMSNormBackwardAttributes);
@@ -716,7 +716,7 @@ TEST_F(TestRMSNormBackwardOperationDescriptor, BuildNodeWithHalfComputeType)
         HIPDNN_ATTR_RMSNORM_BACKWARD_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
-    auto node = desc->buildNode();
+    const auto node = desc->buildNode();
     ASSERT_NE(node, nullptr);
     ASSERT_EQ(node->compute_data_type, DataType::HALF);
 }
@@ -848,7 +848,7 @@ TEST_F(TestRMSNormBackwardOperationDescriptor, BuildNodePreservesName)
         HIPDNN_ATTR_RMSNORM_BACKWARD_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
-    auto node = desc->buildNode();
+    const auto node = desc->buildNode();
     ASSERT_NE(node, nullptr);
     EXPECT_EQ(node->name, "test_rmsnormbackward");
 }

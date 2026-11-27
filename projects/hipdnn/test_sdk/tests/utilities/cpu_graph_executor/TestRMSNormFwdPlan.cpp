@@ -60,7 +60,7 @@ TEST(TestRMSNormFwdPlan, ExecutePlan)
     const auto shallowScaleTensor = createShallowTensor<float>(
         params.scaleTensor,
         directTensorBundle.tensors[attributes.scale_tensor_uid()]->rawHostData());
-    auto shallowYTensor = createShallowTensor<float>(
+    const auto shallowYTensor = createShallowTensor<float>(
         params.yTensor, directTensorBundle.tensors[attributes.y_tensor_uid()]->rawHostData());
 
     CpuFpReferenceRMSNorm::forward(*shallowXTensor, *shallowScaleTensor, *shallowYTensor, epsilon);
@@ -230,7 +230,7 @@ TEST(TestRMSNormFwdPlan, ExecutePlanWithBias)
     const auto shallowBiasTensor = createShallowTensor<float>(
         params.biasTensor.value(),
         directTensorBundle.tensors[attributes.bias_tensor_uid().value()]->rawHostData());
-    auto shallowYTensor = createShallowTensor<float>(
+    const auto shallowYTensor = createShallowTensor<float>(
         params.yTensor, directTensorBundle.tensors[attributes.y_tensor_uid()]->rawHostData());
 
     CpuFpReferenceRMSNorm::forward<float, float, float, float>(*shallowXTensor,

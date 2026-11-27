@@ -302,7 +302,7 @@ TEST_F(TestGraphDescriptorResampleBwd, ResampleBwdAttributesPreserved)
         K_TENSOR_INDEX_UID, toVec(K_TENSOR_INDEX_DIMS), toVec(K_TENSOR_INDEX_STRIDES));
 
     // Create op with non-default parameters to test graph roundtrip
-    auto wrapper = createDescriptor<ResampleBwdOperationDescriptor>();
+    const auto wrapper = createDescriptor<ResampleBwdOperationDescriptor>();
     const auto opDesc = wrapper->asDescriptor<ResampleBwdOperationDescriptor>();
 
     HipdnnBackendDescriptor* dyPtr = dyDesc.get();
@@ -459,7 +459,7 @@ TEST_F(TestGraphDescriptorResampleBwd, OperationNameRoundTripThroughLifting)
                                static_cast<const uint8_t*>(serialized.ptr) + serialized.size);
 
     // Deserialize into a new GraphDescriptor (lifting path)
-    auto liftedWrapper = createDescriptor<GraphDescriptor>();
+    const auto liftedWrapper = createDescriptor<GraphDescriptor>();
     const auto liftedDesc = liftedWrapper->asDescriptor<GraphDescriptor>();
     liftedDesc->deserializeGraph(bytes.data(), bytes.size());
 
@@ -472,7 +472,7 @@ TEST_F(TestGraphDescriptorResampleBwd, OperationNameRoundTripThroughLifting)
 
     // Re-serialize and verify name survived the round-trip
     const auto reSerialized = liftedDesc->getSerializedGraph();
-    auto graphT = UnPackGraph(reSerialized.ptr);
+    const auto graphT = UnPackGraph(reSerialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1u);
     EXPECT_EQ(graphT->nodes[0]->name, "test_resamplebwd_lifting");
@@ -498,7 +498,7 @@ TEST_F(TestGraphDescriptorResampleBwd, BuildFromOperationWithoutOptionalTensors)
     desc->finalize();
 
     const auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
     ASSERT_EQ(graphT->nodes.size(), 1);
     ASSERT_EQ(graphT->tensors.size(), 2);
 

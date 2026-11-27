@@ -209,7 +209,7 @@ TEST_F(IntegrationLayernormBackwardDescriptorLowering,
 
     // Verify operation node
     ASSERT_EQ(graphT.nodes.size(), 1u);
-    auto& node = graphT.nodes[0];
+    const auto& node = graphT.nodes[0];
     EXPECT_EQ(node->compute_data_type, DataTypeSdk::FLOAT);
 
     auto* opNode = node->attributes.AsLayernormBackwardAttributes();
@@ -284,7 +284,7 @@ TEST_F(IntegrationLayernormBackwardDescriptorLowering,
 
     // Verify operation node
     ASSERT_EQ(graphT.nodes.size(), 1u);
-    auto& node = graphT.nodes[0];
+    const auto& node = graphT.nodes[0];
     EXPECT_EQ(node->compute_data_type, DataTypeSdk::FLOAT);
 
     auto* opNode = node->attributes.AsLayernormBackwardAttributes();
@@ -324,7 +324,7 @@ TEST_F(IntegrationLayernormBackwardDescriptorLowering,
 
     // Verify operation node
     ASSERT_EQ(graphT.nodes.size(), 1u);
-    auto& node = graphT.nodes[0];
+    const auto& node = graphT.nodes[0];
     EXPECT_EQ(node->compute_data_type, DataTypeSdk::FLOAT);
 
     auto* opNode = node->attributes.AsLayernormBackwardAttributes();

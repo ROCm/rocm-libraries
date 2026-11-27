@@ -207,7 +207,7 @@ protected:
         const auto site = resolveValidationSite(TestConfig::get().getValidatorDevice(),
                                                 referenceUsesDevice ? ValidationSite::DEVICE
                                                                     : ValidationSite::HOST);
-        auto selection = bundle::makeValidator(
+        const auto selection = bundle::makeValidator(
             frontendToSdkDataType(outputs.y->get_data_type()),
             bundle::tensorLabel(yUid, outputs.y->get_name()),
             bundle::ComparisonTolerance::allClose(tolerance.atol, tolerance.rtol),

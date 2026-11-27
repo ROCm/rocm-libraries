@@ -49,7 +49,7 @@ public:
     {
         const auto shallowATensor = bindShallowTensor<ADataType>(_params.aTensor, variantPack);
         const auto shallowBTensor = bindShallowTensor<BDataType>(_params.bTensor, variantPack);
-        auto shallowCTensor = bindShallowTensor<CDataType>(_params.cTensor, variantPack);
+        const auto shallowCTensor = bindShallowTensor<CDataType>(_params.cTensor, variantPack);
 
         utilities::CpuFpReferenceMatmul::matmul<ADataType, BDataType, CDataType, ComputeDataType>(
             *shallowATensor, *shallowBTensor, *shallowCTensor);

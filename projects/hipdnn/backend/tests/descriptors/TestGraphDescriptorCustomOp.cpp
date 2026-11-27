@@ -129,7 +129,7 @@ std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT>
                                       hipdnnBackendAttributeName_t tensorSideAttr,
                                       TestGraphDescriptorCustomOp& fixture)
 {
-    auto wrapper = createDescriptor<CustomOpOperationDescriptor>();
+    const auto wrapper = createDescriptor<CustomOpOperationDescriptor>();
     const auto desc = wrapper->asDescriptor<CustomOpOperationDescriptor>();
 
     std::array<HipdnnBackendDescriptor*, 1> tensors = {tensorDesc};
@@ -202,7 +202,7 @@ TEST_F(TestGraphDescriptorCustomOp, BuildFromSingleCustomOpOperation)
     flatbuffers::Verifier verifier(static_cast<const uint8_t*>(serialized.ptr), serialized.size);
     ASSERT_TRUE(verifier.VerifyBuffer<Graph>());
 
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
     ASSERT_EQ(graphT->tensors.size(), 3);
@@ -227,7 +227,7 @@ TEST_F(TestGraphDescriptorCustomOp, FinalizeSucceedsWithZeroInputTensors)
     const auto output0Desc = createFinalizedTensor(K_CUSTOM_OP_OUTPUT_UID_0,
                                                    toVec(K_CUSTOM_OP_TENSOR_DIMS),
                                                    toVec(K_CUSTOM_OP_TENSOR_STRIDES));
-    auto graphT = buildAndSerializeZeroPortCustomOp(
+    const auto graphT = buildAndSerializeZeroPortCustomOp(
         output0Desc.get(), HIPDNN_ATTR_OPERATION_CUSTOM_OP_OUTPUTS_EXT, *this);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
@@ -242,7 +242,7 @@ TEST_F(TestGraphDescriptorCustomOp, FinalizeSucceedsWithZeroOutputTensors)
 {
     const auto input0Desc = createFinalizedTensor(
         K_CUSTOM_OP_INPUT_UID_0, toVec(K_CUSTOM_OP_TENSOR_DIMS), toVec(K_CUSTOM_OP_TENSOR_STRIDES));
-    auto graphT = buildAndSerializeZeroPortCustomOp(
+    const auto graphT = buildAndSerializeZeroPortCustomOp(
         input0Desc.get(), HIPDNN_ATTR_OPERATION_CUSTOM_OP_INPUTS_EXT, *this);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
@@ -282,7 +282,7 @@ TEST_F(TestGraphDescriptorCustomOp, ComputeDataTypePreserved)
     ASSERT_NO_THROW(desc->finalize());
 
     const auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
 
@@ -319,7 +319,7 @@ TEST_F(TestGraphDescriptorCustomOp, OperationNamePreservedInGraph)
     desc->finalize();
 
     const auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
     EXPECT_EQ(graphT->nodes[0]->name, "test_custom_op");
@@ -353,7 +353,7 @@ TEST_F(TestGraphDescriptorCustomOp, OperationNameRoundTripThroughLifting)
 
     // Serialize and deserialize via FlatBuffer
     const auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     // Rebuild from the deserialized graph using NodeFactory
     const auto tensorMap = NodeFactory::buildTensorMap(graphT->tensors);
@@ -365,7 +365,7 @@ TEST_F(TestGraphDescriptorCustomOp, OperationNameRoundTripThroughLifting)
     auto* graphOp = rebuilt->asGraphOperation();
     ASSERT_NE(graphOp, nullptr);
 
-    auto rebuiltNode = graphOp->buildNode();
+    const auto rebuiltNode = graphOp->buildNode();
     ASSERT_NE(rebuiltNode, nullptr);
     EXPECT_EQ(rebuiltNode->name, "lift_custom_name");
     ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::CustomOpAttributes);

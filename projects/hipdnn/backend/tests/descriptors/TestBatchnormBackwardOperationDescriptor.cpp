@@ -838,7 +838,7 @@ TEST_F(TestBatchnormBackwardOperationDescriptor, BuildNodeProducesCorrectNodeT)
         HIPDNN_ATTR_BATCHNORM_BACKWARD_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
-    auto node = desc->buildNode();
+    const auto node = desc->buildNode();
     ASSERT_NE(node, nullptr);
     ASSERT_EQ(node->compute_data_type, DataType::FLOAT);
     ASSERT_EQ(node->attributes.type, NodeAttributes::BatchnormBackwardAttributes);
@@ -865,7 +865,7 @@ TEST_F(TestBatchnormBackwardOperationDescriptor, BuildNodeWithHalfComputeType)
         HIPDNN_ATTR_BATCHNORM_BACKWARD_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
-    auto node = desc->buildNode();
+    const auto node = desc->buildNode();
     ASSERT_NE(node, nullptr);
     ASSERT_EQ(node->compute_data_type, DataType::HALF);
 }

@@ -183,7 +183,7 @@ private:
             = populateVariantPackWithMissingVirtualTensors(
                 variantPack, graphWrap.getTensorMap(), virtualTensors);
 
-        for(auto& executor : planExecutors)
+        for(const auto& executor : planExecutors)
         {
             executor->execute(variantPackWithVirtualTensorsAdded);
         }

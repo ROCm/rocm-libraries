@@ -53,8 +53,8 @@ void runPlanExecuteVsCpuRef(const std::vector<int64_t>& dims,
     const auto strides = generateStrides(dims, layout.strideOrder);
     auto builder = createValidBatchnormBwdGraph(
         strides, dims, useSavedStats, nativeTypeToDataType<X>(), DataType::FLOAT, DataType::FLOAT);
-    auto graph = UnPackGraph(builder.GetBufferPointer());
-    for(auto& tensor : graph->tensors)
+    const auto graph = UnPackGraph(builder.GetBufferPointer());
+    for(const auto& tensor : graph->tensors)
     {
         if(tensor->uid == DY_UID)
         {
@@ -203,8 +203,8 @@ TEST_P(TestGpuBatchnormBwdPlanRequiredTensor, RaggedTensorIsNotApplicable)
         builder.GetBufferPointer(), builder.GetSize());
     ASSERT_TRUE(FloatPlanBuilder().isApplicable(denseGraph.getNode(0), denseGraph.getTensorMap()));
 
-    auto graph = UnPackGraph(builder.GetBufferPointer());
-    for(auto& tensor : graph->tensors)
+    const auto graph = UnPackGraph(builder.GetBufferPointer());
+    for(const auto& tensor : graph->tensors)
     {
         if(tensor->uid == GetParam())
         {
@@ -228,8 +228,8 @@ TEST_P(TestGpuBatchnormBwdPlanRequiredTensor, RuntimePassByValueTensorIsNotAppli
     ASSERT_TRUE(
         FloatPlanBuilder().isApplicable(deviceGraph.getNode(0), deviceGraph.getTensorMap()));
 
-    auto graph = UnPackGraph(builder.GetBufferPointer());
-    for(auto& tensor : graph->tensors)
+    const auto graph = UnPackGraph(builder.GetBufferPointer());
+    for(const auto& tensor : graph->tensors)
     {
         if(tensor->uid == GetParam())
         {
@@ -314,7 +314,7 @@ TEST_P(TestGpuBatchnormBwdPlanSavedStatistic, IncompleteSavedStatisticsAreNotApp
     ASSERT_TRUE(
         FloatPlanBuilder().isApplicable(completeGraph.getNode(0), completeGraph.getTensorMap()));
 
-    auto graph = UnPackGraph(builder.GetBufferPointer());
+    const auto graph = UnPackGraph(builder.GetBufferPointer());
     auto* attributes = graph->nodes[0]->attributes.AsBatchnormBackwardAttributes();
     ASSERT_NE(attributes, nullptr);
     if(GetParam() == MEAN_UID)
@@ -438,7 +438,7 @@ TEST(TestGpuBatchnormBwdPlan, MissingVariantPackTensorsThrow)
     const auto builder = createValidBatchnormBwdGraph({48, 16, 4, 1}, {2, 3, 4, 4});
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
-    auto plan = FloatPlanBuilder().buildNodePlan(graph, graph.getNode(0));
+    const auto plan = FloatPlanBuilder().buildNodePlan(graph, graph.getNode(0));
     std::unordered_map<int64_t, void*> completeVariantPack;
     for(int64_t uid = X_UID; uid <= INV_VARIANCE_UID; ++uid)
     {

@@ -309,7 +309,7 @@ TEST_F(TestGraphDescriptorBatchnorm, BuildFromSingleOperationWithOptionals)
     flatbuffers::Verifier verifier(static_cast<const uint8_t*>(serialized.ptr), serialized.size);
     ASSERT_TRUE(verifier.VerifyBuffer<Graph>());
 
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1u);
     ASSERT_EQ(graphT->tensors.size(), 7u);
@@ -348,7 +348,7 @@ TEST_F(TestGraphDescriptorBatchnorm, ComputeDataTypePreserved)
     desc->finalize();
 
     const auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1u);
     EXPECT_EQ(graphT->nodes[0]->compute_data_type, DataType::HALF);
@@ -372,7 +372,7 @@ TEST_F(TestGraphDescriptorBatchnorm, BuildWithPeerStatsTensorArray)
     ASSERT_NO_THROW(desc->finalize());
 
     const auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1u);
 
@@ -413,7 +413,7 @@ TEST_F(TestGraphDescriptorBatchnorm, OperationNameRoundTripThroughLifting)
                                static_cast<const uint8_t*>(serialized.ptr) + serialized.size);
 
     // Deserialize into a new GraphDescriptor (lifting path)
-    auto liftedWrapper = createDescriptor<GraphDescriptor>();
+    const auto liftedWrapper = createDescriptor<GraphDescriptor>();
     const auto liftedDesc = liftedWrapper->asDescriptor<GraphDescriptor>();
     liftedDesc->deserializeGraph(bytes.data(), bytes.size());
 
@@ -426,7 +426,7 @@ TEST_F(TestGraphDescriptorBatchnorm, OperationNameRoundTripThroughLifting)
 
     // Re-serialize and verify name survived the round-trip
     const auto reSerialized = liftedDesc->getSerializedGraph();
-    auto graphT = UnPackGraph(reSerialized.ptr);
+    const auto graphT = UnPackGraph(reSerialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1u);
     EXPECT_EQ(graphT->nodes[0]->name, "bn_fwd_train");
@@ -472,7 +472,7 @@ TEST_F(TestGraphDescriptorBatchnorm, AllTensorsRoundTripThroughLifting)
                                static_cast<const uint8_t*>(serialized.ptr) + serialized.size);
 
     // Deserialize into a new GraphDescriptor (lifting path)
-    auto liftedWrapper = createDescriptor<GraphDescriptor>();
+    const auto liftedWrapper = createDescriptor<GraphDescriptor>();
     const auto liftedDesc = liftedWrapper->asDescriptor<GraphDescriptor>();
     liftedDesc->deserializeGraph(bytes.data(), bytes.size());
 
@@ -485,7 +485,7 @@ TEST_F(TestGraphDescriptorBatchnorm, AllTensorsRoundTripThroughLifting)
 
     // Re-serialize and verify everything survived the round-trip
     const auto reSerialized = liftedDesc->getSerializedGraph();
-    auto graphT = UnPackGraph(reSerialized.ptr);
+    const auto graphT = UnPackGraph(reSerialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1u);
     EXPECT_EQ(graphT->nodes[0]->name, "bn_all_tensors");

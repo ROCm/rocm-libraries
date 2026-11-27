@@ -151,7 +151,7 @@ TEST_P(TestBatchnormActivationValidator, DirectionIdentityAndLeakyRelu)
                 return hipdnn_test_sdk::utilities::createValidBatchnormInferActBwdGraph();
             }
         }();
-        auto nativeGraph
+        const auto nativeGraph
             = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(original.GetBufferPointer());
         auto* activation = nativeGraph->nodes[1]->attributes.AsPointwiseAttributes();
         activation->operation = testCase.mode;

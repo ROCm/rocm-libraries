@@ -766,7 +766,7 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationDescriptor, BuildNodeProducesCo
         HIPDNN_ATTR_BATCHNORM_INF_VAR_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
-    auto node = desc->buildNode();
+    const auto node = desc->buildNode();
     ASSERT_NE(node, nullptr);
     ASSERT_EQ(node->compute_data_type, DataType::FLOAT);
     ASSERT_EQ(node->attributes.type, NodeAttributes::BatchnormInferenceAttributesVarianceExt);
@@ -792,7 +792,7 @@ TEST_F(TestBatchnormInferenceVarianceExtOperationDescriptor, BuildNodeWithHalfCo
         HIPDNN_ATTR_BATCHNORM_INF_VAR_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
-    auto node = desc->buildNode();
+    const auto node = desc->buildNode();
     ASSERT_NE(node, nullptr);
     ASSERT_EQ(node->compute_data_type, DataType::HALF);
 }

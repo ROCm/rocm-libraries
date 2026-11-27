@@ -173,7 +173,7 @@ TEST_F(TestGraphDescriptorBatchnormInferenceVarianceExt, BuildFromSingleOperatio
     flatbuffers::Verifier verifier(static_cast<const uint8_t*>(serialized.ptr), serialized.size);
     ASSERT_TRUE(verifier.VerifyBuffer<Graph>());
 
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
     ASSERT_EQ(graphT->tensors.size(), 7);
@@ -236,7 +236,7 @@ TEST_F(TestGraphDescriptorBatchnormInferenceVarianceExt, ComputeDataTypePreserve
     desc->finalize();
 
     const auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
     EXPECT_EQ(graphT->nodes[0]->compute_data_type, DataType::HALF);
@@ -284,7 +284,7 @@ TEST_F(TestGraphDescriptorBatchnormInferenceVarianceExt, OperationNamePreservedI
     desc->finalize();
 
     const auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
     EXPECT_EQ(graphT->nodes[0]->name, "test_bn_inf_var_ext_op");
@@ -332,7 +332,7 @@ TEST_F(TestGraphDescriptorBatchnormInferenceVarianceExt, OperationNameRoundTripT
     desc->finalize();
 
     const auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
 
@@ -347,7 +347,7 @@ TEST_F(TestGraphDescriptorBatchnormInferenceVarianceExt, OperationNameRoundTripT
     ASSERT_NE(liftedOp, nullptr);
 
     // Re-serialize
-    auto rebuiltNode = liftedOp->asGraphOperation()->buildNode();
+    const auto rebuiltNode = liftedOp->asGraphOperation()->buildNode();
     ASSERT_NE(rebuiltNode, nullptr);
     EXPECT_EQ(rebuiltNode->name, "test_lifting_name");
 }

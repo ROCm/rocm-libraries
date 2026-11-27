@@ -233,7 +233,7 @@ TEST_F(TestKnobSettingWrapper, ToKnobSettingTWithIntValue)
     auto buffer = createKnobSetting("test_knob_42", 100);
     const KnobSettingWrapper wrapper(buffer.data(), buffer.size());
 
-    auto knobSettingT = wrapper.toKnobSettingT();
+    const auto knobSettingT = wrapper.toKnobSettingT();
 
     ASSERT_NE(knobSettingT, nullptr);
     EXPECT_EQ(knobSettingT->knob_id, "test_knob_42");
@@ -247,7 +247,7 @@ TEST_F(TestKnobSettingWrapper, ToKnobSettingTWithStringValue)
     auto buffer = createKnobSettingWithString("test_knob_99", "test_string_value");
     const KnobSettingWrapper wrapper(buffer.data(), buffer.size());
 
-    auto knobSettingT = wrapper.toKnobSettingT();
+    const auto knobSettingT = wrapper.toKnobSettingT();
 
     ASSERT_NE(knobSettingT, nullptr);
     EXPECT_EQ(knobSettingT->knob_id, "test_knob_99");
@@ -262,7 +262,7 @@ TEST_F(TestKnobSettingWrapper, ToKnobSettingTWithFloatValue)
     auto buffer = createKnobSettingWithFloat("test_knob_123", 3.14159);
     const KnobSettingWrapper wrapper(buffer.data(), buffer.size());
 
-    auto knobSettingT = wrapper.toKnobSettingT();
+    const auto knobSettingT = wrapper.toKnobSettingT();
 
     ASSERT_NE(knobSettingT, nullptr);
     EXPECT_EQ(knobSettingT->knob_id, "test_knob_123");

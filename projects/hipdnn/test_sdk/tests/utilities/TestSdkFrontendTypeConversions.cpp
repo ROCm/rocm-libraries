@@ -144,7 +144,7 @@ TEST(TestSdkFrontendTypeConversions, CreateTensorBoolean)
     const std::vector<int64_t> dims = {2, 2};
     const std::vector<int64_t> strides = {2, 1};
 
-    auto tensor = createTensor(fe::DataType::BOOLEAN, dims, strides);
+    const auto tensor = createTensor(fe::DataType::BOOLEAN, dims, strides);
 
     ASSERT_NE(tensor, nullptr);
     EXPECT_EQ(tensor->dims(), dims);
@@ -157,7 +157,7 @@ TEST(TestSdkFrontendTypeConversions, CreateTensorFp4UnpackedByDefault)
     const std::vector<int64_t> dims = {2, 4};
     const std::vector<int64_t> strides = {4, 1};
 
-    auto tensor = createTensor(fe::DataType::FP4_E2M1, dims, strides);
+    const auto tensor = createTensor(fe::DataType::FP4_E2M1, dims, strides);
 
     ASSERT_NE(tensor, nullptr);
     EXPECT_EQ(tensor->dims(), dims);
@@ -171,7 +171,8 @@ TEST(TestSdkFrontendTypeConversions, CreateTensorFp4PackedWhenRequested)
     const std::vector<int64_t> dims = {2, 4};
     const std::vector<int64_t> strides = {4, 1};
 
-    auto tensor = createTensor(fe::DataType::FP4_E2M1, dims, strides, /*packSubByteElements=*/true);
+    const auto tensor
+        = createTensor(fe::DataType::FP4_E2M1, dims, strides, /*packSubByteElements=*/true);
 
     ASSERT_NE(tensor, nullptr);
     EXPECT_EQ(tensor->dims(), dims);
@@ -185,8 +186,8 @@ TEST(TestSdkFrontendTypeConversions, CreateTensorFp6UnpackedByDefault)
     const std::vector<int64_t> dims = {2, 4};
     const std::vector<int64_t> strides = {4, 1};
 
-    auto e2m3 = createTensor(fe::DataType::FP6_E2M3, dims, strides);
-    auto e3m2 = createTensor(fe::DataType::FP6_E3M2, dims, strides);
+    const auto e2m3 = createTensor(fe::DataType::FP6_E2M3, dims, strides);
+    const auto e3m2 = createTensor(fe::DataType::FP6_E3M2, dims, strides);
 
     ASSERT_NE(e2m3, nullptr);
     ASSERT_NE(e3m2, nullptr);
@@ -210,8 +211,10 @@ TEST(TestSdkFrontendTypeConversions, CreateTensorFp6PackedWhenRequested)
     const std::vector<int64_t> dims = {2, 4};
     const std::vector<int64_t> strides = {4, 1};
 
-    auto e2m3 = createTensor(fe::DataType::FP6_E2M3, dims, strides, /*packSubByteElements=*/true);
-    auto e3m2 = createTensor(fe::DataType::FP6_E3M2, dims, strides, /*packSubByteElements=*/true);
+    const auto e2m3
+        = createTensor(fe::DataType::FP6_E2M3, dims, strides, /*packSubByteElements=*/true);
+    const auto e3m2
+        = createTensor(fe::DataType::FP6_E3M2, dims, strides, /*packSubByteElements=*/true);
 
     ASSERT_NE(e2m3, nullptr);
     ASSERT_NE(e3m2, nullptr);
@@ -238,7 +241,8 @@ TEST(TestSdkFrontendTypeConversions, PackSubByteElementsIgnoredForNonSubByteType
     const std::vector<int64_t> strides = {2, 1};
 
     // packSubByteElements only affects sub-byte types; a float tensor is unaffected.
-    auto tensor = createTensor(fe::DataType::FLOAT, dims, strides, /*packSubByteElements=*/true);
+    const auto tensor
+        = createTensor(fe::DataType::FLOAT, dims, strides, /*packSubByteElements=*/true);
 
     ASSERT_NE(tensor, nullptr);
     EXPECT_EQ(tensor->elementSize(), sizeof(float));

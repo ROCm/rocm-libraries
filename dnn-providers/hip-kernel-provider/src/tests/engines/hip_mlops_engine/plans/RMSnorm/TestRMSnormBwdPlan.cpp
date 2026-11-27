@@ -50,7 +50,7 @@ TEST(TestRMSnormBwdParams, ConstructsFromDoubleNodeGraph)
 TEST(TestRMSnormBwdParams, ConstructsFromUnaryIdentityGraph)
 {
     const auto original = hipdnn_test_sdk::utilities::createValidRMSNormBwdActivationGraph();
-    auto nativeGraph
+    const auto nativeGraph
         = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(original.GetBufferPointer());
     auto* activation = nativeGraph->nodes[0]->attributes.AsPointwiseAttributes();
     activation->operation = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::IDENTITY;

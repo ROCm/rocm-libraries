@@ -52,9 +52,9 @@ TEST(TestBlockScaleQuantizePlan, ExecutePlan)
     // Direct execution for reference
     const auto directXTensor
         = createShallowTensor<float>(params.xTensor, directBundle.getTensor(1).rawHostData());
-    auto directYTensor
+    const auto directYTensor
         = createShallowTensor<float>(params.yTensor, directBundle.getTensor(2).rawHostData());
-    auto directScaleTensor
+    const auto directScaleTensor
         = createShallowTensor<float>(params.scaleTensor, directBundle.getTensor(3).rawHostData());
 
     CpuFpReferenceBlockScaleQuantize::quantize(
@@ -112,9 +112,9 @@ TEST(TestBlockScaleQuantizePlan, ExecutePlanWithoutAxis)
     // Direct execution for reference
     const auto directXTensor
         = createShallowTensor<float>(params.xTensor, directBundle.getTensor(1).rawHostData());
-    auto directYTensor
+    const auto directYTensor
         = createShallowTensor<float>(params.yTensor, directBundle.getTensor(2).rawHostData());
-    auto directScaleTensor
+    const auto directScaleTensor
         = createShallowTensor<float>(params.scaleTensor, directBundle.getTensor(3).rawHostData());
 
     CpuFpReferenceBlockScaleQuantize::quantize(
@@ -276,9 +276,9 @@ TYPED_TEST(BlockScaleQuantizeMxPlan, ExecutePlan)
     // Direct reference execution
     const auto directXTensor
         = createShallowTensor<InputType>(params.xTensor, directBundle.getTensor(1).rawHostData());
-    auto directYTensor
+    const auto directYTensor
         = createShallowTensor<OutputType>(params.yTensor, directBundle.getTensor(2).rawHostData());
-    auto directScaleTensor = createShallowTensor<ScaleType>(
+    const auto directScaleTensor = createShallowTensor<ScaleType>(
         params.scaleTensor, directBundle.getTensor(3).rawHostData());
 
     CpuFpReferenceBlockScaleQuantize::quantize(
@@ -354,9 +354,9 @@ TYPED_TEST(BlockScaleQuantizeNonFloatIOPlan, ExecutePlan)
     // Direct reference execution
     const auto directXTensor
         = createShallowTensor<InputType>(params.xTensor, directBundle.getTensor(1).rawHostData());
-    auto directYTensor
+    const auto directYTensor
         = createShallowTensor<OutputType>(params.yTensor, directBundle.getTensor(2).rawHostData());
-    auto directScaleTensor = createShallowTensor<ScaleType>(
+    const auto directScaleTensor = createShallowTensor<ScaleType>(
         params.scaleTensor, directBundle.getTensor(3).rawHostData());
 
     CpuFpReferenceBlockScaleQuantize::quantize(

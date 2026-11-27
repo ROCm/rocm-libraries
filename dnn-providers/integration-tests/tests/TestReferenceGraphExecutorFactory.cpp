@@ -23,14 +23,14 @@ using namespace hipdnn_integration_tests::test_utils;
 
 TEST(TestReferenceGraphExecutorFactory, CreateCpuExecutor)
 {
-    auto executor = ReferenceGraphExecutorFactory::create(ReferenceExecutorType::CPU);
+    const auto executor = ReferenceGraphExecutorFactory::create(ReferenceExecutorType::CPU);
     ASSERT_NE(executor, nullptr);
     EXPECT_FALSE(executor->requiresDeviceMemory());
 }
 
 TEST(TestReferenceGraphExecutorFactory, CreateDeviceExecutor)
 {
-    auto executor = ReferenceGraphExecutorFactory::create(ReferenceExecutorType::GPU);
+    const auto executor = ReferenceGraphExecutorFactory::create(ReferenceExecutorType::GPU);
     ASSERT_NE(executor, nullptr);
     EXPECT_TRUE(executor->requiresDeviceMemory());
 }
@@ -94,7 +94,7 @@ TEST(TestGpuReferenceGraphExecutorFactory, CpuAndDeviceExecutorsAgreeOnConvFwd)
     }
 
     // --- Run CPU executor (host pointers) ---
-    auto cpuExecutor = ReferenceGraphExecutorFactory::create(ReferenceExecutorType::CPU);
+    const auto cpuExecutor = ReferenceGraphExecutorFactory::create(ReferenceExecutorType::CPU);
     ASSERT_FALSE(cpuExecutor->requiresDeviceMemory());
 
     std::vector<float> cpuY(yCount, 0.0f);
@@ -106,7 +106,7 @@ TEST(TestGpuReferenceGraphExecutorFactory, CpuAndDeviceExecutorsAgreeOnConvFwd)
     cpuExecutor->execute(graphBuilder.GetBufferPointer(), graphBuilder.GetSize(), cpuPack);
 
     // --- Run GPU executor (device pointers) ---
-    auto gpuExecutor = ReferenceGraphExecutorFactory::create(ReferenceExecutorType::GPU);
+    const auto gpuExecutor = ReferenceGraphExecutorFactory::create(ReferenceExecutorType::GPU);
     ASSERT_TRUE(gpuExecutor->requiresDeviceMemory());
 
     const hipdnn_data_sdk::utilities::Workspace dX(xCount * sizeof(float));

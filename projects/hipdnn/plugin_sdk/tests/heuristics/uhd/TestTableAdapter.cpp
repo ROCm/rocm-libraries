@@ -136,7 +136,7 @@ TEST_F(TestTableAdapter, LoadFromBufferBasic)
                       .addEntry({1, 1}, 2.0) // Bucket (1,1) -> score 2.0
                       .build();
 
-    auto adapter = TableAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
+    const auto adapter = TableAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
     EXPECT_EQ(adapter->expectedFeatureCount(), 2U);
     EXPECT_EQ(adapter->getFeaturesHash(), TEST_HASH);
@@ -153,7 +153,7 @@ TEST_F(TestTableAdapter, ScoreExactMatch)
                       .addEntry({1, 1}, 3.5)
                       .build();
 
-    auto adapter = TableAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
+    const auto adapter = TableAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
     // Feature vector {3.0, 7.0} -> buckets {0, 0} -> score 1.5
@@ -173,7 +173,7 @@ TEST_F(TestTableAdapter, ScoreFallbackNoMatch)
                       .addEntry({0, 0}, 1.0)
                       .build();
 
-    auto adapter = TableAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
+    const auto adapter = TableAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
     // Bucket (1, 1) has no entry -> declined, never a zero prediction
@@ -222,7 +222,7 @@ TEST_F(TestTableAdapter, TrainingArchDetection)
                       .setTrainingArches({"gfx942", "gfx950"})
                       .build();
 
-    auto adapter = TableAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
+    const auto adapter = TableAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
     EXPECT_TRUE(adapter->isTrainedForArch("gfx942"));
@@ -245,7 +245,7 @@ TEST_F(TestTableAdapter, MultipleBuckets)
                       .addEntry({2, 2, 2}, 20.0) // High, high, high
                       .build();
 
-    auto adapter = TableAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
+    const auto adapter = TableAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
     // {1.5, 5.0, 5.0} -> buckets {0, 0, 1} -> score 10.0
@@ -275,7 +275,7 @@ TEST_F(TestTableAdapter, ABucketIsTheNumberOfBoundariesAtOrBelowTheValue)
                       .addEntry({3}, 103.0)
                       .build();
 
-    auto adapter = TableAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
+    const auto adapter = TableAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
     EXPECT_DOUBLE_EQ(adapter->score({5.0}), 100.0);

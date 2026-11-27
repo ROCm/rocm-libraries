@@ -283,7 +283,7 @@ inline flatbuffers::FlatBufferBuilder cbaGraphWithFloatBiasOnHalfGraph()
 
     return hipdnn_test_sdk::utilities::mutateGraph(
         hipdnn_test_sdk::utilities::createValidConvFwdBiasActivGraph(), [](GraphT& graph) {
-            for(auto& tensor : graph.tensors)
+            for(const auto& tensor : graph.tensors)
             {
                 const bool isFloat = tensor->name == "bias" || tensor->name == "y_conv"
                                      || tensor->name == "y_bias";

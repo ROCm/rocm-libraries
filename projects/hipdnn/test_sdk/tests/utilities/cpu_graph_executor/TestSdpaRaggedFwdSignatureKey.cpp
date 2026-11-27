@@ -58,10 +58,10 @@ flatbuffers::DetachedBuffer
     makeGraphWithDistinctDtypes(DataType q, DataType k, DataType v, DataType o)
 {
     const auto ragged = makeRaggedGraph(DataType::BFLOAT16);
-    auto graphT = std::unique_ptr<GraphT>(GetGraph(ragged.GetBufferPointer())->UnPack());
+    const auto graphT = std::unique_ptr<GraphT>(GetGraph(ragged.GetBufferPointer())->UnPack());
     const std::unordered_map<int64_t, DataType> dataTypes
         = {{Q_UID, q}, {K_UID, k}, {V_UID, v}, {O_UID, o}};
-    for(auto& tensor : graphT->tensors)
+    for(const auto& tensor : graphT->tensors)
     {
         const auto it = dataTypes.find(tensor->uid);
         if(it != dataTypes.end())

@@ -189,7 +189,7 @@ TEST_F(TestResampleFwdOperationDescriptor, BuildNodeWithoutOptionalTensors)
     desc->setAttribute(HIPDNN_ATTR_RESAMPLE_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &compType);
     desc->finalize();
 
-    auto node = desc->buildNode();
+    const auto node = desc->buildNode();
     ASSERT_NE(node, nullptr);
 
     auto* attrs = node->attributes.AsResampleFwdAttributes();
@@ -856,7 +856,7 @@ TEST_F(TestResampleFwdOperationDescriptor, BuildNodeProducesCorrectNodeT)
     const auto desc = getDescriptor();
     desc->finalize();
 
-    auto node = desc->buildNode();
+    const auto node = desc->buildNode();
     ASSERT_NE(node, nullptr);
     ASSERT_EQ(node->attributes.type, NodeAttributes::ResampleFwdAttributes);
 
@@ -991,7 +991,7 @@ TEST_F(TestResampleFwdOperationDescriptor, BuildNodePreservesName)
                        opName.c_str());
     desc->finalize();
 
-    auto node = desc->buildNode();
+    const auto node = desc->buildNode();
     ASSERT_NE(node, nullptr);
     EXPECT_EQ(node->name, "test_resamplefwd");
 }
@@ -1065,7 +1065,7 @@ TEST_F(TestResampleFwdOperationDescriptor, BuildNodePreservesCompType)
     const auto desc = getDescriptor();
     desc->finalize();
 
-    auto node = desc->buildNode();
+    const auto node = desc->buildNode();
     ASSERT_NE(node, nullptr);
     EXPECT_EQ(node->compute_data_type, DataType::FLOAT);
 }

@@ -413,7 +413,7 @@ TEST_F(TestGraphDescriptorLayernormBackward, LayernormBackwardAttributesPreserve
                                                  toVec(K_LAYERNORMBACKWARD_TENSOR_DBIAS_STRIDES));
 
     // Create op with non-default parameters to test graph roundtrip
-    auto wrapper = createDescriptor<LayernormBackwardOperationDescriptor>();
+    const auto wrapper = createDescriptor<LayernormBackwardOperationDescriptor>();
     const auto opDesc = wrapper->asDescriptor<LayernormBackwardOperationDescriptor>();
 
     HipdnnBackendDescriptor* dyPtr = dyDesc.get();
@@ -673,7 +673,7 @@ TEST_F(TestGraphDescriptorLayernormBackward, OperationNameRoundTripThroughLiftin
                                static_cast<const uint8_t*>(serialized.ptr) + serialized.size);
 
     // Deserialize into a new GraphDescriptor (lifting path)
-    auto liftedWrapper = createDescriptor<GraphDescriptor>();
+    const auto liftedWrapper = createDescriptor<GraphDescriptor>();
     const auto liftedDesc = liftedWrapper->asDescriptor<GraphDescriptor>();
     liftedDesc->deserializeGraph(bytes.data(), bytes.size());
 
@@ -686,7 +686,7 @@ TEST_F(TestGraphDescriptorLayernormBackward, OperationNameRoundTripThroughLiftin
 
     // Re-serialize and verify name survived the round-trip
     const auto reSerialized = liftedDesc->getSerializedGraph();
-    auto graphT = UnPackGraph(reSerialized.ptr);
+    const auto graphT = UnPackGraph(reSerialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1u);
     EXPECT_EQ(graphT->nodes[0]->name, "test_layernormbackward_lifting");

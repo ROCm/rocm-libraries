@@ -99,7 +99,7 @@ TEST_F(TestCustomOpOperationFromNode, NodeFactoryDelegatesCorrectly)
 
     auto* op = graphOp->asGraphOperation();
     ASSERT_NE(op, nullptr);
-    auto rebuiltNode = op->buildNode();
+    const auto rebuiltNode = op->buildNode();
     ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::CustomOpAttributes);
     const auto desc = std::static_pointer_cast<CustomOpOperationDescriptor>(graphOp);
     ASSERT_TRUE(desc->isFinalized());
@@ -213,7 +213,7 @@ TEST_F(TestCustomOpOperationFromNode, BuildNodeRoundTrip)
     const auto node = createStandardNode();
     const auto desc = CustomOpOperationDescriptor::fromNode(node, _tensorMap);
 
-    auto rebuiltNode = desc->buildNode();
+    const auto rebuiltNode = desc->buildNode();
     ASSERT_NE(rebuiltNode, nullptr);
     ASSERT_EQ(rebuiltNode->compute_data_type, DataType::FLOAT);
     ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::CustomOpAttributes);
@@ -377,7 +377,7 @@ TEST_F(TestCustomOpOperationFromNode, BuildNodePreservesName)
     node.name = "test_build_name";
 
     const auto desc = CustomOpOperationDescriptor::fromNode(node, _tensorMap);
-    auto rebuiltNode = desc->buildNode();
+    const auto rebuiltNode = desc->buildNode();
 
     ASSERT_NE(rebuiltNode, nullptr);
     EXPECT_EQ(rebuiltNode->name, "test_build_name");
@@ -404,7 +404,7 @@ TEST_F(TestCustomOpOperationFromNode, FromNodeWithSingleInputAndOutput)
     ASSERT_EQ(desc->getOutputDescs().size(), 1);
     EXPECT_EQ(desc->getOutputDescs()[0]->getData().uid, K_CUSTOM_OP_OUTPUT_UID_0);
 
-    auto rebuiltNode = desc->buildNode();
+    const auto rebuiltNode = desc->buildNode();
     ASSERT_NE(rebuiltNode, nullptr);
     const auto* rebuiltAttrs = rebuiltNode->attributes.AsCustomOpAttributes();
     ASSERT_NE(rebuiltAttrs, nullptr);
@@ -434,7 +434,7 @@ TEST_F(TestCustomOpOperationFromNode, FromNodeWithZeroInputs)
     ASSERT_EQ(desc->getOutputDescs().size(), 1);
     EXPECT_EQ(desc->getOutputDescs()[0]->getData().uid, K_CUSTOM_OP_OUTPUT_UID_0);
 
-    auto rebuiltNode = desc->buildNode();
+    const auto rebuiltNode = desc->buildNode();
     ASSERT_NE(rebuiltNode, nullptr);
     const auto* rebuiltAttrs = rebuiltNode->attributes.AsCustomOpAttributes();
     ASSERT_NE(rebuiltAttrs, nullptr);
@@ -463,7 +463,7 @@ TEST_F(TestCustomOpOperationFromNode, FromNodeWithZeroOutputs)
     EXPECT_EQ(desc->getInputDescs()[0]->getData().uid, K_CUSTOM_OP_INPUT_UID_0);
     ASSERT_EQ(desc->getOutputDescs().size(), 0);
 
-    auto rebuiltNode = desc->buildNode();
+    const auto rebuiltNode = desc->buildNode();
     ASSERT_NE(rebuiltNode, nullptr);
     const auto* rebuiltAttrs = rebuiltNode->attributes.AsCustomOpAttributes();
     ASSERT_NE(rebuiltAttrs, nullptr);
@@ -503,7 +503,7 @@ TEST_F(TestCustomOpOperationFromNode, FromNodeWithTwoOutputs)
     EXPECT_EQ(desc->getOutputDescs()[0]->getData().uid, K_CUSTOM_OP_OUTPUT_UID_0);
     EXPECT_EQ(desc->getOutputDescs()[1]->getData().uid, K_CUSTOM_OP_OUTPUT_UID_1);
 
-    auto rebuiltNode = desc->buildNode();
+    const auto rebuiltNode = desc->buildNode();
     ASSERT_NE(rebuiltNode, nullptr);
     const auto* rebuiltAttrs = rebuiltNode->attributes.AsCustomOpAttributes();
     ASSERT_NE(rebuiltAttrs, nullptr);

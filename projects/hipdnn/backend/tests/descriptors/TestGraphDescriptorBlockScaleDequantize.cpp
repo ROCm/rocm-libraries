@@ -92,7 +92,7 @@ public:
     // Build a BSD graph, finalize, and return serialized bytes
     std::vector<uint8_t> buildAndSerializeGraph(HipdnnBackendDescriptor* op)
     {
-        auto graphWrapper = createDescriptor<GraphDescriptor>();
+        const auto graphWrapper = createDescriptor<GraphDescriptor>();
         const auto graphDesc = graphWrapper->asDescriptor<GraphDescriptor>();
 
         hipdnnHandle_t handle = &_mockHandle;
@@ -114,7 +114,7 @@ public:
     // Deserialize bytes into a new GraphDescriptor and finalize it
     std::shared_ptr<GraphDescriptor> deserializeAndFinalize(const std::vector<uint8_t>& bytes)
     {
-        auto graphWrapper = createDescriptor<GraphDescriptor>();
+        const auto graphWrapper = createDescriptor<GraphDescriptor>();
         auto graphDesc = graphWrapper->asDescriptor<GraphDescriptor>();
 
         graphDesc->deserializeGraph(bytes.data(), bytes.size());
@@ -177,7 +177,7 @@ TEST_F(TestGraphDescriptorBlockScaleDequantize, BuildFromSingleOperation)
     flatbuffers::Verifier verifier(static_cast<const uint8_t*>(serialized.ptr), serialized.size);
     ASSERT_TRUE(verifier.VerifyBuffer<Graph>());
 
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
     ASSERT_EQ(graphT->tensors.size(), 3);
@@ -221,7 +221,7 @@ TEST_F(TestGraphDescriptorBlockScaleDequantize, ComputeDataTypePreserved)
     desc->finalize();
 
     const auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
     EXPECT_EQ(graphT->nodes[0]->compute_data_type, DataType::HALF);
@@ -246,7 +246,7 @@ TEST_F(TestGraphDescriptorBlockScaleDequantize, DeserializePreservesNodeAttribut
     const auto liftedGraph = deserializeAndFinalize(serializedBytes);
 
     const auto serialized = liftedGraph->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
     ASSERT_EQ(graphT->tensors.size(), 3);
@@ -277,7 +277,7 @@ TEST_F(TestGraphDescriptorBlockScaleDequantize, DeserializePreservesComputeDataT
     const auto liftedGraph = deserializeAndFinalize(serializedBytes);
 
     const auto serialized = liftedGraph->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
     EXPECT_EQ(graphT->nodes[0]->compute_data_type, DataType::HALF);
@@ -292,7 +292,7 @@ TEST_F(TestGraphDescriptorBlockScaleDequantize, DeserializePreservesIsNegativeSc
     const auto yDesc = createFinalizedTensor(
         K_BSD_TENSOR_Y_UID, toVec(K_BSD_TENSOR_Y_DIMS), toVec(K_BSD_TENSOR_Y_STRIDES));
 
-    auto wrapper = createDescriptor<BlockScaleDequantizeOperationDescriptor>();
+    const auto wrapper = createDescriptor<BlockScaleDequantizeOperationDescriptor>();
     const auto opDesc = wrapper->asDescriptor<BlockScaleDequantizeOperationDescriptor>();
 
     auto* xRaw = xDesc.get();
@@ -334,7 +334,7 @@ TEST_F(TestGraphDescriptorBlockScaleDequantize, DeserializePreservesIsNegativeSc
     const auto liftedGraph = deserializeAndFinalize(serializedBytes);
 
     const auto serialized = liftedGraph->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
     auto* attrs = graphT->nodes[0]->attributes.AsBlockScaleDequantizeAttributes();
@@ -357,7 +357,7 @@ TEST_F(TestGraphDescriptorBlockScaleDequantize, DeserializePreservesTensorData)
     const auto liftedGraph = deserializeAndFinalize(serializedBytes);
 
     const auto serialized = liftedGraph->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->tensors.size(), 3);
 

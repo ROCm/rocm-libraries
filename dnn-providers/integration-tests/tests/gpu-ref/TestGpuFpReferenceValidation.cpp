@@ -423,7 +423,7 @@ TEST(TestGpuValidatorFactory, FloatValidatorPassesMatchingData)
 {
     SKIP_IF_NO_DEVICES();
 
-    auto validator = createGpuAllCloseValidator(hipdnn_frontend::DataType::FLOAT, 0.0f, 0.0f);
+    const auto validator = createGpuAllCloseValidator(hipdnn_frontend::DataType::FLOAT, 0.0f, 0.0f);
     ASSERT_NE(validator, nullptr);
 
     Tensor<float> ref({4});
@@ -449,7 +449,7 @@ TEST(TestGpuValidatorFactory, Int32ValidatorPassesMatchingData)
 {
     SKIP_IF_NO_DEVICES();
 
-    auto validator = createGpuAllCloseValidator(hipdnn_frontend::DataType::INT32);
+    const auto validator = createGpuAllCloseValidator(hipdnn_frontend::DataType::INT32);
     ASSERT_NE(validator, nullptr);
 
     Tensor<int32_t> ref({4});

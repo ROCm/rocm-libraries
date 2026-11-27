@@ -338,14 +338,14 @@ TEST_F(TestGraphDescriptorSdpaBwd, BuildFromSingleOperation)
     flatbuffers::Verifier verifier(static_cast<const uint8_t*>(serialized.ptr), serialized.size);
     ASSERT_TRUE(verifier.VerifyBuffer<Graph>());
 
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
     ASSERT_NE(graphT, nullptr);
     ASSERT_EQ(graphT->nodes.size(), 1u);
 
     // Exact tensor count: 9 required + 10 optional = 19
     ASSERT_EQ(graphT->tensors.size(), 19u);
 
-    auto& node = graphT->nodes[0];
+    const auto& node = graphT->nodes[0];
     ASSERT_EQ(node->attributes.type, NodeAttributes::SdpaBackwardAttributes);
 
     auto* attrs = node->attributes.AsSdpaBackwardAttributes();
@@ -446,7 +446,7 @@ TEST_F(TestGraphDescriptorSdpaBwd, BuildFromRequiredOnlyOperation)
     flatbuffers::Verifier verifier(static_cast<const uint8_t*>(serialized.ptr), serialized.size);
     ASSERT_TRUE(verifier.VerifyBuffer<Graph>());
 
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
     ASSERT_NE(graphT, nullptr);
     ASSERT_EQ(graphT->nodes.size(), 1u);
 
@@ -554,7 +554,7 @@ TEST_F(TestGraphDescriptorSdpaBwd, ComputeDataTypePreserved)
                                               nullptr,
                                               HIPDNN_DATA_HALF);
 
-    auto graphT = finalizeGraphAndUnpack(opWrapper);
+    const auto graphT = finalizeGraphAndUnpack(opWrapper);
 
     ASSERT_EQ(graphT->nodes.size(), 1u);
     EXPECT_EQ(graphT->nodes[0]->compute_data_type, DataType::HALF);
@@ -614,7 +614,7 @@ TEST_F(TestGraphDescriptorSdpaBwd, NonDefaultScalarsPreservedInSerialization)
 
     desc->finalize();
 
-    auto graphT = finalizeGraphAndUnpack(wrapper);
+    const auto graphT = finalizeGraphAndUnpack(wrapper);
     ASSERT_NE(graphT, nullptr);
     ASSERT_EQ(graphT->nodes.size(), 1u);
     ASSERT_EQ(graphT->tensors.size(), 9u); // required only
@@ -682,7 +682,7 @@ TEST_F(TestGraphDescriptorSdpaBwd, AllOptionalTensorsPresentInSerializedTensorLi
                                               dropoutScaleInvDesc.get(),
                                               dbiasDesc.get());
 
-    auto graphT = finalizeGraphAndUnpack(opWrapper);
+    const auto graphT = finalizeGraphAndUnpack(opWrapper);
     ASSERT_NE(graphT, nullptr);
 
     // Collect all tensor UIDs from the serialized tensor list
@@ -734,7 +734,7 @@ TEST_F(TestGraphDescriptorSdpaBwd, RequiredOnlyNoOptionalTensorsInList)
                                               t.dk.get(),
                                               t.dv.get());
 
-    auto graphT = finalizeGraphAndUnpack(opWrapper);
+    const auto graphT = finalizeGraphAndUnpack(opWrapper);
     ASSERT_NE(graphT, nullptr);
 
     // Collect all tensor UIDs

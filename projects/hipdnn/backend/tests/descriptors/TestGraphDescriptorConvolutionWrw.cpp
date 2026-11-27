@@ -149,7 +149,7 @@ TEST_F(TestGraphDescriptorConvolutionWrw, BuildFromSingleOperation)
     flatbuffers::Verifier verifier(static_cast<const uint8_t*>(serialized.ptr), serialized.size);
     ASSERT_TRUE(verifier.VerifyBuffer<Graph>());
 
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
     ASSERT_EQ(graphT->tensors.size(), 3);
@@ -188,7 +188,7 @@ TEST_F(TestGraphDescriptorConvolutionWrw, ComputeDataTypePreserved)
     desc->finalize();
 
     const auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
     EXPECT_EQ(graphT->nodes[0]->compute_data_type, DataType::HALF);
@@ -216,7 +216,7 @@ TEST_F(TestGraphDescriptorConvolutionWrw, OperationNamePreservedInSerialization)
     desc->finalize();
 
     const auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
     EXPECT_EQ(graphT->nodes[0]->name, "test_wrw_op");
@@ -245,7 +245,7 @@ TEST_F(TestGraphDescriptorConvolutionWrw, OperationNameRoundTripThroughLifting)
 
     // Serialize and deserialize via FlatBuffer
     const auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     // Rebuild from the deserialized graph using NodeFactory
     const auto tensorMap = NodeFactory::buildTensorMap(graphT->tensors);
@@ -257,7 +257,7 @@ TEST_F(TestGraphDescriptorConvolutionWrw, OperationNameRoundTripThroughLifting)
     auto* graphOp = rebuilt->asGraphOperation();
     ASSERT_NE(graphOp, nullptr);
 
-    auto rebuiltNode = graphOp->buildNode();
+    const auto rebuiltNode = graphOp->buildNode();
     ASSERT_NE(rebuiltNode, nullptr);
     EXPECT_EQ(rebuiltNode->name, "lift_wrw_name");
     ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::ConvolutionWrwAttributes);

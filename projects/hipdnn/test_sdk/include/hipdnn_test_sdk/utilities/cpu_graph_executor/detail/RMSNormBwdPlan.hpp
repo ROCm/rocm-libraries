@@ -88,10 +88,10 @@ public:
         const auto shallowInvRmsTensor = createShallowTensor<ComputeDataType>(
             _params.invRmsTensor, variantPack.at(_params.invRmsTensor.uid));
 
-        auto shallowDxTensor = createShallowTensor<DxDataType>(
+        const auto shallowDxTensor = createShallowTensor<DxDataType>(
             _params.dxTensor, variantPack.at(_params.dxTensor.uid));
 
-        auto shallowDScaleTensor = createShallowTensor<ScaleDataType>(
+        const auto shallowDScaleTensor = createShallowTensor<ScaleDataType>(
             _params.dscaleTensor, variantPack.at(_params.dscaleTensor.uid));
 
         std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<ScaleDataType>> shallowDBiasTensor;

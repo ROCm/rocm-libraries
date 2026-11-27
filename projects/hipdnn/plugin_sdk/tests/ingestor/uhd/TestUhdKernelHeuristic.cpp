@@ -1791,8 +1791,9 @@ std::string provenanceOfEngineRanking(DescriptorSet set)
         "hipdnn.kernel_ingestor.test.dispatch", handler);
 
     const Gfx942DeviceResolver resolver;
-    auto engine = makeEngine<testing::StubHandle, testing::StubSettings, testing::StubContext>(
-        std::move(set), resolver);
+    const auto engine
+        = makeEngine<testing::StubHandle, testing::StubSettings, testing::StubContext>(
+            std::move(set), resolver);
     if(engine == nullptr)
     {
         return "<no engine>";

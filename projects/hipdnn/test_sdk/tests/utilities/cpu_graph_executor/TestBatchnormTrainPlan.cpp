@@ -137,7 +137,7 @@ TEST_F(TestBatchnormTrainPlan, ExecutePlanWithRuntimeEpsilonAndMomentumFromPack)
                                     DataType::FLOAT,
                                     DataType::FLOAT>
         builder;
-    auto runtimePlan = builder.buildNodePlan(runtimeWrapper, runtimeWrapper.getNode(0));
+    const auto runtimePlan = builder.buildNodePlan(runtimeWrapper, runtimeWrapper.getNode(0));
     runtimePlan->execute(runtimeVariantPack);
 
     // Baked-value reference graph with the same seed and equal epsilon/momentum.
@@ -161,7 +161,7 @@ TEST_F(TestBatchnormTrainPlan, ExecutePlanWithRuntimeEpsilonAndMomentumFromPack)
                                     DataType::FLOAT,
                                     DataType::FLOAT>
         bakedBuilder;
-    auto bakedPlan = bakedBuilder.buildNodePlan(bakedWrapper, bakedWrapper.getNode(0));
+    const auto bakedPlan = bakedBuilder.buildNodePlan(bakedWrapper, bakedWrapper.getNode(0));
     bakedPlan->execute(bakedVariantPack);
 
     const auto tolerance = batchnorm::getToleranceTraining<float>();

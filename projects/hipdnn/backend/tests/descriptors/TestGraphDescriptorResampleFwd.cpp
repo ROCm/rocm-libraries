@@ -229,7 +229,7 @@ TEST_F(TestGraphDescriptorResampleFwd, BuildFromSingleOperation)
     flatbuffers::Verifier verifier(static_cast<const uint8_t*>(serialized.ptr), serialized.size);
     ASSERT_TRUE(verifier.VerifyBuffer<Graph>());
 
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
     ASSERT_EQ(graphT->tensors.size(), 3);
@@ -280,7 +280,7 @@ TEST_F(TestGraphDescriptorResampleFwd, ResampleFwdAttributesPreserved)
                                                  toVec(K_RESAMPLE_FWD_TENSOR_INDEX_STRIDES));
 
     // Create op with non-default parameters to test graph roundtrip
-    auto wrapper = createDescriptor<ResampleFwdOperationDescriptor>();
+    const auto wrapper = createDescriptor<ResampleFwdOperationDescriptor>();
     const auto opDesc = wrapper->asDescriptor<ResampleFwdOperationDescriptor>();
 
     HipdnnBackendDescriptor* const xPtr = xDesc.get(); // NOLINT(misc-const-correctness)
@@ -343,7 +343,7 @@ TEST_F(TestGraphDescriptorResampleFwd, ResampleFwdAttributesPreserved)
     desc->finalize();
 
     const auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
     ASSERT_EQ(graphT->tensors.size(), 3);
@@ -405,7 +405,7 @@ TEST_F(TestGraphDescriptorResampleFwd, OperationNameRoundTripThroughLifting)
     desc->finalize();
 
     const auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
     ASSERT_EQ(graphT->nodes.size(), 1);
     EXPECT_EQ(graphT->nodes[0]->name, "roundtrip_name");
 }
@@ -420,7 +420,7 @@ TEST_F(TestGraphDescriptorResampleFwd, BuildFromOperationWithoutOptionalTensors)
                                              toVec(K_RESAMPLE_FWD_TENSOR_Y_STRIDES));
 
     // Create op WITHOUT index tensor
-    auto wrapper = createDescriptor<ResampleFwdOperationDescriptor>();
+    const auto wrapper = createDescriptor<ResampleFwdOperationDescriptor>();
     const auto op = wrapper->asDescriptor<ResampleFwdOperationDescriptor>();
 
     HipdnnBackendDescriptor* const xPtr = xDesc.get();
@@ -460,7 +460,7 @@ TEST_F(TestGraphDescriptorResampleFwd, BuildFromOperationWithoutOptionalTensors)
     desc->finalize();
 
     const auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
     ASSERT_EQ(graphT->nodes.size(), 1);
     ASSERT_EQ(graphT->tensors.size(), 2);
 
@@ -494,7 +494,7 @@ TEST_F(TestGraphDescriptorResampleFwd, ComputeDataTypePreserved)
     desc->finalize();
 
     const auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
     ASSERT_EQ(graphT->nodes.size(), 1);
     EXPECT_EQ(graphT->nodes[0]->compute_data_type, DataType::FLOAT);
 }
@@ -523,7 +523,7 @@ TEST_F(TestGraphDescriptorResampleFwd, GenerateIndexPreservedInSerialization)
     desc->finalize();
 
     const auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
     ASSERT_EQ(graphT->nodes.size(), 1);
 
     auto* attrs = graphT->nodes[0]->attributes.AsResampleFwdAttributes();

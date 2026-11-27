@@ -61,10 +61,10 @@ public:
         const auto shallowXTensor = createShallowTensor<InputDataType>(
             _params.xTensor, variantPack.at(_params.xTensor.uid));
 
-        auto shallowYTensor = createShallowTensor<OutputDataType>(
+        const auto shallowYTensor = createShallowTensor<OutputDataType>(
             _params.yTensor, variantPack.at(_params.yTensor.uid));
 
-        auto shallowScaleTensor = createShallowTensor<ScaleDataType>(
+        const auto shallowScaleTensor = createShallowTensor<ScaleDataType>(
             _params.scaleTensor, variantPack.at(_params.scaleTensor.uid));
 
         utilities::CpuFpReferenceBlockScaleQuantize::

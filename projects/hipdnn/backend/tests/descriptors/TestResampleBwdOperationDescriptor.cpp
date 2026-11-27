@@ -209,7 +209,7 @@ TEST_F(TestResampleBwdOperationDescriptor, BuildNodeWithoutOptionalTensors)
     desc->setAttribute(HIPDNN_ATTR_RESAMPLE_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &compType);
     desc->finalize();
 
-    auto node = desc->buildNode();
+    const auto node = desc->buildNode();
     ASSERT_NE(node, nullptr);
 
     auto* attrs = node->attributes.AsResampleBwdAttributes();
@@ -937,7 +937,7 @@ TEST_F(TestResampleBwdOperationDescriptor, BuildNodeProducesCorrectNodeT)
     desc->setAttribute(HIPDNN_ATTR_RESAMPLE_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
-    auto node = desc->buildNode();
+    const auto node = desc->buildNode();
     ASSERT_NE(node, nullptr);
     ASSERT_EQ(node->compute_data_type, DataType::FLOAT);
     ASSERT_EQ(node->attributes.type, NodeAttributes::ResampleBwdAttributes);
@@ -963,7 +963,7 @@ TEST_F(TestResampleBwdOperationDescriptor, BuildNodeWithHalfComputeType)
     desc->setAttribute(HIPDNN_ATTR_RESAMPLE_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
-    auto node = desc->buildNode();
+    const auto node = desc->buildNode();
     ASSERT_NE(node, nullptr);
     ASSERT_EQ(node->compute_data_type, DataType::HALF);
 }
@@ -1089,7 +1089,7 @@ TEST_F(TestResampleBwdOperationDescriptor, BuildNodePreservesName)
     desc->setAttribute(HIPDNN_ATTR_RESAMPLE_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
-    auto node = desc->buildNode();
+    const auto node = desc->buildNode();
     ASSERT_NE(node, nullptr);
     EXPECT_EQ(node->name, "test_resamplebwd");
 }

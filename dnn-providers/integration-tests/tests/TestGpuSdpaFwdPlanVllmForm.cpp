@@ -67,18 +67,19 @@ template <typename T>
 Outputs runGpuAs(const VllmProblem& p, const VllmBuffers& buffers)
 {
     auto graph = buildVllmGraph(p);
-    auto q = deviceCopy(storeAs<T>(buffers.q));
-    auto kv = deviceCopy(storeAs<T>(buffers.kv));
-    auto v = deviceCopy(storeAs<T>(buffers.v));
-    auto o = deviceCopy(std::vector<T>(static_cast<size_t>(queryElements(p)),
-                                       static_cast<T>(std::numeric_limits<float>::quiet_NaN())));
-    auto lse = deviceCopy(std::vector<float>(static_cast<size_t>(statsElements(p)),
-                                             std::numeric_limits<float>::quiet_NaN()));
-    auto queryOffsets = deviceCopy(buffers.queryStartLoc);
-    auto keyOffsets = deviceCopy(buffers.keyStartLoc);
-    auto seqLenQ = deviceCopy(buffers.seqLenQ);
-    auto seqLenKv = deviceCopy(buffers.seqLenKv);
-    auto table = deviceCopy(buffers.blockTable);
+    const auto q = deviceCopy(storeAs<T>(buffers.q));
+    const auto kv = deviceCopy(storeAs<T>(buffers.kv));
+    const auto v = deviceCopy(storeAs<T>(buffers.v));
+    const auto o
+        = deviceCopy(std::vector<T>(static_cast<size_t>(queryElements(p)),
+                                    static_cast<T>(std::numeric_limits<float>::quiet_NaN())));
+    const auto lse = deviceCopy(std::vector<float>(static_cast<size_t>(statsElements(p)),
+                                                   std::numeric_limits<float>::quiet_NaN()));
+    const auto queryOffsets = deviceCopy(buffers.queryStartLoc);
+    const auto keyOffsets = deviceCopy(buffers.keyStartLoc);
+    const auto seqLenQ = deviceCopy(buffers.seqLenQ);
+    const auto seqLenKv = deviceCopy(buffers.seqLenKv);
+    const auto table = deviceCopy(buffers.blockTable);
 
     std::unordered_map<int64_t, void*> pack
         = {{Q_UID, q->memory().deviceData()},

@@ -714,7 +714,7 @@ TEST_F(TestExecutionPlanDescriptor, LoadedVersionOnePlanReSavesIdenticalBytesTha
     ASSERT_NO_THROW(plan->serializeBackendPlan(planByteSize, &planByteSize, reSaved.data()));
     ASSERT_EQ(reSaved, loadedBytes);
 
-    auto freshWrapper = createDescriptor<ExecutionPlanDescriptor>();
+    const auto freshWrapper = createDescriptor<ExecutionPlanDescriptor>();
     const auto fresh = freshWrapper->asDescriptor<ExecutionPlanDescriptor>();
     ASSERT_NO_THROW(fresh->deserializeBackendPlan(
         _mockEnginePluginResourceManager, reSaved.data(), reSaved.size()));

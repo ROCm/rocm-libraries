@@ -510,7 +510,7 @@ TEST_F(TestCustomOpOperationDescriptor, BuildNodeProducesCorrectNodeT)
     makeFinalized();
     const auto desc = getDescriptor();
 
-    auto node = desc->buildNode();
+    const auto node = desc->buildNode();
     ASSERT_NE(node, nullptr);
     ASSERT_EQ(node->compute_data_type, DataType::FLOAT);
     ASSERT_EQ(node->attributes.type, NodeAttributes::CustomOpAttributes);
@@ -556,7 +556,7 @@ TEST_F(TestCustomOpOperationDescriptor, BuildNodeWithHalfComputeType)
     desc->setAttribute(HIPDNN_ATTR_CUSTOM_OP_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
-    auto node = desc->buildNode();
+    const auto node = desc->buildNode();
     ASSERT_NE(node, nullptr);
     ASSERT_EQ(node->compute_data_type, DataType::HALF);
 }

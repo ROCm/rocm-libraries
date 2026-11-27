@@ -1167,7 +1167,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, BuildNode)
 {
     makeFinalized();
     const auto desc = getDescriptor();
-    auto node = desc->buildNode();
+    const auto node = desc->buildNode();
 
     ASSERT_NE(node, nullptr);
     ASSERT_EQ(node->compute_data_type, DataType::FLOAT);
@@ -1217,7 +1217,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, BuildNodeWithNonDefaultScalars)
 
     desc->finalize();
 
-    auto node = desc->buildNode();
+    const auto node = desc->buildNode();
     ASSERT_NE(node, nullptr);
 
     const auto* attrs = node->attributes.AsSdpaBackwardAttributes();
@@ -1246,7 +1246,7 @@ TEST_F(TestSdpaBwdOperationDescriptor, BuildNodePreservesName)
                        name.c_str());
     desc->finalize();
 
-    auto node = desc->buildNode();
+    const auto node = desc->buildNode();
     ASSERT_NE(node, nullptr);
     EXPECT_EQ(node->name, "bwd_node_name");
 }
@@ -1762,7 +1762,7 @@ TEST_F(TestSdpaBwdOperationFromNode, FromNodePreservesNameAndComputeType)
     ASSERT_NE(desc, nullptr);
     EXPECT_EQ(desc->getComputeDataType(), DataType::HALF);
 
-    auto rebuiltNode = desc->buildNode();
+    const auto rebuiltNode = desc->buildNode();
     EXPECT_EQ(rebuiltNode->name, "my_bprop_node");
     EXPECT_EQ(rebuiltNode->compute_data_type, DataType::HALF);
 }
@@ -1800,7 +1800,7 @@ TEST_F(TestSdpaBwdOperationFromNode, FromNodeRoundTrip)
     const auto node = createAllNode();
     const auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
 
-    auto rebuiltNode = desc->buildNode();
+    const auto rebuiltNode = desc->buildNode();
     ASSERT_NE(rebuiltNode, nullptr);
     ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::SdpaBackwardAttributes);
 

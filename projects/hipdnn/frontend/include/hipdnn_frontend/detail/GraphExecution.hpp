@@ -239,7 +239,7 @@ inline int64_t queryEngineWorkspaceSize(hipdnnBackendDescriptor_t graphDesc,
         return failed();
     }
 
-    auto engineConfigDesc = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(
+    const auto engineConfigDesc = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(
         HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR);
     const auto setStatus
         = detail::hipdnnBackend()->backendSetAttribute(engineConfigDesc->get(),

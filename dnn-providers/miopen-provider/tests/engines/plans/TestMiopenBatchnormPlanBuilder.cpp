@@ -2493,7 +2493,7 @@ flatbuffers::FlatBufferBuilder createSingleNodeGraphWithVirtualTensor(BnSingleNo
 {
     return hipdnn_test_sdk::utilities::mutateGraph(createSingleNodeGraph(mode),
                                                    [virtualUid](fb::GraphT& graph) {
-                                                       for(auto& tensor : graph.tensors)
+                                                       for(const auto& tensor : graph.tensors)
                                                        {
                                                            if(tensor->uid == virtualUid)
                                                            {
@@ -2623,7 +2623,7 @@ flatbuffers::FlatBufferBuilder
     return hipdnn_test_sdk::utilities::mutateGraph(
         createBatchnormTrainingGraphWithStats(runningStatsMask, true, true),
         [virtualMean, virtualInvVariance](fb::GraphT& graph) {
-            for(auto& tensor : graph.tensors)
+            for(const auto& tensor : graph.tensors)
             {
                 if((tensor->uid == SAVED_MEAN_UID && virtualMean)
                    || (tensor->uid == SAVED_INV_VARIANCE_UID && virtualInvVariance))
@@ -2704,7 +2704,7 @@ TEST_F(TestMiopenBatchnormSavedPairVirtual, TrainingBuilderDeclinesBothVirtualWi
     const auto builder = hipdnn_test_sdk::utilities::mutateGraph(
         hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(),
         [](fb::GraphT& graph) {
-            for(auto& tensor : graph.tensors)
+            for(const auto& tensor : graph.tensors)
             {
                 if(tensor->name == "mean" || tensor->name == "inv_variance")
                 {

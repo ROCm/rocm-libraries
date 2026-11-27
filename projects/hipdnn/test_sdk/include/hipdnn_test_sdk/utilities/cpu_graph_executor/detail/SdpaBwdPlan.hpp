@@ -145,11 +145,11 @@ public:
             _params.doTensor, variantPack.at(_params.doTensor.uid));
         const auto shallowStatsTensor = createShallowTensor<float>(
             _params.statsTensor, variantPack.at(_params.statsTensor.uid));
-        auto shallowDQTensor = createShallowTensor<DQDataType>(
+        const auto shallowDQTensor = createShallowTensor<DQDataType>(
             _params.dqTensor, variantPack.at(_params.dqTensor.uid));
-        auto shallowDKTensor = createShallowTensor<DKDataType>(
+        const auto shallowDKTensor = createShallowTensor<DKDataType>(
             _params.dkTensor, variantPack.at(_params.dkTensor.uid));
-        auto shallowDVTensor = createShallowTensor<DVDataType>(
+        const auto shallowDVTensor = createShallowTensor<DVDataType>(
             _params.dvTensor, variantPack.at(_params.dvTensor.uid));
 
         // Padding lengths (INT32, one per batch). Applicability guarantees both or neither.

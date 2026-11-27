@@ -969,7 +969,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, BuildNodeProducesCorrectNodeT)
         HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_MATH_PREC, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
-    auto node = desc->buildNode();
+    const auto node = desc->buildNode();
     ASSERT_NE(node, nullptr);
     ASSERT_EQ(node->compute_data_type, DataType::FLOAT);
     ASSERT_EQ(node->attributes.type, NodeAttributes::MoeGroupedMatmulAttributes);
@@ -996,7 +996,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, BuildNodeWithHalfComputeType)
         HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_MATH_PREC, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
-    auto node = desc->buildNode();
+    const auto node = desc->buildNode();
     ASSERT_NE(node, nullptr);
     ASSERT_EQ(node->compute_data_type, DataType::HALF);
 }
@@ -1127,7 +1127,7 @@ TEST_F(TestMoeGroupedMatmulOperationDescriptor, BuildNodePreservesName)
         HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_MATH_PREC, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
-    auto node = desc->buildNode();
+    const auto node = desc->buildNode();
     ASSERT_NE(node, nullptr);
     EXPECT_EQ(node->name, "test_moegroupedmatmul");
 }

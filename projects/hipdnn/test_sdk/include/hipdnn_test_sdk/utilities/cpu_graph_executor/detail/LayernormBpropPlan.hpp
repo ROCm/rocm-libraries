@@ -109,13 +109,13 @@ public:
                 variantPack.at(_params.invVarianceTensor.value().uid));
         }
 
-        auto shallowDxTensor = createShallowTensor<DxDataType>(
+        const auto shallowDxTensor = createShallowTensor<DxDataType>(
             _params.dxTensor, variantPack.at(_params.dxTensor.uid));
 
-        auto shallowDscaleTensor = createShallowTensor<ScaleBiasDataType>(
+        const auto shallowDscaleTensor = createShallowTensor<ScaleBiasDataType>(
             _params.dscaleTensor, variantPack.at(_params.dscaleTensor.uid));
 
-        auto shallowDbiasTensor = createShallowTensor<ScaleBiasDataType>(
+        const auto shallowDbiasTensor = createShallowTensor<ScaleBiasDataType>(
             _params.dbiasTensor, variantPack.at(_params.dbiasTensor.uid));
 
         // Extract epsilon from pass-by-value tensor (cast to double)

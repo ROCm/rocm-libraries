@@ -133,9 +133,9 @@ TEST(TestRMSNormBwdPlan, ExecutePlan)
         params.invRmsTensor,
         directTensorBundle.tensors[attributes.inv_rms_tensor_uid()]->rawHostData());
 
-    auto shallowDxTensor = createShallowTensor<float>(
+    const auto shallowDxTensor = createShallowTensor<float>(
         params.dxTensor, directTensorBundle.tensors[attributes.dx_tensor_uid()]->rawHostData());
-    auto shallowDScaleTensor = createShallowTensor<float>(
+    const auto shallowDScaleTensor = createShallowTensor<float>(
         params.dscaleTensor,
         directTensorBundle.tensors[attributes.dscale_tensor_uid()]->rawHostData());
 
@@ -201,9 +201,9 @@ TEST(TestRMSNormBwdPlan, ExecutePlanWithOptionalDbias)
         params.invRmsTensor,
         directTensorBundle.tensors[attributes.inv_rms_tensor_uid()]->rawHostData());
 
-    auto shallowDxTensor = createShallowTensor<float>(
+    const auto shallowDxTensor = createShallowTensor<float>(
         params.dxTensor, directTensorBundle.tensors[attributes.dx_tensor_uid()]->rawHostData());
-    auto shallowDScaleTensor = createShallowTensor<float>(
+    const auto shallowDScaleTensor = createShallowTensor<float>(
         params.dscaleTensor,
         directTensorBundle.tensors[attributes.dscale_tensor_uid()]->rawHostData());
     const auto shallowDBiasTensor = createShallowTensor<float>(

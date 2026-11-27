@@ -224,8 +224,8 @@ RaggedSdpaFwdGraphOptions fp8Options(OperandStorage storage, const std::vector<i
 flatbuffers::DetachedBuffer rewriteTensors(const flatbuffers::FlatBufferBuilder& graph,
                                            const std::function<void(TensorAttributesT&)>& edit)
 {
-    auto graphT = std::unique_ptr<GraphT>(GetGraph(graph.GetBufferPointer())->UnPack());
-    for(auto& tensor : graphT->tensors)
+    const auto graphT = std::unique_ptr<GraphT>(GetGraph(graph.GetBufferPointer())->UnPack());
+    for(const auto& tensor : graphT->tensors)
     {
         edit(*tensor);
     }
@@ -255,7 +255,7 @@ flatbuffers::DetachedBuffer withSeqLens(const flatbuffers::FlatBufferBuilder& gr
                                         bool seqLenKv = true,
                                         DataType type = DataType::INT32)
 {
-    auto graphT = std::unique_ptr<GraphT>(GetGraph(graph.GetBufferPointer())->UnPack());
+    const auto graphT = std::unique_ptr<GraphT>(GetGraph(graph.GetBufferPointer())->UnPack());
     auto* attrs = graphT->nodes.front()->attributes.AsSdpaAttributes();
     for(const auto& [uid, enabled, slot] :
         {std::tuple{SEQ_LEN_Q_UID, seqLenQ, &attrs->seq_len_q_tensor_uid},
@@ -473,7 +473,7 @@ RunResult runPlanAndDirect(const RaggedShape& shape,
         const GraphWrapper graphWrapper(graph.GetBufferPointer(), graph.GetSize());
         const Builder builder;
         EXPECT_TRUE(builder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
-        auto plan = builder.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
+        const auto plan = builder.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
         plan->execute(variantPack);
     }
     else

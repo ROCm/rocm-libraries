@@ -202,7 +202,7 @@ TEST_F(TestGpuHipdnnBackendWriteRanking, DisabledCacheLeavesStoreUntouched)
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter enableDisable(DISABLE_ENV,
                                                                                     "1");
 
-    auto graph = makeFinalizedGraph();
+    const auto graph = makeFinalizedGraph();
     const std::array<int64_t, 2> order = {5, 6};
     auto outcome = HIPDNN_AUTOTUNE_CACHE_WRITE_WRITTEN;
 
@@ -270,7 +270,7 @@ TEST_F(TestGpuHipdnnBackendWriteRanking, RewritingAnIdenticalRankingReportsUncha
 /// the second call then reports UNCHANGED and the stored order stays {5, 6}.
 TEST_F(TestGpuHipdnnBackendWriteRanking, RewritingADifferentRankingReportsWrittenAndSupersedes)
 {
-    auto graph = makeFinalizedGraph();
+    const auto graph = makeFinalizedGraph();
     const std::array<int64_t, 2> first = {5, 6};
     const std::array<int64_t, 3> second = {7, 5, 6};
 
@@ -305,7 +305,7 @@ TEST_F(TestGpuHipdnnBackendWriteRanking, RewritingADifferentRankingReportsWritte
 // binary and libhipdnn_backend.so read and write the same shard file on disk.
 TEST_F(TestGpuHipdnnBackendWriteRanking, WrittenRankingIsVisibleThroughTheCExport)
 {
-    auto graph = makeFinalizedGraph();
+    const auto graph = makeFinalizedGraph();
     const std::array<int64_t, 3> order = {11, 22, 33};
     auto outcome = HIPDNN_AUTOTUNE_CACHE_WRITE_DECLINED_NO_ENGINES;
 

@@ -72,7 +72,7 @@ public:
         const auto shallowXTensor
             = createShallowTensor<XDataType>(_params.xTensor, variantPack.at(_params.xTensor.uid));
 
-        auto shallowDWTensor = createShallowTensor<OutputDataType>(
+        const auto shallowDWTensor = createShallowTensor<OutputDataType>(
             _params.dwTensor, variantPack.at(_params.dwTensor.uid));
 
         const auto shallowDYTensor = createShallowTensor<DyDataType>(

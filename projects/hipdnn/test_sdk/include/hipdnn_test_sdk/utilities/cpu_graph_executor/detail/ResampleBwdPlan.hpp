@@ -74,7 +74,7 @@ public:
     {
         const auto shallowDyTensor = createShallowTensor<DyDataType>(
             _params.dyTensor, variantPack.at(_params.dyTensor.uid));
-        auto shallowDxTensor = createShallowTensor<DxDataType>(
+        const auto shallowDxTensor = createShallowTensor<DxDataType>(
             _params.dxTensor, variantPack.at(_params.dxTensor.uid));
 
         std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<IndexDataType>> shallowIndexTensor;

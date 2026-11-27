@@ -106,12 +106,12 @@ TYPED_TEST(LayernormBpropPlanTyped, ExecutePlan)
     const auto shallowInvVarianceTensor = createShallowTensor<DyType>(
         params.invVarianceTensor.value(),
         directTensorBundle.getTensor(attributes.inv_variance_tensor_uid().value()).rawHostData());
-    auto shallowDxTensor = createShallowTensor<DxType>(
+    const auto shallowDxTensor = createShallowTensor<DxType>(
         params.dxTensor, directTensorBundle.getTensor(attributes.dx_tensor_uid()).rawHostData());
-    auto shallowDscaleTensor = createShallowTensor<ScaleType>(
+    const auto shallowDscaleTensor = createShallowTensor<ScaleType>(
         params.dscaleTensor,
         directTensorBundle.getTensor(attributes.dscale_tensor_uid()).rawHostData());
-    auto shallowDbiasTensor = createShallowTensor<ScaleType>(
+    const auto shallowDbiasTensor = createShallowTensor<ScaleType>(
         params.dbiasTensor,
         directTensorBundle.getTensor(attributes.dbias_tensor_uid()).rawHostData());
 
@@ -305,12 +305,12 @@ TYPED_TEST(LayernormBpropPlanTyped, ExecutePlanWithoutOptionals)
     const auto shallowScaleTensor = createShallowTensor<ScaleType>(
         params.scaleTensor,
         directTensorBundle.getTensor(attributes.scale_tensor_uid()).rawHostData());
-    auto shallowDxTensor = createShallowTensor<DxType>(
+    const auto shallowDxTensor = createShallowTensor<DxType>(
         params.dxTensor, directTensorBundle.getTensor(attributes.dx_tensor_uid()).rawHostData());
-    auto shallowDscaleTensor = createShallowTensor<ScaleType>(
+    const auto shallowDscaleTensor = createShallowTensor<ScaleType>(
         params.dscaleTensor,
         directTensorBundle.getTensor(attributes.dscale_tensor_uid()).rawHostData());
-    auto shallowDbiasTensor = createShallowTensor<ScaleType>(
+    const auto shallowDbiasTensor = createShallowTensor<ScaleType>(
         params.dbiasTensor,
         directTensorBundle.getTensor(attributes.dbias_tensor_uid()).rawHostData());
 
@@ -406,12 +406,12 @@ TYPED_TEST(LayernormBpropPlanTyped, ExecutePlanOnePaddedNormalizedDimCount2)
     const auto shallowInvVarianceTensor = createShallowTensor<DyType>(
         params.invVarianceTensor.value(),
         directTensorBundle.getTensor(attributes.inv_variance_tensor_uid().value()).rawHostData());
-    auto shallowDxTensor = createShallowTensor<DxType>(
+    const auto shallowDxTensor = createShallowTensor<DxType>(
         params.dxTensor, directTensorBundle.getTensor(attributes.dx_tensor_uid()).rawHostData());
-    auto shallowDscaleTensor = createShallowTensor<ScaleType>(
+    const auto shallowDscaleTensor = createShallowTensor<ScaleType>(
         params.dscaleTensor,
         directTensorBundle.getTensor(attributes.dscale_tensor_uid()).rawHostData());
-    auto shallowDbiasTensor = createShallowTensor<ScaleType>(
+    const auto shallowDbiasTensor = createShallowTensor<ScaleType>(
         params.dbiasTensor,
         directTensorBundle.getTensor(attributes.dbias_tensor_uid()).rawHostData());
 
@@ -505,12 +505,12 @@ TYPED_TEST(LayernormBpropPlanTyped, ExecutePlanTrainingPhase)
     const auto shallowInvVarianceTensor = createShallowTensor<DyType>(
         params.invVarianceTensor.value(),
         directTensorBundle.getTensor(attributes.inv_variance_tensor_uid().value()).rawHostData());
-    auto shallowDxTensor = createShallowTensor<DxType>(
+    const auto shallowDxTensor = createShallowTensor<DxType>(
         params.dxTensor, directTensorBundle.getTensor(attributes.dx_tensor_uid()).rawHostData());
-    auto shallowDscaleTensor = createShallowTensor<ScaleType>(
+    const auto shallowDscaleTensor = createShallowTensor<ScaleType>(
         params.dscaleTensor,
         directTensorBundle.getTensor(attributes.dscale_tensor_uid()).rawHostData());
-    auto shallowDbiasTensor = createShallowTensor<ScaleType>(
+    const auto shallowDbiasTensor = createShallowTensor<ScaleType>(
         params.dbiasTensor,
         directTensorBundle.getTensor(attributes.dbias_tensor_uid()).rawHostData());
 
@@ -620,12 +620,12 @@ TYPED_TEST(LayernormBpropPlanTyped, ExecutePlanGetOutputTensorIds)
     const auto shallowInvVarianceTensor = createShallowTensor<DyType>(
         params.invVarianceTensor.value(),
         directTensorBundle.getTensor(attributes.inv_variance_tensor_uid().value()).rawHostData());
-    auto shallowDxTensor = createShallowTensor<DxType>(
+    const auto shallowDxTensor = createShallowTensor<DxType>(
         params.dxTensor, directTensorBundle.getTensor(attributes.dx_tensor_uid()).rawHostData());
-    auto shallowDscaleTensor = createShallowTensor<ScaleType>(
+    const auto shallowDscaleTensor = createShallowTensor<ScaleType>(
         params.dscaleTensor,
         directTensorBundle.getTensor(attributes.dscale_tensor_uid()).rawHostData());
-    auto shallowDbiasTensor = createShallowTensor<ScaleType>(
+    const auto shallowDbiasTensor = createShallowTensor<ScaleType>(
         params.dbiasTensor,
         directTensorBundle.getTensor(attributes.dbias_tensor_uid()).rawHostData());
 

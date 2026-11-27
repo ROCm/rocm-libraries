@@ -312,7 +312,7 @@ flatbuffers::FlatBufferBuilder mutatedResampleBwdGraph(int64_t virtualUid)
 {
     const auto base = hipdnn_test_sdk::utilities::createValidResampleBwdGraph();
     return hipdnn_test_sdk::utilities::mutateGraph(base, [virtualUid](GraphT& graph) {
-        for(auto& tensor : graph.tensors)
+        for(const auto& tensor : graph.tensors)
         {
             if(tensor->uid == virtualUid)
             {

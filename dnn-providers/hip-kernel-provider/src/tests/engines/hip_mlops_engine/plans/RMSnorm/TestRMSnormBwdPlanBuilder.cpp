@@ -472,7 +472,7 @@ TEST_F(TestRMSnormBwdPlanBuilder, IsNotApplicableForLeakyReluActivationGraph)
 TEST_F(TestRMSnormBwdPlanBuilder, IdentityActivationIsApplicable)
 {
     const auto original = hipdnn_test_sdk::utilities::createValidRMSNormBwdActivationGraph();
-    auto nativeGraph
+    const auto nativeGraph
         = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(original.GetBufferPointer());
     auto* activation = nativeGraph->nodes[0]->attributes.AsPointwiseAttributes();
     activation->operation = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::IDENTITY;
@@ -496,7 +496,7 @@ TEST_F(TestRMSnormBwdPlanBuilder, ForwardReluIsNotApplicable)
         validBuilder.GetBufferPointer(), validBuilder.GetSize());
     ASSERT_TRUE(_planBuilder.isApplicable(_dummyHandle, validGraph));
 
-    auto nativeGraph
+    const auto nativeGraph
         = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(validBuilder.GetBufferPointer());
     nativeGraph->nodes[0]->attributes.AsPointwiseAttributes()->operation
         = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD;
@@ -661,7 +661,7 @@ TEST_F(TestRMSnormBwdPlanBuilder, DeclinesAVirtualKernelBuffer)
         const auto builder = hipdnn_test_sdk::utilities::mutateGraph(
             hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph(),
             [name](hipdnn_flatbuffers_sdk::data_objects::GraphT& graph) {
-                for(auto& tensor : graph.tensors)
+                for(const auto& tensor : graph.tensors)
                 {
                     if(tensor->name == name)
                     {

@@ -152,7 +152,7 @@ TEST_F(IntegrationRMSNormBackwardDescriptorLowering, RMSNormBackwardRoundTrip)
 
     // Verify operation node
     ASSERT_EQ(graphT.nodes.size(), 1u);
-    auto& node = graphT.nodes[0];
+    const auto& node = graphT.nodes[0];
     EXPECT_EQ(node->compute_data_type, DataTypeSdk::FLOAT);
     EXPECT_EQ(node->attributes.type, NodeAttrType::RMSNormBackwardAttributes);
 
@@ -295,7 +295,7 @@ TEST_F(IntegrationRMSNormBackwardDescriptorLowering, RMSNormBackwardWithDBiasRou
 
     // Verify operation node
     ASSERT_EQ(graphT.nodes.size(), 1u);
-    auto& node = graphT.nodes[0];
+    const auto& node = graphT.nodes[0];
     EXPECT_EQ(node->compute_data_type, DataTypeSdk::FLOAT);
     EXPECT_EQ(node->attributes.type, NodeAttrType::RMSNormBackwardAttributes);
 

@@ -123,7 +123,7 @@ TEST_F(TestBlockScaleQuantizeOperationFromNode, NodeFactoryDelegatesCorrectly)
 
     auto* op = graphOp->asGraphOperation();
     ASSERT_NE(op, nullptr);
-    auto rebuiltNode = op->buildNode();
+    const auto rebuiltNode = op->buildNode();
     ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::BlockScaleQuantizeAttributes);
     const auto desc = std::static_pointer_cast<BlockScaleQuantizeOperationDescriptor>(graphOp);
     ASSERT_TRUE(desc->isFinalized());
@@ -247,7 +247,7 @@ TEST_F(TestBlockScaleQuantizeOperationFromNode, BuildNodeRoundTrip)
 
     const auto desc = BlockScaleQuantizeOperationDescriptor::fromNode(node, _tensorMap);
 
-    auto rebuiltNode = desc->buildNode();
+    const auto rebuiltNode = desc->buildNode();
     ASSERT_NE(rebuiltNode, nullptr);
     ASSERT_EQ(rebuiltNode->compute_data_type, DataType::FLOAT);
     ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::BlockScaleQuantizeAttributes);
@@ -268,7 +268,7 @@ TEST_F(TestBlockScaleQuantizeOperationFromNode, BuildNodeOmitsUnsetOptionalField
     const auto node = createStandardNode();
     const auto desc = BlockScaleQuantizeOperationDescriptor::fromNode(node, _tensorMap);
 
-    auto rebuiltNode = desc->buildNode();
+    const auto rebuiltNode = desc->buildNode();
     ASSERT_NE(rebuiltNode, nullptr);
     const auto* rebuiltAttrs = rebuiltNode->attributes.AsBlockScaleQuantizeAttributes();
     ASSERT_NE(rebuiltAttrs, nullptr);
@@ -406,7 +406,7 @@ TEST_F(TestBlockScaleQuantizeOperationFromNode, BuildNodePreservesName)
     node.name = "test_build_name";
 
     const auto desc = BlockScaleQuantizeOperationDescriptor::fromNode(node, _tensorMap);
-    auto rebuiltNode = desc->buildNode();
+    const auto rebuiltNode = desc->buildNode();
 
     ASSERT_NE(rebuiltNode, nullptr);
     EXPECT_EQ(rebuiltNode->name, "test_build_name");

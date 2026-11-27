@@ -169,7 +169,7 @@ void finalizeDgrad(DgradShape shape)
     HipdnnBackendDescriptor* wPtr = wTensor.get();
     HipdnnBackendDescriptor* dxPtr = dxTensor.get();
 
-    auto wrapper = createDescriptor<ConvolutionBwdOperationDescriptor>();
+    const auto wrapper = createDescriptor<ConvolutionBwdOperationDescriptor>();
     const auto desc = wrapper->asDescriptor<ConvolutionBwdOperationDescriptor>();
     desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_DY,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
@@ -1035,7 +1035,7 @@ TEST_F(TestConvolutionBwdOperationDescriptor, BuildNodeProducesCorrectNodeT)
     desc->setAttribute(HIPDNN_ATTR_CONVOLUTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
-    auto node = desc->buildNode();
+    const auto node = desc->buildNode();
     ASSERT_NE(node, nullptr);
     ASSERT_EQ(node->compute_data_type, DataType::FLOAT);
     ASSERT_EQ(node->attributes.type, NodeAttributes::ConvolutionBwdAttributes);
@@ -1060,7 +1060,7 @@ TEST_F(TestConvolutionBwdOperationDescriptor, BuildNodeWithHalfComputeType)
     desc->setAttribute(HIPDNN_ATTR_CONVOLUTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
-    auto node = desc->buildNode();
+    const auto node = desc->buildNode();
     ASSERT_NE(node, nullptr);
     ASSERT_EQ(node->compute_data_type, DataType::HALF);
 }

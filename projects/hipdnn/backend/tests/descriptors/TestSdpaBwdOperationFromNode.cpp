@@ -207,7 +207,7 @@ TEST_F(TestSdpaBwdOperationFromNode, NodeFactoryDelegatesCorrectly)
 
     auto* op = graphOp->asGraphOperation();
     ASSERT_NE(op, nullptr);
-    auto rebuiltNode = op->buildNode();
+    const auto rebuiltNode = op->buildNode();
     ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::SdpaBackwardAttributes);
 
     const auto desc = std::static_pointer_cast<SdpaBwdOperationDescriptor>(graphOp);
@@ -439,7 +439,7 @@ TEST_F(TestSdpaBwdOperationFromNode, BuildNodeRoundTrip)
     const auto node = createAllNode();
     const auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
 
-    auto rebuiltNode = desc->buildNode();
+    const auto rebuiltNode = desc->buildNode();
     ASSERT_NE(rebuiltNode, nullptr);
     ASSERT_EQ(rebuiltNode->compute_data_type, DataType::FLOAT);
     ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::SdpaBackwardAttributes);
@@ -482,7 +482,7 @@ TEST_F(TestSdpaBwdOperationFromNode, BuildNodeOmitsUnsetOptionalScalars)
     const auto node = createRequiredOnlyNode();
     const auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
 
-    auto rebuiltNode = desc->buildNode();
+    const auto rebuiltNode = desc->buildNode();
     ASSERT_NE(rebuiltNode, nullptr);
     const auto* attrs = rebuiltNode->attributes.AsSdpaBackwardAttributes();
     ASSERT_NE(attrs, nullptr);
@@ -566,7 +566,7 @@ TEST_F(TestSdpaBwdOperationFromNode, BuildNodePreservesName)
     node.name = "test_build_name";
 
     const auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
-    auto rebuiltNode = desc->buildNode();
+    const auto rebuiltNode = desc->buildNode();
 
     ASSERT_NE(rebuiltNode, nullptr);
     EXPECT_EQ(rebuiltNode->name, "test_build_name");

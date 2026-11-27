@@ -148,7 +148,7 @@ TEST(TestBatchnormFwdTrainingParams, LeavesSavedStatisticsUnsetWhenBothVirtual)
     const auto builder = hipdnn_test_sdk::utilities::mutateGraph(
         base, [](hipdnn_flatbuffers_sdk::data_objects::GraphT& graph) {
             auto* attrs = graph.nodes.at(0)->attributes.AsBatchnormAttributes();
-            for(auto& tensor : graph.tensors)
+            for(const auto& tensor : graph.tensors)
             {
                 if(tensor->uid == attrs->mean_tensor_uid.value()
                    || tensor->uid == attrs->inv_variance_tensor_uid.value())

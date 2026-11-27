@@ -156,7 +156,7 @@ TEST_F(TestGraphDescriptorMatmul, BuildFromSingleMatmulOperation)
     flatbuffers::Verifier verifier(static_cast<const uint8_t*>(serialized.ptr), serialized.size);
     ASSERT_TRUE(verifier.VerifyBuffer<Graph>());
 
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
     ASSERT_EQ(graphT->tensors.size(), 3);
@@ -217,7 +217,7 @@ TEST_F(TestGraphDescriptorMatmul, ComputeDataTypePreserved)
     ASSERT_NO_THROW(desc->finalize());
 
     const auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
 
@@ -258,7 +258,7 @@ TEST_F(TestGraphDescriptorMatmul, NamePreservedInFlatBuffer)
     ASSERT_NO_THROW(desc->finalize());
 
     const auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
     EXPECT_EQ(graphT->nodes[0]->name, opName);
@@ -291,7 +291,7 @@ TEST_F(TestGraphDescriptorMatmul, OperationNameRoundTripThroughLifting)
 
     // Serialize and deserialize via FlatBuffer
     const auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     // Rebuild from the deserialized graph using NodeFactory
     const auto tensorMap = NodeFactory::buildTensorMap(graphT->tensors);
@@ -303,7 +303,7 @@ TEST_F(TestGraphDescriptorMatmul, OperationNameRoundTripThroughLifting)
     auto* graphOp = rebuilt->asGraphOperation();
     ASSERT_NE(graphOp, nullptr);
 
-    auto rebuiltNode = graphOp->buildNode();
+    const auto rebuiltNode = graphOp->buildNode();
     ASSERT_NE(rebuiltNode, nullptr);
     EXPECT_EQ(rebuiltNode->name, opName);
     ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::MatmulAttributes);

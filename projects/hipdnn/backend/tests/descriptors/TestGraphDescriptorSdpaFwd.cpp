@@ -378,7 +378,7 @@ TEST_F(TestGraphDescriptorSdpaFwd, BuildFromSingleOperation)
     flatbuffers::Verifier verifier(static_cast<const uint8_t*>(serialized.ptr), serialized.size);
     ASSERT_TRUE(verifier.VerifyBuffer<Graph>());
 
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
     ASSERT_EQ(graphT->tensors.size(), 28);
@@ -475,7 +475,7 @@ TEST_F(TestGraphDescriptorSdpaFwd, ComputeDataTypePreserved)
     desc->finalize();
 
     const auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
     EXPECT_EQ(graphT->nodes[0]->compute_data_type, DataType::HALF);
@@ -512,7 +512,7 @@ TEST_F(TestGraphDescriptorSdpaFwd, BuildFromRequiredTensorsOnly)
     flatbuffers::Verifier verifier(static_cast<const uint8_t*>(serialized.ptr), serialized.size);
     ASSERT_TRUE(verifier.VerifyBuffer<Graph>());
 
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     // Only 4 required tensors should be present
     ASSERT_EQ(graphT->nodes.size(), 1);
@@ -597,7 +597,7 @@ TEST_F(TestGraphDescriptorSdpaFwd, OperationNamePreservedInSerialization)
     desc->finalize();
 
     const auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
     EXPECT_EQ(graphT->nodes[0]->name, "my_sdpa_op");
@@ -629,7 +629,7 @@ TEST_F(TestGraphDescriptorSdpaFwd, OperationNameRoundTripThroughLifting)
 
     // Serialize and deserialize via FlatBuffer
     const auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     // Rebuild from the deserialized graph using NodeFactory
     const auto tensorMap = NodeFactory::buildTensorMap(graphT->tensors);
@@ -642,7 +642,7 @@ TEST_F(TestGraphDescriptorSdpaFwd, OperationNameRoundTripThroughLifting)
     ASSERT_NE(graphOp, nullptr);
 
     // Verify the name survived the round-trip by building a node from the rebuilt operation
-    auto rebuiltNode = graphOp->buildNode();
+    const auto rebuiltNode = graphOp->buildNode();
     ASSERT_NE(rebuiltNode, nullptr);
     EXPECT_EQ(rebuiltNode->name, "round_trip_name");
     ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::SdpaAttributes);

@@ -140,7 +140,7 @@ void finalizeFpropWithShape(const std::vector<int64_t>& xDims,
     HipdnnBackendDescriptor* wPtr = wTensor.get();
     HipdnnBackendDescriptor* yPtr = yTensor.get();
 
-    auto wrapper = createDescriptor<ConvolutionFwdOperationDescriptor>();
+    const auto wrapper = createDescriptor<ConvolutionFwdOperationDescriptor>();
     const auto desc = wrapper->asDescriptor<ConvolutionFwdOperationDescriptor>();
     desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_X,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
@@ -914,7 +914,7 @@ TEST_F(TestConvolutionFwdOperationDescriptor, BuildNodeProducesCorrectNodeT)
     desc->setAttribute(HIPDNN_ATTR_CONVOLUTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
-    auto node = desc->buildNode();
+    const auto node = desc->buildNode();
     ASSERT_NE(node, nullptr);
     ASSERT_EQ(node->compute_data_type, DataType::FLOAT);
     ASSERT_EQ(node->attributes.type, NodeAttributes::ConvolutionFwdAttributes);
@@ -938,7 +938,7 @@ TEST_F(TestConvolutionFwdOperationDescriptor, BuildNodeWithHalfComputeType)
     desc->setAttribute(HIPDNN_ATTR_CONVOLUTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
-    auto node = desc->buildNode();
+    const auto node = desc->buildNode();
     ASSERT_NE(node, nullptr);
     ASSERT_EQ(node->compute_data_type, DataType::HALF);
 }

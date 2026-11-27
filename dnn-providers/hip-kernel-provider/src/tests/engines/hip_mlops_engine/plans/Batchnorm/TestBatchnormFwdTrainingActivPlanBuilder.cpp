@@ -1036,7 +1036,7 @@ TEST_F(TestBatchnormFusedTrainingStatsDecline, RuntimeEpsilonIsApplicable)
         base, [](hipdnn_flatbuffers_sdk::data_objects::GraphT& graph) {
             const auto epsilonUid
                 = graph.nodes.at(0)->attributes.AsBatchnormAttributes()->epsilon_tensor_uid;
-            for(auto& tensor : graph.tensors)
+            for(const auto& tensor : graph.tensors)
             {
                 if(tensor->uid == epsilonUid)
                 {
@@ -1091,7 +1091,7 @@ TEST_F(TestBatchnormFwdTrainingActivPlanBuilder,
             SCOPED_TRACE(std::string(name) + " " + mutation.first);
             const auto builder = mutateGraph(createValidBatchnormFwdTrainingActivGraph(true, true),
                                              [&](GraphT& graph) {
-                                                 for(auto& tensor : graph.tensors)
+                                                 for(const auto& tensor : graph.tensors)
                                                  {
                                                      if(tensor->name == name)
                                                      {

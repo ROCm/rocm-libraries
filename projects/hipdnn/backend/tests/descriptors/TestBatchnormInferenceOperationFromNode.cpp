@@ -163,7 +163,7 @@ TEST_F(TestBatchnormInferenceOperationFromNode, NodeFactoryDelegatesCorrectly)
     // Cannot use dynamic_pointer_cast: backend tests compile with -fno-rtti.
     auto* op = graphOp->asGraphOperation();
     ASSERT_NE(op, nullptr);
-    auto rebuiltNode = op->buildNode();
+    const auto rebuiltNode = op->buildNode();
     ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::BatchnormInferenceAttributes);
     const auto desc = std::static_pointer_cast<BatchnormInferenceOperationDescriptor>(graphOp);
     ASSERT_TRUE(desc->isFinalized());
@@ -388,7 +388,7 @@ TEST_F(TestBatchnormInferenceOperationFromNode, BuildNodeRoundTrip)
     const auto node = createStandardNode();
     const auto desc = BatchnormInferenceOperationDescriptor::fromNode(node, _tensorMap);
 
-    auto rebuiltNode = desc->buildNode();
+    const auto rebuiltNode = desc->buildNode();
     ASSERT_NE(rebuiltNode, nullptr);
     ASSERT_EQ(rebuiltNode->compute_data_type, DataType::FLOAT);
     ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::BatchnormInferenceAttributes);
@@ -590,7 +590,7 @@ TEST_F(TestBatchnormInferenceOperationFromNode, BuildNodePreservesName)
     node.name = "test_build_name";
 
     const auto desc = BatchnormInferenceOperationDescriptor::fromNode(node, _tensorMap);
-    auto rebuiltNode = desc->buildNode();
+    const auto rebuiltNode = desc->buildNode();
 
     ASSERT_NE(rebuiltNode, nullptr);
     EXPECT_EQ(rebuiltNode->name, "test_build_name");

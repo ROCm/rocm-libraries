@@ -200,7 +200,7 @@ TEST(TestSdpaBwdPlan, ExecutePlan)
                              DataType::FLOAT,
                              DataType::FLOAT>
         builder;
-    auto builtPlan = builder.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
+    const auto builtPlan = builder.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
     builtPlan->execute(variantPack);
 
     CpuFpReferenceSdpa::backward<float, float, float, float, float, float, float, float>(
@@ -277,7 +277,7 @@ TEST(TestSdpaBwdPlan, ExecutePlanWithRuntimeScaleFromPack)
                              DataType::FLOAT,
                              DataType::FLOAT>
         builder;
-    auto builtPlan = builder.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
+    const auto builtPlan = builder.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
     builtPlan->execute(variantPack);
 
     // Direct reference with the same explicit scale value.
@@ -452,7 +452,7 @@ TEST(TestSdpaBwdPlan, BothDeprecatedCausalMasksThrow)
     auto [bin, err] = graph->to_binary();
     ASSERT_TRUE(err.is_good()) << err.get_message();
 
-    auto graphT = std::unique_ptr<GraphT>(GetGraph(bin.data())->UnPack());
+    const auto graphT = std::unique_ptr<GraphT>(GetGraph(bin.data())->UnPack());
     auto* attrs = graphT->nodes.front()->attributes.AsSdpaBackwardAttributes();
     ASSERT_NE(attrs, nullptr);
     attrs->causal_mask_bottom_right = true;

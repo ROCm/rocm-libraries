@@ -3883,7 +3883,7 @@ TEST_F(TestSdpaBwdPlanBuilder, DeclinesAnOutputWhoseDtypeDiffersFromTheInputs)
     // element type, hence its byte size, changes.
     const auto builder
         = hipdnn_test_sdk::utilities::mutateGraph(createSdpaBwdGraph(), [](GraphT& graph) {
-              for(auto& tensor : graph.tensors)
+              for(const auto& tensor : graph.tensors)
               {
                   if(tensor->name == "o")
                   {
@@ -3911,7 +3911,7 @@ TEST_F(TestSdpaBwdPlanBuilder, DeclinesARaggedOffsetMultiplierOnATensorWithoutRa
         SCOPED_TRACE(name);
         const auto builder
             = hipdnn_test_sdk::utilities::mutateGraph(createSdpaBwdGraph(), [name](GraphT& graph) {
-                  for(auto& tensor : graph.tensors)
+                  for(const auto& tensor : graph.tensors)
                   {
                       if(tensor->name == name)
                       {

@@ -818,9 +818,9 @@ TEST(TestCalculateBnTrainTolerance, DetectsFailure)
     const std::vector<int64_t> dims = {1, 1, 10, 10};
     const std::vector<int64_t> strides = {100, 100, 10, 1};
 
-    auto baseline = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
-    auto actualPassing = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
-    auto actualFailing = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
+    const auto baseline = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
+    const auto actualPassing = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
+    const auto actualFailing = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
 
     baseline->fillTensorWithValue(1.0f);
     actualPassing->fillTensorWithValue(1.000001f); // Small error
@@ -832,7 +832,7 @@ TEST(TestCalculateBnTrainTolerance, DetectsFailure)
     EXPECT_LT(tol, 0.01f);
     EXPECT_GT(tol, 1e-6f);
 
-    auto validator = hipdnn_test_sdk::utilities::createAllCloseValidator(
+    const auto validator = hipdnn_test_sdk::utilities::createAllCloseValidator(
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, tol, 0);
 
     bool valid = validator->allClose(*baseline, *actualPassing);

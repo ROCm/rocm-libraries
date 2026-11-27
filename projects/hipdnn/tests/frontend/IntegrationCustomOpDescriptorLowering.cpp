@@ -94,7 +94,7 @@ TEST_F(IntegrationCustomOpDescriptorLowering, CustomOpGraphRoundTrip)
 
     // Verify custom op operation node
     ASSERT_EQ(graphT.nodes.size(), 1u);
-    auto& node = graphT.nodes[0];
+    const auto& node = graphT.nodes[0];
     EXPECT_EQ(node->compute_data_type, DataTypeSdk::FLOAT);
     EXPECT_EQ(node->name, "test_custom_op");
     EXPECT_EQ(node->attributes.type, NodeAttrType::CustomOpAttributes);
@@ -234,7 +234,7 @@ TEST_F(IntegrationCustomOpDescriptorLowering, ZeroInputZeroOutputCustomOpRoundTr
     ASSERT_EQ(graphT.tensors.size(), 0u);
     ASSERT_EQ(graphT.nodes.size(), 1u);
 
-    auto& node = graphT.nodes[0];
+    const auto& node = graphT.nodes[0];
     EXPECT_EQ(node->name, "zero_io_op");
     EXPECT_EQ(node->compute_data_type, DataTypeSdk::FLOAT);
 

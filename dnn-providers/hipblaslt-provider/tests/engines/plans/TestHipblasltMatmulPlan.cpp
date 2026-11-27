@@ -432,7 +432,7 @@ TEST(TestMatmulParams, CLayoutBatchOffsetIgnoresSingletonBatchAxis)
         false,
         hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD);
     const auto builder = mutateGraph(fused, [](auto& g) {
-        for(auto& tensor : g.tensors)
+        for(const auto& tensor : g.tensors)
         {
             if(tensor->name == "C_matmul")
             {

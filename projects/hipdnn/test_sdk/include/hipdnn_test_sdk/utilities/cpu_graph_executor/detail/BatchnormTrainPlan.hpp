@@ -135,7 +135,7 @@ public:
             _params.scaleTensor, variantPack.at(_params.scaleTensor.uid));
         const auto shallowBiasTensor = createShallowTensor<ScaleBiasDataType>(
             _params.biasTensor, variantPack.at(_params.biasTensor.uid));
-        auto shallowYTensor = createShallowTensor<OutputDataType>(
+        const auto shallowYTensor = createShallowTensor<OutputDataType>(
             _params.yTensor, variantPack.at(_params.yTensor.uid));
 
         // Extract epsilon from pass-by-value tensor (cast to double)

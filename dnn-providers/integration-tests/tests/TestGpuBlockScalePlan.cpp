@@ -36,7 +36,7 @@ std::unique_ptr<GraphT> smallBlockScaleGraph(bool quantize)
     const auto builder
         = quantize ? createValidBlockScaleQuantizeGraph() : createValidBlockScaleDequantizeGraph();
     auto graph = UnPackGraph(builder.GetBufferPointer());
-    for(auto& tensor : graph->tensors)
+    for(const auto& tensor : graph->tensors)
     {
         tensor->dims = {2, 3, 5};
         tensor->strides = {15, 5, 1};
@@ -104,7 +104,7 @@ void expectMatchingTensors(Tensor<T>& actual, Tensor<T>& expected)
 template <typename RealType = float, typename QuantizedType = float, typename ScaleType = float>
 void executeQuantizeGraph(std::optional<int64_t> axis)
 {
-    auto graph = smallBlockScaleGraph(true);
+    const auto graph = smallBlockScaleGraph(true);
     auto* attributes = graph->nodes[0]->attributes.AsBlockScaleQuantizeAttributes();
     attributes->axis = axis;
     const auto targetAxis = static_cast<size_t>(axis.value_or(2));
@@ -152,7 +152,7 @@ void executeQuantizeGraph(std::optional<int64_t> axis)
 template <typename XType = float, typename ScaleType = float, typename YType = float>
 void executeDequantizeGraph(bool isNegativeScale)
 {
-    auto graph = smallBlockScaleGraph(false);
+    const auto graph = smallBlockScaleGraph(false);
     graph->nodes[0]->attributes.AsBlockScaleDequantizeAttributes()->is_negative_scale
         = isNegativeScale;
     graph->tensors[0]->data_type = nativeTypeToDataType<XType>();
@@ -216,7 +216,7 @@ class TestGpuBlockScaleInvalidMetadata
 TEST_P(TestGpuBlockScaleInvalidMetadata, IsNotApplicable)
 {
     const auto [quantize, invalid] = GetParam();
-    auto graph = smallBlockScaleGraph(quantize);
+    const auto graph = smallBlockScaleGraph(quantize);
     auto builder = packGraph(*graph);
     ASSERT_TRUE(
         builderIsApplicable(GraphWrapper(builder.GetBufferPointer(), builder.GetSize()), quantize));
@@ -253,7 +253,7 @@ TEST_P(TestGpuBlockScaleInvalidMetadata, IsNotApplicable)
         graph->nodes[0]->compute_data_type = DataType::DOUBLE;
         break;
     case InvalidMetadata::RANK_ABOVE_LIMIT:
-        for(auto& tensor : graph->tensors)
+        for(const auto& tensor : graph->tensors)
         {
             tensor->dims.insert(tensor->dims.begin(), 3, 1);
             tensor->strides.insert(tensor->strides.begin(), 3, 30);
@@ -284,7 +284,7 @@ TEST(TestGpuBlockScalePlan, InvalidQuantizeAxisIsNotApplicable)
 {
     for(const int64_t axis : {-1, 3})
     {
-        auto graph = smallBlockScaleGraph(true);
+        const auto graph = smallBlockScaleGraph(true);
         graph->nodes[0]->attributes.AsBlockScaleQuantizeAttributes()->axis = axis;
         const auto builder = packGraph(*graph);
         EXPECT_FALSE(
@@ -296,7 +296,7 @@ TEST(TestGpuBlockScalePlan, MissingOrOversizedDequantizeBlockSizeIsNotApplicable
 {
     for(const auto& blockSize : std::vector<std::vector<int32_t>>{{}, {1, 1, 2, 2}})
     {
-        auto graph = smallBlockScaleGraph(false);
+        const auto graph = smallBlockScaleGraph(false);
         graph->nodes[0]->attributes.AsBlockScaleDequantizeAttributes()->block_size = blockSize;
         const auto builder = packGraph(*graph);
         EXPECT_FALSE(builderIsApplicable(
@@ -312,7 +312,7 @@ TEST(TestGpuBlockScalePlan, RuntimePassByValueTensorIsNotApplicable)
         {
             SCOPED_TRACE(::testing::Message()
                          << "quantize=" << quantize << " tensorIndex=" << tensorIndex);
-            auto graph = smallBlockScaleGraph(quantize);
+            const auto graph = smallBlockScaleGraph(quantize);
             auto builder = packGraph(*graph);
             ASSERT_TRUE(builderIsApplicable(
                 GraphWrapper(builder.GetBufferPointer(), builder.GetSize()), quantize));

@@ -193,7 +193,7 @@ TEST_F(TestSdpaFwdOperationFromNode, RestoresCuSeqLenTensorsAndRoundTrips)
     EXPECT_EQ(desc->getSeqLenQDesc(), nullptr);
     EXPECT_EQ(desc->getSeqLenKvDesc(), nullptr);
 
-    auto rebuilt = desc->buildNode();
+    const auto rebuilt = desc->buildNode();
     const auto* rebuiltAttrs = rebuilt->attributes.AsSdpaAttributes();
     ASSERT_NE(rebuiltAttrs, nullptr);
     EXPECT_EQ(rebuiltAttrs->cu_seq_len_q_tensor_uid, K_SDPA_TENSOR_CU_SEQ_LEN_Q_UID);
@@ -224,7 +224,7 @@ TEST_F(TestSdpaFwdOperationFromNode, NodeFactoryDelegatesCorrectly)
     // Cannot use dynamic_pointer_cast: backend tests compile with -fno-rtti.
     auto* op = graphOp->asGraphOperation();
     ASSERT_NE(op, nullptr);
-    auto rebuiltNode = op->buildNode();
+    const auto rebuiltNode = op->buildNode();
     ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::SdpaAttributes);
     const auto desc = std::static_pointer_cast<SdpaFwdOperationDescriptor>(graphOp);
     ASSERT_TRUE(desc->isFinalized());
@@ -766,7 +766,7 @@ TEST_F(TestSdpaFwdOperationFromNode, BuildNodeRoundTrip)
     const auto node = createStandardNode();
     const auto desc = SdpaFwdOperationDescriptor::fromNode(node, _tensorMap);
 
-    auto rebuiltNode = desc->buildNode();
+    const auto rebuiltNode = desc->buildNode();
     ASSERT_NE(rebuiltNode, nullptr);
     ASSERT_EQ(rebuiltNode->compute_data_type, DataType::FLOAT);
     ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::SdpaAttributes);
@@ -819,7 +819,7 @@ TEST_F(TestSdpaFwdOperationFromNode, FromNodePreservesMmaCoreMode)
 
     EXPECT_EQ(desc->getData().mma_core_mode, DataType::HALF);
 
-    auto rebuiltNode = desc->buildNode();
+    const auto rebuiltNode = desc->buildNode();
     const auto* rebuiltAttrs = rebuiltNode->attributes.AsSdpaAttributes();
     ASSERT_NE(rebuiltAttrs, nullptr);
     EXPECT_EQ(rebuiltAttrs->mma_core_mode, DataType::HALF);
@@ -851,7 +851,7 @@ TEST_F(TestSdpaFwdOperationFromNode, FromNodePreservesGenerateStats)
     EXPECT_TRUE(desc->getData().generate_stats.has_value());
     EXPECT_EQ(desc->getData().generate_stats.value(), true);
 
-    auto rebuiltNode = desc->buildNode();
+    const auto rebuiltNode = desc->buildNode();
     const auto* rebuiltAttrs = rebuiltNode->attributes.AsSdpaAttributes();
     ASSERT_NE(rebuiltAttrs, nullptr);
     ASSERT_TRUE(rebuiltAttrs->generate_stats.has_value());
@@ -872,7 +872,7 @@ TEST_F(TestSdpaFwdOperationFromNode, FromNodePreservesAlibiMask)
 
     EXPECT_TRUE(desc->getData().alibi_mask);
 
-    auto rebuiltNode = desc->buildNode();
+    const auto rebuiltNode = desc->buildNode();
     const auto* rebuiltAttrs = rebuiltNode->attributes.AsSdpaAttributes();
     ASSERT_NE(rebuiltAttrs, nullptr);
     EXPECT_TRUE(rebuiltAttrs->alibi_mask);
@@ -892,7 +892,7 @@ TEST_F(TestSdpaFwdOperationFromNode, FromNodePreservesPaddingMask)
 
     EXPECT_TRUE(desc->getData().padding_mask);
 
-    auto rebuiltNode = desc->buildNode();
+    const auto rebuiltNode = desc->buildNode();
     const auto* rebuiltAttrs = rebuiltNode->attributes.AsSdpaAttributes();
     ASSERT_NE(rebuiltAttrs, nullptr);
     EXPECT_TRUE(rebuiltAttrs->padding_mask);
@@ -912,7 +912,7 @@ TEST_F(TestSdpaFwdOperationFromNode, FromNodePreservesCausalMask)
 
     EXPECT_TRUE(desc->getData().causal_mask);
 
-    auto rebuiltNode = desc->buildNode();
+    const auto rebuiltNode = desc->buildNode();
     const auto* rebuiltAttrs = rebuiltNode->attributes.AsSdpaAttributes();
     ASSERT_NE(rebuiltAttrs, nullptr);
     EXPECT_TRUE(rebuiltAttrs->causal_mask);
@@ -932,7 +932,7 @@ TEST_F(TestSdpaFwdOperationFromNode, FromNodePreservesCausalMaskBottomRight)
 
     EXPECT_TRUE(desc->getData().causal_mask_bottom_right);
 
-    auto rebuiltNode = desc->buildNode();
+    const auto rebuiltNode = desc->buildNode();
     const auto* rebuiltAttrs = rebuiltNode->attributes.AsSdpaAttributes();
     ASSERT_NE(rebuiltAttrs, nullptr);
     EXPECT_TRUE(rebuiltAttrs->causal_mask_bottom_right);
@@ -953,7 +953,7 @@ TEST_F(TestSdpaFwdOperationFromNode, FromNodePreservesDropoutProbability)
     EXPECT_TRUE(desc->getData().dropout_probability.has_value());
     EXPECT_FLOAT_EQ(desc->getData().dropout_probability.value(), 0.5F);
 
-    auto rebuiltNode = desc->buildNode();
+    const auto rebuiltNode = desc->buildNode();
     const auto* rebuiltAttrs = rebuiltNode->attributes.AsSdpaAttributes();
     ASSERT_NE(rebuiltAttrs, nullptr);
     ASSERT_TRUE(rebuiltAttrs->dropout_probability.has_value());
@@ -975,7 +975,7 @@ TEST_F(TestSdpaFwdOperationFromNode, FromNodePreservesAttnScaleValue)
     EXPECT_TRUE(desc->getData().attn_scale_value.has_value());
     EXPECT_FLOAT_EQ(desc->getData().attn_scale_value.value(), 0.5F);
 
-    auto rebuiltNode = desc->buildNode();
+    const auto rebuiltNode = desc->buildNode();
     const auto* rebuiltAttrs = rebuiltNode->attributes.AsSdpaAttributes();
     ASSERT_NE(rebuiltAttrs, nullptr);
     ASSERT_TRUE(rebuiltAttrs->attn_scale_value.has_value());
@@ -997,7 +997,7 @@ TEST_F(TestSdpaFwdOperationFromNode, FromNodePreservesLeftBound)
     EXPECT_TRUE(desc->getData().left_bound.has_value());
     EXPECT_EQ(desc->getData().left_bound.value(), 2);
 
-    auto rebuiltNode = desc->buildNode();
+    const auto rebuiltNode = desc->buildNode();
     const auto* rebuiltAttrs = rebuiltNode->attributes.AsSdpaAttributes();
     ASSERT_NE(rebuiltAttrs, nullptr);
     ASSERT_TRUE(rebuiltAttrs->left_bound.has_value());
@@ -1019,7 +1019,7 @@ TEST_F(TestSdpaFwdOperationFromNode, FromNodePreservesRightBound)
     EXPECT_TRUE(desc->getData().right_bound.has_value());
     EXPECT_EQ(desc->getData().right_bound.value(), 2);
 
-    auto rebuiltNode = desc->buildNode();
+    const auto rebuiltNode = desc->buildNode();
     const auto* rebuiltAttrs = rebuiltNode->attributes.AsSdpaAttributes();
     ASSERT_NE(rebuiltAttrs, nullptr);
     ASSERT_TRUE(rebuiltAttrs->right_bound.has_value());
@@ -1041,7 +1041,7 @@ TEST_F(TestSdpaFwdOperationFromNode, FromNodePreservesMaxSeqLenKv)
     EXPECT_TRUE(desc->getData().max_seq_len_kv.has_value());
     EXPECT_EQ(desc->getData().max_seq_len_kv.value(), 2);
 
-    auto rebuiltNode = desc->buildNode();
+    const auto rebuiltNode = desc->buildNode();
     const auto* rebuiltAttrs = rebuiltNode->attributes.AsSdpaAttributes();
     ASSERT_NE(rebuiltAttrs, nullptr);
     ASSERT_TRUE(rebuiltAttrs->max_seq_len_kv.has_value());
@@ -1053,7 +1053,7 @@ TEST_F(TestSdpaFwdOperationFromNode, BuildNodeOmitsUnsetOptionalScalars)
     const auto node = createStandardNode();
     const auto desc = SdpaFwdOperationDescriptor::fromNode(node, _tensorMap);
 
-    auto rebuiltNode = desc->buildNode();
+    const auto rebuiltNode = desc->buildNode();
     const auto* rebuiltAttrs = rebuiltNode->attributes.AsSdpaAttributes();
     ASSERT_NE(rebuiltAttrs, nullptr);
 
@@ -1213,7 +1213,7 @@ TEST_F(TestSdpaFwdOperationFromNode, BuildNodePreservesName)
     node.name = "test_build_name";
 
     const auto desc = SdpaFwdOperationDescriptor::fromNode(node, _tensorMap);
-    auto rebuiltNode = desc->buildNode();
+    const auto rebuiltNode = desc->buildNode();
 
     ASSERT_NE(rebuiltNode, nullptr);
     EXPECT_EQ(rebuiltNode->name, "test_build_name");

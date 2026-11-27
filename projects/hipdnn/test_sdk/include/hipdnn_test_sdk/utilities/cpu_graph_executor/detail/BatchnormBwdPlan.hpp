@@ -105,13 +105,13 @@ public:
         const auto shallowScaleTensor = createShallowTensor<ScaleBiasDataType>(
             _params.scaleTensor, variantPack.at(_params.scaleTensor.uid));
 
-        auto shallowDxTensor = createShallowTensor<OutputDataType>(
+        const auto shallowDxTensor = createShallowTensor<OutputDataType>(
             _params.dxTensor, variantPack.at(_params.dxTensor.uid));
 
-        auto shallowDscaleTensor = createShallowTensor<ScaleBiasDataType>(
+        const auto shallowDscaleTensor = createShallowTensor<ScaleBiasDataType>(
             _params.dscaleTensor, variantPack.at(_params.dscaleTensor.uid));
 
-        auto shallowDbiasTensor = createShallowTensor<ScaleBiasDataType>(
+        const auto shallowDbiasTensor = createShallowTensor<ScaleBiasDataType>(
             _params.dbiasTensor, variantPack.at(_params.dbiasTensor.uid));
 
         std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<MeanVarianceDataType>>

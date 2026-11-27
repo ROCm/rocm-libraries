@@ -160,7 +160,7 @@ void checkPlanLseAgainstCpu(RaggedStatsLayout statsLayout, bool tokenOffsets = f
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
     const Fp32Builder fp32Builder;
     ASSERT_TRUE(fp32Builder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
-    auto plan = fp32Builder.buildNodePlan(graphWrap, graphWrap.getNode(0));
+    const auto plan = fp32Builder.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     Tensor<float> q(qDims, raggedStrides(qDims));
     Tensor<float> k(kvDims, raggedStrides(kvDims));
@@ -267,8 +267,8 @@ flatbuffers::DetachedBuffer withShape(const void* graphBuffer,
                                       const std::vector<int64_t>& dims,
                                       const std::vector<int64_t>& strides)
 {
-    auto graphT = std::unique_ptr<GraphT>(GetGraph(graphBuffer)->UnPack());
-    for(auto& tensor : graphT->tensors)
+    const auto graphT = std::unique_ptr<GraphT>(GetGraph(graphBuffer)->UnPack());
+    for(const auto& tensor : graphT->tensors)
     {
         if(tensor->uid == uid)
         {
@@ -527,7 +527,7 @@ TEST(TestGpuSdpaRaggedFwdPlan, ExecuteMatchesDirectFpropRaggedBf16)
     const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
     const Bf16Builder bf16Builder;
-    auto plan = bf16Builder.buildNodePlan(graphWrap, graphWrap.getNode(0));
+    const auto plan = bf16Builder.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     Tensor<bfloat16> q(qkvDims, raggedStrides(qkvDims));
     Tensor<bfloat16> k(qkvDims, raggedStrides(qkvDims));
@@ -611,7 +611,7 @@ TEST(TestGpuSdpaRaggedFwdPlan, ExecuteUsesFloatProbabilityNotProviderRounding)
     const auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
     const Bf16Builder bf16Builder;
-    auto plan = bf16Builder.buildNodePlan(graphWrap, graphWrap.getNode(0));
+    const auto plan = bf16Builder.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     Tensor<bfloat16> q(qDims, raggedStrides(qDims));
     Tensor<bfloat16> k(kvDims, raggedStrides(kvDims));
@@ -709,7 +709,7 @@ TEST(TestGpuSdpaRaggedFwdPlan, ExecuteFp8MatchesDirectFpropRagged)
                                       DataType::BFLOAT16>
         fp8Builder;
     ASSERT_TRUE(fp8Builder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
-    auto plan = fp8Builder.buildNodePlan(graphWrap, graphWrap.getNode(0));
+    const auto plan = fp8Builder.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     Tensor<fp8_e4m3> q(qkvDims, raggedStrides(qkvDims));
     Tensor<fp8_e4m3> k(qkvDims, raggedStrides(qkvDims));
@@ -842,7 +842,7 @@ void checkFp8DescaleStorage(const DescaleCase& qCase,
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
     const Fp8Builder fp8Builder;
     ASSERT_TRUE(fp8Builder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
-    auto plan = fp8Builder.buildNodePlan(graphWrap, graphWrap.getNode(0));
+    const auto plan = fp8Builder.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     Tensor<fp8_e4m3> q(qkvDims, raggedStrides(qkvDims));
     Tensor<fp8_e4m3> k(qkvDims, raggedStrides(qkvDims));
@@ -1010,8 +1010,9 @@ TEST(TestGpuSdpaRaggedFwdPlan, ExecuteTokenOffsetsMatchesCpu)
 TEST(TestGpuSdpaRaggedFwdPlanBuilder, IsNotApplicableForZeroOffsetMultiplier)
 {
     const auto graphBuilder = makeRaggedGraph();
-    auto graphT = std::unique_ptr<GraphT>(GetGraph(graphBuilder.GetBufferPointer())->UnPack());
-    for(auto& tensor : graphT->tensors)
+    const auto graphT
+        = std::unique_ptr<GraphT>(GetGraph(graphBuilder.GetBufferPointer())->UnPack());
+    for(const auto& tensor : graphT->tensors)
     {
         if(tensor->uid == K_UID)
         {
@@ -1058,7 +1059,7 @@ TEST(TestGpuSdpaRaggedFwdPlan, ExecuteRejectsKvSequenceLengthMismatch)
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
     const Fp32Builder fp32Builder;
     ASSERT_TRUE(fp32Builder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
-    auto plan = fp32Builder.buildNodePlan(graphWrap, graphWrap.getNode(0));
+    const auto plan = fp32Builder.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     Tensor<float> q(dims, raggedStrides(dims));
     Tensor<float> k(dims, raggedStrides(dims));
@@ -1180,7 +1181,7 @@ TEST_P(TestGpuSdpaRaggedFwdPlanScale, ExecuteHonorsNonDefaultScale)
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
     const Fp32Builder fp32Builder;
     ASSERT_TRUE(fp32Builder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
-    auto plan = fp32Builder.buildNodePlan(graphWrap, graphWrap.getNode(0));
+    const auto plan = fp32Builder.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     Tensor<float> q(dims, raggedStrides(dims));
     Tensor<float> k(dims, raggedStrides(dims));
@@ -1286,7 +1287,7 @@ void checkPlanMaskAgainstCpu(const SdpaAttributesT& attrs,
         graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
     const Fp32Builder fp32Builder;
     ASSERT_TRUE(fp32Builder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
-    auto plan = fp32Builder.buildNodePlan(graphWrap, graphWrap.getNode(0));
+    const auto plan = fp32Builder.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     Tensor<float> q(qDims, raggedStrides(qDims));
     Tensor<float> k(kvDims, raggedStrides(kvDims));

@@ -82,7 +82,7 @@ TEST(TestNativeAdapter, ResolvesAndScoresFeatureRow)
 {
     const ScopedNativeScorer scope(SUM_SYMBOL, &sumScorer);
 
-    auto adapter = NativeAdapter::resolve(SUM_SYMBOL, 3, "sha256:abc");
+    const auto adapter = NativeAdapter::resolve(SUM_SYMBOL, 3, "sha256:abc");
     ASSERT_NE(adapter, nullptr);
 
     EXPECT_EQ(adapter->expectedFeatureCount(), 3U);
@@ -105,7 +105,7 @@ TEST(TestNativeAdapter, FeatureCountMismatchThrows)
 {
     const ScopedNativeScorer scope(SUM_SYMBOL, &sumScorer);
 
-    auto adapter = NativeAdapter::resolve(SUM_SYMBOL, 3, "sha256:abc");
+    const auto adapter = NativeAdapter::resolve(SUM_SYMBOL, 3, "sha256:abc");
     ASSERT_NE(adapter, nullptr);
 
     EXPECT_THROW(adapter->score({1.0, 2.0}), std::invalid_argument);
@@ -117,7 +117,7 @@ TEST(TestNativeAdapter, ZeroFeatureCountSkipsRowValidation)
     // (RFC 0019 §7.1).
     const ScopedNativeScorer scope(CONSTANT_SYMBOL, &constantScorer);
 
-    auto adapter = NativeAdapter::resolve(CONSTANT_SYMBOL, 0, "");
+    const auto adapter = NativeAdapter::resolve(CONSTANT_SYMBOL, 0, "");
     ASSERT_NE(adapter, nullptr);
 
     EXPECT_DOUBLE_EQ(adapter->score({}), 42.0);

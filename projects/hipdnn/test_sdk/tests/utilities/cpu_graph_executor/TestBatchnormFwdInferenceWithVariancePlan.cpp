@@ -88,7 +88,7 @@ TEST_F(TestBatchnormFwdWithVariancePlan, ExecutePlan)
     const auto shallowVarianceTensor = createShallowTensor<float>(
         params.varianceTensor,
         directTensorBundle.tensors[attributes.variance_tensor_uid()]->rawHostData());
-    auto shallowYTensor = createShallowTensor<float>(
+    const auto shallowYTensor = createShallowTensor<float>(
         params.yTensor, directTensorBundle.tensors[attributes.y_tensor_uid()]->rawHostData());
 
     const double epsilon = hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue(

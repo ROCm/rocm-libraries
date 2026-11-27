@@ -73,7 +73,7 @@ public:
         const auto shallowXTensor
             = createShallowTensor<XDataType>(_params.xTensor, variantPack.at(_params.xTensor.uid));
 
-        auto shallowYTensor = createShallowTensor<OutputDataType>(
+        const auto shallowYTensor = createShallowTensor<OutputDataType>(
             _params.yTensor, variantPack.at(_params.yTensor.uid));
 
         const auto shallowScaleTensor = createShallowTensor<ScaleBiasDataType>(

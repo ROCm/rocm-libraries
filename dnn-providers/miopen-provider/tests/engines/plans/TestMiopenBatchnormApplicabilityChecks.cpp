@@ -4260,7 +4260,7 @@ protected:
     {
         return hipdnn_test_sdk::utilities::mutateGraph(
             createTrainingGraphWithAllRunningStats(), [&](fb::GraphT& graph) {
-                for(auto& tensor : graph.tensors)
+                for(const auto& tensor : graph.tensors)
                 {
                     if(tensor->name == GetParam().tensorName)
                     {
@@ -4337,7 +4337,7 @@ protected:
     flatbuffers::FlatBufferBuilder withRunningStatistic(Mutate&& mutate) const
     {
         return hipdnn_test_sdk::utilities::mutateGraph(createGraph(), [&](fb::GraphT& graph) {
-            for(auto& tensor : graph.tensors)
+            for(const auto& tensor : graph.tensors)
             {
                 if(tensor->name == GetParam().tensorName)
                 {
@@ -4413,7 +4413,7 @@ TEST_P(TestCheckBatchnormTrainingBufferRoles, DeclinesRuntimePassByValueBuffer)
 
     const auto builder = hipdnn_test_sdk::utilities::mutateGraph(
         createTrainingGraphWithAllRunningStats(), [&](fb::GraphT& graph) {
-            for(auto& tensor : graph.tensors)
+            for(const auto& tensor : graph.tensors)
             {
                 if(tensor->name == GetParam().tensorName)
                 {
@@ -4454,7 +4454,7 @@ TEST(TestCheckBatchnormBufferRoles, RejectsBakedValueBufferTensor)
 {
     const auto builder = hipdnn_test_sdk::utilities::mutateGraph(
         hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(), [](fb::GraphT& graph) {
-            for(auto& tensor : graph.tensors)
+            for(const auto& tensor : graph.tensors)
             {
                 if(tensor->name == "scale")
                 {
@@ -4484,7 +4484,7 @@ TEST(TestCheckBatchnormBufferRoles, FusedTrainingDeclinesPassByValueBuffer)
     const auto builder = hipdnn_test_sdk::utilities::mutateGraph(
         hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(true, true),
         [](fb::GraphT& graph) {
-            for(auto& tensor : graph.tensors)
+            for(const auto& tensor : graph.tensors)
             {
                 if(tensor->name == "scale")
                 {

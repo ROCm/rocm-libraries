@@ -211,7 +211,7 @@ TEST_P(TestLayernormFusionPlanBuilder, DeclinesIdentityReluAndLeakyReluFusion)
     const auto& testCase = GetParam();
     const auto original
         = testCase.isBwd ? createValidLayernormBwdGraph() : createValidLayernormFpropGraph();
-    auto nativeGraph = UnPackGraph(original.GetBufferPointer());
+    const auto nativeGraph = UnPackGraph(original.GetBufferPointer());
     auto& normNode = *nativeGraph->nodes[0];
     const auto intermediateUid
         = testCase.isBwd ? normNode.attributes.AsLayernormBackwardAttributes()->dy_tensor_uid
@@ -465,7 +465,7 @@ TEST_F(TestLayernormPlanBuilder, DeclinesAVirtualKernelBuffer)
                 = mutateGraph(direction == "forward" ? createValidLayernormFpropGraph()
                                                      : createValidLayernormBwdGraph(),
                               [&name](hipdnn_flatbuffers_sdk::data_objects::GraphT& graph) {
-                                  for(auto& tensor : graph.tensors)
+                                  for(const auto& tensor : graph.tensors)
                                   {
                                       if(tensor->name == name)
                                       {
@@ -505,7 +505,7 @@ TEST_F(TestLayernormPlanBuilder, DeclinesAnEpsilonTheGraphDoesNotResolve)
             const auto builder
                 = mutateGraph(base(), [&](hipdnn_flatbuffers_sdk::data_objects::GraphT& graph) {
                       const auto uid = epsilonUid(graph);
-                      for(auto& tensor : graph.tensors)
+                      for(const auto& tensor : graph.tensors)
                       {
                           if(tensor->uid == uid)
                           {
@@ -544,7 +544,7 @@ TEST_F(TestLayernormPlanBuilder, AcceptsABakedOrRuntimeEpsilon)
         const auto builder = mutateGraph(backward ? createValidLayernormBwdGraph()
                                                   : createValidLayernormFpropGraph(),
                                          [](hipdnn_flatbuffers_sdk::data_objects::GraphT& graph) {
-                                             for(auto& tensor : graph.tensors)
+                                             for(const auto& tensor : graph.tensors)
                                              {
                                                  if(tensor->name == "epsilon")
                                                  {

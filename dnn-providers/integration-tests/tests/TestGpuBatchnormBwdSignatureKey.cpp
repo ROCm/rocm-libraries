@@ -82,8 +82,8 @@ TEST_P(TestGpuBatchnormBwdSignatureKeySavedStatistic, MismatchedSavedStatisticsT
     EXPECT_NO_THROW(
         GpuBatchnormBwdSignatureKey(matchingGraph.getNode(0), matchingGraph.getTensorMap()));
 
-    auto graph = UnPackGraph(builder.GetBufferPointer());
-    for(auto& tensor : graph->tensors)
+    const auto graph = UnPackGraph(builder.GetBufferPointer());
+    for(const auto& tensor : graph->tensors)
     {
         if(tensor->uid == GetParam())
         {

@@ -152,7 +152,7 @@ TEST_F(TestGraphDescriptorConvolutionBwd, BuildFromSingleOperation)
     flatbuffers::Verifier verifier(static_cast<const uint8_t*>(serialized.ptr), serialized.size);
     ASSERT_TRUE(verifier.VerifyBuffer<Graph>());
 
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
     ASSERT_EQ(graphT->tensors.size(), 3);
@@ -194,7 +194,7 @@ TEST_F(TestGraphDescriptorConvolutionBwd, ComputeDataTypePreserved)
     desc->finalize();
 
     const auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
     EXPECT_EQ(graphT->nodes[0]->compute_data_type, DataType::HALF);
@@ -225,7 +225,7 @@ TEST_F(TestGraphDescriptorConvolutionBwd, OperationNamePreservedInSerialization)
     desc->finalize();
 
     const auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
     EXPECT_EQ(graphT->nodes[0]->name, "test_conv_bwd_op");
@@ -257,7 +257,7 @@ TEST_F(TestGraphDescriptorConvolutionBwd, OperationNameRoundTripThroughLifting)
 
     // Serialize
     const auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
 
@@ -269,7 +269,7 @@ TEST_F(TestGraphDescriptorConvolutionBwd, OperationNameRoundTripThroughLifting)
     // Rebuild node to get name
     auto* graphOp = rebuiltOp->asGraphOperation();
     ASSERT_NE(graphOp, nullptr);
-    auto rebuiltNode = graphOp->buildNode();
+    const auto rebuiltNode = graphOp->buildNode();
     EXPECT_EQ(rebuiltNode->name, "bwd_round_trip_name");
 }
 

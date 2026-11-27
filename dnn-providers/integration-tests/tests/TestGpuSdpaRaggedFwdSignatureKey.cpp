@@ -67,8 +67,8 @@ flatbuffers::FlatBufferBuilder makeRaggedGraph(DataType dataType)
 flatbuffers::FlatBufferBuilder makeGraphWithDenseQ()
 {
     const auto ragged = makeRaggedGraph(DataType::BFLOAT16);
-    auto graph = UnPackGraph(ragged.GetBufferPointer());
-    for(auto& tensor : graph->tensors)
+    const auto graph = UnPackGraph(ragged.GetBufferPointer());
+    for(const auto& tensor : graph->tensors)
     {
         if(tensor->uid == Q_UID)
         {

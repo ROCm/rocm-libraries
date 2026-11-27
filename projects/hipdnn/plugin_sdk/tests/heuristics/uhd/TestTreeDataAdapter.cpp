@@ -86,7 +86,7 @@ TEST_F(TestTreeDataAdapter, LoadFromBufferReturnsCorrectFeatureCount)
                       .addTree(makeLeafTree(1.0))
                       .build();
 
-    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
+    const auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
 
     ASSERT_NE(adapter, nullptr);
     EXPECT_EQ(adapter->expectedFeatureCount(), 5u);
@@ -102,7 +102,7 @@ TEST_F(TestTreeDataAdapter, LoadFromBufferReturnsCorrectTreeCount)
                       .addTree(makeLeafTree(3.0))
                       .build();
 
-    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
+    const auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
 
     ASSERT_NE(adapter, nullptr);
     EXPECT_EQ(adapter->treeCount(), 3u);
@@ -116,7 +116,7 @@ TEST_F(TestTreeDataAdapter, LoadFromBufferStoresFeaturesHash)
                       .addTree(makeLeafTree(1.0))
                       .build();
 
-    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
+    const auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
 
     ASSERT_NE(adapter, nullptr);
     EXPECT_EQ(adapter->getFeaturesHash(), TEST_HASH);
@@ -179,7 +179,7 @@ TEST_F(TestTreeDataAdapter, LoadSucceedsWithEmptyExpectedHash)
                       .build();
 
     // Empty expected hash means skip validation
-    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), "");
+    const auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), "");
 
     ASSERT_NE(adapter, nullptr);
     EXPECT_EQ(adapter->getFeaturesHash(), "sha256:any_hash");
@@ -256,7 +256,7 @@ TEST_F(TestTreeDataAdapter, ScoreLeafOnlyTree)
                       .addTree(makeLeafTree(leafValue))
                       .build();
 
-    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
+    const auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
     const std::vector<double> features = {1.0, 2.0};
@@ -274,7 +274,7 @@ TEST_F(TestTreeDataAdapter, ScoreBinarySplitGoesLeft)
                       .addTree(makeBinarySplitTree(0, 5.0, 10.0, 20.0))
                       .build();
 
-    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
+    const auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
     const std::vector<double> features = {3.0};
@@ -292,7 +292,7 @@ TEST_F(TestTreeDataAdapter, ScoreBinarySplitGoesRight)
                       .addTree(makeBinarySplitTree(0, 5.0, 10.0, 20.0))
                       .build();
 
-    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
+    const auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
     const std::vector<double> features = {7.0};
@@ -310,7 +310,7 @@ TEST_F(TestTreeDataAdapter, ScoreBinarySplitAtThreshold)
                       .addTree(makeBinarySplitTree(0, 5.0, 10.0, 20.0))
                       .build();
 
-    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
+    const auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
     const std::vector<double> features = {5.0};
@@ -328,7 +328,7 @@ TEST_F(TestTreeDataAdapter, ScoreDeepTreePath1)
                       .addTree(makeDeepTree())
                       .build();
 
-    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
+    const auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
     const std::vector<double> features = {3.0, 15.0};
@@ -346,7 +346,7 @@ TEST_F(TestTreeDataAdapter, ScoreDeepTreePath2)
                       .addTree(makeDeepTree())
                       .build();
 
-    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
+    const auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
     const std::vector<double> features = {7.0, 5.0};
@@ -364,7 +364,7 @@ TEST_F(TestTreeDataAdapter, ScoreDeepTreePath3)
                       .addTree(makeDeepTree())
                       .build();
 
-    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
+    const auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
     const std::vector<double> features = {7.0, 15.0};
@@ -387,7 +387,7 @@ TEST_F(TestTreeDataAdapter, ScoreMultipleTreesSumsLeaves)
                       .addTree(makeLeafTree(3.0))
                       .build();
 
-    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
+    const auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
     const std::vector<double> features = {0.0};
@@ -406,7 +406,7 @@ TEST_F(TestTreeDataAdapter, ScoreAppliesBaseScore)
                       .addTree(makeLeafTree(5.0))
                       .build();
 
-    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
+    const auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
     const std::vector<double> features = {0.0};
@@ -428,7 +428,7 @@ TEST_F(TestTreeDataAdapter, LearningRateIsMetadataOnly)
                       .addTree(makeLeafTree(20.0))
                       .build();
 
-    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
+    const auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
     const std::vector<double> features = {0.0};
@@ -448,7 +448,7 @@ TEST_F(TestTreeDataAdapter, ScoreWithBaseScoreAndLearningRate)
                       .addTree(makeLeafTree(20.0))
                       .build();
 
-    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
+    const auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
     const std::vector<double> features = {0.0};
@@ -468,7 +468,7 @@ TEST_F(TestTreeDataAdapter, ScoreWithNaNUsesDefaultLeft)
                       .addTree(makeBinarySplitTree(0, 5.0, 10.0, 20.0))
                       .build();
 
-    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
+    const auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
     const std::vector<double> features = {std::numeric_limits<double>::quiet_NaN()};
@@ -485,7 +485,7 @@ TEST_F(TestTreeDataAdapter, ScoreWithInfinity)
                       .addTree(makeBinarySplitTree(0, 5.0, 10.0, 20.0))
                       .build();
 
-    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
+    const auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
     const std::vector<double> featuresPos = {std::numeric_limits<double>::infinity()};
@@ -505,7 +505,7 @@ TEST_F(TestTreeDataAdapter, ScoreWithNoTrees)
                       .setBaseScore(42.0)
                       .build();
 
-    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
+    const auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
     const std::vector<double> features = {1.0, 2.0};
@@ -522,7 +522,7 @@ TEST_F(TestTreeDataAdapter, ScoreWithEmptyFeatureVector)
                       .addTree(makeLeafTree(5.0))
                       .build();
 
-    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
+    const auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
     const std::vector<double> features;
@@ -577,7 +577,7 @@ TEST_F(TestTreeDataAdapter, WorksWithFeatureExtractor)
                       .addTree(realisticTree)
                       .build();
 
-    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
+    const auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
     EXPECT_DOUBLE_EQ(adapter->score({256.0, 1.0}), 3.0);
@@ -594,7 +594,7 @@ TEST_F(TestTreeDataAdapter, IsTrainedForArchReturnsTrueWhenNoArches)
                       .setFeaturesHash(TEST_HASH)
                       .addTree(makeLeafTree(1.0))
                       .build();
-    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
+    const auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
     EXPECT_TRUE(adapter->isTrainedForArch("gfx942"));
@@ -610,7 +610,7 @@ TEST_F(TestTreeDataAdapter, IsTrainedForArchReturnsTrueWhenArchInList)
                       .setTrainingArches({"gfx942", "gfx1100"})
                       .addTree(makeLeafTree(1.0))
                       .build();
-    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
+    const auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
     EXPECT_TRUE(adapter->isTrainedForArch("gfx942"));
@@ -626,7 +626,7 @@ TEST_F(TestTreeDataAdapter, IsTrainedForArchReturnsFalseWhenArchNotInList)
                       .setTrainingArches({"gfx942", "gfx1100"})
                       .addTree(makeLeafTree(1.0))
                       .build();
-    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
+    const auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
     EXPECT_FALSE(adapter->isTrainedForArch("gfx950"));
@@ -691,7 +691,8 @@ TEST_F(TestTreeDataAdapter, RealisticGbdtEnsembleScoring)
                       .addTree(makeRealisticTree3())
                       .build();
 
-    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), realisticHash);
+    const auto adapter
+        = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), realisticHash);
     ASSERT_NE(adapter, nullptr);
     EXPECT_EQ(adapter->expectedFeatureCount(), 5u);
     EXPECT_EQ(adapter->treeCount(), 3u);
@@ -731,7 +732,8 @@ TEST_F(TestTreeDataAdapter, RealisticBatchScoringMatchesSingle)
                       .addTree(makeRealisticTree3())
                       .build();
 
-    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), realisticHash);
+    const auto adapter
+        = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), realisticHash);
     ASSERT_NE(adapter, nullptr);
 
     const std::vector<std::vector<double>> batch = {
@@ -763,7 +765,8 @@ TEST_F(TestTreeDataAdapter, RealisticRankingOrdersCorrectly)
                       .addTree(makeRealisticTree3())
                       .build();
 
-    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), realisticHash);
+    const auto adapter
+        = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), realisticHash);
     ASSERT_NE(adapter, nullptr);
 
     struct KernelConfig
@@ -805,7 +808,7 @@ TEST_F(TestTreeDataAdapter, OwnershipTransferPreservesModel)
                       .addTree(makeBinarySplitTree(0, 5.0, 1.0, 2.0))
                       .build();
 
-    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
+    const auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH);
     ASSERT_NE(adapter, nullptr);
 
     // The adapter must own a copy of the buffer.
@@ -876,7 +879,7 @@ TEST_F(TestTreeDataAdapter, DeepButAcyclicTreeStillEvaluates)
     chain.defaultLeft.push_back(1);
 
     auto buffer = GbdtModelBuilder().setNumFeatures(1).addTree(chain).build();
-    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), "");
+    const auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), "");
     ASSERT_NE(adapter, nullptr);
 
     EXPECT_DOUBLE_EQ(adapter->score({0.0}), 7.0);
@@ -894,7 +897,7 @@ TEST_F(TestTreeDataAdapter, ModelHashFieldAccepted)
 
     const std::string modelHash = hipdnn_plugin_sdk::uhd::sha256(buffer.data(), buffer.size());
 
-    auto adapter
+    const auto adapter
         = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), TEST_HASH, modelHash);
     ASSERT_NE(adapter, nullptr);
     EXPECT_DOUBLE_EQ(adapter->score({0.0, 0.0}), 5.0);
@@ -992,7 +995,7 @@ TEST_F(TestTreeDataAdapter, OptionalFlagsPreserveComparisonAndMissingValueBehavi
     }
     const auto model = fb::CreateGbdtModel(builder, builder.CreateVector(trees), 1);
     builder.Finish(model, fb::GbdtModelIdentifier());
-    auto adapter
+    const auto adapter
         = TreeDataAdapter::loadFromBuffer(builder.GetBufferPointer(), builder.GetSize(), "");
     ASSERT_NE(adapter, nullptr);
 
@@ -1013,7 +1016,7 @@ TEST_F(TestTreeDataAdapter, AddsBaseScoreAfterSummingTreesInModelOrder)
                             .addTree(makeLeafTree(-1e16))
                             .addTree(makeLeafTree(0.25))
                             .build();
-    auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), "");
+    const auto adapter = TreeDataAdapter::loadFromBuffer(buffer.data(), buffer.size(), "");
     ASSERT_NE(adapter, nullptr);
     EXPECT_DOUBLE_EQ(adapter->score({}), 1.25);
 }
@@ -1065,7 +1068,7 @@ TEST_F(TestTreeDataAdapter, RepeatedTreeOffsetsCannotClaimMoreNodesThanTheBuffer
 
     // Sharing a table is legal while the total stays within what the buffer could back.
     const auto shared = buildRepeated(4);
-    auto sharedAdapter = TreeDataAdapter::loadFromBuffer(shared.data(), shared.size(), "");
+    const auto sharedAdapter = TreeDataAdapter::loadFromBuffer(shared.data(), shared.size(), "");
     ASSERT_NE(sharedAdapter, nullptr);
     EXPECT_DOUBLE_EQ(sharedAdapter->score({0.0}), 4.0);
 

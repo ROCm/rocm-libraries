@@ -141,7 +141,7 @@ void finalizeWgradWithShape(const std::vector<int64_t>& xDims,
     HipdnnBackendDescriptor* dwPtr = dwTensor.get();
     HipdnnBackendDescriptor* dyPtr = dyTensor.get();
 
-    auto wrapper = createDescriptor<ConvolutionWrwOperationDescriptor>();
+    const auto wrapper = createDescriptor<ConvolutionWrwOperationDescriptor>();
     const auto desc = wrapper->asDescriptor<ConvolutionWrwOperationDescriptor>();
     desc->setAttribute(HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER_X,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
@@ -885,7 +885,7 @@ TEST_F(TestConvolutionWrwOperationDescriptor, BuildNodeProducesCorrectNodeT)
     desc->setAttribute(HIPDNN_ATTR_CONVOLUTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
-    auto node = desc->buildNode();
+    const auto node = desc->buildNode();
     ASSERT_NE(node, nullptr);
     ASSERT_EQ(node->compute_data_type, DataType::FLOAT);
     ASSERT_EQ(node->attributes.type, NodeAttributes::ConvolutionWrwAttributes);
@@ -910,7 +910,7 @@ TEST_F(TestConvolutionWrwOperationDescriptor, BuildNodeWithHalfComputeType)
     desc->setAttribute(HIPDNN_ATTR_CONVOLUTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
-    auto node = desc->buildNode();
+    const auto node = desc->buildNode();
     ASSERT_NE(node, nullptr);
     ASSERT_EQ(node->compute_data_type, DataType::HALF);
 }

@@ -388,7 +388,7 @@ TEST(TestSdpaFwdPlan, ExecutePlanWithRuntimeScaleFromPack)
 
     const SdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         builder;
-    auto builtPlan = builder.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
+    const auto builtPlan = builder.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
     builtPlan->execute(variantPack);
 
     // Direct reference with the same explicit scale value.
@@ -499,7 +499,7 @@ TEST(TestSdpaFwdPlanBuilder, ExecutePlanWithAsymmetricWindow)
     // extraction is exercised (this is where the original bug lived).
     const SdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         planBuilder;
-    auto plan = planBuilder.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
+    const auto plan = planBuilder.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
 
     const auto* nodeAttributes = graphWrapper.getNode(0).attributes_as_SdpaAttributes();
     std::unordered_map<int64_t, void*> variantPack;
@@ -1283,7 +1283,7 @@ TEST(TestSdpaFwdPlanSink, FrontendGraphExecutesLikeTheDirectReference)
     const SdpaFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         planBuilder;
     ASSERT_TRUE(planBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
-    auto builtPlan = planBuilder.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
+    const auto builtPlan = planBuilder.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
 
     const unsigned int seed = getGlobalTestSeed();
     Tensor<float> q(qDims);
@@ -1767,7 +1767,7 @@ TEST(TestSdpaFwdPlanBuilder, IsApplicableAndExecutesWithStatsOutput)
         planBuilder;
     EXPECT_TRUE(planBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
 
-    auto builtPlan = planBuilder.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
+    const auto builtPlan = planBuilder.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
     auto* concretePlan = dynamic_cast<SdpaFwdPlan<float, float, float, float>*>(builtPlan.get());
     ASSERT_NE(concretePlan, nullptr);
 
@@ -1840,7 +1840,7 @@ TEST(TestSdpaFwdPlanBuilder, DeprecatedCausalMaskMatchesExplicitTopLeftBounds)
 
     // Execute deprecated-path plan
     {
-        auto plan = planBuilder.buildNodePlan(depWrapper, depWrapper.getNode(0));
+        const auto plan = planBuilder.buildNodePlan(depWrapper, depWrapper.getNode(0));
         const auto* attrs = depWrapper.getNode(0).attributes_as_SdpaAttributes();
         std::unordered_map<int64_t, void*> vp;
         vp[attrs->q_tensor_uid()] = deprecatedBundle.qTensor.memory().hostData();
@@ -1852,7 +1852,7 @@ TEST(TestSdpaFwdPlanBuilder, DeprecatedCausalMaskMatchesExplicitTopLeftBounds)
 
     // Execute explicit-bounds plan
     {
-        auto plan = planBuilder.buildNodePlan(expWrapper, expWrapper.getNode(0));
+        const auto plan = planBuilder.buildNodePlan(expWrapper, expWrapper.getNode(0));
         const auto* attrs = expWrapper.getNode(0).attributes_as_SdpaAttributes();
         std::unordered_map<int64_t, void*> vp;
         vp[attrs->q_tensor_uid()] = explicitBundle.qTensor.memory().hostData();
@@ -1917,7 +1917,7 @@ TEST(TestSdpaFwdPlanBuilder, DeprecatedCausalMaskBottomRightMatchesExplicitBotto
 
     // Execute deprecated-path plan
     {
-        auto plan = planBuilder.buildNodePlan(depWrapper, depWrapper.getNode(0));
+        const auto plan = planBuilder.buildNodePlan(depWrapper, depWrapper.getNode(0));
         const auto* attrs = depWrapper.getNode(0).attributes_as_SdpaAttributes();
         std::unordered_map<int64_t, void*> vp;
         vp[attrs->q_tensor_uid()] = deprecatedBundle.qTensor.memory().hostData();
@@ -1929,7 +1929,7 @@ TEST(TestSdpaFwdPlanBuilder, DeprecatedCausalMaskBottomRightMatchesExplicitBotto
 
     // Execute explicit-bounds plan
     {
-        auto plan = planBuilder.buildNodePlan(expWrapper, expWrapper.getNode(0));
+        const auto plan = planBuilder.buildNodePlan(expWrapper, expWrapper.getNode(0));
         const auto* attrs = expWrapper.getNode(0).attributes_as_SdpaAttributes();
         std::unordered_map<int64_t, void*> vp;
         vp[attrs->q_tensor_uid()] = explicitBundle.qTensor.memory().hostData();
@@ -2060,7 +2060,7 @@ TEST(TestSdpaFwdPlanBuilder, BothDeprecatedCausalMasksThrow)
     auto [bin, err] = graph->to_binary();
     ASSERT_TRUE(err.is_good()) << err.get_message();
 
-    auto graphT = std::unique_ptr<GraphT>(GetGraph(bin.data())->UnPack());
+    const auto graphT = std::unique_ptr<GraphT>(GetGraph(bin.data())->UnPack());
     auto* attrs = graphT->nodes.front()->attributes.AsSdpaAttributes();
     ASSERT_NE(attrs, nullptr);
     attrs->causal_mask_bottom_right = true;
@@ -2350,7 +2350,7 @@ TEST(TestSdpaFwdPlan, ExecuteFp8WithDescale)
                              DataType::BFLOAT16>
         planBuilder;
     ASSERT_TRUE(planBuilder.isApplicable(wrapper.getNode(0), wrapper.getTensorMap()));
-    auto plan = planBuilder.buildNodePlan(wrapper, wrapper.getNode(0));
+    const auto plan = planBuilder.buildNodePlan(wrapper, wrapper.getNode(0));
 
     const auto* nodeAttributes = wrapper.getNode(0).attributes_as_SdpaAttributes();
     std::unordered_map<int64_t, void*> variantPack;

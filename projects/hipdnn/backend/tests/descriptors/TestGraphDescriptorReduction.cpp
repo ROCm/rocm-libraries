@@ -185,7 +185,7 @@ TEST_F(TestGraphDescriptorReduction, BuildFromSingleOperation)
     flatbuffers::Verifier verifier(static_cast<const uint8_t*>(serialized.ptr), serialized.size);
     ASSERT_TRUE(verifier.VerifyBuffer<Graph>());
 
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
     ASSERT_EQ(graphT->tensors.size(), 2);
@@ -234,7 +234,7 @@ TEST_F(TestGraphDescriptorReduction, ComputeDataTypePreserved)
     desc->finalize();
 
     const auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
     EXPECT_EQ(graphT->nodes[0]->compute_data_type, DataType::HALF);
@@ -250,7 +250,7 @@ TEST_F(TestGraphDescriptorReduction, ReductionAttributesPreserved)
                                              toVec(K_REDUCTION_TENSOR_Y_STRIDES));
 
     // Create op with non-default parameters to test graph roundtrip
-    auto wrapper = createDescriptor<ReductionOperationDescriptor>();
+    const auto wrapper = createDescriptor<ReductionOperationDescriptor>();
     const auto opDesc = wrapper->asDescriptor<ReductionOperationDescriptor>();
 
     HipdnnBackendDescriptor* xPtr = xDesc.get();
@@ -290,7 +290,7 @@ TEST_F(TestGraphDescriptorReduction, ReductionAttributesPreserved)
     desc->finalize();
 
     const auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
     ASSERT_EQ(graphT->tensors.size(), 2);
@@ -340,7 +340,7 @@ TEST_F(TestGraphDescriptorReduction, OperationNamePreservedInSerialization)
     desc->finalize();
 
     const auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1u);
     EXPECT_EQ(graphT->nodes[0]->name, "test_reduction_name");
@@ -373,7 +373,7 @@ TEST_F(TestGraphDescriptorReduction, OperationNameRoundTripThroughLifting)
                                static_cast<const uint8_t*>(serialized.ptr) + serialized.size);
 
     // Deserialize into a new GraphDescriptor (lifting path)
-    auto liftedWrapper = createDescriptor<GraphDescriptor>();
+    const auto liftedWrapper = createDescriptor<GraphDescriptor>();
     const auto liftedDesc = liftedWrapper->asDescriptor<GraphDescriptor>();
     liftedDesc->deserializeGraph(bytes.data(), bytes.size());
 
@@ -386,7 +386,7 @@ TEST_F(TestGraphDescriptorReduction, OperationNameRoundTripThroughLifting)
 
     // Re-serialize and verify name survived the round-trip
     const auto reSerialized = liftedDesc->getSerializedGraph();
-    auto graphT = UnPackGraph(reSerialized.ptr);
+    const auto graphT = UnPackGraph(reSerialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1u);
     EXPECT_EQ(graphT->nodes[0]->name, "test_reduction_lifting");
@@ -419,7 +419,7 @@ TEST_F(TestGraphDescriptorReduction, IsDeterministicPreservedInSerialization)
                                static_cast<const uint8_t*>(serialized.ptr) + serialized.size);
 
     // Deserialize into a new GraphDescriptor (lifting path)
-    auto liftedWrapper = createDescriptor<GraphDescriptor>();
+    const auto liftedWrapper = createDescriptor<GraphDescriptor>();
     const auto liftedDesc = liftedWrapper->asDescriptor<GraphDescriptor>();
     liftedDesc->deserializeGraph(bytes.data(), bytes.size());
 
@@ -431,7 +431,7 @@ TEST_F(TestGraphDescriptorReduction, IsDeterministicPreservedInSerialization)
     liftedDesc->finalize();
 
     const auto reSerialized = liftedDesc->getSerializedGraph();
-    auto graphT = UnPackGraph(reSerialized.ptr);
+    const auto graphT = UnPackGraph(reSerialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1u);
     auto* opNode = graphT->nodes[0]->attributes.AsReductionAttributes();

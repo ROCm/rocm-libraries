@@ -290,7 +290,7 @@ TEST_F(TestReductionOperationDescriptor, SetAttributeIsDeterministic)
     EXPECT_FALSE(retrieved);
 
     // Now test with explicit true
-    auto wrapper2 = createDescriptor<ReductionOperationDescriptor>();
+    const auto wrapper2 = createDescriptor<ReductionOperationDescriptor>();
     const auto desc2 = wrapper2->asDescriptor<ReductionOperationDescriptor>();
     desc2->setAttribute(
         HIPDNN_ATTR_OPERATION_REDUCTION_XDESC, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_xDesc);
@@ -589,7 +589,7 @@ TEST_F(TestReductionOperationDescriptor, BuildNodeProducesCorrectNodeT)
     desc->setAttribute(HIPDNN_ATTR_REDUCTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
-    auto node = desc->buildNode();
+    const auto node = desc->buildNode();
     ASSERT_NE(node, nullptr);
     ASSERT_EQ(node->compute_data_type, DataType::FLOAT);
     ASSERT_EQ(node->attributes.type, NodeAttributes::ReductionAttributes);
@@ -610,7 +610,7 @@ TEST_F(TestReductionOperationDescriptor, BuildNodeWithHalfComputeType)
     desc->setAttribute(HIPDNN_ATTR_REDUCTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
-    auto node = desc->buildNode();
+    const auto node = desc->buildNode();
     ASSERT_NE(node, nullptr);
     ASSERT_EQ(node->compute_data_type, DataType::HALF);
 }
@@ -735,7 +735,7 @@ TEST_F(TestReductionOperationDescriptor, BuildNodePreservesName)
     desc->setAttribute(HIPDNN_ATTR_REDUCTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
-    auto node = desc->buildNode();
+    const auto node = desc->buildNode();
     ASSERT_NE(node, nullptr);
     EXPECT_EQ(node->name, "test_reduction");
 }

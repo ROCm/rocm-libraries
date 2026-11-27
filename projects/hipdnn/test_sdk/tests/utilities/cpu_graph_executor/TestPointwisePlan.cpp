@@ -846,7 +846,7 @@ static float executeHalfAddWithCompute()
                                ComputeDataTypeEnum,
                                DataType::FLOAT>
         planBuilder;
-    auto plan = planBuilder.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
+    const auto plan = planBuilder.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
     plan->execute(variantPack);
 
     return output->getHostValue(0, 0, 0, 0);
@@ -2662,11 +2662,11 @@ TEST(TestPointwisePlanBuilder, DeclinesNonBroadcastableShapes)
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
     // The frontend rejects non-broadcastable shapes, so edit the serialized graph instead
-    auto graphT = std::unique_ptr<GraphT>(GetGraph(serializedGraph.data())->UnPack());
+    const auto graphT = std::unique_ptr<GraphT>(GetGraph(serializedGraph.data())->UnPack());
     const GraphWrapper original(serializedGraph.data(), serializedGraph.size());
     const auto secondInputUid
         = original.getNodeWrapper(0).attributesAs<PointwiseAttributes>().in_1_tensor_uid().value();
-    for(auto& tensor : graphT->tensors)
+    for(const auto& tensor : graphT->tensors)
     {
         if(tensor->uid == secondInputUid)
         {
@@ -2823,13 +2823,13 @@ TEST(TestPointwisePlanBuilder, DeclinesNonBroadcastableFirstAndThirdInputs)
         ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
         // The frontend rejects non-broadcastable shapes, so edit the serialized graph instead
-        auto graphT = std::unique_ptr<GraphT>(GetGraph(serializedGraph.data())->UnPack());
+        const auto graphT = std::unique_ptr<GraphT>(GetGraph(serializedGraph.data())->UnPack());
         const GraphWrapper original(serializedGraph.data(), serializedGraph.size());
         const auto& originalAttributes
             = original.getNodeWrapper(0).attributesAs<PointwiseAttributes>();
         const auto editedUid = editThirdInput ? originalAttributes.in_2_tensor_uid().value()
                                               : originalAttributes.in_0_tensor_uid();
-        for(auto& tensor : graphT->tensors)
+        for(const auto& tensor : graphT->tensors)
         {
             if(tensor->uid == editedUid)
             {

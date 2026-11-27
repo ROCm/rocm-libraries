@@ -550,7 +550,7 @@ flatbuffers::FlatBufferBuilder editTensor(const flatbuffers::FlatBufferBuilder& 
                                           const TensorEdit& edit)
 {
     return mutateGraph(source, [&](fb::GraphT& graph) {
-        for(auto& tensor : graph.tensors)
+        for(const auto& tensor : graph.tensors)
         {
             if(tensor->name == name)
             {
@@ -599,7 +599,7 @@ std::vector<int64_t> nhwcStrides()
 flatbuffers::FlatBufferBuilder cbaGraphOfDataType(DataType dataType)
 {
     return mutateGraph(cbaGraph(), [dataType](fb::GraphT& graph) {
-        for(auto& tensor : graph.tensors)
+        for(const auto& tensor : graph.tensors)
         {
             tensor->data_type = dataType;
         }

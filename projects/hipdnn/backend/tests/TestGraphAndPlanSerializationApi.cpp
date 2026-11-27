@@ -241,11 +241,11 @@ public:
         // buffer before reading it back.
         graphDesc->buildSerializedGraph();
         const auto roundTripped = graphDesc->getSerializedGraph();
-        auto reconstructed = fbs::UnPackGraph(static_cast<const uint8_t*>(roundTripped.ptr));
+        const auto reconstructed = fbs::UnPackGraph(static_cast<const uint8_t*>(roundTripped.ptr));
         ASSERT_NE(reconstructed, nullptr);
 
         auto sourceBlob = makeBareGraphBlob();
-        auto source = fbs::UnPackGraph(sourceBlob.data());
+        const auto source = fbs::UnPackGraph(sourceBlob.data());
         ASSERT_NE(source, nullptr);
 
         EXPECT_EQ(reconstructed->name, source->name);

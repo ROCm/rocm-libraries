@@ -5920,7 +5920,7 @@ public:
         HIPDNN_FE_LOG_INFO("Executing graph " << graph_attributes.get_name() << " with "
                                               << overrideUids.size() << " override entries.");
 
-        auto variantPackDesc = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(
+        const auto variantPackDesc = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(
             HIPDNN_BACKEND_VARIANT_PACK_DESCRIPTOR);
         if(!variantPackDesc || !variantPackDesc->valid())
         {

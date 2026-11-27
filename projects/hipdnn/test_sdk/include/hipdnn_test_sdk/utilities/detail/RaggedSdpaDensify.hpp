@@ -178,7 +178,7 @@ std::optional<DenseSdpaFromRagged> densify(hipdnn_flatbuffers_sdk::data_objects:
 
     std::unordered_map<int64_t, TensorAttributesT*> tensors;
     int64_t maxUid = 0;
-    for(auto& tensor : graph.tensors)
+    for(const auto& tensor : graph.tensors)
     {
         tensors[tensor->uid] = tensor.get();
         maxUid = std::max(maxUid, tensor->uid);
@@ -393,7 +393,7 @@ inline std::optional<DenseSdpaFromRagged> densifyRaggedSdpaGraph(const void* buf
     {
         return std::nullopt;
     }
-    auto graph = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(buffer);
+    const auto graph = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(buffer);
     if(graph == nullptr || graph->nodes.size() != 1)
     {
         return std::nullopt;

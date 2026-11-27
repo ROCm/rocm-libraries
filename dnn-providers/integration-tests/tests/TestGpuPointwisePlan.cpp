@@ -583,7 +583,7 @@ TEST(TestGpuPointwiseUnaryPlanFp32, ExecutePlanEluWithAlpha)
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuPointwiseUnaryPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT> patient;
-    auto plan = patient.buildNodePlan(graph, graph.getNode(0));
+    const auto plan = patient.buildNodePlan(graph, graph.getNode(0));
 
     Tensor<float> inputTensor(DIMS);
     Tensor<float> outputTensor(DIMS);
@@ -632,7 +632,7 @@ TEST(TestGpuPointwiseUnaryPlanFp32, ExecutePlanSoftplusWithBeta)
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuPointwiseUnaryPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT> patient;
-    auto plan = patient.buildNodePlan(graph, graph.getNode(0));
+    const auto plan = patient.buildNodePlan(graph, graph.getNode(0));
 
     Tensor<float> inputTensor(DIMS);
     Tensor<float> outputTensor(DIMS);
@@ -670,7 +670,7 @@ TEST(TestGpuPointwiseUnaryPlanFp32, ExecutePlanEluWithDefaultAlpha)
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuPointwiseUnaryPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT> patient;
-    auto plan = patient.buildNodePlan(graph, graph.getNode(0));
+    const auto plan = patient.buildNodePlan(graph, graph.getNode(0));
 
     Tensor<float> inputTensor(DIMS);
     Tensor<float> outputTensor(DIMS);
@@ -707,7 +707,7 @@ TEST(TestGpuPointwiseUnaryPlanFp32, ExecutePlanSoftplusWithDefaultBeta)
         builder.GetBufferPointer(), builder.GetSize());
 
     const GpuPointwiseUnaryPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT> patient;
-    auto plan = patient.buildNodePlan(graph, graph.getNode(0));
+    const auto plan = patient.buildNodePlan(graph, graph.getNode(0));
 
     Tensor<float> inputTensor(DIMS);
     Tensor<float> outputTensor(DIMS);
@@ -749,7 +749,7 @@ TEST(TestGpuPointwiseBinaryPlanFp32, ExecutePlanMaxMin)
         const auto builder = createBinaryGraph(mode);
         const auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
             builder.GetBufferPointer(), builder.GetSize());
-        auto plan = patient.buildNodePlan(graph, graph.getNode(0));
+        const auto plan = patient.buildNodePlan(graph, graph.getNode(0));
 
         Tensor<float> input0Tensor(DIMS);
         Tensor<float> input1Tensor(DIMS);
@@ -795,7 +795,7 @@ TEST(TestGpuPointwiseBinaryPlanFp32, ExecutePlanCmpGt)
                                         DataType::BOOLEAN,
                                         DataType::FLOAT>
         patient;
-    auto plan = patient.buildNodePlan(graph, graph.getNode(0));
+    const auto plan = patient.buildNodePlan(graph, graph.getNode(0));
 
     Tensor<float> input0Tensor(DIMS);
     Tensor<float> input1Tensor(DIMS);
@@ -839,7 +839,7 @@ TEST(TestGpuPointwiseTernaryPlanFp32, ExecutePlanBinarySelect)
                                          DataType::FLOAT,
                                          DataType::FLOAT>
         patient;
-    auto plan = patient.buildNodePlan(graph, graph.getNode(0));
+    const auto plan = patient.buildNodePlan(graph, graph.getNode(0));
 
     Tensor<float> input0Tensor(DIMS);
     Tensor<float> input1Tensor(DIMS);

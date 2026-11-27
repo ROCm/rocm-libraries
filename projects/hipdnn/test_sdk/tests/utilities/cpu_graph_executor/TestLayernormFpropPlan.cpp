@@ -66,7 +66,7 @@ TEST_F(TestLayernormFpropPlan, ExecutePlan)
     const auto shallowBiasTensor = createShallowTensor<float>(
         params.biasTensor,
         directTensorBundle.getTensor(attributes.bias_tensor_uid()).rawHostData());
-    auto shallowYTensor = createShallowTensor<float>(
+    const auto shallowYTensor = createShallowTensor<float>(
         params.yTensor, directTensorBundle.getTensor(attributes.y_tensor_uid()).rawHostData());
 
     CpuFpReferenceLayernorm::fprop(*shallowXTensor,
@@ -201,7 +201,7 @@ TEST_F(TestLayernormFpropPlan, ExecutePlanOnePaddedNormalizedDimCount2)
     const auto shallowBiasTensor = createShallowTensor<float>(
         params.biasTensor,
         directTensorBundle.getTensor(attributes.bias_tensor_uid()).rawHostData());
-    auto shallowYTensor = createShallowTensor<float>(
+    const auto shallowYTensor = createShallowTensor<float>(
         params.yTensor, directTensorBundle.getTensor(attributes.y_tensor_uid()).rawHostData());
 
     CpuFpReferenceLayernorm::fprop(*shallowXTensor,
@@ -275,7 +275,7 @@ TEST_F(TestLayernormFpropPlan, ExecutePlanTrainingPhase)
     const auto shallowBiasTensor = createShallowTensor<float>(
         params.biasTensor,
         directTensorBundle.getTensor(attributes.bias_tensor_uid()).rawHostData());
-    auto shallowYTensor = createShallowTensor<float>(
+    const auto shallowYTensor = createShallowTensor<float>(
         params.yTensor, directTensorBundle.getTensor(attributes.y_tensor_uid()).rawHostData());
 
     std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<float>> shallowMeanTensor;

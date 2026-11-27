@@ -54,7 +54,7 @@ void expectSeqstartTensor(const TensorAttributesT& offset, int64_t batch)
 flatbuffers::FlatBufferBuilder withoutTensor(flatbuffers::FlatBufferBuilder&& builder,
                                              const std::string& name)
 {
-    auto graph = UnPackGraph(builder.GetBufferPointer());
+    const auto graph = UnPackGraph(builder.GetBufferPointer());
     auto& tensors = graph->tensors;
     tensors.erase(std::remove_if(tensors.begin(),
                                  tensors.end(),

@@ -72,7 +72,7 @@ public:
         const auto shallowWTensor
             = createShallowTensor<WDataType>(_params.wTensor, variantPack.at(_params.wTensor.uid));
 
-        auto shallowYTensor = createShallowTensor<OutputDataType>(
+        const auto shallowYTensor = createShallowTensor<OutputDataType>(
             _params.yTensor, variantPack.at(_params.yTensor.uid));
 
         utilities::CpuFpReferenceConvolution::fprop(*shallowXTensor,

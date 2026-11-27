@@ -103,7 +103,7 @@ TEST_F(TestBlockScaleDequantizeOperationFromNode, NodeFactoryDelegatesCorrectly)
     // Cannot use dynamic_pointer_cast: backend tests compile with -fno-rtti.
     auto* op = graphOp->asGraphOperation();
     ASSERT_NE(op, nullptr);
-    auto rebuiltNode = op->buildNode();
+    const auto rebuiltNode = op->buildNode();
     ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::BlockScaleDequantizeAttributes);
     const auto desc = std::static_pointer_cast<BlockScaleDequantizeOperationDescriptor>(graphOp);
     ASSERT_TRUE(desc->isFinalized());
@@ -217,7 +217,7 @@ TEST_F(TestBlockScaleDequantizeOperationFromNode, BuildNodeRoundTrip)
     const auto node = createStandardNode();
     const auto desc = BlockScaleDequantizeOperationDescriptor::fromNode(node, _tensorMap);
 
-    auto rebuiltNode = desc->buildNode();
+    const auto rebuiltNode = desc->buildNode();
     ASSERT_NE(rebuiltNode, nullptr);
     ASSERT_EQ(rebuiltNode->compute_data_type, DataType::FLOAT);
     ASSERT_EQ(rebuiltNode->attributes.type, NodeAttributes::BlockScaleDequantizeAttributes);
@@ -244,7 +244,7 @@ TEST_F(TestBlockScaleDequantizeOperationFromNode, FromNodePreservesIsNegativeSca
 
     EXPECT_EQ(desc->getData().is_negative_scale, true);
 
-    auto rebuiltNode = desc->buildNode();
+    const auto rebuiltNode = desc->buildNode();
     const auto* rebuiltAttrs = rebuiltNode->attributes.AsBlockScaleDequantizeAttributes();
     ASSERT_NE(rebuiltAttrs, nullptr);
     EXPECT_EQ(rebuiltAttrs->is_negative_scale, true);
@@ -383,7 +383,7 @@ TEST_F(TestBlockScaleDequantizeOperationFromNode, BuildNodePreservesName)
     node.name = "test_build_name";
 
     const auto desc = BlockScaleDequantizeOperationDescriptor::fromNode(node, _tensorMap);
-    auto rebuiltNode = desc->buildNode();
+    const auto rebuiltNode = desc->buildNode();
 
     ASSERT_NE(rebuiltNode, nullptr);
     EXPECT_EQ(rebuiltNode->name, "test_build_name");

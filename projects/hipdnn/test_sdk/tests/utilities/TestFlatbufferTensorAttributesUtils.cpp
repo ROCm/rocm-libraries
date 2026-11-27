@@ -53,7 +53,7 @@ TEST(TestFlatbufferTensorAttributesUtils, CreateShallowTensor)
     attr.strides = {2, 1};
 
     std::array<float, 4> data = {1.0f, 2.0f, 3.0f, 4.0f};
-    auto tensor = createShallowTensor<float>(attr, data.data());
+    const auto tensor = createShallowTensor<float>(attr, data.data());
 
     ASSERT_NE(tensor, nullptr);
     EXPECT_EQ(tensor->dims(), attr.dims);
@@ -73,7 +73,7 @@ TEST(TestFlatbufferTensorAttributesUtils, BindShallowTensorReturnsMatchingTensor
     std::array<float, 4> data = {1.0f, 2.0f, 3.0f, 4.0f};
     const std::unordered_map<int64_t, void*> variantPack{{7, data.data()}};
 
-    auto tensor = bindShallowTensor<float>(attr, variantPack);
+    const auto tensor = bindShallowTensor<float>(attr, variantPack);
 
     ASSERT_NE(tensor, nullptr);
     EXPECT_EQ(tensor->dims(), attr.dims);
@@ -115,7 +115,7 @@ TEST(TestFlatbufferTensorAttributesUtils, BindOptionalShallowTensorPresentBinds)
     std::array<float, 3> data = {1.0f, 2.0f, 3.0f};
     const std::unordered_map<int64_t, void*> variantPack{{9, data.data()}};
 
-    auto tensor
+    const auto tensor
         = bindOptionalShallowTensor<float>(std::optional<TensorAttributesT>(attr), variantPack);
 
     ASSERT_NE(tensor, nullptr);
@@ -241,7 +241,7 @@ TEST(TestFlatbufferTensorAttributesUtils, CreateTensorBoolean)
     const std::vector<int64_t> dims = {2, 2};
     const std::vector<int64_t> strides = {2, 1};
 
-    auto tensor = createTensor(DataType::BOOLEAN, dims, strides);
+    const auto tensor = createTensor(DataType::BOOLEAN, dims, strides);
 
     ASSERT_NE(tensor, nullptr);
     EXPECT_EQ(tensor->dims(), dims);
@@ -254,8 +254,8 @@ TEST(TestFlatbufferTensorAttributesUtils, CreateTensorFp8Fnuz)
     const std::vector<int64_t> dims = {2, 2};
     const std::vector<int64_t> strides = {2, 1};
 
-    auto e4m3 = createTensor(DataType::FP8_E4M3_FNUZ, dims, strides);
-    auto e5m2 = createTensor(DataType::FP8_E5M2_FNUZ, dims, strides);
+    const auto e4m3 = createTensor(DataType::FP8_E4M3_FNUZ, dims, strides);
+    const auto e5m2 = createTensor(DataType::FP8_E5M2_FNUZ, dims, strides);
 
     ASSERT_NE(e4m3, nullptr);
     ASSERT_NE(e5m2, nullptr);
@@ -291,7 +291,7 @@ TEST(TestFlatbufferTensorAttributesUtils, CreateTensorFp4UnpackedByDefault)
     const std::vector<int64_t> dims = {2, 4};
     const std::vector<int64_t> strides = {4, 1};
 
-    auto tensor = createTensor(DataType::FP4_E2M1, dims, strides);
+    const auto tensor = createTensor(DataType::FP4_E2M1, dims, strides);
 
     ASSERT_NE(tensor, nullptr);
     EXPECT_EQ(tensor->dims(), dims);
@@ -304,7 +304,8 @@ TEST(TestFlatbufferTensorAttributesUtils, CreateTensorFp4PackedWhenRequested)
     const std::vector<int64_t> dims = {2, 4};
     const std::vector<int64_t> strides = {4, 1};
 
-    auto tensor = createTensor(DataType::FP4_E2M1, dims, strides, /*packSubByteElements=*/true);
+    const auto tensor
+        = createTensor(DataType::FP4_E2M1, dims, strides, /*packSubByteElements=*/true);
 
     ASSERT_NE(tensor, nullptr);
     EXPECT_EQ(tensor->dims(), dims);
@@ -317,8 +318,8 @@ TEST(TestFlatbufferTensorAttributesUtils, CreateTensorFp6UnpackedByDefault)
     const std::vector<int64_t> dims = {2, 4};
     const std::vector<int64_t> strides = {4, 1};
 
-    auto e2m3 = createTensor(DataType::FP6_E2M3, dims, strides);
-    auto e3m2 = createTensor(DataType::FP6_E3M2, dims, strides);
+    const auto e2m3 = createTensor(DataType::FP6_E2M3, dims, strides);
+    const auto e3m2 = createTensor(DataType::FP6_E3M2, dims, strides);
 
     ASSERT_NE(e2m3, nullptr);
     ASSERT_NE(e3m2, nullptr);
@@ -335,8 +336,8 @@ TEST(TestFlatbufferTensorAttributesUtils, CreateTensorFp6PackedWhenRequested)
     const std::vector<int64_t> dims = {2, 4};
     const std::vector<int64_t> strides = {4, 1};
 
-    auto e2m3 = createTensor(DataType::FP6_E2M3, dims, strides, /*packSubByteElements=*/true);
-    auto e3m2 = createTensor(DataType::FP6_E3M2, dims, strides, /*packSubByteElements=*/true);
+    const auto e2m3 = createTensor(DataType::FP6_E2M3, dims, strides, /*packSubByteElements=*/true);
+    const auto e3m2 = createTensor(DataType::FP6_E3M2, dims, strides, /*packSubByteElements=*/true);
 
     ASSERT_NE(e2m3, nullptr);
     ASSERT_NE(e3m2, nullptr);
@@ -438,7 +439,7 @@ TEST(TestFlatbufferTensorAttributesUtils, CreateRaggedTensorAllDataTypes)
 
     for(const auto& [dataType, elementSize] : expectedElementSizes)
     {
-        auto tensor = createRaggedTensor(dataType, RAGGED_DIMS, RAGGED_STRIDES, offsets);
+        const auto tensor = createRaggedTensor(dataType, RAGGED_DIMS, RAGGED_STRIDES, offsets);
 
         ASSERT_NE(tensor, nullptr) << EnumNameDataType(dataType);
         EXPECT_EQ(tensor->dims(), RAGGED_DIMS) << EnumNameDataType(dataType);
@@ -470,8 +471,9 @@ TEST(TestFlatbufferTensorAttributesUtils, CreateRaggedTensorAppliesMultiplier)
 {
     const auto offsets = makeInt32Offsets({0, 2, 4});
 
-    auto unscaled = createRaggedTensor(DataType::FLOAT, RAGGED_DIMS, RAGGED_STRIDES, offsets);
-    auto scaled = createRaggedTensor(DataType::FLOAT, RAGGED_DIMS, RAGGED_STRIDES, offsets, 2);
+    const auto unscaled = createRaggedTensor(DataType::FLOAT, RAGGED_DIMS, RAGGED_STRIDES, offsets);
+    const auto scaled
+        = createRaggedTensor(DataType::FLOAT, RAGGED_DIMS, RAGGED_STRIDES, offsets, 2);
 
     EXPECT_EQ(unscaled->raggedIterationInfo()->origins, (std::vector<int64_t>{0, 2}));
     EXPECT_EQ(unscaled->raggedIterationInfo()->lengths, (std::vector<int64_t>{1, 1}));
@@ -522,7 +524,7 @@ TEST(TestFlatbufferTensorAttributesUtils, CreateRaggedTensorAddressesLogicalBhsd
     const std::vector<int64_t> strides = {12, HEAD_DIM, HEADS * HEAD_DIM, 1};
     const auto tokenOffsets = makeInt32Offsets({0, 2, 5});
 
-    auto tensor
+    const auto tensor
         = createRaggedTensor(DataType::FLOAT, dims, strides, tokenOffsets, HEADS * HEAD_DIM);
 
     const auto info = tensor->raggedIterationInfo();
@@ -560,7 +562,7 @@ TEST(TestFlatbufferTensorAttributesUtils, CreateRaggedTensorBindsLengthTensor)
 {
     const auto lengths = makeInt32Offsets({2, 3});
 
-    auto tensor = createRaggedTensor(
+    const auto tensor = createRaggedTensor(
         DataType::FLOAT, RAGGED_DIMS, RAGGED_STRIDES, makeInt32Offsets({10, 0, 0}), 1, lengths);
 
     const auto info = tensor->raggedIterationInfo();
@@ -573,7 +575,7 @@ TEST(TestFlatbufferTensorAttributesUtils, CreateRaggedTensorBindsLengthTensor)
 
 TEST(TestFlatbufferTensorAttributesUtils, CreateRaggedTensorWithoutLengthsDerivesThemFromOffsets)
 {
-    auto tensor = createRaggedTensor(
+    const auto tensor = createRaggedTensor(
         DataType::FLOAT, RAGGED_DIMS, RAGGED_STRIDES, makeInt32Offsets({0, 4, 10}));
 
     EXPECT_EQ(tensor->raggedIterationInfo()->lengths, (std::vector<int64_t>{2, 3}));

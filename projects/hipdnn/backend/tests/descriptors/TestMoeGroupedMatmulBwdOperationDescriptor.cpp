@@ -614,7 +614,7 @@ TEST_F(TestMoeGroupedMatmulBwdOperationDescriptor, BuildNodeProducesCorrectNodeT
                        &computeType);
     desc->finalize();
 
-    auto node = desc->buildNode();
+    const auto node = desc->buildNode();
     ASSERT_NE(node, nullptr);
     ASSERT_EQ(node->compute_data_type, DataType::FLOAT);
     ASSERT_EQ(node->attributes.type, NodeAttributes::MoeGroupedMatmulBwdAttributes);
@@ -640,7 +640,7 @@ TEST_F(TestMoeGroupedMatmulBwdOperationDescriptor, BuildNodeWithHalfComputeType)
                        &computeType);
     desc->finalize();
 
-    auto node = desc->buildNode();
+    const auto node = desc->buildNode();
     ASSERT_NE(node, nullptr);
     ASSERT_EQ(node->compute_data_type, DataType::HALF);
 }
@@ -771,7 +771,7 @@ TEST_F(TestMoeGroupedMatmulBwdOperationDescriptor, BuildNodePreservesName)
                        &computeType);
     desc->finalize();
 
-    auto node = desc->buildNode();
+    const auto node = desc->buildNode();
     ASSERT_NE(node, nullptr);
     EXPECT_EQ(node->name, "test_moegroupedmatmulbwd");
 }

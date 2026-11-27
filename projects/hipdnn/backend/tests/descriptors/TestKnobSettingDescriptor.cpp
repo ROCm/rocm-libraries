@@ -279,7 +279,7 @@ TEST_F(TestKnobSettingDescriptor, ToKnobSettingTProducesCorrectObject)
     setInt64Value(value);
     ASSERT_NO_THROW(getDescriptor()->finalize());
 
-    auto knobSettingT = getDescriptor()->toKnobSettingT();
+    const auto knobSettingT = getDescriptor()->toKnobSettingT();
     ASSERT_NE(knobSettingT, nullptr);
     ASSERT_EQ(knobSettingT->knob_id, knobId);
     ASSERT_EQ(knobSettingT->value.type, hipdnn_flatbuffers_sdk::data_objects::KnobValue::IntValue);
@@ -294,7 +294,7 @@ TEST_F(TestKnobSettingDescriptor, ToKnobSettingTWithDoubleValue)
     setDoubleValue(value);
     ASSERT_NO_THROW(getDescriptor()->finalize());
 
-    auto knobSettingT = getDescriptor()->toKnobSettingT();
+    const auto knobSettingT = getDescriptor()->toKnobSettingT();
     ASSERT_NE(knobSettingT, nullptr);
     ASSERT_EQ(knobSettingT->knob_id, knobId);
     ASSERT_EQ(knobSettingT->value.type,
@@ -393,7 +393,7 @@ TEST_F(TestKnobSettingDescriptor, ToKnobSettingTWithStringValue)
     setStringValue(value);
     ASSERT_NO_THROW(getDescriptor()->finalize());
 
-    auto knobSettingT = getDescriptor()->toKnobSettingT();
+    const auto knobSettingT = getDescriptor()->toKnobSettingT();
     ASSERT_NE(knobSettingT, nullptr);
     ASSERT_EQ(knobSettingT->knob_id, knobId);
     ASSERT_EQ(knobSettingT->value.type,

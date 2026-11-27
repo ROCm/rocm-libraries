@@ -412,7 +412,7 @@ TEST_P(TestPackedStridedHostSentinelFill, PackedStridedHostSentinelFillMatchesTe
     const auto outputs
         = detail::allocateSentinelOutputs(attributes, {1}, TensorMap{}, {}, /*onDevice=*/false);
 
-    auto expected = hipdnn_test_sdk::detail::createTensor(dataType, dims, strides);
+    const auto expected = hipdnn_test_sdk::detail::createTensor(dataType, dims, strides);
     expected->fillWithSentinelValue();
     ASSERT_TRUE(outputs.at(1)->isPacked());
     ASSERT_EQ(outputs.at(1)->elementSpace(), expected->elementSpace());

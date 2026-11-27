@@ -265,7 +265,7 @@ TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdGraphRoundTrip)
 
     // -- Verify SDPA operation node --
     ASSERT_EQ(graphT.nodes.size(), 1u);
-    auto& node = graphT.nodes[0];
+    const auto& node = graphT.nodes[0];
     EXPECT_EQ(node->compute_data_type, DataTypeSdk::FLOAT);
     EXPECT_EQ(node->attributes.type, NodeAttrType::SdpaAttributes);
 

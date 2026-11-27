@@ -91,7 +91,7 @@ TEST(TestBatchnormFwdTrainingParams, LeavesSavedStatisticsUnsetWhenBothVirtual)
     const auto virtualBuilder = hipdnn_test_sdk::utilities::mutateGraph(
         hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(),
         [](hipdnn_flatbuffers_sdk::data_objects::GraphT& graph) {
-            for(auto& tensor : graph.tensors)
+            for(const auto& tensor : graph.tensors)
             {
                 if(tensor->name == "mean" || tensor->name == "inv_variance")
                 {

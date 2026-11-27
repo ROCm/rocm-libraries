@@ -196,7 +196,7 @@ TEST_F(TestGraphDescriptorRMSNorm, BuildFromSingleRMSNormOperation)
     flatbuffers::Verifier verifier(static_cast<const uint8_t*>(serialized.ptr), serialized.size);
     ASSERT_TRUE(verifier.VerifyBuffer<Graph>());
 
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
     ASSERT_EQ(graphT->tensors.size(), 6);
@@ -280,7 +280,7 @@ TEST_F(TestGraphDescriptorRMSNorm, ComputeDataTypePreserved)
     ASSERT_NO_THROW(desc->finalize());
 
     const auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
 
@@ -335,7 +335,7 @@ TEST_F(TestGraphDescriptorRMSNorm, BuildFromOperationWithoutOptionalTensors)
     ASSERT_NE(serialized.ptr, nullptr);
     ASSERT_GT(serialized.size, 0UL);
 
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
     ASSERT_EQ(graphT->tensors.size(), 4); // x, scale, epsilon, y only
@@ -392,7 +392,7 @@ TEST_F(TestGraphDescriptorRMSNorm, NamePreservedInFlatBuffer)
     ASSERT_NO_THROW(desc->finalize());
 
     const auto serialized = desc->getSerializedGraph();
-    auto graphT = UnPackGraph(serialized.ptr);
+    const auto graphT = UnPackGraph(serialized.ptr);
 
     ASSERT_EQ(graphT->nodes.size(), 1);
     EXPECT_EQ(graphT->nodes[0]->name, opName);

@@ -79,7 +79,7 @@ public:
         const auto weight = bindShallowTensor<WeightDataType>(_params.weightTensor, variantPack);
         const auto firstTokenOffset
             = bindShallowTensor<int32_t>(_params.firstTokenOffsetTensor, variantPack);
-        auto output = bindShallowTensor<OutputDataType>(_params.outputTensor, variantPack);
+        const auto output = bindShallowTensor<OutputDataType>(_params.outputTensor, variantPack);
         const auto tokenIndex
             = bindOptionalShallowTensor<int32_t>(_params.tokenIndexTensor, variantPack);
         const auto tokenKs = bindOptionalShallowTensor<int32_t>(_params.tokenKsTensor, variantPack);

@@ -423,9 +423,9 @@ TEST(TestCalculateSdpaFwdTolerance, DetectsFailure)
     const std::vector<int64_t> dims = {1, 1, 4, 8}; // [B, H, Sq, D]
     const std::vector<int64_t> strides = {32, 32, 8, 1};
 
-    auto baseline = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
-    auto actualPassing = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
-    auto actualFailing = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
+    const auto baseline = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
+    const auto actualPassing = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
+    const auto actualFailing = hipdnn_data_sdk::utilities::createTensor<float>(dims, strides);
 
     baseline->fillTensorWithValue(0.5f);
     actualPassing->fillTensorWithValue(0.500001f); // Small error
@@ -438,7 +438,7 @@ TEST(TestCalculateSdpaFwdTolerance, DetectsFailure)
     EXPECT_LT(tol, 0.01f);
     EXPECT_GT(tol, 1e-7f);
 
-    auto validator = hipdnn_test_sdk::utilities::createAllCloseValidator(
+    const auto validator = hipdnn_test_sdk::utilities::createAllCloseValidator(
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, tol, 0);
 
     bool valid = validator->allClose(*baseline, *actualPassing);

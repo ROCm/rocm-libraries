@@ -838,7 +838,7 @@ TEST_F(TestBatchnormOperationDescriptor, GetTensorDescriptorsWithAllOptionals)
 TEST_F(TestBatchnormOperationDescriptor, BuildNodeProducesCorrectNodeT)
 {
     makeFinalized();
-    auto node = getDescriptor()->buildNode();
+    const auto node = getDescriptor()->buildNode();
     ASSERT_NE(node, nullptr);
     ASSERT_EQ(node->compute_data_type, DataType::FLOAT);
     ASSERT_EQ(node->attributes.type, NodeAttributes::BatchnormAttributes);
@@ -865,7 +865,7 @@ TEST_F(TestBatchnormOperationDescriptor, BuildNodeWithHalfComputeType)
     desc->setAttribute(HIPDNN_ATTR_BATCHNORM_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
-    auto node = desc->buildNode();
+    const auto node = desc->buildNode();
     ASSERT_NE(node, nullptr);
     ASSERT_EQ(node->compute_data_type, DataType::HALF);
 }
@@ -875,7 +875,7 @@ TEST_F(TestBatchnormOperationDescriptor, BuildNodeWithoutOptionalTensors)
     setAllAttributesExcept();
     getDescriptor()->finalize();
 
-    auto node = getDescriptor()->buildNode();
+    const auto node = getDescriptor()->buildNode();
     ASSERT_NE(node, nullptr);
 
     auto* attrs = node->attributes.AsBatchnormAttributes();

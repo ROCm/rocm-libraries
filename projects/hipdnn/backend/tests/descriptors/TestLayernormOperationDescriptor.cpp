@@ -858,7 +858,7 @@ TEST_F(TestLayernormOperationDescriptor, BuildNodeProducesCorrectNodeT)
     makeFinalized();
 
     const auto desc = getDescriptor();
-    auto node = desc->buildNode();
+    const auto node = desc->buildNode();
     ASSERT_NE(node, nullptr);
     ASSERT_EQ(node->compute_data_type, DataType::FLOAT);
     ASSERT_EQ(node->attributes.type, NodeAttributes::LayernormAttributes);
@@ -887,7 +887,7 @@ TEST_F(TestLayernormOperationDescriptor, BuildNodePreservesNormalizedDimCount)
     setRequiredAttributes();
     desc->finalize();
 
-    auto node = desc->buildNode();
+    const auto node = desc->buildNode();
     ASSERT_NE(node, nullptr);
     auto* attrs = node->attributes.AsLayernormAttributes();
     ASSERT_NE(attrs, nullptr);
@@ -903,7 +903,7 @@ TEST_F(TestLayernormOperationDescriptor, BuildNodeWithHalfComputeType)
     desc->setAttribute(HIPDNN_ATTR_LAYERNORM_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
-    auto node = desc->buildNode();
+    const auto node = desc->buildNode();
     ASSERT_NE(node, nullptr);
     ASSERT_EQ(node->compute_data_type, DataType::HALF);
 }
@@ -913,7 +913,7 @@ TEST_F(TestLayernormOperationDescriptor, BuildNodeWithoutOptionalTensors)
     setRequiredAttributes();
     getDescriptor()->finalize();
 
-    auto node = getDescriptor()->buildNode();
+    const auto node = getDescriptor()->buildNode();
     ASSERT_NE(node, nullptr);
 
     auto* attrs = node->attributes.AsLayernormAttributes();

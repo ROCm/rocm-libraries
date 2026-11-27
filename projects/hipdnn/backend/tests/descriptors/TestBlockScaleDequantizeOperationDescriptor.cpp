@@ -665,7 +665,7 @@ TEST_F(TestBlockScaleDequantizeOperationDescriptor, BuildNodeProducesCorrectNode
     makeFinalized();
 
     const auto desc = getDescriptor();
-    auto node = desc->buildNode();
+    const auto node = desc->buildNode();
     ASSERT_NE(node, nullptr);
     ASSERT_EQ(node->compute_data_type, DataType::FLOAT);
     ASSERT_EQ(node->attributes.type, NodeAttributes::BlockScaleDequantizeAttributes);
@@ -691,7 +691,7 @@ TEST_F(TestBlockScaleDequantizeOperationDescriptor, BuildNodeWithIsNegativeScale
                        &isNegativeScale);
     desc->finalize();
 
-    auto node = desc->buildNode();
+    const auto node = desc->buildNode();
     ASSERT_NE(node, nullptr);
 
     auto* attrs = node->attributes.AsBlockScaleDequantizeAttributes();
@@ -710,7 +710,7 @@ TEST_F(TestBlockScaleDequantizeOperationDescriptor, BuildNodeWithHalfComputeType
                        &computeType);
     desc->finalize();
 
-    auto node = desc->buildNode();
+    const auto node = desc->buildNode();
     ASSERT_NE(node, nullptr);
     ASSERT_EQ(node->compute_data_type, DataType::HALF);
 }
