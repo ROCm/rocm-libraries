@@ -35,8 +35,9 @@ any other name for a lane without a GPU::
 Records name test files by their path in the tree that ran them (an installed
 tree or a source checkout), on any operating system; the audit maps each to the
 source test file whose path is the longest unique suffix of it. A lane none of
-whose records maps to a source test file is no evidence, and fails the audit
-as a test in limbo does.
+whose records maps to a source test file, or that ran no test, is no evidence,
+and fails the audit as a test in limbo does. The report counts the tests each
+lane ran.
 
 A test that failed in a lane fails the audit too: one whose body failed or
 whose setup or teardown raised, whose process ended before it did, or whose
@@ -171,6 +172,11 @@ class LaneRun:
         """Whether none of the lane's records named a source test file: its
         records are missing or from another tree, so it is no evidence."""
         return not (self.progress or self.skipped_files or self.failed_files)
+
+    @property
+    def tests_run(self) -> int:
+        """How many tests the lane ran (to any outcome)."""
+        return sum(event == "ran" for event in self.progress.values())
 
     def ran(self, test: TestId) -> bool:
         return self.progress.get(test) == "ran" or test[0] in self.failed_files
@@ -356,11 +362,16 @@ def audit(lanes: list[LaneRun], universe: Iterable[TestId] = ()) -> list[LimboTe
     return limbo
 
 
+def _no_evidence(lane: LaneRun) -> bool:
+    """Whether ``lane``'s records show nothing it ran."""
+    return lane.observed_nothing or not lane.tests_run
+
+
 def report(
     limbo: list[LimboTest], failed: list[FailedTest], lanes: list[LaneRun]
 ) -> str:
-    """The audit's report: the counts, each test that failed, then each test
-    in limbo with its reasons."""
+    """The audit's report: the counts, each lane's tests run, each test that
+    failed, then each test in limbo with its reasons."""
     lines = [
         "# Audit of CI runs",
         "",
@@ -370,11 +381,24 @@ def report(
         ),
         "",
         f"Tests that failed in a lane, a passed retry included: {len(failed)}.",
+        "",
+        "| lane | GPU | tests run | tests failed |",
+        "|---|---|---|---|",
+    ]
+    lines += [
+        f"| {lane.name} | {lane.gpu_arch or 'none'} | {lane.tests_run} | "
+        f"{len(lane.failures)} |"
+        for lane in lanes
     ]
     empty = [lane.name for lane in lanes if lane.observed_nothing]
     if empty:
         evidence = "Lanes with no record naming a source test file, so no evidence"
         lines += ["", f"{evidence}: {', '.join(empty)}"]
+    idle = [
+        lane.name for lane in lanes if not (lane.observed_nothing or lane.tests_run)
+    ]
+    if idle:
+        lines += ["", f"Lanes that ran no test, so no evidence: {', '.join(idle)}"]
     if failed:
         lines += [
             "",
@@ -471,7 +495,7 @@ def main(argv: list[str] | None = None) -> int:
         if len(text) < 20000
         else text[:20000] + "\n[report truncated; see --report]"
     )
-    no_evidence = any(lane.observed_nothing for lane in lanes)
+    no_evidence = any(_no_evidence(lane) for lane in lanes)
     return 1 if limbo or failed or no_evidence else 0
 
 

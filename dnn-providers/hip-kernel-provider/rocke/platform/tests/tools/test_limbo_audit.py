@@ -674,6 +674,7 @@ def test_a_test_that_passed_only_on_a_retry_fails_the_audit(tmp_path):
     text = report.read_text()
     assert "Tests that failed in a lane, a passed retry included: 1." in text
     assert f"| `{UNREGISTERED_FILE}` | `test_fails_once` | gfx942: failed |" in text
+    assert "| gfx942 | gfx942 | 2 | 1 |" in text
 
 
 def test_a_test_whose_process_ended_first_is_a_failure_of_its_lane(tmp_path):
@@ -705,3 +706,29 @@ def test_ends_the_process_once():
             UNREGISTERED_FILE, "test_ends_the_process_once", {"gfx942": ("unfinished",)}
         )
     ]
+
+
+def test_a_lane_that_ran_no_test_fails_the_audit(tmp_path):
+    """A lane whose every test skipped, each for a recorded reason, leaves no
+    test in limbo but is no evidence that the lane ran anything."""
+    tree = _tree_with(
+        tmp_path,
+        {
+            GFX950_FILE: """
+from rocke.tests.lanes import RUNNER_HARDWARE, skip_until
+
+def test_waits_for_gfx950():
+    skip_until(RUNNER_HARDWARE, reason="needs a gfx950 GPU")
+""",
+            UNREGISTERED_FILE: "def test_passes():\n    pass\n",
+        },
+    )
+    idle = _run_lane(tree, tmp_path / "gfx1100", "gfx1100", GFX950_FILE)
+    working = _run_lane(tree, tmp_path / "gfx942", "gfx942")
+    assert _audit(tree, {"gfx1100": idle, "gfx942": working}) == {}
+    report = tmp_path / "limbo.md"
+    assert _main(tree, {"gfx942": working}, report) == 0
+    assert _main(tree, {"gfx1100": idle, "gfx942": working}, report) == 1
+    text = report.read_text()
+    assert "Lanes that ran no test, so no evidence: gfx1100" in text
+    assert "| gfx1100 | gfx1100 | 0 | 0 |" in text
