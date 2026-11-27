@@ -1211,7 +1211,7 @@ TEST_F(TestGpuMxMatmulPlanExecute, PreparesScalesOnTheHandleStream)
 
 // Tensors of rank 3 and 4 with leading dims of 1, as the in-tree bundles have, are the
 // same GEMM: M, N, K, the scale extents and the selected scale format come from the
-// last two dims. On gfx950 rocRoller (natural scales) is also run for each storage.
+// last two dims. On gfx950, force natural scales only for K-contiguous A and B.
 TEST_F(TestGpuMxMatmulPlanExecute, LeadingUnitDimsGiveTheSameResult)
 {
     std::vector<MxStorage> storages{{true, true, false, false}};
@@ -1226,6 +1226,11 @@ TEST_F(TestGpuMxMatmulPlanExecute, LeadingUnitDimsGiveTheSameResult)
     {
         for(const auto& format : formats)
         {
+            if(format == MxScaleFormat::NATURAL && (!storage.aKContiguous || !storage.bKContiguous))
+            {
+                // The default already uses natural scales for non-TN layouts.
+                continue;
+            }
             const auto expected = execute(_handle, storage, inputs, false, format);
             for(const int64_t leadingOnes : {1, 2})
             {

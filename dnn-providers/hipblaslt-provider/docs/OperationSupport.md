@@ -35,7 +35,7 @@ hipBLASLt Provider Plugin supports stand-alone Matmul (GEMM, general matrix mult
 
 ### MX BlockScaleDequantize + GEMM (MX GEMM)
 
-This is a hipDNN graph of two `BlockScaleDequantize` nodes feeding a `Matmul` node — an OCP MX block-scaled matrix multiplication. The plugin recognizes the pattern and executes it as a single fused GEMM, mapping the block-scale dequantization onto hipBLASLt's `VEC32_UE8M0` scale mode.
+The provider supports OCP MX block-scaled GEMM expressed as a hipDNN graph with two `BlockScaleDequantize` nodes feeding a `Matmul` node.
 
 Supported MX input element types are **FP8 OCP** (`FP8_E4M3` / `FP8_E5M2`), **OCP MX FP6** (`FP6_E2M3` / `FP6_E3M2`), and **OCP MX FP4** (`FP4_E2M1`), including **mixed pairs** (e.g. FP8 × FP4, or FP6 E2M3 × FP6 E3M2).
 
@@ -78,16 +78,15 @@ Matmul(a, b) → d
 | row-major | row-major | yes | no |
 | column-major | column-major | yes | no |
 
-**Graph requirements:** the plugin validates the hipDNN graph
-against these before accepting it. They derive from hipBLASLt's `VEC32_UE8M0` scale mode — see the
-[hipBLASLt API reference](https://rocm.docs.amd.com/projects/hipBLASLt/en/latest/reference/api-reference.html).
+**Graph requirements:**
+
 - Tensor roles: the MX inputs, the UE8M0 scales, and the output `d` must be non-virtual; the dequantize outputs `a`/`b` must be virtual (fused intermediates)
 - Scale tensors: dtype `FP8_E8M0`, natural (unswizzled) values, one scale per 32-element block: `[M, K/32]` for `scale_a`, `[K/32, N]` for `scale_b`
 - Layout: A and B are packed matrices in the orders of the table above; each scale is a packed row- or column-major matrix in either order, whatever its operand's order (a scale in the other order is reordered on the device, in the workspace); the output `d` is a packed row-major matrix; padded leading dimensions are rejected
 - Dequantize attributes: `is_negative_scale` is declined; the plan scales by 2^(scale) only
 - Alignment: `M % 16 == 0`, `N % 16 == 0`, `K % 128 == 0`
-- Block size: innermost `block_size == 32` for both scale tensors (VEC32)
-- Batch: single batch only (`batch == 1`); hipBLASLt requires `B == 1` for this scale mode
+- Block size: innermost `block_size == 32` for both scale tensors
+- Batch: single batch only (`batch == 1`)
 - Epilogue: none — no fused bias or activation permitted
 - Output type: limited to the supported output types above (`FP32`/`FP16`/`BF16`); FP8 and other quantized outputs are not produced by this fused path
 
