@@ -141,7 +141,13 @@ from kernels.common._attention_bwd_band import (
     RuntimeBand,
     dkv_store_rule,
 )
-from kernels.common._attention_bwd_caps import BWD_BARRIER_FENCE
+from kernels.common._attention_bwd_caps import (
+    BWD_BARRIER_FENCE,
+    atom_knob_for,
+    atom_knob_k,
+    atom_knobs,
+    bwd_atom_knobs,
+)
 from kernels.common._attention_bwd_body import (
     DEFAULT_G4_SLICING,
     DEFAULT_STAGE_ORDER,
@@ -268,7 +274,7 @@ BLOCK_K4_VALUES = (16, 32, 64)
 # Occupancy hints (waves per SIMD the backend allocates registers for; MFMA
 # targets: the arch-VGPR + AGPR estimate must fit 512 / n; WMMA: None, 1, 2).
 WAVES_PER_EU_VALUES = (1, 2, 3, 4)
-ATOMS = ("16x16x16", "16x16x32", "wmma16x16x16")
+ATOMS = atom_knobs()  # every backward atom of the MMA catalog
 PT_ROUTES = ("relabel", "lds")
 RESIDENCIES = ("reg", "lds")
 TRANSPOSE_SOURCES = ("xt_lds", "tr_read", "lds_plain", "wmma_lds")
@@ -724,9 +730,7 @@ class BwdArchFacts:
 
     @property
     def legal_atoms(self) -> tuple[str, ...]:
-        if self.matrix_path == "wmma":
-            return ("wmma16x16x16",)
-        return ("16x16x16", "16x16x32") if self.wide_k_atom else ("16x16x16",)
+        return bwd_atom_knobs(self.arch)
 
     @property
     def legal_transpose_sources(self) -> tuple[str, ...]:
@@ -778,10 +782,6 @@ def attn_bwd_arch_facts(arch: str) -> BwdArchFacts:
 # ---------------------------------------------------------------------------
 
 
-def _atom_k(atom: str) -> int:
-    return int(atom.rsplit("x", 1)[1])
-
-
 def _canonical_swizzle(value: str) -> str:
     """Normalise ``"k=xor,q=pad8"`` to sorted ``name=value`` pairs."""
     pairs = {}
@@ -823,9 +823,9 @@ def _canonical_asm_knobs(spec: "AttnBwdSpec") -> "AttnBwdSpec":
     if spec.agpr_route != "asm_g13" or spec.atom_g13 is None:
         return spec
     # the asm GEMMs: G1 / G3 (K = kM0), and G0 / G2 (K = D) under s_in_agpr
-    asm_ks = [(_atom_k(spec.atom_g13), spec.block_m)]
+    asm_ks = [(atom_knob_k(spec.atom_g13), spec.block_m)]
     if spec.s_in_agpr and spec.atom_g02 is not None:
-        asm_ks.append((_atom_k(spec.atom_g02), spec.head_size))
+        asm_ks.append((atom_knob_k(spec.atom_g02), spec.head_size))
     updates = {}
     shipped = {AGPR_ASM_TAIL_NOP.get(atom_k) for atom_k, _ in asm_ks}
     if spec.asm_tail_nop is not None and shipped == {spec.asm_tail_nop}:
@@ -849,7 +849,7 @@ def _canonical_g4_slicing(spec: "AttnBwdSpec") -> "AttnBwdSpec":
         return spec
     if v == "slice_db" and spec.block_k4 == spec.block_n:
         v = "slice"
-    if v == "slice" and spec.block_k4 == _atom_k(spec.atom_g4):
+    if v == "slice" and spec.block_k4 == atom_knob_k(spec.atom_g4):
         v = DEFAULT_G4_SLICING
     return dataclasses.replace(spec, g4_slicing=v) if v != spec.g4_slicing else spec
 
@@ -1246,11 +1246,11 @@ class AttnBwdSpec:
                     "asm_load_hoist is legal with agpr_route='asm_g13' only"
                 )
         if (
-            self.atom_g13 == "16x16x32"
+            self.atom_g13 == atom_knob_for(32)
             and self.block_m is not None
             and self.block_m < 32
         ):
-            raise ValueError("atom_g13='16x16x32' requires block_m >= 32")
+            raise ValueError(f"atom_g13={atom_knob_for(32)!r} requires block_m >= 32")
 
     # -- derived -----------------------------------------------------------
 
@@ -1426,9 +1426,9 @@ def attn_bwd_default_geometry(
             "block_n": kn,
             "block_k4": kk,
             "warp_grid_g4": g4,
-            "atom_g02": "wmma16x16x16",
-            "atom_g13": "wmma16x16x16",
-            "atom_g4": "wmma16x16x16",
+            "atom_g02": atom_knob_for(16, wmma=True),
+            "atom_g13": atom_knob_for(16, wmma=True),
+            "atom_g4": atom_knob_for(16, wmma=True),
             "pt_route": "lds",
             "kv_residency": kv,
             "kt_source": kt,
@@ -1463,9 +1463,9 @@ def attn_bwd_default_geometry(
         "block_n": kn,
         "block_k4": kk,
         "warp_grid_g4": g4,
-        "atom_g02": "16x16x32" if wide else "16x16x16",
-        "atom_g13": "16x16x16",
-        "atom_g4": "16x16x32" if wide else "16x16x16",
+        "atom_g02": atom_knob_for(32 if wide else 16),
+        "atom_g13": atom_knob_for(16),
+        "atom_g4": atom_knob_for(32 if wide else 16),
         "pt_route": "relabel",
         "kv_residency": kv,
         "kt_source": kt,
@@ -1545,8 +1545,8 @@ def lds_request(spec: AttnBwdSpec, arch: str) -> BwdLdsRequest:
         dkv_epilogue=_planned_epilogue(spec),
         lds_order=spec.lds_order,
         ds_slots=2 if spec.barrier_merge == "on" else 1,
-        atom_k_g13=_atom_k(spec.atom_g13),
-        atom_k_g4=_atom_k(spec.atom_g4),
+        atom_k_g13=atom_knob_k(spec.atom_g13),
+        atom_k_g4=atom_knob_k(spec.atom_g4),
     )
 
 
@@ -1634,7 +1634,7 @@ def _ds_slice_regs(spec: AttnBwdSpec, wave: int) -> int:
     """
     km = spec.block_m
     if spec.g4_slicing == DEFAULT_G4_SLICING:
-        return 2 * km * _atom_k(spec.atom_g4) // (2 * wave)
+        return 2 * km * atom_knob_k(spec.atom_g4) // (2 * wave)
     kk = spec.block_k4
     regs = 2 * km * kk // (2 * wave)
     if spec.kt_source == "lds":
@@ -1811,15 +1811,15 @@ def validate_attn_bwd_spec(
         )
     if w == 1 and (km, kn) != (16, 16):
         raise ValueError("waves=1 is legal only for the 16 x 16 debug / fallback tile")
-    k4a = _atom_k(s.atom_g4)
+    k4a = atom_knob_k(s.atom_g4)
     if kk % k4a != 0:
         raise ValueError(f"block_k4={kk} must be a multiple of the G4 atom K ({k4a})")
     if kn % kk != 0:
         raise ValueError(f"block_n={kn} must be a multiple of block_k4={kk}")
-    if d % _atom_k(s.atom_g02) != 0:
+    if d % atom_knob_k(s.atom_g02) != 0:
         raise ValueError(f"head_size={d} must be a multiple of the G0/G2 atom K")
-    if s.atom_g13 == "16x16x32" and km < 32:
-        raise ValueError("atom_g13='16x16x32' requires block_m >= 32")
+    if s.atom_g13 == atom_knob_for(32) and km < 32:
+        raise ValueError(f"atom_g13={atom_knob_for(32)!r} requires block_m >= 32")
     g4r, g4c = s.warp_grid_g4
     if (g4r, g4c) not in ((1, w), (2, w // 2)) or g4r * g4c != w:
         raise ValueError(
@@ -1994,9 +1994,11 @@ def validate_attn_bwd_spec(
             # G0 / G2 are asm clusters on the atom_g02 atom too)
             from kernels.common._attention_bwd_caps import check_asm_tail_nop
 
-            check_asm_tail_nop(arch, s.dtype, _atom_k(s.atom_g13), s.asm_tail_nop)
+            check_asm_tail_nop(arch, s.dtype, atom_knob_k(s.atom_g13), s.asm_tail_nop)
             if s.s_in_agpr:
-                check_asm_tail_nop(arch, s.dtype, _atom_k(s.atom_g02), s.asm_tail_nop)
+                check_asm_tail_nop(
+                    arch, s.dtype, atom_knob_k(s.atom_g02), s.asm_tail_nop
+                )
     if spec.g4_slicing != DEFAULT_G4_SLICING or s.g4_slicing != DEFAULT_G4_SLICING:
         # checked on the requested value too: a value the resolved spec spells
         # as "step" (one atom-K step per slice) is still refused where key

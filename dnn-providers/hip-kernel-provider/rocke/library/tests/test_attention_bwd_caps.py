@@ -272,3 +272,47 @@ def test_no_backward_module_defines_a_build_prefixed_non_builder():
             if not re.fullmatch(r"\s*spec\s*(:[^,]*)?,\s*\*,\s*arch\b.*", args, re.S):
                 bad.append(f"{f.name}:{name}")
     assert not bad, bad
+
+
+# ---------------------------------------------------------------------------
+# atom knobs: built from the MMA catalog, never typed or parsed
+# ---------------------------------------------------------------------------
+
+
+def test_atom_knobs_come_from_the_catalog():
+    for arch in C.BWD_ARCHES:
+        want = tuple(
+            dict.fromkeys(
+                C.atom_knob(op)
+                for dt in ("fp16", "bf16")
+                for op in C.bwd_atoms(arch, dt)
+            )
+        )
+        assert C.bwd_atom_knobs(arch) == want
+        for knob in want:
+            assert C.select_bwd_atom(arch, "fp16", C.atom_knob_k(knob)) is not None
+
+
+def test_atom_knobs_keep_the_spec_spellings():
+    """The catalog gives the same knob tuples the specs and their messages use."""
+    from kernels.common.attention_bwd import ATOMS, attn_bwd_arch_facts
+
+    assert C.atom_knobs() == ("16x16x16", "16x16x32", "wmma16x16x16") == ATOMS
+    assert C.atom_knobs(mfma_only=True) == ("16x16x16", "16x16x32")
+    assert attn_bwd_arch_facts("gfx942").legal_atoms == ("16x16x16",)
+    assert attn_bwd_arch_facts("gfx950").legal_atoms == ("16x16x16", "16x16x32")
+    assert attn_bwd_arch_facts("gfx1151").legal_atoms == ("wmma16x16x16",)
+    assert C.atom_knob_for(32) == "16x16x32"
+    assert C.atom_knob_for(16, wmma=True) == "wmma16x16x16"
+    assert [C.atom_knob_k(k) for k in C.atom_knobs()] == [16, 32, 16]
+
+
+@pytest.mark.parametrize("knob", ["32x32x8", "16x16x8", "16x16x", "", None])
+def test_an_unknown_atom_knob_is_refused(knob):
+    with pytest.raises(ValueError, match="unknown atom"):
+        C.atom_knob_k(knob)
+
+
+def test_no_atom_knob_for_a_missing_k():
+    with pytest.raises(ValueError, match="no WMMA atom knob with K 32"):
+        C.atom_knob_for(32, wmma=True)

@@ -37,6 +37,11 @@ __all__ = [
     "BwdArchCaps",
     "bwd_arch_caps",
     "bwd_atoms",
+    "atom_knob",
+    "atom_knob_for",
+    "atom_knob_k",
+    "atom_knobs",
+    "bwd_atom_knobs",
     "check_agpr_alloc",
     "mfma_asm_mnemonic",
     "AGPR_ASM_TAIL_NOP",
@@ -136,6 +141,74 @@ def bwd_atoms(arch: str, dtype: str) -> tuple[MmaOp, ...]:
     """
     _gate(arch)
     return _caps.attn_atoms(arch, _norm_dtype(dtype))
+
+
+# ---------------------------------------------------------------------------
+# atom knobs: the spec spellings (atom_g02 / atom_g13 / atom_g4) of the
+# catalog's backward atoms. A knob names a shape; the instruction comes from
+# the catalog (select_bwd_atom with the knob's K).
+# ---------------------------------------------------------------------------
+
+# Operand dtypes the knobs cover (attention_bwd.BWD_DTYPES; repeated here to
+# keep this module free of the kernel module).
+_KNOB_DTYPES = ("fp16", "bf16")
+
+
+def atom_knob(op: MmaOp) -> str:
+    """The knob spelling of a catalog atom: ``"<m>x<n>x<k>"``, prefixed
+    ``"wmma"`` for a WMMA atom."""
+    prefix = "wmma" if op.family == "wmma" else ""
+    return f"{prefix}{op.m}x{op.n}x{op.k}"
+
+
+@cache
+def _knob_ks(arch: str) -> dict[str, tuple[bool, int]]:
+    """``{knob: (wmma, K)}`` of ``arch``'s backward atoms, by increasing K."""
+    knobs: dict[str, tuple[bool, int]] = {}
+    for dtype in _KNOB_DTYPES:
+        for op in bwd_atoms(arch, dtype):
+            knobs.setdefault(atom_knob(op), (op.family == "wmma", op.k))
+    return dict(sorted(knobs.items(), key=lambda kv: kv[1][1]))
+
+
+def bwd_atom_knobs(arch: str) -> tuple[str, ...]:
+    """The atom knobs legal on ``arch``, by increasing K."""
+    return tuple(_knob_ks(arch))
+
+
+@cache
+def _all_knob_ks() -> dict[str, tuple[bool, int]]:
+    """``{knob: (wmma, K)}`` over every backward arch: MFMA by K, then WMMA."""
+    knobs: dict[str, tuple[bool, int]] = {}
+    for arch in BWD_ARCHES:
+        knobs.update(_knob_ks(arch))
+    return dict(sorted(knobs.items(), key=lambda kv: kv[1]))
+
+
+def atom_knobs(*, mfma_only: bool = False) -> tuple[str, ...]:
+    """Every atom knob of the backward (MFMA by K, then WMMA), or the MFMA ones."""
+    return tuple(
+        k for k, (wmma, _k) in _all_knob_ks().items() if not (mfma_only and wmma)
+    )
+
+
+def atom_knob_k(knob: str) -> int:
+    """The K of an atom knob; ``ValueError`` for a spelling no backward atom has."""
+    try:
+        return _all_knob_ks()[knob][1]
+    except (KeyError, TypeError):
+        raise ValueError(
+            f"unknown atom {knob!r}; known atoms: {atom_knobs()}"
+        ) from None
+
+
+def atom_knob_for(k: int, *, wmma: bool = False) -> str:
+    """The MFMA (or WMMA) atom knob of K ``k``."""
+    for knob, (is_wmma, kk) in _all_knob_ks().items():
+        if is_wmma == wmma and kk == k:
+            return knob
+    kind = "WMMA" if wmma else "MFMA"
+    raise ValueError(f"no {kind} atom knob with K {k}")
 
 
 def select_bwd_atom(arch: str, dtype: str, k: int = 16) -> MmaOp:

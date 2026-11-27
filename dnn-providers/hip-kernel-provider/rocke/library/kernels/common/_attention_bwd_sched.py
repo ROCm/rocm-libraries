@@ -123,6 +123,7 @@ from rocke.helpers.compile import COMGR_FRESH_PROCESS_ATTR
 from rocke.helpers.schedule import DS_READ, DS_WRITE, MFMA, VMEM_READ, VMEM_WRITE
 from rocke.helpers.spec import ceil_div
 
+from ._attention_bwd_caps import atom_knob_k
 from ._attention_bwd_lds import default_xt_writer
 
 __all__ = [
@@ -256,10 +257,7 @@ def _atom_k(value: Any) -> int:
     if k is not None:
         return int(k)
     if isinstance(value, str):
-        text = value.lower().replace("wmma", "")
-        parts = text.split("x")
-        if len(parts) == 3:
-            return int(parts[2])
+        return atom_knob_k(value)  # the spec's atom knob
     raise ValueError(f"cannot read an atom K from {value!r}")
 
 

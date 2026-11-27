@@ -91,7 +91,7 @@ from ._attention_bwd_body import (
     copy_packed_rows_to_lds,
     copy_rows_to_lds,
 )
-from ._attention_bwd_caps import bwd_arch_caps, check_transpose_read
+from ._attention_bwd_caps import atom_knob_k, bwd_arch_caps, check_transpose_read
 from ._attention_bwd_frag import (
     LdsView,
     atom_facts,
@@ -255,10 +255,6 @@ def interior_kv_range(
 # ---------------------------------------------------------------------------
 
 
-def _atom_k(atom: str) -> int:
-    return int(str(atom).rsplit("x", 1)[1])
-
-
 @dataclass(frozen=True)
 class BwdDqGeometry:
     """Resolved, validated tile geometry of one split dQ kernel.
@@ -296,8 +292,8 @@ class BwdDqGeometry:
             k_m0=spec.block_m,
             k_n0=spec.block_n,
             head_size=spec.head_size,
-            atom_g02=_atom_k(spec.atom_g02),
-            atom_g4=_atom_k(spec.atom_g4),
+            atom_g02=atom_knob_k(spec.atom_g02),
+            atom_g4=atom_knob_k(spec.atom_g4),
             transpose_source=spec.transpose_source,
             sched=getattr(spec, "sched", "none"),
             kv_pad=int(getattr(spec, "kv_pad", 0)),

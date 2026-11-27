@@ -321,11 +321,7 @@ static Ints legal_waves(const rocke_attn_bwd_arch_facts_t& f)
 
 static Strs legal_atoms(const rocke_attn_bwd_arch_facts_t& f)
 {
-    Strs out;
-    for(const AtomKnob& a : atom_knobs())
-        if(a.wmma == !facts_mfma(f) && (a.wmma || a.k != 32 || f.wide_k_atom))
-            out.push_back(a.spelling);
-    return out;
+    return bwd_atom_knobs(f.arch);
 }
 
 static Strs legal_transpose_sources(const rocke_attn_bwd_arch_facts_t& f)
