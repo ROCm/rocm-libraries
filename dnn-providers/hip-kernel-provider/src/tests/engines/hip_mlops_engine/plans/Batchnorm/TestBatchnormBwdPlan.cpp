@@ -1,6 +1,11 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <algorithm>
+#include <array>
+#include <string>
+#include <vector>
+
 #include <gtest/gtest.h>
 
 #include "engines/hip_mlops_engine/plans/batchnorm/BatchnormBwdPlan.hpp"
@@ -228,6 +233,92 @@ TEST(TestBatchnormBwdPlan, CompileWithUnsupportedDimensionThrows)
     auto deviceProps = createTestDeviceProps();
 
     EXPECT_THROW(plan.compile(mockCompiler, deviceProps), hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+// ============================================================================
+// buildBatchnormBwdKernel - explicit performance configuration
+// ============================================================================
+
+namespace
+{
+
+// A backward graph and the params of its batchnorm node, which point into the graph's buffer.
+struct BwdGraph
+{
+    flatbuffers::FlatBufferBuilder builder;
+    BatchnormBwdParams params;
+};
+
+BwdGraph createBwdGraph()
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+    BatchnormBwdParams params(*graph.getNode(0).attributes_as_BatchnormBackwardAttributes(),
+                              graph.getTensorMap());
+    return {std::move(builder), std::move(params)};
+}
+
+bool hasBuildOption(const BatchnormKernelBuild& build, const std::string& option)
+{
+    const std::vector<std::string> options = build.options;
+    return std::find(options.begin(), options.end(), option) != options.end();
+}
+
+} // namespace
+
+TEST(TestBatchnormBwdKernelConfig, DefaultConfigIsTheHeuristicChoice)
+{
+    // NCHW 1x3x224x224: spatial single variant 1 of 1024 threads
+    const auto graph = createBwdGraph();
+    EXPECT_EQ(defaultBatchnormBwdConfig(graph.params), (BatchnormSpatialConfig{1, 1024, 1}));
+}
+
+TEST(TestBatchnormBwdKernelConfig, BuildTakesTheWorkgroupSizeOfTheConfig)
+{
+    const auto graph = createBwdGraph();
+
+    const auto build = buildBatchnormBwdKernel(graph.params, "gfx942", {1, 256, 1});
+
+    EXPECT_EQ(build.variant, 1);
+    EXPECT_TRUE(hasBuildOption(build, "-DHIP_PLUGIN_BN_VARIANT=1"));
+    EXPECT_TRUE(hasBuildOption(build, "-DHIP_PLUGIN_BN_GRP0=256"));
+    EXPECT_TRUE(hasBuildOption(build, "-DHIP_PLUGIN_BN_LDS_SIZE=256"));
+    ASSERT_EQ(build.launches.size(), 1u);
+    EXPECT_STREQ(build.launches[0].entryPoint, "BatchNormBwdSpatial");
+    EXPECT_EQ(build.launches[0].blockSize, (std::array<unsigned int, 3>{256, 1, 1}));
+    EXPECT_EQ(build.launches[0].gridSize, (std::array<unsigned int, 3>{3, 1, 1}));
+}
+
+TEST(TestBatchnormBwdKernelConfig, BuildTakesTheVectorSizeOfTheConfig)
+{
+    const auto graph = createBwdGraph();
+
+    const auto build = buildBatchnormBwdKernel(graph.params, "gfx942", {2, 0, 4});
+
+    // NCHW vectorizes the spatial dimension: 50176 / 4 values over workgroups of 1024
+    EXPECT_EQ(build.variant, 2);
+    EXPECT_TRUE(hasBuildOption(build, "-DHIP_PLUGIN_BN_VARIANT=2"));
+    EXPECT_TRUE(hasBuildOption(build, "-DHIP_PLUGIN_BN_VEC_SIZE=4"));
+    EXPECT_TRUE(hasBuildOption(build, "-DHIP_PLUGIN_BN_GRP1=1024"));
+    EXPECT_TRUE(hasBuildOption(build, "-DHIP_PLUGIN_BN_GRPS1=13"));
+    // With saved statistics execute() runs launches 0, 1 and 4
+    ASSERT_EQ(build.launches.size(), 5u);
+    EXPECT_STREQ(build.launches[0].entryPoint, "BatchNormBwdSpatialDScaleDBias");
+    EXPECT_STREQ(build.launches[1].entryPoint, "BatchNormBwdSpatialFinalDScaleDBias");
+    EXPECT_STREQ(build.launches[4].entryPoint, "BatchNormBwdSpatialDX");
+    EXPECT_EQ(build.launches[0].gridSize, (std::array<unsigned int, 3>{3, 13, 1}));
+}
+
+TEST(TestBatchnormBwdKernelConfig, ApplicabilityFollowsTheProblem)
+{
+    const auto graph = createBwdGraph();
+
+    EXPECT_TRUE(isBatchnormBwdConfigApplicable(graph.params, {1, 1024, 1}));
+    EXPECT_TRUE(isBatchnormBwdConfigApplicable(graph.params, {2, 0, 4}));
+    // Variants 0 and 3 give each thread one spatial position: 50176 do not fit 1024 threads
+    EXPECT_FALSE(isBatchnormBwdConfigApplicable(graph.params, {0, 1024, 1}));
+    EXPECT_FALSE(isBatchnormBwdConfigApplicable(graph.params, {3, 1024, 1}));
 }
 
 } // namespace hip_kernel_provider::batchnorm

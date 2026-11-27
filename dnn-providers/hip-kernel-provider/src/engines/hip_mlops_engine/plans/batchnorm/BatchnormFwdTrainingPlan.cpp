@@ -201,10 +201,16 @@ size_t BatchnormFwdTrainingPlan::getWorkspaceSize([[maybe_unused]] const Handle&
     return 0;
 }
 
-BatchnormKernelBuild buildBatchnormFwdTrainingKernel(const BatchnormFwdTrainingParams& params,
-                                                     const std::string& gcnArchName,
-                                                     int multiProcessorCount,
-                                                     int warpSize)
+namespace
+{
+
+// Spatial multiple needs space for 2 fp32 elements
+// per each x thread (including the last workgroup)
+// to stash intermediate mean and variance
+constexpr unsigned int FWD_STASH_VALUES = 2;
+
+ProblemDescription fwdTrainingProblem(const BatchnormFwdTrainingParams& params,
+                                      int multiProcessorCount)
 {
     // Determine data type configuration
     auto xDataType = params.x()->data_type();
@@ -272,85 +278,80 @@ BatchnormKernelBuild buildBatchnormFwdTrainingKernel(const BatchnormFwdTrainingP
                                                            + std::to_string(xDims->size()));
     }
 
-    auto inCstride = static_cast<unsigned int>(spatialSize);
+    // Spatial multiple sizes its workgroups to keep at least 60% of the CUs busy
+    const size_t minWorkgroups
+        = std::max(size_t(1), size_t(0.6f * static_cast<float>(multiProcessorCount)));
+    return {batches,
+            channels,
+            spatialSize,
+            isChannelLastLayout(params.x()),
+            useFp16Mix,
+            useBfp16Mix,
+            useFp16Upcast,
+            useBfp16Upcast,
+            Direction::FORWARD_TRAINING,
+            minWorkgroups};
+}
 
-    // Detect layout
-    const bool isLayoutChannelLast = isChannelLastLayout(params.x());
+} // namespace
 
-    // Kernel launch parameters
-    // NOTE: These are generally selected based on heuristics and tuning,
-    // but here we are starting with initial values that worked well in
-    // MIOpen. Tuning infrastructure can be added in the future to further
-    // optimize these parameters.
-    int variant = -1;
-    size_t vectorsize = 1;
-    size_t xlocalsize = 1;
+BatchnormSpatialConfig defaultBatchnormFwdTrainingConfig(const BatchnormFwdTrainingParams& params,
+                                                         int multiProcessorCount)
+{
+    return defaultSpatialConfig(fwdTrainingProblem(params, multiProcessorCount), FWD_STASH_VALUES);
+}
+
+bool isBatchnormFwdTrainingConfigApplicable(const BatchnormFwdTrainingParams& params,
+                                            int multiProcessorCount,
+                                            const BatchnormSpatialConfig& config)
+{
+    return isSpatialConfigApplicable(
+        fwdTrainingProblem(params, multiProcessorCount), FWD_STASH_VALUES, config);
+}
+
+BatchnormKernelBuild buildBatchnormFwdTrainingKernel(const BatchnormFwdTrainingParams& params,
+                                                     const std::string& gcnArchName,
+                                                     int multiProcessorCount,
+                                                     int warpSize,
+                                                     const BatchnormSpatialConfig& config)
+{
+    const auto problem = fwdTrainingProblem(params, multiProcessorCount);
+    const bool useFp16Mix = problem.useFp16Mix();
+    const bool useBfp16Mix = problem.useBfp16Mix();
+    const bool useFp16Upcast = problem.useFp16Upcast();
+    const bool useBfp16Upcast = problem.useBfp16Upcast();
+    const size_t batches = problem.batches();
+    const size_t channels = problem.channels();
+    const size_t spatialSize = problem.spatialSize();
+    const auto inCstride = problem.inCstride();
+    const bool isLayoutChannelLast = problem.isLayoutChannelLast();
+
+    // Kernel launch parameters: the variant, its workgroup size or vector size come from
+    // config, the rest derives from them and the problem.
+    // NOTE: defaultBatchnormFwdTrainingConfig() picks config with the heuristics that worked
+    // well in MIOpen. Tuning infrastructure can be added in the future to further optimize it.
+    const auto kernelConfig = spatialKernelConfig(problem, config);
+    const int variant = kernelConfig.variant;
+    const size_t vectorsize = kernelConfig.vectorsize;
+    size_t xlocalsize = kernelConfig.xlocalsize;
     size_t xgridsize = 1;
-    size_t ylocalsize = 1;
+    const size_t ylocalsize = kernelConfig.ylocalsize;
     size_t ygridsize = 1;
-    size_t zlocalsize = 1;
+    const size_t zlocalsize = kernelConfig.zlocalsize;
     size_t zgridsize = 1;
     unsigned int ldsgcn = 0;
     unsigned int ldsnogcn = 0;
     int stashMethod = 0;
-    size_t batchElements = 1;
+    const size_t batchElements = kernelConfig.batchElements;
 
-    // Spatial multiple needs space for 2 fp32 elements
-    // per each x thread (including the last workgroup)
-    // to stash intermediate mean and variance
-    const unsigned int stashValuesFwd = 2;
-
-    // Get the kernel launch configuration based on heuristics
-    hip_kernel_provider::batchnorm::KernelConfig config;
-    const size_t minWorkgroups
-        = std::max(size_t(1), size_t(0.6f * static_cast<float>(multiProcessorCount)));
     const auto waveSize = static_cast<size_t>(warpSize);
-    const hip_kernel_provider::batchnorm::ProblemDescription problem(
-        batches,
-        channels,
-        spatialSize,
-        isLayoutChannelLast,
-        useFp16Mix,
-        useBfp16Mix,
-        useFp16Upcast,
-        useBfp16Upcast,
-        hip_kernel_provider::batchnorm::Direction::FORWARD_TRAINING,
-        minWorkgroups);
-    // Define default configuration based on heuristics and
-    // add all other valid configurations for the given problem
-    if(hip_kernel_provider::batchnorm::useMultiple(problem))
-    {
-        hip_kernel_provider::batchnorm::defaultConfigSpatialMultiple(
-            problem, stashValuesFwd, config);
-        if(config.variant == -1)
-        {
-            // If the default spatial multiple function failed to select a valid configuration,
-            // get a default spatial single configuration as fallback
-            hip_kernel_provider::batchnorm::defaultConfigSpatialSingle(problem, config);
-        }
-    }
-    else
-    {
-        hip_kernel_provider::batchnorm::defaultConfigSpatialSingle(problem, config);
-    }
-
-    variant = config.variant;
-    vectorsize = config.vectorsize;
-    xlocalsize = config.xlocalsize;
-    ylocalsize = config.ylocalsize;
-    zlocalsize = config.zlocalsize;
-    batchElements = config.batchElements;
 
     size_t xlocalsizeFinal = xlocalsize;
     size_t ylocalsizeFinal = ylocalsize;
     size_t zlocalsizeFinal = zlocalsize;
     if(variant != 2)
     {
-        xlocalsize = 1024;
-        if(((inCstride < 256) && (batches < 256)) || ((inCstride < 100) && (batches <= 256)))
-        {
-            xlocalsize = 256;
-        }
+        xlocalsize = config.groupSize;
         xgridsize = channels * xlocalsize;
         ldsgcn = static_cast<unsigned int>(xlocalsize / waveSize);
         ldsnogcn = static_cast<unsigned int>(xlocalsize);
@@ -371,8 +372,8 @@ BatchnormKernelBuild buildBatchnormFwdTrainingKernel(const BatchnormFwdTrainingP
         zgridsize = zlocalsize * ((batches / batchElements + zlocalsize - 1) / zlocalsize);
 
         // Get the stash method based on problem size and WG size
-        stashMethod = hip_kernel_provider::batchnorm::getStashMethod(
-            problem, stashValuesFwd, ylocalsize, zlocalsize, batchElements, vectorsize);
+        stashMethod = getStashMethod(
+            problem, FWD_STASH_VALUES, ylocalsize, zlocalsize, batchElements, vectorsize);
 
         // WG size for Final kernels (NLC/NHWC/NDHWC)
         if(isLayoutChannelLast && channels % 2 == 0 && xlocalsize % 2 == 0)
@@ -463,10 +464,12 @@ BatchnormKernelBuild buildBatchnormFwdTrainingKernel(const BatchnormFwdTrainingP
 void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
                                        const hipDeviceProp_t& deviceProperties)
 {
-    const auto build = buildBatchnormFwdTrainingKernel(_trainingParams,
-                                                       std::string(deviceProperties.gcnArchName),
-                                                       deviceProperties.multiProcessorCount,
-                                                       deviceProperties.warpSize);
+    const auto build = buildBatchnormFwdTrainingKernel(
+        _trainingParams,
+        std::string(deviceProperties.gcnArchName),
+        deviceProperties.multiProcessorCount,
+        deviceProperties.warpSize,
+        defaultBatchnormFwdTrainingConfig(_trainingParams, deviceProperties.multiProcessorCount));
 
     // Compile the kernel and configure the launches of the selected variant
     _compiledProgram = kernelCompiler.compile("BatchNormFwdTrainSpatial.cpp", build.options);

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "../TestPlanCommon.hpp"
+#include "engines/hip_mlops_engine/plans/layernorm/LayernormApplicabilityChecks.hpp"
 #include "engines/hip_mlops_engine/plans/layernorm/LayernormBwdPlan.hpp"
 #include "hip_kernel_provider_common/HipDeviceUtils.hpp"
 #include "mocks/MockCompiledProgram.hpp"
@@ -12,6 +13,10 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+
+#include <algorithm>
+#include <string>
+#include <vector>
 
 using namespace hip_kernel_provider;
 using namespace hip_kernel_provider::layernorm;
@@ -602,4 +607,91 @@ TEST(TestLayernormBwdPlan, CompileWithThreadCountAtLimitThrows)
     auto deviceProps = createTestDeviceProps();
 
     EXPECT_THROW(plan.compile(mockCompiler, deviceProps), hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+// ============================================================================
+// buildLayernormBwdKernel - explicit performance configuration
+// ============================================================================
+
+namespace
+{
+
+// A layernorm backward graph with mean and inverse variance, and its params, which point into
+// the graph's buffer.
+struct LayernormBwdGraph
+{
+    flatbuffers::FlatBufferBuilder builder;
+    LayernormBwdParams params;
+};
+
+LayernormBwdGraph createBwdGraph(const std::vector<int64_t>& strides,
+                                 const std::vector<int64_t>& dims)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidLayernormBwdGraph(
+        strides, dims, true, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+    LayernormBwdParams params(*graph.getNode(0).attributes_as_LayernormBackwardAttributes(),
+                              graph.getTensorMap());
+    return {std::move(builder), std::move(params)};
+}
+
+bool hasBuildOption(const LayernormKernelBuild& build, const std::string& option)
+{
+    const std::vector<std::string> options = build.options;
+    return std::find(options.begin(), options.end(), option) != options.end();
+}
+
+} // namespace
+
+TEST(TestLayernormBwdKernelConfig, DefaultConfigIsTheHeuristicChoice)
+{
+    // 60 CUs keep 4 * 1024 * 60 = 245760 work-items busy: an inner size of 768 over 1024 rows
+    // splits its reduction, an inner size of 150528 over one row does not
+    const auto parallel = createBwdGraph({768, 256, 16, 1}, {1024, 3, 16, 16});
+    EXPECT_EQ(defaultLayernormBwdConfig(parallel.params, 60), (LayernormBwdConfig{true}));
+
+    const auto onePass = createBwdGraph({150528, 50176, 224, 1}, {1, 3, 224, 224});
+    EXPECT_EQ(defaultLayernormBwdConfig(onePass.params, 60), (LayernormBwdConfig{false}));
+}
+
+TEST(TestLayernormBwdKernelConfig, BuildTakesTheReductionOfTheConfig)
+{
+    const auto graph = createBwdGraph({768, 256, 16, 1}, {1024, 3, 16, 16});
+
+    const auto split = buildLayernormBwdKernel(graph.params, "gfx942", 60, {true});
+    EXPECT_TRUE(hasBuildOption(split, "-DHIP_PLUGIN_LAYERNORM_PARALLEL_SIZE=32"));
+    ASSERT_EQ(split.launches.size(), 3u);
+    EXPECT_STREQ(split.launches[1].entryPoint, "LayernormBwdScaleBiasParallel");
+    EXPECT_STREQ(split.launches[2].entryPoint, "LayernormBwdScaleBiasReduceSum");
+
+    const auto onePass = buildLayernormBwdKernel(graph.params, "gfx942", 60, {false});
+    EXPECT_TRUE(hasBuildOption(onePass, "-DHIP_PLUGIN_LAYERNORM_PARALLEL_SIZE=0"));
+    ASSERT_EQ(onePass.launches.size(), 2u);
+    EXPECT_STREQ(onePass.launches[1].entryPoint, "LayernormBwdScaleBias");
+    EXPECT_EQ(onePass.launches[1].gridSize, 1u);
+}
+
+TEST(TestLayernormBwdKernelConfig, ParallelReductionAppliesToEveryShape)
+{
+    // One row: the parallel reduction runs with a parallel size of 1
+    const auto graph = createBwdGraph({150528, 50176, 224, 1}, {1, 3, 224, 224});
+    const ProblemDescription problem(
+        graph.params.x(), graph.params.scale(), graph.params.mean(), Direction::BACKWARD);
+    EXPECT_TRUE(isBwdConfigApplicable(problem, {true}));
+    EXPECT_TRUE(isBwdConfigApplicable(problem, {false}));
+
+    const auto build = buildLayernormBwdKernel(graph.params, "gfx942", 60, {true});
+    EXPECT_TRUE(hasBuildOption(build, "-DHIP_PLUGIN_LAYERNORM_PARALLEL_SIZE=1"));
+    ASSERT_EQ(build.launches.size(), 3u);
+}
+
+TEST(TestLayernormBwdKernelConfig, WorkspaceFollowsTheConfig)
+{
+    const auto graph = createBwdGraph({768, 256, 16, 1}, {1024, 3, 16, 16});
+
+    // The graph supplies mean and inverse variance, so only the partial sums take workspace:
+    // `sizeof(float) * 2 * innerSize * parallelSize` = `4 * 2 * 768 * 32` = `196608`
+    EXPECT_EQ(layernormBwdWorkspaceBytes(graph.params, 60, {true}), 196608u);
+    EXPECT_EQ(layernormBwdWorkspaceBytes(graph.params, 60, {false}), 0u);
 }

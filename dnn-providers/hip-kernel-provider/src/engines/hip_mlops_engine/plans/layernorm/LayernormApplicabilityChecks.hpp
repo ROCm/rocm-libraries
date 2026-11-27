@@ -4,6 +4,7 @@
 #pragma once
 
 #include "engines/hip_mlops_engine/plans/ApplicabilityChecks.hpp"
+#include "engines/hip_mlops_engine/plans/layernorm/LayernormUtilities.hpp"
 
 #include <array>
 #include <cstdint>
@@ -78,6 +79,15 @@ public:
     void checkTensorConfigSupported(
         const hipdnn_flatbuffers_sdk::data_objects::LayernormBackwardAttributes& lnAttr);
 };
+
+// Whether the backward launches can run problem with config: both scale/bias reductions
+// handle any shape (at a parallel size of 1 one thread reduces each column over every row),
+// so every config applies.
+inline bool isBwdConfigApplicable([[maybe_unused]] const ProblemDescription& problem,
+                                  [[maybe_unused]] const LayernormBwdConfig& config)
+{
+    return true;
+}
 
 // Layernorm Type Configuration ---
 

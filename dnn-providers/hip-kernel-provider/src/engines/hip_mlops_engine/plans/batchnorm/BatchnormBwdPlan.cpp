@@ -197,39 +197,52 @@ size_t BatchnormBwdPlan::getWorkspaceSize([[maybe_unused]] const Handle& handle)
     return 0;
 }
 
+namespace
+{
+
+// hasSavedStats() is true when the caller supplied mean/variance, so the backward
+// pass need not recompute them. That sets how many per-channel fields the
+// multi-workgroup reduction path stashes into the dx-aliased buffer: 4 when it must
+// compute stats (mean, variance, dscale, dbias), 2 when they are supplied (dscale,
+// dbias only). The applicability gate selects that path only when this many fields
+// fit in dx, so this count must not be too small. This matches the logic captured
+// in MIOpen backward_spatial.cpp.
+unsigned int bwdStashValues(const BatchnormBwdParams& params)
+{
+    return !params.hasSavedStats() ? 4u : 2u;
+}
+
+} // namespace
+
+BatchnormSpatialConfig defaultBatchnormBwdConfig(const BatchnormBwdParams& params)
+{
+    return defaultSpatialConfig(extractProblemDescription(params), bwdStashValues(params));
+}
+
+bool isBatchnormBwdConfigApplicable(const BatchnormBwdParams& params,
+                                    const BatchnormSpatialConfig& config)
+{
+    return isSpatialConfigApplicable(
+        extractProblemDescription(params), bwdStashValues(params), config);
+}
+
 BatchnormKernelBuild buildBatchnormBwdKernel(const BatchnormBwdParams& params,
-                                             const std::string& gcnArchName)
+                                             const std::string& gcnArchName,
+                                             const BatchnormSpatialConfig& config)
 {
     const auto problem = extractProblemDescription(params);
 
-    // usesSavedStats is true when the caller supplied mean/variance, so the backward
-    // pass need not recompute them. That sets how many per-channel fields the
-    // multi-workgroup reduction path stashes into the dx-aliased buffer: 4 when it must
-    // compute stats (mean, variance, dscale, dbias), 2 when they are supplied (dscale,
-    // dbias only). The applicability gate selects that path only when this many fields
-    // fit in dx, so this count must not be too small. This matches the logic captured
-    // in MIOpen backward_spatial.cpp.
     const bool usesSavedStats = params.hasSavedStats();
-    const unsigned int stashValuesBwd = !usesSavedStats ? 4u : 2u;
-    KernelConfig config;
-    if(useMultiple(problem))
-    {
-        defaultConfigSpatialMultiple(problem, stashValuesBwd, config);
-        if(config.variant == -1)
-        {
-            defaultConfigSpatialSingle(problem, config);
-        }
-    }
-    else
-    {
-        defaultConfigSpatialSingle(problem, config);
-    }
+    const unsigned int stashValuesBwd = bwdStashValues(params);
 
-    const int variant = config.variant;
+    // The launch configuration of the chosen variant and vector size
+    const auto kernelConfig = spatialKernelConfig(problem, config);
 
-    size_t xlocalsize = config.xlocalsize;
-    const size_t ylocalsize = config.ylocalsize;
-    const size_t zlocalsize = config.zlocalsize;
+    const int variant = kernelConfig.variant;
+
+    size_t xlocalsize = kernelConfig.xlocalsize;
+    const size_t ylocalsize = kernelConfig.ylocalsize;
+    const size_t zlocalsize = kernelConfig.zlocalsize;
     size_t xgridsize = 1;
     size_t ygridsize = 1;
     size_t zgridsize = 1;
@@ -260,12 +273,7 @@ BatchnormKernelBuild buildBatchnormBwdKernel(const BatchnormBwdParams& params,
 
     if(variant != 2)
     {
-        xlocalsize = 1024;
-        if(((problem.inCstride() < 256) && (problem.batches() < 256))
-           || ((problem.inCstride() < 100) && (problem.batches() <= 256)))
-        {
-            xlocalsize = 256;
-        }
+        xlocalsize = config.groupSize;
         xgridsize = problem.channels() * xlocalsize;
         ldsSize = static_cast<unsigned int>(xlocalsize);
 
@@ -273,7 +281,7 @@ BatchnormKernelBuild buildBatchnormBwdKernel(const BatchnormBwdParams& params,
         options.update("HIP_PLUGIN_BN_GRP1", ylocalsize);
         options.update("HIP_PLUGIN_BN_GRP2", zlocalsize);
         options.update("HIP_PLUGIN_BN_LDS_SIZE", ldsSize);
-        options.update("HIP_PLUGIN_BN_VEC_SIZE", config.vectorsize);
+        options.update("HIP_PLUGIN_BN_VEC_SIZE", kernelConfig.vectorsize);
 
         std::vector<BatchnormLaunch> launches{
             {"BatchNormBwdSpatial",
@@ -285,25 +293,28 @@ BatchnormKernelBuild buildBatchnormBwdKernel(const BatchnormBwdParams& params,
     {
         if(problem.isLayoutChannelLast())
         {
-            xgridsize = xlocalsize
-                        * ((problem.channels() / config.vectorsize + xlocalsize - 1) / xlocalsize);
+            xgridsize
+                = xlocalsize
+                  * ((problem.channels() / kernelConfig.vectorsize + xlocalsize - 1) / xlocalsize);
             ygridsize = ylocalsize * ((problem.inCstride() + ylocalsize - 1) / ylocalsize);
         }
         else
         {
             xgridsize = xlocalsize * ((problem.channels() + xlocalsize - 1) / xlocalsize);
-            ygridsize = ylocalsize
-                        * ((problem.inCstride() / config.vectorsize + ylocalsize - 1) / ylocalsize);
+            ygridsize
+                = ylocalsize
+                  * ((problem.inCstride() / kernelConfig.vectorsize + ylocalsize - 1) / ylocalsize);
         }
-        zgridsize = zlocalsize
-                    * ((problem.batches() / config.batchElements + zlocalsize - 1) / zlocalsize);
+        zgridsize
+            = zlocalsize
+              * ((problem.batches() / kernelConfig.batchElements + zlocalsize - 1) / zlocalsize);
 
         stashMethod = getStashMethod(problem,
                                      stashValuesBwd,
                                      ylocalsize,
                                      zlocalsize,
-                                     config.batchElements,
-                                     config.vectorsize);
+                                     kernelConfig.batchElements,
+                                     kernelConfig.vectorsize);
 
         if(problem.isLayoutChannelLast() && problem.channels() % 2 == 0 && xlocalsize % 2 == 0)
         {
@@ -321,9 +332,9 @@ BatchnormKernelBuild buildBatchnormBwdKernel(const BatchnormBwdParams& params,
         options.update("HIP_PLUGIN_BN_GRP0", xlocalsize);
         options.update("HIP_PLUGIN_BN_GRP1", ylocalsize);
         options.update("HIP_PLUGIN_BN_GRP2", zlocalsize);
-        options.update("HIP_PLUGIN_BN_BATCH_ELEMENTS", config.batchElements);
+        options.update("HIP_PLUGIN_BN_BATCH_ELEMENTS", kernelConfig.batchElements);
         options.update("HIP_PLUGIN_BN_LDS_SIZE", ldsSize);
-        options.update("HIP_PLUGIN_BN_VEC_SIZE", config.vectorsize);
+        options.update("HIP_PLUGIN_BN_VEC_SIZE", kernelConfig.vectorsize);
         options.update("HIP_PLUGIN_BN_STASH_METHOD", stashMethod);
         options.update("HIP_PLUGIN_BN_GRPS0", xgridsize / xlocalsize);
         options.update("HIP_PLUGIN_BN_GRPS1", ygridsize / ylocalsize);
@@ -377,7 +388,8 @@ void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
         _activationBeta = static_cast<float>(_params.optActivation()->beta);
     }
 
-    const auto build = buildBatchnormBwdKernel(_params, std::string(deviceProperties.gcnArchName));
+    const auto build = buildBatchnormBwdKernel(
+        _params, std::string(deviceProperties.gcnArchName), defaultBatchnormBwdConfig(_params));
     _kernelVariant = build.variant;
 
     _compiledProgram = kernelCompiler.compile("BatchNormBwdSpatial.cpp", build.options);

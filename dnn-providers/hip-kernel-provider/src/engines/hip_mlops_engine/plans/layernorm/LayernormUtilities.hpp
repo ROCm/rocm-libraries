@@ -41,6 +41,25 @@ struct LayernormKernelBuild
     std::vector<LayernormLaunch> launches;
 };
 
+/// The performance choice of the layernorm backward launches: whether the scale/bias
+/// reduction splits across workgroups (LayernormBwdScaleBiasParallel then
+/// LayernormBwdScaleBiasReduceSum) or runs in one pass (LayernormBwdScaleBias). The parallel
+/// size derives from the problem and the device.
+struct LayernormBwdConfig
+{
+    bool parallel = false;
+};
+
+inline bool operator==(const LayernormBwdConfig& lhs, const LayernormBwdConfig& rhs)
+{
+    return lhs.parallel == rhs.parallel;
+}
+
+inline bool operator!=(const LayernormBwdConfig& lhs, const LayernormBwdConfig& rhs)
+{
+    return !(lhs == rhs);
+}
+
 class ProblemDescription
 {
 public:

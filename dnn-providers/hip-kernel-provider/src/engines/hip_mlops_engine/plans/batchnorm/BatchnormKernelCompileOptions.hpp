@@ -123,7 +123,7 @@ struct BatchnormLaunch
 };
 
 /// What a batchnorm training or backward plan compiles and launches: the compile options, the
-/// kernel variant the launch heuristics chose, and the launches in the order the plan's
+/// kernel variant of its BatchnormSpatialConfig, and the launches in the order the plan's
 /// execute() indexes them, all entry points of one program. Built by
 /// buildBatchnormFwdTrainingKernel() and buildBatchnormBwdKernel(), which the HIP MLOps
 /// engine's plans and the kernel ingestor's HipMlops packs both call.

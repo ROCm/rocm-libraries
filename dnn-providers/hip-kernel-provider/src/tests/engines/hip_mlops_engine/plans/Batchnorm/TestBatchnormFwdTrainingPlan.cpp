@@ -1,8 +1,12 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <algorithm>
+#include <array>
 #include <cstdio>
+#include <string>
 #include <utility>
+#include <vector>
 
 #include <gtest/gtest.h>
 
@@ -603,6 +607,108 @@ TEST(TestBatchnormFwdTrainingPlan, CompileWithUnsupportedDimensionThrows)
     auto deviceProps = createTestDeviceProps();
 
     EXPECT_THROW(plan.compile(mockCompiler, deviceProps), hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+// ============================================================================
+// buildBatchnormFwdTrainingKernel - explicit performance configuration
+// ============================================================================
+
+namespace
+{
+
+// A training graph and the params of its batchnorm node, which point into the graph's buffer.
+struct TrainingGraph
+{
+    flatbuffers::FlatBufferBuilder builder;
+    BatchnormFwdTrainingParams params;
+};
+
+TrainingGraph createTrainingGraph(const std::vector<int64_t>& strides,
+                                  const std::vector<int64_t>& dims)
+{
+    auto builder
+        = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(strides, dims, true);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+    BatchnormFwdTrainingParams params(*graph.getNode(0).attributes_as_BatchnormAttributes(),
+                                      graph.getTensorMap());
+    return {std::move(builder), std::move(params)};
+}
+
+bool hasBuildOption(const BatchnormKernelBuild& build, const std::string& option)
+{
+    const std::vector<std::string> options = build.options;
+    return std::find(options.begin(), options.end(), option) != options.end();
+}
+
+} // namespace
+
+TEST(TestBatchnormFwdTrainingKernelConfig, DefaultConfigIsTheHeuristicChoice)
+{
+    // NCHW, one batch: spatial single variant 1 of 1024 threads
+    const auto nchw = createTrainingGraph({150528, 50176, 224, 1}, {1, 3, 224, 224});
+    EXPECT_EQ(defaultBatchnormFwdTrainingConfig(nchw.params, 60),
+              (BatchnormSpatialConfig{1, 1024, 1}));
+
+    // NHWC with C = 3: spatial multiple with vector size 1
+    const auto nhwc = createTrainingGraph({150528, 1, 672, 3}, {1, 3, 224, 224});
+    EXPECT_EQ(defaultBatchnormFwdTrainingConfig(nhwc.params, 60),
+              (BatchnormSpatialConfig{2, 0, 1}));
+
+    // NCHW, 32 batches: spatial multiple keeps the smallest applicable vector size
+    const auto multiple = createTrainingGraph({147456, 4608, 576, 1}, {32, 8, 24, 24});
+    EXPECT_EQ(defaultBatchnormFwdTrainingConfig(multiple.params, 60),
+              (BatchnormSpatialConfig{2, 0, 1}));
+}
+
+TEST(TestBatchnormFwdTrainingKernelConfig, BuildTakesTheWorkgroupSizeOfTheConfig)
+{
+    const auto graph = createTrainingGraph({150528, 50176, 224, 1}, {1, 3, 224, 224});
+
+    const auto build = buildBatchnormFwdTrainingKernel(graph.params, "gfx942", 60, 64, {1, 256, 1});
+
+    EXPECT_EQ(build.variant, 1);
+    EXPECT_TRUE(hasBuildOption(build, "-DHIP_PLUGIN_BN_VARIANT=1"));
+    EXPECT_TRUE(hasBuildOption(build, "-DHIP_PLUGIN_BN_GRP0=256"));
+    EXPECT_TRUE(hasBuildOption(build, "-DHIP_PLUGIN_BN_LDS_SIZE=256"));
+    EXPECT_TRUE(hasBuildOption(build, "-DHIP_PLUGIN_BN_LDSGCN_SIZE=4"));
+    EXPECT_TRUE(hasBuildOption(build, "-DHIP_PLUGIN_BN_GRPS0=3"));
+    ASSERT_EQ(build.launches.size(), 1u);
+    EXPECT_STREQ(build.launches[0].entryPoint, "BatchNormFwdTrainSpatial");
+    EXPECT_EQ(build.launches[0].blockSize, (std::array<unsigned int, 3>{256, 1, 1}));
+    EXPECT_EQ(build.launches[0].gridSize, (std::array<unsigned int, 3>{3, 1, 1}));
+}
+
+TEST(TestBatchnormFwdTrainingKernelConfig, BuildTakesTheVectorSizeOfTheConfig)
+{
+    const auto graph = createTrainingGraph({150528, 50176, 224, 1}, {1, 3, 224, 224});
+
+    const auto build = buildBatchnormFwdTrainingKernel(graph.params, "gfx942", 60, 64, {2, 0, 4});
+
+    // NCHW vectorizes the spatial dimension: 50176 / 4 values over workgroups of 1024
+    EXPECT_EQ(build.variant, 2);
+    EXPECT_TRUE(hasBuildOption(build, "-DHIP_PLUGIN_BN_VARIANT=2"));
+    EXPECT_TRUE(hasBuildOption(build, "-DHIP_PLUGIN_BN_VEC_SIZE=4"));
+    EXPECT_TRUE(hasBuildOption(build, "-DHIP_PLUGIN_BN_GRP0=1"));
+    EXPECT_TRUE(hasBuildOption(build, "-DHIP_PLUGIN_BN_GRP1=1024"));
+    EXPECT_TRUE(hasBuildOption(build, "-DHIP_PLUGIN_BN_GRPS1=13"));
+    EXPECT_TRUE(hasBuildOption(build, "-DHIP_PLUGIN_BN_STASH_METHOD=0"));
+    ASSERT_EQ(build.launches.size(), 3u);
+    EXPECT_STREQ(build.launches[0].entryPoint, "BatchNormFwdTrainSpatialMeanVariance");
+    EXPECT_STREQ(build.launches[1].entryPoint, "BatchNormFwdTrainSpatialFinalMeanVariance");
+    EXPECT_STREQ(build.launches[2].entryPoint, "BatchNormFwdTrainSpatialNorm");
+    EXPECT_EQ(build.launches[0].gridSize, (std::array<unsigned int, 3>{3, 13, 1}));
+}
+
+TEST(TestBatchnormFwdTrainingKernelConfig, ApplicabilityFollowsTheProblem)
+{
+    const auto graph = createTrainingGraph({150528, 50176, 224, 1}, {1, 3, 224, 224});
+
+    EXPECT_TRUE(isBatchnormFwdTrainingConfigApplicable(graph.params, 60, {1, 256, 1}));
+    EXPECT_TRUE(isBatchnormFwdTrainingConfigApplicable(graph.params, 60, {2, 0, 4}));
+    // Variants 0 and 3 give each thread one spatial position: 50176 do not fit 1024 threads
+    EXPECT_FALSE(isBatchnormFwdTrainingConfigApplicable(graph.params, 60, {0, 1024, 1}));
+    EXPECT_FALSE(isBatchnormFwdTrainingConfigApplicable(graph.params, 60, {3, 1024, 1}));
 }
 
 } // namespace hip_kernel_provider::batchnorm::test

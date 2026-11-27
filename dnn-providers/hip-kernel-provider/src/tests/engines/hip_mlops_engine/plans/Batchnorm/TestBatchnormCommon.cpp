@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <gtest/gtest.h>
+#include <vector>
 
 #include "engines/hip_mlops_engine/plans/batchnorm/BatchnormCommon.hpp"
 
@@ -552,4 +553,247 @@ TEST(TestBatchnormBwdStashFix, ApplicabilityGateFlipsOnStashValues)
     const auto problem = makeProblem(2, 3, 1, true, true, false);
     EXPECT_TRUE(isSpatialMultipleApplicable(problem, 1, 2, 256, 1, 2));
     EXPECT_FALSE(isSpatialMultipleApplicable(problem, 1, 4, 256, 1, 2));
+}
+
+// ====================================================================================================
+// defaultSpatialConfig - the heuristics' choice as an explicit configuration
+// ====================================================================================================
+
+namespace
+{
+
+// The launch configuration the training and backward builds chose from the heuristics before
+// they took a BatchnormSpatialConfig.
+KernelConfig heuristicKernelConfig(const ProblemDescription& problem, unsigned int stashValues)
+{
+    KernelConfig config;
+    if(useMultiple(problem))
+    {
+        defaultConfigSpatialMultiple(problem, stashValues, config);
+        if(config.variant == -1)
+        {
+            defaultConfigSpatialSingle(problem, config);
+        }
+    }
+    else
+    {
+        defaultConfigSpatialSingle(problem, config);
+    }
+    return config;
+}
+
+struct DefaultSpatialConfigCase
+{
+    const char* name;
+    ProblemDescription problem;
+    unsigned int stashValues;
+    BatchnormSpatialConfig expected;
+};
+
+} // namespace
+
+TEST(TestDefaultSpatialConfig, MatchesTheHeuristicsOnEveryBranch)
+{
+    const auto fwd = Direction::FORWARD_TRAINING;
+    const auto bwd = Direction::BACKWARD;
+    const std::vector<DefaultSpatialConfigCase> cases = {
+        // Channel last always tries spatial multiple: vector size 4, then 1, then variant 1
+        {"NhwcMultipleVector4",
+         makeProblem(128, 64, 256, true, true, false, 80, fwd),
+         2,
+         {2, 0, 4}},
+        {"NhwcMultipleVector1", makeProblem(64, 25, 256, true, true, false, 80, fwd), 2, {2, 0, 1}},
+        {"NhwcSingleFallback", makeProblem(1, 3, 1, true, true, false, 1, fwd), 2, {1, 256, 1}},
+        {"NhwcBwdSingleFallback", makeProblem(2, 3, 1, true, true, false, 1, bwd), 4, {1, 256, 1}},
+        {"NhwcBwdMultipleSavedStats",
+         makeProblem(2, 3, 1, true, true, false, 1, bwd),
+         2,
+         {2, 0, 1}},
+        // Forward NCHW, spatial single
+        {"FwdVariant3", makeProblem(2, 1, 600, false, true, false, 1, fwd), 2, {3, 1024, 1}},
+        {"FwdVariant1LargeSpatial",
+         makeProblem(2, 1, 2048, false, true, false, 1, fwd),
+         2,
+         {1, 1024, 1}},
+        {"FwdVariant1Mixed",
+         makeProblem(64, 1, 1024, false, false, false, 1, fwd),
+         2,
+         {1, 1024, 1}},
+        {"FwdVariant0Small", makeProblem(10, 1, 64, false, true, false, 1, fwd), 2, {0, 256, 1}},
+        {"FwdVariant0Batch256Spatial64",
+         makeProblem(256, 1, 64, false, true, false, 1, fwd),
+         2,
+         {0, 256, 1}},
+        {"FwdVariant0Batch256Spatial128",
+         makeProblem(256, 1, 128, false, true, false, 1, fwd),
+         2,
+         {0, 1024, 1}},
+        {"FwdVariant0LargeSpatial",
+         makeProblem(2, 1, 16777216, false, true, false, 1, fwd),
+         2,
+         {0, 1024, 1}},
+        // Forward NCHW, spatial multiple: the smallest applicable vector size is kept
+        {"FwdNchwMultiple", makeProblem(32, 8, 576, false, true, false, 36, fwd), 2, {2, 0, 1}},
+        // Backward NCHW, spatial single
+        {"BwdVariant1Fp16MixMidSpatial",
+         makeProblem(64, 1, 100, false, false, false, 1, bwd),
+         4,
+         {1, 256, 1}},
+        {"BwdVariant1LargeSpatial",
+         makeProblem(1, 3, 50176, false, true, false, 1, bwd),
+         4,
+         {1, 1024, 1}},
+        {"BwdVariant1MidSpatialLargeBatch",
+         makeProblem(32, 1, 600, false, true, false, 1, bwd),
+         4,
+         {1, 1024, 1}},
+        {"BwdVariant3MidSpatialSmallBatch",
+         makeProblem(16, 1, 600, false, true, false, 1, bwd),
+         4,
+         {3, 1024, 1}},
+        {"BwdVariant3SmallSpatialLargeBatch",
+         makeProblem(128, 1, 200, false, true, false, 1, bwd),
+         4,
+         {3, 256, 1}},
+        {"BwdVariant0SmallSpatial",
+         makeProblem(32, 1, 256, false, true, false, 1, bwd),
+         4,
+         {0, 1024, 1}},
+        // Backward NCHW, spatial multiple, and its fallback when no vector size applies
+        {"BwdNchwMultiple", makeProblem(64, 1, 1048576, false, true, false, 1, bwd), 4, {2, 0, 1}},
+        {"BwdNchwMultipleFallback",
+         makeProblem(2, 1, 16777217, false, true, false, 1, bwd),
+         4,
+         {1, 1024, 1}},
+    };
+
+    for(const auto& testCase : cases)
+    {
+        SCOPED_TRACE(testCase.name);
+        const auto config = defaultSpatialConfig(testCase.problem, testCase.stashValues);
+        EXPECT_EQ(config, testCase.expected);
+
+        // The builds launch what spatialKernelConfig() derives from the configuration, which
+        // must be what the heuristics chose.
+        const auto derived = spatialKernelConfig(testCase.problem, config);
+        const auto heuristic = heuristicKernelConfig(testCase.problem, testCase.stashValues);
+        EXPECT_EQ(derived.variant, heuristic.variant);
+        EXPECT_EQ(derived.vectorsize, heuristic.vectorsize);
+        EXPECT_EQ(derived.xlocalsize, heuristic.xlocalsize);
+        EXPECT_EQ(derived.ylocalsize, heuristic.ylocalsize);
+        EXPECT_EQ(derived.zlocalsize, heuristic.zlocalsize);
+        EXPECT_EQ(derived.batchElements, heuristic.batchElements);
+    }
+}
+
+TEST(TestSpatialKernelConfig, DerivesTheMultipleGeometryFromTheVectorSize)
+{
+    const auto problem = makeProblem(128, 64, 256, true, true, false, 80);
+
+    const auto config = spatialKernelConfig(problem, {2, 0, 4});
+    EXPECT_EQ(config.variant, 2);
+    EXPECT_EQ(config.vectorsize, 4);
+    EXPECT_EQ(config.xlocalsize, 16);
+    EXPECT_EQ(config.ylocalsize, 8);
+    EXPECT_EQ(config.zlocalsize, 1);
+    EXPECT_EQ(config.batchElements, 128);
+}
+
+TEST(TestSpatialKernelConfig, KeepsAUnitGeometryForSingleVariants)
+{
+    const auto config
+        = spatialKernelConfig(makeProblem(128, 64, 256, false, true, false), {3, 256, 1});
+    EXPECT_EQ(config.variant, 3);
+    EXPECT_EQ(config.vectorsize, 1);
+    EXPECT_EQ(config.xlocalsize, 1);
+    EXPECT_EQ(config.ylocalsize, 1);
+    EXPECT_EQ(config.zlocalsize, 1);
+    EXPECT_EQ(config.batchElements, 1);
+}
+
+// ====================================================================================================
+// isSpatialConfigApplicable - which configurations can run a problem
+// ====================================================================================================
+
+TEST(TestSpatialConfigApplicable, Variants0And3NeedChannelFirstAndSpatialWithinTheWorkgroup)
+{
+    const auto spatial256 = makeProblem(32, 1, 256, false, true, false, 1, Direction::BACKWARD);
+    EXPECT_TRUE(isSpatialConfigApplicable(spatial256, 4, {0, 256, 1}));
+    EXPECT_TRUE(isSpatialConfigApplicable(spatial256, 4, {3, 256, 1}));
+
+    const auto spatial600 = makeProblem(32, 1, 600, false, true, false, 1, Direction::BACKWARD);
+    EXPECT_FALSE(isSpatialConfigApplicable(spatial600, 4, {0, 256, 1}));
+    EXPECT_FALSE(isSpatialConfigApplicable(spatial600, 4, {3, 256, 1}));
+    EXPECT_TRUE(isSpatialConfigApplicable(spatial600, 4, {0, 1024, 1}));
+    EXPECT_TRUE(isSpatialConfigApplicable(spatial600, 4, {3, 1024, 1}));
+    EXPECT_TRUE(isSpatialConfigApplicable(spatial600, 4, {1, 256, 1}));
+
+    const auto nhwc = makeProblem(32, 4, 64, true, true, false, 1, Direction::BACKWARD);
+    EXPECT_FALSE(isSpatialConfigApplicable(nhwc, 4, {0, 1024, 1}));
+    EXPECT_FALSE(isSpatialConfigApplicable(nhwc, 4, {3, 1024, 1}));
+    EXPECT_TRUE(isSpatialConfigApplicable(nhwc, 4, {1, 1024, 1}));
+}
+
+TEST(TestSpatialConfigApplicable, RejectsValuesTheBuildsNeverUse)
+{
+    const auto problem = makeProblem(32, 4, 64, false, true, false);
+    EXPECT_FALSE(isSpatialConfigApplicable(problem, 2, {-1, 1024, 1}));
+    EXPECT_FALSE(isSpatialConfigApplicable(problem, 2, {4, 1024, 1}));
+    EXPECT_FALSE(isSpatialConfigApplicable(problem, 2, {1, 512, 1}));
+    EXPECT_FALSE(isSpatialConfigApplicable(problem, 2, {1, 1024, 2}));
+    EXPECT_FALSE(isSpatialConfigApplicable(problem, 2, {2, 0, 3}));
+    EXPECT_FALSE(isSpatialConfigApplicable(problem, 2, {2, 0, 8}));
+}
+
+TEST(TestSpatialConfigApplicable, Variant2FollowsIsSpatialMultipleApplicable)
+{
+    // The stash boundary of TestBatchnormBwdStashFix: 2 stash fields fit, 4 do not
+    const auto boundary = makeProblem(2, 3, 1, true, true, false);
+    EXPECT_TRUE(isSpatialConfigApplicable(boundary, 2, {2, 0, 1}));
+    EXPECT_FALSE(isSpatialConfigApplicable(boundary, 4, {2, 0, 1}));
+    // C = 3 is not a multiple of 4
+    EXPECT_FALSE(isSpatialConfigApplicable(boundary, 2, {2, 0, 4}));
+
+    // An odd spatial size vectorizes only by 1
+    const auto oddSpatial = makeProblem(64, 64, 15, false, true, false);
+    EXPECT_TRUE(isSpatialConfigApplicable(oddSpatial, 2, {2, 0, 1}));
+    EXPECT_FALSE(isSpatialConfigApplicable(oddSpatial, 2, {2, 0, 2}));
+    EXPECT_FALSE(isSpatialConfigApplicable(oddSpatial, 2, {2, 0, 4}));
+}
+
+TEST(TestSpatialConfigApplicable, RejectsTheDefaultVariant0BeyondItsWorkgroup)
+{
+    // The heuristics fall back to variant 0 for this forward problem although its spatial size
+    // exceeds the workgroup, which variant 0 does not cover.
+    const auto problem = makeProblem(2, 1, 16777216, false, true, false);
+    const auto config = defaultSpatialConfig(problem, 2);
+    EXPECT_EQ(config.variant, 0);
+    EXPECT_FALSE(isSpatialConfigApplicable(problem, 2, config));
+}
+
+// ====================================================================================================
+// defaultInferenceConfig / isInferenceConfigApplicable - batchnorm inference vector size
+// ====================================================================================================
+
+TEST(TestDefaultInferenceConfig, IsTheLargestVectorSizeDividingTheVectorizedDimension)
+{
+    EXPECT_EQ(defaultInferenceConfig(true, 16, 7).vectorSize, 4);
+    EXPECT_EQ(defaultInferenceConfig(true, 6, 8).vectorSize, 2);
+    EXPECT_EQ(defaultInferenceConfig(true, 3, 4).vectorSize, 1);
+    EXPECT_EQ(defaultInferenceConfig(false, 3, 8).vectorSize, 4);
+    EXPECT_EQ(defaultInferenceConfig(false, 16, 10).vectorSize, 2);
+    EXPECT_EQ(defaultInferenceConfig(false, 8, 7).vectorSize, 1);
+}
+
+TEST(TestInferenceConfigApplicable, NeedsAVectorSizeDividingTheVectorizedDimension)
+{
+    EXPECT_TRUE(isInferenceConfigApplicable(true, 16, 7, {4}));
+    EXPECT_FALSE(isInferenceConfigApplicable(true, 6, 8, {4}));
+    EXPECT_TRUE(isInferenceConfigApplicable(true, 6, 8, {2}));
+    EXPECT_TRUE(isInferenceConfigApplicable(true, 3, 4, {1}));
+    EXPECT_TRUE(isInferenceConfigApplicable(false, 3, 8, {4}));
+    EXPECT_FALSE(isInferenceConfigApplicable(false, 16, 10, {4}));
+    EXPECT_TRUE(isInferenceConfigApplicable(false, 16, 10, {2}));
+    EXPECT_FALSE(isInferenceConfigApplicable(false, 8, 16, {8}));
+    EXPECT_FALSE(isInferenceConfigApplicable(false, 8, 16, {0}));
 }

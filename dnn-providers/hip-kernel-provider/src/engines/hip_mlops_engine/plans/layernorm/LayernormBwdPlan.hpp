@@ -67,21 +67,30 @@ private:
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _dbias;
 };
 
+/// Whether the launch heuristics split the scale/bias reduction of @p params across
+/// workgroups on a device with @p multiProcessorCount CUs: when the inner size alone does not
+/// exceed 4 workgroups of MAX_LOCAL_SIZE per CU but the whole tensor does.
+LayernormBwdConfig defaultLayernormBwdConfig(const LayernormBwdParams& params,
+                                             int multiProcessorCount);
+
 /// The compile options and launches of the LayernormBwd program for @p params on
 /// @p gcnArchName, on a device with @p multiProcessorCount CUs: LayernormBwd, then
 /// LayernormBwdScaleBias, or LayernormBwdScaleBiasParallel and LayernormBwdScaleBiasReduceSum
-/// when the inner size is small enough to split the reduction across workgroups.
+/// when @p config splits the reduction across workgroups.
 ///
 /// @throws HipdnnPluginException with BAD_PARAM for a tensor that is not 4D or 5D, or a grid
 ///         that does not fit one launch.
 LayernormKernelBuild buildLayernormBwdKernel(const LayernormBwdParams& params,
                                              const std::string& gcnArchName,
-                                             int multiProcessorCount);
+                                             int multiProcessorCount,
+                                             const LayernormBwdConfig& config);
 
-/// The workspace the LayernormBwd launches need on a device with @p multiProcessorCount CUs:
-/// the parallel reduction's partial sums, and mean and inverse variance when the graph does
-/// not supply them.
-size_t layernormBwdWorkspaceBytes(const LayernormBwdParams& params, int multiProcessorCount);
+/// The workspace the LayernormBwd launches of @p config need on a device with
+/// @p multiProcessorCount CUs: the parallel reduction's partial sums, and mean and inverse
+/// variance when the graph does not supply them. Pass the config the build takes.
+size_t layernormBwdWorkspaceBytes(const LayernormBwdParams& params,
+                                  int multiProcessorCount,
+                                  const LayernormBwdConfig& config);
 
 class LayernormBwdPlan : public hipdnn_plugin_sdk::IPlan<Handle>
 {

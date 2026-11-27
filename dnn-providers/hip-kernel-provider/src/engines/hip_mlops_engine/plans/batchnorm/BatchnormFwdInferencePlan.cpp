@@ -105,11 +105,102 @@ size_t BatchnormFwdInferencePlan::getWorkspaceSize([[maybe_unused]] const Handle
     return 0;
 }
 
+namespace
+{
+
+// The dimensions and strides of x, its spatial dimensions combined.
+struct InferenceShape
+{
+    int batches = 0;
+    int channels = 0;
+    int spatialSize = 0;
+    int batchStride = 0;
+    int channelStride = 0;
+    int spatialStride = 0;
+};
+
+InferenceShape inferenceShape(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& x)
+{
+    const auto* xDims = x.dims();
+    const auto* xStrides = x.strides();
+
+    InferenceShape shape;
+
+    // Check if 3D (NCL/NLC), 4D (NCHW/NHWC) or 5D (NCDHW/NDHWC)
+    if(xDims->size() == 3)
+    {
+        shape.batches = checkedNarrowToInt(xDims->Get(0), "batches");
+        shape.channels = checkedNarrowToInt(xDims->Get(1), "channels");
+        shape.spatialSize = checkedNarrowToInt(xDims->Get(2), "spatialSize");
+
+        shape.batchStride = checkedNarrowToInt(xStrides->Get(0), "batchStride");
+        shape.channelStride = checkedNarrowToInt(xStrides->Get(1), "channelStride");
+        shape.spatialStride = checkedNarrowToInt(xStrides->Get(2), "spatialStride");
+    }
+    else if(xDims->size() == 4)
+    {
+        shape.batches = checkedNarrowToInt(xDims->Get(0), "batches");
+        shape.channels = checkedNarrowToInt(xDims->Get(1), "channels");
+        auto height = checkedNarrowToInt(xDims->Get(2), "height");
+        auto width = checkedNarrowToInt(xDims->Get(3), "width");
+        // For 4D, combine H*W into spatial dimension
+        shape.spatialSize = height * width;
+
+        shape.batchStride = checkedNarrowToInt(xStrides->Get(0), "batchStride");
+        shape.channelStride = checkedNarrowToInt(xStrides->Get(1), "channelStride");
+        shape.spatialStride = checkedNarrowToInt(xStrides->Get(3), "spatialStride");
+    }
+    else if(xDims->size() == 5)
+    {
+        shape.batches = checkedNarrowToInt(xDims->Get(0), "batches");
+        shape.channels = checkedNarrowToInt(xDims->Get(1), "channels");
+        auto depth = checkedNarrowToInt(xDims->Get(2), "depth");
+        auto height = checkedNarrowToInt(xDims->Get(3), "height");
+        auto width = checkedNarrowToInt(xDims->Get(4), "width");
+        // For 5D, combine D*H*W into spatial dimension
+        shape.spatialSize = depth * height * width;
+
+        shape.batchStride = checkedNarrowToInt(xStrides->Get(0), "batchStride");
+        shape.channelStride = checkedNarrowToInt(xStrides->Get(1), "channelStride");
+        shape.spatialStride = checkedNarrowToInt(xStrides->Get(4), "spatialStride");
+    }
+    else
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                       "Unsupported tensor dimension: "
+                                                           + std::to_string(xDims->size()));
+    }
+
+    return shape;
+}
+
+} // namespace
+
+BatchnormInferenceConfig
+    defaultBatchnormFwdInferenceConfig(const BatchnormFwdInferenceParams& params)
+{
+    const auto shape = inferenceShape(*params.x());
+    return defaultInferenceConfig(isChannelLastLayout(params.x()),
+                                  shape.channels,
+                                  static_cast<unsigned int>(shape.spatialSize));
+}
+
+bool isBatchnormFwdInferenceConfigApplicable(const BatchnormFwdInferenceParams& params,
+                                             const BatchnormInferenceConfig& config)
+{
+    const auto shape = inferenceShape(*params.x());
+    return isInferenceConfigApplicable(isChannelLastLayout(params.x()),
+                                       shape.channels,
+                                       static_cast<unsigned int>(shape.spatialSize),
+                                       config);
+}
+
 BatchnormInferenceKernelBuild
     buildBatchnormFwdInferenceKernel(const BatchnormFwdInferenceParams& params,
                                      const std::string& gcnArchName,
                                      int multiProcessorCount,
-                                     int warpSize)
+                                     int warpSize,
+                                     const BatchnormInferenceConfig& config)
 {
     // Determine data type configuration
     auto xDataType = params.x()->data_type();
@@ -135,67 +226,20 @@ BatchnormInferenceKernelBuild
           && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
 
     // Extract dimensions from x tensor
-    const auto* xDims = params.x()->dims();
-    const auto* xStrides = params.x()->strides();
-
-    int batches = 0;
-    int channels = 0;
-    int spatialSize = 0;
-    int batchStride = 0;
-    int channelStride = 0;
-    int spatialStride = 0;
-
-    // Check if 3D (NCL/NLC), 4D (NCHW/NHWC) or 5D (NCDHW/NDHWC)
-    if(xDims->size() == 3)
-    {
-        batches = checkedNarrowToInt(xDims->Get(0), "batches");
-        channels = checkedNarrowToInt(xDims->Get(1), "channels");
-        spatialSize = checkedNarrowToInt(xDims->Get(2), "spatialSize");
-
-        batchStride = checkedNarrowToInt(xStrides->Get(0), "batchStride");
-        channelStride = checkedNarrowToInt(xStrides->Get(1), "channelStride");
-        spatialStride = checkedNarrowToInt(xStrides->Get(2), "spatialStride");
-    }
-    else if(xDims->size() == 4)
-    {
-        batches = checkedNarrowToInt(xDims->Get(0), "batches");
-        channels = checkedNarrowToInt(xDims->Get(1), "channels");
-        auto height = checkedNarrowToInt(xDims->Get(2), "height");
-        auto width = checkedNarrowToInt(xDims->Get(3), "width");
-        // For 4D, combine H*W into spatial dimension
-        spatialSize = height * width;
-
-        batchStride = checkedNarrowToInt(xStrides->Get(0), "batchStride");
-        channelStride = checkedNarrowToInt(xStrides->Get(1), "channelStride");
-        spatialStride = checkedNarrowToInt(xStrides->Get(3), "spatialStride");
-    }
-    else if(xDims->size() == 5)
-    {
-        batches = checkedNarrowToInt(xDims->Get(0), "batches");
-        channels = checkedNarrowToInt(xDims->Get(1), "channels");
-        auto depth = checkedNarrowToInt(xDims->Get(2), "depth");
-        auto height = checkedNarrowToInt(xDims->Get(3), "height");
-        auto width = checkedNarrowToInt(xDims->Get(4), "width");
-        // For 5D, combine D*H*W into spatial dimension
-        spatialSize = depth * height * width;
-
-        batchStride = checkedNarrowToInt(xStrides->Get(0), "batchStride");
-        channelStride = checkedNarrowToInt(xStrides->Get(1), "channelStride");
-        spatialStride = checkedNarrowToInt(xStrides->Get(4), "spatialStride");
-    }
-    else
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                                                       "Unsupported tensor dimension: "
-                                                           + std::to_string(xDims->size()));
-    }
+    const auto shape = inferenceShape(*params.x());
+    const int batches = shape.batches;
+    const int channels = shape.channels;
+    const int spatialSize = shape.spatialSize;
+    const int batchStride = shape.batchStride;
+    const int channelStride = shape.channelStride;
+    const int spatialStride = shape.spatialStride;
 
     auto inSpatialSize = static_cast<unsigned int>(spatialSize);
 
     const bool isLayoutChannelLast = isChannelLastLayout(params.x());
 
-    // Calculate vector size based on layout
-    auto vectorsize = computeVectorSize(isLayoutChannelLast, channels, inSpatialSize);
+    // The vector size along C (channel last) or the spatial dimension
+    const size_t vectorsize = config.vectorSize;
 
     // Calculate block and grid dimensions
     size_t xlocalsize = 0;
@@ -278,10 +322,12 @@ BatchnormInferenceKernelBuild
 void BatchnormFwdInferencePlan::compile(const IKernelCompiler& kernelCompiler,
                                         const hipDeviceProp_t& deviceProperties)
 {
-    const auto build = buildBatchnormFwdInferenceKernel(_inferenceParams,
-                                                        std::string(deviceProperties.gcnArchName),
-                                                        deviceProperties.multiProcessorCount,
-                                                        deviceProperties.warpSize);
+    const auto build
+        = buildBatchnormFwdInferenceKernel(_inferenceParams,
+                                           std::string(deviceProperties.gcnArchName),
+                                           deviceProperties.multiProcessorCount,
+                                           deviceProperties.warpSize,
+                                           defaultBatchnormFwdInferenceConfig(_inferenceParams));
 
     // Compile kernel and configure launch dimensions
     _compiledProgram = kernelCompiler.compile("BatchNormFwdInferSpatial.cpp", build.options);

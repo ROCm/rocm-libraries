@@ -36,7 +36,10 @@ size_t getMaxBwdWorkspaceSize(const Handle& handle,
     const LayernormBwdParams params(attr, opGraph.getTensorMap());
     const auto deviceProperties
         = hip_kernel_provider_common::getDeviceProperties(handle.getStream());
-    return layernormBwdWorkspaceBytes(params, deviceProperties.multiProcessorCount);
+    return layernormBwdWorkspaceBytes(
+        params,
+        deviceProperties.multiProcessorCount,
+        defaultLayernormBwdConfig(params, deviceProperties.multiProcessorCount));
 }
 
 std::vector<KernelLaunchShape>

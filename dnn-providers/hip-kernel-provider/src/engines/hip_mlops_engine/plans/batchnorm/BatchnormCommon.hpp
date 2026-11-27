@@ -6,6 +6,8 @@
 #include <cmath>
 #include <cstddef>
 
+#include "engines/hip_mlops_engine/plans/PlanUtils.hpp"
+
 namespace hip_kernel_provider
 {
 namespace batchnorm
@@ -558,6 +560,188 @@ inline void defaultConfigSpatialMultiple(const ProblemDescription& problem,
         }
         vectorsizeDefault >>= 1;
     }
+}
+
+// The performance choices of a batchnorm training or backward kernel. Everything else a build
+// compiles and launches (variant 2's workgroup geometry, stash method and final-kernel
+// geometry, the LDS sizes) derives from the problem, the device and these choices.
+struct BatchnormSpatialConfig
+{
+    // 0, 1 or 3: one workgroup per channel (spatial single); 2: spatial multiple
+    int variant = 1;
+    // Threads of the 1D workgroup of variants 0, 1 and 3 (256 or 1024); unused (0) by variant 2
+    size_t groupSize = 1024;
+    // Vector size of variant 2 (1, 2 or 4); 1 for variants 0, 1 and 3
+    size_t vectorSize = 1;
+};
+
+inline bool operator==(const BatchnormSpatialConfig& lhs, const BatchnormSpatialConfig& rhs)
+{
+    return lhs.variant == rhs.variant && lhs.groupSize == rhs.groupSize
+           && lhs.vectorSize == rhs.vectorSize;
+}
+
+inline bool operator!=(const BatchnormSpatialConfig& lhs, const BatchnormSpatialConfig& rhs)
+{
+    return !(lhs == rhs);
+}
+
+// Workgroup size the launch heuristics give variants 0, 1 and 3: 256 threads for small
+// problems, else 1024.
+inline size_t defaultSpatialSingleGroupSize(const ProblemDescription& problem)
+{
+    const auto inCstride = problem.inCstride();
+    const auto batches = problem.batches();
+    if(((inCstride < 256) && (batches < 256)) || ((inCstride < 100) && (batches <= 256)))
+    {
+        return 256;
+    }
+    return 1024;
+}
+
+// Configuration the launch heuristics choose for a problem whose spatial multiple
+// implementation stashes stashValues values per channel: spatial multiple when useMultiple()
+// prefers it and defaultConfigSpatialMultiple() finds an applicable vector size, else the
+// spatial single variant defaultConfigSpatialSingle() picks.
+inline BatchnormSpatialConfig defaultSpatialConfig(const ProblemDescription& problem,
+                                                   unsigned int stashValues)
+{
+    KernelConfig config;
+    if(useMultiple(problem))
+    {
+        defaultConfigSpatialMultiple(problem, stashValues, config);
+        if(config.variant == -1)
+        {
+            // If the default spatial multiple function failed to select a valid configuration,
+            // get a default spatial single configuration as fallback
+            defaultConfigSpatialSingle(problem, config);
+        }
+    }
+    else
+    {
+        defaultConfigSpatialSingle(problem, config);
+    }
+
+    if(config.variant == 2)
+    {
+        return {config.variant, 0, config.vectorsize};
+    }
+    return {config.variant, defaultSpatialSingleGroupSize(problem), config.vectorsize};
+}
+
+// Launch configuration of config on problem. Variant 2 takes the workgroup geometry
+// getSpatialMultipleConfig() gives its vector size, with every batch in one z workgroup, as
+// defaultConfigSpatialMultiple() does. Variants 0, 1 and 3 keep a 1x1x1 geometry here: the
+// builds size their 1D workgroup from config.groupSize.
+inline KernelConfig spatialKernelConfig(const ProblemDescription& problem,
+                                        const BatchnormSpatialConfig& config)
+{
+    KernelConfig kernelConfig;
+    kernelConfig.variant = config.variant;
+    kernelConfig.vectorsize = config.vectorSize;
+    if(config.variant == 2)
+    {
+        getSpatialMultipleConfig(
+            problem, config.vectorSize, kernelConfig.xlocalsize, kernelConfig.ylocalsize);
+        kernelConfig.zlocalsize = 1;
+        kernelConfig.batchElements = problem.batches();
+    }
+    return kernelConfig;
+}
+
+// Whether a spatial single variant (0, 1 or 3) of groupSize threads can run problem. Variants
+// 0 and 3 index NCL/NCHW/NCDHW channels and give each thread one spatial position, so they
+// need a channel-first layout and a spatial size no larger than the workgroup.
+inline bool isSpatialSingleConfigApplicable(const ProblemDescription& problem,
+                                            const BatchnormSpatialConfig& config)
+{
+    if(config.variant != 0 && config.variant != 1 && config.variant != 3)
+    {
+        return false;
+    }
+    if((config.groupSize != 256 && config.groupSize != 1024) || config.vectorSize != 1)
+    {
+        return false;
+    }
+    if(config.variant == 1)
+    {
+        return true;
+    }
+    return !problem.isLayoutChannelLast() && problem.inCstride() <= config.groupSize;
+}
+
+// Whether variant 2 with config.vectorSize can run a problem whose spatial multiple
+// implementation stashes stashValues values per channel: isSpatialMultipleApplicable() on the
+// geometry spatialKernelConfig() derives. config.groupSize is unused.
+inline bool isSpatialMultipleConfigApplicable(const ProblemDescription& problem,
+                                              unsigned int stashValues,
+                                              const BatchnormSpatialConfig& config)
+{
+    if(config.variant != 2
+       || (config.vectorSize != 1 && config.vectorSize != 2 && config.vectorSize != 4))
+    {
+        return false;
+    }
+    const auto kernelConfig = spatialKernelConfig(problem, config);
+    return isSpatialMultipleApplicable(problem,
+                                       kernelConfig.vectorsize,
+                                       stashValues,
+                                       kernelConfig.ylocalsize,
+                                       kernelConfig.zlocalsize,
+                                       kernelConfig.batchElements);
+}
+
+// Whether config can run problem, stashValues as for isSpatialMultipleConfigApplicable().
+// NOTE: defaultSpatialConfig() can return variant 0 for a spatial size above its workgroup
+// size (its spatial single fallback for NCHW problems spatial multiple cannot run), which
+// this rejects.
+inline bool isSpatialConfigApplicable(const ProblemDescription& problem,
+                                      unsigned int stashValues,
+                                      const BatchnormSpatialConfig& config)
+{
+    return config.variant == 2 ? isSpatialMultipleConfigApplicable(problem, stashValues, config)
+                               : isSpatialSingleConfigApplicable(problem, config);
+}
+
+// The performance choice of a batchnorm inference kernel: its vector size along C (NLC, NHWC,
+// NDHWC) or along the spatial dimension (NCL, NCHW, NCDHW).
+struct BatchnormInferenceConfig
+{
+    size_t vectorSize = 1;
+};
+
+inline bool operator==(const BatchnormInferenceConfig& lhs, const BatchnormInferenceConfig& rhs)
+{
+    return lhs.vectorSize == rhs.vectorSize;
+}
+
+inline bool operator!=(const BatchnormInferenceConfig& lhs, const BatchnormInferenceConfig& rhs)
+{
+    return !(lhs == rhs);
+}
+
+// Configuration the inference plans choose: the largest vector size computeVectorSize() finds
+// dividing the vectorized dimension.
+inline BatchnormInferenceConfig
+    defaultInferenceConfig(bool isLayoutChannelLast, int channels, unsigned int inCstride)
+{
+    return {computeVectorSize(isLayoutChannelLast, channels, inCstride)};
+}
+
+// Whether an inference kernel can vectorize by config.vectorSize: 1, 2 or 4 dividing C for a
+// channel-last layout, the spatial size otherwise.
+inline bool isInferenceConfigApplicable(bool isLayoutChannelLast,
+                                        int channels,
+                                        unsigned int inCstride,
+                                        const BatchnormInferenceConfig& config)
+{
+    if(config.vectorSize != 1 && config.vectorSize != 2 && config.vectorSize != 4)
+    {
+        return false;
+    }
+    const auto vectorizedSize
+        = isLayoutChannelLast ? static_cast<size_t>(channels) : static_cast<size_t>(inCstride);
+    return vectorizedSize % config.vectorSize == 0;
 }
 
 } // namespace batchnorm

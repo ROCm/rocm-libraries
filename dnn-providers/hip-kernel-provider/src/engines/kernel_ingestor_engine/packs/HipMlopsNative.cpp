@@ -911,8 +911,11 @@ public:
         const auto& attributes = context.graph.getNodeWrapper(0)
                                      .attributesAs<data_objects::LayernormBackwardAttributes>();
         const layernorm::LayernormBwdParams params(attributes, context.graph.getTensorMap());
-        return layernorm::layernormBwdWorkspaceBytes(params,
-                                                     context.deviceProperties.multiProcessorCount);
+        const int multiProcessorCount = context.deviceProperties.multiProcessorCount;
+        return layernorm::layernormBwdWorkspaceBytes(
+            params,
+            multiProcessorCount,
+            layernorm::defaultLayernormBwdConfig(params, multiProcessorCount));
     }
 
     std::unique_ptr<PreparedDispatch> prepare(const MatchContext& context,
@@ -923,10 +926,12 @@ public:
                                      .attributesAs<data_objects::LayernormBackwardAttributes>();
         const auto& tensorMap = context.graph.getTensorMap();
         const layernorm::LayernormBwdParams params(attributes, tensorMap);
-        const auto build
-            = layernorm::buildLayernormBwdKernel(params,
-                                                 context.deviceProperties.gcnArchName,
-                                                 context.deviceProperties.multiProcessorCount);
+        const int multiProcessorCount = context.deviceProperties.multiProcessorCount;
+        const auto build = layernorm::buildLayernormBwdKernel(
+            params,
+            context.deviceProperties.gcnArchName,
+            multiProcessorCount,
+            layernorm::defaultLayernormBwdConfig(params, multiProcessorCount));
 
         std::optional<hipdnn_plugin_sdk::ScalarOperand> epsilon;
         if(attributes.epsilon_tensor_uid().has_value())
@@ -1271,7 +1276,11 @@ public:
                   : batchnorm::BatchnormFwdInferenceParams(attributes, tensorMap);
         const auto& properties = context.deviceProperties;
         const auto build = batchnorm::buildBatchnormFwdInferenceKernel(
-            params, properties.gcnArchName, properties.multiProcessorCount, properties.warpSize);
+            params,
+            properties.gcnArchName,
+            properties.multiProcessorCount,
+            properties.warpSize,
+            batchnorm::defaultBatchnormFwdInferenceConfig(params));
 
         return std::make_unique<PreparedBatchnormInference>(
             compileBatchnormInference(_compiler, _loader, context, kernel, build),
@@ -1306,7 +1315,11 @@ public:
                   : batchnorm::BatchnormFwdInferenceWithVarianceParams(attributes, tensorMap);
         const auto& properties = context.deviceProperties;
         const auto build = batchnorm::buildBatchnormFwdInferenceWithVarianceKernel(
-            params, properties.gcnArchName, properties.multiProcessorCount, properties.warpSize);
+            params,
+            properties.gcnArchName,
+            properties.multiProcessorCount,
+            properties.warpSize,
+            batchnorm::defaultBatchnormFwdInferenceWithVarianceConfig(params));
 
         return std::make_unique<PreparedBatchnormInference>(
             compileBatchnormInference(_compiler, _loader, context, kernel, build),
@@ -1654,7 +1667,11 @@ public:
                   : batchnorm::BatchnormFwdTrainingParams(attributes, tensorMap);
         const auto& properties = context.deviceProperties;
         const auto build = batchnorm::buildBatchnormFwdTrainingKernel(
-            params, properties.gcnArchName, properties.multiProcessorCount, properties.warpSize);
+            params,
+            properties.gcnArchName,
+            properties.multiProcessorCount,
+            properties.warpSize,
+            batchnorm::defaultBatchnormFwdTrainingConfig(params, properties.multiProcessorCount));
 
         return std::make_unique<PreparedBatchnormTraining>(
             compileBatchnormLaunches(_compiler, _loader, context, kernel, build),
@@ -1689,7 +1706,9 @@ public:
                           tensorMap)
                     : batchnorm::BatchnormBwdParams(backward, tensorMap);
         const auto build
-            = batchnorm::buildBatchnormBwdKernel(params, context.deviceProperties.gcnArchName);
+            = batchnorm::buildBatchnormBwdKernel(params,
+                                                 context.deviceProperties.gcnArchName,
+                                                 batchnorm::defaultBatchnormBwdConfig(params));
 
         return std::make_unique<PreparedBatchnormBackward>(
             compileBatchnormLaunches(_compiler, _loader, context, kernel, build),

@@ -23,6 +23,7 @@
 #include "compilation/IRunnableKernel.hpp"
 #include "core/Handle.hpp"
 #include "core/Utils.hpp"
+#include "engines/hip_mlops_engine/plans/batchnorm/BatchnormCommon.hpp"
 #include "engines/hip_mlops_engine/plans/batchnorm/BatchnormKernelCompileOptions.hpp"
 
 namespace hip_kernel_provider
@@ -87,13 +88,26 @@ private:
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _bias = nullptr;
 };
 
+/// The variant, workgroup size and vector size the launch heuristics choose for @p params.
+///
+/// @throws HipdnnPluginException with BAD_PARAM for a tensor that is not 3D, 4D or 5D.
+BatchnormSpatialConfig defaultBatchnormBwdConfig(const BatchnormBwdParams& params);
+
+/// Whether @p config can run @p params (isSpatialConfigApplicable()).
+///
+/// @throws HipdnnPluginException with BAD_PARAM for a tensor that is not 3D, 4D or 5D.
+bool isBatchnormBwdConfigApplicable(const BatchnormBwdParams& params,
+                                    const BatchnormSpatialConfig& config);
+
 /// The compile options, variant and launches of the BatchNormBwdSpatial program for @p params
-/// on @p gcnArchName: one launch, or for variant 2 the five launches BatchnormBwdPlan::execute()
-/// indexes (three of which run with saved statistics).
+/// on @p gcnArchName with the variant, workgroup size and vector size of @p config: one launch,
+/// or for variant 2 the five launches BatchnormBwdPlan::execute() indexes (three of which run
+/// with saved statistics).
 ///
 /// @throws HipdnnPluginException with BAD_PARAM for a tensor that is not 3D, 4D or 5D.
 BatchnormKernelBuild buildBatchnormBwdKernel(const BatchnormBwdParams& params,
-                                             const std::string& gcnArchName);
+                                             const std::string& gcnArchName,
+                                             const BatchnormSpatialConfig& config);
 
 class BatchnormBwdPlan : public hipdnn_plugin_sdk::IPlan<Handle>
 {

@@ -1,8 +1,12 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <algorithm>
+#include <array>
 #include <cstdio>
+#include <string>
 #include <utility>
+#include <vector>
 
 #include <gtest/gtest.h>
 
@@ -539,6 +543,80 @@ TEST(TestBatchnormFwdInferenceWithVariancePlan, CompileWithUnsupportedDimensionT
     auto deviceProps = createTestDeviceProps();
 
     EXPECT_THROW(plan.compile(mockCompiler, deviceProps), hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+// ============================================================================
+// buildBatchnormFwdInferenceWithVarianceKernel - explicit performance configuration
+// ============================================================================
+
+namespace
+{
+
+// An inference graph and the params of its batchnorm node, which point into the graph's buffer.
+struct InferenceGraph
+{
+    flatbuffers::FlatBufferBuilder builder;
+    BatchnormFwdInferenceWithVarianceParams params;
+};
+
+InferenceGraph createInferenceGraph(const std::vector<int64_t>& strides,
+                                    const std::vector<int64_t>& dims)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceGraph(
+        strides, dims, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+    BatchnormFwdInferenceWithVarianceParams params(
+        *graph.getNode(0).attributes_as_BatchnormInferenceAttributesVarianceExt(),
+        graph.getTensorMap());
+    return {std::move(builder), std::move(params)};
+}
+
+bool hasBuildOption(const BatchnormInferenceKernelBuild& build, const std::string& option)
+{
+    const std::vector<std::string> options = build.options;
+    return std::find(options.begin(), options.end(), option) != options.end();
+}
+
+} // namespace
+
+TEST(TestBatchnormFwdInferenceWithVarianceKernelConfig, DefaultConfigIsTheLargestDividingVectorSize)
+{
+    // NCHW vectorizes the spatial size 50176, NHWC the 3 channels
+    const auto nchw = createInferenceGraph({150528, 50176, 224, 1}, {1, 3, 224, 224});
+    EXPECT_EQ(defaultBatchnormFwdInferenceWithVarianceConfig(nchw.params),
+              (BatchnormInferenceConfig{4}));
+    const auto nhwc = createInferenceGraph({150528, 1, 672, 3}, {1, 3, 224, 224});
+    EXPECT_EQ(defaultBatchnormFwdInferenceWithVarianceConfig(nhwc.params),
+              (BatchnormInferenceConfig{1}));
+}
+
+TEST(TestBatchnormFwdInferenceWithVarianceKernelConfig, BuildTakesTheVectorSizeOfTheConfig)
+{
+    const auto graph = createInferenceGraph({150528, 50176, 224, 1}, {1, 3, 224, 224});
+
+    const auto vectorized
+        = buildBatchnormFwdInferenceWithVarianceKernel(graph.params, "gfx942", 60, 64, {4});
+    EXPECT_TRUE(hasBuildOption(vectorized, "-DHIP_PLUGIN_BN_VEC_SIZE=4"));
+    EXPECT_EQ(vectorized.blockSize, (std::array<unsigned int, 3>{1, 256, 1}));
+    EXPECT_EQ(vectorized.gridSize, (std::array<unsigned int, 3>{3, 49, 1}));
+
+    const auto scalar
+        = buildBatchnormFwdInferenceWithVarianceKernel(graph.params, "gfx942", 60, 64, {1});
+    EXPECT_TRUE(hasBuildOption(scalar, "-DHIP_PLUGIN_BN_VEC_SIZE=1"));
+    EXPECT_EQ(scalar.blockSize, (std::array<unsigned int, 3>{1, 256, 1}));
+    EXPECT_EQ(scalar.gridSize, (std::array<unsigned int, 3>{3, 196, 1}));
+}
+
+TEST(TestBatchnormFwdInferenceWithVarianceKernelConfig, ApplicabilityNeedsADividingVectorSize)
+{
+    const auto nchw = createInferenceGraph({150528, 50176, 224, 1}, {1, 3, 224, 224});
+    EXPECT_TRUE(isBatchnormFwdInferenceWithVarianceConfigApplicable(nchw.params, {4}));
+    EXPECT_FALSE(isBatchnormFwdInferenceWithVarianceConfigApplicable(nchw.params, {8}));
+
+    const auto nhwc = createInferenceGraph({150528, 1, 672, 3}, {1, 3, 224, 224});
+    EXPECT_TRUE(isBatchnormFwdInferenceWithVarianceConfigApplicable(nhwc.params, {1}));
+    EXPECT_FALSE(isBatchnormFwdInferenceWithVarianceConfigApplicable(nhwc.params, {2}));
 }
 
 } // namespace hip_kernel_provider::batchnorm::test

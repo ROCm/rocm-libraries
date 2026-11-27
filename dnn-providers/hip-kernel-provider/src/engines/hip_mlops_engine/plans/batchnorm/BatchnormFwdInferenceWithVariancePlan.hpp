@@ -12,6 +12,7 @@
 #include "compilation/IRunnableKernel.hpp"
 #include "core/Handle.hpp"
 #include "core/Utils.hpp"
+#include "engines/hip_mlops_engine/plans/batchnorm/BatchnormCommon.hpp"
 #include "engines/hip_mlops_engine/plans/batchnorm/BatchnormKernelCompileOptions.hpp"
 
 #include <memory>
@@ -78,16 +79,30 @@ private:
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _activationOut;
 };
 
+/// The vector size the inference plan chooses for @p params: the largest of 4, 2 and 1 that
+/// divides the vectorized dimension.
+///
+/// @throws HipdnnPluginException with BAD_PARAM for a tensor that is not 3D, 4D or 5D.
+BatchnormInferenceConfig defaultBatchnormFwdInferenceWithVarianceConfig(
+    const BatchnormFwdInferenceWithVarianceParams& params);
+
+/// Whether @p config can run @p params (isInferenceConfigApplicable()).
+///
+/// @throws HipdnnPluginException with BAD_PARAM for a tensor that is not 3D, 4D or 5D.
+bool isBatchnormFwdInferenceWithVarianceConfigApplicable(
+    const BatchnormFwdInferenceWithVarianceParams& params, const BatchnormInferenceConfig& config);
+
 /// The compile options, entry point, 3D geometry and launch strides of the BatchNormFwdInferSpatialEst
-/// kernel for @p params on @p gcnArchName. The batch dimension's grid fills the device:
-/// @p multiProcessorCount CUs of @p warpSize lanes.
+/// kernel for @p params on @p gcnArchName with the vector size of @p config. The batch
+/// dimension's grid fills the device: @p multiProcessorCount CUs of @p warpSize lanes.
 ///
 /// @throws HipdnnPluginException with BAD_PARAM for a tensor that is not 3D, 4D or 5D.
 BatchnormInferenceKernelBuild buildBatchnormFwdInferenceWithVarianceKernel(
     const BatchnormFwdInferenceWithVarianceParams& params,
     const std::string& gcnArchName,
     int multiProcessorCount,
-    int warpSize);
+    int warpSize,
+    const BatchnormInferenceConfig& config);
 
 class BatchnormFwdInferenceWithVariancePlan : public hipdnn_plugin_sdk::IPlan<Handle>
 {

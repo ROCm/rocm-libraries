@@ -12,6 +12,7 @@
 #include "compilation/IRunnableKernel.hpp"
 #include "core/Handle.hpp"
 #include "core/Utils.hpp"
+#include "engines/hip_mlops_engine/plans/batchnorm/BatchnormCommon.hpp"
 #include "engines/hip_mlops_engine/plans/batchnorm/BatchnormKernelCompileOptions.hpp"
 
 #include <memory>
@@ -92,16 +93,33 @@ private:
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _activationOut;
 };
 
+/// The variant, workgroup size and vector size the launch heuristics choose for @p params on a
+/// device of @p multiProcessorCount CUs.
+///
+/// @throws HipdnnPluginException with BAD_PARAM for a tensor that is not 3D, 4D or 5D.
+BatchnormSpatialConfig defaultBatchnormFwdTrainingConfig(const BatchnormFwdTrainingParams& params,
+                                                         int multiProcessorCount);
+
+/// Whether @p config can run @p params on a device of @p multiProcessorCount CUs
+/// (isSpatialConfigApplicable()).
+///
+/// @throws HipdnnPluginException with BAD_PARAM for a tensor that is not 3D, 4D or 5D.
+bool isBatchnormFwdTrainingConfigApplicable(const BatchnormFwdTrainingParams& params,
+                                            int multiProcessorCount,
+                                            const BatchnormSpatialConfig& config);
+
 /// The compile options, variant and launches of the BatchNormFwdTrainSpatial program for
-/// @p params on @p gcnArchName: one launch, or for variant 2 the mean/variance, final
-/// mean/variance and normalization launches. The launch heuristics size for a device of
-/// @p multiProcessorCount CUs of @p warpSize lanes.
+/// @p params on @p gcnArchName with the variant, workgroup size and vector size of @p config:
+/// one launch, or for variant 2 the mean/variance, final mean/variance and normalization
+/// launches. Variant 2's geometry sizes for a device of @p multiProcessorCount CUs of
+/// @p warpSize lanes.
 ///
 /// @throws HipdnnPluginException with BAD_PARAM for a tensor that is not 3D, 4D or 5D.
 BatchnormKernelBuild buildBatchnormFwdTrainingKernel(const BatchnormFwdTrainingParams& params,
                                                      const std::string& gcnArchName,
                                                      int multiProcessorCount,
-                                                     int warpSize);
+                                                     int warpSize,
+                                                     const BatchnormSpatialConfig& config);
 
 class BatchnormFwdTrainingPlan : public hipdnn_plugin_sdk::IPlan<Handle>
 {
