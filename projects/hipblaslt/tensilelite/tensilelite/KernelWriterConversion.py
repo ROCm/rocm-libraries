@@ -34,6 +34,12 @@ from .Common.ScaleAlphaVec import scaleAlphaSupportsDeviceScalar, scaleAlphaVect
 
 class KernelWriterConversion(KernelWriterBase):
 
+  # Threads per workgroup the host launches these kernels with. Without the
+  # matching __launch_bounds__ clang assumes 1024 and caps a wave64 thread at
+  # 128 VGPRs, which spills the PostGSU16 VW4 remainder path.
+  # Must stay in sync with OutputConversionWorkGroupSize in ContractionSolution.hpp.
+  WorkGroupSize = 256
+
   def __init__(self, state, load_vw, isaInfoMap: Dict[str, IsaInfo]):
     super().__init__()
 
@@ -220,7 +226,7 @@ class KernelWriterConversion(KernelWriterBase):
     # kernel name
     kStr += self.endLine
     kStr += "extern \"C\"\n"
-    kStr += "__global__ "
+    kStr += "__global__ __launch_bounds__(%d) " % self.WorkGroupSize
     kStr += "void %s" % ( self.kernelName )
     kStr += "(" + self.endLine
 

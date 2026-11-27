@@ -306,6 +306,13 @@ namespace TensileLite
     // Must stay in sync with _rocblaslt_handle::c_syncSkSlotElements.
     constexpr uint32_t StreamKFlagElements = 2048;
 
+    // Threads per workgroup of every output conversion (PostGSU) launch. The
+    // generated kernels declare it as __launch_bounds__, so a launch with more
+    // threads fails.
+    //
+    // Must stay in sync with KernelWriterConversion.WorkGroupSize.
+    constexpr uint32_t OutputConversionWorkGroupSize = 256;
+
     template <typename TAct>
     struct DeviceUserArguments
     {
