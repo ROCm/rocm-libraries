@@ -15,13 +15,14 @@ import re
 
 import numpy as np
 import pytest
+from rocke.tests.bool_flags import bool_flag_reason
+
 from dispatch.gdn import (
     GdnPrefillRequest,
     dispatch_gdn_prefill,
     gdn_prefill_candidates,
 )
 from dispatch.gdn.prefill_gfx950 import value_splits_for
-from rocke.tests.bool_flags import bool_flag_reason
 
 ARCH = "gfx950"
 

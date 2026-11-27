@@ -19,6 +19,8 @@ import unittest
 from contextlib import contextmanager
 from unittest import mock
 
+from rocke.tests.bool_flags import bool_flag_reason
+
 from dispatch.mla import (
     FAMILY,
     MLA_ABI_VERSION,
@@ -32,7 +34,6 @@ from dispatch.mla import (
     num_q_blocks_for,
     registered_mla_combos,
 )
-from rocke.tests.bool_flags import bool_flag_reason
 
 _NAME = "mla_prefill_fwd_gfx942"
 # Opt-in candidates pinned to one fixed two-heads layout each.

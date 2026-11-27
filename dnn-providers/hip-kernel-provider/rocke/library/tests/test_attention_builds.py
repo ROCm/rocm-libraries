@@ -1464,12 +1464,13 @@ class TestAttentionHelpers(unittest.TestCase):
 
     def test_unified_attention_additive_bias_must_be_bool(self):
         """The flag appends ABI params, so a truthy non-bool must not enable it."""
+        from rocke.tests.bool_flags import bool_flag_refusal
+
         from kernels import (
             UnifiedAttention2DTiledSpec,
             UnifiedAttention3DTiledSpec,
             UnifiedAttentionProblem,
         )
-        from rocke.tests.bool_flags import bool_flag_refusal
 
         common = dict(
             head_size=64,

@@ -18,6 +18,8 @@ import dataclasses
 import itertools
 
 import pytest
+from rocke.tests.bool_flags import bool_flag_refusal
+
 from dispatch.attention import attention_candidates
 from dispatch.attention.common import AttentionMaskType, AttentionRequest
 from kernels.gfx950.attention_tiled_3d import (
@@ -27,7 +29,6 @@ from kernels.gfx950.attention_tiled_3d import (
     supports_tiled_3d_spec,
     supports_unified_attention_3d_tiled_module,
 )
-from rocke.tests.bool_flags import bool_flag_refusal
 
 
 def _gfx950_3d_candidates():

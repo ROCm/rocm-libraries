@@ -27,6 +27,8 @@ import dataclasses
 import re
 
 import pytest
+from rocke.tests.bool_flags import bool_flag_refusal
+
 from kernels.common.attention_bwd_plan import DECLINE_KINDS
 from kernels.common.attention_bwd_unified import (
     ATTN_BWD_UNIFIED_ABI,
@@ -48,7 +50,6 @@ from kernels.common.attention_bwd_unified_plan import (
     attn_bwd_unified_workspace_layout,
     unified_stage_params,
 )
-from rocke.tests.bool_flags import bool_flag_refusal
 
 CDNA = ("gfx942", "gfx950")
 

@@ -992,8 +992,9 @@ class TestSplitKSpecDict(unittest.TestCase):
     def test_a_malformed_acc_epilogue_is_rejected(self):
         # relu is a bool and the bounds real numbers: a truthy non-bool or a
         # non-numeric field is rejected, not coerced by the bridge.
-        from kernels.common.conv_implicit_gemm import ConvAccumulatorEpilogue
         from rocke.tests.bool_flags import bool_flag_refusal
+
+        from kernels.common.conv_implicit_gemm import ConvAccumulatorEpilogue
 
         for relu in (1, "no", None):
             with self.subTest(relu=relu):

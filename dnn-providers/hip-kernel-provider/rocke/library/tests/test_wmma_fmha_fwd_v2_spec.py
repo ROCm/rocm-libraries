@@ -7,6 +7,8 @@ from __future__ import annotations
 import unittest
 from dataclasses import replace
 
+from rocke.tests.bool_flags import bool_flag_refusal
+
 from kernels.gfx1151.wmma_fmha_fwd_v2 import (
     WmmaFmhaFwdV2Spec,
     build_wmma_fmha_fwd_v2,
@@ -16,7 +18,6 @@ from kernels.gfx1151.wmma_fmha_fwd_v2 import (
     wmma_fmha_fwd_v2_lds_bytes,
     wmma_fmha_fwd_v2_signature,
 )
-from rocke.tests.bool_flags import bool_flag_refusal
 
 _ARCHS = ("gfx11-generic", "gfx12-generic")
 _BUCKETS = ((64, 64), (96, 96), (128, 128), (192, 128), (256, 128), (256, 256))

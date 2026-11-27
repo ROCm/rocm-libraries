@@ -8,6 +8,8 @@ import unittest
 from dataclasses import replace
 from fractions import Fraction
 
+from rocke.tests.bool_flags import bool_flag_refusal
+
 from dispatch.attention import (
     AttentionMaskType,
     AttentionRequest,
@@ -15,7 +17,6 @@ from dispatch.attention import (
     dispatch_attention,
 )
 from dispatch.attention.common import ATTENTION_FEATURES
-from rocke.tests.bool_flags import bool_flag_refusal
 
 # Frozen map of every registered candidate to the feature set its Capability
 # declares. Generated once from the registry; a new candidate (or a features

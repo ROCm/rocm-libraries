@@ -28,6 +28,8 @@ import itertools
 import re
 
 import pytest
+from rocke.tests.bool_flags import bool_flag_reason
+
 from kernels.gfx950.gdn_decode import (
     ROW_LOADS,
     STATE_HINTS,
@@ -43,7 +45,6 @@ from kernels.gfx950.gdn_decode import (
     stream_rows_applies,
     xcd_remap_applies,
 )
-from rocke.tests.bool_flags import bool_flag_reason
 
 ARCH = "gfx950"
 

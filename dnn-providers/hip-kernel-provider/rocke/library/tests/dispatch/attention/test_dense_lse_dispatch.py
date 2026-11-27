@@ -7,13 +7,14 @@ import dataclasses
 import re
 
 import pytest
+from rocke.tests.bool_flags import bool_flag_refusal
+
 from dispatch.attention import (
     AttentionRequest,
     attention_execution_candidates,
     dispatch_attention,
     dispatch_attention_all,
 )
-from rocke.tests.bool_flags import bool_flag_refusal
 
 _DENSE_SPEC_IDS = {
     "gfx942": ("gfx942_dense",),
