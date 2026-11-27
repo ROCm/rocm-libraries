@@ -48,6 +48,7 @@ namespace hiptensor
         auto BDataType       = desc->mDescB ? desc->mDescB->mType : hiptensor::NONE_TYPE;
         auto CDataType       = desc->mDescC ? desc->mDescC->mType : hiptensor::NONE_TYPE;
         auto DDataType       = desc->mDescD ? desc->mDescD->mType : hiptensor::NONE_TYPE;
+        auto EDataType       = desc->mDescE ? desc->mDescE->mType : hiptensor::NONE_TYPE;
         auto computeType     = desc->mDescCompute;
         auto operationType   = desc->mOperationType;
         auto contractionOpId = desc->mContractionOpId;
@@ -57,36 +58,42 @@ namespace hiptensor
         std::vector<std::size_t> lengthsB = hiptensor::getTensorLengths(desc->mDescB);
         std::vector<std::size_t> lengthsC = hiptensor::getTensorLengths(desc->mDescC);
         std::vector<std::size_t> lengthsD = hiptensor::getTensorLengths(desc->mDescD);
+        std::vector<std::size_t> lengthsE = hiptensor::getTensorLengths(desc->mDescE);
 
         std::vector<std::size_t> arrLSM;
         arrLSM.insert(arrLSM.end(), lengthsA.begin(), lengthsA.end());
         arrLSM.insert(arrLSM.end(), lengthsB.begin(), lengthsB.end());
         arrLSM.insert(arrLSM.end(), lengthsC.begin(), lengthsC.end());
         arrLSM.insert(arrLSM.end(), lengthsD.begin(), lengthsD.end());
+        arrLSM.insert(arrLSM.end(), lengthsE.begin(), lengthsE.end());
 
         //Get strides
         std::vector<std::size_t> stridesA = hiptensor::getTensorStrides(desc->mDescA);
         std::vector<std::size_t> stridesB = hiptensor::getTensorStrides(desc->mDescB);
         std::vector<std::size_t> stridesC = hiptensor::getTensorStrides(desc->mDescC);
         std::vector<std::size_t> stridesD = hiptensor::getTensorStrides(desc->mDescD);
+        std::vector<std::size_t> stridesE = hiptensor::getTensorStrides(desc->mDescE);
 
         arrLSM.insert(arrLSM.end(), stridesA.begin(), stridesA.end());
         arrLSM.insert(arrLSM.end(), stridesB.begin(), stridesB.end());
         arrLSM.insert(arrLSM.end(), stridesC.begin(), stridesC.end());
         arrLSM.insert(arrLSM.end(), stridesD.begin(), stridesD.end());
+        arrLSM.insert(arrLSM.end(), stridesE.begin(), stridesE.end());
 
         //Get modes
         arrLSM.insert(arrLSM.end(), desc->mModeA.begin(), desc->mModeA.end());
         arrLSM.insert(arrLSM.end(), desc->mModeB.begin(), desc->mModeB.end());
         arrLSM.insert(arrLSM.end(), desc->mModeC.begin(), desc->mModeC.end());
         arrLSM.insert(arrLSM.end(), desc->mModeD.begin(), desc->mModeD.end());
+        arrLSM.insert(arrLSM.end(), desc->mModeE.begin(), desc->mModeE.end());
 
-        //generate hash ID by {Tag, DatatypeA, DatatypeB, DatatypeC, DatatypeD, DatatypeCompute, mOperationType, mContractionOpId, lengths, strides, modes}
+        //generate hash ID by {Tag, DatatypeA, DatatypeB, DatatypeC, DatatypeD, DatatypeE, DatatypeCompute, mOperationType, mContractionOpId, lengths, strides, modes}
         PlanCache::HashId hashID = Hash{}(tag,
                                           ADataType,
                                           BDataType,
                                           CDataType,
                                           DDataType,
+                                          EDataType,
                                           computeType,
                                           operationType,
                                           contractionOpId,

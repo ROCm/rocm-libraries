@@ -371,3 +371,170 @@ TEST_F(PlanCacheFileTest, FullCacheUpdatesExistingLineInPlace)
 
     EXPECT_EQ(hashesIn(output), (std::set<HashId>{0x1111, permute.hash}));
 }
+
+namespace
+{
+    // Runs the trinary contraction E[m,n] = A[m,k] * B[k,q] * C[q,n] + D[m,n] once on
+    // handle, which adds its kernel to the handle's plan cache. A to D are packed and
+    // stay the same; E has 4 x 5 elements and the given strides.
+    // With created, it stores the status of creating the contraction there and returns
+    // without running when the device has no FP32 contraction (ARCH_MISMATCH), so the
+    // caller can skip. Without created, creating the contraction must succeed.
+    // Call it through ASSERT_NO_FATAL_FAILURE.
+    void runTrinary(hiptensorHandle_t  handle,
+                    int64_t const      stridesE[2],
+                    hiptensorStatus_t* created = nullptr)
+    {
+        constexpr int64_t M = 4, N = 5, K = 3, Q = 2;
+        int64_t const     lensA[]{M, K}, lensB[]{K, Q}, lensC[]{Q, N}, lensD[]{M, N};
+        int32_t const modeA[]{'m', 'k'}, modeB[]{'k', 'q'}, modeC[]{'q', 'n'}, modeD[]{'m', 'n'};
+        // E sits on positions 0 to (M - 1) * strideM + (N - 1) * strideN.
+        std::size_t const elementsE = (M - 1) * stridesE[0] + (N - 1) * stridesE[1] + 1;
+
+        hiptensorTensorDescriptor_t descA = nullptr, descB = nullptr, descC = nullptr,
+                                    descD = nullptr, descE = nullptr;
+        hiptensorOperationDescriptor_t opDesc = nullptr;
+        hiptensorPlanPreference_t      pref   = nullptr;
+        hiptensorPlan_t                plan   = nullptr;
+        void *dA = nullptr, *dB = nullptr, *dC = nullptr, *dD = nullptr, *dE = nullptr,
+             *workspace = nullptr;
+        ScopeExit cleanup{[&] {
+            for(auto ptr : {dA, dB, dC, dD, dE, workspace})
+                (void)hipFree(ptr);
+            if(plan)
+                hiptensorDestroyPlan(plan);
+            if(pref)
+                hiptensorDestroyPlanPreference(pref);
+            if(opDesc)
+                hiptensorDestroyOperationDescriptor(opDesc);
+            for(auto desc : {descA, descB, descC, descD, descE})
+                if(desc)
+                    hiptensorDestroyTensorDescriptor(desc);
+        }};
+
+        for(auto [desc, lens] : {std::pair{&descA, lensA},
+                                 std::pair{&descB, lensB},
+                                 std::pair{&descC, lensC},
+                                 std::pair{&descD, lensD}})
+        {
+            ASSERT_EQ(hiptensorCreateTensorDescriptor(
+                          handle, desc, 2, lens, nullptr, HIPTENSOR_R_32F, 128),
+                      HIPTENSOR_STATUS_SUCCESS);
+        }
+        ASSERT_EQ(hiptensorCreateTensorDescriptor(
+                      handle, &descE, 2, lensD, stridesE, HIPTENSOR_R_32F, 128),
+                  HIPTENSOR_STATUS_SUCCESS);
+        auto const status = hiptensorCreateContractionTrinary(handle,
+                                                              &opDesc,
+                                                              descA,
+                                                              modeA,
+                                                              HIPTENSOR_OP_IDENTITY,
+                                                              descB,
+                                                              modeB,
+                                                              HIPTENSOR_OP_IDENTITY,
+                                                              descC,
+                                                              modeC,
+                                                              HIPTENSOR_OP_IDENTITY,
+                                                              descD,
+                                                              modeD,
+                                                              HIPTENSOR_OP_IDENTITY,
+                                                              descE,
+                                                              modeD,
+                                                              HIPTENSOR_COMPUTE_DESC_32F);
+        if(created)
+        {
+            *created = status;
+            if(status == HIPTENSOR_STATUS_ARCH_MISMATCH)
+            {
+                return;
+            }
+        }
+        ASSERT_EQ(status, HIPTENSOR_STATUS_SUCCESS);
+        ASSERT_EQ(hiptensorCreatePlanPreference(
+                      handle, &pref, HIPTENSOR_ALGO_DEFAULT, HIPTENSOR_JIT_MODE_NONE),
+                  HIPTENSOR_STATUS_SUCCESS);
+
+        uint64_t wsSize = 0;
+        ASSERT_EQ(hiptensorEstimateWorkspaceSize(
+                      handle, opDesc, pref, HIPTENSOR_WORKSPACE_DEFAULT, &wsSize),
+                  HIPTENSOR_STATUS_SUCCESS);
+        ASSERT_EQ(hiptensorCreatePlan(handle, &plan, opDesc, pref, wsSize),
+                  HIPTENSOR_STATUS_SUCCESS);
+
+        for(auto [ptr, elements] : {std::pair{&dA, M * K},
+                                    std::pair{&dB, K * Q},
+                                    std::pair{&dC, Q * N},
+                                    std::pair{&dD, M * N},
+                                    std::pair{&dE, static_cast<int64_t>(elementsE)}})
+        {
+            ASSERT_EQ(hipMalloc(ptr, sizeof(float) * elements), hipSuccess);
+            ASSERT_EQ(hipMemset(*ptr, 0, sizeof(float) * elements), hipSuccess);
+        }
+        if(wsSize > 0)
+        {
+            ASSERT_EQ(hipMalloc(&workspace, wsSize), hipSuccess);
+        }
+
+        float alpha = 1.0f, beta = 1.0f;
+        ASSERT_EQ(hiptensorContractTrinary(
+                      handle, plan, &alpha, dA, dB, dC, &beta, dD, dE, workspace, wsSize, nullptr),
+                  HIPTENSOR_STATUS_SUCCESS);
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+    }
+
+    constexpr int64_t kPackedE[]{1, 4};
+    // Each column of 4 elements starts 7 elements after the previous one.
+    constexpr int64_t kPaddedE[]{1, 7};
+
+    // The number of lines in handle's plan cache.
+    // Call it through ASSERT_NO_FATAL_FAILURE.
+    void countCacheLines(hiptensorHandle_t handle, std::size_t* count)
+    {
+        TempFile file("trinary");
+        ASSERT_EQ(hiptensorHandleWritePlanCacheToFile(handle, file.c_str()),
+                  HIPTENSOR_STATUS_SUCCESS);
+        *count = readCacheFile(file).size();
+    }
+} // namespace
+
+// The control: running one trinary contraction twice adds one cache line.
+TEST_F(PlanCacheFileTest, SameTrinaryContractionOneCacheLine)
+{
+    hiptensorHandle_t handle = nullptr;
+    ASSERT_EQ(hiptensorCreate(&handle), HIPTENSOR_STATUS_SUCCESS);
+    ScopeExit destroyHandle{[&] { hiptensorDestroy(handle); }};
+
+    hiptensorStatus_t created{};
+    ASSERT_NO_FATAL_FAILURE(runTrinary(handle, kPackedE, &created));
+    if(created == HIPTENSOR_STATUS_ARCH_MISMATCH)
+    {
+        GTEST_SKIP() << "no FP32 contraction on this device";
+    }
+    ASSERT_NO_FATAL_FAILURE(runTrinary(handle, kPackedE));
+
+    std::size_t count = 0;
+    ASSERT_NO_FATAL_FAILURE(countCacheLines(handle, &count));
+    EXPECT_EQ(count, 1u);
+}
+
+// A cached kernel is reused for every problem with the same hash, so two trinary
+// contractions that differ only in E's strides must get a cache line each: the kernel
+// chosen for one layout of E may not support the other.
+TEST_F(PlanCacheFileTest, TrinaryContractionsDifferingInEStridesTwoCacheLines)
+{
+    hiptensorHandle_t handle = nullptr;
+    ASSERT_EQ(hiptensorCreate(&handle), HIPTENSOR_STATUS_SUCCESS);
+    ScopeExit destroyHandle{[&] { hiptensorDestroy(handle); }};
+
+    hiptensorStatus_t created{};
+    ASSERT_NO_FATAL_FAILURE(runTrinary(handle, kPackedE, &created));
+    if(created == HIPTENSOR_STATUS_ARCH_MISMATCH)
+    {
+        GTEST_SKIP() << "no FP32 contraction on this device";
+    }
+    ASSERT_NO_FATAL_FAILURE(runTrinary(handle, kPaddedE));
+
+    std::size_t count = 0;
+    ASSERT_NO_FATAL_FAILURE(countCacheLines(handle, &count));
+    EXPECT_EQ(count, 2u);
+}

@@ -126,14 +126,14 @@ HIPTENSOR_EXPORT hiptensorStatus_t
 //! @param[in] descB Tensor descriptor for B.
 //! @param[in] modeB Array with `nmodeB` entries representing tensor B's modes.
 //! @param[in] opB Unary operator applied to each element of B.
-//! @param[in] descC Tensor descriptor for C.
-//! @param[in] modeC Array with `nmodeC` entries representing tensor C's modes.
+//! @param[in] descC Tensor descriptor for C. C may have its own strides. A complex contraction needs every tensor packed and C laid out like D.
+//! @param[in] modeC Array with `nmodeC` entries representing tensor C's modes. They must be the modes of D, in any order, each with the same extent as in D.
 //! @param[in] opC Unary operator applied to each element of C.
-//! @param[in] descD Tensor descriptor for D (must match `descC`).
-//! @param[in] modeD Array with `nmodeD` entries representing tensor D's modes (must match `modeC`).
+//! @param[in] descD Tensor descriptor for D.
+//! @param[in] modeD Array with `nmodeD` entries representing tensor D's modes.
 //! @param[in] descCompute Data type used for intermediate computation of \f$T = A * B\f$.
-//! @retval `HIPTENSOR_STATUS_NOT_SUPPORTED` When data type combinations or operations aren't supported.
-//! @retval `HIPTENSOR_STATUS_INVALID_VALUE` When tensor dimensions or modes contain illegal values.
+//! @retval `HIPTENSOR_STATUS_NOT_SUPPORTED` When data type combinations or operations aren't supported, when C doesn't have the modes of D, or when a complex contraction is given a tensor that isn't packed or a C laid out differently from D.
+//! @retval `HIPTENSOR_STATUS_INVALID_VALUE` When tensor dimensions or modes contain illegal values, or when a mode has a different extent in C and in D.
 //! @retval `HIPTENSOR_STATUS_SUCCESS` When the operation completes successfully.
 //! @retval `HIPTENSOR_STATUS_NOT_INITIALIZED` When the handle isn't initialized.
 HIPTENSOR_EXPORT hiptensorStatus_t
@@ -328,18 +328,22 @@ HIPTENSOR_EXPORT hiptensorStatus_t hiptensorDestroyPlan(hiptensorPlan_t plan);
 //!
 //! @details Computes: \f$\mathcal{D}_{{modes}_\mathcal{D}} \gets \alpha * \mathcal{A}_{{modes}_\mathcal{A}} B_{{modes}_\mathcal{B}} + \beta \mathcal{C}_{{modes}_\mathcal{C}}\f$.
 //! The active HIP device must match the device that was active during plan creation.
+//! Overlap is checked on memory ranges. A tensor's range runs from its first to its
+//! last element, including the gaps between the elements of a padded or strided
+//! tensor. Two tensors overlap when their ranges share a byte, even if they share no
+//! element.
 //! @param[in] handle Opaque handle representing the hipTensor library context.
 //! @param[in] plan Opaque handle containing the contraction execution plan.
 //! @param[in] alpha Scaling factor for \f$A*B\f$. Data type determined by `descCompute`. Pointer to host memory.
-//! @param[in] A Pointer to tensor A data in GPU-accessible memory. Must not overlap with elements written to D.
-//! @param[in] B Pointer to tensor B data in GPU-accessible memory. Must not overlap with elements written to D.
+//! @param[in] A Pointer to tensor A data in GPU-accessible memory. Must not overlap D.
+//! @param[in] B Pointer to tensor B data in GPU-accessible memory. Must not overlap D.
 //! @param[in] beta Scaling factor for C. Data type determined by `descCompute`. Pointer to host memory.
-//! @param[in] C Pointer to tensor C data in GPU-accessible memory.
+//! @param[in] C Pointer to tensor C data in GPU-accessible memory. May be the same pointer as D when C and D have the same layout; otherwise must not overlap D.
 //! @param[out] D Pointer to tensor D data in GPU-accessible memory.
 //! @param[out] workspace Optional parameter (can be `NULL`). Additional device memory workspace for optimizations.
 //! @param[in] workspaceSize Size of the `workspace` array in bytes.
 //! @param[in] stream HIP stream for all computations.
-//! @retval `HIPTENSOR_STATUS_NOT_SUPPORTED` When the operation isn't supported.
+//! @retval `HIPTENSOR_STATUS_NOT_SUPPORTED` When the operation isn't supported, when C and D are the same pointer with different layouts, when C overlaps D without being the same pointer, or when A or B overlaps D.
 //! @retval `HIPTENSOR_STATUS_INVALID_VALUE` When input data is invalid (typically user error).
 //! @retval `HIPTENSOR_STATUS_SUCCESS` When the operation completes successfully.
 //! @retval `HIPTENSOR_STATUS_NOT_INITIALIZED` When the handle isn't initialized.
@@ -375,15 +379,16 @@ HIPTENSOR_EXPORT hiptensorStatus_t hiptensorContract(const hiptensorHandle_t han
 //! @param[in] descC Tensor descriptor for C.
 //! @param[in] modeC Array representing tensor C's modes.
 //! @param[in] opC Unary operator applied to each element of C.
-//! @param[in] descD Tensor descriptor for D.
-//! @param[in] modeD Array representing tensor D's modes.
+//! @param[in] descD Tensor descriptor for D. D may have its own strides. A complex contraction needs every tensor packed and D laid out like E.
+//! @param[in] modeD Array representing tensor D's modes. They must be the modes of E, in any order, each with the same extent as in E.
 //! @param[in] opD Unary operator applied to each element of D.
-//! @param[in] descE Tensor descriptor for E (output, must match `descD`).
-//! @param[in] modeE Array representing tensor E's modes (must match `modeD`).
+//! @param[in] descE Tensor descriptor for E (output).
+//! @param[in] modeE Array representing tensor E's modes.
 //! @param[in] descCompute Data type used for intermediate computation.
 //! @retval `HIPTENSOR_STATUS_SUCCESS` When the operation completes successfully.
 //! @retval `HIPTENSOR_STATUS_NOT_INITIALIZED` When the handle isn't initialized.
-//! @retval `HIPTENSOR_STATUS_INVALID_VALUE` When tensor dimensions or modes contain illegal values.
+//! @retval `HIPTENSOR_STATUS_NOT_SUPPORTED` When the operation isn't supported, when D doesn't have the modes of E, or when a complex contraction is given a tensor that isn't packed or a D laid out differently from E.
+//! @retval `HIPTENSOR_STATUS_INVALID_VALUE` When tensor dimensions or modes contain illegal values, or when a mode has a different extent in D and in E.
 HIPTENSOR_EXPORT hiptensorStatus_t
     hiptensorCreateContractionTrinary(const hiptensorHandle_t            handle,
                                       hiptensorOperationDescriptor_t*    desc,
@@ -410,20 +415,24 @@ HIPTENSOR_EXPORT hiptensorStatus_t
 //!   \mathcal{B}_{{modes}_\mathcal{B}} \mathcal{C}_{{modes}_\mathcal{C}}
 //!   + \beta \mathcal{D}_{{modes}_\mathcal{D}}\f$.
 //! The active HIP device must match the device that was active during plan creation.
+//! Overlap is checked on memory ranges. A tensor's range runs from its first to its
+//! last element, including the gaps between the elements of a padded or strided
+//! tensor. Two tensors overlap when their ranges share a byte, even if they share no
+//! element.
 //! @param[in] handle Opaque handle representing the hipTensor library context.
 //! @param[in] plan Opaque handle containing the trinary contraction execution plan.
 //! @param[in] alpha Scaling factor for A*B*C. Pointer to host memory.
-//! @param[in] A Pointer to tensor A data in GPU-accessible memory.
-//! @param[in] B Pointer to tensor B data in GPU-accessible memory.
-//! @param[in] C Pointer to tensor C data in GPU-accessible memory.
+//! @param[in] A Pointer to tensor A data in GPU-accessible memory. May overlap E.
+//! @param[in] B Pointer to tensor B data in GPU-accessible memory. May overlap E.
+//! @param[in] C Pointer to tensor C data in GPU-accessible memory. Must not overlap E.
 //! @param[in] beta Scaling factor for D. Pointer to host memory.
-//! @param[in] D Pointer to tensor D data in GPU-accessible memory.
+//! @param[in] D Pointer to tensor D data in GPU-accessible memory. May be the same pointer as E when D and E have the same layout; otherwise must not overlap E.
 //! @param[out] E Pointer to tensor E data in GPU-accessible memory.
 //! @param[in] workspace Device memory workspace (must hold at least the intermediate tensor).
 //! @param[in] workspaceSize Size of the `workspace` array in bytes.
 //! @param[in] stream HIP stream for all computations.
 //! @retval `HIPTENSOR_STATUS_SUCCESS` When the operation completes successfully.
-//! @retval `HIPTENSOR_STATUS_NOT_SUPPORTED` When the operation isn't supported.
+//! @retval `HIPTENSOR_STATUS_NOT_SUPPORTED` When the operation isn't supported, when C overlaps E, or when D overlaps E without being the same pointer with the same layout.
 //! @retval `HIPTENSOR_STATUS_INVALID_VALUE` When input data is invalid.
 //! @retval `HIPTENSOR_STATUS_NOT_INITIALIZED` When the handle isn't initialized.
 //! @retval `HIPTENSOR_STATUS_ARCH_MISMATCH` When the plan was created for a different device.
