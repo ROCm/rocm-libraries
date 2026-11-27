@@ -706,7 +706,7 @@ def _run_forward_device(
             artifact, p, (x, w), y, grid=grid, block=block, dtype=dtype
         )
     except HipError as e:
-        return False, f"kernel load failed: {e}"
+        return False, f"kernel load or launch failed: {e}"
 
     rel_err = peak_relative_error(storage.decode(y, dtype), ref, floor=1.0)
     if not rel_err < tol:
@@ -1291,7 +1291,7 @@ def _run_dgrad_device(
             artifact, p, (dy, w), dx, grid=grid, block=block, direction="dgrad"
         )
     except HipError as e:
-        return False, f"kernel load failed: {e}"
+        return False, f"kernel load or launch failed: {e}"
 
     rel_err = peak_relative_error(storage.decode(dx, dtype), ref, floor=1.0)
     tol = _TOL_BF16 if dtype == "bf16" else _TOL
@@ -1731,7 +1731,7 @@ def _run_nongrouped_spec(
                 block=(red_spec.threads, 1, 1),
             )
     except HipError as e:
-        return False, f"kernel load failed: {e}"
+        return False, f"kernel load or launch failed: {e}"
 
     rel_err = peak_relative_error(storage.decode(y_dev.read(), p.dtype), ref, floor=1.0)
     tol = _TOL_BF16 if p.dtype == "bf16" else _TOL
@@ -2447,7 +2447,7 @@ def _run_wgrad_one(
             direction="wgrad",
         )
     except HipError as e:
-        return False, f"kernel load failed: {e}"
+        return False, f"kernel load or launch failed: {e}"
     dw = dw_dev.read().sum(axis=1).reshape(ref.shape)
 
     rel_err = peak_relative_error(dw, ref, floor=1.0)
