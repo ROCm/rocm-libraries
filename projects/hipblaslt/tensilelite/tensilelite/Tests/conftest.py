@@ -326,11 +326,24 @@ def dpxSkipMark(config):
 
 
 def pytest_terminal_summary(terminalreporter):
-    """Report how many logic-corpus-dependent tests ran in this lane and how many skipped.
+    """Report common YAML stage timings and logic-corpus test coverage."""
+    # xdist forwards test reports to the controller, which owns the console.
+    stage_timings = []
+    for reports in terminalreporter.stats.values():
+        for report in reports:
+            if getattr(report, "when", None) != "call":
+                continue
+            fields = [
+                value for _, value in report.get_sections("Captured tensilelite stage timing call")
+            ]
+            if fields:
+                stage_timings.append((report.nodeid, " ".join(fields)))
+    if stage_timings:
+        terminalreporter.write_sep("-", "TensileLite stage timings")
+        for nodeid, durations in sorted(stage_timings):
+            terminalreporter.write_line(f"TENSILELITE_STAGE_TIMING {durations} nodeid={nodeid}")
 
-    Without this line a lane that lacks the corpus reads as covered as one that
-    has it, since these skips look like any other. See ``Tests/unit/logic_corpus.py``.
-    """
+    # Distinguish a lane missing the logic corpus from one that exercised it.
     outcomes = {}
     for category in ("passed", "failed", "error", "skipped"):
         outcomes[category] = {

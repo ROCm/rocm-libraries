@@ -56,6 +56,7 @@ import os
 import shutil
 import subprocess
 import sys
+from time import perf_counter
 
 import py
 import pytest
@@ -92,7 +93,21 @@ def _call_helper_in_subprocess(
     )
 
 
-def test_config(tensile_args: list[str], config: str, tmpdir: py.path.local, pytestconfig: pytest.Config) -> None:
+@contextlib.contextmanager
+def _record_stage_timing(request: pytest.FixtureRequest, stage: str):
+    start = perf_counter()
+    try:
+        yield
+    finally:
+        request.node.add_report_section(
+            "call", "tensilelite stage timing", f"{stage}_s={perf_counter() - start:.3f}"
+        )
+
+
+def test_config(
+    tensile_args: list[str], config: str, tmpdir: py.path.local,
+    pytestconfig: pytest.Config, request: pytest.FixtureRequest,
+) -> None:
     """Pytest wrapper: run the full build→artifact→run round-trip on a single machine.
 
     Activated in the default mode (no ``--build-only`` / ``--use-cache`` flags).
@@ -105,10 +120,12 @@ def test_config(tensile_args: list[str], config: str, tmpdir: py.path.local, pyt
     artifact_dir = tmpdir.strpath
     artifact_path = os.path.join(artifact_dir, artifact_name + ".tar.gz")
 
-    _call_helper_in_subprocess("test_config_build", "_build", config, output_dir, artifact_dir, tensile_args)
+    with _record_stage_timing(request, "build"):
+        _call_helper_in_subprocess("test_config_build", "_build", config, output_dir, artifact_dir, tensile_args)
     shutil.rmtree(output_dir)
     try:
-        _call_helper_in_subprocess("test_config_run", "_run", config, output_dir, artifact_dir, tensile_args)
+        with _record_stage_timing(request, "run"):
+            _call_helper_in_subprocess("test_config_run", "_run", config, output_dir, artifact_dir, tensile_args)
     finally:
         with contextlib.suppress(FileNotFoundError):
             os.remove(artifact_path)
