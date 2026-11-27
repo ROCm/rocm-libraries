@@ -99,8 +99,8 @@ def test_ued_fixture_validity_matches_the_runtime(tmp_path, fixture):
 @pytest.mark.quick
 @pytest.mark.parametrize("fixture", _VALID_FIXTURES, ids=lambda path: path.stem)
 def test_valid_fixture_conforms_to_the_schema(fixture):
-    # Skipped on a host without jsonschema: this is the only test that needs it, so
-    # the build's configure does not require it.
+    # Skipped on a host without jsonschema: only the schema tests need it, so the
+    # build's configure does not require it.
     jsonschema = pytest.importorskip("jsonschema")
 
     schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
@@ -108,6 +108,58 @@ def test_valid_fixture_conforms_to_the_schema(fixture):
     ued = json.loads(_ued_text(_read_case(fixture)))
 
     jsonschema.Draft7Validator(schema).validate(ued)
+
+
+# Invalid fixtures whose defect the schema expresses: a binding, node id or opcode form,
+# a `one_of` list's length or uniqueness, an unknown key, or a missing member. The rest
+# need the op-schema registry or the whole pattern, which the schema cannot see.
+_SCHEMA_REJECTED_FIXTURES = [
+    "bad_kind",
+    "binding_empty_name",
+    "binding_leading_digit",
+    "binding_mid_identifier_mark",
+    "binding_not_string",
+    "binding_two_marks",
+    "binding_without_dollar",
+    "both_arms",
+    "empty_nodes",
+    "empty_op",
+    "graph_match_not_object",
+    "neither_arm",
+    "node_id_not_identifier",
+    "node_id_not_string",
+    "node_missing_id",
+    "node_missing_kind",
+    "node_missing_op",
+    "node_not_object",
+    "nodes_not_array",
+    "nodes_over_limit",
+    "one_of_duplicate_member",
+    "one_of_empty_member",
+    "one_of_non_string_member",
+    "one_of_not_array",
+    "one_of_single_member",
+    "one_of_unknown_key",
+    "op_not_string_or_object",
+    "op_object_without_one_of",
+    "operands_not_object",
+    "optional_result",
+    "results_not_object",
+    "unknown_node_key",
+]
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize("name", _SCHEMA_REJECTED_FIXTURES)
+def test_schema_rejects_the_invalid_fixture(name):
+    jsonschema = pytest.importorskip("jsonschema")
+
+    case = _read_case(FIXTURE_DIR / f"{name}.json")
+    assert not case["valid"]
+    schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+    ued = json.loads(_ued_text(case))
+
+    assert list(jsonschema.Draft7Validator(schema).iter_errors(ued))
 
 
 @pytest.mark.quick

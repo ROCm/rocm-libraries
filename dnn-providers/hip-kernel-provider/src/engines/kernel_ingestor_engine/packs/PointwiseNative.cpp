@@ -337,10 +337,11 @@ bool pointwiseSubMatches(const MatchContext& context, const BoundTokens& bound)
  * @brief Kernel-scoped applicability: accepts only kernels compiled for the binding's
  *        dtype, and only a binding the dispatch can serve.
  *
- * A KDP may list this as its only criterion, and a declarative `graph_match` can admit
- * graphs the native one refuses. So it re-checks the dispatch preconditions: one node,
- * three single-element operands of one dtype, a supported rank and layout. Without that
- * check a multi-element tensor reaches a kernel that writes only element 0.
+ * A declarative `graph_match` can admit graphs the native one refuses, so this also
+ * re-checks the binding: one node, three single-element operands of one dtype, a
+ * supported rank and layout. Without that check a multi-element tensor reaches a kernel
+ * that writes only element 0. It does not check the operation or the operand roles; a
+ * KDP relies on the operation criterion it lists for those.
  */
 bool pointwiseKernelMatches(const MatchContext& /*context*/,
                             const BoundTokens& bound,

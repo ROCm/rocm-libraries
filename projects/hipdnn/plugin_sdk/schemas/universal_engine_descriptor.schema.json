@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "ued.json",
   "title": "hipDNN UED",
-  "description": "Universal Engine Descriptor. Implements RFC 0020 section 4.2 and the RFC 0021 slot members ('slots', 'shared_workspace', version 1.1), and differs from the RFC's inline schema in three ways: 'revision' is an optional '<major>.<minor>' authored revision; keys starting with 'x-' or '_', and the key 'provenance', are extensions the loader ignores; and 'nodes' holds at most 32 items (section 4.3.2). Structural shape only; registry and cross-reference rules are semantic (section 13.2).",
+  "description": "Universal Engine Descriptor. Implements RFC 0020 section 4.2 and the RFC 0021 slot members ('slots', 'shared_workspace', version 1.1). It differs from the RFC's inline schema as RFC 0020 section 4.2 lists: 'revision' is an optional '<major>.<minor>' authored revision; keys starting with 'x-' or '_', and the key 'provenance', are extensions the loader ignores; 'nodes' holds at most 32 items (section 4.3.2); and the RFC 0021 members, the version enum and the slot rules below. Structural shape only; registry and cross-reference rules are semantic (section 13.2).",
   "type": "object",
   "additionalProperties": false,
   "required": ["version", "id", "name"],

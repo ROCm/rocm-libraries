@@ -1362,8 +1362,10 @@ generalizes to any ranker (LightGBM, ONNX, a custom scorer):
      reference only `$kernel.*` and `$device.*`. A model needing problem features requires the engine to
      declare a pattern.
 
-   This bears on sequencing: the shipped engines use the native arm, so their models do not get this
-   load-time check.
+   This bears on sequencing: every shipped UED uses the native arm, and the loader does not yet
+   validate a `features_signature` against a pattern's published set for either arm (RFC 0020 lists
+   per-consumer published-symbol validation as not built), so no shipped model gets this load-time
+   check.
 2. **Signature → KMD → knobs.** Two assertions over the same set. Let `F` be the `$kernel.*` fields
    reachable from the `features_signature`, including those nested inside computed (expression) entries,
    each named by its base field — `$kernel.tile[0]` contributes `tile`:

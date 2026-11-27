@@ -8,6 +8,7 @@
 #include <limits>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -37,12 +38,12 @@ TensorAttributesT scalar(DataType dtype, Value value)
     return result;
 }
 
-bool publish(const TensorAttributesT& source, BoundTokens& bound)
+bool publish(const TensorAttributesT& source, BoundTokens& bound, std::string_view root = "q")
 {
     flatbuffers::FlatBufferBuilder builder;
     builder.Finish(TensorAttributes::Pack(builder, &source));
     return publishTensor(
-        bound, "q", flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer()));
+        bound, root, flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer()));
 }
 
 void expectScalar(const TensorAttributesT& source, float expected)
@@ -87,6 +88,30 @@ TEST(TestBindingPublication, OwnsCanonicalTensorFieldsAfterSerializedStorageDies
     EXPECT_EQ(bound.count("q.value_f32"), 0U);
     EXPECT_EQ(bound.count("q.dims[3]"), 0U);
     EXPECT_EQ(bound.count("q.strides[3]"), 0U);
+}
+
+TEST(TestBindingPublication, PublishesUnderTheRootItIsGiven)
+{
+    auto source = tensor();
+    source.uid = 7;
+    BoundTokens bound;
+    ASSERT_TRUE(publish(source, bound, "_Input_a2"));
+    EXPECT_EQ(tryGetBoundInt(bound, "_Input_a2"), 7);
+    EXPECT_EQ(tryGetBoundInt(bound, "_Input_a2.rank"), 4);
+    EXPECT_EQ(std::get<std::string>(bound.at("_Input_a2.dtype")), "FLOAT");
+    EXPECT_EQ(bound.count("q"), 0U);
+    EXPECT_EQ(bound.count("q.uid"), 0U);
+}
+
+TEST(TestBindingPublication, DeclinesARootThatIsNotAnIdentifier)
+{
+    for(const std::string_view root : {"", "1q", "q.dims", "q r", "$q", "q?", "q-r"})
+    {
+        SCOPED_TRACE(std::string(root));
+        BoundTokens bound;
+        EXPECT_FALSE(publish(tensor(), bound, root));
+        EXPECT_TRUE(bound.empty());
+    }
 }
 
 TEST(TestBindingPublication, PublishesEveryScalarArmAndDtypeInterpretation)

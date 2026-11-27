@@ -8,6 +8,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -111,9 +112,36 @@ TEST(TestPointwiseAddGraphMatcher, RejectsScalarAndVirtualStateOnEveryOperand)
 
 TEST(TestPointwiseAddBinding, RejectsInvalidOptionalNodeScalarRatherThanOmittingIt)
 {
+    using Attributes = data_objects::PointwiseAttributesT;
+    const std::array<std::pair<const char*, decltype(&Attributes::swish_beta)>, 6> fields{{
+        {"relu_lower_clip", &Attributes::relu_lower_clip},
+        {"relu_upper_clip", &Attributes::relu_upper_clip},
+        {"relu_lower_clip_slope", &Attributes::relu_lower_clip_slope},
+        {"swish_beta", &Attributes::swish_beta},
+        {"elu_alpha", &Attributes::elu_alpha},
+        {"softplus_beta", &Attributes::softplus_beta},
+    }};
+    const std::array<float, 3> nonFinite{std::numeric_limits<float>::quiet_NaN(),
+                                         std::numeric_limits<float>::infinity(),
+                                         -std::numeric_limits<float>::infinity()};
+    for(const auto& [name, field] : fields)
+    {
+        for(const float value : nonFinite)
+        {
+            SCOPED_TRACE(std::string(name) + " = " + std::to_string(value));
+            const auto member = field;
+            const GraphFixture fixture(transformGraph(buildPointwiseGraph(), [&](auto& graph) {
+                graph.nodes[0]->attributes.AsPointwiseAttributes()->*member = value;
+            }));
+            EXPECT_FALSE(matches(fixture.context()));
+        }
+    }
+}
+
+TEST(TestPointwiseAddBinding, RejectsAnUnnamedNodeComputeType)
+{
     const GraphFixture fixture(transformGraph(buildPointwiseGraph(), [](auto& graph) {
-        graph.nodes[0]->attributes.AsPointwiseAttributes()->swish_beta
-            = std::numeric_limits<float>::quiet_NaN();
+        graph.nodes[0]->compute_data_type = static_cast<data_objects::DataType>(127);
     }));
     EXPECT_FALSE(matches(fixture.context()));
 }
@@ -390,8 +418,8 @@ TEST(TestPointwiseAddKernelMatcher, IgnoresBlockSizeWhichTheGraphDoesNotConstrai
     EXPECT_TRUE(matchesKernel(POINTWISE_ADD, fixture.context(), makeKernel(256, "FLOAT")));
 }
 
-/// The kernel criterion can be a KDP's only criterion, under a declarative `graph_match`
-/// that admits graphs the native match refuses. It must decline those on its own.
+/// A declarative `graph_match` can admit graphs the native match refuses. The kernel
+/// criterion re-checks the binding, so it declines one the dispatch cannot serve.
 TEST(TestPointwiseAddKernelMatcher, DeclinesAPatternBindingTheDispatchCannotServe)
 {
     const GraphFixture servable(buildPointwiseGraph());
@@ -406,6 +434,27 @@ TEST(TestPointwiseAddKernelMatcher, DeclinesAPatternBindingTheDispatchCannotServ
     const auto kernel = makeKernel(64, "FLOAT");
     EXPECT_TRUE(kernelMatches(servable.context(), *servableBound, kernel));
     EXPECT_FALSE(kernelMatches(multiElement.context(), *multiElementBound, kernel));
+}
+
+/// The operation criterion re-checks the binding too, so a pack declines an unservable
+/// pattern binding even when its kernel criterion would not.
+TEST(TestPointwiseAddGraphMatcher, OperationCriterionDeclinesAPatternBindingTheDispatchCannotServe)
+{
+    const GraphFixture servable(buildPointwiseGraph());
+    const GraphFixture multiElement(buildPointwiseGraph(
+        data_objects::PointwiseMode::ADD, data_objects::DataType::FLOAT, {1, 1, 2, 2}));
+    const GraphFixture rank3(buildPointwiseGraph(
+        data_objects::PointwiseMode::ADD, data_objects::DataType::FLOAT, {1, 1, 1}));
+    const auto servableBound = matchPattern(pointwisePattern(), servable.context());
+    const auto multiElementBound = matchPattern(pointwisePattern(), multiElement.context());
+    const auto rank3Bound = matchPattern(pointwisePattern(), rank3.context());
+    ASSERT_TRUE(servableBound.has_value());
+    ASSERT_TRUE(multiElementBound.has_value());
+    ASSERT_TRUE(rank3Bound.has_value());
+
+    EXPECT_TRUE(matchesOperation(POINTWISE_ADD, servable.context(), *servableBound));
+    EXPECT_FALSE(matchesOperation(POINTWISE_ADD, multiElement.context(), *multiElementBound));
+    EXPECT_FALSE(matchesOperation(POINTWISE_ADD, rank3.context(), *rank3Bound));
 }
 
 // Score and binding

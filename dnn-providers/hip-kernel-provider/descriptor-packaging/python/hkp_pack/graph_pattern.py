@@ -51,7 +51,11 @@ OP_SCHEMA_REGISTRY_ENV = "HKP_OP_SCHEMA_REGISTRY"
 # links.
 OP_SCHEMA_REGISTRY_UNAVAILABLE_ENV = "HKP_OP_SCHEMA_REGISTRY_UNAVAILABLE"
 
-# The committed registry. This package sits at
+# The committed registry, for a run that names no registry: direct CLI use and
+# tools CMake starts before _hkp_resolve_op_schema_registry() has run. A configured
+# build names its registry through the argument or OP_SCHEMA_REGISTRY_ENV, and
+# HkpPackaging.cmake owns the default it picks. This path must stay the same as
+# that function's in-tree fallback. This package sits at
 # <repo>/dnn-providers/hip-kernel-provider/descriptor-packaging/python/hkp_pack.
 DEFAULT_OP_SCHEMA_REGISTRY = (
     Path(__file__).resolve().parents[5]

@@ -45,8 +45,10 @@ exclude: |
     # ==========================================================================
     # Binary files
     projects/hipdnn/.*\.bin$|
-    # Generated hipDNN FlatBuffers headers
-    projects/hipdnn/flatbuffers_sdk/include/hipdnn_flatbuffers_sdk/data_objects/.*_generated\.h|
+    # Generated hipDNN FlatBuffers headers. The cache-key and op-schema registry
+    # headers stay visible so their codegen hooks fire on a hand edit; the
+    # formatting hooks skip them through &opted_out_but_scanned.
+    projects/hipdnn/flatbuffers_sdk/include/hipdnn_flatbuffers_sdk/data_objects/(?!(cachekey|op_schema_registry)_generated\.h$).*_generated\.h|
     # Generated hipDNN FlatBuffers Python bindings: flatc-hipdnn rewrites them, so a
     # formatter that touched them would fight that hook on every run.
     projects/hipdnn/tools/uhd_gen/_generated/.*|
@@ -99,7 +101,10 @@ repos:
           shared/tensile/.*|
           # Vendored AOTriton test sources, kept byte-identical to their pin
           # (tools/sdpa_conformance/aotriton/VENDOR.md, sync.py --check).
-          projects/hipdnn/tools/sdpa_conformance/aotriton/vendor/.*
+          projects/hipdnn/tools/sdpa_conformance/aotriton/vendor/.*|
+          # Generated headers left out of the top level exclude for their codegen
+          # hooks (cache-key-hipdnn, op-schema-registry-hipdnn).
+          projects/hipdnn/flatbuffers_sdk/include/hipdnn_flatbuffers_sdk/data_objects/(cachekey|op_schema_registry)_generated\.h
       - id: end-of-file-fixer
         exclude: *opted_out_but_scanned
       - id: check-yaml

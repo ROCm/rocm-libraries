@@ -249,6 +249,16 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     set(_ued_test_fixtures_dir "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_DATADIR}/hipdnn_plugin_sdk/test_fixtures")
     set(_ued_schema "${CMAKE_CURRENT_SOURCE_DIR}/../schemas/universal_engine_descriptor.schema.json")
     file(GLOB _ued_fixtures CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/ingestor/ued_fixtures/*.json")
+    # Removing a fixture makes no input newer than the stamp, so the fixture list itself is an
+    # input: file(CONFIGURE) rewrites this manifest only when the list changes, and the newer
+    # manifest forces a restage that drops the removed file.
+    list(SORT _ued_fixtures)
+    string(REPLACE ";" "\n" _ued_fixture_manifest_body "${_ued_fixtures}")
+    set(_ued_fixture_manifest "${CMAKE_CURRENT_BINARY_DIR}/ued-fixture-inputs.txt")
+    # cmake-lint: disable=E1126
+    #   cmake-lint carries no form spec for file(CONFIGURE) and reports it as an
+    #   invalid discriminator. It is valid CMake from 3.18.
+    file(CONFIGURE OUTPUT "${_ued_fixture_manifest}" CONTENT "${_ued_fixture_manifest_body}\n" @ONLY)
     # Copy the directory, not each file, so the command line does not grow with the corpus
     # (cmd.exe limits it to 8191 characters on Windows).
     add_custom_command(
@@ -259,7 +269,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 "${_ued_test_fixtures_dir}/ued"
         COMMAND ${CMAKE_COMMAND} -E copy "${_ued_schema}" "${_ued_test_fixtures_dir}/schemas"
         COMMAND ${CMAKE_COMMAND} -E touch "${_ued_test_fixtures_dir}/ued.stamp"
-        DEPENDS ${_ued_fixtures} "${_ued_schema}"
+        DEPENDS ${_ued_fixtures} "${_ued_schema}" "${_ued_fixture_manifest}"
         COMMENT "Staging the UED fixture corpus and schema for hipdnn_plugin_sdk_tests"
         VERBATIM
     )

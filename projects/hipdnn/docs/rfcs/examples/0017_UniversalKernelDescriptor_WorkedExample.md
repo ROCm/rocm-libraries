@@ -95,17 +95,16 @@ two schema tables — the op's `SdpaAttributes` and the `Node` table's own scala
     //     declined before any criterion runs
     //     ([RFC 0018 A.1](../0018_UniversalMatchDescriptor.md#a1-the-umd-descriptor-object)).
     //     No conjunct restates that: with the default in force, one could never change the
-    //     verdict. `node_count` below is the opposite case — it is not a restatement of the
-    //     pattern but the only thing bounding the rest of the graph, since the pattern matches
-    //     the ops it names and does not by itself exclude others (RFC 0020 § 4.3.1). ---
-    {"==": ["$graph.node_count", 1]},
-    // --- 23 of the 24 optional tensors the engine's pattern binds are refused outright. The
-    //     24th, the scale tensor, is served, and its gate is further down. ---
+    //     verdict. Nor is there a `node_count` conjunct: the engine's one-node pattern already
+    //     declines a graph with any other node, because a match covers the whole graph
+    //     (RFC 0020 § 4.3.1). ---
+    // --- 19 of the 20 optional operands the engine's pattern binds are refused outright. The
+    //     20th, the scale tensor, is served, and its gate is further down. The six optional
+    //     results are left unnamed, so a graph carrying any of them already declines. ---
     {"not_present": ["$attn_mask", "$seq_len_q", "$seq_len_kv", "$seed", "$offset",
                      "$dropout_mask", "$dropout_scale", "$page_table_k", "$page_table_v",
                      "$block_mask", "$sink_token", "$descale_q", "$descale_k", "$descale_v",
-                     "$descale_s", "$scale_s", "$scale_o", "$stats", "$max", "$sum_exp",
-                     "$rng_dump", "$amax_s", "$amax_o"]},
+                     "$descale_s", "$scale_s", "$scale_o", "$cu_seq_len_q", "$cu_seq_len_kv"]},
 
     // --- rank, plus the cross-tensor dim agreements written out one position at a time. Q's
     //     query-side extents reappear in O; K and V agree with each other on the KV-side ones;
@@ -633,7 +632,7 @@ adapter invocation: the builder, plus the exact build values for that instance.
          // suffix: a pattern binds the tensor, not its uid.
          "q": "$q", "k": "$k", "v": "$v",
 
-         // Every optional tensor the schema declares, bound here and declined by §2's criteria.
+         // Every optional operand the schema declares, bound here and declined by §2's criteria.
          // The set is generic hipDNN SDPA vocabulary; none of it appears in AttentionDenseSpec.
          "attn_mask":     "$attn_mask?",
          "scale":         "$scale?",           // the scale-tensor form; §2's scale gate accepts it
@@ -653,22 +652,19 @@ adapter invocation: the builder, plus the exact build values for that instance.
          "descale_s":     "$descale_s?",
          "scale_s":       "$scale_s?",
          "scale_o":       "$scale_o?",
-         "stats":         "$stats?",
-         "max":           "$max?",
-         "sum_exp":       "$sum_exp?",
-         "rng_dump":      "$rng_dump?",
-         "amax_s":        "$amax_s?",
-         "amax_o":        "$amax_o?"
+         "cu_seq_len_q":  "$cu_seq_len_q?",
+         "cu_seq_len_kv": "$cu_seq_len_kv?"
        },
+       // Only the required result is named. A result takes no `?`, and a named result must be
+       // present, so the six optional results (stats, max, sum_exp, rng_dump, amax_s, amax_o)
+       // stay unnamed: a graph that carries any of them declines (RFC 0020 § 4.3.1).
        "results": {"o": "$o"}}
     ]
     // A prebuilt kernel serves one fixed compile-time shape, so this pack needs the whole graph
-    // to be this node. The pattern does not state that: match semantics are exact over the ops
-    // named, not subgraph-containment, so the pattern binds this node and says nothing about the
-    // rest of the graph (RFC 0020 § 4.3.1). Bounding the graph is §2's `node_count` conjunct,
-    // which ADDS that constraint rather than restating one. It lives on the criteria side
-    // because it is a per-pack constraint: another pack on this same engine could serve this
-    // node fused into a larger graph without touching the pattern both share.
+    // to be this node. The pattern states that: a match covers the whole graph, so this
+    // one-node pattern declines a graph with any other node (RFC 0020 § 4.3.1), and §2 needs no
+    // `node_count` conjunct. Serving this node fused into a larger graph takes a different
+    // engine whose pattern names the larger graph.
   }
 }
 

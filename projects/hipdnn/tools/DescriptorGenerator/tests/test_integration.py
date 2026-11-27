@@ -2721,8 +2721,8 @@ class TestWorkModelFragments:
         rendered = generator._render_template(
             "fragments/fbs_tensor_fields.j2", convolution_fwd_config
         )
-        assert "work_data_dependent;" not in rendered
-        assert "(cache_uid, work_data_dependent)" not in rendered
+        assert 'attribute "work_data_dependent";' not in rendered
+        assert "(cache_uid, work_data_dependent," not in rendered
         assert (
             '    x_tensor_uid: long (cache_uid, matcher_input_tensor, matcher_name: "x");\n'
             in rendered

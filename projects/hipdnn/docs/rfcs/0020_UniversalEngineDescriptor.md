@@ -3,7 +3,7 @@
 - Contributors: TBD
 - **Status**: In progress
 - **Status notes**: The UED loads and registers a generic engine (`plugin_sdk/include/hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp`; #10606, #10679, #10850, #11033). `graph_match` has both arms: the declarative `nodes` pattern, compiled against the generated op-schema registry when the UED is read, and the `native` arm, a C++ function resolved through `GraphMatchRegistry`. The loader reads the three role-scoped heuristic maps and the runtime resolves them by arch (#13028). The JSON Schema file is `plugin_sdk/schemas/universal_engine_descriptor.schema.json`. The cross-engine root-opcode index and the per-consumer published-symbol validation are not built.
-- **Last verified**: 2026-11-10 against `develop` (1c63e26254a)
+- **Last verified**: 2026-11-27 against `develop` (193b8bfe0a3)
 - **Follows**: [RFC 0017](0017_UniversalKernelDescriptor.md) (Universal Kernel Descriptors). This is the "UED + graph matching" follow-up named in RFC 0017 § 14.2: the engine format together with the graph-matching specification: the `nodes` structural pattern, the symbols matching publishes, and the op-schema registry behind them.
 
 ## Table of Contents
@@ -239,7 +239,7 @@ entirely to its packs' criteria. That is a narrow way to write an engine, not a 
 keeping it absence-safe is what holds the format on the `1.0` line (§ 14.2).
 
 A single JSON Schema **file**, `plugin_sdk/schemas/universal_engine_descriptor.schema.json`, is
-delivered with the provider. The inline copy below is that file's content, except for three
+delivered with the provider. The inline copy below is that file's content, except for these
 differences:
 
 - **Authored revision.** The file also accepts an optional `revision`, a `<major>.<minor>` string
@@ -248,12 +248,21 @@ differences:
   object also accept `x-`- or `_`-prefixed keys and the key `provenance`. The loader warns about
   and ignores these keys (§ 4.2, § 4.3.2).
 - **Size cap.** `nodes` carries `"maxItems": 32`, the pattern limit of § 4.3.2.
+- **Kernel slots.** The file adds the [RFC 0021](0021_KernelSlots.md) members `slots` and
+  `shared_workspace`, and its `version` enum is `["1.0", "1.1"]`. It requires only `version`, `id`,
+  and `name` at the top level. Conditional rules then require `metadata` on an engine without
+  `slots`. An engine with `slots` must declare `version` `1.1` and must not carry `metadata`,
+  `sort_kernel_catalog`, `knobs`, or `predict_applicable_kernels` itself. `shared_workspace`
+  requires `slots` and a `native` `graph_match`.
+- **Numerical notes.** The file's `numerical_notes` items are any non-empty string, without the
+  inline `enum` of note names. The loader still fails a UED that names an unknown note (§ 9), so a
+  file can pass the schema and fail to load.
 
-The last two are not divergences from this RFC: they encode rules its prose states that the inline
-schema does not spell out. No build check verifies the two schemas match yet.
+The extension keys and size cap are not divergences from this RFC: they encode rules its prose
+states that the inline schema does not spell out. No build check verifies the two schemas match yet.
 
 The file reflects the latest version the runtime supports and covers **all** supported versions at
-once: its `version` property enumerates the accepted versions (here, only `1.0`), and each new version
+once: its `version` property enumerates the accepted versions (`1.0` and `1.1`), and each new version
 adds its value to the `enum`. The runtime supports exactly one major version, so every enumerated
 version is of that major. Every field is present, with fields introduced after the earliest version
 marked **optional**, so the schema is a structural **superset**: it accepts any supported version
@@ -504,7 +513,7 @@ ident        = ( letter | "_" ) , { letter | digit | "_" } ;
 | `id` | yes | Names this node within the pattern, and is the **Attributes namespace root** its scalar attributes bind under: `{"id": "sdpa"}` publishes `$sdpa.causal_mask` (§ 6.1). Unique within the block. Bare in the descriptor; the `$` appears only on the reference. |
 | `op` | yes | The opcode this node matches, keyed against the op-schema registry (§ 5, Appendix B). A bare string matches exactly. An **opcode set**, `{"one_of": ["a", "b"]}`, matches any listed opcode; every member must declare the operand and result names this node binds, so one node covers a family of ops that agree on their edges. |
 | `operands` | no | Input edges: an object mapping an operand **name the op declares** to a pattern variable. Absent or `{}` binds no operands, which is legal but publishes nothing for that node's inputs. |
-| `results` | no | Output edges, same form. A result binding takes no `?`: an op's declared result is always produced. |
+| `results` | no | Output edges, same form. A result binding takes no `?`. Some ops declare optional results (for example `sdpa`'s `stats`, `layernorm`'s `mean`), and a named result must be present in the graph: a graph that omits a named optional result does not match. To accept a graph without an optional result, leave the result unnamed; the graph then matches only when that result is absent (§ 4.3.1). |
 
 **Binding form.** A binding is `"$name"`, or `"$name?"` on an operand the op declares optional. The
 `?` is a property of the *pattern*, not of the graph: it says the engine still matches when the
@@ -623,8 +632,8 @@ load rejection, never a warning:
 - **A variable is not a reserved root**, and does not collide with a node `id`.
 - **`?` appears only on an operand binding**, never on a result and never mid-identifier.
 - **A `?` variable is not produced by the pattern.** `?` says the graph may omit the tensor, but a
-  variable some node's result binds is always produced (a result takes no `?`), so a `?` read of it
-  is contradictory and is refused.
+  variable some node's result binds must be present for that node to match (a result takes no
+  `?`), so a `?` read of it is contradictory and is refused.
 - **Edge names are unique within their `operands` or `results` object**, which JSON object
   semantics already imply but a lenient parser may not enforce.
 - **Unknown keys are refused, except extension keys.** A node object and an `op` object accept
@@ -657,9 +666,12 @@ A failure here is a load error naming the UED, the node `id`, and the unresolved
 ### 4.4 Serialization
 
 A UED is plain JSON. The loader reads a file only when its name ends in one of the seven
-descriptor suffixes (for a UED, `.ued.json`). It has no comment-stripping parser, so it logs a
-warning and skips a `.jsonc` file. The `//` comments in this RFC's examples explain the fields;
-they are not part of a valid file.
+descriptor suffixes (for a UED, `.ued.json`), and logs a warning and skips a `.jsonc` file. Both
+the runtime loader and `hkp_pack` reject a key repeated within one object. They differ on
+comments: the runtime loader's parser ignores `//` and `/* */` comments (`parseDescriptorDocument`
+parses with `ignore_comments=true`), but `hkp_pack` parses with `json_rules.loads_strict`, which
+rejects them. An authored file must therefore contain no comments. The `//` comments in this RFC's
+examples explain the fields; they are not part of a valid file.
 
 ### 4.5 The `native` arm (normative)
 
@@ -990,6 +1002,19 @@ uint         = digit , { digit } ;
   infinity would pass every bound. A graph that spells "unbounded" as an infinite attribute (an
   infinite `relu_upper_clip`, say) therefore matches no declarative engine. An optional float
   attribute the node does not carry is absent, not a decline.
+- **An opcode set publishes the attributes its members share.** A node whose `op` is a `one_of`
+  publishes an attribute only when every member declares an attribute of that name with the same
+  value kind; an attribute some member lacks, or declares with another kind, is not published for
+  that node. A published attribute is optional if any member declares it optional, so a member
+  whose graph node omits it still matches.
+- **Every published value must be publishable.** Besides the finite-float rule, the match declines
+  the graph when a required attribute is missing from the matched node, an enum attribute has no
+  name, or a bound tensor cannot be published: its dims or strides are missing, empty, or of
+  different lengths; a dim is not positive or the element count overflows `int64_t`; its dtype has
+  no enum name; its stored value disagrees with its value type; or a stored or runtime-passed
+  scalar is virtual or has more than one element. `publishTensor` (`BindingPublication.hpp`) also
+  returns false for a root that is not an `ident`. A pattern variable is always an `ident`, but a
+  native matcher chooses its own root names, and on a false return it must discard the whole binding.
 - **Which edge a variable names is part of the contract.** The pattern author's choice of variable
   for each edge is what a pack's criteria and dispatch read as that tensor's role; two operands of
   the same shape bound the wrong way round publish a binding no field check can tell apart from the

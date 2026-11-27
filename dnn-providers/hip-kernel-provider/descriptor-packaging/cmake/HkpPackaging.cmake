@@ -1341,12 +1341,16 @@ endfunction()
 #   hipDNN built with HIPDNN_ENABLE_KERNEL_INGESTOR (imported hipdnn_flatbuffers_sdk
 #   target) names its registry, under <prefix>/share/hipdnn_flatbuffers_sdk/, through
 #   its package config. An in-tree hipDNN, or a build without the target, uses the copy
-#   generated and committed beside the repository's graph schemas.
+#   generated and committed beside the repository's graph schemas. This function is the
+#   source of truth for a configured build. hkp_pack's DEFAULT_OP_SCHEMA_REGISTRY
+#   (graph_pattern.py) names the same committed copy for runs that get no registry from
+#   CMake, and must stay equal to the fallback here.
 #
 #   The default is recomputed on every configure. A cached value that equals the default
 #   the previous configure computed was never overridden, so it follows the new default
-#   when the build is reconfigured against a different hipDNN. Any other value was set
-#   by the user and is kept.
+#   when the build is reconfigured against a different hipDNN. Any other value, and any
+#   value present on the first configure (including an empty one), was set by the user
+#   and is kept.
 # ---------------------------------------------------------------------------
 function(_hkp_resolve_op_schema_registry)
     get_filename_component(_default
@@ -1373,8 +1377,9 @@ function(_hkp_resolve_op_schema_registry)
     endif()
 
     if(NOT DEFINED CACHE{HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY}
-       OR "$CACHE{HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY}" STREQUAL
-          "$CACHE{_HKP_OP_SCHEMA_REGISTRY_DEFAULT}")
+       OR (DEFINED CACHE{_HKP_OP_SCHEMA_REGISTRY_DEFAULT}
+           AND "$CACHE{HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY}" STREQUAL
+               "$CACHE{_HKP_OP_SCHEMA_REGISTRY_DEFAULT}"))
         set(HIPKERNELPROVIDER_OP_SCHEMA_REGISTRY "${_default}"
             CACHE FILEPATH
             "The op-schema registry JSON that UED graph_match.nodes patterns resolve \

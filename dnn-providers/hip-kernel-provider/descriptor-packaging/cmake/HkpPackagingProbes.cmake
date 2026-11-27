@@ -313,6 +313,7 @@ endfunction()
 #   cannot resolve. Configure re-runs when a file under the root, the generic target
 #   table, the derive tooling or the registry changes.
 # ---------------------------------------------------------------------------
+# cmake-lint: disable=R0915
 function(_hkp_probe_automatic_arches out_var)
     get_property(_filter_args GLOBAL PROPERTY HKP_PROBE_FILTER_ARGS)
     set(_root "${HIPKERNELPROVIDER_PRODUCTION_DESCRIPTOR_SOURCE_ROOT}")
@@ -325,6 +326,7 @@ function(_hkp_probe_automatic_arches out_var)
                           "${HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON}")
     _hkp_op_schema_registry_env(_registry_env)
     hkp_selected_arches(_targets _targets_source)
+    set(_exclude_args "")
     foreach(_target IN LISTS _targets)
         list(APPEND _exclude_args --exclude "${_target}")
     endforeach()

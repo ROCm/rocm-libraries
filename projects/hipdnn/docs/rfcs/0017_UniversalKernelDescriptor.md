@@ -3,7 +3,7 @@
 - Contributors: Brian Harrison, Daryl Hawkins, Jason Campbell, Brad Pepers
 - **Status**: In progress
 - **Status notes**: The generic kernel ingestor ships behind the default-OFF `HIPDNN_ENABLE_KERNEL_INGESTOR` CMake option (#10606), in `plugin_sdk/include/hipdnn_plugin_sdk/ingestor/`, with build-time kpack packaging in `dnn-providers/hip-kernel-provider/descriptor-packaging` (#10820, #11165) and runtime kpack loading (#11144). UMD, UDD, and `NATIVE` UHD logic resolve to C++ symbols through `NativeRegistry`, and the UED `graph_match.native` arm through `GraphMatchRegistry`. The UED `graph_match.nodes` pattern is built (compiled against the generated op-schema registry). The declarative `criteria` forms, UDD formulas, `MODEL` UHDs, runtime drop-in, multi-launch, and composition are not built.
-- **Last verified**: 2026-11-10 against `develop` (1c63e26254a)
+- **Last verified**: 2026-11-27 against `develop` (193b8bfe0a3)
 
 ## Table of Contents
 
@@ -838,9 +838,12 @@ set and the interpreter profile are in the expression-language follow-up
 **A prebuilt match is exact.** A prebuilt kernel solves one complete graph, so a matcher asserts
 `$graph.node_count` to accept only a graph of exactly that size, marking each intermediate tensor
 `virtual`. A single-op kernel checks `node_count == 1`; a fused Conv-Bias-ReLU kernel checks
-`node_count == 3` with its two intermediates `virtual`. Shared checks, like the tile matcher below,
-stay graph-shape-agnostic, so one such matcher composes into packs on either engine. Matching a
-pattern inside a larger graph, with no fixed count, is the looser JIT / general-matching mode
+`node_count == 3` with its two intermediates `virtual`. A `nodes` pattern already declines a graph
+with any node it does not name
+([RFC 0020 § 4.3.1](0020_UniversalEngineDescriptor.md#431-grammar)), so the count criterion is
+needed on a `native` engine and restates the pattern on a `nodes` one. Shared checks, like the tile
+matcher below, stay graph-shape-agnostic, so one such matcher composes into packs on either engine.
+Matching a pattern inside a larger graph, with no fixed count, is the looser JIT / general-matching mode
 ([Section 9.3](#93-future-jit-and-normalized-providers)).
 
 **Exactness runs to the kernel, not just the graph.** Node count and topology pin the *shape of the
@@ -924,7 +927,7 @@ it constrains them:
   "graph_match": {
     "nodes": [
       {"kind": "op", "id": "sdpa", "op": "sdpa",
-       "operands": {"Q": "$q", "K": "$k", "V": "$v"}, "results": {"O": "$o"}}
+       "operands": {"q": "$q", "k": "$k", "v": "$v"}, "results": {"o": "$o"}}
     ]
   }
 }
@@ -1089,18 +1092,20 @@ is definitely true, so the root is true and no unknown reaches it. Without a pre
 first arm cannot be written at all: a bare field check on an absent operand is unknown, the root
 inherits it, and the criterion declines every graph that omits the bias. "Absent, or present and
 constrained" collapses into "present and constrained". Presence is
-also how a pack refuses a feature outright. The worked example later uses exactly this to decline 23
-of the 24 optional operands its kernel does not implement, admitting only the 24th.
+also how a pack refuses a feature outright. The worked example later uses exactly this to decline 19
+of the 20 optional operands its kernel does not implement, admitting only the 20th.
 
 **Out of scope for v1.** General N-ary commutative matching, unbounded variadic operands, and
 unbounded chains are deferred to the JIT follow-up. A prebuilt kernel encodes one fixed graph shape,
 so bounded matching covers it.
 
 **A fused match.** The same pattern form matches several ops as one fusable unit. This
-Conv-Bias-ReLU engine's three-node pattern binds the chain, and its matcher pins the exact graph:
-`$graph.node_count == 3` accepts only these three ops, and `$conv_out` and `$bias_out` are required
-`virtual`, so those intermediates are absorbed into the fused kernel and one UKD serves the whole
-chain as a single kernel.
+Conv-Bias-ReLU engine's three-node pattern binds the chain and pins the exact graph: a match covers
+the whole graph, so only these three ops match
+([RFC 0020 § 4.3.1](0020_UniversalEngineDescriptor.md#431-grammar)). Both trailing nodes are
+`pointwise`, so the matcher fixes their modes through each node's `operation` attribute, and it
+requires `$conv_out` and `$bias_out` to be `virtual`, so those intermediates are absorbed into the
+fused kernel and one UKD serves the whole chain as a single kernel.
 
 ```jsonc
 {
@@ -1112,11 +1117,11 @@ chain as a single kernel.
   "graph_match": {
     "nodes": [
       {"kind": "op", "id": "conv", "op": "convolution",
-       "operands": {"X": "$x", "W": "$w"},           "results": {"Y": "$conv_out"}},
-      {"kind": "op", "id": "bias", "op": "pointwise_add",
-       "operands": {"A": "$conv_out", "B": "$bias"},  "results": {"Y": "$bias_out"}},
-      {"kind": "op", "id": "act",  "op": "pointwise_relu",
-       "operands": {"A": "$bias_out"},                "results": {"Y": "$y"}}
+       "operands": {"x": "$x", "w": "$w"},              "results": {"y": "$conv_out"}},
+      {"kind": "op", "id": "bias", "op": "pointwise",
+       "operands": {"in_0": "$conv_out", "in_1": "$b"}, "results": {"out_0": "$bias_out"}},
+      {"kind": "op", "id": "act",  "op": "pointwise",
+       "operands": {"in_0": "$bias_out"},               "results": {"out_0": "$y"}}
     ]
   }
 }
@@ -1134,9 +1139,10 @@ chain as a single kernel.
     {"in":    ["$y.dtype", ["FLOAT16"]]},
     {"==":    ["$y.stride_order", [3, 0, 2, 1]]}, "$y.packed",  // NHWC
     {"==":    ["$y.rank", 4]},                    // (n, out channels, out h, out w)
-    {"==":    ["$bias.rank", 1]},                 // one element per output channel
-    {"==":    ["$bias.dims[0]", "$y.dims[1]"]},
-    {"==":  ["$graph.node_count", 3]},  // exactly these three ops
+    {"==":    ["$b.rank", 1]},                    // one element per output channel
+    {"==":    ["$b.dims[0]", "$y.dims[1]"]},
+    {"==":    ["$bias.operation", "ADD"]},        // the bias node adds
+    {"==":    ["$act.operation", "RELU_FWD"]},    // the activation node is a ReLU
     "$conv_out.virtual",                // internal intermediate, absorbed by the fused kernel
     "$bias_out.virtual"
   ]}

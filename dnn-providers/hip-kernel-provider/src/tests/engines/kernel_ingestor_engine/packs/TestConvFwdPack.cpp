@@ -232,6 +232,14 @@ TEST(TestConvFwdBinding, PublishesUidZeroAndNodeComputeTypeIndependentlyOfGraphD
         kernelMatcher(CONV_FWD)(other.context(), *bound, makeKernel(64, "HALF", "ConvFwd")));
 }
 
+TEST(TestConvFwdBinding, RejectsAnUnnamedNodeComputeType)
+{
+    const GraphFixture fixture(transformGraph(buildConvFwdGraph(), [](auto& graph) {
+        graph.nodes[0]->compute_data_type = static_cast<data_objects::DataType>(127);
+    }));
+    EXPECT_FALSE(matches(fixture.context()));
+}
+
 // ---------------------------------------------------------------------------
 // Problem binding: the dims, dtypes and cost fields a UHD ranks on
 // ---------------------------------------------------------------------------

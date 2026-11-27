@@ -244,7 +244,9 @@ TargetType extractValueFromTensorValue(const data_objects::TensorAttributes* ten
 }
 
 /// Converts a stored scalar to a finite float32, rounding to nearest with ties to even.
-/// Throws when the data type and union type disagree, or the value is not finite in float32.
+/// Throws std::runtime_error when the data type and union type disagree, or the value is
+/// not finite or its magnitude exceeds FLT_MAX; a value just above FLT_MAX throws instead
+/// of rounding to FLT_MAX.
 /// Reads stored runtime defaults too. Callers decide whether to publish them.
 /// Introduced in hipdnn_flatbuffers_sdk 0.3.0.
 inline float extractFiniteFloatFromTensorValue(const data_objects::TensorAttributesT& tensorAttr,
@@ -258,7 +260,8 @@ inline float extractFiniteFloatFromTensorValue(const data_objects::TensorAttribu
         [paramName](auto value) { return detail::finiteFloat(value, paramName); });
 }
 
-/// As the TensorAttributesT overload, read from a serialized tensor. Also throws
+/// As the TensorAttributesT overload, read from a serialized tensor, with the same
+/// rounding and the same throws, including a magnitude above FLT_MAX. Also throws
 /// std::runtime_error when @p tensorAttr is null.
 /// Introduced in hipdnn_flatbuffers_sdk 0.3.0.
 inline float extractFiniteFloatFromTensorValue(const data_objects::TensorAttributes* tensorAttr,

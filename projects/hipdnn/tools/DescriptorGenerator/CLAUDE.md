@@ -506,6 +506,7 @@ tensor_array_fields:
     fbs_field: "peer_stats_tensor_uid"
     attr_name: "HIPDNN_ATTR_OPERATION_BATCHNORM_PEER_STATS"
     frontend_getter: "get_peer_stats()"
+    direction: "input"      # input | output; required, no default
     required: false         # Whether the field must be set before finalize
     test_uids: [100, 101]   # UIDs for test tensor descriptors
     test_label: "PeerStats"  # Label used in test case names

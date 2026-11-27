@@ -901,9 +901,9 @@ pin them per candidate. The pack's matcher then constrains what that pattern bou
     // generate_stats is allowed; causal + stats is declined by the native matcher
     // unsupported optional operands declined together; `not_present` always evaluates,
     // unlike a field read on an absent operand
-    {"not_present": ["$attn_mask", "$page_table_k", "$page_table_v"]},
-    {"==": ["$graph.node_count", 1]}                               // bounds the graph: the pattern
-                                                                   // does not (RFC 0020 § 4.3.1)
+    // no node-count criterion: the one-node pattern already declines a graph with more
+    // nodes (RFC 0020 § 4.3.1)
+    {"not_present": ["$attn_mask", "$page_table_k", "$page_table_v"]}
   ]}
   // arch is a pack property (KDP.arch), not a match criterion
   // mask self-consistency is a native matcher the pack lists
@@ -916,7 +916,7 @@ Mapping to the hand-written code:
 | Hand-written (`SdpaFwdPlanBuilder.cpp`) | Where it lands |
 |---|---|
 | `getDeviceString` gfx942/gfx950 (:253-256) | pack `arch` property (KDP), gated at selection |
-| `nodeWrappers().size() != 1` (:264) | UMD `{"==": ["$graph.node_count", 1]}` |
+| `nodeWrappers().size() != 1` (:264) | UED pattern: one node, and a match covers the whole graph ([RFC 0020 § 4.3.1](0020_UniversalEngineDescriptor.md#431-grammar)) |
 | `attributesType() != SdpaAttributes` (:265-267) | UED pattern node matching `sdpa` |
 | dropout / alibi / padding gates (:273-278) | UMD `$sdpa.*` criteria |
 | `attn_mask` / `page_table_*` absent (:279-285) | UED optional operands + one UMD `{"not_present": [...]}` over all three |
