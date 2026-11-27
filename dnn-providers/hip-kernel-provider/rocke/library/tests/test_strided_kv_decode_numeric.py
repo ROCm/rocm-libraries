@@ -21,6 +21,7 @@ from dataclasses import replace
 import numpy as np
 import pytest
 from rocke.numeric import storage
+from rocke.numeric.compare import Tolerance, assert_within_tolerance
 from rocke.runtime.device_array import DeviceArray
 from rocke.runtime.hip_module import Runtime, get_device_arch
 from rocke.tests.lanes import TICKET, import_or_skip_until
@@ -274,12 +275,12 @@ def test_strided_lds_admission_numeric(gpu, dtype, dim, block, tile):
         au.run_unified_attention_torch(**kwargs, tuning_spec=spec)
     atol, rtol = (0.003, 0.005) if dtype == "fp16" else (0.01, 0.02)
     out = arrays.read(tensors["out"], dtype)
-    np.testing.assert_allclose(out, reference, atol=atol, rtol=rtol)
+    assert_within_tolerance(out, reference, Tolerance(atol=atol, rtol=rtol))
     if tile is None:
         tensors["out"].write(storage.encode(unwritten, dtype))
         au.run_unified_attention_torch(**kwargs)
         out = arrays.read(tensors["out"], dtype)
-        np.testing.assert_allclose(out, reference, atol=atol, rtol=rtol)
+        assert_within_tolerance(out, reference, Tolerance(atol=atol, rtol=rtol))
 
 
 # Distinct batches, empty/partial segments, both physical orders, independent
@@ -444,8 +445,8 @@ def _strided_kv_decode(
                 captured_graphs = current_graphs
             expected = _reference(q_host, k_host, v_host, lengths_host, window)
             atol, rtol = (0.01, 0.02) if dtype == "bf16" else (0.003, 0.005)
-            np.testing.assert_allclose(
-                arrays.read(output, dtype), expected, atol=atol, rtol=rtol
+            assert_within_tolerance(
+                arrays.read(output, dtype), expected, Tolerance(atol=atol, rtol=rtol)
             )
             guards = arrays.read(guarded, dtype)
             np.testing.assert_array_equal(guards[:32], 117)
@@ -662,14 +663,18 @@ def test_decode_concurrent_workspace(
         assert not allocations  # cache hits replay without new scratch allocations
     atol, rtol = (0.01, 0.02) if dtype == "bf16" else (0.003, 0.005)
     for request, reference in zip(requests, expected):
-        np.testing.assert_allclose(
-            arrays.read(request["out"], dtype), reference, atol=atol, rtol=rtol
+        assert_within_tolerance(
+            arrays.read(request["out"], dtype),
+            reference,
+            Tolerance(atol=atol, rtol=rtol),
         )
     if mode == "external":
         for _, workspace in allocations:
             assert set(workspace).isdisjoint(captured[0] + captured[1])
-        np.testing.assert_allclose(
-            arrays.read(eager_request["out"], dtype), expected[0], atol=atol, rtol=rtol
+        assert_within_tolerance(
+            arrays.read(eager_request["out"], dtype),
+            expected[0],
+            Tolerance(atol=atol, rtol=rtol),
         )
     if graphs:
         assert len(churn) == 8
@@ -762,8 +767,8 @@ def test_prepared_decode_lifecycle(torch_gpu, monkeypatch, dtype, kv_layout, gra
             synchronize_and_release(stream.cuda_stream)
             expected = _reference(q_step, k_host, v_host, lens, 0)
             atol, rtol = (0.01, 0.02) if dtype == "bf16" else (0.003, 0.005)
-            np.testing.assert_allclose(
-                arrays.read(output, dtype), expected, atol=atol, rtol=rtol
+            assert_within_tolerance(
+                arrays.read(output, dtype), expected, Tolerance(atol=atol, rtol=rtol)
             )
             assert tuple(t.data_ptr() for t in execution._workspace) == scratch
             assert len(execution._graphs) <= 1
@@ -779,8 +784,8 @@ def test_prepared_decode_lifecycle(torch_gpu, monkeypatch, dtype, kv_layout, gra
         with torch.cuda.stream(stream):
             outer.replay()
         synchronize_and_release(stream.cuda_stream)
-        np.testing.assert_allclose(
-            arrays.read(output, dtype), expected, atol=atol, rtol=rtol
+        assert_within_tolerance(
+            arrays.read(output, dtype), expected, Tolerance(atol=atol, rtol=rtol)
         )
     finally:
         execution.close()

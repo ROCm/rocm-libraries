@@ -18,6 +18,7 @@ from kernels.gfx950.attention_tiled_3d import (
     UnifiedAttention3DTiledSpec,
     UnifiedAttentionReduceTiledSpec,
 )
+from rocke.numeric.compare import Tolerance, assert_within_tolerance
 from rocke.tests.gpu import current_device_arch_in
 from rocke.tests.lanes import BUILD_VARIANT, import_or_skip_until
 
@@ -202,7 +203,7 @@ def _decode_case(seed, dtype, head_size):
 def _assert_matches_reference(out, q, k, v, lengths, dtype):
     expected = decode_reference(q, k, v, lengths, 1 / math.sqrt(q.shape[2]))
     atol, rtol = (0.01, 0.02) if dtype == "bf16" else (0.003, 0.005)
-    np.testing.assert_allclose(out, expected, atol=atol, rtol=rtol)
+    assert_within_tolerance(out, expected, Tolerance(atol=atol, rtol=rtol))
 
 
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
