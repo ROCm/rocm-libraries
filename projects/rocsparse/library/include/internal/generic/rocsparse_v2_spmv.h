@@ -264,6 +264,16 @@ rocsparse_status rocsparse_v2_spmv(rocsparse_handle            handle,
  *  - All \p z_vecs must have the same size (vector length).
  *  - Both scalar and compute data types must be set on the descriptor before calling this function.
  *
+ *  \note
+ *  This call captures the extra terms. It copies the values of \p gamma_vec, read with the
+ *  pointer mode in effect here, so later writes to that buffer have no effect. It records the
+ *  data pointers of \p z_vecs, so after \ref rocsparse_dnvec_set_values on one of them, call
+ *  \ref rocsparse_spmv_set_extra again.
+ *
+ *  \note
+ *  Only a CSR matrix applies the extra terms. For the other formats, \ref rocsparse_v2_spmv
+ *  computes \f$y = \alpha * op(A) * x + \beta * y\f$ without them.
+ *
  *  @param[in]
  *  handle          handle to the rocSPARSE library context queue.
  *  @param[inout]

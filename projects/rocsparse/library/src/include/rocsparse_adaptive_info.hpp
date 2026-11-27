@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -27,12 +27,13 @@
 typedef struct _rocsparse_adaptive_info
 {
 
-    size_t    size{}; // num row blocks
-    int64_t   first_row{};
-    int64_t   last_row{};
-    void*     row_blocks{};
-    uint32_t* wg_flags{};
-    void*     wg_ids{};
+    size_t  size{}; // num row blocks
+    int64_t first_row{};
+    int64_t last_row{};
+    void*   row_blocks{};
+    void*   wg_ids{};
+    size_t  num_split_rows{}; // rows split over several workgroups
+    void*   split_rows{};
 
 public:
     ~_rocsparse_adaptive_info();

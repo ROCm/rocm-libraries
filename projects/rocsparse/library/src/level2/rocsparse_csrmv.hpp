@@ -49,13 +49,13 @@ namespace rocsparse
 
     // Helper function to extract gamma arrays and z vectors for batched operations
     // gamma_device_array and z_array must be preallocated device buffers
-    template <typename T, typename Y>
+    template <typename T, typename Z>
     rocsparse_status csrmv_extract_gamma_and_z_arrays(rocsparse_handle             handle,
                                                       rocsparse_int                num_extra,
                                                       rocsparse_const_dnvec_descr  gamma_vec,
                                                       rocsparse_const_dnvec_descr* z_vecs,
                                                       T*        gamma_device_array,
-                                                      const Y** z_array);
+                                                      const Z** z_array);
 
     // When p_csrmv_info[0] is already set and its max_nnz_per_row is known,
     // that value is the longest row. Otherwise this allocates the descriptor

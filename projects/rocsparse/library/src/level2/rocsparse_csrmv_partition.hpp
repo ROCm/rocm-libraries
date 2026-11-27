@@ -70,6 +70,11 @@ namespace rocsparse
         // Longest row recorded by compute(). Zero until compute() runs.
         int64_t max_nnz_per_row() const;
 
+        // The rows that adaptive splits over several workgroups, in row order, once each.
+        // The first block of such a row spans no row and has workgroup id 0; the other
+        // blocks of the row have a nonzero workgroup id.
+        std::vector<J> split_rows() const;
+
     private:
         int64_t max_nnz_per_row_value{};
     };

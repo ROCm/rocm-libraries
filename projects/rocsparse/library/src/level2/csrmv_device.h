@@ -25,18 +25,64 @@
 #pragma once
 
 #include "rocsparse_common.hpp"
-
-// gfx12 and gfx13 order the stores before releasing other workgroups with __threadfence; from
-// gfx1250 on there is no s_waitcnt. SPIR-V uses __threadfence on every processor, so it stays
-// correct on processors newer than this list.
-#if defined(__GFX12__) || defined(__GFX13__) || defined(__SPIRV__)
-#define ROCSPARSE_CSRMV_RELEASE_WITH_THREADFENCE 1
-#else
-#define ROCSPARSE_CSRMV_RELEASE_WITH_THREADFENCE 0
-#endif
+#include "rocsparse_scalar.hpp"
 
 namespace rocsparse
 {
+    // y[row] = beta * y[row] + sum_i gamma_i * z_i[row]. beta == 0 does not read y, so a NaN
+    // already there does not reach the result.
+    template <typename Y, typename Z, typename T>
+    ROCSPARSE_DEVICE_ILF void csrmv_apply_beta_extras(Y*              y,
+                                                      int64_t         row,
+                                                      T               beta,
+                                                      rocsparse_int   num_extra,
+                                                      const T*        gamma_device_array,
+                                                      const Z* const* z_arrays)
+    {
+        T sum = static_cast<T>(0);
+        if(beta != static_cast<T>(0))
+        {
+            sum = beta * static_cast<T>(y[row]);
+        }
+        for(rocsparse_int i = 0; i < num_extra; ++i)
+        {
+            const T gamma = gamma_device_array[i];
+            if(gamma != static_cast<T>(0))
+            {
+                sum = rocsparse::fma<T>(gamma, rocsparse::nontemporal_load(z_arrays[i] + row), sum);
+            }
+        }
+        y[row] = static_cast<Y>(sum);
+    }
+
+    // Applies beta and the extra terms to y[rows[i]] for i in [0, n_rows), the rows whose
+    // workgroups only atomic-add A * x. Launched before them on the same stream.
+    template <uint32_t BLOCKSIZE, typename J, typename Y, typename Z, typename T>
+    ROCSPARSE_KERNEL(BLOCKSIZE)
+    void csrmv_scale_rows_kernel(int64_t n_rows,
+                                 const J* __restrict__ rows,
+                                 ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
+                                 Y* __restrict__ y,
+                                 rocsparse_int   num_extra,
+                                 const T*        gamma_device_array,
+                                 const Z* const* z_arrays,
+                                 bool            is_host_mode)
+    {
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
+        if(beta == static_cast<T>(1) && num_extra == 0)
+        {
+            return;
+        }
+        const int64_t stride = static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE;
+        for(int64_t i = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
+            i < n_rows;
+            i += stride)
+        {
+            rocsparse::csrmv_apply_beta_extras(
+                y, static_cast<int64_t>(rows[i]), beta, num_extra, gamma_device_array, z_arrays);
+        }
+    }
+
     template <uint32_t BLOCKSIZE,
               uint32_t WF_SIZE,
               typename I,
@@ -183,9 +229,16 @@ namespace rocsparse
         }
     }
 
-    // Scales y by beta in the range [0, first_row) and [last_row, m)
-    template <uint32_t WG_SIZE, typename J, typename Y, typename T>
-    ROCSPARSE_DEVICE_ILF void partial_scale_y_device(J m, J first_row, J last_row, T beta, Y* y)
+    // Computes y = beta * y + sum_i gamma_i * z_i in the range [0, first_row) and [last_row, m)
+    template <uint32_t WG_SIZE, typename J, typename Y, typename Z, typename T>
+    ROCSPARSE_DEVICE_ILF void partial_scale_y_device(J               m,
+                                                     J               first_row,
+                                                     J               last_row,
+                                                     T               beta,
+                                                     Y*              y,
+                                                     rocsparse_int   num_extra,
+                                                     const T*        gamma_device_array,
+                                                     const Z* const* z_arrays)
     {
         const J required_threads = (first_row - 0) + (m - last_row);
 
@@ -195,28 +248,9 @@ namespace rocsparse
         const int64_t stride = static_cast<int64_t>(hipGridDim_x) * WG_SIZE;
         for(int64_t idx = gid; idx < required_threads; idx += stride)
         {
-            if(idx < first_row)
-            {
-                if(beta == static_cast<T>(0))
-                {
-                    y[idx] = static_cast<Y>(0);
-                }
-                else
-                {
-                    y[idx] *= beta;
-                }
-            }
-            else
-            {
-                if(beta == static_cast<T>(0))
-                {
-                    y[last_row + (idx - first_row)] = static_cast<Y>(0);
-                }
-                else
-                {
-                    y[last_row + (idx - first_row)] *= beta;
-                }
-            }
+            const int64_t row = (idx < first_row) ? idx : last_row + (idx - first_row);
+            rocsparse::csrmv_apply_beta_extras(
+                y, row, beta, num_extra, gamma_device_array, z_arrays);
         }
     }
 
@@ -247,7 +281,6 @@ namespace rocsparse
                                                      J                    m,
                                                      I                    nnz,
                                                      const I*             row_blocks,
-                                                     uint32_t*            wg_flags,
                                                      const J*             wg_ids,
                                                      T                    alpha,
                                                      const I*             csr_row_ptr,
@@ -283,10 +316,6 @@ namespace rocsparse
         // Alternately, on short row blocks, wg_ids are used to communicate
         // the number of threads that should be used for the reduction. Pre-calculating
         // this on the CPU-side results in a noticeable performance uplift on many matrices.
-        // wg_flags contains the flag bit used so that the multiple WGs calculating a long row can
-        // know when the first workgroup for that row has finished initializing the output
-        // value. While this bit is the same as the first workgroup's flag bit, this
-        // workgroup will spin-loop.
         const I row      = row_blocks[gid];
         const I stop_row = row_blocks[gid + 1];
         const J num_rows = stop_row - row;
@@ -555,63 +584,9 @@ namespace rocsparse
         }
         else
         {
-            // In CSR-LongRows, we have more than one workgroup calculating this row.
-            // The output values for those types of rows are stored using atomic_add, because
-            // more than one parallel workgroup's value makes up the final answer.
-            // Unfortunately, this makes it difficult to do y=Ax, rather than y=Ax+y, because
-            // the values still left in y will be added in using the atomic_add.
-            //
-            // Our solution is to have the first workgroup in one of these long-rows cases
-            // properly initialize the output vector. All the other workgroups working on this
-            // row will spin-loop until that workgroup finishes its work.
-
-            // First, figure out which workgroup you are in the row.
-            // You can use that to find the global ID for the first workgroup calculating
-            // this long row.
-            // row_blocks, wg_ids and wg_flags may start at a row-block offset when the
-            // host splits the row blocks over several launches, so first_wg_in_row is
-            // negative when the row started in an earlier launch.
-            J        first_wg_in_row = gid - wg_ids[gid];
-            uint32_t compare_value   = wg_flags[gid];
-
-            // wg_flags[first_wg_in_row] in the first workgroup is the flag that everyone waits on.
-            if(gid == first_wg_in_row && lid == 0)
-            {
-                // The first workgroup handles the output initialization.
-                const Y out_val = y[row];
-                temp_sum        = (beta - static_cast<T>(1)) * out_val;
-                // Add contributions from all extra vectors
-                for(rocsparse_int i = 0; i < num_extra; ++i)
-                {
-                    T gamma = gamma_device_array[i];
-                    if(gamma != static_cast<T>(0))
-                    {
-                        temp_sum = rocsparse::fma<T>(
-                            gamma, rocsparse::nontemporal_load(z_arrays[i] + row), temp_sum);
-                    }
-                }
-
-                // All inter thread communication is done using atomics, therefore cache flushes or
-                // invalidates should not be needed (thus __threadfence() has been removed to regain
-                // performance).
-                // Because of atomics being relaxed, however, the compiler is allowed to reorder them
-                // with respect to ordinary memory accesses (and other relaxed atomic operations).
-                // In this case, out_val seem to be reordered with the xor and subsequently, accumulation
-                // ends up being wrong.
-                // To force the compiler to stick to the order of operations, we need acquire/release fences.
-                // Workgroup scope is sufficient for this purpose, to only invalidate L1 and avoid L2
-                // invalidations.
-#if ROCSPARSE_CSRMV_RELEASE_WITH_THREADFENCE
-                __threadfence();
-#else
-                __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
-                __builtin_amdgcn_s_waitcnt(0);
-#endif
-
-                // Release other workgroups
-                atomicXor(&wg_flags[first_wg_in_row], 1U);
-            }
-
+            // CSR-LongRows. Each workgroup atomic-adds its part of A * x into this row. Beta and
+            // the extra terms are already in y: csrmv_scale_rows_kernel ran before this kernel,
+            // on the same stream.
             const I vecStart = (I)wg * (I)BLOCK_MULTIPLIER * BLOCKSIZE + row_offset - idx_base;
             const I vecEnd   = rocsparse::min(csr_row_ptr[row + 1] - idx_base,
                                             vecStart + I(BLOCK_MULTIPLIER * BLOCKSIZE));
@@ -633,24 +608,8 @@ namespace rocsparse
             // Reduce partial sums
             rocsparse::blockreduce_sum<WG_SIZE>(lid, partialSums);
 
-            // For every other workgroup, wg_flags[first_wg_in_row] holds the value they wait on.
-            // If your flag == first_wg's flag, you spin loop.
-            // The first workgroup will eventually flip this flag, and you can move forward.
             if(lid == 0)
             {
-                if(gid != first_wg_in_row)
-                {
-                    while(rocsparse::atomic_max(&wg_flags[first_wg_in_row], 0U) == compare_value)
-                        ;
-
-                    // __builtin_amdgcn_s_waitcnt(0);
-                    // __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");
-
-                    // After you've passed the barrier, update your local flag to make sure that
-                    // the next time through, you know what to wait on.
-                    wg_flags[gid] ^= 1U;
-                }
-
                 rocsparse::atomic_add(y, row, m, partialSums[0]);
             }
         }
@@ -1236,13 +1195,11 @@ namespace rocsparse
               typename A,
               typename X,
               typename Y,
-              typename Z,
               typename T>
     ROCSPARSE_DEVICE_ILF void csrmvn_lrb_long_rows_device(bool                 conj,
                                                           J                    m,
                                                           I                    nnz,
                                                           int64_t              count,
-                                                          uint32_t*            wg_flags,
                                                           const J*             rows_bins,
                                                           const J*             n_rows_bins,
                                                           uint32_t             bin_id,
@@ -1251,11 +1208,7 @@ namespace rocsparse
                                                           const J*             csr_col_ind,
                                                           const A*             csr_val,
                                                           const X*             x,
-                                                          T                    beta,
                                                           Y*                   y,
-                                                          rocsparse_int        num_extra,
-                                                          const T*             gamma_device_array,
-                                                          const Z* const*      z_arrays,
                                                           rocsparse_index_base idx_base)
     {
         __shared__ T partialSums[BLOCKSIZE];
@@ -1272,13 +1225,6 @@ namespace rocsparse
             const J wg      = gid % num_wgs_per_row;
             const J row     = rows_bins[bin_start + row_idx];
 
-            // wg_flags contains the flag bits used so that the multiple WGs calculating a long row can
-            // know when the first workgroup for that row has finished initializing the output
-            // value. While this bit is the same as the first workgroup's flag bit, this
-            // workgroup will spin-loop.
-
-            // TODO: Can the wg_flags-based coordination be done instead with cooperative-groups?
-
             // Each workgroup computes exactly one row.
             const I vecStart = static_cast<I>(wg) * static_cast<I>(BLOCK_MULTIPLIER) * BLOCKSIZE
                                + csr_row_ptr[row] - idx_base;
@@ -1287,50 +1233,6 @@ namespace rocsparse
                                  vecStart + static_cast<I>(BLOCK_MULTIPLIER * BLOCKSIZE));
 
             T temp_sum = static_cast<T>(0);
-
-            // In CSR-LongRows, we have more than one workgroup calculating this row.
-            // The output values for those types of rows are stored using atomic_add, because
-            // more than one parallel workgroup's value makes up the final answer.
-            // Unfortunately, this makes it difficult to do y=Ax, rather than y=Ax+y, because
-            // the values still left in y will be added in using the atomic_add.
-            //
-            // Our solution is to have the first workgroup in one of these long-rows cases
-            // properly initialize the output vector. All the other workgroups working on this
-            // row will spin-loop until that workgroup finishes its work.
-
-            // First, figure out which workgroup you are in the row.
-            // You can use that to find the global ID for the first workgroup calculating
-            // this long row.
-            const J        first_wg_in_row = gid - wg;
-            const uint32_t compare_value   = wg_flags[gid];
-
-            // wg_flags[first_wg_in_row] in the first workgroup is the flag that everyone waits on.
-            if(gid == first_wg_in_row && lid == 0)
-            {
-                // The first workgroup handles the output initialization.
-                const Y out_val = y[row];
-                temp_sum        = (beta - static_cast<T>(1)) * out_val;
-
-                // All inter thread communication is done using atomics, therefore cache flushes or
-                // invalidates should not be needed (thus __threadfence() has been removed to regain
-                // performance).
-                // Because of atomics being relaxed, however, the compiler is allowed to reorder them
-                // with respect to ordinary memory accesses (and other relaxed atomic operations).
-                // In this case, out_val seem to be reordered with the xor and subsequently, accumulation
-                // ends up being wrong.
-                // To force the compiler to stick to the order of operations, we need acquire/release fences.
-                // Workgroup scope is sufficient for this purpose, to only invalidate L1 and avoid L2
-                // invalidations.
-#if ROCSPARSE_CSRMV_RELEASE_WITH_THREADFENCE
-                __threadfence();
-#else
-                __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
-                __builtin_amdgcn_s_waitcnt(0);
-#endif
-
-                // Release other workgroups
-                atomicXor(&wg_flags[first_wg_in_row], 1U);
-            }
 
             // Load in a bunch of partial results into your register space, rather than LDS (no
             // contention)
@@ -1349,49 +1251,17 @@ namespace rocsparse
             // Reduce partial sums
             rocsparse::blockreduce_sum<BLOCKSIZE>(lid, partialSums);
 
-            // For every other workgroup, wg_flags[first_wg_in_row] holds the value they wait on.
-            // If your flag == first_wg's flag, you spin loop.
-            // The first workgroup will eventually flip this flag, and you can move forward.
+            // The workgroups of this row atomic-add their parts. Beta and the extra terms are
+            // already in y: csrmv_scale_rows_kernel ran before this kernel, on the same stream.
             if(lid == 0)
             {
-                if(gid != first_wg_in_row)
-                {
-                    while(rocsparse::atomic_max(&wg_flags[first_wg_in_row], 0U) == compare_value)
-                        ;
-
-                    // __builtin_amdgcn_s_waitcnt(0);
-                    // __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");
-
-                    // After you've passed the barrier, update your local flag to make sure that
-                    // the next time through, you know what to wait on.
-                    wg_flags[gid] ^= 1U;
-                }
-
-                T extra_sum = partialSums[0];
-
-                // Add contributions from all extra vectors (only for the first workgroup)
-                if(gid == first_wg_in_row)
-                {
-                    for(rocsparse_int i = 0; i < num_extra; ++i)
-                    {
-                        T gamma = gamma_device_array[i];
-                        if(gamma != static_cast<T>(0))
-                        {
-                            extra_sum = rocsparse::fma<T>(
-                                gamma, rocsparse::nontemporal_load(z_arrays[i] + row), extra_sum);
-                        }
-                    }
-                }
-
-                rocsparse::atomic_add(y, row, m, extra_sum);
+                rocsparse::atomic_add(y, row, m, partialSums[0]);
             }
         };
 
         if constexpr(GRID_STRIDE)
         {
-            // count is nRowsBins[bin_id] * num_wgs_per_row. The host rounds the clamped grid down
-            // to a multiple of num_wgs_per_row, so all workgroups cooperating on a row run in the
-            // same grid-stride iteration, which the spin-loop hand-off requires.
+            // count is nRowsBins[bin_id] * num_wgs_per_row.
             // No barrier between iterations: blockreduce_sum ends with one, after which only
             // lid 0 reads partialSums[0], and only lid 0 writes that slot in the next iteration.
             for(int64_t gid = hipBlockIdx_x; gid < count; gid += hipGridDim_x)

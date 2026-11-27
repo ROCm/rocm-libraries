@@ -36,15 +36,16 @@ _rocsparse_adaptive_info::~_rocsparse_adaptive_info()
     WARNING_IF_HIP_ERROR(rocsparse_hipDeviceSynchronize());
 
     WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->row_blocks));
-    WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->wg_flags));
     WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->wg_ids));
+    WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->split_rows));
 
-    this->row_blocks = nullptr;
-    this->wg_flags   = nullptr;
-    this->wg_ids     = nullptr;
-    this->size       = 0;
-    this->first_row  = 0;
-    this->last_row   = 0;
+    this->row_blocks     = nullptr;
+    this->wg_ids         = nullptr;
+    this->split_rows     = nullptr;
+    this->num_split_rows = 0;
+    this->size           = 0;
+    this->first_row      = 0;
+    this->last_row       = 0;
 }
 
 void _rocsparse_adaptive_info::clear()
@@ -57,13 +58,14 @@ void _rocsparse_adaptive_info::clear()
     WARNING_IF_HIP_ERROR(rocsparse_hipDeviceSynchronize());
 
     THROW_IF_HIP_ERROR(rocsparse_hipFree(this->row_blocks));
-    THROW_IF_HIP_ERROR(rocsparse_hipFree(this->wg_flags));
     THROW_IF_HIP_ERROR(rocsparse_hipFree(this->wg_ids));
+    THROW_IF_HIP_ERROR(rocsparse_hipFree(this->split_rows));
 
-    this->row_blocks = nullptr;
-    this->wg_flags   = nullptr;
-    this->wg_ids     = nullptr;
-    this->size       = 0;
-    this->first_row  = 0;
-    this->last_row   = 0;
+    this->row_blocks     = nullptr;
+    this->wg_ids         = nullptr;
+    this->split_rows     = nullptr;
+    this->num_split_rows = 0;
+    this->size           = 0;
+    this->first_row      = 0;
+    this->last_row       = 0;
 }

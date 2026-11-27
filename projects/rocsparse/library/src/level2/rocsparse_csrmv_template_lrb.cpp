@@ -48,7 +48,7 @@
 // The short-row and long-row kernels deliberately keep WG_SIZE=256:
 //  - short rows: 256 amortizes more rows per block and measured slower at 128;
 //  - long rows: shrinking the block only multiplies the number of cooperating workgroups
-//    per (few) very long rows, increasing cross-workgroup atomic/spin-loop sync contention.
+//    per (few) very long rows, increasing the contention of their atomic adds.
 #define WG_SIZE_WAVE32 128
 #define LR_THRESHOLD 11
 #define VEC_THRESHOLD 5
@@ -193,37 +193,6 @@ rocsparse_status rocsparse::csrmv_analysis_lrb_template_dispatch(rocsparse_handl
         csrmv_info->lrb.rows_bins            = csrmv_info->lrb.rows_offsets_scratch;
         csrmv_info->lrb.rows_offsets_scratch = tmp;
     }*/
-
-    // Determine how many cross-workgroup global synchronization flags we'll need for Longrows
-    // and allocate device storage accordingly (note that the sync approach is basically a
-    // direct copy-paste from rocSPARSE CSR-Adaptive at present).
-    // We should be able to reduce this to one flag per *row* (rather than one per *WG*)
-    // if we do bit of Longrows refactoring.
-
-    // Longrows synchronization flags: these will be allocated below, during the preprocessing, based
-    // on Longrows bin sizes. We use a different array per kernel launch in order to permit use of >1 stream.
-    // The number of cooperating workgroups for a long-row bin is nRowsBins[j] * num_wgs_per_row.
-    // This product can exceed the range of a 32-bit unsigned integer, so accumulate it in 64-bit
-    // to avoid wrap-around. This buffer must be sized for the *true* (unclamped) grid because the
-    // kernel's grid-stride loop indexes wg_flags by the full logical workgroup id.
-    int64_t max_required_grid = 0;
-    for(int j = LR_THRESHOLD; j < 32; j++)
-    {
-        uint32_t block_size      = WG_SIZE;
-        uint32_t bin_max_row_len = (1 << j);
-        uint32_t num_wgs_per_row = (bin_max_row_len - 1) / (BLOCK_MULTIPLIER * block_size) + 1;
-        int64_t  grid_size = static_cast<int64_t>(csrmv_info->lrb.nRowsBins[j]) * num_wgs_per_row;
-
-        max_required_grid = rocsparse::max(grid_size, max_required_grid);
-    }
-
-    if(max_required_grid != 0)
-    {
-        csrmv_info->lrb.size = max_required_grid;
-
-        RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(
-            &csrmv_info->lrb.wg_flags, sizeof(uint32_t) * csrmv_info->lrb.size, stream));
-    }
 
     // Store some pointers to verify correct execution
     csrmv_info->trans       = trans;
@@ -466,14 +435,12 @@ namespace rocsparse
               typename A,
               typename X,
               typename Y,
-              typename Z,
               typename T>
     ROCSPARSE_KERNEL(WG_SIZE)
     void csrmvn_lrb_long_rows_kernel(bool    conj,
                                      J       m,
                                      I       nnz,
                                      int64_t count,
-                                     uint32_t* __restrict__ wg_flags,
                                      J* __restrict__ rows_bins,
                                      J* __restrict__ n_rows_bins,
                                      const uint32_t bin_id,
@@ -482,46 +449,28 @@ namespace rocsparse
                                      const J* __restrict__ csr_col_ind,
                                      const A* __restrict__ csr_val,
                                      const X* __restrict__ x,
-                                     ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
                                      Y* __restrict__ y,
-                                     rocsparse_int        num_extra,
-                                     const T*             gamma_device_array,
-                                     const Z* const*      z_arrays,
                                      rocsparse_index_base idx_base,
                                      bool                 is_host_mode)
     {
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
-        ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
-        if(alpha != 0 || beta != 1 || num_extra > 0)
+        if(alpha != 0)
         {
-            rocsparse::csrmvn_lrb_long_rows_device<WG_SIZE,
-                                                   BLOCK_MULTIPLIER,
-                                                   GRID_STRIDE,
-                                                   I,
-                                                   J,
-                                                   A,
-                                                   X,
-                                                   Y,
-                                                   Z,
-                                                   T>(conj,
-                                                      m,
-                                                      nnz,
-                                                      count,
-                                                      wg_flags,
-                                                      rows_bins,
-                                                      n_rows_bins,
-                                                      bin_id,
-                                                      alpha,
-                                                      csr_row_ptr,
-                                                      csr_col_ind,
-                                                      csr_val,
-                                                      x,
-                                                      beta,
-                                                      y,
-                                                      num_extra,
-                                                      gamma_device_array,
-                                                      z_arrays,
-                                                      idx_base);
+            rocsparse::csrmvn_lrb_long_rows_device<WG_SIZE, BLOCK_MULTIPLIER, GRID_STRIDE>(
+                conj,
+                m,
+                nnz,
+                count,
+                rows_bins,
+                n_rows_bins,
+                bin_id,
+                alpha,
+                csr_row_ptr,
+                csr_col_ind,
+                csr_val,
+                x,
+                y,
+                idx_base);
         }
     }
 }
@@ -549,7 +498,7 @@ rocsparse_status rocsparse::csrmv_lrb_template_dispatch(rocsparse_handle        
     ROCSPARSE_ROUTINE_TRACE;
 
     // Extract gamma arrays and z vectors for batched operation
-    using Z                      = Y;
+    using Z                      = T;
     T*        gamma_device_array = nullptr;
     const Z** z_array            = nullptr;
 
@@ -862,13 +811,39 @@ rocsparse_status rocsparse::csrmv_lrb_template_dispatch(rocsparse_handle        
             }
         }
 
-        // Long rows
+        // Long rows. Their workgroups only atomic-add A * x, so beta and the extra terms go
+        // into each bin's rows first. Nothing to do for beta = 1 without extras.
+        const bool skip_scale = handle->pointer_mode == rocsparse_pointer_mode_host
+                                && *beta_device_host == static_cast<T>(1) && num_extra == 0;
+        // rows_bins holds the bins one after the other.
+        int64_t bin_start = 0;
+        for(int j = 0; j < LR_THRESHOLD; j++)
+        {
+            bin_start += info->lrb.nRowsBins[j];
+        }
         for(int j = LR_THRESHOLD; j < 32; j++)
         {
             if(info->lrb.nRowsBins[j] != 0)
             {
-                RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
-                    info->lrb.wg_flags, 0, sizeof(uint32_t) * info->lrb.size, stream));
+                const int64_t n_long_rows = info->lrb.nRowsBins[j];
+                if(!skip_scale)
+                {
+                    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                        (rocsparse::csrmv_scale_rows_kernel<WG_SIZE>),
+                        dim3(rocsparse::get_grid_size_x(
+                            handle, (n_long_rows - 1) / WG_SIZE + 1, WG_SIZE)),
+                        dim3(WG_SIZE),
+                        0,
+                        stream,
+                        n_long_rows,
+                        static_cast<const J*>(info->lrb.rows_bins) + bin_start,
+                        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
+                        y,
+                        num_extra,
+                        gamma_device_array,
+                        z_array,
+                        handle->pointer_mode == rocsparse_pointer_mode_host);
+                }
 
                 uint32_t block_size      = WG_SIZE;
                 uint32_t bin_max_row_len = (1 << j);
@@ -876,61 +851,39 @@ rocsparse_status rocsparse::csrmv_lrb_template_dispatch(rocsparse_handle        
                     = (bin_max_row_len - 1) / (BLOCK_MULTIPLIER * block_size) + 1;
 
                 // Total cooperating workgroups for this bin. Widen to 64-bit before multiplying to
-                // avoid the 32-bit product wrapping (which would both undersize the launch and, via
-                // wg_flags sizing, corrupt the cross-workgroup synchronization).
+                // avoid the 32-bit product wrapping, which would undersize the launch.
                 int64_t count = static_cast<int64_t>(info->lrb.nRowsBins[j]) * num_wgs_per_row;
 
-                // Clamp the launch grid, rounded down to a whole number of per-row workgroup
-                // groups so that all workgroups cooperating on a row stay within one grid-stride
-                // wave (required by the spin-loop hand-off). The kernel grid-strides over the full
-                // logical range [0, count).
-                int64_t capped = rocsparse::get_grid_size_x(handle, count, block_size);
-                capped         = (capped / num_wgs_per_row) * num_wgs_per_row;
-                if(capped < num_wgs_per_row)
-                {
-                    capped = num_wgs_per_row;
-                }
-                uint32_t grid_size = static_cast<uint32_t>(rocsparse::min(capped, count));
-
-                const auto launch = [&](auto grid_stride) -> rocsparse_status {
-                    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                        (csrmvn_lrb_long_rows_kernel<decltype(grid_stride)::value>),
-                        grid_size,
-                        block_size,
-                        0,
-                        stream,
-                        conj,
-                        m,
-                        nnz,
-                        count,
-                        info->lrb.wg_flags,
-                        static_cast<J*>(info->lrb.rows_bins),
-                        static_cast<J*>(info->lrb.n_rows_bins),
-                        j,
-                        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
-                        csr_row_ptr,
-                        csr_col_ind,
-                        csr_val,
-                        x,
-                        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
-                        y,
-                        num_extra,
-                        gamma_device_array,
-                        z_array,
-                        descr->base,
-                        handle->pointer_mode == rocsparse_pointer_mode_host);
-                    return rocsparse_status_success;
-                };
-
-                if(grid_size < count)
-                {
-                    RETURN_IF_ROCSPARSE_ERROR(launch(std::true_type{}));
-                }
-                else
-                {
-                    RETURN_IF_ROCSPARSE_ERROR(launch(std::false_type{}));
-                }
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(
+                    handle,
+                    count,
+                    block_size,
+                    [&](auto grid_stride, uint32_t grid_size) -> rocsparse_status {
+                        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                            (csrmvn_lrb_long_rows_kernel<decltype(grid_stride)::value>),
+                            grid_size,
+                            block_size,
+                            0,
+                            stream,
+                            conj,
+                            m,
+                            nnz,
+                            count,
+                            static_cast<J*>(info->lrb.rows_bins),
+                            static_cast<J*>(info->lrb.n_rows_bins),
+                            j,
+                            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
+                            csr_row_ptr,
+                            csr_col_ind,
+                            csr_val,
+                            x,
+                            y,
+                            descr->base,
+                            handle->pointer_mode == rocsparse_pointer_mode_host);
+                        return rocsparse_status_success;
+                    }));
             }
+            bin_start += info->lrb.nRowsBins[j];
         }
     }
     else

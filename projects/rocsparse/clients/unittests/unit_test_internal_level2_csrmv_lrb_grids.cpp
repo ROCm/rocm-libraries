@@ -30,10 +30,8 @@
 // to min(maxGridSize[0], (2^32 - 1) / blockDim.x) blocks. When the clamp binds,
 // the host launches the GRID_STRIDE variant of the kernel, which grid-strides
 // over the full logical block count; otherwise it launches the straight-line
-// variant, one block per block index. The long-rows grid is further
-// rounded down to a whole multiple of num_wgs_per_row, so that all workgroups
-// cooperating on one row run in the same grid-stride wave (the spin-wait
-// hand-off needs that). At real sizes the clamp needs more than 16.7M blocks.
+// variant, one block per block index. At real sizes the clamp needs more than
+// 16.7M blocks.
 // These tests shrink handle->properties.maxGridSize[0] to a few blocks for the
 // compute stage instead, so a small matrix runs through the clamped, looping
 // path, and compare y against a host reference.
@@ -50,8 +48,8 @@
 // The matrix below populates bins 0 to 14 with enough rows that every one of
 // those grids is wider than 7 blocks, so each of the clamped limits 1, 2, 3 and
 // 7 forces the stride loop. For long rows num_wgs_per_row is 3, 6, 11 and 22
-// for bins 11 to 14, so the limits cover both "one row per wave" (grid raised
-// to num_wgs_per_row) and "two rows per wave" (limit 7, bins 11 and 12).
+// for bins 11 to 14, so with the smaller limits the workgroups of one row run in
+// different grid-stride iterations.
 // Results are checked per bin, so a failure names the kernel that dropped rows.
 //
 // PARTIAL_SCALE_Y. The adaptive analysis trims leading and trailing runs of

@@ -134,9 +134,24 @@ int64_t rocsparse::csrmv_partition<I, J>::max_nnz_per_row() const
     return this->max_nnz_per_row_value;
 }
 
-#define INSTANTIATE(I, J)                                                   \
-    template bool    rocsparse::csrmv_partition<I, J>::is_poor_fit() const; \
-    template int64_t rocsparse::csrmv_partition<I, J>::max_nnz_per_row() const;
+template <typename I, typename J>
+std::vector<J> rocsparse::csrmv_partition<I, J>::split_rows() const
+{
+    std::vector<J> rows;
+    for(size_t block = 0; block + 1 < this->row_blocks.size(); ++block)
+    {
+        if(this->row_blocks[block + 1] == this->row_blocks[block] && this->wg_ids[block] == 0)
+        {
+            rows.push_back(static_cast<J>(this->row_blocks[block]));
+        }
+    }
+    return rows;
+}
+
+#define INSTANTIATE(I, J)                                                              \
+    template bool           rocsparse::csrmv_partition<I, J>::is_poor_fit() const;     \
+    template int64_t        rocsparse::csrmv_partition<I, J>::max_nnz_per_row() const; \
+    template std::vector<J> rocsparse::csrmv_partition<I, J>::split_rows() const;
 
 INSTANTIATE(int32_t, int32_t);
 INSTANTIATE(int64_t, int32_t);

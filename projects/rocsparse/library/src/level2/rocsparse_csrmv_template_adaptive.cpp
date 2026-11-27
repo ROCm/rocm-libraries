@@ -468,10 +468,6 @@ rocsparse_status
             RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(&csrmv_info->adaptive.row_blocks,
                                                          sizeof(I) * csrmv_info->adaptive.size,
                                                          handle->stream));
-            RETURN_IF_HIP_ERROR(
-                rocsparse_hipMallocAsync(&csrmv_info->adaptive.wg_flags,
-                                         sizeof(uint32_t) * csrmv_info->adaptive.size,
-                                         handle->stream));
             RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(&csrmv_info->adaptive.wg_ids,
                                                          sizeof(J) * csrmv_info->adaptive.size,
                                                          handle->stream));
@@ -482,16 +478,25 @@ rocsparse_status
                                                          sizeof(I) * csrmv_info->adaptive.size,
                                                          hipMemcpyHostToDevice,
                                                          stream));
-            RETURN_IF_HIP_ERROR(
-                rocsparse_hipMemsetAsync(csrmv_info->adaptive.wg_flags,
-                                         0,
-                                         sizeof(uint32_t) * csrmv_info->adaptive.size,
-                                         stream));
             RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(csrmv_info->adaptive.wg_ids,
                                                          wg_ids.data(),
                                                          sizeof(J) * csrmv_info->adaptive.size,
                                                          hipMemcpyHostToDevice,
                                                          stream));
+
+            const std::vector<J> split_rows     = partition->split_rows();
+            csrmv_info->adaptive.num_split_rows = split_rows.size();
+            if(!split_rows.empty())
+            {
+                RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(&csrmv_info->adaptive.split_rows,
+                                                             sizeof(J) * split_rows.size(),
+                                                             handle->stream));
+                RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(csrmv_info->adaptive.split_rows,
+                                                             split_rows.data(),
+                                                             sizeof(J) * split_rows.size(),
+                                                             hipMemcpyHostToDevice,
+                                                             stream));
+            }
 
             // Wait for device transfer to finish
             RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
@@ -515,19 +520,23 @@ rocsparse_status
 
 namespace rocsparse
 {
-    template <uint32_t GEN_WG, typename J, typename Y, typename T>
+    template <uint32_t GEN_WG, typename J, typename Y, typename Z, typename T>
     ROCSPARSE_KERNEL(GEN_WG)
     void partial_scale_y_kernel(J m,
                                 J first_row,
                                 J last_row,
                                 ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
                                 Y* __restrict__ y,
-                                bool is_host_mode)
+                                rocsparse_int   num_extra,
+                                const T*        gamma_device_array,
+                                const Z* const* z_arrays,
+                                bool            is_host_mode)
     {
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
-        if(beta != 1)
+        if(beta != 1 || num_extra > 0)
         {
-            rocsparse::partial_scale_y_device<GEN_WG>(m, first_row, last_row, beta, y);
+            rocsparse::partial_scale_y_device<GEN_WG>(
+                m, first_row, last_row, beta, y, num_extra, gamma_device_array, z_arrays);
         }
     }
 
@@ -544,7 +553,6 @@ namespace rocsparse
                                 J    m,
                                 I    nnz,
                                 const I* __restrict__ row_blocks,
-                                uint32_t* __restrict__ wg_flags,
                                 const J* __restrict__ wg_ids,
                                 ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                                 const I* __restrict__ csr_row_ptr,
@@ -569,7 +577,6 @@ namespace rocsparse
                     m,
                     nnz,
                     row_blocks,
-                    wg_flags,
                     wg_ids,
                     alpha,
                     csr_row_ptr,
@@ -718,7 +725,7 @@ rocsparse_status rocsparse::csrmv_adaptive_template_dispatch(rocsparse_handle   
     ROCSPARSE_ROUTINE_TRACE;
 
     // Extract gamma arrays and z vectors for batched operation
-    using Z                      = Y;
+    using Z                      = T;
     T*        gamma_device_array = nullptr;
     const Z** z_array            = nullptr;
     bool      temp_alloc         = false;
@@ -777,11 +784,32 @@ rocsparse_status rocsparse::csrmv_adaptive_template_dispatch(rocsparse_handle   
         // to build wg_ids in analysis, which is derived the same way from m/nnz).
         const uint32_t gen_wg = rocsparse::general_wg_size(handle, m, nnz);
 
+        // The workgroups of a split row only atomic-add A * x, so beta and the extra terms
+        // go into those rows first. Nothing to do for beta = 1 without extras.
+        const int64_t n_split_rows = static_cast<int64_t>(info->adaptive.num_split_rows);
+        const bool    skip_scale   = handle->pointer_mode == rocsparse_pointer_mode_host
+                                && *beta_device_host == static_cast<T>(1) && num_extra == 0;
+        if(n_split_rows > 0 && !skip_scale)
+        {
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                (rocsparse::csrmv_scale_rows_kernel<WG_SIZE>),
+                dim3(rocsparse::get_grid_size_x(handle, (n_split_rows - 1) / WG_SIZE + 1, WG_SIZE)),
+                dim3(WG_SIZE),
+                0,
+                stream,
+                n_split_rows,
+                static_cast<const J*>(info->adaptive.split_rows),
+                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
+                y,
+                num_extra,
+                gamma_device_array,
+                z_array,
+                handle->pointer_mode == rocsparse_pointer_mode_host);
+        }
+
         // Run different csrmv kernels, one workgroup per row block. A row-block
         // count above the grid.x limit is split into consecutive launches on the
-        // same stream rather than grid-strided: the workgroups of a long row wait
-        // on the flag of its first workgroup, which never comes after them, so a
-        // later launch only ever waits on a flag an earlier launch already set.
+        // same stream.
         const int64_t nblocks = static_cast<int64_t>(info->adaptive.size) - 1;
         const int64_t chunk   = rocsparse::get_grid_size_x(handle, nblocks, gen_wg);
         for(int64_t offset = 0; offset < nblocks; offset += chunk)
@@ -799,7 +827,6 @@ rocsparse_status rocsparse::csrmv_adaptive_template_dispatch(rocsparse_handle   
         m,                                                            \
         nnz,                                                          \
         static_cast<I*>(info->adaptive.row_blocks) + offset,          \
-        info->adaptive.wg_flags + offset,                             \
         static_cast<J*>(info->adaptive.wg_ids) + offset,              \
         ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host), \
         csr_row_ptr,                                                  \
@@ -826,7 +853,7 @@ rocsparse_status rocsparse::csrmv_adaptive_template_dispatch(rocsparse_handle   
 
         if(info->adaptive.first_row > 0 || info->adaptive.last_row < m)
         {
-            // Scale y by beta from rows [0, first_row) and [last_row, m)
+            // y = beta * y + sum_i gamma_i * z_i in the rows [0, first_row) and [last_row, m)
             J first_row        = info->adaptive.first_row;
             J last_row         = info->adaptive.last_row;
             J required_threads = (first_row - 0) + (m - last_row);
@@ -848,6 +875,9 @@ rocsparse_status rocsparse::csrmv_adaptive_template_dispatch(rocsparse_handle   
         last_row,                                                    \
         ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host), \
         y,                                                           \
+        num_extra,                                                   \
+        gamma_device_array,                                          \
+        z_array,                                                     \
         handle->pointer_mode == rocsparse_pointer_mode_host)
             if(gen_wg == 128)
             {
@@ -862,7 +892,8 @@ rocsparse_status rocsparse::csrmv_adaptive_template_dispatch(rocsparse_handle   
     }
     else if(descr->type == rocsparse_matrix_type_symmetric)
     {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::scale_array(handle, m, beta_device_host, y));
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::axpby_array_batched(
+            handle, m, num_extra, gamma_device_array, z_array, beta_device_host, y));
 
         I max_rows = static_cast<I>(info->max_rows);
 
