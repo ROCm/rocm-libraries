@@ -81,7 +81,9 @@ if(NOT MIOPEN_ENABLE_HIPDNN_WRAPPER)
     list(APPEND SKIP_TESTS
         hipdnn_erase_outside_lock.cpp
         hipdnn_lru_cache.cpp
+        hipdnn_output_hash.cpp
         hipdnn_reentry.cpp
+        hipdnn_shim_batchnorm.cpp
         hipdnn_shim_conv.cpp
         hipdnn_shim_conv_gaps.cpp
         hipdnn_shim_conv_translation.cpp
@@ -191,6 +193,14 @@ function(add_gtest TEST_NAME TEST_CPP)
       set(MIOPEN_GTEST_PREFIX "")
     else()
       set(MIOPEN_GTEST_PREFIX "Quick")
+    endif()
+
+    # The hipDNN wrapper's host-only unit tests are plain TEST()s with no instantiation prefix,
+    # so a Smoke prefix would leave these binaries with no tests.
+    if("${TEST_NAME}" STREQUAL "test_hipdnn_lru_cache"
+       OR "${TEST_NAME}" STREQUAL "test_hipdnn_output_hash"
+       OR "${TEST_NAME}" STREQUAL "test_wrapper_routing")
+      set(MIOPEN_GTEST_PREFIX "")
     endif()
 
     if (NOT MIOPEN_TEST_DBSYNC)
@@ -306,9 +316,9 @@ function(add_gtest TEST_NAME TEST_CPP)
 
   endif()
 
-  # Among discrete binaries only the hipdnn_shim_conv*.cpp files have shim tests; any other
+  # Among discrete binaries only the hipdnn_shim_*.cpp files have shim tests; any other
   # would replay nothing, which the comparison rejects. No GPU: the shim tests are all GPU tests.
-  if(MIOPEN_ENABLE_HIPDNN_WRAPPER AND NOT MIOPEN_NO_GPU AND (NOT MIOPEN_TEST_DISCRETE OR TEST_CPP MATCHES "^hipdnn_shim_conv"))
+  if(MIOPEN_ENABLE_HIPDNN_WRAPPER AND NOT MIOPEN_NO_GPU AND (NOT MIOPEN_TEST_DISCRETE OR TEST_CPP MATCHES "^hipdnn_shim_"))
     miopen_forwarding_parity_entries(BUILD ${TEST_NAME})
   endif()
 
@@ -568,6 +578,20 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
   add_dependencies(miopen-tests fake_hipdnn_backend)
   add_dependencies(miopen-check fake_hipdnn_backend)
 
+  # A backend hipDNN accepts whose hipdnnDestroy calls miopenDestroy. MODULE, with its import
+  # library in its own directory, for the same reasons as the fake above. It needs no install
+  # RPATH: its one library dependency is MIOpen (hipdnn_frontend_dynamic is header-only), and
+  # only the probe loads it, after MIOpen is already in the process. TheRock's RPATH pass
+  # skips MODULE targets, so THEROCK_INSTALL_RPATH_ORIGIN would not be read here anyway.
+  add_library(reentrant_hipdnn_backend MODULE forwarding_failure/reentrant_hipdnn_backend.cpp)
+  target_link_libraries(reentrant_hipdnn_backend PRIVATE MIOpen hipdnn_frontend_dynamic)
+  set_target_properties(reentrant_hipdnn_backend PROPERTIES
+    OUTPUT_NAME hipdnn_backend
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/reentrant_hipdnn_backend"
+    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/reentrant_hipdnn_backend")
+  add_dependencies(miopen-tests reentrant_hipdnn_backend)
+  add_dependencies(miopen-check reentrant_hipdnn_backend)
+
   add_executable(forwarding_failure_probe forwarding_failure/forwarding_failure_probe.cpp)
   target_link_libraries(forwarding_failure_probe PRIVATE MIOpen)
   # TheRock sets an executable's install RPATH as if it were in bin/. This one is a folder
@@ -580,7 +604,7 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
   miopen_add_wrapper_check(forwarding_failure_modes
     COMMAND ${Python3_EXECUTABLE} -m unittest -v test_forwarding_failure_modes
     ENVIRONMENT
-      "PYTHONDONTWRITEBYTECODE=1;MIOPEN_FAILURE_PROBE=$<TARGET_FILE:forwarding_failure_probe>;MIOPEN_FAKE_HIPDNN_BACKEND=${CMAKE_CURRENT_BINARY_DIR}/fake_hipdnn_backend"
+      "PYTHONDONTWRITEBYTECODE=1;MIOPEN_FAILURE_PROBE=$<TARGET_FILE:forwarding_failure_probe>;MIOPEN_FAKE_HIPDNN_BACKEND=${CMAKE_CURRENT_BINARY_DIR}/fake_hipdnn_backend;MIOPEN_REENTRANT_HIPDNN_BACKEND=${CMAKE_CURRENT_BINARY_DIR}/reentrant_hipdnn_backend"
     ENVIRONMENT_MODIFICATION
       "PYTHONPATH=path_list_prepend:${PROJECT_SOURCE_DIR}/script")
 
@@ -701,7 +725,7 @@ endif()
 if(MIOPEN_ENABLE_HIPDNN_WRAPPER AND NOT MIOPEN_TEST_DISCRETE)
   miopen_append_installed_wrapper_check(forwarding_failure_modes
     "\"../${MIOPEN_WRAPPER_TESTS_SUBDIR}/test_forwarding_failure_modes.py\" \"-v\""
-    " ENVIRONMENT \"PYTHONDONTWRITEBYTECODE=1;MIOPEN_FAILURE_PROBE=../${MIOPEN_WRAPPER_TESTS_SUBDIR}/forwarding_failure_probe${CMAKE_EXECUTABLE_SUFFIX};MIOPEN_FAKE_HIPDNN_BACKEND=../${MIOPEN_WRAPPER_TESTS_SUBDIR}/fake_hipdnn_backend\"")
+    " ENVIRONMENT \"PYTHONDONTWRITEBYTECODE=1;MIOPEN_FAILURE_PROBE=../${MIOPEN_WRAPPER_TESTS_SUBDIR}/forwarding_failure_probe${CMAKE_EXECUTABLE_SUFFIX};MIOPEN_FAKE_HIPDNN_BACKEND=../${MIOPEN_WRAPPER_TESTS_SUBDIR}/fake_hipdnn_backend;MIOPEN_REENTRANT_HIPDNN_BACKEND=../${MIOPEN_WRAPPER_TESTS_SUBDIR}/reentrant_hipdnn_backend\"")
 endif()
 
 # The dispatch macro's re-entry tests, with the settings wrapper_reentry_macro gives them in the
@@ -753,6 +777,10 @@ if( NOT ENABLE_ASAN_PACKAGING )
     )
     install(TARGETS fake_hipdnn_backend
         LIBRARY DESTINATION ${MIOPEN_WRAPPER_TESTS_INSTALL_DIR}/fake_hipdnn_backend
+        COMPONENT tests
+    )
+    install(TARGETS reentrant_hipdnn_backend
+        LIBRARY DESTINATION ${MIOPEN_WRAPPER_TESTS_INSTALL_DIR}/reentrant_hipdnn_backend
         COMPONENT tests
     )
   endif()

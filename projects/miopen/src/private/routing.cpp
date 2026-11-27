@@ -45,7 +45,7 @@ constexpr int kInfo2LogLevel   = 6;
 //      point through the public miopen.h API only and checks the result against a CPU
 //      reference (see "hipDNN shim surface" in test/gtest/README.md). Without one, the
 //      parity run replays nothing for it, so a swap that changes results goes unnoticed.
-//   4. Update DefaultSetIsTheConvolutionFamily in test/gtest/wrapper_routing.cpp.
+//   4. Update DefaultSetIsConvolutionAndBatchnorm in test/gtest/wrapper_routing.cpp.
 //
 // The forwarding parity tests (script/run_forwarding_parity.py) run the shim
 // tests once with forwarding disabled and once enabled and require the two runs
@@ -55,23 +55,32 @@ constexpr int kInfo2LogLevel   = 6;
 // are deliberately absent: they are standalone bias kernels rather than
 // convolutions, and hipDNN has no matching single-op graph for them.
 //
+// Of the batchnorm entry points, miopenDeriveBNTensorDescriptor is absent because
+// it only fills a descriptor and runs nothing, and the fusion-plan batchnorm ops
+// are absent because their state lives inside the fusion plan, which is not
+// forwarded.
+//
 // constexpr so it lands in .rodata: no initialization order or exit-time
 // destructor to worry about.
-constexpr std::array<std::string_view, 4> kForwardingEntries{
+constexpr std::array<std::string_view, 17> kForwardingEntries{
     "miopenConvolutionForward",
     "miopenConvolutionBackwardData",
     "miopenConvolutionBackwardWeights",
     "miopenConvolutionBiasActivationForward",
+    "miopenBatchNormalizationForwardTraining",
+    "miopenBatchNormalizationForwardTraining_V2",
+    "miopenBatchNormalizationForwardTraining_V3",
+    "miopenBatchNormForwardTrainingActivation",
+    "miopenBatchNormForwardTrainingActivation_V2",
+    "miopenBatchNormalizationForwardInference",
+    "miopenBatchNormalizationForwardInference_V2",
+    "miopenBatchNormalizationForwardInferenceInvVariance",
+    "miopenBatchNormForwardInferenceActivationInvVariance",
+    "miopenBatchNormForwardInferenceActivation",
+    "miopenBatchNormalizationBackward",
+    "miopenBatchNormalizationBackward_V2",
+    "miopenBatchNormBackwardActivation",
 };
-
-std::string ToLower(std::string_view value)
-{
-    std::string lowered(value);
-    std::transform(lowered.begin(), lowered.end(), lowered.begin(), [](unsigned char c) {
-        return static_cast<char>(std::tolower(c));
-    });
-    return lowered;
-}
 
 std::string_view Trim(std::string_view value)
 {
@@ -158,6 +167,15 @@ unsigned long long LogLevel()
 int AsMiopenLevel(unsigned long long level) { return static_cast<int>(level); }
 
 } // namespace
+
+std::string ToLower(std::string_view value)
+{
+    std::string lowered(value);
+    std::transform(lowered.begin(), lowered.end(), lowered.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return lowered;
+}
 
 ForwardingMode ParseForwardingMode(const char* value, std::ostream& diagnostics)
 {

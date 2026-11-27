@@ -95,6 +95,10 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   workspace `miopenFindSolutions` allocates when no workspace is preallocated, so it can now
   return GEMM solutions for dilated problems. When free memory cannot be read, no dilated GEMM
   workspace is reported.
+* [BatchNorm] Fixed spatial `miopenBatchNormBackwardActivation` with an activation other than
+  PASTHRU, RELU, CLIPPEDRELU or CLAMP, which ran the per-activation kernel, wrote `dscale` and
+  `dbias` past their per-channel buffers, ignored the activation and returned success. It now
+  returns `miopenStatusNotImplemented`.
 * [Conv] Fixed the default kernel pick on gfx950 for FP16 and BF16 3D forward convolutions with
   input depth of at least 3 and input width of at least 256 (for example Wan VAE layers). A
   hard-coded rule in `ConvHipImplicitGemm3DGroupFwdXdlops` returned one fixed CK instance for

@@ -77,4 +77,67 @@ TEST_P(CPU_HipdnnLruCache_NONE, EraseIfRemovesOnlyMatchingEntries)
     EXPECT_NE(cache.Find(3), nullptr);
 }
 
+TEST_P(CPU_HipdnnLruCache_NONE, EraseIfHandsBackTheRemovedValues)
+{
+    // The caller, not EraseIf, destroys what is removed, so it can do that after
+    // releasing its lock.
+    miopen::wrapper::LruCache<int, std::shared_ptr<int>> cache(4);
+    std::vector<std::weak_ptr<int>> watched;
+    for(int key = 0; key < 4; ++key)
+    {
+        auto value = std::make_shared<int>(key);
+        watched.push_back(value);
+        cache.Insert(key, std::move(value));
+    }
+
+    auto removed = cache.EraseIf([](int key) { return key % 2 == 0; });
+    ASSERT_EQ(removed.size(), 2u);
+    EXPECT_FALSE(watched[0].expired());
+    EXPECT_FALSE(watched[2].expired());
+    std::vector<int> removedKeys;
+    for(const auto& value : removed)
+        removedKeys.push_back(*value);
+    std::sort(removedKeys.begin(), removedKeys.end());
+    EXPECT_EQ(removedKeys, (std::vector<int>{0, 2}));
+
+    removed.clear();
+    EXPECT_TRUE(watched[0].expired());
+    EXPECT_TRUE(watched[2].expired());
+    EXPECT_FALSE(watched[1].expired());
+    EXPECT_FALSE(watched[3].expired());
+}
+
+TEST_P(CPU_HipdnnLruCache_NONE, InsertHandsBackTheEvictedEntry)
+{
+    // As with EraseIf, the caller destroys what the cache pushes out, after releasing its lock.
+    miopen::wrapper::LruCache<int, std::shared_ptr<int>> cache(2);
+    std::weak_ptr<int> oldest;
+    {
+        auto value = std::make_shared<int>(1);
+        oldest     = value;
+        EXPECT_FALSE(cache.Insert(1, std::move(value)).has_value());
+    }
+    EXPECT_FALSE(cache.Insert(2, std::make_shared<int>(2)).has_value());
+
+    auto evicted = cache.Insert(3, std::make_shared<int>(3));
+    ASSERT_TRUE(evicted.has_value());
+    EXPECT_FALSE(oldest.expired());
+    EXPECT_EQ(**evicted, 1);
+
+    evicted.reset();
+    EXPECT_TRUE(oldest.expired());
+}
+
+TEST_P(CPU_HipdnnLruCache_NONE, InsertHandsBackTheValueItReplaces)
+{
+    Cache cache(2);
+    EXPECT_FALSE(cache.Insert(1, 10).has_value());
+
+    const auto replaced = cache.Insert(1, 11);
+    ASSERT_TRUE(replaced.has_value());
+    EXPECT_EQ(*replaced, 10);
+    ASSERT_NE(cache.Find(1), nullptr);
+    EXPECT_EQ(*cache.Find(1), 11);
+}
+
 INSTANTIATE_TEST_SUITE_P(Quick, CPU_HipdnnLruCache_NONE, testing::Values(0));

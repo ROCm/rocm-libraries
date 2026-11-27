@@ -14,6 +14,7 @@
 
 #include <hip/hip_runtime_api.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <exception>
 #include <iostream>
@@ -24,6 +25,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#include <vector>
 
 namespace miopen {
 namespace wrapper {
@@ -33,6 +35,10 @@ namespace {
 
 namespace fe = hipdnn_frontend;
 
+// The knob ID hipDNN documents for benchmarking. hipdnn_plugin_sdk's
+// GlobalKnobDefines.hpp defines it; the frontend's copy is in a detail namespace.
+constexpr const char* kBenchmarkingKnob = "global.benchmarking";
+
 struct PlanKeyHash
 {
     size_t operator()(const PlanKey& key) const
@@ -40,7 +46,7 @@ struct PlanKeyHash
         size_t seed = std::hash<const void*>{}(key.handle);
         for(const int64_t value : key.problem)
             seed ^= static_cast<size_t>(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-        return seed;
+        return key.benchmark ? ~seed : seed;
     }
 };
 
@@ -86,16 +92,22 @@ struct HandleState
     }
 };
 
+// The locks and maps below are never freed. Destroying what they hold at exit
+// would run hipDNN and its plugins while the process tears down, and a plugin
+// built against MIOpen calls miopenDestroy from there, which lands in
+// ReleaseHandle and would find these already destroyed. A handle still alive at
+// exit is left to the operating system, as MIOpen leaves its own.
 std::mutex& HandleMapMutex()
 {
-    static std::mutex mutex;
-    return mutex;
+    static auto* const mutex = new std::mutex;
+    return *mutex;
 }
 
 std::unordered_map<miopenHandle_t, std::unique_ptr<HandleState>>& HandleMap()
 {
-    static std::unordered_map<miopenHandle_t, std::unique_ptr<HandleState>> handles;
-    return handles;
+    static auto* const handles =
+        new std::unordered_map<miopenHandle_t, std::unique_ptr<HandleState>>;
+    return *handles;
 }
 
 class ScopedDevice
@@ -194,10 +206,11 @@ std::pair<HandleState*, miopenStatus_t> AcquireHandleState(miopenHandle_t handle
 
 using GraphPtr = std::shared_ptr<fe::graph::Graph>;
 
+// Never freed, like HandleMap.
 std::mutex& PlanMutex()
 {
-    static std::mutex mutex;
-    return mutex;
+    static auto* const mutex = new std::mutex;
+    return *mutex;
 }
 
 // Capped because a workload with changing shapes (varying batch size or input
@@ -208,8 +221,9 @@ constexpr size_t kPlanCacheCapacity = 128;
 
 LruCache<PlanKey, GraphPtr, PlanKeyHash>& PlanCache()
 {
-    static LruCache<PlanKey, GraphPtr, PlanKeyHash> plans(kPlanCacheCapacity);
-    return plans;
+    // Never freed, like HandleMap.
+    static auto* const plans = new LruCache<PlanKey, GraphPtr, PlanKeyHash>(kPlanCacheCapacity);
+    return *plans;
 }
 
 struct LastForwardedError
@@ -259,6 +273,37 @@ std::optional<miopenStatus_t> FailureOfHipdnnResult(const fe::Error& error)
     return RecordHipdnnFailure(error);
 }
 
+// Builds `graph` like Graph::build, but on the first engine in heuristic order
+// that exposes the benchmarking knob, with the knob on. Engines without the knob
+// are skipped rather than used, because they would run the problem untuned.
+fe::Error BuildBenchmarked(fe::graph::Graph& graph, hipdnnHandle_t hipdnnHandle)
+{
+    if(fe::Error error = graph.build_operation_graph(hipdnnHandle); !error.is_good())
+        return error;
+    std::vector<fe::EngineConfigInfo> configs;
+    if(fe::Error error = graph.get_engine_configs(hipdnnHandle, configs); !error.is_good())
+        return error;
+
+    fe::Error error{fe::ErrorCode::GRAPH_NOT_SUPPORTED,
+                    "no hipDNN engine can benchmark this problem"};
+    for(const fe::EngineConfigInfo& config : configs)
+    {
+        if(!config.supportsExhaustive)
+            continue;
+        error = graph.create_execution_plan_ext(config.engineId,
+                                                {fe::KnobSetting(kBenchmarkingKnob, int64_t{1})});
+        if(error.is_good())
+            error = graph.check_support();
+        if(error.is_good())
+            error = graph.build_plans();
+        if(error.is_good())
+            return error;
+    }
+    return error;
+}
+
+// Both ways of building run inside AcquireGraphWith's hipDNN call, so the benchmarked build,
+// with its engine and plan calls, is marked and checked for re-entry like Graph::build.
 std::pair<GraphPtr, miopenStatus_t>
 AcquireGraph(const PlanKey& key, const PopulateGraphFn& populate, hipdnnHandle_t hipdnnHandle)
 {
@@ -267,29 +312,124 @@ AcquireGraph(const PlanKey& key, const PopulateGraphFn& populate, hipdnnHandle_t
         PlanMutex(),
         key,
         populate,
-        [&](fe::graph::Graph& graph) { return graph.build(hipdnnHandle); },
+        [&](fe::graph::Graph& graph) {
+            return key.benchmark ? BuildBenchmarked(graph, hipdnnHandle)
+                                 : graph.build(hipdnnHandle);
+        },
         FailureOfHipdnnResult);
 }
 
-miopenStatus_t RunGraph(HandleState& state,
-                        const GraphPtr& graph,
-                        VariantPack& variantPack,
-                        void* callerWorkspace,
-                        size_t callerWorkspaceSize)
+// One graph of a sequence, with the variant pack it runs on and the function
+// that adds the scratch pointers to that pack.
+struct GraphRun
 {
+    GraphPtr graph;
+    VariantPack* variantPack;
+    const BindScratchFn* bindScratch;
+};
+
+// Runs `runs` in order. They share one workspace, big enough for any of them,
+// and one scratch after it, so each run sees the scratch at the same address.
+miopenStatus_t RunGraphs(HandleState& state,
+                         const std::vector<GraphRun>& runs,
+                         void* callerWorkspace,
+                         size_t callerWorkspaceSize,
+                         size_t scratchBytes)
+{
+    // With scratch, the scratch follows the graph's workspace in the handle's own buffer, so
+    // the caller's workspace is not offered and the query reports the whole buffer: the
+    // largest workspace, aligned, then the scratch.
+    size_t scratchOffset = 0;
     return RunGraphWith(
         state.mutex,
-        callerWorkspace,
-        callerWorkspaceSize,
-        [&](int64_t& needed) { return graph->get_workspace_size(needed); },
+        scratchBytes > 0 ? nullptr : callerWorkspace,
+        scratchBytes > 0 ? size_t{0} : callerWorkspaceSize,
+        [&](int64_t& needed) -> fe::Error {
+            needed = 0;
+            for(const GraphRun& run : runs)
+            {
+                int64_t runNeeded = 0;
+                if(fe::Error error = run.graph->get_workspace_size(runNeeded); !error.is_good())
+                    return error;
+                needed = std::max(needed, runNeeded);
+            }
+            if(scratchBytes > 0)
+            {
+                scratchOffset = AlignScratch(static_cast<size_t>(needed));
+                needed        = static_cast<int64_t>(scratchOffset + scratchBytes);
+            }
+            return {};
+        },
         [&](size_t bytes) -> void* {
             return state.EnsureWorkspace(bytes) ? state.workspace : nullptr;
         },
-        [&](void* workspace) {
-            return graph->execute(*state.hipdnnHandle, variantPack, workspace);
+        [&](void* workspace) -> fe::Error {
+            void* const scratch =
+                scratchBytes > 0 ? static_cast<char*>(workspace) + scratchOffset : nullptr;
+            for(const GraphRun& run : runs)
+            {
+                if(scratch != nullptr && run.bindScratch != nullptr && *run.bindScratch)
+                    (*run.bindScratch)(*run.variantPack, scratch);
+                // A failed run stops the sequence; RunGraphWith records the end of whatever
+                // work was queued before the failure is reported.
+                if(fe::Error error =
+                       run.graph->execute(*state.hipdnnHandle, *run.variantPack, workspace);
+                   !error.is_good())
+                    return error;
+            }
+            return {};
         },
         [&] { return hipEventRecord(state.lastWork, state.stream) == hipSuccess; },
         FailureOfHipdnnResult);
+}
+
+// One graph to look up or build, then run.
+struct GraphRequest
+{
+    const PlanKey* key;
+    const PopulateGraphFn* populate;
+    VariantPack* variantPack;
+    const BindScratchFn* bindScratch;
+};
+
+miopenStatus_t RunCachedRequests(miopenHandle_t handle,
+                                 const std::vector<GraphRequest>& requests,
+                                 void* workspace,
+                                 size_t workspaceSize,
+                                 size_t scratchBytes)
+{
+    hipStream_t stream = nullptr;
+    if(miopenGetStream_impl(handle, &stream) != miopenStatusSuccess)
+        return RecordFailure(miopenStatusInternalError,
+                             "could not read the MIOpen handle's stream");
+
+    // MIOpen makes the handle's device current before each launch. Doing the same
+    // here puts the workspace, event and hipDNN handle on that device. A null
+    // stream reports the current device, so a handle on the null stream runs on
+    // whichever device the caller has current.
+    hipDevice_t device = 0;
+    ScopedDevice scopedDevice;
+    if(hipStreamGetDevice(stream, &device) != hipSuccess || !scopedDevice.Set(device))
+        return RecordFailure(miopenStatusInternalError,
+                             "could not make the MIOpen handle's device current");
+
+    auto [state, acquired] = AcquireHandleState(handle, stream);
+    if(state == nullptr)
+        return acquired;
+
+    // Every graph is built before any runs, so a sequence that cannot be built
+    // does no work.
+    std::vector<GraphRun> runs;
+    runs.reserve(requests.size());
+    for(const GraphRequest& request : requests)
+    {
+        auto [graph, status] = AcquireGraph(*request.key, *request.populate, *state->hipdnnHandle);
+        if(graph == nullptr)
+            return status;
+        runs.push_back({graph, request.variantPack, request.bindScratch});
+    }
+
+    return RunGraphs(*state, runs, workspace, workspaceSize, scratchBytes);
 }
 
 } // namespace
@@ -437,32 +577,24 @@ miopenStatus_t RunCachedGraph(miopenHandle_t handle,
                               const PopulateGraphFn& populate,
                               VariantPack& variantPack,
                               void* workspace,
-                              size_t workspaceSize)
+                              size_t workspaceSize,
+                              const GraphScratch& scratch)
 {
-    hipStream_t stream = nullptr;
-    if(miopenGetStream_impl(handle, &stream) != miopenStatusSuccess)
-        return RecordFailure(miopenStatusInternalError,
-                             "could not read the MIOpen handle's stream");
+    return RunCachedRequests(handle,
+                             {{&key, &populate, &variantPack, &scratch.bind}},
+                             workspace,
+                             workspaceSize,
+                             scratch.bytes);
+}
 
-    // MIOpen makes the handle's device current before each launch. Doing the same
-    // here puts the workspace, event and hipDNN handle on that device. A null
-    // stream reports the current device, so a handle on the null stream runs on
-    // whichever device the caller has current.
-    hipDevice_t device = 0;
-    ScopedDevice scopedDevice;
-    if(hipStreamGetDevice(stream, &device) != hipSuccess || !scopedDevice.Set(device))
-        return RecordFailure(miopenStatusInternalError,
-                             "could not make the MIOpen handle's device current");
-
-    auto [state, acquired] = AcquireHandleState(handle, stream);
-    if(state == nullptr)
-        return acquired;
-
-    auto [graph, status] = AcquireGraph(key, populate, *state->hipdnnHandle);
-    if(graph == nullptr)
-        return status;
-
-    return RunGraph(*state, graph, variantPack, workspace, workspaceSize);
+miopenStatus_t
+RunCachedGraphs(miopenHandle_t handle, std::vector<GraphStep>& steps, size_t scratchBytes)
+{
+    std::vector<GraphRequest> requests;
+    requests.reserve(steps.size());
+    for(GraphStep& step : steps)
+        requests.push_back({&step.key, &step.populate, &step.variantPack, &step.bindScratch});
+    return RunCachedRequests(handle, requests, nullptr, 0, scratchBytes);
 }
 
 bool IsAvailable()
@@ -488,11 +620,19 @@ bool IsAvailable()
 
 void ReleaseHandle(miopenHandle_t handle) noexcept
 {
+    // The graphs and the handle state are destroyed only after their lock is
+    // released. Destroying them runs hipDNN and its plugins, and a plugin built
+    // against MIOpen may call miopenDestroy on its own handle, which lands back
+    // here and would wait forever on a lock this thread still held.
     try
     {
         {
-            const std::lock_guard<std::mutex> lock(PlanMutex());
-            PlanCache().EraseIf([handle](const PlanKey& key) { return key.handle == handle; });
+            std::vector<GraphPtr> graphs;
+            {
+                const std::lock_guard<std::mutex> lock(PlanMutex());
+                graphs = PlanCache().EraseIf(
+                    [handle](const PlanKey& key) { return key.handle == handle; });
+            }
         }
 
         EraseDestroyingOutsideLock(HandleMap(), HandleMapMutex(), handle);

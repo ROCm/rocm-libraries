@@ -18,6 +18,7 @@
 #ifdef MIOPEN_ENABLE_HIPDNN_WRAPPER
 
 #include "../../src/private/hipdnn_graph.hpp"
+#include "../../src/private/lru_cache.hpp"
 #include "../../src/private/routing.hpp"
 
 #include <miopen/logger.hpp>
@@ -248,18 +249,37 @@ TEST_P(CPU_WrapperRoutingForwardingSet_NONE, EmptySetMatchesNothing)
 // so the addition is deliberate rather than silent. It cannot check that the new entry
 // point has a HipdnnShim test; the checklist above kForwardingEntries in
 // src/private/routing.cpp requires one, so review must check.
-TEST_P(CPU_WrapperRoutingForwardingSet_NONE, DefaultSetIsTheConvolutionFamily)
+TEST_P(CPU_WrapperRoutingForwardingSet_NONE, DefaultSetIsConvolutionAndBatchnorm)
 {
-    EXPECT_EQ(DefaultForwardingSet().size(), 4u);
+    EXPECT_EQ(DefaultForwardingSet().size(), 17u);
     EXPECT_TRUE(IsInForwardingSet("miopenConvolutionForward"));
     EXPECT_TRUE(IsInForwardingSet("miopenConvolutionBackwardData"));
     EXPECT_TRUE(IsInForwardingSet("miopenConvolutionBackwardWeights"));
     EXPECT_TRUE(IsInForwardingSet("miopenConvolutionBiasActivationForward"));
 
+    EXPECT_TRUE(IsInForwardingSet("miopenBatchNormalizationForwardTraining"));
+    EXPECT_TRUE(IsInForwardingSet("miopenBatchNormalizationForwardTraining_V2"));
+    EXPECT_TRUE(IsInForwardingSet("miopenBatchNormalizationForwardTraining_V3"));
+    EXPECT_TRUE(IsInForwardingSet("miopenBatchNormForwardTrainingActivation"));
+    EXPECT_TRUE(IsInForwardingSet("miopenBatchNormForwardTrainingActivation_V2"));
+    EXPECT_TRUE(IsInForwardingSet("miopenBatchNormalizationForwardInference"));
+    EXPECT_TRUE(IsInForwardingSet("miopenBatchNormalizationForwardInference_V2"));
+    EXPECT_TRUE(IsInForwardingSet("miopenBatchNormalizationForwardInferenceInvVariance"));
+    EXPECT_TRUE(IsInForwardingSet("miopenBatchNormForwardInferenceActivationInvVariance"));
+    EXPECT_TRUE(IsInForwardingSet("miopenBatchNormForwardInferenceActivation"));
+    EXPECT_TRUE(IsInForwardingSet("miopenBatchNormalizationBackward"));
+    EXPECT_TRUE(IsInForwardingSet("miopenBatchNormalizationBackward_V2"));
+    EXPECT_TRUE(IsInForwardingSet("miopenBatchNormBackwardActivation"));
+
     // The bias-only entry points are standalone bias kernels rather than
     // convolutions, so they stay on the MIOpen path.
     EXPECT_FALSE(IsInForwardingSet("miopenConvolutionForwardBias"));
     EXPECT_FALSE(IsInForwardingSet("miopenConvolutionBackwardBias"));
+
+    // Deriving a batchnorm descriptor runs nothing, and fusion-plan batchnorm
+    // state lives inside the fusion plan, which is not forwarded.
+    EXPECT_FALSE(IsInForwardingSet("miopenDeriveBNTensorDescriptor"));
+    EXPECT_FALSE(IsInForwardingSet("miopenCreateOpBatchNormForward"));
 
     EXPECT_FALSE(IsInForwardingSet("miopenSetTensorDescriptor"));
     EXPECT_FALSE(IsInForwardingSet("miopenCreate"));
@@ -317,10 +337,14 @@ INSTANTIATE_TEST_SUITE_P(
 using CPU_WrapperRoutingResolveDefault_NONE = ::testing::TestWithParam<int>;
 
 // Kept separate from the injected-set cases so the difference between "the logic
-// works" and "this build forwards these four names" stays explicit.
-TEST_P(CPU_WrapperRoutingResolveDefault_NONE, DefaultSetRoutesTheConvolutionFamily)
+// works" and "this build forwards these names" stays explicit.
+TEST_P(CPU_WrapperRoutingResolveDefault_NONE, DefaultSetRoutesConvolutionAndBatchnorm)
 {
     EXPECT_EQ(ResolveRoute(ForwardingMode::Enabled, "miopenConvolutionForward"), Route::Hipdnn);
+    EXPECT_EQ(ResolveRoute(ForwardingMode::Enabled, "miopenBatchNormalizationForwardTraining"),
+              Route::Hipdnn);
+    EXPECT_EQ(ResolveRoute(ForwardingMode::Enabled, "miopenDeriveBNTensorDescriptor"),
+              Route::Miopen);
     EXPECT_EQ(ResolveRoute(ForwardingMode::Enabled, "miopenSetTensorDescriptor"), Route::Miopen);
     EXPECT_EQ(ResolveRoute(ForwardingMode::Disabled, "miopenConvolutionForward"), Route::Miopen);
 }
@@ -1214,9 +1238,11 @@ public:
                 return &entry.second;
         return nullptr;
     }
-    void Insert(const hipdnn::PlanKey& key, std::shared_ptr<FakeGraph> graph)
+    std::optional<std::shared_ptr<FakeGraph>> Insert(const hipdnn::PlanKey& key,
+                                                     std::shared_ptr<FakeGraph> graph)
     {
         entries_.emplace_back(key, std::move(graph));
+        return std::nullopt;
     }
     size_t Size() const { return entries_.size(); }
 
@@ -1511,6 +1537,119 @@ TEST_P(CPU_WrapperRoutingReentry_NONE, AnEndThatCannotBeMarkedFailsTheCall)
     const auto status = run.Go([] { return 0; }, nullptr, 0, 0, false);
 
     EXPECT_EQ(status, miopenStatusInternalError);
+    hipdnn::ClearForwardedFailure();
+}
+
+namespace graph_eviction {
+
+// Reports, when destroyed, whether `mutex` was held. try_lock runs on another thread: calling it
+// on a mutex this thread already owns is undefined, and a blocking lock would hang the test.
+struct TrackedGraph
+{
+    std::mutex* mutex           = nullptr;
+    bool* destroyed             = nullptr;
+    bool* lockHeldAtDestruction = nullptr;
+
+    ~TrackedGraph()
+    {
+        if(mutex == nullptr)
+            return;
+        bool acquired = false;
+        std::thread([&] {
+            acquired = mutex->try_lock();
+            if(acquired)
+                mutex->unlock();
+        }).join();
+        *lockHeldAtDestruction = !acquired;
+        *destroyed             = true;
+    }
+};
+
+struct KeyHash
+{
+    size_t operator()(const hipdnn::PlanKey& key) const
+    {
+        size_t seed = std::hash<const void*>{}(key.handle);
+        for(const int64_t value : key.problem)
+            seed ^= static_cast<size_t>(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+        return seed;
+    }
+};
+
+} // namespace graph_eviction
+
+// A full cache drops its oldest graph when the next one is cached. Destroying a graph runs
+// plugin code, which must not happen while the wrapper holds its plan lock, as for
+// ReleaseHandle: a plugin that called back into the wrapper from there would wait on a lock
+// its own thread holds.
+TEST_P(CPU_WrapperRoutingReentry_NONE, AGraphEvictedByTheNextBuildIsDestroyedAfterTheLockIsReleased)
+{
+    using Graph = graph_eviction::TrackedGraph;
+    miopen::wrapper::LruCache<hipdnn::PlanKey, std::shared_ptr<Graph>, graph_eviction::KeyHash>
+        cache(1);
+    std::mutex mutex;
+    bool destroyed   = false;
+    bool lockHeld    = false;
+    const auto build = [](Graph&) { return 0; };
+
+    hipdnn::PlanKey first;
+    first.problem = {1};
+    hipdnn::PlanKey second;
+    second.problem = {2};
+
+    // The result is dropped at once, so the cache holds the only reference to the graph.
+    hipdnn::AcquireGraphWith<Graph>(
+        cache,
+        mutex,
+        first,
+        [&](Graph& graph) {
+            graph.mutex                 = &mutex;
+            graph.destroyed             = &destroyed;
+            graph.lockHeldAtDestruction = &lockHeld;
+            return true;
+        },
+        build,
+        graph_steps::FailureOf);
+    ASSERT_FALSE(destroyed);
+
+    hipdnn::AcquireGraphWith<Graph>(
+        cache, mutex, second, [](Graph&) { return true; }, build, graph_steps::FailureOf);
+
+    ASSERT_TRUE(destroyed) << "the first graph was not evicted";
+    EXPECT_FALSE(lockHeld) << "the evicted graph was destroyed while the plan lock was held";
+}
+
+// The graph is created before the build, so when the build fails it is dropped on the way out,
+// and then it is the only reference. It must go after the lock is released too.
+TEST_P(CPU_WrapperRoutingReentry_NONE, AGraphFromAFailedBuildIsDestroyedAfterTheLockIsReleased)
+{
+    const graph_steps::SilencedStderr silenced;
+    using Graph = graph_eviction::TrackedGraph;
+    miopen::wrapper::LruCache<hipdnn::PlanKey, std::shared_ptr<Graph>, graph_eviction::KeyHash>
+        cache(1);
+    std::mutex mutex;
+    bool destroyed = false;
+    bool lockHeld  = false;
+    hipdnn::PlanKey key;
+    key.problem = {1};
+
+    const auto result = hipdnn::AcquireGraphWith<Graph>(
+        cache,
+        mutex,
+        key,
+        [&](Graph& graph) {
+            graph.mutex                 = &mutex;
+            graph.destroyed             = &destroyed;
+            graph.lockHeldAtDestruction = &lockHeld;
+            return true;
+        },
+        [](Graph&) { return 1; },
+        graph_steps::FailureOf);
+
+    ASSERT_EQ(result.second, miopenStatusBadParm);
+    ASSERT_EQ(result.first, nullptr);
+    ASSERT_TRUE(destroyed) << "the graph of the failed build was not destroyed";
+    EXPECT_FALSE(lockHeld) << "the graph was destroyed while the plan lock was held";
     hipdnn::ClearForwardedFailure();
 }
 

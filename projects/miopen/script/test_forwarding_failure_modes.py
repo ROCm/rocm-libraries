@@ -10,12 +10,22 @@ and HIPDNN_* variable removed and only the case's own set.
 
 hipDNN is made unusable with a fake backend that has the real backend's file name and no
 version, so hipDNN loads it and then refuses it. Every case points hipDNN at it, so none
-can reach a real backend. A missing backend cannot be simulated: when the override
+can reach a real backend; a hipDNN frontend that predates HIPDNN_BACKEND_LIBRARY_PATH
+ignores it and loads the real one, so the cases fail if the fake never loads. A missing backend cannot be simulated: when the override
 directory has none, hipDNN falls back to the real one next to the MIOpen library, then to
 the loader's search path. MIOpen handles the fake the same way as a missing backend.
 
 ctest sets MIOPEN_FAILURE_PROBE (the probe) and MIOPEN_FAKE_HIPDNN_BACKEND (the fake's
 directory). Without them every case is skipped.
+
+Three cases use a second backend instead, from MIOPEN_REENTRANT_HIPDNN_BACKEND: hipDNN
+accepts it, and its hipdnnDestroy calls miopenDestroy. One checks that miopenDestroy does
+not hang when destroying its hipDNN handle re-enters it. One makes the backend fail to
+set a stream, and checks that the forwarded call that destroys the hipDNN handle it just
+created does not hang either. One exits with a forwarded handle still alive, and checks
+that MIOpen destroys nothing at exit, where the re-entry would find MIOpen's handle map
+torn down. All need a GPU, because the backend creates an MIOpen handle, and are skipped
+without one.
 
 Uses unittest rather than pytest, like the other wrapper script tests, because nothing
 installs pytest on a machine that builds MIOpen.
@@ -30,6 +40,7 @@ from pathlib import Path
 
 PROBE_ENV = "MIOPEN_FAILURE_PROBE"
 FAKE_BACKEND_ENV = "MIOPEN_FAKE_HIPDNN_BACKEND"
+REENTRANT_BACKEND_ENV = "MIOPEN_REENTRANT_HIPDNN_BACKEND"
 
 # miopenStatus_t values the probe prints.
 SUCCESS = 0
@@ -37,6 +48,7 @@ BAD_PARM = 3
 INTERNAL_ERROR = 5
 
 LOADED_MARKER = "FAKE_HIPDNN_BACKEND_LOADED"
+DESTROYED_MARKER = "REENTRANT_HIPDNN_BACKEND_DESTROYED_MIOPEN_HANDLE="
 UNAVAILABLE = "[MIOpen] hipDNN forwarding is unavailable"
 FORWARDED_FAILURE = "[MIOpen] [hipDNN-forwarded] "
 FORWARDED_CALL = "[MIOpen] hipDNN forwarded: miopenConvolutionForward"
@@ -79,14 +91,37 @@ class ForwardingFailureModesTest(unittest.TestCase):
         # list passes paths relative to its own directory.
         cls.probe = Path(probe).resolve()
         cls.fake_backend = Path(fake_backend).resolve()
+        reentrant_backend = os.environ.get(REENTRANT_BACKEND_ENV)
+        cls.reentrant_backend = (
+            Path(reentrant_backend).resolve() if reentrant_backend else None
+        )
 
-    def run_probe(self, steps, env=None):
+    # Set once a run shows hipDNN loading the fake, so the check runs once per process.
+    fake_backend_loads = False
+
+    def require_fake_backend(self):
+        if ForwardingFailureModesTest.fake_backend_loads:
+            return
+        run = self.run_probe(["conv_forward"], FORWARDING_ON, backend=self.fake_backend)
+        if not run.loaded_fake_backend():
+            # Otherwise the cases reach the real backend and fail one by one, each
+            # for a reason that hides this one.
+            self.fail(
+                f"hipDNN never loaded the fake backend in {self.fake_backend}: MIOpen was "
+                "built against a hipDNN frontend that ignores HIPDNN_BACKEND_LIBRARY_PATH"
+                f"\nstderr:\n{run.stderr}"
+            )
+        ForwardingFailureModesTest.fake_backend_loads = True
+
+    def run_probe(self, steps, env=None, backend=None, timeout=120):
+        if backend is None:
+            self.require_fake_backend()
         clean = {
             name: value
             for name, value in os.environ.items()
             if not name.startswith(("MIOPEN_", "HIPDNN_"))
         }
-        clean["HIPDNN_BACKEND_LIBRARY_PATH"] = str(self.fake_backend)
+        clean["HIPDNN_BACKEND_LIBRARY_PATH"] = str(backend or self.fake_backend)
         if os.name == "nt":
             # Windows finds a program's DLLs beside it or on PATH, and the installed
             # probe is one folder below MIOpen.dll.
@@ -98,14 +133,19 @@ class ForwardingFailureModesTest(unittest.TestCase):
                 ]
             )
         clean.update(env or {})
-        completed = subprocess.run(
-            [str(self.probe), *steps],
-            env=clean,
-            capture_output=True,
-            text=True,
-            timeout=120,
-            check=False,
-        )
+        try:
+            completed = subprocess.run(
+                [str(self.probe), *steps],
+                env=clean,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as hung:
+            self.fail(
+                f"probe hung for {timeout} s\nstdout:\n{hung.stdout}\nstderr:\n{hung.stderr}"
+            )
         self.assertEqual(
             completed.returncode,
             0,
@@ -118,6 +158,14 @@ class ForwardingFailureModesTest(unittest.TestCase):
         self.assertTrue(run.loaded_fake_backend(), run.stderr)
         self.assertEqual(run.statuses("conv_forward"), [INTERNAL_ERROR] * 3)
         # hipDNN's availability is checked once per process, so the reason prints once.
+        self.assertEqual(len(run.lines_starting(UNAVAILABLE)), 1, run.stderr)
+        self.assertEqual(len(run.lines_starting(FORWARDED_FAILURE)), 3, run.stderr)
+
+    def test_refused_backend_fails_every_forwarded_batchnorm_call(self):
+        run = self.run_probe(["batchnorm"], FORWARDING_ON)
+        self.assertTrue(run.loaded_fake_backend(), run.stderr)
+        for step in ("bn_train", "bn_infer", "bn_backward"):
+            self.assertEqual(run.statuses(step), [INTERNAL_ERROR], run.stderr)
         self.assertEqual(len(run.lines_starting(UNAVAILABLE)), 1, run.stderr)
         self.assertEqual(len(run.lines_starting(FORWARDED_FAILURE)), 3, run.stderr)
 
@@ -252,6 +300,84 @@ class ForwardingFailureModesTest(unittest.TestCase):
     def test_forwarded_calls_are_not_listed_without_api_logging(self):
         run = self.run_probe(["conv_forward"], FORWARDING_ON)
         self.assertEqual(run.lines_starting(FORWARDED_CALL), [], run.stderr)
+
+    def test_destroy_returns_when_the_backend_calls_back_into_miopen(self):
+        if self.reentrant_backend is None:
+            self.skipTest(f"set {REENTRANT_BACKEND_ENV}")
+        run = self.run_probe(
+            ["destroy_after_forward"],
+            FORWARDING_ON,
+            backend=self.reentrant_backend,
+            timeout=60,
+        )
+        if run.statuses("create") != [SUCCESS]:
+            self.skipTest(f"miopenCreate failed, so no GPU\n{run.stderr}")
+        self.assertEqual(run.statuses("destroy"), [SUCCESS], run.stderr)
+        # Two hipDNN handles are destroyed: the one hipDNN's availability check makes,
+        # and the one the forwarded call gave the probe's handle. Fewer means the
+        # forwarded call never got that far, and miopenDestroy had nothing to re-enter.
+        self.assertEqual(
+            run.lines_starting(DESTROYED_MARKER),
+            [f"{DESTROYED_MARKER}{SUCCESS}"] * 2,
+            run.stderr,
+        )
+
+    def test_exit_destroys_no_hipdnn_handle_a_live_miopen_handle_holds(self):
+        if self.reentrant_backend is None:
+            self.skipTest(f"set {REENTRANT_BACKEND_ENV}")
+        # run_probe fails a run that crashes at exit, as it fails any nonzero exit.
+        run = self.run_probe(
+            ["exit_after_forward"],
+            FORWARDING_ON,
+            backend=self.reentrant_backend,
+            timeout=60,
+        )
+        if run.statuses("create") != [SUCCESS]:
+            self.skipTest(f"miopenCreate failed, so no GPU\n{run.stderr}")
+        self.assertEqual(len(run.statuses("forward_with_handle")), 1, run.stderr)
+        # Only the availability check's hipDNN handle is destroyed. The one the
+        # forwarded call gave the probe's handle is left to the operating system: a
+        # second marker means exit destroyed it, re-entering miopenDestroy while
+        # MIOpen's handle map was being torn down. The destroy case above shows the
+        # same call does give the handle one, so one marker is not a vacuous pass.
+        self.assertEqual(
+            run.lines_starting(DESTROYED_MARKER),
+            [f"{DESTROYED_MARKER}{SUCCESS}"],
+            run.stderr,
+        )
+
+    def test_a_failed_stream_set_returns_when_the_backend_calls_back_into_miopen(self):
+        if self.reentrant_backend is None:
+            self.skipTest(f"set {REENTRANT_BACKEND_ENV}")
+        run = self.run_probe(
+            ["destroy_after_forward_on_stream"],
+            {**FORWARDING_ON, "REENTRANT_HIPDNN_BACKEND_FAIL_SET_STREAM": "1"},
+            backend=self.reentrant_backend,
+            timeout=60,
+        )
+        if run.statuses("create") != [SUCCESS]:
+            self.skipTest(
+                f"no stream or miopenCreateWithStream failed, so no GPU\n{run.stderr}"
+            )
+        self.assertEqual(
+            run.statuses("forward_with_handle"), [INTERNAL_ERROR], run.stderr
+        )
+        self.assertTrue(
+            any(
+                line.endswith("could not create a hipDNN handle")
+                for line in run.lines_starting(FORWARDED_FAILURE)
+            ),
+            run.stderr,
+        )
+        self.assertEqual(run.statuses("destroy"), [SUCCESS], run.stderr)
+        # Two hipDNN handles are destroyed: the availability check's, and the one the
+        # forwarded call created and could not set the stream on. The probe's handle
+        # never kept one, so miopenDestroy destroys none.
+        self.assertEqual(
+            run.lines_starting(DESTROYED_MARKER),
+            [f"{DESTROYED_MARKER}{SUCCESS}"] * 2,
+            run.stderr,
+        )
 
 
 if __name__ == "__main__":
