@@ -160,7 +160,11 @@ extern "C" {
  *     own entries in rocke/instance_fused_moe_e2e.h
  *     (rocke_build_fused_moe_forward, rocke_fused_moe_forward_free and
  *     rocke_fused_moe_forward_lower_to_llvm) stay. rocke_topk_softmax_spec_t lost
- *     cross_wave_argmax, which no lowering read, so its size changes. */
+ *     cross_wave_argmax, which no lowering read, so its size changes.
+ *     rocke_build_f64_mma_probe takes the target as a fourth argument
+ *     (const char* arch, required), which changes its signature. The per-part
+ *     XCD-count macros of rocke/helper_rocke.helpers.grid.h are replaced by
+ *     ROCKE_NUM_XCDS_GFX942 and ROCKE_NUM_XCDS_GFX950. */
 #define ROCKE_ABI_VERSION 23
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
