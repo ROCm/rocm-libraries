@@ -6,8 +6,13 @@
 The script is intended to run from an installed staging prefix, where it lives in
 ``bin/`` and the Python package/extension live under ``lib/pythonX.Y/site-packages``.
 It adds those installed paths to ``sys.path`` before importing anything, so RockCI
-can execute it directly from a staged test package. By default it checks only the
-pure Python lowering path; the optional pybind backend is opt-in.
+can execute it directly from a staged test package.
+
+It lowers one kernel with the Python engine (``ROCKE_BACKEND=python`` for this
+process, so the C++ engine cannot serve the lowering), then, where the shared C++
+engine (librocke) is installed beside the package, lowers the same serialized
+kernel with it and requires the same bytes. Both lower at one fixed LLVM flavor,
+so the smoke asks no compiler. The optional pybind backend is opt-in.
 """
 
 from __future__ import annotations
@@ -16,6 +21,10 @@ import argparse
 import os
 import sys
 from pathlib import Path
+
+#: The target and LLVM flavor every lowering of the smoke uses.
+SMOKE_ARCH = "gfx950"
+SMOKE_FLAVOR = "llvm20"
 
 
 def _add_installed_python_paths() -> None:
@@ -77,29 +86,49 @@ def _build_smoke_kernel():
 
 
 def _smoke_python_engine() -> tuple[str, str]:
+    """Serialize the smoke kernel and lower it with the Python engine; return
+    the serialized IR and the LLVM IR."""
+    from rocke.core.backend import BACKEND_ENV, BACKEND_PYTHON
     from rocke.core.ir_serialize import serialize
     from rocke.core.lower_llvm import lower_kernel_to_llvm
 
+    os.environ[BACKEND_ENV] = BACKEND_PYTHON
     kernel = _build_smoke_kernel()
     ir_text = serialize(kernel)
-    ll_text = lower_kernel_to_llvm(kernel, arch="gfx950")
+    ll_text = lower_kernel_to_llvm(kernel, arch=SMOKE_ARCH, llvm_flavor=SMOKE_FLAVOR)
     if "rocke_install_smoke" not in ll_text:
         raise RuntimeError("Python engine smoke did not lower the expected kernel")
     return ir_text, ll_text
+
+
+def _require_same_ir(engine: str, engine_ll_text: str, py_ll_text: str) -> None:
+    if engine_ll_text != py_ll_text:
+        raise RuntimeError(
+            f"the installed {engine} lowered the smoke kernel to different LLVM IR "
+            "than the Python engine"
+        )
+
+
+def _smoke_shared_engine(ir_text: str, py_ll_text: str) -> Path | None:
+    """Lower ``ir_text`` with the shared C++ engine installed beside the package
+    and require ``py_ll_text``; return the engine's path, or None when none is
+    installed."""
+    from rocke.core import native_engine
+
+    if not native_engine.native_lowering_available():
+        return None
+    cpp_ll_text = native_engine.lower_serialized_ir(ir_text, SMOKE_ARCH, SMOKE_FLAVOR)
+    _require_same_ir("shared C++ engine", cpp_ll_text, py_ll_text)
+    return native_engine.loaded_shared_engine_path()
 
 
 def _smoke_pybind_engine(ir_text: str, py_ll_text: str) -> str:
     import rocke_engine  # type: ignore
 
     cpp_ll_text = rocke_engine.lower_serialized_ir(
-        ir_text,
-        arch="gfx950",
-        flavor=os.environ.get("ROCKE_LLVM_FLAVOR", ""),
+        ir_text, arch=SMOKE_ARCH, flavor=SMOKE_FLAVOR
     )
-    if cpp_ll_text != py_ll_text:
-        raise RuntimeError(
-            "Installed rocke_engine output differs from Python engine output"
-        )
+    _require_same_ir("rocke_engine module", cpp_ll_text, py_ll_text)
     build_id = rocke_engine.build_id()
     if not build_id:
         raise RuntimeError("Installed rocke_engine did not report a build id")
@@ -118,6 +147,12 @@ def main() -> int:
     _add_installed_python_paths()
     ir_text, py_ll_text = _smoke_python_engine()
     print("rocKE installed Python engine smoke: PASS")
+
+    shared_engine = _smoke_shared_engine(ir_text, py_ll_text)
+    if shared_engine is None:
+        print("rocKE installed shared C++ engine smoke: not run (none installed)")
+    else:
+        print(f"rocKE installed shared C++ engine smoke: PASS ({shared_engine})")
 
     if args.check_pybind:
         build_id = _smoke_pybind_engine(ir_text, py_ll_text)
