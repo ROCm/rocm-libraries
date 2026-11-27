@@ -16,9 +16,9 @@ Not every MIOpenDriver line is runnable by the current kernel families -- see
 ``run_norm_shards.py``'s module docstring (and the plan this was built from)
 for the exact scope:
 
-* ``bnormfp16``/``bnormbfp16`` + ``--layout NCHW`` + ``--forw 1`` (training)
-  or ``--forw 2`` (inference). Bare ``bnorm`` (fp32), ``--layout NHWC``/
-  ``NCDHW``, and ``--forw 0`` (backward) are out of scope.
+* ``bnormfp16``/``bnormbfp16`` + ``--layout NCHW`` (or ``NCDHW`` with ``-D``, depth folded into the height) + ``--forw 1`` (training)
+  or ``--forw 2`` (inference). Bare ``bnorm`` (fp32), ``--layout NHWC``,
+  and ``--forw 0`` (backward) are out of scope.
 * ``layernormbfp16`` + ``-L NW`` + ``-F 1`` (forward). ``-F 0`` (backward) is
   out of scope.
 
@@ -55,6 +55,7 @@ class ParsedCase:
     dims: Tuple[Tuple[str, int], ...]  # sorted dims.items(), e.g. (("c", 64), ("h", 28), ...)
     dtype: str  # "fp16" | "bf16"
     mode: str  # "training" | "inference" (bnorm) | "forward" (lnorm)
+    layout: str = "NCHW"  # "NHWC" only from parse_bnorm_line(..., nhwc=True)
 
     @property
     def dims_dict(self) -> Dict[str, int]:
@@ -65,25 +66,32 @@ class ParsedCase:
         return (self.family, self.dims, self.dtype, self.mode)
 
 
-_BNORM_DTYPES = {"bnormfp16": "fp16", "bnormbfp16": "bf16"}
+_BNORM_DTYPES = {"bnormfp16": "fp16", "bnormbfp16": "bf16", "bnorm": "fp32"}
 _LNORM_DTYPES = {"layernormfp16": "fp16", "layernormbfp16": "bf16"}
 
 
-def parse_bnorm_line(line: str):
-    """One ``MIOpenDriver bnorm*`` line to a :class:`ParsedCase`, or a skip reason."""
+def parse_bnorm_line(line: str, backward: bool = False, nhwc: bool = False):
+    """One ``MIOpenDriver bnorm*`` line to a :class:`ParsedCase`, or a skip reason.
+
+    ``backward=True`` additionally accepts ``--forw 0 -b 1`` rows (mode ``"backward"``);
+    ``nhwc=True`` accepts ``--layout NHWC`` rows (``ParsedCase.layout == "NHWC"``)."""
     m = re.match(r"\s*(?:MIOpenDriver\s+)?(\S+)", line)
     if not m:
         return None, "unparseable"
     token = m.group(1)
     dtype = _BNORM_DTYPES.get(token)
     if dtype is None:
-        return None, "unsupported-dtype(fp32)" if token == "bnorm" else f"unknown-token({token})"
+        return None, f"unknown-token({token})"
 
     layout = _str_flag(line, "layout") or "NCHW"
-    if layout != "NCHW":
+    depth = _int_flag(line, "D")
+    if layout == "NCDHW":
+        if depth is None:
+            return None, "missing-dims"
+    elif layout == "NHWC" and nhwc and depth is None:
+        pass
+    elif layout != "NCHW" or depth is not None:
         return None, f"unsupported-layout({layout})"
-    if re.search(r"-D\s+\d+", line):
-        return None, "unsupported-layout(3D)"
 
     forw = _int_flag(line, "forw")
     if forw == 2:
@@ -91,15 +99,20 @@ def parse_bnorm_line(line: str):
     elif forw == 1:
         mode = "training"
     elif forw == 0:
-        return None, "backward-only(forw=0)"
+        if not (backward and _int_flag(line, "b") == 1):
+            return None, "backward-only(forw=0)"
+        mode = "backward"
     else:
         return None, f"unknown-forw({forw})"
 
     n, c, h, w = (_int_flag(line, name) for name in ("n", "c", "H", "W"))
     if None in (n, c, h, w):
         return None, "missing-dims"
+    if layout == "NCDHW":
+        # NCDHW is contiguous N,C,(D,H,W): the same memory as NCHW with the depth folded into the height.
+        h *= depth
     dims = tuple(sorted({"n": n, "c": c, "h": h, "w": w}.items()))
-    return ParsedCase(family="bnorm", dims=dims, dtype=dtype, mode=mode), None
+    return ParsedCase(family="bnorm", dims=dims, dtype=dtype, mode=mode, layout="NHWC" if layout == "NHWC" else "NCHW"), None
 
 
 def parse_lnorm_line(line: str):

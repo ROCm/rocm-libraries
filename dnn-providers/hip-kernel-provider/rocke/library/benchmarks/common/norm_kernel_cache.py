@@ -47,6 +47,7 @@ tuple) rather than on a specific problem.
 from __future__ import annotations
 
 import hashlib
+import os
 import pickle
 from pathlib import Path
 from typing import Any, Mapping
@@ -62,12 +63,16 @@ def cache_key(
     arch: str,
     candidate_name: str,
     dynamic: bool = False,
+    kernel_name: str = "",
 ) -> str:
     if dynamic:
         # Shape-free: this candidate's compiled kernel admits any runtime
         # dims, so including them would scatter one tuning config's
         # artifact across as many cache entries as shapes tried against it.
-        raw = f"{family}|dynamic|{dtype}|{arch}|{candidate_name}"
+        # The candidate name alone is not unique: one candidate serves both
+        # training and inference, so the spec's kernel name (which carries
+        # those flags) is part of the key.
+        raw = f"{family}|dynamic|{dtype}|{arch}|{candidate_name}|{kernel_name}"
     else:
         dims_part = ",".join(f"{k}={v}" for k, v in sorted(dims.items()))
         raw = f"{family}|{dims_part}|{dtype}|{arch}|{candidate_name}"
@@ -100,6 +105,7 @@ def compile_candidate_cached(
             arch=arch,
             candidate_name=candidate.name,
             dynamic=dynamic,
+            kernel_name=spec.kernel_name() if hasattr(spec, "kernel_name") else "",
         )
         + ".pkl"
     )
@@ -107,10 +113,89 @@ def compile_candidate_cached(
         with path.open("rb") as fh:
             return pickle.load(fh)
 
+    if os.environ.get("ROCKE_NORM_CACHE_ONLY") == "1":
+        raise RuntimeError(f"AOT cache miss (ROCKE_NORM_CACHE_ONLY=1): {candidate.name} -> {path}")
     artifact = compile_candidate(spec, candidate, arch=arch)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".pkl.tmp")
+    tmp = path.with_suffix(f".pkl.{os.getpid()}.tmp")
     with tmp.open("wb") as fh:
         pickle.dump(artifact, fh, protocol=pickle.HIGHEST_PROTOCOL)
     tmp.replace(path)  # atomic: a reader never observes a partial file
+    return artifact
+
+
+def compile_split_cached(cand: Any, kind: str, *, dtype: str, arch: str, cache_dir: str):
+    """Load / build one kernel (``kind`` = ``"reduce"`` or ``"apply"``) of a
+    dynamic split candidate. The key is the kernel name alone (shape- and
+    split-plan-free): the split geometry is a runtime kernarg."""
+    from rocke.helpers.compile import compile_kernel
+
+    spec = cand.spec(dtype, arch)
+    kname = spec.kernel_name(kind)
+    raw = f"batchnorm2d_split|dynamic|{dtype}|{arch}|{cand.name}|{kname}"
+    path = Path(cache_dir) / (
+        "batchnorm2d_split_" + hashlib.sha1(raw.encode("utf-8")).hexdigest()[:24] + ".pkl"
+    )
+    if path.is_file():
+        with path.open("rb") as fh:
+            return pickle.load(fh)
+    if os.environ.get("ROCKE_NORM_CACHE_ONLY") == "1":
+        raise RuntimeError(f"AOT cache miss (ROCKE_NORM_CACHE_ONLY=1): {kname} -> {path}")
+    kdef = cand.build_reduce(spec, arch) if kind == "reduce" else cand.build_apply(spec, arch)
+    artifact = compile_kernel(kdef, arch=arch)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(f".pkl.{os.getpid()}.tmp")
+    with tmp.open("wb") as fh:
+        pickle.dump(artifact, fh, protocol=pickle.HIGHEST_PROTOCOL)
+    tmp.replace(path)
+    return artifact
+
+
+def compile_nhwc_cached(cand: Any, kind: str, *, dtype: str, arch: str, cache_dir: str):
+    """Load / build one kernel of an NHWC candidate. The key is the candidate and
+    kernel name alone: shape and launch plan are runtime kernel arguments."""
+    from rocke.helpers.compile import compile_kernel
+
+    spec = cand.spec(dtype, arch)
+    kname = spec.kernel_name(kind)
+    raw = f"batchnorm2d_nhwc|dynamic|{dtype}|{arch}|{cand.name}|{kname}"
+    path = Path(cache_dir) / (
+        "batchnorm2d_nhwc_" + hashlib.sha1(raw.encode("utf-8")).hexdigest()[:24] + ".pkl"
+    )
+    if path.is_file():
+        with path.open("rb") as fh:
+            return pickle.load(fh)
+    if os.environ.get("ROCKE_NORM_CACHE_ONLY") == "1":
+        raise RuntimeError(f"AOT cache miss (ROCKE_NORM_CACHE_ONLY=1): {kname} -> {path}")
+    artifact = compile_kernel(cand.build(kind, spec, arch), arch=arch)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(f".pkl.{os.getpid()}.tmp")
+    with tmp.open("wb") as fh:
+        pickle.dump(artifact, fh, protocol=pickle.HIGHEST_PROTOCOL)
+    tmp.replace(path)
+    return artifact
+
+
+def compile_mcw_cached(cand: Any, *, dtype: str, arch: str, cache_dir: str):
+    """Load / build the kernel of a multi-channel-per-wave candidate. The key is the
+    candidate and kernel name alone: the shape is a runtime kernel argument."""
+    from rocke.helpers.compile import compile_kernel
+
+    spec = cand.spec(dtype, arch)
+    kname = spec.kernel_name()
+    raw = f"batchnorm2d_mcw|dynamic|{dtype}|{arch}|{cand.name}|{kname}"
+    path = Path(cache_dir) / (
+        "batchnorm2d_mcw_" + hashlib.sha1(raw.encode("utf-8")).hexdigest()[:24] + ".pkl"
+    )
+    if path.is_file():
+        with path.open("rb") as fh:
+            return pickle.load(fh)
+    if os.environ.get("ROCKE_NORM_CACHE_ONLY") == "1":
+        raise RuntimeError(f"AOT cache miss (ROCKE_NORM_CACHE_ONLY=1): {kname} -> {path}")
+    artifact = compile_kernel(cand.build("fused", spec, arch), arch=arch)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(f".pkl.{os.getpid()}.tmp")
+    with tmp.open("wb") as fh:
+        pickle.dump(artifact, fh, protocol=pickle.HIGHEST_PROTOCOL)
+    tmp.replace(path)
     return artifact

@@ -54,7 +54,7 @@ from rocke.runtime import time_launches, time_launches_staged
 # gate flags normal bf16 rounding as a false failure (observed: a bf16
 # layernorm2d case at max_abs=0.0078125, exactly 1 bf16 ULP, failing a flat
 # 5e-3 gate).
-VALIDATE_TOL = {"fp16": 5e-3, "bf16": 4e-2}
+VALIDATE_TOL = {"fp16": 5e-3, "bf16": 4e-2, "fp32": 1e-4}
 
 
 def case_key(dims: Mapping[str, int], *, dtype: str, family: str, extra: str = "") -> str:

@@ -23,7 +23,10 @@ from typing import Sequence, Tuple
 
 from rocke.dispatch.families.batchnorm import (
     BatchNormRequest,
+    dynamic_batchnorm_bwd_candidates,
+    dynamic_batchnorm_bwd_split_candidates,
     dynamic_batchnorm_candidates,
+    dynamic_batchnorm_split_candidates,
     registered_batchnorm_combos,
 )
 from rocke.dispatch.families.norm import (
@@ -89,3 +92,71 @@ def batchnorm_dynamic_combos(
         if ok:
             out.append((candidate, candidate.select_spec(req)))
     return out
+
+
+def batchnorm_split_combos(
+    *, n: int, c: int, h: int, w: int, dtype: str, arch: str
+) -> Sequence[Tuple[object, object]]:
+    """Every ``(split candidate, split plan)`` pair admitting this training
+    shape (dynamic cross-CTA split reduction; two launches per pair)."""
+    req = BatchNormRequest(n=n, c=c, h=h, w=w, arch=arch, training=True, dtype=dtype)
+    out = []
+    for candidate in dynamic_batchnorm_split_candidates():
+        for plan in candidate.plans(req):
+            out.append((candidate, plan))
+    return out
+
+
+def batchnorm_bwd_dynamic_combos(
+    *, n: int, c: int, h: int, w: int, dtype: str, arch: str
+) -> Sequence[Combo]:
+    """Every single-launch dynamic backward ``(candidate, spec)`` pair admitting this shape."""
+    req = BatchNormRequest(n=n, c=c, h=h, w=w, arch=arch, dtype=dtype, backward=True)
+    out = []
+    for candidate in dynamic_batchnorm_bwd_candidates():
+        ok, _why = candidate.admits(req)
+        if ok:
+            out.append((candidate, candidate.select_spec(req)))
+    return out
+
+
+def batchnorm_bwd_split_combos(
+    *, n: int, c: int, h: int, w: int, dtype: str, arch: str
+) -> Sequence[Tuple[object, object]]:
+    """Every ``(split backward candidate, split plan)`` pair admitting this shape."""
+    req = BatchNormRequest(n=n, c=c, h=h, w=w, arch=arch, dtype=dtype, backward=True)
+    out = []
+    for candidate in dynamic_batchnorm_bwd_split_candidates():
+        for plan in candidate.plans(req):
+            out.append((candidate, plan))
+    return out
+
+
+def batchnorm_nhwc_combos(
+    *, n: int, c: int, h: int, w: int, dtype: str, arch: str, mode: str
+) -> Sequence[Tuple[object, object]]:
+    """Every NHWC ``(candidate, launch plan)`` pair admitting this shape.
+
+    ``mode`` is ``"infer"``, ``"train"`` or ``"bwd"``; each pair is one
+    launch (infer, fused) or one two-launch sequence (split)."""
+    from rocke.dispatch.families.batchnorm import dynamic_batchnorm_nhwc_candidates
+
+    out = []
+    for candidate in dynamic_batchnorm_nhwc_candidates(mode):
+        for plan in candidate.plans(n, c, h, w, dtype, arch):
+            out.append((candidate, plan))
+    return out
+
+
+def batchnorm_mcw_combos(
+    *, n: int, c: int, h: int, w: int, dtype: str, arch: str, mode: str, full: bool = False
+) -> Sequence[object]:
+    """Multi-channel-per-wave candidates of ``mode`` ("train" / "bwd") admitting this shape.
+
+    The shipped set by default; ``full=True`` gives the whole sweep space."""
+    from rocke.dispatch.families.batchnorm import dynamic_batchnorm_mcw_candidates
+
+    return [
+        cand for cand in dynamic_batchnorm_mcw_candidates(mode)
+        if (full or cand.shipped(dtype)) and cand.admits(n, c, h, w, dtype, arch)
+    ]

@@ -785,7 +785,7 @@ class TensorView:
         """f32 demote + pack + vector store. ``len(values) == 1``
         routes through :meth:`store_scalar` (one scalar store) instead
         of through ``global_store_vN``."""
-        if self.dtype.name not in ("f16", "bf16"):
+        if self.dtype.name not in ("f16", "bf16", "f32"):
             raise NotImplementedError(
                 f"store_vec_from_f32 not wired for {self.dtype.name}"
             )
@@ -938,7 +938,7 @@ class TileWindow:
         ``<n x dtype>`` vector, and stored. The dual of
         :meth:`load_vec_as_f32`.
         """
-        if self.dtype.name not in ("f16", "bf16"):
+        if self.dtype.name not in ("f16", "bf16", "f32"):
             raise NotImplementedError(
                 f"store_vec_from_f32 not wired for {self.dtype.name}; "
                 "cast manually and use store_vec"

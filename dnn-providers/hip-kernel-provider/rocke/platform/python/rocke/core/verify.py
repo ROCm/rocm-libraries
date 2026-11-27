@@ -161,6 +161,7 @@ _REQUIRED_ATTRS: Dict[str, List[str]] = {
     "memref.fence": ["scope", "ordering"],
     "memref.global_flag_store": ["scope", "ordering"],
     "memref.global_flag_wait_eq": ["scope"],
+    "memref.global_flag_wait_ge_bounded": ["scope"],
 }
 
 
@@ -504,6 +505,25 @@ class _Verifier:
                 _FLAG_STORE_ORDERINGS if name == "memref.global_flag_store" else None
             )
             self._check_sync_attrs(op, orderings)
+        elif name == "memref.global_flag_wait_ge_bounded":
+            if len(op.operands) != 4 or len(op.results) != 1:
+                self.err(
+                    f"{name}: expected 4 operands / 1 result, got "
+                    f"{len(op.operands)} / {len(op.results)}",
+                    op,
+                )
+                return
+            if not _is_flag_ptr(op.operands[0].type):
+                self.err(
+                    f"{name}: expected a global i32 pointer, got {op.operands[0].type.name}",
+                    op,
+                )
+            for what, v in zip(("index", "expect", "max_polls"), op.operands[1:]):
+                if v.type.name != "i32":
+                    self.err(f"{name}: {what} must be i32, got {v.type.name}", op)
+            self._check_sync_attrs(op, None)
+            if op.attrs.get("ordering", "acquire") not in ("acquire", "monotonic"):
+                self.err(f"{name}: unknown ordering '{op.attrs.get('ordering')}'", op)
         elif name == "tile.global_ptr_offset":
             error = _global_ptr_offset_op_error(op)
             if error:

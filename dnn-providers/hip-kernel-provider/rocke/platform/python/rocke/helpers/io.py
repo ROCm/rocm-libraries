@@ -23,7 +23,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Literal
 
-from ..core.ir import BF16, F16, IRBuilder, TemporalHint, Type, Value
+from ..core.ir import BF16, F16, F32, IRBuilder, TemporalHint, Type, Value
 
 
 __all__ = [
@@ -48,7 +48,7 @@ __all__ = [
 
 # Aliases the small ops use. ``"fp16"`` is the CK Tile / ``UniversalGemm``
 # spelling; we accept it to make port snippets read literally.
-DType = Literal["f16", "fp16", "bf16"]
+DType = Literal["f16", "fp16", "bf16", "f32"]
 
 
 def io_ir_type(dtype: str) -> Type:
@@ -62,7 +62,9 @@ def io_ir_type(dtype: str) -> Type:
         return F16
     if dtype == "bf16":
         return BF16
-    raise ValueError(f"unsupported I/O dtype {dtype!r}; expected f16/fp16/bf16")
+    if dtype == "f32":
+        return F32
+    raise ValueError(f"unsupported I/O dtype {dtype!r}; expected f16/fp16/bf16/f32")
 
 
 def load_scalar(b: IRBuilder, ptr: Value, idx: Value, *, dtype: str) -> Value:
@@ -76,6 +78,8 @@ def load_scalar(b: IRBuilder, ptr: Value, idx: Value, *, dtype: str) -> Value:
         return b.global_load_f16(ptr, idx)
     if dtype == "bf16":
         return b.global_load_bf16(ptr, idx)
+    if dtype == "f32":
+        return b.global_load_f32(ptr, idx)
     raise ValueError(f"unsupported I/O dtype {dtype!r}")
 
 
@@ -185,7 +189,7 @@ def store_scalar(
     :func:`store_scalar_from_f32` to handle the f32 -> {f16, bf16}
     cast for you.
     """
-    if dtype not in ("f16", "fp16", "bf16"):
+    if dtype not in ("f16", "fp16", "bf16", "f32"):
         raise ValueError(f"unsupported I/O dtype {dtype!r}")
     b.global_store(ptr, idx, value)
 

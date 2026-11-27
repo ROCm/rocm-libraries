@@ -3664,7 +3664,7 @@ class _Lowerer:
             )
         self._current().emit(
             f"  {op.result.name} = atomicrmw {rmw_op} ptr addrspace(1) {gep}, "
-            f"{elem_ty} {self._operand(val)} {ordering}{md}"
+            f"{elem_ty} {self._operand(val)}{_llvm_syncscope(op.attrs['scope']) if op.attrs.get('scope') else ''} {ordering}{md}"
         )
 
     def _op_memref_fence(self, op: Op) -> None:
@@ -3717,6 +3717,46 @@ class _Lowerer:
         spin.emit(f"  {hit} = icmp eq i32 {val}, {self._operand(expect)}")
         done = self._new_block("flag.done")
         spin.emit(f"  br i1 {hit}, label %{done.label}, label %{spin.label}")
+        spin.terminated = True
+
+    def _op_memref_global_flag_wait_ge_bounded(self, op: Op) -> None:
+        """Lower ``memref.global_flag_wait_ge_bounded`` to a bounded spin loop.
+
+        The loop re-issues an ``acquire`` atomic load until the flag is at
+        least ``expect`` or ``max_polls`` polls were made; the result is the
+        last value read.
+        """
+        ptr, idx, expect, max_polls = op.operands
+        self._require_global_header_ptr("global_flag_wait_ge_bounded", ptr)
+        scope = _sync_attr(op, "scope", _FENCE_SCOPES)
+        ordering = op.attrs.get("ordering", "acquire")
+        gep = self._fresh("gep")
+        cur = self._current()
+        cur.emit(
+            f"  {gep} = getelementptr inbounds i32, ptr addrspace(1) "
+            f"{self._operand(ptr)}, i32 {self._operand(idx)}"
+        )
+        pre = cur.label
+        spin = self._new_block("flag.wait")
+        cur.emit(f"  br label %{spin.label}")
+        cur.terminated = True
+        it = self._fresh("poll")
+        nxt = self._fresh("poll.next")
+        hit = self._fresh("flag.hit")
+        out_of = self._fresh("flag.limit")
+        stop = self._fresh("flag.stop")
+        val = op.result.name
+        spin.emit(f"  {it} = phi i32 [ 0, %{pre} ], [ {nxt}, %{spin.label} ]")
+        spin.emit(
+            f"  {val} = load atomic i32, ptr addrspace(1) {gep}"
+            f"{_llvm_syncscope(scope)} {ordering}, align 4"
+        )
+        spin.emit(f"  {hit} = icmp sge i32 {val}, {self._operand(expect)}")
+        spin.emit(f"  {nxt} = add i32 {it}, 1")
+        spin.emit(f"  {out_of} = icmp sge i32 {nxt}, {self._operand(max_polls)}")
+        spin.emit(f"  {stop} = or i1 {hit}, {out_of}")
+        done = self._new_block("flag.done")
+        spin.emit(f"  br i1 {stop}, label %{done.label}, label %{spin.label}")
         spin.terminated = True
 
     def _lower_pk_atomic_add(
