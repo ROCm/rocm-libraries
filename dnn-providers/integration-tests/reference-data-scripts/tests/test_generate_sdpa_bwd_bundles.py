@@ -343,10 +343,25 @@ TOML_SECTION_KEYS = {
     "test_skips": {"filters", "reason", "archs", "platforms"},
     "tolerance_overrides": {"filters", "atol", "rtol"},
     "validator_overrides": {"filters", "tensors", "validator", "rms_threshold"},
-    "conv_fwd_tolerance.float": {"summation_order"},
 }
-_TOML_HEADER = re.compile(r"^\[\[?([A-Za-z_]+(?:\.[A-Za-z_]+)*)\]\]?$")
+# [conv_<direction>_tolerance.<type>] and its optional per-arch table
+# [conv_<direction>_tolerance.<type>.<arch>]; 'summation_order' is for float only.
+_CONV_TOLERANCE_SECTION = re.compile(
+    r"conv_(?:fwd|dgrad|wrw)_tolerance\.(float|half|bfloat16)(?:\.[A-Za-z0-9_]+)?"
+)
+_CONV_TOLERANCE_KEYS = {"lambda", "lambda_per_quartic_root_k"}
+_TOML_HEADER = re.compile(r"^\[\[?([A-Za-z_]+(?:\.[A-Za-z0-9_]+)*)\]\]?$")
 _TOML_KEY = re.compile(r"^([A-Za-z_][A-Za-z0-9_-]*)\s*=")
+
+
+def _section_keys(section):
+    """The keys TestSettings.hpp accepts in `section`, or None for an unknown section."""
+    if section in TOML_SECTION_KEYS:
+        return TOML_SECTION_KEYS[section]
+    conv = _CONV_TOLERANCE_SECTION.fullmatch(section)
+    if conv is None:
+        return None
+    return _CONV_TOLERANCE_KEYS | ({"summation_order"} if conv.group(1) == "float" else set())
 
 
 def _toml_entries(path):
@@ -391,8 +406,9 @@ def _sdpa_fwd_plan_names():
 
 def _check_known_keys(path):
     for section, keys, _ in _toml_entries(path):
-        assert section in TOML_SECTION_KEYS, (path.name, section)
-        unknown = set(keys) - TOML_SECTION_KEYS[section]
+        allowed = _section_keys(section)
+        assert allowed is not None, (path.name, section)
+        unknown = set(keys) - allowed
         assert not unknown, (path.name, section, sorted(unknown))
 
 
@@ -463,7 +479,11 @@ _SYNTHETIC_CONV_TOLERANCE = """\
     ("section", "key", "rejected"),
     [
         ("conv_fwd_tolerance.float", "summation_ordr", "'summation_ordr'"),
-        ("conv_fwd_tolerance.half", "summation_order", "'conv_fwd_tolerance.half'"),
+        ("conv_fwd_tolerance.half", "summation_order", "'summation_order'"),
+        ("conv_dgrad_tolerance.half.gfx90a", "summation_order", "'summation_order'"),
+        ("conv_wrw_tolerance.bfloat16", "lambda_per_quartic_root", "'lambda_per_quartic_root'"),
+        ("conv_bwd_tolerance.float", "lambda", "'conv_bwd_tolerance.float'"),
+        ("conv_fwd_tolerance.double", "lambda", "'conv_fwd_tolerance.double'"),
         ("conv_fwd_tolerance", "summation_order", "'conv_fwd_tolerance'"),
     ],
 )
