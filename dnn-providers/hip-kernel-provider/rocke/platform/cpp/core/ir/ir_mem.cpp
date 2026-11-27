@@ -737,11 +737,77 @@ void rocke_b_global_flag_wait_eq(rocke_ir_builder_t* b,
     (void)rocke_i_op0(b, ROCKE_OP_MEMREF_GLOBAL_FLAG_WAIT_EQ, ops, 3, &a);
 }
 
+rocke_value_t* rocke_b_global_flag_wait_ge_bounded(rocke_ir_builder_t* b,
+                                                   rocke_value_t* ptr,
+                                                   rocke_value_t* idx,
+                                                   rocke_value_t* expect,
+                                                   rocke_value_t* max_polls,
+                                                   const char* scope,
+                                                   const char* ordering)
+{
+    rocke_value_t* ops[4];
+    rocke_attr_map_t a;
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!ptr || !idx || !expect || !max_polls)
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "global_flag_wait_ge_bounded: null operand");
+    if(scope == NULL)
+        scope = "agent";
+    if(ordering == NULL)
+        ordering = "acquire";
+    if(!rocke_i_flag_ptr_ok(ptr->type))
+        return (rocke_value_t*)rocke_i_set_err(
+            b,
+            ROCKE_ERR_VALUE,
+            "global_flag_wait_ge_bounded expects a global i32 pointer, got %s",
+            ptr->type ? ptr->type->name : "?");
+    {
+        const char* what[3] = {"expect", "max_polls", "idx"};
+        rocke_value_t* vals[3] = {expect, max_polls, idx};
+        for(int i = 0; i < 3; ++i)
+        {
+            if(!rocke_i_type_is(vals[i]->type, "i32"))
+                return (rocke_value_t*)rocke_i_set_err(
+                    b,
+                    ROCKE_ERR_VALUE,
+                    "global_flag_wait_ge_bounded expects an i32 %s, got %s",
+                    what[i],
+                    vals[i]->type->name);
+        }
+    }
+    if(!rocke_i_fence_scope_ok(scope))
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "unknown flag scope '%s'", scope);
+    if(strcmp(ordering, "acquire") && strcmp(ordering, "monotonic"))
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "unknown flag wait ordering '%s'", ordering);
+    ops[0] = ptr;
+    ops[1] = idx;
+    ops[2] = expect;
+    ops[3] = max_polls;
+    a = rocke_i_attrs(b);
+    rocke_attr_set_str(b, &a, "scope", scope);
+    rocke_attr_set_str(b, &a, "ordering", ordering);
+    return rocke_i_op1(
+        b, ROCKE_OP_MEMREF_GLOBAL_FLAG_WAIT_GE_BOUNDED, ops, 4, rocke_i32(), &a, "flag_seen");
+}
+
 rocke_value_t* rocke_b_global_atomic_add(rocke_ir_builder_t* b,
                                          rocke_value_t* ptr,
                                          rocke_value_t* idx,
                                          rocke_value_t* value,
                                          const char* ordering)
+{
+    return rocke_b_global_atomic_add_scoped(b, ptr, idx, value, ordering, NULL);
+}
+
+rocke_value_t* rocke_b_global_atomic_add_scoped(rocke_ir_builder_t* b,
+                                                rocke_value_t* ptr,
+                                                rocke_value_t* idx,
+                                                rocke_value_t* value,
+                                                const char* ordering,
+                                                const char* scope)
 {
     rocke_value_t* ops[3];
     rocke_attr_map_t a;
@@ -758,12 +824,17 @@ rocke_value_t* rocke_b_global_atomic_add(rocke_ir_builder_t* b,
     if(!rocke_i_ordering_ok(ordering))
         return (rocke_value_t*)rocke_i_set_err(
             b, ROCKE_ERR_VALUE, "unknown ordering '%s'", ordering);
+    if(scope != NULL && !rocke_i_fence_scope_ok(scope))
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "unknown atomic scope '%s'", scope);
     ops[0] = ptr;
     ops[1] = idx;
     ops[2] = value;
     a = rocke_i_attrs(b);
     rocke_attr_set_str(b, &a, "elem_type", value->type->name);
     rocke_attr_set_str(b, &a, "ordering", ordering);
+    if(scope != NULL)
+        rocke_attr_set_str(b, &a, "scope", scope);
     return rocke_i_op1(b, ROCKE_OP_MEMREF_GLOBAL_ATOMIC_ADD, ops, 3, value->type, &a, "atom_add");
 }
 

@@ -748,6 +748,13 @@ static rocke_status_t _op_memref_global_store_vN(rocke_h_lowerer_t* lw, const ro
 
 /* ================================ atomics =============================== */
 
+static const char* hip_atomic_order(const char* o);
+static const char* hip_memory_scope(const char* s);
+static const char* hip_sync_attr(rocke_h_lowerer_t* lw,
+                                 const rocke_op_t* op,
+                                 const char* key,
+                                 const char* const* allowed);
+
 /* Python _op_memref_global_atomic_add */
 static rocke_status_t _op_memref_global_atomic_add(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
@@ -766,6 +773,24 @@ static rocke_status_t _op_memref_global_atomic_add(rocke_h_lowerer_t* lw, const 
     idx = op->operands[1];
     val = op->operands[2];
     cpp_t = rocke_h_type_to_hip(lw, val->type);
+    {
+        const char* scope = rocke_attr_get_str(&op->attrs, "scope");
+        if(scope && scope[0])
+        {
+            static const char* const scopes[] = {"workgroup", "agent", "system", NULL};
+            const char* ord = rocke_attr_get_str(&op->attrs, "ordering");
+            rocke_h_emitf(lw,
+                          "%s %s = __hip_atomic_fetch_add(&%s[%s], %s, %s, %s);",
+                          cpp_t,
+                          rocke_h_name(lw, op->results[0]),
+                          rocke_h_name(lw, ptr),
+                          rocke_h_name(lw, idx),
+                          rocke_h_name(lw, val),
+                          hip_atomic_order(ord ? ord : "monotonic"),
+                          hip_memory_scope(hip_sync_attr(lw, op, "scope", scopes)));
+            return lw->status;
+        }
+    }
     rocke_h_emitf(lw,
                   "%s %s = atomicAdd(&%s[%s], %s);",
                   cpp_t,
@@ -895,6 +920,41 @@ static rocke_status_t _op_memref_global_flag_wait_eq(rocke_h_lowerer_t* lw, cons
                   rocke_h_name(lw, op->operands[0]),
                   rocke_h_name(lw, op->operands[1]),
                   hip_memory_scope(scp),
+                  rocke_h_name(lw, op->operands[2]));
+    return lw->status;
+}
+
+/* Python _op_memref_global_flag_wait_ge_bounded: a bounded poll loop. */
+static rocke_status_t _op_memref_global_flag_wait_ge_bounded(rocke_h_lowerer_t* lw,
+                                                             const rocke_op_t* op)
+{
+    const char *scp, *ord, *res;
+    if(!rocke_h_live(lw))
+    {
+        return lw->status;
+    }
+    if(op->num_operands < 4 || op->num_results < 1)
+    {
+        return rocke_h_fail(
+            lw, ROCKE_ERR_VALUE, "memref.global_flag_wait_ge_bounded: bad operand/result count");
+    }
+    scp = hip_sync_attr(lw, op, "scope", k_hip_sync_scopes);
+    ord = rocke_attr_get_str(&op->attrs, "ordering");
+    res = rocke_h_name(lw, op->results[0]);
+    rocke_h_emitf(lw, "int %s = 0;", res);
+    rocke_h_emitf(lw,
+                  "for (int %s_i = 0; %s_i < %s; ++%s_i) { %s = __hip_atomic_load(&%s[%s], "
+                  "%s, %s); if (%s >= %s) break; }",
+                  res,
+                  res,
+                  rocke_h_name(lw, op->operands[3]),
+                  res,
+                  res,
+                  rocke_h_name(lw, op->operands[0]),
+                  rocke_h_name(lw, op->operands[1]),
+                  (ord && !strcmp(ord, "monotonic")) ? "__ATOMIC_RELAXED" : "__ATOMIC_ACQUIRE",
+                  hip_memory_scope(scp),
+                  res,
                   rocke_h_name(lw, op->operands[2]));
     return lw->status;
 }
@@ -1867,6 +1927,7 @@ const rocke_h_handler_entry_t* rocke_h_handlers_mem(void)
            {ROCKE_OP_MEMREF_FENCE, _op_memref_fence},
            {ROCKE_OP_MEMREF_GLOBAL_FLAG_STORE, _op_memref_global_flag_store},
            {ROCKE_OP_MEMREF_GLOBAL_FLAG_WAIT_EQ, _op_memref_global_flag_wait_eq},
+           {ROCKE_OP_MEMREF_GLOBAL_FLAG_WAIT_GE_BOUNDED, _op_memref_global_flag_wait_ge_bounded},
            {ROCKE_OP_MEMREF_COOPERATIVE_GLOBAL_STORE, _op_memref_cooperative_global_store},
            /* global pointer arithmetic + buffer rsrc */
            {ROCKE_OP_TILE_GLOBAL_PTR_ADD, _op_tile_global_ptr_add},

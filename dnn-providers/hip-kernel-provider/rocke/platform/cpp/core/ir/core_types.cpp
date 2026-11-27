@@ -1479,7 +1479,10 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     "tile.buffer_atomic_fadd_f32",
 
     /* math.* value * 2^exponent */
-    "math.ldexp"};
+    "math.ldexp",
+
+    /* memref.* bounded flag spin */
+    "memref.global_flag_wait_ge_bounded"};
 
 const char* rocke_opcode_name(rocke_opcode_t op)
 {
@@ -1784,7 +1787,10 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
     /* buffer_atomic_fadd_f32     */ false,
 
     /* math.* value * 2^exponent */
-    /* math.ldexp                 */ true};
+    /* math.ldexp                 */ true,
+
+    /* memref.* bounded flag spin (effectful) */
+    /* global_flag_wait_ge_bounded */ false};
 
 bool rocke_opcode_is_pure(rocke_opcode_t op)
 {

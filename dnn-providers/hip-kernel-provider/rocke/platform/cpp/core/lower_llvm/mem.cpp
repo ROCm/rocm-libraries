@@ -347,6 +347,67 @@ static void op_memref_global_flag_wait_eq(rocke_lower_t* L, const rocke_op_t* op
     spin->terminated = true;
 }
 
+/* Python _op_memref_global_flag_wait_ge_bounded: a bounded spin loop that
+ * re-issues an atomic load until the flag is at least `expect` or `max_polls`
+ * polls were made; the result is the last value read. */
+static void op_memref_global_flag_wait_ge_bounded(rocke_lower_t* L, const rocke_op_t* op)
+{
+    if(op->num_operands != 4 || op->num_results != 1)
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "memref.global_flag_wait_ge_bounded expects four operands / one result");
+    const rocke_value_t* ptr = op->operands[0];
+    const rocke_value_t* idx = op->operands[1];
+    const rocke_value_t* expect = op->operands[2];
+    const rocke_value_t* max_polls = op->operands[3];
+    rocke_ll_require_global_header_ptr(L, "global_flag_wait_ge_bounded", ptr, "ptr");
+    const char* scope = ll_sync_attr(L, op, "scope", k_ll_sync_scopes);
+    const char* ordering = ll_attr_str(op, "ordering", "acquire");
+    const char* gep = rocke_ll_fresh(L, "gep");
+    rocke_ll_block_t* cur = rocke_ll_current(L);
+    if(!cur)
+        return;
+    rocke_ll_block_emitf(L,
+                         cur,
+                         "  %s = getelementptr inbounds i32, ptr addrspace(1) %s, i32 %s",
+                         gep,
+                         rocke_ll_operand(L, ptr),
+                         rocke_ll_operand(L, idx));
+    const char* pre = cur->label;
+    rocke_ll_block_t* spin = rocke_ll_new_block(L, "flag.wait");
+    if(!spin)
+        return;
+    rocke_ll_block_emitf(L, cur, "  br label %%%s", spin->label);
+    cur->terminated = true;
+    const char* it = rocke_ll_fresh(L, "poll");
+    const char* nxt = rocke_ll_fresh(L, "poll.next");
+    const char* hit = rocke_ll_fresh(L, "flag.hit");
+    const char* out_of = rocke_ll_fresh(L, "flag.limit");
+    const char* stop = rocke_ll_fresh(L, "flag.stop");
+    const char* val = ll_res(op);
+    rocke_ll_block_emitf(
+        L, spin, "  %s = phi i32 [ 0, %%%s ], [ %s, %%%s ]", it, pre, nxt, spin->label);
+    rocke_ll_block_emitf(L,
+                         spin,
+                         "  %s = load atomic i32, ptr addrspace(1) %s%s %s, align 4",
+                         val,
+                         gep,
+                         ll_syncscope(L, scope),
+                         ordering);
+    rocke_ll_block_emitf(
+        L, spin, "  %s = icmp sge i32 %s, %s", hit, val, rocke_ll_operand(L, expect));
+    rocke_ll_block_emitf(L, spin, "  %s = add i32 %s, 1", nxt, it);
+    rocke_ll_block_emitf(
+        L, spin, "  %s = icmp sge i32 %s, %s", out_of, nxt, rocke_ll_operand(L, max_polls));
+    rocke_ll_block_emitf(L, spin, "  %s = or i1 %s, %s", stop, hit, out_of);
+    rocke_ll_block_t* done = rocke_ll_new_block(L, "flag.done");
+    if(!done)
+        return;
+    rocke_ll_block_emitf(
+        L, spin, "  br i1 %s, label %%%s, label %%%s", stop, done->label, spin->label);
+    spin->terminated = true;
+}
+
 static void op_memref_global_atomic_add(rocke_lower_t* L, const rocke_op_t* op)
 {
     const rocke_value_t* ptr = op->operands[0];
@@ -375,13 +436,16 @@ static void op_memref_global_atomic_add(rocke_lower_t* L, const rocke_op_t* op)
              ", !amdgpu.no.remote.memory !1"
              ", !amdgpu.ignore.denormal.mode !1";
     }
+    /* An absent / empty scope keeps the historical (system-scope) text. */
+    const char* scope = ll_attr_str(op, "scope", "");
     rocke_ll_emitf(L,
-                   "  %s = atomicrmw %s ptr addrspace(1) %s, %s %s %s%s",
+                   "  %s = atomicrmw %s ptr addrspace(1) %s, %s %s%s %s%s",
                    ll_res(op),
                    rmw_op,
                    gep,
                    elem_ty,
                    rocke_ll_operand(L, val),
+                   scope[0] ? ll_syncscope(L, scope) : "",
                    ordering,
                    md);
 }
@@ -2159,6 +2223,8 @@ void rocke_ll_register_mem(void)
     rocke_ll_set_handler(ROCKE_OP_MEMREF_FENCE, op_memref_fence);
     rocke_ll_set_handler(ROCKE_OP_MEMREF_GLOBAL_FLAG_STORE, op_memref_global_flag_store);
     rocke_ll_set_handler(ROCKE_OP_MEMREF_GLOBAL_FLAG_WAIT_EQ, op_memref_global_flag_wait_eq);
+    rocke_ll_set_handler(ROCKE_OP_MEMREF_GLOBAL_FLAG_WAIT_GE_BOUNDED,
+                         op_memref_global_flag_wait_ge_bounded);
     rocke_ll_set_handler(ROCKE_OP_MEMREF_GLOBAL_ATOMIC_ADD_F32, op_memref_global_atomic_add_f32);
     rocke_ll_set_handler(ROCKE_OP_MEMREF_GLOBAL_ATOMIC_ADD_PK_BF16,
                          op_memref_global_atomic_add_pk_bf16);

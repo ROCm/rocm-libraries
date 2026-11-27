@@ -510,6 +510,10 @@ typedef enum rocke_opcode
      * existing index shifts. */
     ROCKE_OP_MATH_LDEXP,
 
+    /* Bounded i32 flag spin (Python IRBuilder.global_flag_wait_ge_bounded).
+     * Appended so no existing index shifts. */
+    ROCKE_OP_MEMREF_GLOBAL_FLAG_WAIT_GE_BOUNDED,
+
     ROCKE_OP__COUNT
 } rocke_opcode_t;
 
@@ -1078,6 +1082,16 @@ void rocke_b_global_flag_wait_eq(rocke_ir_builder_t* b,
                                  rocke_value_t* idx,
                                  rocke_value_t* expect,
                                  const char* scope);
+/* IRBuilder.global_flag_wait_ge_bounded: spin until ptr[idx] >= expect, at
+ * most max_polls polls; returns the last value read (i32). NULL scope /
+ * ordering select agent / acquire; ordering in {acquire, monotonic}. */
+rocke_value_t* rocke_b_global_flag_wait_ge_bounded(rocke_ir_builder_t* b,
+                                                   rocke_value_t* ptr,
+                                                   rocke_value_t* idx,
+                                                   rocke_value_t* expect,
+                                                   rocke_value_t* max_polls,
+                                                   const char* scope,
+                                                   const char* ordering);
 
 /* ----- atomics ----- */
 rocke_value_t* rocke_b_global_atomic_add(rocke_ir_builder_t* b,
@@ -1085,6 +1099,16 @@ rocke_value_t* rocke_b_global_atomic_add(rocke_ir_builder_t* b,
                                          rocke_value_t* idx,
                                          rocke_value_t* value,
                                          const char* ordering /* NULL=>monotonic */);
+/* IRBuilder.global_atomic_add(..., scope=scope): as rocke_b_global_atomic_add
+ * plus a sync scope in {workgroup, agent, system}. NULL scope is the
+ * unscoped op (no attr, lowering default), identical to
+ * rocke_b_global_atomic_add. */
+rocke_value_t* rocke_b_global_atomic_add_scoped(rocke_ir_builder_t* b,
+                                                rocke_value_t* ptr,
+                                                rocke_value_t* idx,
+                                                rocke_value_t* value,
+                                                const char* ordering,
+                                                const char* scope);
 rocke_value_t* rocke_b_lds_atomic_add(rocke_ir_builder_t* b,
                                       rocke_value_t* smem,
                                       rocke_value_t* const* indices,

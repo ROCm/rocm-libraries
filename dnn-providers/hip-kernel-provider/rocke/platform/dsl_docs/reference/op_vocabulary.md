@@ -109,6 +109,7 @@ f32 range gives the infinity or zero of its sign. Any other operand types are re
 | `memref.fence`               | `fence`                       | `fence syncscope(...) <ordering>` |
 | `memref.global_flag_store`   | `global_flag_store`           | `store atomic i32 ... syncscope(...) <ordering>` |
 | `memref.global_flag_wait_eq` | `global_flag_wait_eq`         | spin loop around `load atomic i32 ... acquire` |
+| `memref.global_flag_wait_ge_bounded` | `global_flag_wait_ge_bounded` | at most `max_polls` polls of `load atomic i32 ... <ordering>` until `>= expect`; returns the last value |
 
 `masked_global_load(ptr, idx, mask, other, dtype)` clamps the false-lane index to 0 before loading, then selects `other` afterward.
 
