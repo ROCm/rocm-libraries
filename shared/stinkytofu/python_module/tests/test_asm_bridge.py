@@ -296,6 +296,41 @@ def test_emit_asm_supports_audited_negated_vfma_src0():
     assert "v_fma_f32 v0, -v1, v2, v3" in assembly
 
 
+def test_emit_asm_supports_fmha_bwd_signed_scalar_integer_forms():
+    assembly = emit_asm(
+        "gfx1250",
+        32,
+        [
+            {"kind": "instruction", "mnemonic": "s_add_i32", "dst": [sgpr(0)],
+             "src": [sgpr(1), Register(-4)]},
+            {"kind": "instruction", "mnemonic": "s_sub_i32", "dst": [sgpr(2)],
+             "src": [sgpr(3), Register(5)]},
+            {"kind": "instruction", "mnemonic": "s_cmp_eq_i32",
+             "src": [sgpr(92), Register(0)]},
+            {"kind": "instruction", "mnemonic": "s_cmp_ge_i32",
+             "src": [sgpr(4), Register(-1)]},
+            {"kind": "instruction", "mnemonic": "s_cmp_le_i32",
+             "src": [Register(-2), sgpr(5)]},
+            {"kind": "instruction", "form": "gfx1250::v_cmp_gt_i32::vop3",
+             "mnemonic": "v_cmp_gt_i32", "dst": [sgpr(4)],
+             "src": [vgpr(1), Register(3)]},
+        ],
+    )
+
+    assert (
+        "s_add_i32 s0, s1, -4" in assembly
+        or "s_add_co_i32 s0, s1, -4" in assembly
+    )
+    assert (
+        "s_sub_i32 s2, s3, 5" in assembly
+        or "s_sub_co_i32 s2, s3, 5" in assembly
+    )
+    assert "s_cmp_eq_i32 s92, 0" in assembly
+    assert "s_cmp_ge_i32 s4, -1" in assembly
+    assert "s_cmp_le_i32 -2, s5" in assembly
+    assert "v_cmp_gt_i32_e64 s4, v1, 3" in assembly
+
+
 def test_emit_asm_supports_t00_descriptor_aliases_and_scalar_vcc_forms():
     assembly = emit_asm(
         "gfx1250",
