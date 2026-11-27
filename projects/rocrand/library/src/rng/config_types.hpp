@@ -241,7 +241,13 @@ inline hipError_t get_device_arch([[maybe_unused]] int device_id, target_arch& a
 inline hipError_t get_device_from_stream(const hipStream_t stream, int& device_id)
 {
     constexpr hipStream_t default_stream = 0;
-    if(stream == default_stream || stream == hipStreamPerThread)
+    // hipStreamLegacy is supported in HIP >= 6.2.0
+#if(HIP_VERSION_MAJOR > 6 || (HIP_VERSION_MAJOR == 6 && HIP_VERSION_MINOR >= 2))
+    const bool is_legacy_stream = (stream == hipStreamLegacy);
+#else
+    const bool is_legacy_stream = false;
+#endif
+    if(stream == default_stream || stream == hipStreamPerThread || is_legacy_stream)
     {
         const hipError_t result = hipGetDevice(&device_id);
         if(result != hipSuccess)

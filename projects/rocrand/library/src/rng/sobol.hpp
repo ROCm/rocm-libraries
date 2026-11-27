@@ -553,7 +553,7 @@ public:
                              hipStream_t        stream = 0)
         : base_type(order, offset, stream)
     {
-        const rocrand_status status = prime_constants();
+        const rocrand_status status = prime_constants(stream);
         if(status != ROCRAND_STATUS_SUCCESS)
         {
             throw status;
@@ -628,14 +628,18 @@ public:
 
     rocrand_status set_stream(hipStream_t stream)
     {
-        const rocrand_status status = m_poisson.set_stream(stream);
+        rocrand_status status = prime_constants(stream);
+        if(status != ROCRAND_STATUS_SUCCESS)
+        {
+            return status;
+        }
+        status = m_poisson.set_stream(stream);
         if(status != ROCRAND_STATUS_SUCCESS)
         {
             return status;
         }
         base_type::set_stream(stream);
-        // The new stream may belong to another device, which needs its own constants.
-        return prime_constants();
+        return ROCRAND_STATUS_SUCCESS;
     }
 
     rocrand_status init()
@@ -912,16 +916,16 @@ private:
         return accessor->get_scramble_constants(scramble_constants);
     }
 
-    /// \brief Allocates the constants for the current stream's device ahead of time.
+    /// \brief Allocates the constants for a stream's device ahead of time.
     ///
     /// Called when the generator is created and whenever its stream changes, so that the
     /// allocation never has to happen during the first generate(), which may be inside a
     /// stream capture region.
-    rocrand_status prime_constants() const
+    static rocrand_status prime_constants(const hipStream_t stream)
     {
         const constant_type* direction_vectors  = nullptr;
         const constant_type* scramble_constants = nullptr;
-        return get_constants(m_stream, &direction_vectors, &scramble_constants);
+        return get_constants(stream, &direction_vectors, &scramble_constants);
     }
 
     bool               m_initialized    = false;
