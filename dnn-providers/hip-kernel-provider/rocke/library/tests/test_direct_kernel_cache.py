@@ -1454,7 +1454,19 @@ def test_dgrad_rtc_grid_skips_wide_q_heavy_preloads(jobs):
 def test_plans_pack_against_their_signatures(cache, direction, problem):
     plans, _ = dks.direct_plans(cache, problem, direction, _ARCH)
     assert plans
-    names = ("x", "w", "y", "dy", "dx", "dw", "ws_t", "ws_coa", "ws_split")
+    names = (
+        "x",
+        "w",
+        "y",
+        "dy",
+        "dx",
+        "dw",
+        "dw16",
+        "ws",
+        "ws_t",
+        "ws_coa",
+        "ws_split",
+    )
     ptrs = {n: 0x1000 * (i + 1) for i, n in enumerate(names)}
     sizes = {n: 1 << 20 for n in names}
     for plan in plans:
@@ -1505,8 +1517,9 @@ def test_wgrad_serves_valid_and_same_padding_only_at_stride_1(cache):
     for pad in (0, 1):
         plans, _ = dks.direct_plans(cache, _problem(PAD=pad), "wgrad", _ARCH)
         assert _wgrad(plans) and all(p.identity.pad_h == pad for p in plans)
-    # The kernel is stride-1 only; nothing is cached for stride 2.
-    assert dks.direct_plans(cache, _problem(stride=2), "wgrad", _ARCH)[0] == []
+    # The kernel is stride-1 only; stride 2 is the grouped gather kernel's.
+    strided = dks.direct_plans(cache, _problem(stride=2), "wgrad", _ARCH)[0]
+    assert {p.identity.algorithm for p in strided} <= {"direct_wgrad_gather"}
     assert not [j for j in dks.DIRECT_CAPABILITIES["direct_wgrad"][1] if j.stride != 1]
 
 
@@ -1845,7 +1858,16 @@ def test_run_from_cache_batch_chunks_are_balanced():
             assert s_i[name] == n * per_image < _TENSOR_LIMIT
         assert (p_i["w"], s_i["w"]) == (ptrs["w"], sizes["w"])
         n0 += n
+    # One launch over the whole batch (a plan that rebases its activations
+    # per segment): the i32 size kernargs take a clamped value.
+    assert _chunk_buffers(ptrs, sizes, inputs, "y", [31], 0, True) == (
+        ptrs,
+        {k: min(v, _TENSOR_LIMIT - 1) for k, v in sizes.items()},
+    )
+    # any other plan keeps the true size, which the packer rejects
     assert _chunk_buffers(ptrs, sizes, inputs, "y", [31], 0) == (ptrs, sizes)
+    small = {k: min(v, 4096) for k, v in sizes.items()}
+    assert _chunk_buffers(ptrs, small, inputs, "y", [31], 0) == (ptrs, small)
 
 
 def test_run_from_cache_wgrad_chunks_accumulate_into_one_dw():
@@ -1965,12 +1987,16 @@ def test_measure_plans_skips_a_plan_whose_kernargs_do_not_fit(monkeypatch, capsy
     assert "[skip] big: kernarg does not fit" in capsys.readouterr().out
 
 
-def test_run_from_cache_plans_each_chunk_size():
+def test_run_from_cache_plans_each_chunk_size(monkeypatch):
     """Each distinct chunk size is planned on its own batch; only kernels that
     serve every chunk are offered, each launch with its chunk's plan."""
     from types import SimpleNamespace
 
+    from benchmarks.common import benchmark_direct_conv
     from benchmarks.common.benchmark_direct_conv import _chunk_plans
+
+    # none of these plans runs the whole batch as one launch
+    monkeypatch.setattr(benchmark_direct_conv, "_one_launch", lambda pl: False)
 
     seen = []
 
@@ -1986,7 +2012,8 @@ def test_run_from_cache_plans_each_chunk_size():
 
     problem = _problem(N=31)
     plans, rejected, per_chunk = _chunk_plans(plan_fn, problem, [11, 10, 10])
-    assert seen == [11, 10]
+    # the whole batch is planned too, for the one-launch plans
+    assert seen == [11, 10, 31]
     assert [pl.label for pl in plans] == ["both"]
     assert [pl.N for pl in per_chunk["both"]] == [11, 10, 10]
     assert ("big", "does not serve a batch chunk of 10 images") in rejected

@@ -60,6 +60,14 @@ class WgradGatherSpec:
     prefetch: int = 2
     rows_per_seg: int = 16  # output rows per segment (rounded up to the unroll)
     target_blocks: int = 1024
+    # Grouped layers with cpg == kpg in {8, 16} (any stride). A block
+    # owns block_k output channels = whole groups, and stages only the X
+    # channels of those groups ([pixel][block_k] rows, one DMA chunk per
+    # pixel slice, out-of-image columns zeroed by the buffer bounds). An MFMA
+    # atom spans 16 output channels and the (s, c) columns of the same 16 input
+    # channels: the off-diagonal (cross-group) products are computed and
+    # dropped by the epilogue.
+    grouped: bool = False
 
     @property
     def block_k(self) -> int:
@@ -72,7 +80,14 @@ class WgradGatherSpec:
     @property
     def n_atoms(self) -> int:
         p = self.problem
+        if self.grouped:
+            return p.KW
         return ceil_div(p.KW * p.cpg, _ATOM)
+
+    @property
+    def c_staged(self) -> int:
+        """Input channels per staged X pixel."""
+        return self.block_k if self.grouped else self.problem.cpg
 
     @property
     def unroll(self) -> int:
@@ -84,12 +99,14 @@ class WgradGatherSpec:
 
     def x_phase(self) -> int:
         p = self.problem
+        if self.grouped:
+            return 0
         return (-p.PAD * p.cpg) % _VEC
 
     def x_elems(self) -> int:
         """Elements of one staged X row: phase + the strip's columns."""
         p = self.problem
-        return self.x_phase() + ((_WO - 1) * p.stride + p.KW) * p.cpg
+        return self.x_phase() + ((_WO - 1) * p.stride + p.KW) * self.c_staged
 
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join
@@ -103,11 +120,11 @@ class WgradGatherSpec:
             f"pf{self.prefetch}",
             f"rps{self.rows_per_seg}",
             f"tb{self.target_blocks}",
-            flags=flags,
+            flags={**flags, "grp": self.grouped},
         )
 
     def n_k_tiles(self) -> int:
-        return ceil_div(self.problem.kpg, self.block_k)
+        return ceil_div(self.problem.groups * self.problem.kpg, self.block_k)
 
     def n_units(self) -> int:
         p = self.problem
@@ -121,7 +138,7 @@ class WgradGatherSpec:
         return p.KH * p.KW * p.cpg
 
     def fold_channels(self) -> int:
-        return self.problem.kpg
+        return self.problem.groups * self.problem.kpg
 
     def workspace_bytes(self) -> int:
         return self.n_partitions() * self.fold_taps() * self.fold_channels() * 4
@@ -164,8 +181,11 @@ def is_valid_wgrad_gather_spec(
     why = dilation_reason(p)
     if why is not None:
         return False, why
-    if p.groups != 1:
-        return False, "dense layers only"
+    if spec.grouped:
+        if p.groups < 2 or p.cpg != p.kpg or p.kpg not in (8, 16):
+            return False, "grouped needs groups > 1 and cpg == kpg in (8, 16)"
+    elif p.groups != 1:
+        return False, "dense layers only (grouped=False)"
     if p.dtype not in ("fp16", "bf16"):
         return False, "fp16/bf16 only"
     if not target.memory.has_ds_read_tr:
@@ -177,7 +197,7 @@ def is_valid_wgrad_gather_spec(
     if p.KW * p.cpg > 96:
         return False, "KW * C must be at most 96"
     # Whole 16-byte chunks from an aligned start at a build-time phase.
-    if (p.W * p.cpg) % _VEC or (_WO * p.stride * p.cpg) % _VEC:
+    if not spec.grouped and ((p.W * p.cpg) % _VEC or (_WO * p.stride * p.cpg) % _VEC):
         return False, "W * C and 32 * stride * C must be multiples of 8"
     acc = p.KH * spec.wave_k16 * spec.n_atoms * 4
     if acc > 192:
@@ -201,6 +221,8 @@ def build_wgrad_gather(spec: WgradGatherSpec, arch: str = "gfx950") -> KernelDef
         raise ValueError(f"invalid WgradGatherSpec for {arch}: {why}")
     p = spec.problem
     KH, KW, PAD, S, C = p.KH, p.KW, p.PAD, p.stride, p.cpg
+    G = spec.grouped
+    CS = spec.c_staged  # channels per staged X pixel (C, or block_k grouped)
     io_dtype = p.dtype
     io_type = _io_type(io_dtype)
     WK16 = spec.wave_k16
@@ -221,7 +243,8 @@ def build_wgrad_gather(spec: WgradGatherSpec, arch: str = "gfx950") -> KernelDef
     # When a pixel row of the strip (S * C elements) and the phase keep every
     # lane's 8-byte read aligned, the raw row is itself a [pixel][(s, c)]
     # tile with contiguous columns, so the X operand is a transpose read too.
-    X_TR = (S * C) % 4 == 0 and PH % 4 == 0
+    X_TR = (S * CS) % 4 == 0 and PH % 4 == 0
+    assert X_TR or not G
     Y_ELEMS = spec.dy_slot_elems()
     PER_STEP = S * IX + IY
 
@@ -262,6 +285,7 @@ def build_wgrad_gather(spec: WgradGatherSpec, arch: str = "gfx950") -> KernelDef
         params["p_dY_stride_wo"],
     )
     sx_n, sx_h = params["p_X_stride_n"], params["p_X_stride_hi"]
+    sx_w = params["p_X_stride_wi"]
 
     x_bufs = [
         b.smem_alloc(io_type, [1, X_ELEMS], name_hint=f"xg{i}") for i in range(NX)
@@ -287,10 +311,20 @@ def build_wgrad_gather(spec: WgradGatherSpec, arch: str = "gfx950") -> KernelDef
         b.async_buffer_load_lds(rsrc, lds, voff, c0, 4)
 
     # X: chunk L of a row is elements [8 L, 8 L + 8) from the aligned start.
+    # Grouped: chunk L is pixel L // (CS / 8), channels 8 * (L % (CS / 8)) on.
     x_chunks = []
     for i in range(IX):
         slot = b.add(b.mul(b.add(b.mul(wave, ci(IX)), ci(i)), ci(_WAVE)), lane)
-        x_chunks.append((b.mul(slot, ci(_VEC)), b.cmp_lt(slot, ci(XCH))))
+        if G:
+            x_chunks.append(
+                (
+                    b.div(slot, ci(CS // _VEC)),
+                    b.mul(b.mod(slot, ci(CS // _VEC)), ci(_VEC)),
+                    b.cmp_lt(slot, ci(XCH)),
+                )
+            )
+        else:
+            x_chunks.append((b.mul(slot, ci(_VEC)), b.cmp_lt(slot, ci(XCH))))
     # dY: slot -> (pixel row, swizzled k chunk).
     y_chunks = []
     for i in range(IY):
@@ -359,7 +393,38 @@ def build_wgrad_gather(spec: WgradGatherSpec, arch: str = "gfx950") -> KernelDef
         for nj in range(NA)
     ]
 
-    def read_x(buf: int, nj: int) -> Value:
+    # Grouped: atom nj is filter column s = nj over the 16 input channels of
+    # k atom mi: elements s * CS + (wave_k0 + 16 mi) + 0..15 of each pixel.
+    xg_tr_idx = (
+        [
+            [
+                [
+                    b.add(
+                        b.add(ci(nj * CS + mi * _ATOM), wave_k0),
+                        b.add(
+                            b.mul(
+                                b.add(b.add(b.mul(lane_hi, ci(8)), lane_q), ci(rd * 4)),
+                                ci(S * CS),
+                            ),
+                            b.mul(lane_c4, ci(4)),
+                        ),
+                    )
+                    for rd in (0, 1)
+                ]
+                for mi in range(WK16)
+            ]
+            for nj in range(NA)
+        ]
+        if G
+        else None
+    )
+
+    def read_x(buf: int, nj: int, mi: int = 0) -> Value:
+        if G:
+            idx = xg_tr_idx[nj][mi]
+            lo = b.ds_read_tr16_b64(x_bufs[buf], c0, idx[0], dtype=io_type)
+            hi = b.ds_read_tr16_b64(x_bufs[buf], c0, idx[1], dtype=io_type)
+            return b.vec_concat(lo, hi)
         if X_TR:
             lo = b.ds_read_tr16_b64(x_bufs[buf], c0, x_tr_idx[nj][0], dtype=io_type)
             hi = b.ds_read_tr16_b64(x_bufs[buf], c0, x_tr_idx[nj][1], dtype=io_type)
@@ -420,12 +485,35 @@ def build_wgrad_gather(spec: WgradGatherSpec, arch: str = "gfx950") -> KernelDef
         pad_hi0 = b.add(ci(PH), b.mul(cols_in, ci(C)))
         edge = b.lor(b.cmp_lt(col0, c0), b.cmp_lt(pad_hi0, ci(spec.x_elems())))
 
+        if G:
+            # Per chunk: its pixel's column bounds and offset within the row.
+            xg_offs = []
+            for px, ce, okl in x_chunks:
+                col = b.add(col0, px)
+                ok = b.land(okl, b.land(b.cmp_ge(col, c0), b.cmp_lt(col, p_W)))
+                xg_offs.append(
+                    (
+                        b.add(
+                            b.add(b.mul(n_img, sx_n), b.mul(col, sx_w)),
+                            b.add(k_blk0, ce),
+                        ),
+                        ok,
+                    )
+                )
+
         def issue_x(xr: Value, slot: int):
             hi = b.add(x_row0, xr)
             ok_r = b.land(
                 b.land(b.cmp_ge(hi, c0), b.cmp_lt(hi, p_H)),
                 b.cmp_lt(xr, b.add(b.mul(n_steps, ci(S)), ci(PRE))),
             )
+            if G:
+                for i, (off, okl) in enumerate(xg_offs):
+                    voff = b.select(
+                        b.land(okl, ok_r), b.mul(b.add(off, b.mul(hi, sx_h)), c2), oob
+                    )
+                    dma(b_rsrc, x_addr[slot], IX, i, voff)
+                return
             row_off = b.add(x_start, b.mul(hi, sx_h))
             for i, (e, okl) in enumerate(x_chunks):
                 voff = b.select(b.land(okl, ok_r), b.mul(b.add(row_off, e), c2), oob)
@@ -447,6 +535,8 @@ def build_wgrad_gather(spec: WgradGatherSpec, arch: str = "gfx950") -> KernelDef
 
         def fix_padding(slots: List[int]):
             """Zero the padding columns of freshly landed X rows (edge strips)."""
+            if G:
+                return  # out-of-image pixels were read as zeros
             with b.scf_if(edge):
                 for slot in slots:
                     for k in range(ceil_div(spec.x_elems(), spec.threads)):
@@ -480,8 +570,10 @@ def build_wgrad_gather(spec: WgradGatherSpec, arch: str = "gfx950") -> KernelDef
             for r in range(KH):
                 slot = (S * tm + r) % NX
                 for nj in range(NA):
-                    xf = read_x(slot, nj)
+                    xf = None if G else read_x(slot, nj)
                     for mi in range(WK16):
+                        if G:
+                            xf = read_x(slot, nj, mi)
                         i = acc_index(r, mi, nj)
                         accs[i] = _mfma(b, io_dtype, "16x16x32", dyf[mi], xf, accs[i])
             return accs
@@ -517,9 +609,22 @@ def build_wgrad_gather(spec: WgradGatherSpec, arch: str = "gfx950") -> KernelDef
             tap = b.add(ci(r * KW * C), n)  # (r, s, c) flattened
             row_base = b.mul(b.add(b.mul(part, ci(TAPS)), tap), p_K)
             for mi in range(WK16):
+                if G:
+                    # Column n is input channel ch of filter column s = nj;
+                    # only the products inside one group are kept.
+                    ch = b.add(b.add(k_blk0, wave_k0), b.add(lane_n, ci(mi * _ATOM)))
+                    tap = b.add(ci((r * KW + nj) * C), b.mod(ch, ci(C)))
+                    row_base = b.mul(b.add(b.mul(part, ci(TAPS)), tap), p_K)
                 for slot in range(4):
                     kk = b.add(k_lane0, ci(mi * _ATOM + slot))
-                    ok = b.land(n_ok, b.cmp_lt(kk, p_K))
+                    ok = (
+                        b.land(
+                            b.cmp_lt(kk, p_K),
+                            b.cmp_eq(b.div(kk, ci(C)), b.div(ch, ci(C))),
+                        )
+                        if G
+                        else b.land(n_ok, b.cmp_lt(kk, p_K))
+                    )
                     val = b.vec_extract(accs[acc_index(r, mi, nj)], slot)
                     with b.scf_if(ok):
                         b.global_store(D_ptr, b.add(row_base, kk), val, align=4)

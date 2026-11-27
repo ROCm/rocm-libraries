@@ -307,6 +307,7 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "kernels.common.conv_direct_fwd_gstream_wmma.FwdGstreamWmmaSpec": ("problem",),
     "kernels.common.conv_direct_fwd_tapouter_wmma.DirectFwdTapOuterSpec": ("problem",),
     "kernels.common.conv_direct_wgrad_tiled.DirectWgradTiledSpec": ("problem",),
+    "kernels.common.conv_direct_wgrad_tiled.WgradSlabFoldSpec": (),
     "kernels.common.conv_direct_dw_wgrad.DwWgradLdsSpec": ("problem",),
     "kernels.common.conv_direct_dw_wgrad_mfma.DwWgradMfmaSpec": ("problem",),
     "kernels.common.conv_direct_dw_wgrad.DwWgradColsSpec": ("problem",),

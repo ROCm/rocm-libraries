@@ -2344,6 +2344,10 @@ def _measure_plans(
     n_plans = len(plans)
     width = len(str(n_plans))
 
+    def plan_chunks(plan):
+        # a one-launch plan (see _one_launch) covers the whole batch
+        return [sum(chunks)] if len(per_chunk[plan.label]) == 1 else chunks
+
     def bind(plan):
         """The plan's launch, or ``None`` if a step cannot be loaded."""
         try:
@@ -2355,7 +2359,16 @@ def _measure_plans(
                         signature=st.signature,
                     ),
                     launch_values(
-                        st, *_chunk_buffers(ptrs, sizes, inputs, out_name, chunks, i)
+                        st,
+                        *_chunk_buffers(
+                            ptrs,
+                            sizes,
+                            inputs,
+                            out_name,
+                            plan_chunks(plan),
+                            i,
+                            _one_launch(plan),
+                        ),
                     ),
                     LaunchConfig(grid=st.grid, block=st.block, stream=0),
                 )
@@ -2594,6 +2607,7 @@ def _cache_dispatch(args, arch: str, cases: list) -> int:
 
 
 _TENSOR_LIMIT = 1 << 31
+_I32_MAX = _TENSOR_LIMIT - 1
 
 
 def _batch_chunks(p, direction: str) -> List[int]:
@@ -2616,10 +2630,16 @@ def _batch_chunks(p, direction: str) -> List[int]:
     return [base + (i < extra) for i in range(n_steps)]
 
 
-def _chunk_buffers(ptrs, sizes, inputs, out_name, chunks, i):
+def _chunk_buffers(ptrs, sizes, inputs, out_name, chunks, i, one_launch=False):
     """``(ptrs, sizes)`` with the activations narrowed to batch chunk ``i``
-    of ``chunks`` (images per chunk, in batch order)."""
+    of ``chunks`` (images per chunk, in batch order). ``one_launch``: the plan
+    is a one-launch plan (see :func:`_one_launch`)."""
     if len(chunks) == 1:
+        if one_launch and any(v > _I32_MAX for v in sizes.values()):
+            # a one-launch plan rebases its activations per segment and never
+            # reads their byte sizes: the i32 kernargs take a clamped value.
+            # Any other plan keeps the true size, which the packer rejects.
+            return ptrs, {k: min(v, _I32_MAX) for k, v in sizes.items()}
         return ptrs, sizes
     ptrs, sizes = dict(ptrs), dict(sizes)
     n_total, n0 = sum(chunks), sum(chunks[:i])
@@ -2645,6 +2665,11 @@ def _chunk_plans(plan_fn, p, chunks):
     by_size = {}
     for n in dict.fromkeys(chunks):
         by_size[n] = plan_fn(p if n == p.N else dataclasses.replace(p, N=n))
+    # The kernels that rebase their activations per segment run the whole
+    # batch as one launch.
+    whole = []
+    if len(chunks) > 1:
+        whole = [pl for pl in plan_fn(p)[0] if _one_launch(pl)]
     plans, rejected = by_size[chunks[0]]
     rejected = list(rejected)
     labels = {n: {pl.label: pl for pl in sized[0]} for n, sized in by_size.items()}
@@ -2657,13 +2682,32 @@ def _chunk_plans(plan_fn, p, chunks):
         ]
         plans = [pl for pl in plans if pl.label in labels[n]]
     per_chunk = {pl.label: [labels[n][pl.label] for n in chunks] for pl in plans}
+    if whole:
+        one = {pl.label for pl in whole}
+        plans = [pl for pl in plans if pl.label not in one] + whole
+        for pl in whole:
+            per_chunk[pl.label] = [pl]
     return plans, rejected, per_chunk
+
+
+def _one_launch(plan) -> bool:
+    """A plan whose kernels address the activations through a per-segment
+    64-bit rebased base (tiled wgrad ``l64``): one launch serves a batch past
+    the 2^31-byte buffer range."""
+    ident = getattr(plan, "identity", None)
+    return (
+        ident is not None
+        and ident.algorithm == "direct_wgrad_tiled"
+        and '"l64": true' in (ident.knobs or "")
+    )
 
 
 def _accumulates_dw(plan) -> bool:
     """A one-step wgrad plan with no scratch: its kernel adds its tiles into
     the zeroed fp32 dW (atomics), so its launches over batch chunks sum. A fold
     or reduce step, or a scratch slab, writes dW instead."""
+    if '"one_split": true' in (getattr(plan.identity, "knobs", None) or ""):
+        return False  # the one-split tiled wgrad stores its dW tile
     return len(plan.steps) == 1 and not plan.workspaces and not plan.zeroed
 
 
@@ -2672,7 +2716,12 @@ def _wgrad_chunk_plans(plans, rejected, per_chunk, chunks):
     chunk, only the plans whose every chunk accumulates into dW."""
     if len(chunks) == 1:
         return plans, rejected
-    keep = [pl for pl in plans if all(map(_accumulates_dw, per_chunk[pl.label]))]
+    keep = [
+        pl
+        for pl in plans
+        if len(per_chunk[pl.label]) == 1
+        or all(map(_accumulates_dw, per_chunk[pl.label]))
+    ]
     rejected = list(rejected) + [
         (
             pl.identity,
@@ -2744,6 +2793,17 @@ def _run_from_cache(args, arch: str, cases: list, cache, directions) -> int:
             )
             if direction == "wgrad":
                 plans, rejected = _wgrad_chunk_plans(plans, rejected, per_chunk, chunks)
+                # This harness binds the fp32 dW only: plans that write the
+                # 16-bit dW (dw16 / pk16 / slab) are the provider's to run.
+                plans = [
+                    pl
+                    for pl in plans
+                    if not any(
+                        st.buffers[2] == "dw16"
+                        for cp in per_chunk[pl.label]
+                        for st in cp.steps
+                    )
+                ]
             if kernel_map is not None:
                 keep = conv_fill.kernels_for(kernel_map, case_key(p, dtype, direction))
                 plans = [pl for pl in plans if pl.identity.label() in keep]

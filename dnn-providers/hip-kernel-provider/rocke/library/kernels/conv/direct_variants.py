@@ -18,6 +18,7 @@ from dataclasses import replace
 
 __all__ = [
     "DIRECT_WGRAD_FOLD",
+    "DIRECT_WGRAD_SLAB_FOLD",
     "DIRECT_WGRAD_FOLDED",
     "DIRECT_DGRAD_REORGANIZE",
     "DIRECT_DGRAD_REORGANIZE_RTC",
@@ -163,6 +164,7 @@ DIRECT_DEPTHWISE_TILED_DGRAD = "direct_depthwise_tiled_dgrad"
 # identity lookup (direct_aot_jobs.direct_job_for_identity) both read it.
 PER_AXIS_PAD_VARIANTS = (
     DIRECT_DEPTHWISE_TILED_DGRAD,
+    "direct_wgrad_tiled",
     DIRECT_FWD_FLEX_MFMA,
     DIRECT_FWD_SMALLK_WMMA,
     DIRECT_FWD_SMALLK_MFMA,
@@ -184,12 +186,16 @@ DIRECT_WGRAD_FOLDED = (
     "direct_wgrad_gather",
     "direct_wgrad_grouped_mfma",
 )
+# The fold of the tiled wgrad's ``slab`` scratch into the 16-bit dW;
+# shape-generic, keyed by its output dtype and slice count.
+DIRECT_WGRAD_SLAB_FOLD = "direct_wgrad_slab_fold"
 _HELPERS = (
     DIRECT_DGRAD_TRANSPOSE,
     DIRECT_DGRAD_REORGANIZE,
     DIRECT_DGRAD_TRANSPOSE_RTC,
     DIRECT_DGRAD_REORGANIZE_RTC,
     DIRECT_WGRAD_FOLD,
+    DIRECT_WGRAD_SLAB_FOLD,
 )
 # Stage 2 of the two-stage direct wgrad kernels: folds the ws_replicas fp32
 # scratch slabs into dW. Cached as its own entry (one per replica count) and
@@ -487,6 +493,10 @@ def make_direct_spec(variant: str, problem, knobs: dict, wave_size: int = 64):
         return GroupedWgradMfmaSpec(
             problem=problem, name="rocke_direct_wgrad_grouped_mfma", **knobs
         )
+    if variant == DIRECT_WGRAD_SLAB_FOLD:
+        from kernels.common.conv_direct_wgrad_tiled import WgradSlabFoldSpec
+
+        return WgradSlabFoldSpec(name="rocke_direct_wgrad_slab_fold", **knobs)
     if variant == DIRECT_WGRAD_FOLD:
         from kernels.common.conv_direct_dw_wgrad import DwWgradFoldSpec
 
@@ -949,6 +959,7 @@ def select_direct_kernel_builder(variant: str, spec, arch: str):
         "direct_wgrad_dw_mfma": dwmf.build_dw_wgrad_mfma,
         "direct_wgrad_grouped_mfma": gwm.build_grouped_wgrad_mfma,
         DIRECT_WGRAD_FOLD: dw.build_dw_wgrad_fold,
+        DIRECT_WGRAD_SLAB_FOLD: wt.build_wgrad_slab_fold,
         "direct_grouped": dc.build_direct_conv,
         "direct_nongrouped": dn.build_direct_conv_nongrouped,
         DIRECT_GROUPED_HALO: dn.build_direct_conv_nongrouped,

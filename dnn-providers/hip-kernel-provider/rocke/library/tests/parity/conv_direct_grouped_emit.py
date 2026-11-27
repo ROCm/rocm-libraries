@@ -27,8 +27,10 @@
 # DirectNongroupedConvSpec, from index 218 the fp32-storage configs of every
 # grouped kernel that serves them, see _f32_spec, from index 318 the gfx1250
 # wave32 and image-per-block DirectConvWgradSpec, from index 349
-# DirectDepthwiseWgradSpec and from index 356 the small-C wgrad stems of the
-# AOT grid), builds the kernel via the matching build_direct_conv_* function
+# DirectDepthwiseWgradSpec, from index 356 the small-C wgrad stems of the
+# AOT grid, from index 359 the auto-launch and ping-pong tiled wgrad and from
+# index 371 the tiled wgrad's dW / tile / launch knobs, WgradSlabFoldSpec and
+# the grouped WgradGatherSpec), builds the kernel via the matching build_direct_conv_* function
 # (arch=<cfg arch>) and prints
 # _native_lower(arch=<cfg arch>) to stdout so it can be byte-compared with
 # the C emitter conv_direct_grouped_emit.c.
@@ -97,7 +99,9 @@ from kernels.common.conv_direct_wgrad_gather import (
 )
 from kernels.common.conv_direct_wgrad_tiled import (
     DirectWgradTiledSpec,
+    WgradSlabFoldSpec,
     build_direct_wgrad_tiled,
+    build_wgrad_slab_fold,
 )
 
 try:
@@ -2521,8 +2525,197 @@ def _wgrad_pp_spec(idx: int):
     return ("wgrad_tiled", sel, "gfx950")
 
 
+# ---------------------------------------------------------------------------
+# Tiled wgrad knobs, the slab fold and the grouped gather wgrad, indices
+# 371..415. Tiled 371..399: one_split + dw16 (16-bit dW store) with the row
+# tail, q_groups 4 (ping-pong in halves, pp_tight, slab / pk16; a reduction
+# that fits one LDS buffer only), gpack (whole groups per wave, a partial
+# last block) with pk16 / slab, l64 (rebased descriptors; an Nx1 filter over
+# eight packed images with its own column padding), pp_sched, the q_groups 2
+# epilogue with dw16 / pk16, pk16 at kpg % 8 == 4, slab with column padding,
+# then thirteen specs both engines must reject. WgradSlabFoldSpec 400..408:
+# fp16 / bf16 / fp32 outputs over 8, 2, 1 and 64 slices, two rejections.
+# Grouped WgradGatherSpec 409..415: 16 and 8 channels per group, stride 2,
+# 5x5, then four rejections.
+# ---------------------------------------------------------------------------
+_WGRAD_KNOB_CFG_BASE = 371
+
+
+def _wgrad_knob_spec(idx: int):
+    """Return (kind, spec, arch) for config ``_WGRAD_KNOB_CFG_BASE + idx``, or None."""
+    ts, gs, fs = DirectWgradTiledSpec, WgradGatherSpec, WgradSlabFoldSpec
+    q4 = dict(q_groups=4, pingpong=True, pp_tight=True, waves_k=1, waves_c=2)
+    q2 = dict(q_groups=2, pingpong=True, waves_k=2, wave_k16=1, prefetch=3)
+    auto = dict(row_tail=True, rows_per_seg=0)
+    tiled = {
+        0: ts(problem=_wp(H=13, dtype="fp16"), one_split=True, dw16=True, **auto),
+        1: ts(problem=_wp(H=13), one_split=True, dw16=True, target_blocks=64, **auto),
+        2: ts(
+            problem=_wp(H=14, dtype="fp16"),
+            slab=True,
+            unfold_n=2,
+            wave_c16=1,
+            target_blocks=32,
+            **q4,
+            **auto,
+        ),
+        3: ts(problem=_wp(H=14), slab=True, unfold_n=2, wave_c16=1, **q4, **auto),
+        4: ts(
+            problem=_wp(cpg=128, kpg=128, dtype="fp16"),
+            pk16=True,
+            rows_per_seg=12,
+            target_blocks=16,
+            **{**q4, "waves_k": 2, "waves_c": 1},
+        ),
+        5: ts(
+            problem=_wp(groups=6, cpg=16, kpg=16, dtype="fp16"),
+            gpack=True,
+            pk16=True,
+            wave_k16=1,
+            wave_c16=1,
+            waves_k=2,
+            waves_c=2,
+            **auto,
+        ),
+        6: ts(
+            problem=_wp(groups=6, cpg=16, kpg=16),
+            gpack=True,
+            slab=True,
+            wave_k16=1,
+            wave_c16=1,
+            waves_k=2,
+            waves_c=2,
+            **auto,
+        ),
+        7: ts(
+            problem=_wp(N=12, H=20, W=6, KW=1, pad_w=0, dtype="fp16"),
+            l64=True,
+            pingpong=True,
+            unfold_n=8,
+            **auto,
+        ),
+        8: ts(problem=_wp(), l64=True, pingpong=True, rows_per_seg=12),
+        9: ts(
+            problem=_wp(H=13, dtype="fp16"),
+            pp_sched=True,
+            slab=True,
+            target_blocks=64,
+            **q2,
+            **auto,
+        ),
+        10: ts(problem=_wp(H=13), one_split=True, dw16=True, **q2, **auto),
+        11: ts(
+            problem=_wp(H=13, dtype="fp16"), pk16=True, target_blocks=64, **q2, **auto
+        ),
+        12: ts(problem=_wp(kpg=36, dtype="fp16"), pk16=True, rows_per_seg=12),
+        13: ts(problem=_wp(), pingpong=True, pp_sched=True, slab=True, rows_per_seg=12),
+        14: ts(
+            problem=_wp(W=30, pad_w=0, dtype="fp16"),
+            slab=True,
+            rows_per_seg=15,
+            row_unroll=3,
+        ),
+        15: ts(
+            problem=_wp(H=13, dtype="fp16"),
+            q_groups=4,
+            pingpong=True,
+            waves_k=1,
+            waves_c=2,
+            wave_k16=1,
+            wave_c16=1,
+            **auto,
+        ),
+        # q_groups 4 without the ping-pong; the reduction gets one buffer.
+        16: ts(
+            problem=_wp(cpg=128, kpg=128),
+            q_groups=4,
+            slab=True,
+            waves_k=1,
+            waves_c=2,
+            prefetch=3,
+            rows_per_seg=12,
+        ),
+        # Must reject, one per new rule.
+        17: ts(problem=_wp(), dw16=True),
+        18: ts(problem=_wp(), pk16=True),
+        19: ts(problem=_wp(dtype="fp16"), pk16=True, one_split=True),
+        20: ts(problem=_wp(), slab=True, one_split=True),
+        21: ts(problem=_wp(), row_tail=True, rows_per_seg=12),
+        22: ts(problem=_wp(), pp_tight=True, rows_per_seg=12),
+        23: ts(problem=_wp(), pp_sched=True, rows_per_seg=12),
+        24: ts(problem=_wp(), unfold_n=8, rows_per_seg=12),
+        25: ts(problem=_wp(), q_groups=3, rows_per_seg=12),
+        26: ts(
+            problem=_wp(groups=4, cpg=16, kpg=32), gpack=True, wave_k16=1, wave_c16=1
+        ),
+        27: ts(
+            problem=_wp(H=1024, W=1024, cpg=512, kpg=512),
+            l64=True,
+            unfold_n=4,
+            rows_per_seg=12,
+        ),
+        28: ts(problem=_wp(kpg=38), rows_per_seg=12),
+    }
+    if idx in tiled:
+        return ("wgrad_tiled", tiled[idx], "gfx950")
+    fold = {
+        29: fs(out="fp16"),
+        30: fs(out="bf16"),
+        31: fs(out="fp32", slices=2),
+        32: fs(out="fp16", slices=1),
+        33: fs(out="bf16", slices=1),
+        34: fs(out="fp32", slices=1),
+        35: fs(out="bf16", slices=64, name="fold64"),
+        # Must reject: 3 does not divide 256; no 8-bit output.
+        36: fs(slices=3),
+        37: fs(out="fp8e4m3"),
+    }
+    if idx in fold:
+        return ("slab_fold", fold[idx], "gfx950")
+    gather = {
+        38: gs(
+            problem=_wp(groups=4, cpg=16, kpg=16, dtype="fp16"),
+            grouped=True,
+            wave_k16=1,
+            waves_k=4,
+        ),
+        39: gs(
+            problem=_wp(groups=8, cpg=8, kpg=8, stride=2, H=30, W=40),
+            grouped=True,
+            wave_k16=1,
+            waves_k=2,
+            rows_per_seg=8,
+        ),
+        40: gs(
+            problem=_wp(groups=4, cpg=16, kpg=16, KH=5, KW=5, PAD=2),
+            grouped=True,
+            wave_k16=1,
+            waves_k=2,
+            target_blocks=256,
+        ),
+        # Must reject: 4 channels per group (K % 8), one group, cpg != kpg,
+        # and a grouped layer without grouped.
+        41: gs(
+            problem=_wp(groups=16, cpg=4, kpg=4, PAD=0, dtype="fp16"),
+            grouped=True,
+            prefetch=1,
+        ),
+        42: gs(problem=_wp(cpg=16, kpg=16), grouped=True),
+        43: gs(problem=_wp(groups=4, cpg=8, kpg=16), grouped=True),
+        44: gs(problem=_wp(groups=2, cpg=8, kpg=8)),
+    }
+    if idx in gather:
+        return ("wgrad_gather", gather[idx], "gfx950")
+    return None
+
+
 def _spec(idx: int):
     """Return (kind, spec, arch) for config index `idx`."""
+    if idx >= _WGRAD_KNOB_CFG_BASE:
+        sel = _wgrad_knob_spec(idx - _WGRAD_KNOB_CFG_BASE)
+        if sel is not None:
+            return sel
+        raise SystemExit(f"unknown config index {idx}")
     if idx >= _WGRAD_PP_CFG_BASE:
         sel = _wgrad_pp_spec(idx - _WGRAD_PP_CFG_BASE)
         if sel is not None:
@@ -3258,6 +3451,8 @@ def main() -> int:
         kernel = build_dw_wgrad_lds(spec, arch=arch)
     elif kind == "wgrad_gather":
         kernel = build_wgrad_gather(spec, arch=arch)
+    elif kind == "slab_fold":
+        kernel = build_wgrad_slab_fold(spec, arch=arch)
     elif kind == "split_reduce":
         kernel = build_direct_conv_split_reduce(spec, arch=arch)
     elif kind == "dw_wgrad_mfma":

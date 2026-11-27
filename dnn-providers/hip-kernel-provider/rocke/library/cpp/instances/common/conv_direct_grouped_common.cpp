@@ -46,11 +46,15 @@
 /* Direct conv pointers: D is the output, the rest are inputs. The operand
  * element type rides in `user`. Under wgrad D is the fp32 dW the kernel
  * global_atomic_adds into: an atomic reads its target, so it is not
- * writeonly, and a scalar f32 atomic only needs dword alignment. */
+ * writeonly, and a scalar f32 atomic only needs dword alignment. A d16 wgrad
+ * D is the io_type dW a kernel stores whole, a d16_atomic one the io_type dW
+ * it adds packed pairs into. */
 typedef struct dconv_ptr_decl
 {
     const rocke_type_t* io_type;
     bool wgrad;
+    bool d16;
+    bool d16_atomic;
 } dconv_ptr_decl_t;
 
 static rocke_value_t* dconv_declare_ptr(rocke_ir_builder_t* b,
@@ -63,6 +67,20 @@ static rocke_value_t* dconv_declare_ptr(rocke_ir_builder_t* b,
     memset(&opts, 0, sizeof(opts));
     opts.noalias = true;
     opts.noalias_set = true;
+    if(kind == ROCKE_CONV_ARG_D && decl->wgrad && decl->d16_atomic)
+    {
+        opts.align = 4;
+        opts.align_set = true;
+        return rocke_b_param(b, name, rocke_ptr_type(b, decl->io_type, "global"), &opts);
+    }
+    if(kind == ROCKE_CONV_ARG_D && decl->wgrad && decl->d16)
+    {
+        opts.writeonly = true;
+        opts.writeonly_set = true;
+        opts.align = 2;
+        opts.align_set = true;
+        return rocke_b_param(b, name, rocke_ptr_type(b, decl->io_type, "global"), &opts);
+    }
     if(kind == ROCKE_CONV_ARG_D && decl->wgrad)
     {
         opts.align = 4;
@@ -89,12 +107,24 @@ void rocke_dconv_emit_params(rocke_ir_builder_t* b,
                              const char* direction,
                              const rocke_type_t* io_type)
 {
+    rocke_dconv_emit_params_ex(b, params, direction, io_type, false, false);
+}
+
+void rocke_dconv_emit_params_ex(rocke_ir_builder_t* b,
+                                rocke_dconv_params_t* params,
+                                const char* direction,
+                                const rocke_type_t* io_type,
+                                bool d16,
+                                bool d16_atomic)
+{
     dconv_ptr_decl_t decl;
     memset(params, 0, sizeof(*params));
     if(direction == NULL)
         direction = "fwd";
     decl.io_type = io_type ? io_type : rocke_f16();
     decl.wgrad = strcmp(direction, "wgrad") == 0;
+    decl.d16 = d16;
+    decl.d16_atomic = d16_atomic;
     /* The A/D stride slots hold whichever tensor the direction binds there:
      * forward NHWC -> NHWK, dgrad dY (NHWK) -> dX (NHWC), wgrad dY (NHWK) in
      * A with X (NHWC) in B. */

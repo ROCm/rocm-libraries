@@ -11,7 +11,7 @@
  * S * C keeps every lane 8-byte aligned). It stores one partial slot per block,
  * ws[part][(r, s, c)][k], folded into dW by the DwWgradFoldSpec kernel
  * (rocke/instance_conv_direct_dw_wgrad.h) with taps = KH * KW * C and
- * channels = K.
+ * channels = groups * kpg.
  *
  *   Python (conv_direct_wgrad_gather.py)       C (this header)
  *   ------------------------------------   -----------------------------------
@@ -42,13 +42,14 @@ extern "C" {
  *
  *  @dataclass(frozen=True)
  *  class WgradGatherSpec:
- *      problem: DirectConvProblem          # groups must be 1
+ *      problem: DirectConvProblem          # groups 1 unless grouped
  *      name: str = "direct_wgrad_gather"
  *      wave_k16: int = 2
  *      waves_k: int = 1
  *      prefetch: int = 2
  *      rows_per_seg: int = 16
  *      target_blocks: int = 1024
+ *      grouped: bool = False
  * ===================================================================== */
 typedef struct rocke_direct_wgrad_gather_spec
 {
@@ -59,20 +60,24 @@ typedef struct rocke_direct_wgrad_gather_spec
     int prefetch; /* default 2 */
     int rows_per_seg; /* default 16 */
     int target_blocks; /* default 1024 */
+    /* default false; grouped layers with cpg == kpg in {8, 16} (any
+     * stride): a block owns block_k output channels = whole groups and stages
+     * only their X channels; the cross-group products are dropped. */
+    bool grouped;
 } rocke_direct_wgrad_gather_spec_t;
 
 rocke_direct_wgrad_gather_spec_t rocke_direct_wgrad_gather_spec_default(void);
 int rocke_direct_wgrad_gather_threads(const rocke_direct_wgrad_gather_spec_t* spec);
 long rocke_direct_wgrad_gather_lds_bytes(const rocke_direct_wgrad_gather_spec_t* spec);
 int rocke_direct_wgrad_gather_n_partitions(const rocke_direct_wgrad_gather_spec_t* spec);
-/* fold_taps() = KH * KW * C; fold_channels() = K. */
+/* fold_taps() = KH * KW * C; fold_channels() = groups * kpg. */
 int rocke_direct_wgrad_gather_fold_taps(const rocke_direct_wgrad_gather_spec_t* spec);
 long rocke_direct_wgrad_gather_workspace_bytes(const rocke_direct_wgrad_gather_spec_t* spec);
 void rocke_direct_wgrad_gather_launch_geometry(const rocke_direct_wgrad_gather_spec_t* spec,
                                                int grid[3],
                                                int block[3]);
 /* kernel_name_join(name, f{KH}x{KW}p{PAD}s{stride}c{cpg}, wk{wk16}x{waves_k},
- * pf{n}, rps{n}, tb{n}, flags [bf16]). */
+ * pf{n}, rps{n}, tb{n}, flags [bf16, grp]). */
 rocke_status_t rocke_direct_wgrad_gather_kernel_name(const rocke_direct_wgrad_gather_spec_t* spec,
                                                      char* out,
                                                      size_t out_cap);
