@@ -49,11 +49,9 @@ set_directory_properties(PROPERTIES CMAKE_CONFIGURE_DEPENDS "${CODE_GEN_SCRIPTS}
 
 list(JOIN INST_TARGETS , FMHA_TARGETS_ARG)
 
-# Select the fwd --optdim head-dim list by architecture. gfx125x (QR-TDM) adds
-# 96/160/192. generate.py applies
-# --optdim uniformly across all --targets, so a mixed gfx9x + gfx125x build would
-# leak the gfx125x-only head dims into the gfx9/gfx11/gfx12 generic QR factories
-# (which also define 96/160/192 tiles). Disallow mixing so the list stays correct.
+# Select the fwd and bwd --optdim lists by architecture. Since generate.py applies
+# one list to all --targets, disallow mixing gfx125x with other architectures
+# to avoid generating head dims outside each architecture's intended defaults.
 set(FMHA_FWD_HAS_GFX125 FALSE)
 set(FMHA_FWD_HAS_NON_GFX125 FALSE)
 foreach(inst_target ${INST_TARGETS})
@@ -65,21 +63,28 @@ foreach(inst_target ${INST_TARGETS})
 endforeach()
 if(FMHA_FWD_HAS_GFX125 AND FMHA_FWD_HAS_NON_GFX125)
   message(FATAL_ERROR "CK Tile FMHA: gfx125x cannot be built together with other archs "
-                      "(the fwd --optdim head-dim list differs per arch). INST_TARGETS: ${INST_TARGETS}")
+                      "(the fwd/bwd --optdim head-dim lists differ per arch). INST_TARGETS: ${INST_TARGETS}")
 endif()
-# Keep the optdim baseline in test/ck_tile/fmha/test_fmha_fwd_codegen.py in
-# sync when either list changes -- it asserts on the exact gfx125 value.
+# Keep the gfx125 fwd default in sync with the optdim baseline in
+# test/ck_tile/fmha/test_fmha_fwd_codegen.py.
 set(FMHA_FWD_OPTDIM "" CACHE STRING
   "Comma-separated head dimensions for all FMHA forward APIs; empty uses arch defaults; -1 enables all")
 if(FMHA_FWD_OPTDIM STREQUAL "")
   if(FMHA_FWD_HAS_GFX125)
-    set(FMHA_FWD_OPTDIM 64,96,128,160,192,256)
+    set(FMHA_FWD_OPTDIM 64,128,192,256)
   else()
-    set(FMHA_FWD_OPTDIM 64,80,128,256)
+    set(FMHA_FWD_OPTDIM 32,64,80,128,256)
   endif()
 endif()
-set(FMHA_BWD_OPTDIM 64,96,128,256 CACHE STRING
-  "Comma-separated head dimensions for FMHA backward; -1 enables all")
+set(FMHA_BWD_OPTDIM "" CACHE STRING
+  "Comma-separated head dimensions for FMHA backward; empty uses arch defaults; -1 enables all")
+if(FMHA_BWD_OPTDIM STREQUAL "")
+  if(FMHA_FWD_HAS_GFX125)
+    set(FMHA_BWD_OPTDIM 64,128,256)
+  else()
+    set(FMHA_BWD_OPTDIM 32,64,96,128,256)
+  endif()
+endif()
 
 string(REPLACE ";" "," FMHA_FWD_APIS "${FMHA_FWD_ENABLE_APIS}")
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/fmha_fwd_source_flags.cmake)
