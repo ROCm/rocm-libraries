@@ -8,6 +8,7 @@
 #include <Tensile/LocalKernelIndex.hpp>
 #include <Tensile/MasterSolutionLibrary.hpp>
 #include <Tensile/SolutionLibrary.hpp>
+#include <condition_variable>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -15,6 +16,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace TensileLite::hip
@@ -24,6 +26,15 @@ namespace TensileLite::hip
 
 namespace hipblaslt_jit
 {
+    // Whether a map keyed by solution index, such as a prebuilt library's
+    // solutions or libraryMapping, has a key in the JIT index range.
+    template <class ByIndex>
+    bool holdsJitIndex(const ByIndex& byIndex)
+    {
+        const auto first = byIndex.lower_bound(TensileLite::JitKernelIndexBase);
+        return first != byIndex.end() && TensileLite::isJitKernelIndex(first->first);
+    }
+
     // Libraries live under "v<jitLibrarySchema>"; other versions are never read.
     constexpr int jitLibrarySchema = 1;
 
@@ -113,8 +124,8 @@ namespace hipblaslt_jit
     // readers take no lock. Thread-safe.
     //
     // Consulted the same way as the Equality and Origami libraries.
-    // findTopSolutions returns published matches for the query beginQuery set.
-    // Grouped-GEMM queries return nothing.
+    // findTopSolutions returns published matches and, on a miss, generates and
+    // publishes when beginQuery allowed it. Grouped-GEMM queries return nothing.
     class JitLibrary : public TensileLite::SolutionLibrary<TensileLite::ContractionProblemGemm>
     {
     public:
@@ -124,10 +135,13 @@ namespace hipblaslt_jit
             TensileLite::hip::SolutionAdapter* adapter = nullptr;
         };
 
-        // The caller chooses root. Touches no file until first use. resolve()
-        // finds only indices in directories this instance has looked up or
-        // published to.
-        explicit JitLibrary(std::filesystem::path root);
+        // Sets key to device's cache key with empty backend fields.
+        using DeviceKey = std::function<Status(int device, CacheKey& key)>;
+
+        // The caller chooses root. Touches no file until first use. Without
+        // deviceKey, resolve() finds only indices in directories this instance
+        // has looked up or published to.
+        explicit JitLibrary(std::filesystem::path root, DeviceKey deviceKey = nullptr);
         JitLibrary(const JitLibrary&)            = delete;
         JitLibrary& operator=(const JitLibrary&) = delete;
         ~JitLibrary();
@@ -139,15 +153,28 @@ namespace hipblaslt_jit
         std::filesystem::path buildDirectory() const;
         std::filesystem::path directory(const CacheKey& key) const;
 
-        // What findTopSolutions looks up. Set on the calling thread before the
-        // library call. endQuery clears it.
-        void beginQuery(const DeviceTarget&      target,
+        // Publishes the shortfall. indices receives new library indices. failure
+        // is set when nothing new was published.
+        using GenerateMissing = std::function<void(size_t                          count,
+                                                   const std::vector<std::string>& excludeKernels,
+                                                   std::vector<int32_t>&           indices,
+                                                   Status&                         failure)>;
+
+        // What findTopSolutions may do. Set on the calling thread before the
+        // library call. A capturing stream sets allowGeneration false so a hit
+        // can return and a miss does not build. endQuery clears it.
+        void beginQuery(bool                     allowGeneration,
+                        const DeviceTarget&      target,
                         const BackendInfo&       backend,
                         size_t                   workspace,
-                        std::vector<std::string> excludeKernels);
+                        std::vector<std::string> excludeKernels,
+                        GenerateMissing          generate);
         void endQuery();
         // Failure from the query in progress, or success when there is none.
         Status queryStatus() const;
+
+        // Every later call fails with reason.
+        void disable(const std::string& reason);
 
         std::shared_ptr<TensileLite::ContractionSolution>
             getSolutionByIndex(TensileLite::ContractionProblemGemm const& problem,
@@ -207,10 +234,10 @@ namespace hipblaslt_jit
 
         // The library that maps index on device, and the adapter that loads its
         // code objects from the key directory. An index is looked for in every
-        // directory this instance has used for device, because the caller
-        // already chose the solution; each directory is reloaded once when the
-        // index is newer than this process has seen. Empty, with why set,
-        // otherwise.
+        // directory whose key matches device's for any backend, because the
+        // caller already chose the solution; each directory is reloaded once
+        // when the index is newer than this process has seen. Empty, with why
+        // set, otherwise.
         View resolve(int device, int32_t index, Status& why);
         // The helper Relocatable stored under key for kernelName, the symbol of
         // the helper kernel it defines; a source file name, such as a
@@ -240,19 +267,41 @@ namespace hipblaslt_jit
                         bool               create,
                         Status&            why);
         Status     attach(const CacheKey& key, int device, Directory*& attached);
+        void       discover(int device);
 
-        // Lookup for the active query.
+        // Lookup or publish for the active query. generate is false for a
+        // find-only call, which must not record an attempt.
         TensileLite::SolutionVector<TensileLite::ContractionSolution>
             solutionsFor(const TensileLite::ContractionProblemGemm& problem,
                          const TensileLite::Hardware&               hardware,
-                         int                                        numSolutions);
+                         int                                        numSolutions,
+                         bool                                       generate);
 
         std::filesystem::path                             m_root;
+        DeviceKey                                         m_deviceKey;
         std::mutex                                        m_mutex;
         std::string                                       m_disabled;
         bool                                              m_checked = false;
         std::map<std::string, std::unique_ptr<Directory>> m_directories;
         std::map<int, std::vector<Directory*>>            m_routes;
+        // One generation of a problem. The first caller owns it; others wait
+        // until that attempt finishes and then read what it published.
+        struct GenerationAttempt
+        {
+            std::mutex              mutex;
+            std::condition_variable ready;
+            bool                    done = false;
+            std::thread::id         owner{};
+        };
+        // Problems this library already tried to generate. The key is the cache
+        // directory, workspace, requested count, problem type and sizes, so a
+        // different K, datatype or count is still generated. Another root has
+        // its own map.
+        std::mutex                                                m_attemptMutex;
+        std::map<std::string, std::shared_ptr<GenerationAttempt>> m_attempts;
     };
 
+    // Stores GEMM solutions in library under the cache key of backend.
+    std::shared_ptr<const SolutionStore>
+        makeLibraryStore(JitLibrary& library, const BackendInfo& backend, int codeObjectVersion);
 }

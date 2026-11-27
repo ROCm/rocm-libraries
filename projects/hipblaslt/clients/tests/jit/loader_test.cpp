@@ -138,7 +138,7 @@ TEST_CASE("resolve loads each code object once", "[jit-gpu]")
     hj::BackendInfo backend;
     backend.id      = "pregenerated";
     backend.version = 1;
-    library.beginQuery(target, backend, hipblaslt_jit_test::workspaceLimit, {});
+    library.beginQuery(false, target, backend, hipblaslt_jit_test::workspaceLimit, {}, nullptr);
     const auto found = library.findTopSolutions(problem, hardware, 2);
     const auto query = library.queryStatus();
     library.endQuery();
@@ -148,7 +148,7 @@ TEST_CASE("resolve loads each code object once", "[jit-gpu]")
                     && query.message.find(".co: ") != std::string::npos);
 
     // A fresh query, so a failure left by findTopSolutions cannot satisfy this.
-    library.beginQuery(target, backend, hipblaslt_jit_test::workspaceLimit, {});
+    library.beginQuery(false, target, backend, hipblaslt_jit_test::workspaceLimit, {}, nullptr);
     JIT_REQUIRE("the fresh query inherited the earlier failure", library.queryStatus().ok());
     const auto byIndex
         = library.getSolutionByIndex(problem, hardware, static_cast<int>(indices[0]));

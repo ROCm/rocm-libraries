@@ -7,6 +7,12 @@
 
 namespace hipblaslt_jit
 {
+    struct GemmRequest;
+
+    // The TensileLite problem hipBLASLt solves for a rocBLASLt GEMM.
+    TensileLite::ContractionProblemGemm
+        RocblasltToTensileContractionProblemGemm(const GemmRequest& request);
+
     // A single strided batched GEMM in TensileLite's canonical index form.
     struct CanonicalGemm
     {

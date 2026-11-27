@@ -1,6 +1,8 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 #include "hipblaslt-jit-fs.hpp"
+#include "hipblaslt-jit-heuristic.hpp"
+#include "hipblaslt-jit-rank.hpp"
 #include "library_fixture.hpp"
 #include "solution_entry.hpp"
 #include <Tensile/DataTypes_Half.hpp>
@@ -10,10 +12,13 @@
 #include <catch2/catch_test_macros.hpp>
 #include <hip/hip_runtime_api.h>
 
+#include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <string>
+#include <thread>
 #include <vector>
 
 // Compiles this device's committed assembly, publishes the code object into
@@ -90,7 +95,7 @@ TEST_CASE("a published JIT solution launches", "[jit-gpu]")
     JIT_REQUIRE("publish did not return one JIT solution index",
                 published.size() == 1 && TensileLite::isJitKernelIndex(published.front()));
 
-    library.beginQuery(target, backend, workspace, {});
+    library.beginQuery(false, target, backend, workspace, {}, nullptr);
     const auto found   = library.findTopSolutions(problem, *target.hardware, 1);
     const auto byIndex = library.getSolutionByIndex(problem, *target.hardware, published.front());
     const auto query   = library.queryStatus();
@@ -188,7 +193,7 @@ TEST_CASE("a published JIT solution launches", "[jit-gpu]")
     const auto other = library.buildDirectory().parent_path() / "another-build";
     fs::rename(library.buildDirectory(), other);
     hj::JitLibrary fresh(libraryRoot);
-    fresh.beginQuery(target, backend, workspace, {});
+    fresh.beginQuery(false, target, backend, workspace, {}, nullptr);
     const auto reused = fresh.findTopSolutions(problem, *target.hardware, 1);
     fresh.endQuery();
     JIT_REQUIRE("A library published under another revision was not reused",
@@ -271,4 +276,288 @@ TEST_CASE("a held file lock times out and is acquired once released", "[jit-cpu]
     held.release();
     const auto freed = hj::files::FileLock::acquire(file, std::chrono::seconds(1), second);
     JIT_REQUIRE("A released lock was not acquired: " + freed.message, freed.ok());
+}
+
+TEST_CASE("concurrent lookups generate one problem once", "[jit-gpu]")
+{
+    const auto target = hipblaslt_jit_test::currentDeviceTarget();
+    const auto root   = fs::u8path(HIPBLASLT_JIT_LAUNCH_SCRATCH) / "generate-once";
+    fs::remove_all(root);
+    hj::BackendInfo backend;
+    backend.id               = "generate-once";
+    backend.version          = 1;
+    const auto     problem   = hipblaslt_jit_test::fp16Gemm(false, 128);
+    constexpr auto workspace = hipblaslt_jit_test::workspaceLimit;
+    hj::JitLibrary library(root);
+
+    auto calls = std::make_shared<std::atomic<int>>(0);
+    auto generate
+        = [calls](size_t, const std::vector<std::string>&, std::vector<int32_t>&, hj::Status&) {
+              std::this_thread::sleep_for(std::chrono::milliseconds(200));
+              calls->fetch_add(1);
+          };
+
+    std::string errors[2];
+    auto        worker = [&](std::string& error) {
+        try
+        {
+            library.beginQuery(true, target, backend, workspace, {}, generate);
+            const auto found  = library.findTopSolutions(problem, *target.hardware, 1);
+            const auto status = library.queryStatus();
+            library.endQuery();
+            if(!status.ok())
+                error = status.message.empty() ? "lookup failed" : status.message;
+            else if(!found.empty())
+                error = "a lookup with no publisher returned a solution";
+        }
+        catch(const std::exception& failure)
+        {
+            error = failure.what();
+        }
+    };
+    std::thread first(worker, std::ref(errors[0]));
+    std::thread second(worker, std::ref(errors[1]));
+    first.join();
+    second.join();
+    JIT_REQUIRE(errors[0].empty() ? errors[1] : errors[0], errors[0].empty() && errors[1].empty());
+    JIT_REQUIRE("The problem was generated " + std::to_string(calls->load()) + " times",
+                calls->load() == 1);
+}
+
+// A generator that rejects one layout of a problem must not stop the same
+// process from generating for a layout it supports. Only the leading dimension
+// of A differs between the two queries.
+TEST_CASE("a rejected layout does not suppress a supported one", "[jit-gpu]")
+{
+    const auto target  = hipblaslt_jit_test::currentDeviceTarget();
+    const auto scratch = fs::u8path(HIPBLASLT_JIT_LAUNCH_SCRATCH) / "layout-attempts";
+    fs::remove_all(scratch);
+    fs::create_directories(scratch);
+    const auto prepared
+        = hipblaslt_jit_test::prepareSolutions(fs::u8path(HIPBLASLT_JIT_DATA), target, scratch);
+    const auto& plain = prepared.front();
+    REQUIRE((plain.name == "plain" && plain.ks.size() == 1));
+
+    hj::BackendInfo backend;
+    backend.id       = "layout-attempts";
+    backend.version  = 1;
+    const auto   key = hj::CacheKey::make(target, backend, hj::jitCodeObjectVersion);
+    hj::Artifact executable;
+    auto built = hj::makeComgrBuilder()->build(plain.source, hj::BuildKind::Executable, executable);
+    hj::keepBuildLog(built, scratch);
+    JIT_REQUIRE("The build for " + target.targetId() + " failed: " + built.message, built.ok());
+
+    const size_t   K         = plain.ks.front();
+    constexpr auto workspace = hipblaslt_jit_test::workspaceLimit;
+    // Same type, sizes and every other stride; the padded layout is the rejected one.
+    auto rejected = hipblaslt_jit_test::fp16Gemm(false, K);
+    rejected.resetTensor(TensileLite::ContractionProblemGemm::A,
+                         rocisa::DataType::Half,
+                         {256, K, 1},
+                         {1, 512, 512 * K});
+    const auto supported = hipblaslt_jit_test::fp16Gemm(false, K);
+
+    hj::JitLibrary library(scratch / "library");
+    int            rejectedCalls  = 0;
+    int            supportedCalls = 0;
+    const auto     queryRejected  = [&] {
+        library.beginQuery(true,
+                           target,
+                           backend,
+                           workspace,
+                                {},
+                           [&](size_t,
+                               const std::vector<std::string>&,
+                               std::vector<int32_t>&,
+                               hj::Status& failure) {
+                               ++rejectedCalls;
+                               failure = {hj::Status::Code::Failed,
+                                          hj::Stage::Generate,
+                                          "layout is not supported"};
+                           });
+        auto found = library.findTopSolutions(rejected, *target.hardware, 1);
+        library.endQuery();
+        return found;
+    };
+
+    JIT_REQUIRE("The rejected layout returned a solution",
+                queryRejected().empty() && rejectedCalls == 1);
+    JIT_REQUIRE("A rejected layout was generated again; calls: " + std::to_string(rejectedCalls),
+                queryRejected().empty() && rejectedCalls == 1);
+
+    library.beginQuery(true,
+                       target,
+                       backend,
+                       workspace,
+                       {},
+                       [&](size_t,
+                           const std::vector<std::string>&,
+                           std::vector<int32_t>& produced,
+                           hj::Status&           failure) {
+                           ++supportedCalls;
+                           const auto solutions = hj::supportingSolutions(
+                               plain.source.solutions, supported, *target.hardware, workspace);
+                           failure = library.publish(
+                               key, target.device, supported, executable, solutions, produced);
+                       });
+    const auto found  = library.findTopSolutions(supported, *target.hardware, 1);
+    const auto status = library.queryStatus();
+    library.endQuery();
+    JIT_REQUIRE("A supported layout that follows a rejected one was not generated; calls: "
+                    + std::to_string(supportedCalls),
+                supportedCalls == 1);
+    JIT_REQUIRE("The supported layout produced no solution: " + status.message,
+                status.ok() && found.size() == 1 && found.front()
+                    && found.front()->KernelName() == plain.source.solutions.front()->kernelName);
+
+    // A failed attempt that differs only in uniform summation order, or only in
+    // the alpha or beta restriction, must not suppress the supported request.
+    const auto restrictive = [&](TensileLite::ContractionProblemGemm rejected,
+                                 TensileLite::ContractionProblemGemm allowed,
+                                 const char*                         name) {
+        hj::JitLibrary local(scratch / name);
+        int            calls = 0;
+        const auto query = [&](const TensileLite::ContractionProblemGemm& problem, bool publish) {
+            local.beginQuery(true,
+                             target,
+                             backend,
+                             workspace,
+                             {},
+                             [&](size_t,
+                                 const std::vector<std::string>&,
+                                 std::vector<int32_t>& produced,
+                                 hj::Status&           failure) {
+                                 ++calls;
+                                 if(!publish)
+                                 {
+                                     failure = {hj::Status::Code::Failed,
+                                                hj::Stage::Generate,
+                                                "restriction is not supported"};
+                                     return;
+                                 }
+                                 const auto solutions = hj::supportingSolutions(
+                                     plain.source.solutions, allowed, *target.hardware, workspace);
+                                 failure = local.publish(
+                                     key, target.device, allowed, executable, solutions, produced);
+                             });
+            auto       got    = local.findTopSolutions(problem, *target.hardware, 1);
+            const auto status = local.queryStatus();
+            local.endQuery();
+            return std::pair{std::move(got), status};
+        };
+        const auto failed = query(rejected, false);
+        JIT_REQUIRE(std::string(name) + " rejected request returned a solution",
+                    failed.first.empty() && calls == 1);
+        const auto again = query(rejected, false);
+        JIT_REQUIRE(std::string(name) + " rejected request was generated again",
+                    again.first.empty() && calls == 1);
+        const auto passed = query(allowed, true);
+        JIT_REQUIRE(std::string(name)
+                        + " supported request was not generated; calls: " + std::to_string(calls),
+                    calls == 2);
+        JIT_REQUIRE(std::string(name)
+                        + " supported request produced no solution: " + passed.second.message,
+                    passed.second.ok() && passed.first.size() == 1);
+    };
+
+    auto alphaRejected = supported;
+    alphaRejected.setAlphaRestriction(TensileLite::ScalarValue::One);
+    restrictive(alphaRejected, supported, "alpha-restriction");
+
+    auto betaRejected = supported;
+    betaRejected.setBetaRestriction(TensileLite::ScalarValue::One);
+    restrictive(betaRejected, supported, "beta-restriction");
+
+    auto usoRejected = supported;
+    usoRejected.setParams().setUniformSummationOrder(1);
+    auto usoAllowed = supported;
+    usoAllowed.setParams().setUniformSummationOrder(0);
+    restrictive(usoRejected, usoAllowed, "uniform-summation");
+
+    // GELU and ReLU share the frontend's Hipblaslt_all activation. The attempt
+    // key has to carry activationEnum or the rejected GELU suppresses ReLU.
+    auto geluRejected = supported;
+    geluRejected.setParams().setActivationEnum(TensileLite::ActivationType::Gelu);
+    auto reluSupported = supported;
+    reluSupported.setParams().setActivationEnum(TensileLite::ActivationType::Relu);
+    restrictive(geluRejected, reluSupported, "activation");
+}
+
+TEST_CASE("an empty walk keeps a layout rejection", "[jit-cpu]")
+{
+    auto empty = [](int) {
+        hj::ProviderPage<int> page;
+        page.layoutRuledOut = false;
+        return page;
+    };
+    auto ruledOut = [](int) {
+        hj::ProviderPage<int> page;
+        page.layoutRuledOut = true;
+        return page;
+    };
+    const auto equalityEmpty = hj::fillUniqueSlots<int>(
+        ruledOut, [](int, const std::vector<int>&) { return false; }, 1, false);
+    JIT_REQUIRE("an empty equality walk dropped the other walk's layout rejection",
+                equalityEmpty.layoutRuledOut && equalityEmpty.kept.empty());
+    const auto othersEmpty = hj::fillUniqueSlots<int>(
+        empty, [](int, const std::vector<int>&) { return false; }, 1, true);
+    JIT_REQUIRE("an empty later walk dropped equality's layout rejection",
+                othersEmpty.layoutRuledOut && othersEmpty.kept.empty());
+    // Equality kept a compatible algorithm. The other walk rejected its
+    // candidates. The rejection must not hide the algorithm that was kept.
+    JIT_REQUIRE("a layout rejection hid an accepted algorithm",
+                !hj::layoutRuledOutForQuery(true, false));
+    JIT_REQUIRE("an empty selection dropped a layout rejection",
+                hj::layoutRuledOutForQuery(true, true));
+}
+
+TEST_CASE("a JIT hit does not clear a prebuilt layout rejection", "[jit-cpu]")
+{
+    // Two slots, one JIT row, no prebuilt row. The JIT row must not clear the flag.
+    JIT_REQUIRE("a JIT hit cleared a layout rejection", hj::layoutRuledOutForQuery(true, 0, 0, 1));
+    JIT_REQUIRE("a prebuilt row kept a layout rejection",
+                !hj::layoutRuledOutForQuery(true, 1, 0, 0));
+}
+
+TEST_CASE("a duplicate prefix does not fill a slot", "[jit-cpu]")
+{
+    // Equality already selected 1. Prediction's prefix is [1, 2]. One slot remains.
+    const std::vector<int> ranked{1, 2};
+    auto                   prediction = [&](int room) {
+        hj::ProviderPage<int> page;
+        const auto            count = std::min(room, static_cast<int>(ranked.size()));
+        if(count > 0)
+            page.results.assign(ranked.begin(), ranked.begin() + count);
+        return page;
+    };
+    auto duplicate = [](int candidate, const std::vector<int>& unique) {
+        if(candidate == 1)
+            return true;
+        for(int kept : unique)
+            if(kept == candidate)
+                return true;
+        return false;
+    };
+    const auto filled = hj::fillUniqueSlots<int>(prediction, duplicate, 1, false);
+    JIT_REQUIRE("a duplicate prefix consumed the remaining slot",
+                filled.kept.size() == 1 && filled.kept.front() == 2);
+}
+
+TEST_CASE("a repeated index does not fill a second slot", "[jit-cpu]")
+{
+    std::vector<int32_t>     accepted;
+    std::vector<std::string> excluded;
+    JIT_REQUIRE("the first index was rejected",
+                hj::acceptJitIndex(accepted, excluded, 7, "kernel"));
+    JIT_REQUIRE("a repeated index filled another slot",
+                !hj::acceptJitIndex(accepted, excluded, 7, "kernel") && accepted.size() == 1);
+}
+
+TEST_CASE("an accepted index excludes its kernel from the next backend", "[jit-cpu]")
+{
+    std::vector<int32_t>     accepted;
+    std::vector<std::string> excluded{"other"};
+    JIT_REQUIRE("a new index was rejected", hj::acceptJitIndex(accepted, excluded, 3, "kernel-a"));
+    JIT_REQUIRE("the published kernel was not excluded",
+                std::find(excluded.begin(), excluded.end(), "kernel-a") != excluded.end());
 }
