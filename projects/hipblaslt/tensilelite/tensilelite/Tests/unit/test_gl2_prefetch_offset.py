@@ -1411,7 +1411,8 @@ class TestGL2PrefetchOffset:
 
 def _assemble_for_target(asm, obj_path):
     """Assemble for TARGET without a device present. assemble_kernel targets the
-    detected GPU, which a CPU-only runner does not have."""
+    detected GPU, which a CPU-only runner does not have. The caller builds with
+    build_kernel's default target, TARGET, so the directive and -mcpu agree."""
     clang = shutil.which("amdclang++")
     if clang is None:
         pytest.skip("amdclang++ not found")
@@ -1525,6 +1526,41 @@ def test_gl2_prefetch_codegen(cfg, tmp_path):
     asm, _, _ = build_kernel(cfg, with_prefetch=True)
     _assemble_for_target(asm, str(tmp_path / f"gl2_{cfg.name}.o"))
     _cover_kwa_gl2_hooks(cfg)
+
+
+class _StopBeforeLaunch(Exception):
+    """Raised in place of the assembler call, so run_config stops before the launch."""
+
+
+@pytest.mark.parametrize("arch", ["gfx1250", "gfx1250-strict"])
+def test_gpu_path_builds_for_the_device_it_runs_on(arch, monkeypatch, tmp_path):
+    """run_config's ``.amdgcn_target`` directive matches the ``-mcpu`` assemble_kernel passes.
+
+    Runs on CPU: the assembler command is captured at ``subprocess.check_call``, and the
+    test stops there. The GPU path itself only runs on gfx1250 hardware, so without this
+    a directive hard-coded back to ``gfx1250`` would go unnoticed until a gfx1250-strict
+    runner, where clang rejects a gfx1250 directive under ``-mcpu=gfx1250-strict``.
+    """
+    import gpu_detection
+
+    monkeypatch.setenv("TENSILE_GPU_TARGET", arch)
+    gpu_detection.detect_gpu_target.cache_clear()
+    captured = {}
+
+    def capture_and_stop(cmd, *args, **kwargs):
+        captured["mcpu"] = next(a for a in cmd if a.startswith("-mcpu="))[len("-mcpu="):]
+        with open(cmd[-1]) as source:  # the .s file; assemble_kernel deletes it afterwards
+            captured["asm"] = source.read()
+        raise _StopBeforeLaunch
+
+    monkeypatch.setattr(subprocess, "check_call", capture_and_stop)
+    try:
+        with pytest.raises(_StopBeforeLaunch):
+            run_config(CONFIGS[0], str(tmp_path))
+    finally:
+        gpu_detection.detect_gpu_target.cache_clear()
+    assert captured["mcpu"] == arch
+    assert f'.amdgcn_target "amdgcn-amd-amdhsa--{arch}"' in captured["asm"]
 
 
 # ---------------------------------------------------------------------------

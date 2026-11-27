@@ -110,6 +110,8 @@ test_categories:
       - "tensilelite/Tests/unit"
     pytest_args:
       - "--snapshot-warn-unused"
+      # Fail when hip-python or a GPU is missing, instead of skipping every gpu test.
+      - "--require-gpu"
     labels:
       - "comprehensive"
       - "nightly"
@@ -122,6 +124,8 @@ test_categories:
       - "tensilelite/Tests/unit"
     pytest_args:
       - "--snapshot-warn-unused"
+      # Fail when hip-python or a GPU is missing, instead of skipping every gpu test.
+      - "--require-gpu"
     labels:
       - "full"
       - "all"

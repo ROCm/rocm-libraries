@@ -54,13 +54,39 @@ question that this section returns to below. It matters more than the headline c
 
 **Arch gating.** Unit tests: `@pytest.mark.gpu` (any GPU) or `@pytest.mark.gpu("gfx950")`; the
 [conftest](tensilelite/Tests/unit/conftest.py) skips what HIP's device can't run (`TENSILE_GPU_TARGET`
-overrides; `gfx1250` covers `gfx1250-strict`, not the reverse). One `gpu` mark per test, counting
-its param, function, class and module, with positional arch strings only; anything else is a usage
-error. `--require-gpu` (set by TheRock's `standard` tier) fails the run up front when hip-python or
-a GPU is missing, instead of skipping every `gpu` test. The gate covers `Tests/unit` only: elsewhere (e.g.
-`rocisa/test`) `gpu` just selects, and its arch arguments do nothing. No arch/hip `skipif`
-or in-body skip; `test_gpu_marker_guard.py` enforces it. Non-gate code uses `gpu_is(...)`.
-`Tests/common` configs use `skip-gfxNNNN`.
+overrides; `gfx1250` covers `gfx1250-strict`, not the reverse). This covers `Tests/unit` only:
+elsewhere (e.g. `rocisa/test`) `gpu` just selects, and its arch arguments do nothing. The device is
+read in a short-lived child process: HIP ignores `HIP_VISIBLE_DEVICES` once a process has
+initialised it, and [`Tests/conftest.py`](tensilelite/Tests/conftest.py) sets that variable later
+to give each pytest-xdist worker its own GPU. When HIP reports no device (`hipErrorNoDevice`), the
+`gpu` tests skip; any other HIP error fails each of them with the error's name. One `gpu` mark per
+test, counting its param, function, class and module, with positional arch strings only; anything
+else fails that test with its node id.
+
+`--require-gpu` fails the run up front when hip-python or a GPU is missing, instead of skipping
+every `gpu` test. With `TENSILE_GPU_TARGET` set it does not ask HIP, so it passes without a GPU. TheRock's `standard`, `comprehensive` and `full` tiers set it, and any run under
+`Tests` accepts it. It is also the only check that catches a GPU that cannot be opened (a broken
+`/dev/kfd`, for example), because HIP reports that as `hipErrorNoDevice` too. It checks that a GPU
+is there, not that any `gpu` test ran: a tier whose GPU matches none of the selected tests' arches
+still ends green.
+
+[`test_gpu_marker_guard.py`](tensilelite/Tests/unit/test_gpu_marker_guard.py) runs on the CPU lanes
+too and checks the unit tree statically. No test may decide from which GPU or HIP is present
+whether it runs: a `skipif`, an `xfail(run=False)`, an `if` that skips or returns early, or a `try`
+that imports `hip` and skips in its `except` is an error when it reads `hip`, `gpu_is`,
+`detect_gpu_target`, `GFX_TARGET`, `/dev/kfd` or a similar value, and so is `importorskip("hip")`.
+Names are followed through every assignment and function in the file. Each test has at most one
+well-formed `gpu` mark. A test without one may not call `run_on_gpu` or the HIP runtime, or branch
+on those values: on a pull request the CPU lanes run it without a GPU and TheRock's `standard` tier
+does not select it, so its GPU branch would run only in Math CI's `preliminary` and the nightly
+tiers. A launch inside a helper is not followed, but an unmarked test that launches through one fails
+on the CPU lane, where HIP has no device. The guard also does not follow names imported from other
+modules, a skip inside a function of a module outside `Tests/unit`, a return or branch inside a
+function defined in a test, or `getattr` and `eval`. A test that skips itself
+in one of those ways still runs wherever the whole unit tree runs on GPUs: Math CI's `preliminary`
+(gfx12, gfx90a, gfx942 and gfx950) and TheRock's nightly tiers. Code that needs the arch, for
+example a marked test picking its expected value, calls `gpu_is(...)`. `Tests/common` configs use
+`skip-gfxNNNN`.
 
 **Worker pools are not exercised here.** The unit suite pins `CpuThreads` to 1 (a session fixture in
 [`Tests/unit/conftest.py`](tensilelite/Tests/unit/conftest.py)), so its `ParallelMap` and `ParallelMap2`
