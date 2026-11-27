@@ -1122,9 +1122,9 @@ using GPU_ConvAIModelLoad_FP32 = ::testing::TestWithParam<int>;
 // heuristic on a load failure, it would otherwise be masked in CI. The .tn.model and .ktn.model
 // files are frugally-deep models EXCEPT the "*_metadata.tn.model" siblings, which are plain JSON
 // read by MIOpen directly (not by fdeep). Pure CPU fdeep load -- the handle is only used to
-// identify the device. An arch that ships no bundled models (e.g. gfx1250) is skipped only when
-// the system db holds no models at all; models present for other archs (a multi-arch install, a
-// dev build tree) are still loaded.
+// identify the device. An arch that ships no bundled models is skipped only when the system db
+// holds no models at all; models present for other archs (a multi-arch install, a dev build tree)
+// are still loaded.
 TEST_P(GPU_ConvAIModelLoad_FP32, BundledFdeepModelsLoad)
 {
     const auto db = GetSystemDbPath();
