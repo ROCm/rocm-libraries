@@ -114,7 +114,7 @@ import shutil
 import subprocess
 import time
 
-from .Common import print1, printWarning, ClientExecutionLock
+from .Common import print1, printWarning, ClientExecutionLock, recordClientLockHold
 from .Common.GlobalParameters import globalParameters
 
 # Wall-clock deadline in seconds from launch; all GPU processes must finish within this window
@@ -284,7 +284,9 @@ def runClientParallel(buildPath, configPaths, numGpus, timingEnabled, getClientE
 
         # Launch all GPU clients in parallel
         processes = []
-        with ClientExecutionLock(globalParameters["ClientExecutionLockPath"]):
+        lockPath = globalParameters["ClientExecutionLockPath"]
+        lockWaitStart = time.time()
+        with ClientExecutionLock(lockPath), recordClientLockHold(lockPath, lockWaitStart):
             try:
                 for perGpuConfig, perGpuResults, gpuIdx in gpuConfigs:
                     args = [clientExe, "--config-file", perGpuConfig]
