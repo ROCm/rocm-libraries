@@ -165,17 +165,16 @@ if( BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS )
       rocm_package_add_deb_dependencies(COMPONENT samples DEPENDS "${GFORTRAN_DEB}")
     endif()
   endif()
-  if(BUILD_CLIENTS_BENCHMARKS AND NOT USE_CUDA)
-    # hipblas-bench links amd-smi when it is found (clients/benchmarks) and then loads it at start.
-    # Declared here: rocm_create_package reads the package dependencies from this directory scope.
-    find_package( amd_smi CONFIG QUIET )
-    if( amd_smi_FOUND )
-      rocm_package_add_rpm_dependencies(COMPONENT benchmarks DEPENDS "amd-smi-lib")
-      rocm_package_add_deb_dependencies(COMPONENT benchmarks DEPENDS "amd-smi-lib")
-    endif()
-  endif()
 
   add_subdirectory( clients )
+
+  # Package dependencies the client directories record (see clients/benchmarks). Declared here,
+  # because rocm_create_package reads them from this directory scope.
+  get_property( HIPBLAS_BENCHMARKS_DEPENDS GLOBAL PROPERTY HIPBLAS_BENCHMARKS_PACKAGE_DEPENDS )
+  if( HIPBLAS_BENCHMARKS_DEPENDS )
+    rocm_package_add_rpm_dependencies(COMPONENT benchmarks DEPENDS ${HIPBLAS_BENCHMARKS_DEPENDS})
+    rocm_package_add_deb_dependencies(COMPONENT benchmarks DEPENDS ${HIPBLAS_BENCHMARKS_DEPENDS})
+  endif()
 endif( )
 
 # Build docs
