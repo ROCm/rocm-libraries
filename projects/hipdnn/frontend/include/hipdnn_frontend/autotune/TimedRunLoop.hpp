@@ -47,8 +47,10 @@ namespace hipdnn_frontend::autotune
  * produced @c timings without re-deriving it from the timing callback itself.
  * A finite negative elapsed reading is not a failure: it is re-measured in the same slot
  * within negativeReadingRetryBudget(), and @c discardedNegativeSamples counts those
- * re-measurements. @c timings never contains a negative sample. Exhausting the budget
- * sets @c restartUnstalled in a stalled pass and @c benchmarkFailed in an unstalled one.
+ * re-measurements. @c timings never contains a negative sample. In a stalled pass,
+ * exceeding K_STALLED_MAX_CONSECUTIVE_NEGATIVE_RETRIES consecutive retries or exhausting
+ * the total budget sets @c restartUnstalled; in an unstalled pass, exhausting the total
+ * budget sets @c benchmarkFailed.
  */
 struct TimedRunOutcome
 {
@@ -117,18 +119,23 @@ inline TimedSampleOutcome classifyTimedSample(const ExecutionTiming& timing, boo
                : TimedSampleOutcome::MALFORMED;
 }
 
-// Negative-reading retries per candidate in a stalled pass. Exhausting them restarts the
-// comparison unstalled.
-inline constexpr int K_STALLED_EXTRA_ATTEMPTS_PER_CANDIDATE = 2;
+// Minimum negative-reading retries per candidate, shared by stalled and unstalled passes.
+inline constexpr int K_MIN_EXTRA_ATTEMPTS_PER_CANDIDATE = 2;
 
-// An unstalled pass cannot restart, and the Windows HIP runtime reads negative at a steady
-// rate (ROCm/rocm-systems#12925), so a fixed budget fails healthy candidates more often the
-// more samples they take. The unstalled budget scales with the requested sample count,
-// which also caps total attempts at twice that count.
-inline int negativeReadingRetryBudget(int sampleSlots, bool stalled)
+// Maximum consecutive negative-reading retries in a stalled pass before restarting
+// unstalled. A third consecutive negative reading signals a persistently unusable stalled
+// span (for example short stalled work on Windows, ROCm/rocm-systems#12925), while
+// isolated negative readings still draw from the scaled total budget below.
+inline constexpr int K_STALLED_MAX_CONSECUTIVE_NEGATIVE_RETRIES = 2;
+
+// The Windows HIP runtime reads negative at a steady per-reading rate for both stalled
+// and unstalled spans (ROCm/rocm-systems#12925), so a fixed total budget fails or
+// restarts healthy candidates more often the more samples they take. Scaling the total
+// budget with the requested sample count caps total attempts at twice that count (three
+// when one sample is requested).
+inline int negativeReadingRetryBudget(int sampleSlots)
 {
-    return stalled ? K_STALLED_EXTRA_ATTEMPTS_PER_CANDIDATE
-                   : std::max(sampleSlots, K_STALLED_EXTRA_ATTEMPTS_PER_CANDIDATE);
+    return std::max(sampleSlots, K_MIN_EXTRA_ATTEMPTS_PER_CANDIDATE);
 }
 
 // Outcome of resolving one output sample slot: either a valid measurement, a
@@ -143,9 +150,10 @@ enum class MeasureOutcome
 };
 
 // Resolves one output sample: calls timeOnce, transparently retrying a TRANSIENT_INVALID
-// sample with a fresh measurement (bounded by extraAttemptsRemaining, shared across the
-// whole candidate run and decremented in place). `attempt` is used only for log/error-message
-// text; on RECORDED, `timing` holds the recorded measurement.
+// sample with a fresh measurement (bounded by extraAttemptsRemaining across the whole
+// candidate run and, when stalled, by K_STALLED_MAX_CONSECUTIVE_NEGATIVE_RETRIES within
+// this slot). `attempt` is used only for log/error-message text; on RECORDED, `timing`
+// holds the recorded measurement.
 template <typename TimeOnceFn>
 MeasureOutcome measureOneSample(TimeOnceFn&& timeOnce,
                                 bool stalled,
@@ -154,6 +162,7 @@ MeasureOutcome measureOneSample(TimeOnceFn&& timeOnce,
                                 ExecutionTiming& timing,
                                 std::string& errorMessage)
 {
+    int consecutiveNegativeRetries = 0;
     for(;;)
     {
         auto benchErr = timeOnce(timing);
@@ -175,12 +184,16 @@ MeasureOutcome measureOneSample(TimeOnceFn&& timeOnce,
         }
         if(sampleOutcome == TimedSampleOutcome::TRANSIENT_INVALID)
         {
+            // Repeated negative readings under the stall gate say the stalled span
+            // is unusable for this workload, not that the candidate is broken.
+            // Dropping it would silently remove the fastest candidates (the ones
+            // closest to the timer floor), so re-measure the comparison unstalled.
+            if(stalled && consecutiveNegativeRetries >= K_STALLED_MAX_CONSECUTIVE_NEGATIVE_RETRIES)
+            {
+                return MeasureOutcome::RESTART_UNSTALLED;
+            }
             if(extraAttemptsRemaining == 0)
             {
-                // Repeated negative readings under the stall gate say the stalled span
-                // is unusable for this workload, not that the candidate is broken.
-                // Dropping it would silently remove the fastest candidates (the ones
-                // closest to the timer floor), so re-measure the comparison unstalled.
                 if(stalled)
                 {
                     return MeasureOutcome::RESTART_UNSTALLED;
@@ -191,6 +204,7 @@ MeasureOutcome measureOneSample(TimeOnceFn&& timeOnce,
                 return MeasureOutcome::FAILED;
             }
             --extraAttemptsRemaining;
+            ++consecutiveNegativeRetries;
             continue; // Fresh measurement replaces the invalid one in the same slot.
         }
         errorMessage = "Benchmark iteration " + std::to_string(attempt)
@@ -220,7 +234,7 @@ TimedRunOutcome runUntilStable(int maxIterations,
     TimedRunOutcome outcome;
     outcome.timings.reserve(static_cast<size_t>(maxIterations));
 
-    const int retryBudget = negativeReadingRetryBudget(maxIterations, stalled);
+    const int retryBudget = negativeReadingRetryBudget(maxIterations);
     int extraAttemptsRemaining = retryBudget;
     bool converged = false;
     for(int t = 0; t < maxIterations; ++t)
@@ -288,7 +302,7 @@ TimedRunOutcome runFixedAverage(int timedIterations,
     TimedRunOutcome outcome;
     outcome.timings.reserve(static_cast<size_t>(timedIterations));
 
-    const int retryBudget = negativeReadingRetryBudget(timedIterations, stalled);
+    const int retryBudget = negativeReadingRetryBudget(timedIterations);
     int extraAttemptsRemaining = retryBudget;
     for(int t = 0; t < timedIterations; ++t)
     {

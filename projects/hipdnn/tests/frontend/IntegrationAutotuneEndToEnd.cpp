@@ -192,6 +192,116 @@ TEST_F(IntegrationAutotuneStrategySmoke, RunUntilStableMaxEqualsWindow)
 class IntegrationAutotuneStallRecovery : public hipdnn_tests::AutotuneIntegrationFixture
 {
 protected:
+    static constexpr auto MIN_EXPECTED_STALL = std::chrono::milliseconds(1500);
+    static constexpr auto MAX_EXPECTED_STALL = std::chrono::milliseconds(3500);
+
+    static std::string formatResults(const std::vector<AutotuneResult>& results)
+    {
+        std::string out = "[";
+        for(size_t i = 0; i < results.size(); ++i)
+        {
+            const auto& r = results[i];
+            if(i > 0)
+            {
+                out += ", ";
+            }
+            out += r.engineName + "{ok=" + (r.succeeded ? "true" : "false")
+                   + ", quality=" + std::to_string(static_cast<int>(r.timingQuality))
+                   + ", iters=" + std::to_string(r.iterationsRun)
+                   + ", avgMs=" + std::to_string(r.avgTimeMs) + "}";
+        }
+        out += "]";
+        return out;
+    }
+
+    static void assertUniformUnstalledResults(const std::vector<AutotuneResult>& results)
+    {
+        // Every succeeded engine must carry the SAME timing quality: a discarded,
+        // re-measured sweep is uniformly UNSTALLED, never a mix of
+        // DEVICE_ONLY and UNSTALLED results.
+        std::optional<TimingQuality> commonQuality;
+        bool checkedAnySucceeded = false;
+        for(const auto& r : results)
+        {
+            if(!r.succeeded)
+            {
+                continue;
+            }
+            checkedAnySucceeded = true;
+            if(!commonQuality.has_value())
+            {
+                commonQuality = r.timingQuality;
+            }
+            EXPECT_EQ(r.timingQuality, *commonQuality)
+                << "engine " << r.engineName
+                << " was ranked with a timing quality that differs from the rest of "
+                   "the pass -- the mixed sweep was not discarded ("
+                << formatResults(results) << ")";
+        }
+        ASSERT_TRUE(checkedAnySucceeded) << "No engine succeeded during autotune";
+        ASSERT_TRUE(commonQuality.has_value());
+        EXPECT_EQ(*commonQuality, TimingQuality::UNSTALLED)
+            << "results were not re-measured unstalled after the mixed pass ("
+            << formatResults(results) << ")";
+
+        // The winner must come from that same uniformly-measured, re-run pass.
+        const auto winner
+            = std::find_if(results.begin(), results.end(), [](const AutotuneResult& r) {
+                  return r.succeeded && r.rank == 0;
+              });
+        ASSERT_NE(winner, results.end()) << "No winner selected";
+        EXPECT_EQ(winner->timingQuality, TimingQuality::UNSTALLED)
+            << "winner was not one of the uniformly-measured results (" << formatResults(results)
+            << ")";
+    }
+
+    // Runs autotune with only AutotunePluginEngineHostSyncs. As the first and only
+    // candidate, its first stalled timed iteration calls hipStreamSynchronize inside
+    // executeOpGraph before hipEventElapsedTime is invoked, so waiting out the ~2 s
+    // watchdog proves stalling is active without depending on hipEventElapsedTime's sign
+    // (https://github.com/ROCm/rocm-systems/issues/12925).
+    [[maybe_unused]] void assertHostSyncsTripsWatchdog()
+    {
+        ConvGraphBundle bundle;
+        createBuiltConvGraph("autotune_stall_recovery_probe_conv", bundle);
+
+        auto result = bundle.graph->add_all_engines();
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+        int64_t maxWs = 0;
+        result = bundle.graph->get_estimated_max_workspace_size(maxWs);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+        const Workspace workspace(static_cast<size_t>(maxWs));
+
+        AutotuneConfig config;
+        config.mode = TuneMode::STANDARD;
+        config.strategy = AutotuneStrategy::FIXED_AVERAGE;
+        config.warmupIterations = 1;
+        config.timedIterations = 1;
+        config.engineIdFilter
+            = {hipdnn_tests::plugin_constants::engineId<AutotunePluginEngineHostSyncs>()};
+
+        std::vector<AutotuneResult> results;
+        const auto start = std::chrono::steady_clock::now();
+        result = bundle.graph->autotune(
+            _handle, bundle.variantPack, workspace.get(), maxWs, config, {}, &results);
+        const auto elapsed = std::chrono::steady_clock::now() - start;
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+        EXPECT_GE(elapsed, MIN_EXPECTED_STALL)
+            << "HostSyncs-only probe finished in "
+            << std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count()
+            << " ms; stall gate did not engage for this independent call ("
+            << formatResults(results) << ")";
+        EXPECT_LT(elapsed, MAX_EXPECTED_STALL)
+            << "HostSyncs-only probe took "
+            << std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count()
+            << " ms; timeout must cost at most one stalled attempt (" << formatResults(results)
+            << ")";
+        assertUniformUnstalledResults(results);
+    }
+
     // This test requires a usable stall gate. Fail constructor errors loudly; skip only
     // when the capability query succeeds and reports no support.
     static bool stallGateAvailable()
@@ -252,6 +362,13 @@ protected:
         config.windowSize = 3;
         config.maxIterations = 5;
         config.timedIterations = 3;
+        // Measure one healthy engine before HostSyncs so the stalled pass records a
+        // DEVICE_ONLY result before tripping the watchdog, without exposing the sweep to
+        // five extra engines' worth of Windows negative readings
+        // (https://github.com/ROCm/rocm-systems/issues/12925).
+        config.engineIdFilter
+            = {hipdnn_tests::plugin_constants::engineId<AutotunePlugin>(),
+               hipdnn_tests::plugin_constants::engineId<AutotunePluginEngineHostSyncs>()};
 
         std::vector<AutotuneResult> results;
         const auto start = std::chrono::steady_clock::now();
@@ -260,61 +377,46 @@ protected:
         const auto elapsed = std::chrono::steady_clock::now() - start;
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
+        // Proves the timeout cost at most ONE stalled attempt at this sweep layer: the
+        // whole comparison breaks and reruns unstalled immediately, instead of letting
+        // every remaining candidate or iteration of the host-syncing engine retry into
+        // its own fresh watchdog wait. Two full timeouts would clear this bound.
+        EXPECT_LT(elapsed, MAX_EXPECTED_STALL)
+            << "run took " << std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count()
+            << " ms; a timeout must cost at most one stalled attempt at this sweep layer ("
+            << formatResults(results) << ")";
+
+        assertUniformUnstalledResults(results);
+
         // Proves this run genuinely deadlocked and was released by the watchdog,
         // rather than passing because nothing was ever stalled: the host-syncing
         // engine can only complete once StallGate::DEFAULT_TIMEOUT (2 s) elapses and
         // the watchdog writes the release signal itself. A run that took the normal
         // sub-second path for this tiny graph never hit that wait.
-        constexpr auto MIN_EXPECTED_STALL = std::chrono::milliseconds(1500);
+#if defined(_WIN32)
+        // On Windows, hipEventElapsedTime can still return negative values intermittently
+        // (https://github.com/ROCm/rocm-systems/issues/12925). If the healthy engine
+        // before HostSyncs exhausts its stalled negative-reading budget, autotune
+        // legitimately restarts unstalled before HostSyncs runs, so the watchdog never
+        // fires here. Probe HostSyncs alone to confirm stalling is actually active rather
+        // than silently disabled. Remove this branch when the runtime fix ships.
+        if(elapsed < MIN_EXPECTED_STALL)
+        {
+            GTEST_LOG_(INFO)
+                << "Windows early unstalled restart before HostSyncs ("
+                << std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count()
+                << " ms, results=" << formatResults(results)
+                << "); running HostSyncs-only stall probe (ROCm/rocm-systems#12925)";
+            assertHostSyncsTripsWatchdog();
+        }
+#else
         EXPECT_GE(elapsed, MIN_EXPECTED_STALL)
             << "run finished in "
             << std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count()
             << " ms; the stall watchdog's ~2s timeout was never waited out, so this "
-               "run did not exercise the comparison-local stall fallback";
-
-        // Proves the timeout cost at most ONE stalled attempt at this sweep layer: the
-        // whole comparison breaks and reruns unstalled immediately, instead of letting
-        // every remaining candidate or iteration of the host-syncing engine retry into
-        // its own fresh watchdog wait. Two full timeouts would clear this bound.
-        constexpr auto MAX_EXPECTED_STALL = std::chrono::milliseconds(3500);
-        EXPECT_LT(elapsed, MAX_EXPECTED_STALL)
-            << "run took " << std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count()
-            << " ms; a timeout must cost at most one stalled attempt at this sweep layer";
-
-        // Every succeeded engine must carry the SAME timing quality: a discarded,
-        // re-measured sweep is uniformly UNSTALLED, never a mix of
-        // DEVICE_ONLY and UNSTALLED results.
-        std::optional<TimingQuality> commonQuality;
-        bool checkedAnySucceeded = false;
-        for(const auto& r : results)
-        {
-            if(!r.succeeded)
-            {
-                continue;
-            }
-            checkedAnySucceeded = true;
-            if(!commonQuality.has_value())
-            {
-                commonQuality = r.timingQuality;
-            }
-            EXPECT_EQ(r.timingQuality, *commonQuality)
-                << "engine " << r.engineName
-                << " was ranked with a timing quality that differs from the rest of "
-                   "the pass -- the mixed sweep was not discarded";
-        }
-        ASSERT_TRUE(checkedAnySucceeded) << "No engine succeeded during autotune";
-        ASSERT_TRUE(commonQuality.has_value());
-        EXPECT_EQ(*commonQuality, TimingQuality::UNSTALLED)
-            << "results were not re-measured unstalled after the mixed pass";
-
-        // The winner must come from that same uniformly-measured, re-run pass.
-        const auto winner
-            = std::find_if(results.begin(), results.end(), [](const AutotuneResult& r) {
-                  return r.succeeded && r.rank == 0;
-              });
-        ASSERT_NE(winner, results.end()) << "No winner selected";
-        EXPECT_EQ(winner->timingQuality, TimingQuality::UNSTALLED)
-            << "winner was not one of the uniformly-measured results";
+               "run did not exercise the comparison-local stall fallback ("
+            << formatResults(results) << ")";
+#endif
     }
 };
 
@@ -364,6 +466,7 @@ TEST_F(IntegrationAutotuneStallRecovery, LaterIndependentCallIsEligibleToStallAg
             _handle, bundle.variantPack, workspace.get(), maxWs, config, {}, &results);
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
+        std::optional<TimingQuality> commonQuality;
         bool checkedAnySucceeded = false;
         for(const auto& r : results)
         {
@@ -372,12 +475,36 @@ TEST_F(IntegrationAutotuneStallRecovery, LaterIndependentCallIsEligibleToStallAg
                 continue;
             }
             checkedAnySucceeded = true;
-            EXPECT_EQ(r.timingQuality, TimingQuality::DEVICE_ONLY)
+            if(!commonQuality.has_value())
+            {
+                commonQuality = r.timingQuality;
+            }
+            EXPECT_EQ(r.timingQuality, *commonQuality)
                 << "engine " << r.engineName
-                << " was not measured device-only; an earlier call's timeout must not "
-                   "disable stalling for this independent comparison";
+                << " was ranked with a mixed timing quality in the follow-up call ("
+                << formatResults(results) << ")";
         }
-        EXPECT_TRUE(checkedAnySucceeded) << "No engine succeeded for the follow-up autotune call";
+        ASSERT_TRUE(checkedAnySucceeded) << "No engine succeeded for the follow-up autotune call";
+        ASSERT_TRUE(commonQuality.has_value());
+#if defined(_WIN32)
+        // On Windows, intermittent negative readings (ROCm/rocm-systems#12925) can still
+        // restart a healthy stalled sweep unstalled. If that happens, prove the earlier
+        // call's timeout did not disable stalling by verifying a HostSyncs-only call
+        // still trips the watchdog before hipEventElapsedTime is invoked. Remove this
+        // branch when the runtime fix ships.
+        if(*commonQuality == TimingQuality::UNSTALLED)
+        {
+            GTEST_LOG_(INFO) << "Windows follow-up restarted unstalled (results="
+                             << formatResults(results)
+                             << "); running HostSyncs-only stall probe (ROCm/rocm-systems#12925)";
+            assertHostSyncsTripsWatchdog();
+            return;
+        }
+#endif
+        EXPECT_EQ(*commonQuality, TimingQuality::DEVICE_ONLY)
+            << "follow-up call was not measured device-only; an earlier call's timeout "
+               "must not disable stalling for this independent comparison ("
+            << formatResults(results) << ")";
     });
 }
 

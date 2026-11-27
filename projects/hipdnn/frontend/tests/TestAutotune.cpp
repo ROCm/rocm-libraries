@@ -312,9 +312,9 @@ TEST(TestAutotune, RunUntilStableReportsCovValidityToCallback)
 // enter the timings vector, the CoV convergence check, or averaging. Zero is a valid sample.
 //
 // A finite negative sample is not a failure: it is re-measured within a per-candidate
-// budget that counts every negative reading in the pass, so it never enters timings. A
-// stalled pass allows two and then restarts unstalled; an unstalled pass allows one per
-// requested sample (at least two) and then fails the candidate.
+// total budget of max(requested samples, 2), so it never enters timings. In a stalled
+// pass, three consecutive negative readings or exhausting the total budget restarts
+// unstalled; in an unstalled pass, exhausting the total budget fails the candidate.
 // ============================================================================
 
 TEST(TestAutotune, RunUntilStableReplacesSingleTransientNegativeElapsed)
@@ -338,7 +338,7 @@ TEST(TestAutotune, RunUntilStableReplacesSingleTransientNegativeElapsed)
 
 TEST(TestAutotune, RunUntilStableUnstalledPassBudgetsNegativesByMaxIterations)
 {
-    // The unstalled budget is maxIterations, not windowSize or the stalled budget of two:
+    // The unstalled budget is maxIterations, not windowSize or the minimum budget of two:
     // either of those would fail this candidate on its fourth negative reading.
     ScriptedTimer timer{{-1.0f, -2.0f, -3.0f, -4.0f, 10.0f, 10.0f, 10.0f}, -1, 0};
     timer.quality = TimingQuality::UNSTALLED;
@@ -360,9 +360,9 @@ TEST(TestAutotune, RunUntilStableUnstalledPassBudgetsNegativesByMaxIterations)
 TEST(TestAutotune, RunFixedAverageRestartsStalledPassAfterThirdNegativeElapsed)
 {
     // Stalled timing can read negative for every sample of short work (seen on Windows).
-    // The candidate is not at fault, so exhausting the budget must restart the comparison
-    // unstalled instead of dropping the candidate. The 4th (valid) scripted value is never
-    // reached, proving the candidate cannot spin forever waiting for a clean reading.
+    // The candidate is not at fault, so three consecutive negative readings must restart
+    // the comparison unstalled instead of dropping the candidate. The 4th (valid) scripted
+    // value is never reached, proving the candidate cannot spin forever waiting for a clean reading.
     ScriptedTimer timer{{-1.0f, -2.0f, -3.0f, 5.0f}, -1, 0};
     auto outcome = autotune::detail::runFixedAverage(
         /*timedIterations=*/3, /*stalled=*/true, timer, noopFixedAverageLog);
@@ -374,10 +374,68 @@ TEST(TestAutotune, RunFixedAverageRestartsStalledPassAfterThirdNegativeElapsed)
     EXPECT_EQ(timer.callCount, 3);
 }
 
+TEST(TestAutotune, RunUntilStableStalledPassAbsorbsIsolatedNegativesUpToMaxIterations)
+{
+    // Isolated negative readings spread across slots draw from the scaled total budget
+    // (maxIterations) rather than restarting the stalled pass after two total negatives.
+    ScriptedTimer timer{{-1.0f, 10.0f, -1.0f, 20.0f, -1.0f, 10.0f, -1.0f, 10.0f, 10.0f}, -1, 0};
+    auto outcome = autotune::detail::runUntilStable(
+        /*maxIterations=*/5,
+        WINDOW_SIZE,
+        STABILITY_THRESHOLD,
+        /*stalled=*/true,
+        timer,
+        noopRunUntilStableLog);
+
+    EXPECT_TRUE(outcome.converged);
+    EXPECT_FALSE(outcome.benchmarkFailed);
+    EXPECT_FALSE(outcome.restartUnstalled);
+    EXPECT_EQ(outcome.timings, (std::vector<float>{10.0f, 20.0f, 10.0f, 10.0f, 10.0f}));
+    EXPECT_EQ(outcome.finalQuality, TimingQuality::DEVICE_ONLY);
+    EXPECT_EQ(outcome.discardedNegativeSamples, 4);
+    EXPECT_EQ(timer.callCount, 9);
+}
+
+TEST(TestAutotune, RunUntilStableStalledPassRestartsAfterThreeConsecutiveNegativesWithBudgetLeft)
+{
+    // Even with a larger total budget (maxIterations = 10), three consecutive negative
+    // readings in a stalled pass bail out immediately instead of burning the full budget.
+    ScriptedTimer timer{{10.0f, -1.0f, -2.0f, -3.0f, 10.0f}, -1, 0};
+    auto outcome = autotune::detail::runUntilStable(MAX_ITERATIONS,
+                                                    WINDOW_SIZE,
+                                                    STABILITY_THRESHOLD,
+                                                    /*stalled=*/true,
+                                                    timer,
+                                                    noopRunUntilStableLog);
+
+    EXPECT_FALSE(outcome.converged);
+    EXPECT_FALSE(outcome.benchmarkFailed);
+    EXPECT_TRUE(outcome.restartUnstalled);
+    EXPECT_EQ(outcome.timings, (std::vector<float>{10.0f}));
+    EXPECT_EQ(outcome.discardedNegativeSamples, 2);
+    EXPECT_EQ(timer.callCount, 4);
+}
+
+TEST(TestAutotune, RunFixedAverageStalledPassRestartsOnceIsolatedNegativesExceedBudget)
+{
+    // Non-consecutive negatives never trigger the consecutive cap, but exceeding the
+    // scaled total budget (timedIterations = 3) still restarts the stalled pass unstalled.
+    ScriptedTimer timer{{-1.0f, 5.0f, -1.0f, -1.0f, 5.0f, -1.0f, 5.0f}, -1, 0};
+    auto outcome = autotune::detail::runFixedAverage(
+        /*timedIterations=*/3, /*stalled=*/true, timer, noopFixedAverageLog);
+
+    EXPECT_FALSE(outcome.converged);
+    EXPECT_FALSE(outcome.benchmarkFailed);
+    EXPECT_TRUE(outcome.restartUnstalled);
+    EXPECT_EQ(outcome.timings, (std::vector<float>{5.0f, 5.0f}));
+    EXPECT_EQ(outcome.discardedNegativeSamples, 3);
+    EXPECT_EQ(timer.callCount, 6);
+}
+
 TEST(TestAutotune, RunFixedAverageUnstalledPassReplacesAsManyNegativesAsRequestedSamples)
 {
-    // An unstalled pass cannot restart, so it absorbs one negative reading per requested
-    // sample; the stalled budget of two would fail here.
+    // An unstalled pass cannot restart and has no consecutive cap, so it absorbs one
+    // negative reading per requested sample even when they arrive back-to-back.
     ScriptedTimer timer{{-1.0f, -2.0f, -3.0f, 5.0f, 5.0f, 5.0f}, -1, 0};
     timer.quality = TimingQuality::UNSTALLED;
     auto outcome = autotune::detail::runFixedAverage(
