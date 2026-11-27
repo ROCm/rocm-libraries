@@ -578,8 +578,17 @@ namespace rocsparse
             if(gid == first_wg_in_row && lid == 0)
             {
                 // The first workgroup handles the output initialization.
-                const Y out_val = y[row];
-                temp_sum        = (beta - static_cast<T>(1)) * out_val;
+                // If beta == 0, y is write-only: overwrite it with zero instead of cancelling
+                // the old value through the atomics, which leaks NaN, Inf and round-off from it.
+                if(beta == static_cast<T>(0))
+                {
+                    y[row] = static_cast<Y>(0);
+                }
+                else
+                {
+                    const Y out_val = y[row];
+                    temp_sum        = (beta - static_cast<T>(1)) * out_val;
+                }
                 // Add contributions from all extra vectors
                 for(rocsparse_int i = 0; i < num_extra; ++i)
                 {
@@ -604,8 +613,17 @@ namespace rocsparse
 #if ROCSPARSE_CSRMV_RELEASE_WITH_THREADFENCE
                 __threadfence();
 #else
-                __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
-                __builtin_amdgcn_s_waitcnt(0);
+                if(beta == static_cast<T>(0))
+                {
+                    // The store of zero to y[row] has to be visible to the atomics of the other
+                    // workgroups before they are released, which needs device scope.
+                    __threadfence();
+                }
+                else
+                {
+                    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
+                    __builtin_amdgcn_s_waitcnt(0);
+                }
 #endif
 
                 // Release other workgroups
@@ -1308,8 +1326,17 @@ namespace rocsparse
             if(gid == first_wg_in_row && lid == 0)
             {
                 // The first workgroup handles the output initialization.
-                const Y out_val = y[row];
-                temp_sum        = (beta - static_cast<T>(1)) * out_val;
+                // If beta == 0, y is write-only: overwrite it with zero instead of cancelling
+                // the old value through the atomics, which leaks NaN, Inf and round-off from it.
+                if(beta == static_cast<T>(0))
+                {
+                    y[row] = static_cast<Y>(0);
+                }
+                else
+                {
+                    const Y out_val = y[row];
+                    temp_sum        = (beta - static_cast<T>(1)) * out_val;
+                }
 
                 // All inter thread communication is done using atomics, therefore cache flushes or
                 // invalidates should not be needed (thus __threadfence() has been removed to regain
@@ -1324,8 +1351,17 @@ namespace rocsparse
 #if ROCSPARSE_CSRMV_RELEASE_WITH_THREADFENCE
                 __threadfence();
 #else
-                __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
-                __builtin_amdgcn_s_waitcnt(0);
+                if(beta == static_cast<T>(0))
+                {
+                    // The store of zero to y[row] has to be visible to the atomics of the other
+                    // workgroups before they are released, which needs device scope.
+                    __threadfence();
+                }
+                else
+                {
+                    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
+                    __builtin_amdgcn_s_waitcnt(0);
+                }
 #endif
 
                 // Release other workgroups

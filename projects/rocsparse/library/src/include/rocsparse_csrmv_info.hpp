@@ -64,6 +64,10 @@ typedef struct _rocsparse_csrmv_info
     // on the mat info so a later routine can reuse it.
     int64_t max_nnz_per_row = -1;
 
+    // Algorithm the analysis data was built for, never csrmv_alg_default. Only
+    // the members of that algorithm (adaptive, lrb or nnzsplit) hold data.
+    rocsparse::csrmv_alg analysis_alg = rocsparse::csrmv_alg_default;
+
     _rocsparse_csrmv_info();
     ~_rocsparse_csrmv_info();
 
@@ -80,6 +84,11 @@ typedef struct _rocsparse_csrmv_info
     // none either.
     static rocsparse::csrmv_alg choose_alg(const _rocsparse_csrmv_info* csrmv_info,
                                            rocsparse_operation          operation);
+
+    // Whether preprocessing for alg and operation can keep this analysis. A
+    // csrmv_alg_default request keeps only an analysis that one built, as that
+    // is the one alg_for uses. Row-split reads no analysis.
+    bool is_analysis_for(rocsparse::csrmv_alg alg, rocsparse_operation operation) const;
 
 } * rocsparse_csrmv_info, *rocsparse_cscmv_info;
 
