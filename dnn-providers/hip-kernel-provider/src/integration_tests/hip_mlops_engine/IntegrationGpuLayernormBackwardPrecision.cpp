@@ -36,6 +36,16 @@ namespace hip_kernel_provider::layernorm_bwd_precision::test
 namespace
 {
 
+// The engine serving HIP MLops layernorm backward in this build: HIP_MLOPS_ENGINE, or its
+// per-operation ingestor engine in its place (HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR). Both
+// run the same kernel source.
+#ifdef HIPDNN_ENGINE_HIP_MLOPS_INGESTOR
+constexpr const char* SERVING_ENGINE_NAME = "hipkernel:LayernormBwd";
+#else
+constexpr const char* SERVING_ENGINE_NAME = HIP_MLOPS_ENGINE_NAME;
+#endif
+const int64_t SERVING_ENGINE_ID = engineNameToId(SERVING_ENGINE_NAME);
+
 // The HIP MLops layernorm backward kernel must stay accurate
 // in fp32 when the activations sit far from zero relative to their spread (|mean| >> std).
 // An uncentered dx = rstd*dy*scale - a*x - b subtracts terms of size |mean|*rstd that cancel
@@ -183,7 +193,7 @@ protected:
             .set_io_data_type(hipdnn_frontend::DataType::FLOAT)
             .set_intermediate_data_type(hipdnn_frontend::DataType::FLOAT)
             .set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
-        graphObj.set_preferred_engine_id_ext(HIP_MLOPS_ENGINE_ID);
+        graphObj.set_preferred_engine_id_ext(SERVING_ENGINE_ID);
 
         auto dyAttr = std::make_shared<TensorAttributes>(
             makeTensorAttributes("dy", hipdnn_frontend::DataType::FLOAT, dims, dataStrides));
@@ -231,8 +241,8 @@ protected:
         int64_t servingEngineId = 0;
         result = graphObj.get_execution_plan_engine_id(servingEngineId);
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-        ASSERT_EQ(servingEngineId, HIP_MLOPS_ENGINE_ID)
-            << "layernorm backward was not served by HIP_MLOPS_ENGINE";
+        ASSERT_EQ(servingEngineId, SERVING_ENGINE_ID)
+            << "layernorm backward was not served by " << SERVING_ENGINE_NAME;
 
         int64_t workspaceSize = 0;
         result = graphObj.get_workspace_size(workspaceSize);

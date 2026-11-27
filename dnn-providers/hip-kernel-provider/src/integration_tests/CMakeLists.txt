@@ -66,10 +66,20 @@ if(ENABLE_ASM_SDPA_ENGINE)
     endif()
 endif()
 
-if(ENABLE_HIP_MLOPS_ENGINE)
+# The HIP MLOps runtime suites, against whichever engines serve those operations:
+# HIP_MLOPS_ENGINE, or the per-operation ingestor engines in its place with
+# HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR.
+if(ENABLE_HIP_MLOPS_ENGINE OR HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR)
     target_sources(hip_kernel_provider_integration_tests PRIVATE
         hip_mlops_engine/IntegrationGpuPassByValue.cpp
         hip_mlops_engine/IntegrationGpuLayernormBackwardPrecision.cpp
+    )
+endif()
+if(HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR)
+    # This target links only the SDKs, not hip_kernel_provider_impl, so it does not inherit
+    # the provider's definition. The layernorm backward suite pins its engine by it.
+    target_compile_definitions(hip_kernel_provider_integration_tests
+        PRIVATE HIPDNN_ENGINE_HIP_MLOPS_INGESTOR=1
     )
 endif()
 
