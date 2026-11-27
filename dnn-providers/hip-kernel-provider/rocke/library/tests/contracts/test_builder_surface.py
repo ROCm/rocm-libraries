@@ -161,6 +161,52 @@ def test_a_builder_call_shape_change_is_reported(snapshot: dict) -> None:
     assert change.endswith("new parameter 'tuning' has no default")
 
 
+@pytest.mark.parametrize("key", ["returns", "spec"])
+def test_a_changed_return_or_spec_annotation_is_reported(
+    snapshot: dict, key: str
+) -> None:
+    live = copy.deepcopy(snapshot)
+    builder = _first_builder(live)
+    recorded = builder[key]
+    builder[key] = f"{recorded}Renamed"
+    name = f"{builder['module']}.{builder['builder']}"
+    assert (
+        f"{name}: {key} changed from {recorded} to {recorded}Renamed"
+        in find_breaking_changes(snapshot, live)
+    )
+
+
+def test_a_removed_builder_parameter_is_reported(snapshot: dict) -> None:
+    live = copy.deepcopy(snapshot)
+    builder = _first_builder(live)
+    removed, *_ = builder["parameters"].pop()
+    assert find_breaking_changes(snapshot, live) == [
+        f"{builder['module']}.{builder['builder']}: parameter {removed!r} is gone"
+    ]
+
+
+def test_reordered_positional_builder_parameters_are_reported(
+    snapshot: dict,
+) -> None:
+    """A call that passes the spec and a second argument by position binds them
+    the other way round, so a swap is a break even with every name kept."""
+    live = copy.deepcopy(snapshot)
+    builder = _first_builder(live)
+    builder["parameters"] = [
+        [name, "POSITIONAL_OR_KEYWORD", requirement]
+        for name, _, requirement in builder["parameters"]
+    ]
+    recorded = copy.deepcopy(live)
+    builder["parameters"].reverse()
+    order = [parameter[0] for parameter in recorded["builders"][0]["parameters"]]
+    assert find_breaking_changes(recorded, live) == [
+        (
+            f"{builder['module']}.{builder['builder']}: positional parameters "
+            f"reordered from {order} to {order[::-1]}"
+        )
+    ]
+
+
 def test_write_snapshot_refuses_an_unresolved_builder(tmp_path) -> None:
     unresolved = capture_surface([BuilderRef("kernels", "build_no_such_kernel")])
     target = tmp_path / "builder_surface.json"
