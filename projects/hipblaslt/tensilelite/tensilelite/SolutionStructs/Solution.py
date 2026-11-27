@@ -490,6 +490,8 @@ def _checkScalarLoadB(state, isaInfoMap, printRejectionReason):
     return no("SubGroup0 (%u) must be a multiple of the wavefront size so B is uniform within a wave" % state["SubGroup0"])
   if not state["BufferLoad"] or state["LocalSplitU"] != 1 or state["InnerUnroll"] != 1:
     return no("requires BufferLoad, LocalSplitU=1 and InnerUnroll=1")
+  if isPersistent(state):
+    return no("no persistent kernels (the next tile's setup would read SGPRs the ring reuses)")
   if state["GlobalSplitU"] != 1:
     return no("requires GlobalSplitU=1 (the summation range of a workgroup must be contiguous)")
   if state["StaggerU"] != 0:

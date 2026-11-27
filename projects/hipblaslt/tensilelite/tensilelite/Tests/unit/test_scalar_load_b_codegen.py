@@ -155,14 +155,16 @@ def test_every_fma_reads_its_b_element(kernels):
 
 def test_every_block_issues_one_warming_load():
     # Waits count the warming load, so no block may skip it.
+    checked = 0
     for group in ("TN prefetch", "TT prefetch"):
         for name, source, _ in _emit(group):
-            if "flat_load_b32" not in source:
-                continue
+            assert int(re.search(r"_SLBP(\d+)_", source).group(1)) > 0, name  # full kernel name
+            checked += 1
             _, loop, drain = _sections(_instructions(source))
             blocks = _loop_blocks(source, loop)
             assert sum(line.startswith("flat_load_b32") for line in loop) == blocks, name
             assert not any(line.startswith("flat_load_b32") for line in drain), name
+    assert checked == _GROUPS["TN prefetch"][1] + _GROUPS["TT prefetch"][1]
 
 
 def test_b_never_touches_vgprs_or_lds(kernels):
@@ -222,6 +224,7 @@ def test_baseline_config_is_accepted(tmp_path, arch):
     {"SuppressNoLoadLoop": [True]},               # the last block would load B past the summation range
     # loop close every second block reads the released StaggerU SGPR
     {"PrefetchGlobalRead": [2], "AssertSummationElementMultiple": [16]},
+    {"TileProcessingStrategy": ["DataParallel"]},  # the next tile's setup would read the reused SGPRs
 ], ids=lambda forks: "-".join(forks))
 def test_unsupported_configs_are_rejected(tmp_path, forks):
     assert _valid(_config_with(tmp_path, **forks)) == []
