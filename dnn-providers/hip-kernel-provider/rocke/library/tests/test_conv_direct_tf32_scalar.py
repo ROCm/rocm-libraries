@@ -42,6 +42,7 @@ from ._direct_conv_numeric import (
     direct_fwd_reference,
     direct_wgrad_reference,
     launch_direct_conv,
+    poisoned,
     stored_uniform,
 )
 
@@ -371,7 +372,9 @@ class TestWgradBuild(unittest.TestCase):
 
 def _launch(spec, build, arch: str, direction: str, inputs, output_shape):
     """Compile ``spec`` and launch it on the fp32 host ``inputs`` (ABI order)
-    with a zeroed output (wgrad accumulates into it); return the output.
+    and return the output. The output starts zeroed for wgrad, which
+    accumulates into it, and NaN-filled otherwise, so an element the kernel
+    leaves unwritten fails the comparison.
 
     The element type is fp32 for every case here (TF32 is fp32 storage). It
     is named rather than read off ``spec.problem``: the column-streamed spec
@@ -384,7 +387,11 @@ def _launch(spec, build, arch: str, direction: str, inputs, output_shape):
         art,
         spec.problem,
         inputs,
-        np.zeros(output_shape, np.float32),
+        (
+            np.zeros(output_shape, np.float32)
+            if direction == "wgrad"
+            else poisoned(output_shape, "fp32", 0xFF)
+        ),
         grid=grid,
         block=block,
         direction=direction,

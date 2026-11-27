@@ -35,7 +35,7 @@ from rocke.runtime.device_array import (
     strided_view,
     zero_elements,
 )
-from rocke.runtime.torch_interop import torch_array_info
+from rocke.runtime.torch_interop import is_torch_tensor, torch_array_info
 from rocke.tests.gpu import current_device_arch
 from rocke.tests.host_arrays import HostArray
 from rocke.tests.lanes import TICKET, import_or_skip_until
@@ -110,6 +110,28 @@ def test_torch_tensor_info_maps_dtype_and_device():
         backed_elements=56,
     )
     assert not info.is_contiguous()
+
+
+class _TensorSubclass(_TorchTensorAttributes):
+    """A subclass of a torch type defined outside torch, as a user's tensor
+    subclass is."""
+
+    __module__ = __name__
+
+
+def test_a_subclass_of_a_torch_type_is_a_torch_tensor():
+    assert not is_torch_tensor(np.zeros(4, np.float32))
+    assert is_torch_tensor(_TensorSubclass())
+    assert array_info(_TensorSubclass()).shape == (4, 8)
+
+
+def test_a_real_torch_tensor_subclass_is_a_torch_tensor():
+    torch = import_or_skip_until("torch", TICKET)
+
+    class Subclass(torch.Tensor):
+        pass
+
+    assert is_torch_tensor(torch.zeros(2).as_subclass(Subclass))
 
 
 def test_torch_tensor_info_refuses_a_dtype_without_an_element_type():
@@ -221,6 +243,11 @@ def test_a_view_describes_part_of_an_array_and_stays_inside_it():
         whole.view((2, 6), (6, 1), offset=13)
     with pytest.raises(ValueError, match=r"expected one non-negative stride"):
         whole.view((2,), (-1,))
+    # A negative extent would reach backwards past the origin unchecked.
+    with pytest.raises(
+        ValueError, match=r"shape=\(-2, 3\), expected a non-negative extent per axis"
+    ):
+        whole.view((-2, 3), (6, 1), offset=7)
 
 
 def test_dense_layouts_are_one_block_of_one_row():
@@ -396,6 +423,24 @@ def test_gpu_strided_view_keeps_the_view_start():
     pairs = strided_view(tail, (4, 2), (1, 4))
     assert pairs.data_ptr() == tail.data_ptr()
     np.testing.assert_array_equal(host_values(pairs), host[4:].reshape(2, 4).T)
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("offset", [64, 65], ids=["offset_exact", "offset_short"])
+def test_gpu_an_offset_view_backs_the_elements_from_its_start(offset):
+    """A launch check bounds an index by ``backed_elements``, so a view that
+    starts ``offset`` elements into a buffer backs only the elements from its
+    start, never the buffer's whole size; and it cannot reach past the
+    buffer."""
+    current_device_arch()
+    buffer = DeviceArray(np.zeros(320, np.float32))
+    view = buffer.view((320 - offset,), offset=offset)
+    assert view.info().backed_elements == 320 - offset
+    assert array_info(view).backed_elements == 320 - offset
+    with pytest.raises(
+        ValueError, match=r"reaches past the 320 elements from its origin"
+    ):
+        buffer.view((321 - offset,), offset=offset)
 
 
 @pytest.mark.gpu

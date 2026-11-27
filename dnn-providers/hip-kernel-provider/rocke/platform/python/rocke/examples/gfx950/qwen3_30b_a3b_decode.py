@@ -284,7 +284,6 @@ def _build_dsl_topk(T, E, K):
         dtype="f32",
         out_dtype="f32",
         block_size=128,
-        cross_wave_argmax=False,
     )
     art = compile_kernel(build_topk_softmax(spec), isa=ISA)
     grid = topk_softmax_grid(T, spec)

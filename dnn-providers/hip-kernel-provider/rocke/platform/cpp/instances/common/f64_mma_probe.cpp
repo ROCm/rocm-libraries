@@ -1,6 +1,6 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-/* Spec-driven native mirror of instances/gfx942/f64_mma_probe.py. */
+/* Spec-driven native mirror of instances/common/f64_mma_probe.py. */
 #include "f64_mma_probe_internal.h"
 
 #include <stdio.h>
@@ -11,15 +11,13 @@
 #include "rocke/instance_f64_mma_probe.h"
 #include "rocke/ir_internal.h"
 
-rocke_kernel_def_t* rocke_build_f64_mma_probe(rocke_ir_builder_t* b, int m, int k)
+rocke_kernel_def_t* rocke_build_f64_mma_probe(rocke_ir_builder_t* b, int m, int k, const char* arch)
 {
-    return ckc::build_f64_mma_probe(b, m, k, nullptr);
+    return ckc::build_f64_mma_probe(b, m, k, arch, nullptr);
 }
 
-rocke_kernel_def_t* ckc::build_f64_mma_probe(rocke_ir_builder_t* b,
-                                             int m,
-                                             int k,
-                                             const rocke_mma_catalog_t* catalog)
+rocke_kernel_def_t* ckc::build_f64_mma_probe(
+    rocke_ir_builder_t* b, int m, int k, const char* arch, const rocke_mma_catalog_t* catalog)
 {
     char name[64];
     snprintf(name, sizeof(name), "f64_mma_probe_m%d_k%d", m, k);
@@ -35,7 +33,15 @@ rocke_kernel_def_t* ckc::build_f64_mma_probe(rocke_ir_builder_t* b,
         /* m -> (B slab rows, B/C/D columns) per K step of 4. */
         int slab_rows = m == 16 ? 4 : 16;
         int cols = m == 16 ? 16 : 4;
-        const rocke_arch_target_t* target = rocke_arch_target_from_gfx("gfx942");
+        /* An unknown target is a ValueError, as in the Python builder, not a
+         * registry KeyError: both engines refuse it alike. */
+        const rocke_arch_target_t* target = rocke_arch_target_from_gfx(arch);
+        if(!target)
+            return (rocke_kernel_def_t*)rocke_i_set_err(
+                b,
+                ROCKE_ERR_VALUE,
+                "build_f64_mma_probe failed - arch='%s', expected a known gfx target",
+                arch ? arch : "");
         if(!catalog)
             catalog = &target->mma;
         const rocke_mma_op_t* atom
@@ -65,7 +71,11 @@ rocke_kernel_def_t* ckc::build_f64_mma_probe(rocke_ir_builder_t* b,
             return (rocke_kernel_def_t*)rocke_i_set_err(
                 b,
                 ROCKE_ERR_VALUE,
-                "F64 probe requires the fixed gfx942 instruction and layout contract");
+                "build_f64_mma_probe failed - arch='%s', expected a target whose MMA catalog "
+                "lists the f64 %dx%dx4 atom with the probe's lane-map contract",
+                arch,
+                m,
+                m);
         rocke_param_opts_t opts = {};
         opts.align = 8;
         opts.align_set = true;

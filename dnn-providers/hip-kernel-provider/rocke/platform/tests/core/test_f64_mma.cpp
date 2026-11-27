@@ -1,12 +1,14 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-/* Native mirror of test_f64_mma.py's fixed probe contract and valid controls. */
+/* Native mirror of test_f64_mma.py's fixed probe contract, its refused targets and
+ * its valid controls. */
 #include "f64_mma_probe_internal.h"
 
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <initializer_list>
+#include <string>
 #include <vector>
 
 #include "rocke/instance_f64_mma_probe.h"
@@ -22,6 +24,27 @@
             return 1;                                               \
         }                                                           \
     } while(0)
+
+/* The probe's refusal of arch (NULL reads as ''): unknown, or its catalog lacks
+ * the m x m x 4 atom's contract. test_f64_mma.py's _refusal. */
+static std::string expected_refusal(const char* arch, int m)
+{
+    char text[256];
+    if(!rocke_arch_target_from_gfx(arch))
+        std::snprintf(text,
+                      sizeof(text),
+                      "build_f64_mma_probe failed - arch='%s', expected a known gfx target",
+                      arch ? arch : "");
+    else
+        std::snprintf(text,
+                      sizeof(text),
+                      "build_f64_mma_probe failed - arch='%s', expected a target whose MMA "
+                      "catalog lists the f64 %dx%dx4 atom with the probe's lane-map contract",
+                      arch,
+                      m,
+                      m);
+    return text;
+}
 
 static int test_rejects_incompatible_contract()
 {
@@ -118,14 +141,11 @@ static int test_rejects_incompatible_contract()
                     atom.srcs[2].frag_len = atom.dst.frag_len
                         = !std::strcmp(field, "both_capacity") ? 5 : atom.dst.frag_len - 1;
                 rocke_ir_builder_t b;
-                auto* kernel = ckc::build_f64_mma_probe(&b, m, 4, &catalog);
+                auto* kernel = ckc::build_f64_mma_probe(&b, m, 4, "gfx942", &catalog);
                 // Free before assertions: even an unexpectedly admitted contract owns an arena.
-                bool correct
-                    = kernel == nullptr && b.status == ROCKE_ERR_VALUE
-                      && !std::strcmp(
-                          b.err,
-                          "F64 probe requires the fixed gfx942 instruction and layout contract")
-                      && b.kernel->num_params == 0 && b.kernel->body->num_ops == 0;
+                bool correct = kernel == nullptr && b.status == ROCKE_ERR_VALUE
+                               && b.err == expected_refusal("gfx942", m)
+                               && b.kernel->num_params == 0 && b.kernel->body->num_ops == 0;
                 rocke_ir_builder_free(&b);
                 if(!correct)
                     std::fprintf(stderr, "m=%d role=%d field=%s\n", m, role, field);
@@ -145,65 +165,90 @@ static void forward_coord(
     original_coord(b, lane, slot, row, col);
 }
 
+// The targets whose catalog lists both f64 atoms, as test_f64_mma.py's _LISTED_ON.
+static const char* const k_listing_arches[] = {"gfx90a", "gfx942", "gfx950"};
+
+static int test_refuses_targets_without_the_atoms()
+{
+    // Two targets whose catalog lists no f64 atom, an unknown one, and none at all.
+    for(const char* arch : {"gfx908", "gfx1201", "gfx000", static_cast<const char*>(nullptr)})
+        for(int m : {16, 4})
+        {
+            rocke_ir_builder_t b;
+            auto* kernel = rocke_build_f64_mma_probe(&b, m, 4, arch);
+            bool correct = kernel == nullptr && b.status == ROCKE_ERR_VALUE
+                           && b.err == expected_refusal(arch, m);
+            rocke_ir_builder_free(&b);
+            if(!correct)
+                std::fprintf(stderr, "arch=%s m=%d\n", arch ? arch : "(null)", m);
+            CHECK(correct);
+        }
+    return 0;
+}
+
 static int test_valid_copied_contracts()
 {
-    const auto* target = rocke_arch_target_from_gfx("gfx942");
-    for(int m : {16, 4})
-        for(int k : {4, 8, 64})
-            for(bool forwarded : {false, true})
-            {
-                std::vector<rocke_mma_op_t> ops(target->mma.ops,
-                                                target->mma.ops + target->mma.num_ops);
-                rocke_mma_catalog_t catalog = {ops.data(), static_cast<int>(ops.size())};
-                const auto* selected = rocke_mma_catalog_op_for_shape(
-                    &catalog, "mma", "fp64", "fp64", "fp64", m, m, 4, nullptr);
-                CHECK(selected);
-                auto& atom = ops[selected - ops.data()];
-                rocke_layout_map_t maps[] = {*atom.srcs[0].layout,
-                                             *atom.srcs[1].layout,
-                                             *atom.srcs[2].layout,
-                                             *atom.dst.layout};
-                for(int role = 0; role < 3; ++role)
-                    atom.srcs[role].layout = &maps[role];
-                atom.dst.layout = &maps[3];
-                if(forwarded)
+    for(const char* arch : k_listing_arches)
+    {
+        const auto* target = rocke_arch_target_from_gfx(arch);
+        for(int m : {16, 4})
+            for(int k : {4, 8, 64})
+                for(bool forwarded : {false, true})
                 {
-                    original_coord = maps[2].fn;
-                    maps[2].fn = maps[3].fn = forward_coord;
+                    std::vector<rocke_mma_op_t> ops(target->mma.ops,
+                                                    target->mma.ops + target->mma.num_ops);
+                    rocke_mma_catalog_t catalog = {ops.data(), static_cast<int>(ops.size())};
+                    const auto* selected = rocke_mma_catalog_op_for_shape(
+                        &catalog, "mma", "fp64", "fp64", "fp64", m, m, 4, nullptr);
+                    CHECK(selected);
+                    auto& atom = ops[selected - ops.data()];
+                    rocke_layout_map_t maps[] = {*atom.srcs[0].layout,
+                                                 *atom.srcs[1].layout,
+                                                 *atom.srcs[2].layout,
+                                                 *atom.dst.layout};
+                    for(int role = 0; role < 3; ++role)
+                        atom.srcs[role].layout = &maps[role];
+                    atom.dst.layout = &maps[3];
+                    if(forwarded)
+                    {
+                        original_coord = maps[2].fn;
+                        maps[2].fn = maps[3].fn = forward_coord;
+                    }
+                    rocke_ir_builder_t public_builder, copied_builder;
+                    auto* expected = rocke_build_f64_mma_probe(&public_builder, m, k, arch);
+                    auto* copied = ckc::build_f64_mma_probe(&copied_builder, m, k, arch, &catalog);
+                    CHECK(expected && copied);
+                    char *public_ir = nullptr, *copied_ir = nullptr;
+                    CHECK(rocke_ir_serialize(expected, &public_ir) == ROCKE_OK);
+                    CHECK(rocke_ir_serialize(copied, &copied_ir) == ROCKE_OK);
+                    CHECK(!std::strcmp(public_ir, copied_ir));
+                    for(auto flavor : {ROCKE_LLVM_FLAVOR_LLVM20,
+                                       ROCKE_LLVM_FLAVOR_LLVM22,
+                                       ROCKE_LLVM_FLAVOR_LLVM23,
+                                       ROCKE_LLVM_FLAVOR_LLVM24})
+                    {
+                        char *public_ll = nullptr, *copied_ll = nullptr;
+                        CHECK(rocke_lower_kernel_to_llvm(expected, flavor, arch, &public_ll)
+                              == ROCKE_OK);
+                        CHECK(rocke_lower_kernel_to_llvm(copied, flavor, arch, &copied_ll)
+                              == ROCKE_OK);
+                        CHECK(!std::strcmp(public_ll, copied_ll));
+                        std::free(public_ll);
+                        std::free(copied_ll);
+                    }
+                    std::free(public_ir);
+                    std::free(copied_ir);
+                    rocke_ir_builder_free(&public_builder);
+                    rocke_ir_builder_free(&copied_builder);
                 }
-                rocke_ir_builder_t public_builder, copied_builder;
-                auto* expected = rocke_build_f64_mma_probe(&public_builder, m, k);
-                auto* copied = ckc::build_f64_mma_probe(&copied_builder, m, k, &catalog);
-                CHECK(expected && copied);
-                char *public_ir = nullptr, *copied_ir = nullptr;
-                CHECK(rocke_ir_serialize(expected, &public_ir) == ROCKE_OK);
-                CHECK(rocke_ir_serialize(copied, &copied_ir) == ROCKE_OK);
-                CHECK(!std::strcmp(public_ir, copied_ir));
-                for(auto flavor : {ROCKE_LLVM_FLAVOR_LLVM20,
-                                   ROCKE_LLVM_FLAVOR_LLVM22,
-                                   ROCKE_LLVM_FLAVOR_LLVM23,
-                                   ROCKE_LLVM_FLAVOR_LLVM24})
-                {
-                    char *public_ll = nullptr, *copied_ll = nullptr;
-                    CHECK(rocke_lower_kernel_to_llvm(expected, flavor, "gfx942", &public_ll)
-                          == ROCKE_OK);
-                    CHECK(rocke_lower_kernel_to_llvm(copied, flavor, "gfx942", &copied_ll)
-                          == ROCKE_OK);
-                    CHECK(!std::strcmp(public_ll, copied_ll));
-                    std::free(public_ll);
-                    std::free(copied_ll);
-                }
-                std::free(public_ir);
-                std::free(copied_ir);
-                rocke_ir_builder_free(&public_builder);
-                rocke_ir_builder_free(&copied_builder);
-            }
+    }
     return 0;
 }
 
 int main()
 {
     CHECK(test_rejects_incompatible_contract() == 0);
+    CHECK(test_refuses_targets_without_the_atoms() == 0);
     CHECK(test_valid_copied_contracts() == 0);
     return 0;
 }

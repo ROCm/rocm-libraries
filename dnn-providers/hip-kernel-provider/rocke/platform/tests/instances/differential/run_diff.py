@@ -1345,8 +1345,9 @@ def main():
     ap.add_argument(
         "--flavor",
         default="",
-        help="LLVM flavor to emit for and to record / check under (llvm20, "
-        "llvm22, llvm23); default ROCKE_LLVM_FLAVOR, else the host's flavor. "
+        help="LLVM flavor to emit for and to record / check under "
+        f"({', '.join(_llvm_flavors())}); default ROCKE_LLVM_FLAVOR, else the host's "
+        "flavor. "
         "--python-only --mode ll takes a comma-separated list, or 'all' for "
         "every flavor rocke qualifies, and emits for all of them in one pool",
     )
@@ -1575,9 +1576,9 @@ def _golden_files(args, fams) -> dict[Path, set[str]]:
 def _misrouted_families(kind, flavor, fams) -> list[str]:
     """Run families blessed in a golden file other than the one anchoring them.
 
-    Checked against the wrong file, a family's configs read as NEW
-    (informational) and the check prints GOLDEN OK; its blessings in the
-    other file name the misrouting instead."""
+    Checked against the wrong file, a family's configs read as new, which
+    fails the check without naming the cause; its blessings in the other file
+    name the misrouting instead."""
     sections = {
         path: GoldenStore.load(path).section(kind, flavor)
         for path in (GOLDEN_FILE, LIB_GOLDEN_FILE)

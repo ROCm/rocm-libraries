@@ -10,10 +10,8 @@ backward tests' session pre-build:
   :mod:`kernels.common.attention_bwd_cache`, so the run glue
   (``attn_bwd_kernels`` with ``ROCKE_BWD_HSACO_CACHE``) reads the entries
   written here and the other way round; it is re-exported here.
-* :func:`toolchain_identity` names the toolchain a process actually uses. It
-  never imports torch: it pins the torch-bundled comgr (the one every timed
-  process resolves) by path, see ``kernels.common.attention_bwd_comgr``, so
-  a compile process and a timed process name the same comgr.
+* :func:`toolchain_identity` names the toolchain a process actually uses: the
+  comgr rocKE's discovery loads. It never imports torch.
 * :func:`compile_batch` compiles many specs with a thread or a process pool
   (``mode``), writes them to the cache and returns per-spec results with an
   error token (``not_built`` for a value whose emission is not built,

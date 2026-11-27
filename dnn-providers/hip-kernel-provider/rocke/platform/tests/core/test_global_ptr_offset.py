@@ -286,17 +286,6 @@ def _gpu_kernel(name):
     return b.kernel
 
 
-def _gpu_arch():
-    try:
-        from rocke.runtime.hip_module import get_device_arch
-    except ImportError:
-        return None
-    try:
-        return get_device_arch()
-    except Exception:  # noqa: BLE001 - no HIP runtime means no GPU test
-        return None
-
-
 def _run(blob, kernel_name, x):
     """Launch one lane; return the device address of X, Y and Z."""
     from rocke.runtime.hip_module import Runtime
@@ -330,9 +319,9 @@ def _run(blob, kernel_name, x):
 @pytest.mark.gpu
 @pytest.mark.parametrize("route", ["llvm", "hipcc"])
 def test_gpu_offset_pointers(route):
-    arch = _gpu_arch()
-    if not arch:
-        pytest.skip("no GPU")
+    from rocke.tests.gpu import current_device_arch
+
+    arch = current_device_arch()
     kernel = _gpu_kernel(f"gpo_gpu_{route}")
     if route == "llvm":
         from rocke.helpers.compile import compile_kernel

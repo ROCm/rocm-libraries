@@ -133,7 +133,7 @@ RUNNER_HARDWARE = Lane(
 BUILD_VARIANT = Lane(
     "build-variant",
     "a build or test environment pull-request CI does not provide: the C++ "
-    "engine's Python modules (a build whose Python has pybind11), the shared "
+    "engine's Python modules (a build with ROCKE_BUILD_PYBIND on), the shared "
     "librocke (the Windows provider build installs none), or the optional "
     "packages and LLVM tools the CI test step does not install",
 )

@@ -439,16 +439,10 @@ class TestGfx1250Fp8MoeDriver(unittest.TestCase):
             Gfx1250Fp8Moe,
             Gfx1250Fp8MoeSpec,
         )
-        from rocke.runtime.comgr import resolved_lib_rocm_version
+        from rocke.tests.comgr import require_comgr_target
 
-        # gfx1250 codegen requires comgr >= 7.2; when the resolved comgr is older
-        # (e.g. a system ROCm 7.0 with no torch-bundled 7.2 loaded in the process)
-        # set_isa rejects the gfx1250 ISA. Skip cleanly rather than fail -- the
-        # compile path is covered wherever a gfx1250-capable comgr is active
-        # (e.g. the ROCm 7.2 venv with torch imported).
-        ver = resolved_lib_rocm_version()
-        if ver is None or ver < (7, 2):
-            self.skipTest(f"comgr {ver} cannot target gfx1250 (needs >= 7.2)")
+        # A comgr without a gfx1250 ISA rejects it at set_isa: ask the loaded one.
+        require_comgr_target("gfx1250")
 
         # Compiling the whole driver exercises every component-kernel build for
         # gfx1250 and the per-expert GEMM specs (no GPU needed to compile).

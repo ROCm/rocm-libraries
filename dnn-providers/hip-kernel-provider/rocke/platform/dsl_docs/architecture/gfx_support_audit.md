@@ -123,6 +123,17 @@ Source: `tests/instances/test_rocke_multiarch.py`, `tests/golden/rocke_represent
    its `_meta.excluded_targets`.
 
 7. **A matrix capability flag is not sufficient to emit a primitive** — a registered target can report a matrix capability TRUE while the catalog offers zero usable rows for it. Authority for "can I emit this" is the backend coverage record (`helpers/tiling/traits/data/backend_coverage.json`): an instruction is emitted on a target only where the record classes the pair `issuable` (`TileMmaPlan.emit_op`), not where a flag is set or a catalog row exists.
+8. **Minimum compiler for `iglp_opt(1)`: ROCm 7.11 or newer, the 10.x releases included.** A kernel that emits `iglp_opt(1)` (`IRBuilder.iglp_opt(1)`, LLVM's `MFMASmallGemmSingleWaveOpt` scheduling strategy) needs a compiler that contains LLVM commit `576e1affab35` ("[NFC][AMDGPU] IGLP: Fixes for unsigned int handling"). Without it, a scheduling region that carries the hint and has fewer than 4 LDS reads underflows an unsigned count, and the compile allocates until the process runs out of memory. Compilers without the fix: ROCm 7.1.x, 7.2.0 to 7.2.4, 7.9 rc1 and 7.10. State the requirement by ROCm release or by commit, not by LLVM version: ROCm 7.2.x and 7.11 both report LLVM 22.0.0git.
+   - A scheduling region is a basic block after the LLVM middle end, so count the LDS reads there, not in the source loop: a loop body with 3 LDS reads is safe once the loop is fully unrolled into a block with more, and unsafe while it stays a loop.
+   - The attention backward and fp8 fused-MoE kernels compile in a memory-capped fresh process when they emit `iglp_opt(1)`, so on a compiler without the fix they fail fast with `ComgrOutOfMemory` instead of taking the host's memory ([Compiling In A Fresh Process](../runtime/comgr_and_hipmodule.md#compiling-in-a-fresh-process)). Other kernels that emit it compile in-process, without the cap.
+
+9. **gfx950 conv dgrad: an LLVM 24 register-allocator defect (LCOMPILER-3317)**. Built by some
+   LLVM 24 compiler builds, some gfx950 dgrad kernels fault with an illegal memory access or return
+   wrong results; rocKE's IR is the same for every LLVM 24 build, and LLVM 20 builds these kernels
+   correctly. Dispatch does not refuse them, so a caller on an affected compiler can get them;
+   build with LLVM 20 until the compiler fix lands. Their tests are quarantined on gfx950 with the
+   affected compilers until then: the `QUARANTINED` records in
+   `python/rocke/tests/pending_lanes.py` name the compiler builds, the kernels and the defect.
 
 ## Proposed gap-closure priority
 Ordering for follow-up stories (to be confirmed with the team):
