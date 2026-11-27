@@ -1317,7 +1317,6 @@ def test_packaging_admits_every_ued_field_the_loader_reads(tmp_path, main_fixtur
 
     def mutate(ued):
         ued["knobs"] = ["block_size"]
-        ued["builtin_engine"] = "HIP_MLOPS_ENGINE"
         ued["behavior_notes"] = ["runtime_compilation", "supports_graph_capture"]
         ued["numerical_notes"] = ["nondeterministic"]
         ued["sdk_version"] = "1.2.3"
@@ -1371,16 +1370,6 @@ def test_packaging_admits_every_sdk_version_the_loader_parses(
         ),
         pytest.param(
             _set("knobs", ["tile_m"]), "does not declare", id="knob_not_in_kmd"
-        ),
-        pytest.param(
-            _set("builtin_engine", "hipkernel:Other"),
-            "unscoped name of a built-in engine",
-            id="builtin_engine_scoped",
-        ),
-        pytest.param(
-            _set("builtin_engine", ["HIP_MLOPS_ENGINE"]),
-            "unscoped name of a built-in engine",
-            id="builtin_engine_not_string",
         ),
         pytest.param(
             _set("behavior_notes", ["fast_math"]),

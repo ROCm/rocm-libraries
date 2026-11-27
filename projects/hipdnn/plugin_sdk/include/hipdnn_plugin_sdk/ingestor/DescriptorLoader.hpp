@@ -477,27 +477,6 @@ inline void requireScopedName(const std::string& name, const std::string& where)
     }
 }
 
-/// `builtin_engine`: the unscoped name of a hand-written engine this descriptor engine
-/// replaces, which it then takes the name and id of (engineIdentityName()). The exception to
-/// §4.2's scoping, and safe for the same reason §4.2 exists: the name must already be
-/// registered through HIPDNN_REGISTER_ENGINE, so it names an id the provider owns rather than
-/// one a vendor picked.
-inline void requireRegisteredBuiltinName(const std::string& name, const std::string& where)
-{
-    if(name.empty() || name.find(':') != std::string::npos)
-    {
-        fail("builtin_engine '" + name + "' in " + where
-             + " must be the unscoped name of a built-in engine");
-    }
-    const auto registered = hipdnn_data_sdk::utilities::tryGetEngineNameFromId(
-        hipdnn_data_sdk::utilities::engineNameToId(name));
-    if(!registered.has_value() || *registered != name)
-    {
-        fail("builtin_engine '" + name + "' in " + where
-             + " is not an engine registered with HIPDNN_REGISTER_ENGINE");
-    }
-}
-
 /// An absent array key means an empty list, which is what every optional list-valued
 /// descriptor field defaults to.
 inline std::vector<std::string> optionalStringArray(const nlohmann::json& object,
@@ -1040,7 +1019,6 @@ inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root, const 
                       "revision",
                       "id",
                       "name",
-                      "builtin_engine",
                       "sdk_version",
                       "sort_kernel_catalog",
                       "predict_engine",
@@ -1058,11 +1036,6 @@ inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root, const 
     engine.id = requireId(root, "id", where);
     engine.name = requireString(root, "name", where);
     requireScopedName(engine.name, where);
-    if(root.contains("builtin_engine"))
-    {
-        engine.builtinEngine = requireString(root, "builtin_engine", where);
-        requireRegisteredBuiltinName(engine.builtinEngine, where);
-    }
     engine.revision = declaredRevisionOf(root, where);
     // Roles are independently optional, but an authored role is always an arch map. @p label
     // names where the role is authored: the engine, or one of its slots.
@@ -2144,8 +2117,8 @@ inline bool
 }
 
 /// RFC 0020 §12: an engine named in HIPDNN_DISABLE_ENGINES is skipped before
-/// registration. An entry may be the UED `name`, its `builtin_engine`, the 64-bit engine
-/// id (decimal or `0x` hex), or the UED's own UUID; an entry matching nothing is ignored,
+/// registration. An entry may be the UED `name`, the 64-bit engine id it hashes to
+/// (decimal or `0x` hex), or the UED's own UUID; an entry matching nothing is ignored,
 /// since one list is expected to span providers. Read per load, not cached, since a
 /// cached first read would make this order-dependent inside a shared test binary.
 inline bool isEngineDisabled(const EngineDescriptor& engine)
@@ -2164,7 +2137,7 @@ inline bool isEngineDisabled(const EngineDescriptor& engine)
                   });
     };
 
-    const int64_t engineId = hipdnn_data_sdk::utilities::engineNameToId(engineIdentityName(engine));
+    const int64_t engineId = hipdnn_data_sdk::utilities::engineNameToId(engine.name);
     const auto hex = hipdnn_data_sdk::utilities::formatEngineIdHex(engineId);
     const auto decimal = std::to_string(engineId);
     const auto uuid = toString(engine.id);
@@ -2188,8 +2161,8 @@ inline bool isEngineDisabled(const EngineDescriptor& engine)
             continue;
         }
 
-        if(entry == engine.name || entry == engineIdentityName(engine) || entry == decimal
-           || equalsIgnoringCase(entry, hex) || equalsIgnoringCase(entry, uuid))
+        if(entry == engine.name || entry == decimal || equalsIgnoringCase(entry, hex)
+           || equalsIgnoringCase(entry, uuid))
         {
             HIPDNN_PLUGIN_LOG_INFO("descriptor loader: engine '"
                                    << engine.name << "' id=" << hex
@@ -3082,9 +3055,7 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(DescriptorCatalog catalo
         {
             continue;
         }
-        // By identity: two UEDs taking over one built-in claim one id, as two of one name do.
-        ++nameClaims[hipdnn_data_sdk::utilities::engineNameToId(
-            engineIdentityName(engineEntry->descriptor))];
+        ++nameClaims[hipdnn_data_sdk::utilities::engineNameToId(engineEntry->descriptor.name)];
     }
 
     std::vector<DescriptorSet> sets;
@@ -3099,13 +3070,13 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(DescriptorCatalog catalo
                                     << " is defined by conflicting files; dropping it");
             continue;
         }
-        if(nameClaims[hipdnn_data_sdk::utilities::engineNameToId(engineIdentityName(engine))] > 1)
+        if(nameClaims[hipdnn_data_sdk::utilities::engineNameToId(engine.name)] > 1)
         {
-            HIPDNN_PLUGIN_LOG_ERROR(
-                "descriptor loader: engine name '"
-                << engineIdentityName(engine) << "' is claimed by more than one UED; "
-                << "dropping every one of them, including id=" << toString(engine.id)
-                << ". Disable all but one with HIPDNN_DISABLE_ENGINES");
+            HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: engine name '"
+                                    << engine.name << "' is claimed by more than one UED; "
+                                    << "dropping every one of them, including id="
+                                    << toString(engine.id)
+                                    << ". Disable all but one with HIPDNN_DISABLE_ENGINES");
             continue;
         }
 
@@ -3994,19 +3965,12 @@ inline std::vector<ValidatedSet<THandle>> loadValidatedDescriptorSets(Descriptor
         // hand-written engines, or anything registering after load) are caught by
         // EngineManager::addEngine, which logs the duplicate instead of letting the map
         // discard it in silence.
-        //
-        // An engine taking over a built-in (`builtin_engine`) expects that built-in's own
-        // registration on its id, so only a different name there is a collision. Whether the
-        // hand-written engine is also instantiated is the provider's to rule out at build time:
-        // EngineManager::addEngine reports the pair if it is.
         const auto& registered = hipdnn_data_sdk::utilities::getEngineIdToNameMap();
-        const auto& identity = engineIdentityName(set.engine);
-        const auto claimed = registered.find(hipdnn_data_sdk::utilities::engineNameToId(identity));
+        const auto claimed
+            = registered.find(hipdnn_data_sdk::utilities::engineNameToId(set.engine.name));
         const auto& ours = detail::registeredEngineNames();
-        const bool expected = !set.engine.builtinEngine.empty() && claimed != registered.end()
-                              && claimed->second == set.engine.builtinEngine;
-        if(claimed != registered.end() && !expected
-           && std::find(ours.begin(), ours.end(), identity) == ours.end())
+        if(claimed != registered.end()
+           && std::find(ours.begin(), ours.end(), set.engine.name) == ours.end())
         {
             HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: engine '"
                                     << set.engine.name << "' collides with already-registered '"
@@ -4039,14 +4003,8 @@ inline std::vector<ValidatedSet<THandle>> loadValidatedDescriptorSets(Descriptor
         }
 
         // Best-effort: the checks above reject real name collisions, so a throw here means an
-        // earlier call already registered this name. A built-in an engine takes over is
-        // already registered under its own name, which is the one the engine is advertised by.
+        // earlier call already registered this name.
         auto& registeredNames = detail::registeredEngineNames();
-        if(!set.engine.builtinEngine.empty())
-        {
-            validated.push_back(ValidatedSet<THandle>{std::move(set), std::move(built)});
-            continue;
-        }
         try
         {
             registeredNames.push_back(set.engine.name);

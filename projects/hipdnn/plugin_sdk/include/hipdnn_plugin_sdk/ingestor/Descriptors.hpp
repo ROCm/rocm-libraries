@@ -476,12 +476,6 @@ struct EngineDescriptor
 {
     DescriptorId id{};
     std::string name;
-    /// The unscoped built-in engine whose name and id this engine takes over, or empty. A
-    /// hand-written engine registered with HIPDNN_REGISTER_ENGINE moves onto descriptors
-    /// without changing the id callers pin: the loader requires the name to be registered, and
-    /// the engine is advertised under it. Read the advertised name through
-    /// engineIdentityName().
-    std::string builtinEngine;
     /// The default catalog ranker for the `default` arch key (see DescriptorSet::heuristic).
     /// nullopt when the engine ships no UHD; selection then falls back to the
     /// descriptor-declared order. Filled by resolveDescriptorSets(), not at parse, because the
@@ -524,7 +518,6 @@ inline bool operator==(const EngineDescriptor& lhs, const EngineDescriptor& rhs)
 {
     return std::tie(lhs.id,
                     lhs.name,
-                    lhs.builtinEngine,
                     lhs.sortKernelCatalog,
                     lhs.predictEngine,
                     lhs.predictApplicableKernels,
@@ -539,7 +532,6 @@ inline bool operator==(const EngineDescriptor& lhs, const EngineDescriptor& rhs)
                     lhs.sharedWorkspaceToken)
            == std::tie(rhs.id,
                        rhs.name,
-                       rhs.builtinEngine,
                        rhs.sortKernelCatalog,
                        rhs.predictEngine,
                        rhs.predictApplicableKernels,
@@ -552,13 +544,6 @@ inline bool operator==(const EngineDescriptor& lhs, const EngineDescriptor& rhs)
                        rhs.revision,
                        rhs.slots,
                        rhs.sharedWorkspaceToken);
-}
-
-/// The name @p engine is advertised under and whose hash is its engine id: the built-in it
-/// takes over when it names one, else its own scoped name.
-inline const std::string& engineIdentityName(const EngineDescriptor& engine)
-{
-    return engine.builtinEngine.empty() ? engine.name : engine.builtinEngine;
 }
 
 inline bool operator!=(const EngineDescriptor& lhs, const EngineDescriptor& rhs)

@@ -139,16 +139,13 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
             // engineNameToId, not a provider-side registration: the loader already interned
             // and registered this name, and a second registry over the same process-wide
             // string_view map risks a dangling view.
-            // By identity: an engine taking over a built-in (`builtin_engine`) is advertised
-            // under that built-in's name and id.
-            const auto& identity = hipdnn_plugin_sdk::ingestor::engineIdentityName(set.engine);
-            const auto engineId = engineNameToId(identity);
+            const auto engineId = engineNameToId(set.engine.name);
             definitions.push_back(
                 {engineId,
                  // The same string the id was hashed from, so the two agree by
                  // construction and hipDNN's load-time engineNameToId(name) == id check
                  // cannot be what drops the engine.
-                 identity,
+                 set.engine.name,
                  // set aliases discoverDescriptorSets()'s memoized, process-lifetime vector.
                  // Capture by reference: [set] would re-copy a DescriptorSet per engine.
                  [&set](const device::IDevicePropertyProvider& /*devicePropertyProvider*/)
