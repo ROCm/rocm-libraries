@@ -15,12 +15,15 @@ It also checks that every test_patterns entry of the tiers named by --require-ma
 selects at least one test, which catches a renamed test or suite that an opt-in list
 (the gpu-ref quick tier) still names.
 
---no-device-skips runs the named tiers' GTest filters with no visible device and fails if a
-test skips for lack of one. It keeps the device tests out of a tier that has to run on a host
-without a GPU (the unit-test quick tier).
+--no-device-skips runs the named tiers' GTest filters with no visible device. It fails when the
+run exits non-zero (a crash or a failing test) or when a test skips for lack of a device, so it
+keeps the device tests out of a tier that has to run on a host without a GPU (the unit-test
+quick tier). As a control it also runs the first tier that was not named, still with no device,
+and fails when no test skips: the device is then not hidden here (the variables are ignored),
+and the check would pass without checking anything.
 
-Tiers are quick, standard, comprehensive and full; other categories (ffm-quick, ...) are
-not tiers and are ignored.
+Tiers are quick, standard, comprehensive and full. Other categories (ffm-quick, ...) are not
+tiers: their patterns are validated, but they are not partitioned.
 """
 
 import argparse
@@ -43,6 +46,10 @@ TIERS = ("quick", "standard", "comprehensive", "full")
 NO_DEVICE_MESSAGE = "No devices available"
 NO_DEVICE_ENVIRONMENT = {"HIP_VISIBLE_DEVICES": "-1", "ROCR_VISIBLE_DEVICES": "-1"}
 RUN_LINE = re.compile(r"^\[ RUN      \] (\S+)")
+# GTest's closing banner ("[==========] N tests from M test suites ran."), not the opening one.
+COMPLETED_LINE = re.compile(
+    r"^\[==========\] \d+ tests? from \d+ test suites? ran\.", re.M
+)
 
 
 def list_tests(exe):
@@ -86,33 +93,54 @@ def gtest_filter(category):
     return f"{positive}-{negative}" if negative else positive
 
 
-def tests_skipped_without_device(exe, filter_):
-    """The tests of `filter_` that skip because no device is visible.
-
-    The tests that need a device skip with NO_DEVICE_MESSAGE when HIP finds none, so a
-    tier that has to run on a host without a GPU must select none of them.
-    """
+def run_without_device(exe, filter_):
     env = {**os.environ, **NO_DEVICE_ENVIRONMENT}
-    result = subprocess.run(
+    return subprocess.run(
         [exe, f"--gtest_filter={filter_}"],
         capture_output=True,
         text=True,
         check=False,
         env=env,
     )
-    if "[==========]" not in result.stdout:
-        sys.exit(
-            f"{exe} did not run the tests of the filter:\n{result.stdout}{result.stderr}"
-        )
+
+
+def device_skips(output):
+    """The tests of a GTest run's output that skipped with NO_DEVICE_MESSAGE."""
     skipped = set()
     current = None
-    for line in result.stdout.splitlines():
+    for line in output.splitlines():
         started = RUN_LINE.match(line)
         if started:
             current = started.group(1)
         elif NO_DEVICE_MESSAGE in line and current is not None:
             skipped.add(current)
     return sorted(skipped)
+
+
+def tests_skipped_without_device(exe, filter_):
+    """The tests of `filter_` that skip because no device is visible.
+
+    The tests that need a device skip with NO_DEVICE_MESSAGE when HIP finds none, so a
+    tier that has to run on a host without a GPU must select none of them. The run itself
+    must pass: a crash or a failing test would otherwise hide the tests that did not run.
+    """
+    result = run_without_device(exe, filter_)
+    if result.returncode != 0 or not COMPLETED_LINE.search(result.stdout):
+        sys.exit(
+            f"{exe} --gtest_filter={filter_} with no visible device exited with "
+            f"{result.returncode}; a tier that runs without a device must pass:\n"
+            f"{result.stdout[-2000:]}{result.stderr[-2000:]}"
+        )
+    return device_skips(result.stdout)
+
+
+def device_is_hidden(exe, filter_):
+    """True when a run of `filter_` skips at least one test for lack of a device.
+
+    The filter is one that selects device tests. The exit status is not read: only the
+    skips matter, and the tier may hold tests that fail without their data.
+    """
+    return bool(device_skips(run_without_device(exe, filter_).stdout))
 
 
 def check(yaml_path, exe, require_match, no_device_skips=()):
@@ -149,6 +177,14 @@ def check(yaml_path, exe, require_match, no_device_skips=()):
     for tier in no_device_skips:
         for name in tests_skipped_without_device(exe, gtest_filter(tiers[tier])):
             errors.append(f"{name}: in {tier}, but skips when no device is visible")
+    control = next((t for t in tiers if t not in no_device_skips), None)
+    if no_device_skips and control is not None:
+        if not device_is_hidden(exe, gtest_filter(tiers[control])):
+            errors.append(
+                f"no test of the {control} tier skipped with HIP_VISIBLE_DEVICES and "
+                "ROCR_VISIBLE_DEVICES set to -1: the device is not hidden here, so the "
+                "no-device check proves nothing"
+            )
 
     if errors:
         shown = errors[:50]
@@ -163,10 +199,22 @@ def check(yaml_path, exe, require_match, no_device_skips=()):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("--yaml", required=True)
-    parser.add_argument("--exe", required=True)
-    parser.add_argument("--require-match", nargs="*", default=[], choices=TIERS)
-    parser.add_argument("--no-device-skips", nargs="*", default=[], choices=TIERS)
+    parser.add_argument("--yaml", required=True, help="the tier YAML to check")
+    parser.add_argument("--exe", required=True, help="the GTest binary the YAML tiers")
+    parser.add_argument(
+        "--require-match",
+        nargs="*",
+        default=[],
+        choices=TIERS,
+        help="tiers whose test_patterns entries must each select at least one test",
+    )
+    parser.add_argument(
+        "--no-device-skips",
+        nargs="*",
+        default=[],
+        choices=TIERS,
+        help="tiers that must pass with no visible device and skip no test for lack of one",
+    )
     args = parser.parse_args()
     check(args.yaml, args.exe, args.require_match, args.no_device_skips)
 

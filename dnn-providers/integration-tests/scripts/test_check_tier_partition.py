@@ -118,6 +118,7 @@ def test_device_test_in_a_tier_that_must_run_without_a_device_fails(run, monkeyp
         return ["TestHost.Named"]
 
     monkeypatch.setattr(ctp, "tests_skipped_without_device", skipped)
+    monkeypatch.setattr(ctp, "device_is_hidden", lambda exe, filter_: True)
     with pytest.raises(
         SystemExit,
         match=r"TestHost.Named: in quick, but skips when no device is visible",
@@ -127,8 +128,31 @@ def test_device_test_in_a_tier_that_must_run_without_a_device_fails(run, monkeyp
 
 
 def test_tier_without_device_skips_passes(run, monkeypatch):
+    controls = []
     monkeypatch.setattr(ctp, "tests_skipped_without_device", lambda exe, filter_: [])
+    monkeypatch.setattr(
+        ctp, "device_is_hidden", lambda exe, filter_: controls.append(filter_) or True
+    )
     run(TESTS, require_match=("quick",), no_device_skips=("quick",))
+    # The control runs the first tier that was not named.
+    assert controls == ["*-*DISABLED*:Comprehensive*:Full*:Quick/*:TestHost.Named"]
+
+
+def test_device_that_is_not_hidden_fails_the_check(run, monkeypatch):
+    monkeypatch.setattr(ctp, "tests_skipped_without_device", lambda exe, filter_: [])
+    monkeypatch.setattr(ctp, "device_is_hidden", lambda exe, filter_: False)
+    with pytest.raises(SystemExit, match="the device is not hidden here"):
+        run(TESTS, require_match=("quick",), no_device_skips=("quick",))
+
+
+_CLOSING_BANNER = "[==========] 2 tests from 1 test suite ran. (0 ms total)\n"
+
+
+class _Completed:
+    def __init__(self, stdout, returncode=0, stderr=""):
+        self.stdout = stdout
+        self.returncode = returncode
+        self.stderr = stderr
 
 
 def test_no_device_skip_parser_reads_the_run_line_of_the_skipping_test(monkeypatch):
@@ -138,13 +162,55 @@ def test_no_device_skip_parser_reads_the_run_line_of_the_skipping_test(monkeypat
         "[ RUN      ] TestA.Device\n"
         "x.cpp(1): Skipped\n"
         "No devices available. Skipping test.\n"
-        "[  SKIPPED ] TestA.Device (0 ms)\n"
-        "[==========] 2 tests ran.\n"
+        "[  SKIPPED ] TestA.Device (0 ms)\n" + _CLOSING_BANNER
     )
-
-    class Completed:
-        stdout = output
-        stderr = ""
-
-    monkeypatch.setattr(ctp.subprocess, "run", lambda *a, **k: Completed())
+    monkeypatch.setattr(ctp.subprocess, "run", lambda *a, **k: _Completed(output))
     assert ctp.tests_skipped_without_device("exe", "*") == ["TestA.Device"]
+
+
+def test_no_device_run_hides_the_device_from_hip_and_rocr(monkeypatch):
+    seen = {}
+
+    def run(*args, **kwargs):
+        seen.update(kwargs["env"])
+        return _Completed(_CLOSING_BANNER)
+
+    monkeypatch.setattr(ctp.subprocess, "run", run)
+    ctp.tests_skipped_without_device("exe", "*")
+    assert seen["HIP_VISIBLE_DEVICES"] == "-1"
+    assert seen["ROCR_VISIBLE_DEVICES"] == "-1"
+
+
+@pytest.mark.parametrize(
+    "completed",
+    [
+        # An aborted run: the opening banner was printed, the closing one never was.
+        _Completed("[==========] Running 2 tests from 1 test suite.\n", returncode=139),
+        # A test that fails instead of skipping.
+        _Completed(
+            "[ RUN      ] TestA.Device\n[  FAILED  ] TestA.Device\n" + _CLOSING_BANNER,
+            returncode=1,
+        ),
+        # An exit status of 0 with no closing banner: the run did not finish its tests.
+        _Completed("[==========] Running 2 tests from 1 test suite.\n", returncode=0),
+    ],
+)
+def test_no_device_run_that_does_not_pass_fails(monkeypatch, completed):
+    monkeypatch.setattr(ctp.subprocess, "run", lambda *a, **k: completed)
+    with pytest.raises(SystemExit, match="with no visible device exited with"):
+        ctp.tests_skipped_without_device("exe", "*")
+
+
+def test_control_run_counts_skips_whatever_the_exit_status(monkeypatch):
+    skipping = (
+        "[ RUN      ] TestA.Device\nNo devices available. Skipping test.\n"
+        "[  SKIPPED ] TestA.Device (0 ms)\n" + _CLOSING_BANNER
+    )
+    monkeypatch.setattr(
+        ctp.subprocess, "run", lambda *a, **k: _Completed(skipping, returncode=1)
+    )
+    assert ctp.device_is_hidden("exe", "*")
+    monkeypatch.setattr(
+        ctp.subprocess, "run", lambda *a, **k: _Completed(_CLOSING_BANNER)
+    )
+    assert not ctp.device_is_hidden("exe", "*")

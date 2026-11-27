@@ -56,7 +56,7 @@ test_categories:
       - "full"
 
   standard:
-    description: "Standard-tier cases (Standard* tests and standard_* golden-data bundles)"
+    description: "Standard-tier cases (Standard* tests, standard_* golden-data bundles and the unit tests that need a device)"
     test_patterns:
       - "Standard*"
       - "standard_*"
@@ -104,7 +104,7 @@ test_categories:
       - "slow"
 
   ffm-quick:
-    description: "Fast-feedback mechanism (FFM) quick tier - mirrors the quick tier minus the quick-tier SDPA golden-data GPU-reference cases"
+    description: "Fast-feedback mechanism (FFM) quick tier - mirrors the quick tier (the unit tests that need a device run in standard only, in no FFM tier) minus the quick-tier SDPA golden-data GPU-reference cases"
     test_patterns:
       - "*"
     exclude:
