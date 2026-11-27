@@ -36,7 +36,7 @@ def _as_set(mis) -> set[tuple[int, ...]]:
 
 @pytest.mark.parametrize("arch", sorted(HARDWARE_MAP))
 def test_only_include_mis_are_valid_mfmas(arch: str) -> None:
-    """Every allowlisted MI must exist in validMFMA, or generate_all_mfmas drops it silently."""
+    """Every allowlisted MI must exist in validMFMA, or MI Designer's candidate enumeration drops it silently."""
     for dtype, mis in HARDWARE_MAP[arch]["ONLY_INCLUDE_MIs"].items():
         assert dtype in validMFMA, f"{arch}: no validMFMA entry for {dtype}"
         missing = _as_set(mis) - _as_set(validMFMA[dtype])
@@ -72,7 +72,7 @@ def test_gfx950_i8_allowlist_has_native_mfmas() -> None:
     "arch, expected_native",
     [("gfx950", True), ("gfx942", False)],
 )
-def test_generate_all_mfmas_i8_native_mfmas_by_arch(tmp_path: Path, arch: str, expected_native: bool) -> None:
+def test_load_candidate_mfmas_i8_native_mfmas_by_arch(tmp_path: Path, arch: str, expected_native: bool) -> None:
     gt = GemmType.from_tensile("N", "N", "I8", "I8", "I")
     cfg = {
         "ARCH": arch,
@@ -81,7 +81,7 @@ def test_generate_all_mfmas_i8_native_mfmas_by_arch(tmp_path: Path, arch: str, e
         "StreamK": False,
         "GemmProblem": GemmConfig(gt, [[16, 16, 1, 16]]),
     }
-    valid, _, _ = mid.MIDesign(tmp_path, cfg).generate_all_mfmas()
+    valid, _, _ = mid.MIDesign(tmp_path, cfg).load_candidate_mfmas()
     used = {(m.M, m.N, m.K, m.B) for m in valid}
     assert used, "no MFMA generated"
     assert used <= _as_set(HARDWARE_MAP[arch]["ONLY_INCLUDE_MIs"]["I8"])

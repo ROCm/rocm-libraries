@@ -91,6 +91,7 @@ If the YAML omits them, these are filled from `HARDWARE_MAP[ARCH]` in [`load_inp
 | `ONE_SIZE_PER_CONFIG` | One size per output config file |
 | `CMS` / `CMS_PRIORITY` | CMS optimization / tile priority (defaults **on** for `gfx950`, **off** for gfx942 family) |
 | `MI_FILTER` | MI filtering: `0` none, `1` moderate, `2` aggressive |
+| `BUILDABLE_MIS` | `False` (default): every MI geko's tiling rules allow. `True`: MI Designer takes its candidate MIs from the buildable-MI list for this ARCH and GEMM type when one exists (see [Buildable-MI lists](#buildable-mi-lists)); not applied to subtile kernels |
 | `EPILOGUES` | Include epilogues |
 | `GSU_PER_MI` | `True` gives each MI group the `GlobalSplitU` MIDesign picks for it (the smallest GSU that fills the CUs), with or without `StreamK`. `False` (default) leaves the gfx1250 generic space on one `GlobalSplitU: [-1]`, which Tensile resolves at run time |
 | `DATA_INIT` | Map of Tensile `DataInitType*` / `DataInitSeed` overrides for the emitted `GlobalParameters`, e.g. `{DataInitTypeC: 3, DataInitTypeD: 2, DataInitSeed: 0}` to initialise buffers like a hand-written Tensile config. Default: none (A/B/C/D TrigSin/TrigCos, seed 1) |
@@ -115,6 +116,7 @@ Current keys (from `ENV_UPDATABLE_KEYS`):
 - `StreamK`
 - `MI_FILTER`
 - `DUCTILE_VALIDATION_PROFILE`
+- `BUILDABLE_MIS`
 
 Example (force `MI_FILTER` to `0` for one run):
 
@@ -128,6 +130,66 @@ MI_FILTER=0 python3 scripts/config_generator.py --hipblaslt /path/to/hipBLASLt -
 - **`load_prepared_config`** / **`_prepare_config`** ([`load_input_config.py`](load_input_config.py)): if `MACROTILE_OPT` is false, `MT_DU` is cleared to `None`. `MACROTILE_OPT` with a non-Ductile backend is supported for `SIZE_OPTION: 0` only (explicit `Sizes:` list); attempting it with `SIZE_OPTION: 1` raises `NotImplementedError`. The post-processor's `_apply_mt_du` runs regardless of backend.
 - **`get_sizes`** ([`sizes.py`](sizes.py)): `SIZE_OPTION=1` (grid) with `MACROTILE_OPT` and the Ductile backend raises `NotImplementedError`.
 - **`BUILD_DIR`:** Optional; passed to `geko.utils.build_tensilelite_client` from [`scripts/config_generator.py`](../../scripts/config_generator.py) when generating shell scripts.
+
+### Buildable-MI lists
+
+MI Designer's candidate MatrixInstructions come from geko's tiling rules
+([`mi_candidates.enumerate_candidate_mis`](mi_candidates.py)), which do not know whether TensileLite can
+build a kernel for an MI: large tiles often overflow registers or LDS for every parameter setting, and a
+tuning run then spends its budget on kernels that fail code generation. With `BUILDABLE_MIS: True`, for GEMM types
+with a list in [`mi_lists/`](mi_lists/)`<arch>/<GEMM name>.yaml`, MI Designer uses only the MIs in it: those for which
+TensileLite code generation builds at least one kernel with every other parameter inside the generic (GA)
+search space's fork ranges. It also pairs each MI only with the DepthUs it builds at: one MI group per DepthU
+replaces the DepthU fork axis (the MI's sampling weight is shared across its groups), and DepthUs the list's search
+did not try stay allowed. One list serves generic (GA) and heuristic runs: it is computed for the generic
+space, and the heuristic space (the older exhaustive search, rarely used) offers only a few values generic does
+not, e.g. FP32 DepthU 16, so a heuristic run can miss the rare MI that builds only with one of them. Subtile kernels (the subtile search space and
+gfx950 MX) are not covered and keep every candidate. Lists are generated with StreamK off: the persistent
+StreamK kernels need slightly more VGPRs, so the StreamK-off list holds every MI the StreamK-on one does
+plus a few tiles at the register limit, and one list serves runs with either setting. The lists are opt-in
+(`BUILDABLE_MIS: True`); by default MI Designer enumerates every MI as before. With the option on but no list
+for the GEMM type, MI Designer enumerates every MI and logs a warning with the command that generates the list.
+For `geko --tune`, turn it on with the environment variable (any workload source) or in a `--list` file:
+
+```bash
+BUILDABLE_MIS=1 geko --tune --inline 4096 4096 1 4096 B B S T N --arch gfx950 --devices 0
+```
+
+The bundled lists cover gfx950 (108), gfx942 (64), gfx1250 (82), and gfx1250-strict (82). The gfx950 and
+gfx942 totals include 12 int8 lists each: `I8:I:I`, `I8:I:S`, and `I8:I8:S` across `NN`, `NT`, `TN`, and `TT`.
+gfx1250 and gfx1250-strict do not have int8 MIs on geko's allowlist.
+
+The lists are produced, CPU only, by [`scripts/generate_buildable_mis.py`](../../scripts/generate_buildable_mis.py)
+(search described in [`buildability/`](buildability/__init__.py)). Code generation and fork ranges change, so
+regenerate them regularly and whenever either changes:
+
+```bash
+python3 scripts/generate_buildable_mis.py --hipblaslt /path/to/hipblaslt --arch gfx950 \
+  --types B:B:S H:H:S F8:B:S --layouts TN NN NT TT --workers 64
+```
+
+The bundled lists record the `rocm-libraries` `develop` base used for TensileLite code generation. Each list records
+the DepthUs searched and gives each MI found buildable as `{MatrixInstruction: [...], DepthU: [...]}` (macro tile
+as a comment). An MI for which TensileLite refused every setting before code generation was never measured, so the
+list keeps it, with no DepthUs recorded (every DepthU stays allowed) and `not measured` in its comment: such a
+refusal can come from a setting geko pairs with the MI differently, not from the MI. The trailer lists the MIs
+measured not to build and why the closest setting failed.
+MI Designer warns, with the command that regenerates it, when a list it uses was generated (the UTC date in its
+`Source` line) more than 7 days from today in UTC, or records no date (`BUILDABLE_LIST_MAX_AGE_DAYS` in
+`mi_candidates.py`).
+A list whose `Architecture` and `GemmType` headers differ from the ARCH and GEMM type it was looked up for (e.g. one
+copied to the wrong file) is not used: MI Designer warns and uses every candidate MI.
+For each buildable MI, the generator checks every DepthU below the one that built and stops at the first failed
+search going upward. This DepthU pass roughly doubles generation time.
+The one-parameter search first follows improvements found by trying new settings. If no kernel builds, it walks
+from the same starts again, this time allowing a setting measured earlier (for example, by repair) to guide the
+next step. The two walks share measurements: each distinct setting is code-generated at most once per search.
+Earlier runs on 352 workers took about 7 h for 96 non-int8 gfx950 lists and 3 h for 52 non-int8 gfx942 lists.
+The 24 int8 lists took about 4 h 43 min on 320 workers. Each MI runs in a fresh worker
+process; a worker can still need several GB for a large tile (the gfx1250 FP4 lists peak around 1.7 TB at 352
+workers), so lower `--workers` on machines with less memory. GEMM types MI Designer tunes only as subtile kernels
+(gfx950 MX, e.g. FP4) are skipped: they never read a list. `--report-dir` also writes every MI's verdict and witness
+setting as CSV.
 
 ---
 
@@ -163,6 +225,8 @@ flowchart LR
 | [`load_input_config.py`](load_input_config.py) | Single place for loaded + normalized config dict |
 | [`sizes.py`](sizes.py) | Size list vs grid sources |
 | [`mi_designer.py`](mi_designer.py) | MI / macro-tile exploration for each size |
+| [`mi_candidates.py`](mi_candidates.py) | Candidate MIs: geko's tiling rules, and the buildable-MI lists MI Designer reads |
+| [`buildability/`](buildability/__init__.py) | TensileLite code-generation check behind the buildable-MI lists (used by `scripts/generate_buildable_mis.py`) |
 | [`fork_params/`](fork_params/) | Per-`ARCH` (and generic vs heuristic) parameter and post-process implementations |
 | [`fork_param_generator.py`](fork_param_generator.py) | Combines MI design, optimization params, post-processor |
 | [`cluster_sizes.py`](cluster_sizes.py), [`config_merger.py`](config_merger.py) | Clustering and merging fork params under kernel limits |

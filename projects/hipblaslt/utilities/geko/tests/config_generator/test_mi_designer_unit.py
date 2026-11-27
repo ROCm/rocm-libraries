@@ -3,9 +3,12 @@
 
 from __future__ import annotations
 
+import datetime
 from pathlib import Path
 
+from geko.config_generator import mi_candidates
 from geko.config_generator import mi_designer as mid
+from geko.config_generator.constants import library_logic_architecture
 from geko.schemas import GemmConfig, GemmType
 
 
@@ -40,13 +43,112 @@ def test_calculate_granularities_and_mfma_parameters() -> None:
     assert params.MT0 > 0 and params.MT1 > 0
 
 
-def test_generate_all_mfmas_uses_override(tmp_path: Path) -> None:
+def _write_list(cfg: dict, mis: list, depthu: dict = None, generated: datetime.date = None) -> None:
+    """A buildable-MI list for cfg's GEMM type; ``depthu`` maps an MI to the DepthUs it builds at."""
+    depthu = depthu or {}
+    path = mi_candidates.buildable_list_path(cfg["ARCH"], cfg["GemmProblem"].name)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rows = "".join(f"  - {{MatrixInstruction: {list(m)}" + (f", DepthU: {depthu[m]}" if m in depthu else "") + "}\n"
+                   for m in mis)
+    header = f"Architecture: {library_logic_architecture(cfg['ARCH'])}\nGemmType: {cfg['GemmProblem'].name}\n"
+    source = f"Source: rocm-libraries 0123456789, {generated.isoformat()}\n" if generated else ""
+    path.write_text(f"{header}{source}DepthU: [32, 64, 128, 256, 512]\nMatrixInstructions:\n{rows}")
+
+
+def _mi9(m: mid.MFMA) -> tuple:
+    return (m.M, m.N, m.K, m.B, m.MIBlockM, m.waveTileM, m.waveTileN, m.waveM, m.waveN)
+
+
+def test_load_candidate_mfmas_uses_override(tmp_path: Path) -> None:
     cfg = _config()
     cfg["MFMA"] = [16, 16, 16, 1]
     d = mid.MIDesign(tmp_path, cfg)
-    valid, sm, sn = d.generate_all_mfmas()
+    valid, sm, sn = d.load_candidate_mfmas()
     assert sm == 16 and sn == 16
     assert len(valid) > 0
+
+
+def test_load_candidate_mfmas_reads_buildable_list(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(mi_candidates, "MI_LISTS_DIR", tmp_path / "lists")
+    cfg = dict(_config(), BUILDABLE_MIS=True)
+    listed = [(32, 32, 16, 1, 1, 1, 1, 4, 1), (16, 16, 32, 1, 1, 2, 3, 2, 2)]
+    _write_list(cfg, listed)
+    valid, _, _ = mid.MIDesign(tmp_path, cfg).load_candidate_mfmas()
+    assert [_mi9(m) for m in valid] == listed
+
+
+def test_load_candidate_mfmas_enumerates_without_opt_in_or_list(monkeypatch, tmp_path: Path, caplog) -> None:
+    monkeypatch.setattr(mi_candidates, "MI_LISTS_DIR", tmp_path / "lists")
+    cfg = _config()
+    every = mi_candidates.enumerate_candidate_mis("gfx950", "H", None)
+    _write_list(cfg, [(16, 16, 32, 1, 1, 1, 1, 4, 1)])
+    valid, _, _ = mid.MIDesign(tmp_path, cfg).load_candidate_mfmas()
+    assert [_mi9(m) for m in valid] == every
+
+    cfg["BUILDABLE_MIS"] = True
+    mi_candidates.buildable_list_path(cfg["ARCH"], cfg["GemmProblem"].name).unlink()
+    with caplog.at_level("WARNING", logger="GEKO"):
+        valid, _, _ = mid.MIDesign(tmp_path, cfg).load_candidate_mfmas()
+    assert [_mi9(m) for m in valid] == every
+    assert "generate_buildable_mis.py" in caplog.text
+
+
+def test_buildable_list_restricts_each_mi_to_its_depthus(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(mi_candidates, "MI_LISTS_DIR", tmp_path / "lists")
+    cfg = dict(_config(), BUILDABLE_MIS=True, MI_FILTER=0)
+    a, b, c = (16, 16, 32, 1, 1, 1, 1, 4, 1), (32, 32, 16, 1, 1, 1, 1, 4, 1), (16, 16, 32, 1, 1, 2, 1, 4, 1)
+    _write_list(cfg, [a, b, c], depthu={a: [64, 128], b: [512]})
+    groups = mid.MIDesign(tmp_path, cfg).generate_for_size((4096, 4096, 1, 4096), depthu_values=[16, 64, 256])
+    pairs = {(tuple(g["MatrixInstruction"].values), g["DepthU"].values[0]) for g in groups}
+    # 16 was never searched, so it stays allowed; c has no recorded DepthUs, so it keeps every offered one.
+    assert pairs == {(a, 16), (a, 64), (b, 16), (c, 16), (c, 64), (c, 256)}
+
+
+def test_list_whose_headers_name_another_gemm_type_is_not_used(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(mi_candidates, "MI_LISTS_DIR", tmp_path / "lists")
+    cfg = dict(_config(), BUILDABLE_MIS=True)
+    path = mi_candidates.buildable_list_path(cfg["ARCH"], cfg["GemmProblem"].name)
+    every = mi_candidates.enumerate_candidate_mis("gfx950", "H", None)
+    # A list copied to the wrong GEMM type or ARCH: its headers name the one it was generated for.
+    for right, wrong in (("GemmType: HHS_NN", "GemmType: HHS_TN"), ("Architecture: gfx950", "Architecture: gfx942")):
+        _write_list(cfg, [(16, 16, 32, 1, 1, 1, 1, 4, 1)])
+        path.write_text(path.read_text().replace(right, wrong))
+        valid, _, _ = mid.MIDesign(tmp_path, cfg).load_candidate_mfmas()
+        assert [_mi9(m) for m in valid] == every, wrong
+
+
+def test_generated_lists_read_back_even_when_no_mi_builds(tmp_path: Path) -> None:
+    from geko.config_generator import buildability as B  # the generator's writer must match the loader above
+
+    mi = (16, 16, 4, 1, 1, 1, 1, 4, 1)
+    built = B.Verdict(mi, True, "preset", 1, depthu=[64, 128])
+    rejected = B.Verdict((16, 16, 4, 1, 1, 1, 2, 4, 1), False, "", 9, overflow=0.1, reason="too many vgprs")
+    for verdicts, listed in (([built, rejected], [mi]), ([rejected], [])):
+        path = tmp_path / "SSS_NN.yaml"
+        B.write_buildable_list(path, verdicts, arch="gfx950", gemm_name="SSS_NN",
+                               source="rocm-libraries 0123456789, 2026-11-02", depthu=[32, 64, 128])
+        bl = mi_candidates.load_buildable_list(path)
+        assert bl.mis == listed and bl.searched_depthu == [32, 64, 128]
+        assert bl.depthu == ({mi: [64, 128]} if listed else {})
+        assert bl.generated == datetime.date(2026, 11, 2)
+
+
+def test_mi_refused_without_a_measured_kernel_stays_listed_at_every_depthu(tmp_path: Path) -> None:
+    from geko.config_generator import buildability as B
+
+    built, refused, over = (16, 16, 4, 1, 1, 1, 1, 4, 1), (16, 16, 4, 1, 1, 1, 2, 4, 1), (16, 16, 4, 1, 1, 1, 3, 4, 1)
+    verdicts = [
+        B.Verdict(refused, False, "", 0, reason="TDMFuse=1 needs more than one wave: use TDMFuse=0"),  # nothing measured
+        B.Verdict(built, True, "preset", 1, depthu=[64]),
+        B.Verdict(over, False, "", 9, overflow=0.1, reason="too many vgprs"),
+    ]
+    path = tmp_path / "SSS_NN.yaml"
+    B.write_buildable_list(path, verdicts, arch="gfx950", gemm_name="SSS_NN",
+                           source="rocm-libraries 0123456789, 2026-11-02", depthu=[32, 64, 128])
+    bl = mi_candidates.load_buildable_list(path)
+    assert bl.mis == [refused, built]  # enumeration order; the MI measured over a limit is excluded
+    assert bl.allowed_depthu(refused, [32, 64, 128]) == [32, 64, 128]
+    assert bl.allowed_depthu(built, [32, 64, 128]) == [64]
 
 
 def test_sort_and_remove_gsu_duplicates_and_log_path(tmp_path: Path) -> None:

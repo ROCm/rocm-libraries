@@ -37,6 +37,7 @@ tags
 
 # build-in-source directory and documentation artifacts
 build*/
+!/utilities/geko/geko/config_generator/buildability/
 hipblaslt-install/
 _build/
 _deps/

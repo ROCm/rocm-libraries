@@ -25,21 +25,27 @@ DUCTILE_COST_SCALE = 0.25
 
 
 def _cluster_variant_cost_offsets(mi_groups: Sequence[Dict[str, Any]]) -> np.ndarray:
-    """Cost offsets that keep each MI's sampling mass independent of its ClusterDim shapes.
+    """Cost offsets that keep each MI's sampling mass independent of its ClusterDim shapes and of the DepthUs a
+    buildable-MI list expanded it into.
 
-    An MI group entry repeated once per ClusterDim shape would otherwise be
-    drawn as many times more often as it has shapes. Adding ln(n) / scale to
-    each of the n variants divides each variant's probability by n, so the MI
-    as a whole keeps the probability its cost gives it.
+    An MI group entry repeated once per variant would otherwise be drawn as
+    many times more often as it has variants. Adding ln(n) / scale to each of
+    the n variants divides each variant's probability by n, so the MI as a
+    whole keeps the probability its cost gives it.
     """
-    keys: List[Optional[tuple]] = [
-        tuple((name, repr(fp.values)) for name, fp in entry.items() if name != "ClusterDim")
-        if "ClusterDim" in entry else None
-        for entry in mi_groups
-    ]
-    counts = Counter(key for key in keys if key is not None)
+
+    def key(entry: Dict[str, Any]) -> Optional[tuple]:
+        varied = {"ClusterDim"} & entry.keys()
+        if entry["MatrixInstruction"].metadata.get("ListDepthU"):
+            varied.add("DepthU")
+        if not varied:
+            return None
+        return tuple((name, repr(fp.values)) for name, fp in entry.items() if name not in varied)
+
+    keys: List[Optional[tuple]] = [key(entry) for entry in mi_groups]
+    counts = Counter(k for k in keys if k is not None)
     return np.array(
-        [math.log(counts[key]) / DUCTILE_COST_SCALE if key is not None else 0.0 for key in keys],
+        [math.log(counts[k]) / DUCTILE_COST_SCALE if k is not None else 0.0 for k in keys],
         dtype=np.float32,
     )
 
