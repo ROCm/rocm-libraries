@@ -264,6 +264,12 @@ extern "C" {
 *               \p buffer_size pointer is invalid.
 *  \retval      rocsparse_status_not_implemented \p trans_A, \p trans_B, \p compute_type, or \p alg is
 *               currently not supported.
+*  \retval      rocsparse_status_invalid_value for a blocked ELL \p mat_A with \p trans_A ==
+*               \ref rocsparse_operation_none and otherwise valid arguments, the batch count of
+*               \p mat_A, \p mat_B, or \p mat_C is not 1. Only the \ref rocsparse_spmm_stage_compute
+*               stage returns this status, including for an empty product, and it leaves \p mat_C
+*               unchanged. The \ref rocsparse_spmm_stage_buffer_size and
+*               \ref rocsparse_spmm_stage_preprocess stages still succeed.
 *  \par Example
 *  This example performs sparse matrix-dense matrix multiplication, \f$C := \alpha \cdot A \cdot B + \beta \cdot C\f$
 *  \snippet example_rocsparse_spmm.cpp doc example

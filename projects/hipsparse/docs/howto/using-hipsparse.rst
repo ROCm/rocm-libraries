@@ -417,6 +417,96 @@ where
     \text{ell_col_ind}[9] & = \{0, 1, 0, 1, 2, 3, 3, -1, 4\}
   \end{array}
 
+Blocked ELL storage format
+--------------------------
+
+The Blocked Ellpack (ELL) storage format represents an :math:`m \times (nb \cdot \text{block_dim})` matrix by:
+
+=========== ================================================================================
+m           Number of rows (integer).
+mb          Number of block rows, :math:`\lceil m / \text{block_dim} \rceil` (integer).
+nb          Number of block columns (integer).
+ell_width   Maximum number of non-zero block elements per row (integer).
+ell_cols    Number of columns of the storage, ``ell_width * block_dim`` (integer).
+ell_val     Array of ``m * ell_cols`` elements containing the data (floating point).
+ell_col_ind Array of ``mb * ell_width`` elements containing the column indices (integer).
+block_dim   Dimension of each block (integer).
+=========== ================================================================================
+
+The Blocked ELL is similar to the ELL format except that column entries now indicate the location of two dimensional blocks of size
+``block_dim * block_dim`` instead of single matrix entries. ``ell_val`` is a row-major array of ``m`` rows of ``ell_cols`` values,
+and ``ell_col_ind`` is a row-major array of ``mb`` rows of ``ell_width`` block column indices. Entry ``(r, c)`` of the block in
+slot ``e`` of block row ``i`` is ``ell_val[(i * block_dim + r) * ell_cols + e * block_dim + c]``, and its block column is
+``ell_col_ind[i * ell_width + e]``. Block rows with less than ``ell_width`` non-zero blocks are padded with zero blocks
+(``ell_val``) and :math:`-1` (``ell_col_ind``).
+
+When ``block_dim`` divides ``m``, ``ell_val`` has ``mb * ell_width * block_dim * block_dim`` elements.
+Otherwise the last block row is partial and holds only the last ``m - (mb - 1) * block_dim`` rows. Its blocks
+have no rows past row ``m``: those rows are not part of the matrix and have no storage, so ``ell_val`` needs no
+padding rows. Only the last block row can be partial; the matrix always has ``nb`` whole block columns.
+
+Consider the following :math:`6 \times 6` matrix and the corresponding Blocked ELL structures,
+with :math:`m = 6`, :math:`mb = 3`, :math:`nb = 3`, :math:`\text{block_dim} = 2`, :math:`\text{ell_width} = 2`, and
+:math:`\text{ell_cols} = 4` using zero-based indexing:
+
+.. math::
+
+  A = \begin{pmatrix}
+        1.0 & 2.0 & 0.0 & 0.0 & 3.0 & 1.0 \\
+        2.0 & 4.0 & 0.0 & 0.0 & 4.0 & 3.0 \\
+        0.0 & 0.0 & 6.0 & 4.0 & 7.0 & 8.0 \\
+        0.0 & 0.0 & 4.0 & 5.0 & 3.0 & 2.0 \\
+        1.0 & 2.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
+        2.0 & 1.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
+      \end{pmatrix}
+
+with the blocks :math:`A_{ij}`
+
+.. math::
+
+  A_{00} = \begin{pmatrix}
+             1.0 & 2.0 \\
+             2.0 & 4.0 \\
+           \end{pmatrix},
+  A_{02} = \begin{pmatrix}
+             3.0 & 1.0 \\
+             4.0 & 3.0 \\
+           \end{pmatrix},
+  A_{11} = \begin{pmatrix}
+             6.0 & 4.0 \\
+             4.0 & 5.0 \\
+           \end{pmatrix},
+  A_{12} = \begin{pmatrix}
+             7.0 & 8.0 \\
+             3.0 & 2.0 \\
+           \end{pmatrix},
+  A_{21} = \begin{pmatrix}
+             1.0 & 2.0 \\
+             2.0 & 1.0 \\
+           \end{pmatrix}
+
+such that
+
+.. math::
+
+  A = \begin{pmatrix}
+        A_{00} & 0      & A_{02} \\
+        0      & A_{11} & A_{12} \\
+        A_{21} & 0      & 0      \\
+      \end{pmatrix}
+
+where
+
+.. math::
+
+  \begin{array}{ll}
+    \text{ell_val}[24] & = \{1.0, 2.0, 3.0, 1.0, 2.0, 4.0, 4.0, 3.0, 6.0, 4.0, 7.0, 8.0, 4.0, 5.0, 3.0, 2.0, 1.0, 2.0, 0.0, 0.0, 2.0, 1.0, 0.0, 0.0\} \\
+    \text{ell_col_ind}[6] & = \{0, 2, 1, 2, 0, -1\}
+  \end{array}
+
+A Blocked ELL matrix descriptor is created with :cpp:func:`hipsparseCreateBlockedEll`, which takes ``block_dim`` as
+``ellBlockSize``, ``ell_cols`` as ``ellCols``, ``ell_col_ind`` as ``ellColInd``, and ``ell_val`` as ``ellValue``.
+
 .. _HYB storage format:
 
 HYB storage format
