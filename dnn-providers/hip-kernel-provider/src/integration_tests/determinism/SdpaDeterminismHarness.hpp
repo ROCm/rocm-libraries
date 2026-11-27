@@ -1200,7 +1200,7 @@ inline bool registerRows(const std::vector<DeterminismRow>& rows)
         registeredDeterminismRows().push_back(
             {row.meta.engine, row.meta.archs, row.meta.disposition});
         std::string key = suite;
-        key += ".";
+        key += '.';
         key += test;
         if(!s_registered.insert(key).second)
         {
