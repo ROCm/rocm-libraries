@@ -570,11 +570,13 @@ struct CachingDeviceAllocator
             device = entrypoint_device;
         }
 
-        // Lock
-        mutex.lock();
+        // Lock the mutex
+        // Use std::unique_lock so that if we error out, the mutex gets unlocked when it destructs.
+        std::unique_lock lock(mutex);
 
         // Find corresponding block descriptor
         bool recached = false;
+        bool cacheable = false;
         BlockDescriptor search_key(d_ptr, device);
         BusyBlocks::iterator block_itr = live_blocks.find(search_key);
         if (block_itr != live_blocks.end())
@@ -585,8 +587,24 @@ struct CachingDeviceAllocator
             cached_bytes[device].live -= search_key.bytes;
 
             // Keep the returned allocation if bin is valid and we won't exceed the max cached threshold
-            if ((search_key.bin != INVALID_BIN) && (cached_bytes[device].free + search_key.bytes <= max_cached_bytes)
-                && IsFreedOnAssociatedStream(search_key))
+            cacheable = (search_key.bin != INVALID_BIN) && (cached_bytes[device].free + search_key.bytes <= max_cached_bytes)
+                && IsFreedOnAssociatedStream(search_key);
+        }
+
+        // First set to specified device (entrypoint may not be set)
+        if (device != entrypoint_device)
+        {
+            if (HipcubDebug(error = hipGetDevice(&entrypoint_device))) return error;
+            if (HipcubDebug(error = hipSetDevice(device))) return error;
+        }
+
+        hipError_t record_error = hipSuccess;
+        if (cacheable)
+        {
+            // Insert the ready event in the associated stream (must have current device set properly).
+            // Record it before inserting the block into cached_blocks, so that other threads can never
+            // find a cached block whose ready event doesn't cover its last use on the device.
+            if (HipcubDebug(record_error = hipEventRecord(search_key.ready_event, search_key.associated_stream)) == hipSuccess)
             {
                 // Insert returned allocation into free blocks
                 recached = true;
@@ -597,23 +615,11 @@ struct CachingDeviceAllocator
                     device, (long long) search_key.bytes, (long long) search_key.associated_stream, (long long) cached_blocks.size(),
                     (long long) cached_bytes[device].free, (long long) live_blocks.size(), (long long) cached_bytes[device].live);
             }
-        }
-
-        // First set to specified device (entrypoint may not be set)
-        if (device != entrypoint_device)
-        {
-            if (HipcubDebug(error = hipGetDevice(&entrypoint_device))) return error;
-            if (HipcubDebug(error = hipSetDevice(device))) return error;
-        }
-
-        if (recached)
-        {
-            // Insert the ready event in the associated stream (must have current device set properly)
-            if (HipcubDebug(error = hipEventRecord(search_key.ready_event, search_key.associated_stream))) return error;
+            // Otherwise fall through and free the block below rather than caching it
         }
 
         // Unlock
-        mutex.unlock();
+        lock.unlock();
 
         if (!recached)
         {
@@ -630,6 +636,9 @@ struct CachingDeviceAllocator
         {
             if (HipcubDebug(error = hipSetDevice(entrypoint_device))) return error;
         }
+
+        // Report a failed event record even though the block was then freed successfully
+        if (record_error != hipSuccess) return record_error;
 
         return error;
     }
