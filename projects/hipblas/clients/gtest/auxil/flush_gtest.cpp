@@ -52,7 +52,12 @@ namespace
         EXPECT_EQ((float*)dx, rotating[0]);
         for(size_t i = 1; i < 7; i++)
         {
-            EXPECT_EQ(0u, reinterpret_cast<uintptr_t>(rotating[i]) % hipblas_flush_align_bytes);
+            // each copy starts one 256-byte-aligned operand size after the previous one; their
+            // base follows the gtest guard padding (g_DVEC_PAD), so the spacing is checked rather
+            // than the absolute address
+            uintptr_t offset = reinterpret_cast<uintptr_t>(rotating[i])
+                               - reinterpret_cast<uintptr_t>(rotating[1]);
+            EXPECT_EQ((i - 1) * hipblas_flush_align(n * sizeof(float)), offset) << "copy " << i;
             EXPECT_EQ(values, copy_to_host(rotating[i], n)) << "copy " << i;
         }
 
