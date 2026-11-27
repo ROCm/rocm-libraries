@@ -11,7 +11,8 @@ One wave issues a single ``mfma_f32_4x4x4_{f16,bf16}``. The test pins the
 * result slot ``m`` of lane ``l`` is ``D_blk[m][i]``.
 
 The IR / lowering checks run everywhere; the on-device numeric check runs only
-where a gfx942 / gfx950 GPU is visible (numpy only, torch is not required).
+where a gfx90a, gfx942 or gfx950 GPU is visible (numpy only, torch is not
+required).
 
 It also pins, for these atoms and the f64 4x4x4 atom, that the MMA catalog
 lists each atom exactly on the targets whose compiler selects its intrinsic.
@@ -52,6 +53,10 @@ _LISTED_ON = {
     "mfma_f32_4x4x4_bf16": ["gfx90a", "gfx942", "gfx950"],
     "mfma_f64_4x4x4_f64": ["gfx90a", "gfx942", "gfx950"],
 }
+
+# The targets the on-device check has passed on; a target the catalog lists
+# but the check has not run on (gfx908) stays skipped until it does.
+_DEVICE_CHECKED_ON = ("gfx90a", "gfx942", "gfx950")
 
 # Each atom's intrinsic, as the declaration table and the arch domain key it.
 _INTRINSIC_KEY = {
@@ -241,8 +246,11 @@ def test_numerics_on_device(dtype):
         arch = get_device_info().base_arch
     except (ImportError, OSError, RuntimeError) as e:  # pragma: no cover
         pytest.skip(f"no visible GPU: {e}")
-    if arch not in ("gfx942", "gfx950"):
-        pytest.skip(f"4x4x4 MFMA check needs gfx942/gfx950 (got {arch})")
+    if arch not in _DEVICE_CHECKED_ON:
+        pytest.skip(
+            f"4x4x4 MFMA device check has run on {', '.join(_DEVICE_CHECKED_ON)} "
+            f"only (got {arch}); enable {arch} once it passes there"
+        )
     art = compile_kernel(_build(dtype), arch=arch, capture_ir_text=False)
 
     rng = np.random.default_rng(1234)
