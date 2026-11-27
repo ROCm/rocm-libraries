@@ -184,6 +184,7 @@ Other requirements:
 - The string is owned by the plugin and must stay valid for the lifetime of the loaded library. Use a string literal or an entry in a static table; returning a stack buffer is a use-after-free.
 - On any status other than ``HIPDNN_PLUGIN_STATUS_SUCCESS``, hipDNN doesn't read ``*name``. ``HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE`` is the supported way to leave an engine unnamed; any other failure is treated as a plugin defect and drops that engine with an error naming the status.
 - The engine ID must be the hash of the reported name, so that ``engineNameToId(name) == engineId``. Deriving both from ``HIPDNN_REGISTER_ENGINE`` satisfies this automatically. hipDNN verifies it when it loads the plugin and drops any engine that fails; see :ref:`engine-name-conflicts`.
+- The name must not parse as an engine ID, unless it is registered with ``HIPDNN_REGISTER_ENGINE``, which keeps its registered ID. hipDNN replaces an unregistered name such as ``1234`` or ``0xFF`` with the hexadecimal form of the engine's own ID and logs a warning naming the plugin, the engine, and the replaced name.
 - The implementation must be thread-safe.
 
 ``getEngineName`` is optional. The entry point is emitted whether or not your container defines the member; when the member is absent, it reports ``HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE`` and hipDNN names the engine itself.
@@ -230,7 +231,7 @@ Addressing an engine by name
 
 The string therefore always yields an ID, and a name that names nothing is indistinguishable from one naming an engine this graph has no candidate for. A misspelled name resolves to an ID no candidate carries: ``deselect_engines`` bars nothing and ``set_preferred_engine_id_ext`` falls back to the heuristics' top pick. To check a name took effect, read the log — ``deselect_engines`` reports each name with the ID it resolved to when it is called, and the graph reports each plan it bars when the plans are built. A string that appears only in ``EngineDetails.name`` never becomes an engine's name, so it selects nothing on these surfaces either.
 
-One spelling is ambiguous by construction: an engine whose declared name is itself a number, such as ``1234`` or ``0xFF``. The numeric parse runs before the hash, so that string addresses the engine holding that numeric ID rather than the engine declaring the name. Namespacing an engine name avoids this as well.
+A declared name that is itself a number, such as ``1234`` or ``0xFF``, would read here as that numeric ID rather than as the engine declaring it, because the numeric parse runs before the hash. hipDNN therefore never lists an engine under such a name: it uses the hexadecimal form of the engine's own ID instead, so every name the enumeration reports resolves back to its engine. Namespacing an engine name avoids the replacement.
 
 Both surfaces retain the resolved ID whether or not it selected anything. That ID is what ``Graph::get_preferred_engine_id_ext()`` reports back and what a serialized graph descriptor carries, so a preference set from a string that matched nothing reads back as the hash of that string rather than as "unset".
 

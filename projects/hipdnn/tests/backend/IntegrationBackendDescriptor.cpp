@@ -101,3 +101,54 @@ TEST_F(IntegrationBackendDescriptor, SetAttributeWithNullDescriptor)
 
     EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
+
+TEST_F(IntegrationBackendDescriptor, GetAttributeRejectsNegativeRequestedCount)
+{
+    int64_t elementCount = 42;
+
+    // An invalid descriptor is reported before the count is looked at.
+    EXPECT_EQ(hipdnnBackendGetAttribute(nullptr,
+                                        HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                        -1,
+                                        &elementCount,
+                                        nullptr),
+              HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+
+    hipdnnBackendDescriptor_t descriptor = nullptr;
+    ASSERT_EQ(hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR, &descriptor),
+              HIPDNN_STATUS_SUCCESS);
+
+    // A null array is a count query for this attribute, so the descriptor alone
+    // would answer it; a negative count is still refused.
+    EXPECT_EQ(hipdnnBackendGetAttribute(descriptor,
+                                        HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                        -1,
+                                        &elementCount,
+                                        nullptr),
+              HIPDNN_STATUS_BAD_PARAM);
+    EXPECT_EQ(elementCount, 42);
+
+    EXPECT_EQ(hipdnnBackendDestroyDescriptor(descriptor), HIPDNN_STATUS_SUCCESS);
+}
+
+TEST_F(IntegrationBackendDescriptor, SetAttributeRejectsNegativeElementCount)
+{
+    // An invalid descriptor is reported before the count is looked at.
+    EXPECT_EQ(hipdnnBackendSetAttribute(
+                  nullptr, HIPDNN_ATTR_TENSOR_DIMENSIONS, HIPDNN_TYPE_INT64, -1, nullptr),
+              HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+
+    hipdnnBackendDescriptor_t descriptor = nullptr;
+    ASSERT_EQ(hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_TENSOR_DESCRIPTOR, &descriptor),
+              HIPDNN_STATUS_SUCCESS);
+
+    // The descriptor alone would report the null array first; the negative count
+    // is refused before the descriptor sees the call.
+    EXPECT_EQ(hipdnnBackendSetAttribute(
+                  descriptor, HIPDNN_ATTR_TENSOR_DIMENSIONS, HIPDNN_TYPE_INT64, -1, nullptr),
+              HIPDNN_STATUS_BAD_PARAM);
+
+    EXPECT_EQ(hipdnnBackendDestroyDescriptor(descriptor), HIPDNN_STATUS_SUCCESS);
+}

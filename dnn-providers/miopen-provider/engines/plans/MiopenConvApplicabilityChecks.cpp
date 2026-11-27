@@ -646,12 +646,13 @@ bool hasDisjointElements(const std::vector<int64_t>& dims, const std::vector<int
 }
 
 // Elements that may share an address (hasDisjointElements: a broadcast axis, a negative stride,
-// overlapping or interleaved strides), declined by every operation. Such a tensor is never packed,
-// but its stride order can still match a layout and pass the layout rule. Overlapping strides such
-// as [256, 64, 5, 4] on [2, 4, 8, 8] span exactly the element count, so MIOpen counts them as
-// packed (TensorDescriptor compares the element count with GetElementSpace) and may hand them to a
-// solver that assumes dense data. Not tested on a GPU; an output (y, dx, dw) of that kind cannot
-// be written correctly at all. A tensor with a zero dim has no elements and passes.
+// overlapping or interleaved strides), declined by every operation (checkPacking). Such a tensor
+// is never packed, but its stride order can still match a layout and pass the layout rule.
+// Overlapping strides such as [256, 64, 5, 4] on [2, 4, 8, 8] span exactly the element count, so
+// MIOpen counts them as packed (TensorDescriptor compares the element count with GetElementSpace)
+// and may hand them to a solver that assumes dense data. Not tested on a GPU; an output (y, dx,
+// dw) of that kind cannot be written correctly at all. A tensor with a zero dim has no elements
+// and passes.
 void checkDisjointElements(const char* operation, const TensorInfo& tensor)
 {
     if(!hasDisjointElements(tensor.dims, tensor.strides))
@@ -659,6 +660,23 @@ void checkDisjointElements(const char* operation, const TensorInfo& tensor)
         decline(std::string(operation) + ": tensor " + tensor.name
                 + " may have elements that share an address (a zero, negative or overlapping "
                   "stride)");
+    }
+}
+
+// Packing, every operation. Each tensor in turn is judged by `operationRule`, which declines a
+// non-packed tensor the operation cannot take, and then by checkDisjointElements, so the first
+// tensor that breaks either rule gives the reason.
+template <typename OperationRule>
+void checkPacking(const char* operation,
+                  const TensorInfo& a,
+                  const TensorInfo& b,
+                  const TensorInfo& c,
+                  const OperationRule& operationRule)
+{
+    for(const TensorInfo* tensor : {&a, &b, &c})
+    {
+        operationRule(*tensor);
+        checkDisjointElements(operation, *tensor);
     }
 }
 
@@ -678,18 +696,15 @@ void checkBackwardTensors(const char* operation,
     // correctly and accepted. A non-packed tensor is classified by stride order and so carries at
     // most one layout bit; a packed tensor never triggers this rule. Workaround tracked by
     // ALMIOPEN-3301; remove it when the MIOpen defect ALMIOPEN-3300 is fixed. In either layout, a
-    // tensor whose elements may share an address is declined as in forward
-    // (checkDisjointElements).
-    for(const TensorInfo* tensor : {&a, &b, &c})
-    {
-        if(!tensor->packed && (tensor->layoutMask & LAYOUT_CHANNELS_LAST) != 0U)
+    // tensor whose elements may share an address is declined as in forward (checkPacking).
+    checkPacking(operation, a, b, c, [&](const TensorInfo& tensor) {
+        if(!tensor.packed && (tensor.layoutMask & LAYOUT_CHANNELS_LAST) != 0U)
         {
-            decline(std::string(operation) + ": tensor " + tensor->name
+            decline(std::string(operation) + ": tensor " + tensor.name
                     + " is channels-last and not packed; " + tensorNames(a, b, c)
                     + " must not be channels-last with padded strides");
         }
-        checkDisjointElements(operation, *tensor);
-    }
+    });
 }
 
 void checkBwdDataElementCount(const char* name, const TensorAttributes& attr)
@@ -782,7 +797,7 @@ void checkForwardLayout(const TensorInfo& x, const TensorInfo& w, const TensorIn
 //   the invoker of a same-shape packed problem run before it in the process, and the packed one
 //   reuses its invoker when it runs first: MIOpen's invoker cache key leaves out the strides
 //   (ALMIOPEN-3356). Remove it when that is fixed.
-// - elements that may share an address (checkDisjointElements).
+// - elements that may share an address (checkPacking).
 void checkForwardPacking(const TensorInfo& x, const TensorInfo& w, const TensorInfo& y)
 {
     const bool grouped = x.dims[1] != w.dims[1];
@@ -790,20 +805,18 @@ void checkForwardPacking(const TensorInfo& x, const TensorInfo& w, const TensorI
         = x.dims.size() == 5
           && (x.layoutMask & w.layoutMask & y.layoutMask & LAYOUT_CHANNELS_LAST) != 0U;
 
-    for(const TensorInfo* tensor : {&x, &w, &y})
-    {
-        const std::string prefix = std::string(FWD_OPERATION) + ": tensor " + tensor->name;
-        if(!tensor->packed && grouped)
+    checkPacking(FWD_OPERATION, x, w, y, [&](const TensorInfo& tensor) {
+        const std::string prefix = std::string(FWD_OPERATION) + ": tensor " + tensor.name;
+        if(!tensor.packed && grouped)
         {
             decline(prefix + " is not packed; a grouped convolution needs x, w and y packed");
         }
-        if(!tensor->packed && channelsLast3d)
+        if(!tensor.packed && channelsLast3d)
         {
             decline(prefix
                     + " is not packed; a 3D channels-last convolution needs x, w and y packed");
         }
-        checkDisjointElements(FWD_OPERATION, *tensor);
-    }
+    });
 }
 
 } // namespace

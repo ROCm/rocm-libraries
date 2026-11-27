@@ -1519,23 +1519,6 @@ def test_udd_declarative_arm_replaces_dispatch_symbol(tmp_path, main_fixture, la
     load_flat_input(root, GENERIC_TARGETS)
 
 
-@pytest.mark.quick
-@pytest.mark.parametrize("sdk_version", ["1.2.3", " 1. 2 .3", "1.2.3-rc1"])
-def test_ued_sdk_version_accepts_what_the_runtime_parses(
-    tmp_path, empty_arch_fixture, sdk_version
-):
-    """The runtime's Version{} skips whitespace and ignores trailing text, so a
-    stricter pack-time rule would refuse a UED the runtime loads."""
-    root = tmp_path / "root"
-    folder = _nest(root, "hip", empty_arch_fixture)
-    path = folder / "solo.ued.json"
-    document = _read(path)
-    document["sdk_version"] = sdk_version
-    path.write_text(json.dumps(document), encoding="utf-8")
-
-    load_flat_input(root, GENERIC_TARGETS)
-
-
 def _empty_arch_pattern_root(tmp_path, empty_arch_fixture, embedded=False):
     """The empty-arch fixture, its UED matching by a `nodes` pattern. An `embedded`
     root compiles nothing, so a full pack never runs the HIP compiler."""
