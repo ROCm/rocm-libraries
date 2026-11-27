@@ -1604,6 +1604,18 @@ diagonal, and `any_diagonal` 0, the plain build, admitted only at offset 0: caus
 self-attention, and top-left causal with fewer queries than keys. At `head_dim` 64
 the two measured the same, and only `any_diagonal` 1 ships.
 
+Several kernels of one engine can serve the same graph (a wider tile beside the exact one, a
+key-aligned object beside the any-length one, a vectorized bias beside a key-strided one), so
+the runtime needs each candidate to have a distinct knob tuple. The forward engines enrol the
+graph-determined fields that tell those kernels apart as knobs, in the generator's
+`FORWARD_ALTERNATIVE_KNOBS`: `head_dim`, `head_dim_v`, `qk_mask`, `kv_align` and `bias_kstrided`
+for `sdpa_cdna`, and `any_diagonal` for `sdpa_cdna_dualwave`. Each set is the smallest that
+separates every pair on every shipped arch; no feature field (`has_dropout`, `v_mask`) is
+needed. The fields stay in the kernel matchers, and the unique ids, bindings and objects do not
+change. Tested: `TestFlydslSdpaCdnaPacks.EveryGraphsCandidatesHaveDistinctKnobTuples` and
+`TestFlydslSdpaCdnaDualwavePacks.EveryGraphsCandidatesHaveDistinctKnobTuples` (every graph class
+of the census, per arch), and `flydsl/tests/test_sdpa_fwd_enumeration.py`.
+
 Each tensor is passed as FlyDSL's
 `fx.Tensor`: an 8-byte pointer followed by a 40-byte by-value layout (four i32
 extents, then the i64 strides of the three non-unit-stride dimensions);
@@ -1629,6 +1641,7 @@ One SDPA-forward node, and:
 | Padding, if present: both per-batch lengths, with or without `padding_mask` (§7.8) | Served on the generic prefill and decode objects (modification 32); the dual-wave and `kv_align` 64 objects decline it, and so do the decode objects under a top-left causal mask. |
 | Dropout, if present: a probability in [0, 1) with an INT64 device or INT64/INT32 by-value seed and offset (§7.9); above 0 without a sink, padded or not, packed or not (packed without a bias), with or without a bias the vectorized objects read | Above 0, served by the generic `has_dropout` objects (modification 33) at `head_dim` 64, 128, 256, packed too, and their bias builds; 0 is the undropped result every object computes. |
 | Packed THD, if present: compact, Q/O and K/V ragged through INT32 `[B + 1, 1, 1, 1]` token tables, the LSE packed through Q's, optionally with both per-batch lengths or `seq_len_kv` alone; without a bias, with or without dropout (§7.10) | Served on the generic prefill objects (modification 34), with dropout on their `has_dropout` objects; the dual-wave, decode and `kv_align` 64 objects decline it. |
+| A bias view past 32-bit byte offsets: one (batch, head) slice over 2147483647 bytes (an f32 bias over 2 GiB) | Declined, with the reason logged: `flydsl_sdpa declined the graph [bias]`, naming the view's bytes against the 32-bit limit when this test failed, and the bias operand when another bias test did. Serving such a bias takes 64-bit offsets and is deferred. Pinned by `TestFlydslSdpaCdnaBiasDeclineLog.NamesTheViewBytesWhereThe32BitSizeTestFailed`, `GivesAGenericReasonForABiasThatFailsAnotherTest` and `LogsNoBiasDeclineForAViewWithinThe32BitLimit`. |
 | Declined outright: the dropout mask-and-scale form (the RNG dump of a dropping graph is served, §7.9), paged KV, block masks, FP8 descales, ALiBi, the split max / sum-exp stats, a non-`AUTO` implementation | The objects are built without them. |
 | Batch pitch and grid within int32; under 2³² work-items on each launch axis (workgroups times workgroup size) | 32-bit addressing; HIP rejects a launch whose work-items on an axis pass the dispatch packet's 32-bit grid size. |
 
@@ -2297,12 +2310,34 @@ changed.
   one. The engine's object runs on the copies; O's first Dv columns are copied back. The copy is
   the `sdpa_head_pad` op's object (`kernels_src/kernels/head_pad/`, one per target), launched
   by the natives on the attention launch's stream, three times before it and once after; it
-  moves 16-bit units, so f32 is two per element. Packed operands are copied through their own
-  token tables, as the attention kernels read them: each sequence from its table entry, for its
-  per-batch length when the graph gives one (`seq_len_q` for Q and O, `seq_len_kv` for K and V,
-  so origins in any order and with gaps, §5.9), else for the table's difference. Only a
-  sequence's own tokens are read or written; a tensor bound as both a query-side and a key-side
-  operand with different lengths declines.
+  moves 16-bit units, so f32 is two per element. The head-pad objects are built with ROCm 10.2.0,
+  as the backward objects are; the unedited kernel rebuilt there differs from the 7.13.0 objects it
+  replaced only in the ELF `.comment` section.
+- **Packed origins.** A packed operand is copied from its own token table, as the attention
+  kernels read it: each sequence from its table entry, for its per-batch length when the graph
+  gives one (`seq_len_q` for Q and O, `seq_len_kv` for K and V), else for the table's difference.
+  Origins in any order and with gaps, past the token count included, are served by rebasing:
+  the copy-in packs the sequences densely, sequence `b` at token `b * S`, and writes the compact
+  table `[0, S, ..., B * S]` to the workspace, and the engine's graph reads that table in place of
+  the graph's. Only the sides whose lengths the graph gives are rebased (K and V with
+  `seq_len_kv` alone; Q, O and the LSE too with `seq_len_q`); a side with no length keeps its
+  table and copies for the table's difference. When Q is rebased, the engine writes the LSE to
+  token-major scratch, ragged through Q's compact table, and a copy writes it back through the
+  graph's own Q table. Only a sequence's own tokens are read or written; a tensor bound as both
+  a query-side and a key-side operand with different lengths declines. A packed graph whose
+  head-major strides fail the engines' token-span rule is declined at a head dim off 8, as it is
+  at multiples of 8, because the length binding is read from the graph's own operands.
+  Tested: `TestFlydslSdpaHeadPad.RebasesExactlyTheSidesWhoseLengthsTheGraphGives`,
+  `GivesQAndKSharingATableTablesOfTheirOwnWhenTheirSequencesDiffer`,
+  `TheRebasedFormTwoGraphStillMatchesTheEngines` (LSE at 1, 2 and 4 heads),
+  `FormTwoWithOriginsPastTheTokenCountLaunchesInsideItsWorkspace`,
+  `FormThreeWithKeyOriginsPastTheTokenCountLaunchesInsideItsWorkspace`,
+  `DeclinesAHeadMajorPackedGraph`; on CDNA devices
+  `TestGpuFlydslSdpaCdnaDispatch.PacksGappedOriginsPastTheTokenCountAtAHeadDimOffEight`,
+  `PacksGappedOriginsPastTheTokenCountWithLengthsOnBothSides`,
+  `PacksGappedKeyOriginsPastTheTokenCountAtAHeadDimOffEight`,
+  `PacksGappedOriginsInF32AtAHeadDimFourModEight` and
+  `PacksGappedOriginsWithTwoAndFourHeadsAndTheLse`.
 - **Matching.** The engine's graph match, kernel match, score, workspace and prepare see a padded
   graph: Q/K/V/O at the padded width, in the padded layout, declaring 16-byte alignment, a packed
   operand's multiplier its new sequence stride; every other field is the graph's own. The scale
@@ -2313,8 +2348,9 @@ changed.
   The operands must be copyable: device tensors, head-dim stride 1, other strides positive, O's
   elements distinct, a packed operand's offsets counting tokens. A shard without the copy's
   object serves no such graph.
-- **Workspace.** The four copies, each 256-byte aligned, then the engine's own workspace, last,
-  where it is alone (its zero bias stays at the end).
+- **Workspace.** The four copies, each 256-byte aligned, then the LSE scratch and the compact
+  tables where a side is rebased, then the engine's own workspace, last, where it is alone (its
+  zero bias stays at the end) (`TestFlydslSdpaHeadPad.LaysOutTheWorkspaceWithTheLseScratchAndTheCompactTables`).
 - **Unchanged for every other graph.** With both head dims multiples of 8 the wrappers call the
   engine's own functions with the graph's own context, and its handler's workspace, prepared
   dispatch and launch are the engine's (`TestFlydslSdpaHeadPad.AGraphOnMultiplesOfEightReachesTheEngineUntouched`).
