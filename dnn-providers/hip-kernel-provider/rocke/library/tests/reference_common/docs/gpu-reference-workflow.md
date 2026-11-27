@@ -194,7 +194,7 @@ parts:
 
 | File | Declares |
 |---|---|
-| `cli.py` | `OPERATION`, a `reference_common.cli.ReferenceOperation` naming the contract, architectures, manifest reference description, `Metric`, and an optional `TorchReference` for offline Torch cross-checks; module aliases for its `qualify`, `load_bundle`, `manifest_key`, `verify_case`, and `main` |
+| `cli.py` | `OPERATION`, a `reference_common.cli.ReferenceOperation` naming the contract, architectures, manifest reference description, and `Metric`; module aliases for its `qualify`, `load_bundle`, `manifest_key`, `verify_case`, and `main` |
 | `worker.py` | `run(request, output)`, which passes a `WorkerOperation` with the adapter's launch call and the frozen replay-argument binding to `reference_common.worker.run_case`, with the requested variant's adapter in source mode and only the processor package in replay mode |
 | `test_<operation>_pinned_reference.py` | A `reference_bundle` fixture from `select_bundle` and the tests from `pinned_reference_tests`, with a negative-control perturbation that exceeds the comparison limit in the operation's metric |
 
@@ -322,22 +322,11 @@ target, launch metadata, and payload digests. Inputs and answer tensors are not
 shipped. The generated `qualification-lock.json` is a candidate trust anchor,
 not an automatically approved replacement for the committed lock.
 
-For convolution, optionally add `--torch-reference` to the qualification command
-in a separate offline environment with Torch installed. This checks CPU Torch
-float64 and float32 answers as well as NumPy and includes their bounds in the
-certificate. A CPU Torch build suffices. SDPA also accepts `--torch-reference`
-for CPU Torch float64/float32 SDPA, or `--torch-reference cuda` for the matching
-ROCm GPU. Both operations set B to the largest measured baseline error bound
-against all enabled references. No fixed percentage margin is reserved; the
+Both operations set B to the measured baseline error bound against the
+independent NumPy reference. No fixed percentage margin is reserved; the
 comparison limit C is rounded strictly below T-B, so D<=C implies D+B<T.
-The NumPy–Torch gap remains diagnostic. Existing published bundles retain
-their old authenticated limits until replaced through this workflow. See the [SDPA contract](../../sdpa_reference/docs/sdpa-test-reference.md#optional-torch-reference-agreement-during-qualification)
-for scope and reference-only auditing. The
-convolution oracle-only audit is:
-
-```bash
-python -m pytest library/tests/conv_reference/check_torch_reference.py -v
-```
+Existing published bundles retain their old authenticated limits until replaced
+through this workflow.
 
 Review every case's target, geometry, grid, epilogue, output determinism, oracle
 agreement, and remaining error budget. For coverage additions, check that the
@@ -581,8 +570,10 @@ selects both by pattern for a lowercase operation name and a `gfx` processor, so
 it needs no edit; verify that the real provider selector includes the new
 entries. An architecture's entry runs every variant installed for it, with test
 ids `<arch>-<variant>-<case>` and the CTest limit of the `gpu` resource class
-(`platform/tests/cmake/TestTimeouts.cmake`), which covers two variants at the
-worker's five-minute request timeout, so adding cases to a published
+(`platform/tests/cmake/TestTimeouts.cmake`), which covers two variants. Each
+request of a case stops at the worker's 100 s request timeout
+(`PINNED_REQUEST_TIMEOUT_SECONDS` in `pinned_tests.py`), below the 120 s
+per-test limit of the GPU pytest entries, so adding cases to a published
 architecture uses its existing entry.
 
 One entry per architecture is a trade-off. It keeps the CTest names, and the
@@ -591,7 +582,7 @@ variants existed, and pytest still reports each result under its
 `<arch>-<variant>-<case>` id. With one variant per architecture it costs
 nothing. With two or more, it gives up isolation at the CTest level: one
 variant's failure fails the whole entry; a variant whose kernel hangs reaches
-the worker's five-minute request timeout case after case, so it can use the
+the worker's 100 s request timeout case after case, so it can use the
 entry's whole timeout and leave the other variants unrun; and a CTest exclusion
 or category can select only the whole architecture. So an architecture's
 entry runs at most two variants of an operation. Before an

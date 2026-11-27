@@ -8,6 +8,8 @@ import pytest
 
 from rocke.tests.subprocess_launcher import rocke_python_command
 
+pytestmark = pytest.mark.gpu
+
 
 @pytest.mark.parametrize(
     "dtype,matrix_path,route,m,n,k,case,count",

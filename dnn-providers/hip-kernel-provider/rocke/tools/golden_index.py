@@ -284,9 +284,6 @@ GOLDENS: tuple[Golden, ...] = (
         argv=("-m", "tests.test_strided_kv_decode", "--write"),
     ),
     _library_test_golden(
-        "dsa_indexer", "dsa_indexer_ir_sha256.json", "test_dsa_indexer_golden.py"
-    ),
-    _library_test_golden(
         "gdn_decode", "gdn_decode_gfx950_ir_sha256.json", "test_gdn_decode_golden.py"
     ),
     _library_test_golden(

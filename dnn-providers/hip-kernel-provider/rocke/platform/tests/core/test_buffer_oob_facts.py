@@ -31,27 +31,17 @@ import pytest
 from rocke.core.ir import I8, I32, IRBuilder, PtrType
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
+pytestmark = pytest.mark.gpu
+
 _LANE_STRIDE = 16  # bytes per lane in the load results and the store sources
 _SOURCE_BYTES = 4096
 
 
-def _gpu_arch():
-    try:
-        from rocke.runtime.hip_module import get_device_arch
-    except ImportError:
-        return None
-    try:
-        return get_device_arch()
-    except Exception:  # noqa: BLE001 - no HIP runtime means no GPU test
-        return None
-
-
 @pytest.fixture(scope="module")
 def arch():
-    found = _gpu_arch()
-    if not found:
-        pytest.skip("no GPU")
-    return found
+    from rocke.tests.gpu import current_device_arch
+
+    return current_device_arch()
 
 
 def _i32(value: int) -> int:

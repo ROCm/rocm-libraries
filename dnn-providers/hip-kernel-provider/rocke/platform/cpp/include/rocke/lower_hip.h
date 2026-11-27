@@ -102,16 +102,19 @@ rocke_status_t rocke_lower_kernel_to_hip(rocke_ir_builder_t* b,
                                          rocke_strbuf_t* out);
 
 /* Parse the serialized ck.dsl.ir/v1 kernel `ir_text` (rocke/ir_serialize.h)
- * and lower it as rocke_lower_kernel_to_hip does with `arch` (NULL => gfx950)
- * and every other option at its default: the route for a host that holds a
- * kernel as text rather than as a KernelDef. On ROCKE_OK the source is appended
- * to `out`. On any other status the reason -- the parser's or the lowerer's
- * message, or one naming the step that failed; never empty -- is appended to
- * `message`, and `out` is unspecified. NULL or empty `ir_text` is
- * ROCKE_ERR_VALUE ("empty IR input"), and so is a NULL `out` ("no output
- * buffer"). `message` is optional: NULL means "do not report the reason", and
- * the status is the same as with a buffer. The caller owns and initialises
- * each buffer it passes. */
+ * and lower it as rocke_lower_kernel_to_hip does for `arch`, with every other
+ * option at its default: the route for a host that holds a kernel as text
+ * rather than as a KernelDef. On ROCKE_OK the source is appended to `out`. On
+ * any other status the reason -- the parser's or the lowerer's message, or one
+ * naming the step that failed; never empty -- is appended to `message`, and
+ * `out` is unspecified. NULL or empty `ir_text` is ROCKE_ERR_VALUE ("empty IR
+ * input"), and so is a NULL `out` ("no output buffer"). Unlike
+ * rocke_lower_kernel_to_hip there is no default target, as for
+ * rocke_lower_serialized_ir_to_llvm: a NULL or empty `arch` is ROCKE_ERR_VALUE
+ * ("lowering requires an explicit gfx target (there is no default)").
+ * `message` is optional: NULL means "do not report the reason", and the status
+ * is the same as with a buffer. The caller owns and initialises each buffer it
+ * passes. */
 rocke_status_t rocke_lower_serialized_ir_to_hip(const char* ir_text,
                                                 const char* arch,
                                                 rocke_strbuf_t* out,

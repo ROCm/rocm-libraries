@@ -55,7 +55,8 @@ python3 $UHD/scripts/decide.py l1 --rows rows.json --candidate-dir <model dir> -
   for every graph it executes; `--min-available` relaxes it, `--min-graphs` sets how many it
   must execute), `metric` (the candidate's `score.metric` and every answer name the declared
   metric), `selector_revision` (the engine reports the revision the model was trained
-  against), `accuracy` (candidate median |error| ≤ incumbent × 1.05, `--max-regression`
+  against; the gate also reports the engine's and the candidate's `codegen_revision`, with a
+  note when they differ, and never fails on them), `accuracy` (candidate median |error| ≤ incumbent × 1.05, `--max-regression`
   changes it). Both models' accuracy is always reported. With no incumbent, pass
   `--no-incumbent`: the accuracy gate then asks only that the candidate was scored, and the
   report says `baseline: none`.

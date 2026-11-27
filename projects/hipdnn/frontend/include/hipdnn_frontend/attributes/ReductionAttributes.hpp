@@ -6,7 +6,7 @@
  * @brief Attributes for reduction operations
  *
  * This file defines the ReductionAttributes class for configuring reduction
- * operations that reduce a tensor along all dimensions.
+ * operations that reduce a tensor along one or more dimensions.
  */
 
 #pragma once
@@ -25,18 +25,22 @@ namespace hipdnn_frontend::graph
  * @class ReductionAttributes
  * @brief Configuration for reduction operations
  *
- * ReductionAttributes specifies the parameters for reduction operations that
- * reduce an input tensor to a scalar or lower-dimensional tensor.
+ * ReductionAttributes specifies the parameters for reduction operations. The
+ * output Y has the rank of X; each Y dimension is either X's (kept) or 1
+ * (reduced), and at least one is reduced. Y dims are required before
+ * validation/build; strides may be omitted and inferred.
  *
  * @code{.cpp}
- * // Sum reduction
+ * // Sum reduction over C
  * auto y = graph.reduction(x, ReductionAttributes()
  *              .set_mode(ReductionMode::ADD));
+ * y->set_dim({N, 1, H, W});
  *
- * // Absolute maximum reduction
+ * // Absolute maximum reduction to one element
  * auto y = graph.reduction(x, ReductionAttributes()
  *              .set_mode(ReductionMode::AMAX)
  *              .set_name("amax_op"));
+ * y->set_dim({1, 1, 1, 1});
  * @endcode
  *
  * @see Graph::reduction(), ReductionMode

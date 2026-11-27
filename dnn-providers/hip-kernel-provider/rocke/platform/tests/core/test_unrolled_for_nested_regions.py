@@ -677,6 +677,7 @@ def test_kernel_compiles_and_links(case):
     )
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("case", sorted(CASES))
 def test_gpu_every_lane_matches_the_host(case):
     build, expected = CASES[case]

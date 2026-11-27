@@ -29,7 +29,9 @@ Checks:
 * On the host, the contract checker itself: an output whose running sum
   overflows may be Inf or NaN, one whose terms and running sums all stay in
   range must be finite and within the tolerance.
-* On the host, on the LLVM IR of both engines: every stored output gets each K
+* On the host, on the LLVM IR of the Python builder's kernel and, where the
+  C++ engine's Python modules are built, of each engine's builder's kernel,
+  which must be the same byte for byte: every stored output gets each K
   group once, with the A scale of its own row and the B scale of its own
   column, for every lane, wave and workgroup; the gfx950 kernel uses the
   scaled MFMA and the ldexp path, the gfx942 kernel the 32x32x16 MFMA and
@@ -56,12 +58,13 @@ from rocke.instances.common.mx_gemm import (
     mx_gemm_signature,
 )
 from rocke.tests.engines import (
+    ENGINES,
     all_engines_backend,
     engine_modules_available,
-    lower_spec_with_all_engines,
+    lower_spec_with_engine,
 )
 from rocke.tests.gpu import current_device_arch_in, launch_with_buffers
-from rocke.tests.lanes import BINDING_LANE, skip_until
+from rocke.tests.lanes import BUILD_VARIANT, skip_until
 from rocke.tests.llvm_ir import KernelIR
 
 _NAN_CODE = 255
@@ -263,6 +266,7 @@ _RANDOM_SHAPES = (
 )
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("mantissa", ["fp8e4m3", "bf8e5m2"])
 @pytest.mark.parametrize(
     "M, N, K, tile_m, tile_n",
@@ -349,6 +353,7 @@ def _special_case(arch, mantissa):
     return table, a, a_codes, b, b_codes
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("mantissa", ["fp8e4m3", "bf8e5m2"])
 def test_mx_gemm_special_values_on_gpu(mx_gpu_arch, mantissa):
     table, a, a_codes, b, b_codes = _special_case(mx_gpu_arch, mantissa)
@@ -368,6 +373,7 @@ def test_mx_gemm_special_values_on_gpu(mx_gpu_arch, mantissa):
     assert not overflows[27, 28] and np.isfinite(got[27, 28])
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("mantissa", ["fp8e4m3", "bf8e5m2"])
 def test_mx_gemm_codes_at_the_safe_bound_on_gpu(mx_gpu_arch, mantissa):
     """Every A and B code at the largest code the scaled MFMA takes directly,
@@ -393,37 +399,43 @@ def test_mx_gemm_codes_at_the_safe_bound_on_gpu(mx_gpu_arch, mantissa):
 
 
 # ---------------------------------------------------------------------------
-# Host checks on both engines' LLVM IR.
+# Host checks on each engine's LLVM IR.
 # ---------------------------------------------------------------------------
 
 
-def _both_engines_ir(spec, arch) -> str:
-    return lower_spec_with_all_engines(
-        spec, arch, build_kernel=build_mx_gemm, lower_spec=lower_mx_gemm
+def _engine_ir(spec, arch, engine) -> str:
+    return lower_spec_with_engine(
+        spec,
+        arch,
+        engine=engine,
+        build_kernel=build_mx_gemm,
+        lower_spec=lower_mx_gemm,
     )
 
 
+@pytest.mark.parametrize("engine", ENGINES)
 @pytest.mark.parametrize("mantissa", ["fp8e4m3", "bf8e5m2"])
-def test_gfx950_kernel_uses_the_scaled_mfma_and_the_ldexp_path(mantissa):
+def test_gfx950_kernel_uses_the_scaled_mfma_and_the_ldexp_path(mantissa, engine):
     # K = 96: one scaled MFMA step and one group added with ldexp.
     spec = MxGemmSpec(
         M=64, N=64, K=96, block_tile_m=32, block_tile_n=128, mantissa_dtype=mantissa
     )
-    ir = _both_engines_ir(spec, "gfx950")
+    ir = _engine_ir(spec, "gfx950", engine)
     assert "@llvm.amdgcn.mfma.scale.f32.32x32x64.f8f6f4.v8i32.v8i32(" in ir
     assert "call float @llvm.ldexp.f32.i32(" in ir
     assert "@llvm.amdgcn.ballot" in ir  # the wave's codes checked against the bound
     assert not re.search(r"= fmul ", ir)
 
 
+@pytest.mark.parametrize("engine", ENGINES)
 @pytest.mark.parametrize(
     "mantissa, operands", [("fp8e4m3", "fp8.fp8"), ("bf8e5m2", "bf8.bf8")]
 )
-def test_gfx942_kernel_uses_the_32x32x16_mfma_and_ldexp(mantissa, operands):
+def test_gfx942_kernel_uses_the_32x32x16_mfma_and_ldexp(mantissa, operands, engine):
     spec = MxGemmSpec(
         M=64, N=64, K=96, block_tile_m=32, block_tile_n=128, mantissa_dtype=mantissa
     )
-    ir = _both_engines_ir(spec, "gfx942")
+    ir = _engine_ir(spec, "gfx942", engine)
     assert f"@llvm.amdgcn.mfma.f32.32x32x16.{operands}(" in ir
     assert "mfma.scale" not in ir
     assert "call float @llvm.ldexp.f32.i32(" in ir
@@ -431,7 +443,7 @@ def test_gfx942_kernel_uses_the_32x32x16_mfma_and_ldexp(mantissa, operands):
 
 
 # Every output is scaled with its own row's A scale and its own column's B
-# scale. The check reads both engines' LLVM IR and evaluates, for every lane,
+# scale. The check reads the engine's LLVM IR and evaluates, for every lane,
 # wave, workgroup and K group, the address of every scale byte an output's
 # terms read and the address the output is stored to, so it follows the kernel:
 # any change to which scale an output gets changes what it checks.
@@ -657,12 +669,13 @@ _PROVENANCE_TARGETS = [
 ]
 
 
+@pytest.mark.parametrize("engine", ENGINES)
 @pytest.mark.parametrize(
     "arch, mantissa",
     _PROVENANCE_TARGETS,
     ids=[f"{a}-{m}" for a, m in _PROVENANCE_TARGETS],
 )
-def test_each_output_is_scaled_with_its_own_row_and_column(arch, mantissa):
+def test_each_output_is_scaled_with_its_own_row_and_column(arch, mantissa, engine):
     """Every stored output gets each K group exactly once, scaled with the A
     scale of its own row and the B scale of its own column, for every lane,
     wave and workgroup.
@@ -681,7 +694,7 @@ def test_each_output_is_scaled_with_its_own_row_and_column(arch, mantissa):
     spec = MxGemmSpec(
         M=64, N=64, K=96, block_tile_m=32, block_tile_n=64, mantissa_dtype=mantissa
     )
-    ir = _MxKernelIR(_both_engines_ir(spec, arch))
+    ir = _MxKernelIR(_engine_ir(spec, arch, engine))
     grid_x, grid_y, _ = mx_gemm_grid(spec)
     work_items = {
         ir.call_named("llvm.amdgcn.workitem.id.x"): np.arange(spec.block_size)[
@@ -818,7 +831,7 @@ def test_both_engines_refuse_invalid_specs(fields, message):
     with pytest.raises(ValueError, match=re.escape(message)):
         build_mx_gemm(spec, arch="gfx950")
     if not engine_modules_available():
-        skip_until(BINDING_LANE, reason="needs the rocke_engine binding")
+        skip_until(BUILD_VARIANT, reason="needs the rocke_engine binding")
     with pytest.raises(RuntimeError, match=re.escape(message)):
         lower_mx_gemm(spec, arch="gfx950", backend="cpp")
 

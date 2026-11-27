@@ -8,7 +8,7 @@ derived relative to each file, so this tree is copy-able verbatim.
 
 Install test dependencies from the platform directory with
 `python -m pip install -r requirements.txt` or `python -m pip install -e '.[dev]'`.
-Both include `ml_dtypes>=0.6.0`, which supplies independent FP4/FP6/FP8 reference
+Both include `ml_dtypes>=0.5.0`, which supplies independent FP4/FP6/FP8 reference
 types. Host tests that need this optional runtime dependency use
 `pytest.importorskip`; a minimal authoring installation can run the remaining
 tests. Required gfx1250 numerical validation needs `ml_dtypes` installed and
@@ -68,7 +68,7 @@ for what is actually exercised vs. manual/diagnostic/demo.
 |---|---|---|
 | `core/` | `test_ir_serialize.py`, `dsl_optimization/` (constant-fold, unroll, barrier) | `ir_serialize_roundtrip.cpp` (**CTest**); `test_gemm_spec_dict_binding_parity.py` (source-only: the GEMM spec dicts against the binding's key reads, run from the source tree as the `rocke_gemm_spec_dict_binding_parity` **CTest**); `smoke.cpp` (optional build-only target, **not** registered); `ir_lower_cli.cpp` (built as `rocke_ir_lower_cli`, not a test: the C++ HIP lowerer of the both-engine HIP checks where the binding is absent) |
 | `helpers/` | (covered today via `test_rocke.py` TestHelpers; dedicated split is a follow-up) | - |
-| `instances/` | `test_rocke_multiarch.py`, `test_gfx1250_*`, `test_moe_*`, `test_wmma_schedule.py`, `test_rocke_gfx950_smoke.py` | `tiled_attention_2d_reentrancy.cpp` (**CTest**); `parity/` 47 `*_emit.py`/`*_emit.c` pairs + `run_parity.py` (driven by the byte-identity gate, **not** pytest); `differential/` drivers `run_diff.py`, `fuzz_diff.py`, `ir_artifact_diff.py`, `numeric.py`; `jit_demo.cpp`, `gemm_jit_demo.cpp` (manual demos, **not** built/registered) |
+| `instances/` | `test_rocke_multiarch.py`, `test_gfx1250_*`, `test_moe_*`, `test_wmma_schedule.py` | `tiled_attention_2d_reentrancy.cpp` (**CTest**); `parity/` `*_emit.py`/`*_emit.c` pairs + `run_parity.py` (driven by the byte-identity gate, **not** pytest); `differential/` drivers `run_diff.py`, `fuzz_diff.py`, `ir_artifact_diff.py`, `numeric.py`; `jit_demo.cpp`, `gemm_jit_demo.cpp` (manual demos, **not** built/registered) |
 | `runtime/` | (covered via `test_rocke.py`; dedicated split is a follow-up) | - |
 | `dispatch/` | `dispatch_tests/{gemm,attention,conv,moe,norm}` | - |
 | `analysis/` | (covered via `test_rocke.py`) | - |
@@ -310,22 +310,25 @@ CTests. Legacy violations remain tracked as TESTING.md gap G9.
 
 | CTest entry | Scope | Tier / resources |
 |---|---|---|
-| `rocke_library_attention_cpu_pytest` | Existing attention host units; new counted/resource contracts remain source-only until CI enrollment has capacity | quick and higher |
+| `rocke_library_attention_cpu_pytest` | Existing attention host units; new counted/resource contracts remain source-only until CI enrollment has capacity | standard and higher |
 | `rocke_library_runner_contract_pytest` | Affordable-lane selection, resource defaults, and gate verdict policy | comprehensive and full; excluded from quick/standard pre-merge and post-merge runs |
 | `rocke_library_worker_integration_pytest` | Real file-worker subprocess, timeout, signal, package-identity, and process-ownership lifecycle | comprehensive and full; excluded from quick/standard pre-merge and post-merge runs |
 | `rocke_library_counted_structural_gate` | Exhaustive counted-wait IR model, LDS hazards, step equivalence, lowering and mirror-edge refusal coverage | comprehensive and full; host-only structural gate |
-| `rocke_library_counted_compiler_gate` | Pinned representative compile/final-ISA/resource subset and canonical full-barrier twins on the LLVM 22/reference-comgr toolchain | comprehensive and full; compiler preflight required |
+| `rocke_library_counted_compiler_gate` | Representative compile/final-ISA/resource subset and canonical full-barrier twins | comprehensive and full; compiler preflight required |
 
-The compiler gate preserves the resource table's existing qualification contract:
-LLVM 22 with the reference ROCm 7.2 comgr. LLVM 23 and LLVM 24 are emission/parity
-profiles, not qualified code-object resource lanes; their scheduling and register
-allocation cannot be judged against thresholds calibrated on the reference compiler.
-The two counted gates share the `rocke_counted_sync_gate` CTest resource
-lock. The installed compiler gate forces required mode; a mismatched compiler,
-missing target support, or missing `llvm-objdump` fails once at preflight. The
-source runner treats that gate as optional unless passed
-`--require-compiler-gate`; an accepted optional skip reports `INCOMPLETE`, never
-plain `GREEN`.
+Tests use the loaded compiler
+([the test compiler rule](../dsl_docs/reference/env_flags.md#compiler-detection-and-provenance)).
+The compiler gate's resource thresholds keep the toolchain they were calibrated on
+until AICK-3320 unpins them: on any other LLVM flavor (requested or run by the
+loaded compiler) or comgr its preflight skips
+every row, naming the difference, as its `rocke.tests.pending_lanes` record says,
+and the session ends with exit 77, which the installed entry reports as a skip; the
+source runner reports `INCOMPLETE`, never plain `GREEN`, or a failure when passed
+`--require-compiler-gate`. The two counted gates share the
+`rocke_counted_sync_gate` CTest resource lock. The installed compiler gate forces
+required mode for the rest: a toolchain query that fails, a reference comgr without
+a gate arch, or a missing `llvm-objdump` fails once at preflight. The source runner
+treats those as an optional skip unless passed `--require-compiler-gate`.
 See [TESTING.md §5.0.1](../../TESTING.md#501-unit-discovery-versus-explicit-resource-gates)
 for the reusable placement contract.
 
@@ -548,8 +551,8 @@ environment without Torch; they do not invoke the offline CPU oracles.
 | `rocke_reference_common_pytest` | Shared numerical budgets, artifact integrity, worker isolation, that each committed lock pins its adapter's cohort, and that each installed bundle records the enrolled cohort and its frozen runner accepts the current request | Host suite; skips the bundle checks for a bundle that is not installed |
 | `rocke_sdpa_reference_unit_pytest` | SDPA numerical contract and qualification guards | Host suite; independent of bundles |
 | `rocke_conv_reference_unit_pytest` | Convolution numerical contract and qualification guards | Host suite; independent of bundles |
-| `rocke_sdpa_gpu_<arch>_pytest` | For each SDPA variant published for `<arch>`, its enrolled cases and three failure checks | For each published SDPA architecture, when its bundles are installed; five minutes per variant |
-| `rocke_conv_gpu_<arch>_pytest` | For each forward convolution variant published for `<arch>`, its enrolled cases and three failure checks | For each published convolution architecture, when its bundles are installed; five minutes per variant |
+| `rocke_sdpa_gpu_<arch>_pytest` | For each SDPA variant published for `<arch>`, its enrolled cases and three failure checks | For each published SDPA architecture, when its bundles are installed; CTest limit in the [GPU reference workflow](../../library/tests/reference_common/docs/gpu-reference-workflow.md#enroll-provider-test-selection) |
+| `rocke_conv_gpu_<arch>_pytest` | For each forward convolution variant published for `<arch>`, its enrolled cases and three failure checks | For each published convolution architecture, when its bundles are installed; CTest limit in the [GPU reference workflow](../../library/tests/reference_common/docs/gpu-reference-workflow.md#enroll-provider-test-selection) |
 
 `ROCKE_INSTALL_TEST_GPU_REFERENCES` controls installation of every published
 variant and is on by default in provider builds.
@@ -563,9 +566,6 @@ CMake uses the standard archives and committed locks; verify replacement
 candidates with the offline CLI using explicit `--bundle` and `--lock` paths.
 Each variant retains a separate archive, lock, and installed payload.
 
-The optional `conv_reference/check_torch_reference.py` and
-`sdpa_reference/check_torch_reference.py` are explicit offline oracle audits.
-They are excluded from installation and normal pytest discovery.
 For adding cases, replacing bundles, or enrolling targets, follow the
 [authoritative reference workflow](../../library/tests/reference_common/docs/gpu-reference-workflow.md).
 See [the installed reference procedure](../../TESTING.md#running-installed-reference-tests-without-torch)

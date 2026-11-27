@@ -3,7 +3,8 @@
 
 """Case model, validity rules, input materialisation and oracle evaluation.
 
-Host-only (numpy); ``to_torch`` imports torch lazily. The case table itself
+Host-only (numpy); ``to_torch`` imports torch lazily, and ``to_device_arrays``
+makes the same arrays as rocKE ``DeviceArray`` s. The case table itself
 lives in ``cases.py``.
 
 Conventions
@@ -34,6 +35,8 @@ import numpy as np
 from numpy.lib.stride_tricks import as_strided
 
 from rocke.numeric.sdpa_reference import resolve_diagonal_band, sdpa_reference
+from rocke.numeric.storage import encode
+from rocke.runtime.device_array import DeviceArray
 
 CDNA_ARCHS = ("gfx942", "gfx950")
 RDNA_ARCHS = ("gfx1151", "gfx1201", "gfx1250")
@@ -551,45 +554,73 @@ def lse_shape(case):
     return (case.b, case.h_q, case.s_q)
 
 
-def to_torch(inputs, device="cuda"):
-    """Torch tensors (strided views of device buffers) for a kernel launch.
+def _launch_arrays(inputs, *, upload, zeros, view):
+    """The arrays of a kernel launch for ``inputs``, of one array kind.
 
     Returns a dict with q, k, v, o (zero-filled), bias or None, the length
-    tensors / offsets or None, the resolved scale and ``lse`` (zeros, or None
-    when the case does not emit it). Imports torch lazily.
+    arrays / offsets or None, the resolved scale and ``lse`` (zeros, or None
+    when the case does not emit it). The kind is three operations:
+    ``upload(host, dtype)`` a device copy of a host array (``dtype`` the
+    element type it holds, ``"fp16"`` / ``"bf16"`` / ``"fp32"``, or None for the
+    host dtype), ``zeros(shape, dtype)`` and ``view(buffer, desc)`` (``desc``'s
+    dims, strides and offset over ``buffer``).
     """
-    import torch
-
     case = inputs.case
-    tdt = {"fp16": torch.float16, "bf16": torch.bfloat16}[case.dtype]
-    dev = {
-        n: torch.from_numpy(a).to(device=device, dtype=tdt)
-        for n, a in inputs.buffers.items()
-        if n != "bias"
-    }
-    out = {}
-    for n in "qkv":
-        dsc = inputs.descs[n]
-        out[n] = torch.as_strided(dev[dsc.buffer], dsc.dims, dsc.strides, dsc.offset)
-    od = inputs.descs["o"]
-    obuf = torch.zeros(inputs.sizes["o"], dtype=tdt, device=device)
-    out["o"] = torch.as_strided(obuf, od.dims, od.strides, od.offset)
+    dev = {n: upload(a, case.dtype) for n, a in inputs.buffers.items() if n != "bias"}
+    out = {n: view(dev[inputs.descs[n].buffer], inputs.descs[n]) for n in "qkv"}
+    out["o"] = view(zeros((inputs.sizes["o"],), case.dtype), inputs.descs["o"])
     out["bias"] = None
     if inputs.bias_desc is not None:
-        bdt = torch.float32 if case.bias.dtype == "fp32" else tdt
-        bbuf = torch.from_numpy(inputs.buffers["bias"]).to(device=device, dtype=bdt)
-        bd = inputs.bias_desc
-        out["bias"] = torch.as_strided(bbuf, bd.dims, bd.strides, bd.offset)
+        bias_dtype = "fp32" if case.bias.dtype == "fp32" else case.dtype
+        out["bias"] = view(upload(inputs.buffers["bias"], bias_dtype), inputs.bias_desc)
     for name in ("seq_len_q", "seq_len_kv", "q_offsets", "kv_offsets"):
         a = getattr(inputs, name)
-        out[name] = None if a is None else torch.from_numpy(a).to(device)
+        out[name] = None if a is None else upload(a, None)
     out["scale"] = inputs.scale
-    out["lse"] = (
-        torch.zeros(lse_shape(case), dtype=torch.float32, device=device)
-        if case.emit_lse
-        else None
-    )
+    out["lse"] = zeros(lse_shape(case), "fp32") if case.emit_lse else None
     return out
+
+
+def to_torch(inputs, device="cuda"):
+    """:func:`_launch_arrays` as torch tensors on ``device`` (strided views of
+    device buffers). Imports torch lazily."""
+    import torch
+
+    dtypes = {"fp16": torch.float16, "bf16": torch.bfloat16, "fp32": torch.float32}
+
+    def upload(host, dtype):
+        tensor = torch.from_numpy(host)
+        return tensor.to(
+            device=device, dtype=tensor.dtype if dtype is None else dtypes[dtype]
+        )
+
+    return _launch_arrays(
+        inputs,
+        upload=upload,
+        zeros=lambda shape, dtype: torch.zeros(
+            shape, dtype=dtypes[dtype], device=device
+        ),
+        view=lambda buffer, desc: torch.as_strided(
+            buffer, desc.dims, desc.strides, desc.offset
+        ),
+    )
+
+
+def to_device_arrays(inputs):
+    """:func:`_launch_arrays` as :class:`rocke.runtime.device_array.DeviceArray`
+    views of device buffers, on HIP's current device, without torch."""
+    return _launch_arrays(
+        inputs,
+        upload=lambda host, dtype: (
+            DeviceArray(host)
+            if dtype is None
+            else DeviceArray(encode(host, dtype), dtype)
+        ),
+        zeros=DeviceArray.zeros,
+        view=lambda buffer, desc: buffer.view(
+            desc.dims, desc.strides, offset=desc.offset
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------

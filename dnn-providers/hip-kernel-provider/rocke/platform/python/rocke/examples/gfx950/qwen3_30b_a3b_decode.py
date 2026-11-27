@@ -4,7 +4,7 @@
 """Pure-DSL vs AITER/ATOM production pipeline benchmark — Qwen3-30B-A3B decode.
 
 Comprehensive layer-by-layer speedup measurement for the Qwen3-30B-A3B
-decode step on AMD MI355X (gfx950). Demonstrates that pure rocke kernels
+decode step on gfx950. Demonstrates that pure rocke kernels
 (no AITER code) can match or exceed every AITER production kernel.
 
 Attention benchmarks (decode + prefill) have moved to the library:
@@ -284,7 +284,6 @@ def _build_dsl_topk(T, E, K):
         dtype="f32",
         out_dtype="f32",
         block_size=128,
-        cross_wave_argmax=False,
     )
     art = compile_kernel(build_topk_softmax(spec), isa=ISA)
     grid = topk_softmax_grid(T, spec)
@@ -1059,6 +1058,8 @@ def main():
     )
     print("  (FusedMoeForward includes sort; see moe_e2e row for e2e timing)")
 
+    from rocke.runtime.hip_module import get_device_arch
+
     summary = amdahl_table(decode_layers)
 
     # Save JSON
@@ -1066,7 +1067,7 @@ def main():
         return None if isinstance(v, float) and v != v else v
 
     out = {
-        "gpu": torch.cuda.get_device_name(0),
+        "arch": get_device_arch(0),
         "model": "Qwen3-30B-A3B",
         "batch": BATCH,
         "methodology": "pure_dsl_vs_aiter_production_pipeline",

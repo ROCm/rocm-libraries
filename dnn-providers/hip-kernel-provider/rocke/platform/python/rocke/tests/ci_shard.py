@@ -25,34 +25,49 @@ chance. Keys without a cost keep the hash rule, so a run that declares no cost
 splits exactly as before. Every shard of one run places the same keys with the
 same costs, so each key still runs in exactly one shard.
 
-A runner prints :func:`header_line` and :meth:`Shard.split_line`, the lines
-the plugin prints, so one log parser reads both.
+A runner that is not pytest takes the flag with :func:`add_shard_argument`,
+gets its shard with :func:`shard_from_arguments`, and prints
+:func:`header_line` and :meth:`Shard.split_line`, the lines the plugin prints,
+so one log parser reads both.
+
+Given ``LIST_KEYS_FLAG`` and a path, a run lists instead of running: it writes
+the cases it would split, each with its shard key, as a
+:class:`ShardKeyListing`, so a check can place them by this module's rule
+without running them (``tools/check_entry_times.py``).
 """
 
 from __future__ import annotations
 
+import argparse
 import dataclasses
 import hashlib
+import json
 import math
 import os
 from collections.abc import Iterable, Mapping
+from pathlib import Path
 
 __all__ = [
     "ACTIVATION_FLAG",
     "CHILD_ENV_EXCLUDED",
     "GTEST_INDEX_ENV",
     "GTEST_TOTAL_ENV",
+    "LIST_KEYS_FLAG",
     "SHARD_ENV",
     "WORKER_ENV",
     "Shard",
+    "ShardKeyListing",
+    "add_shard_argument",
     "adopt_worker",
     "check_cost",
     "current_shard",
     "current_worker",
     "header_line",
+    "list_keys_path",
     "parse_shard",
     "place_keys",
     "resolve_shard",
+    "shard_from_arguments",
     "shard_of",
     "unsharded_environment",
 ]
@@ -68,6 +83,9 @@ WORKER_ENV = "ROCKE_TEST_WORKER"
 # The option that makes a run take its shard from the gtest pair. A CTest entry
 # whose command carries it runs only its CI shard's share.
 ACTIVATION_FLAG = "--rocke-shard-from-gtest-env"
+# The option, followed by a path, that makes a run write its ShardKeyListing
+# there instead of running.
+LIST_KEYS_FLAG = "--rocke-list-shard-keys"
 # A child pytest that must run unsharded, with only the plugins that it names,
 # must not inherit these variables. SHARD_INDEX and TOTAL_SHARDS are
 # TheRock's 1-based pair.
@@ -141,6 +159,64 @@ def place_keys(
         placement[key] = shard
         load[shard] += weighted[key]
     return placement
+
+
+@dataclasses.dataclass(frozen=True)
+class ShardKeyListing:
+    """The cases a run splits over the CI shards, without running them.
+
+    ``key_of_case`` maps each case (a test's node id, a golden case id) to its
+    shard key, in the run's order. ``costs`` holds the declared cost of each
+    key that has one, which :func:`place_keys` places by. A run in worker
+    processes also lists each key's cost over its cases that do not run alone
+    (``worker_costs``) and the cases that run alone after the workers
+    (``run_alone_cases``).
+    """
+
+    key_of_case: Mapping[str, str]
+    costs: Mapping[str, float] = dataclasses.field(default_factory=dict)
+    worker_costs: Mapping[str, float] = dataclasses.field(default_factory=dict)
+    run_alone_cases: frozenset[str] = frozenset()
+
+    def __post_init__(self) -> None:
+        keys = set(self.key_of_case.values())
+        for field in ("costs", "worker_costs"):
+            costs = getattr(self, field)
+            unknown = sorted(set(costs) - keys)
+            if unknown:
+                raise ValueError(
+                    f"ShardKeyListing failed - {field} keys={unknown}, expected "
+                    "only keys of key_of_case"
+                )
+            for key, cost in costs.items():
+                check_cost(key, cost)
+        unknown = sorted(self.run_alone_cases - set(self.key_of_case))
+        if unknown:
+            raise ValueError(
+                f"ShardKeyListing failed - run_alone_cases={unknown}, expected only "
+                "cases of key_of_case"
+            )
+
+    def write(self, path: Path) -> None:
+        """Write this listing to ``path`` as JSON."""
+        listing = {
+            "key_of_case": dict(self.key_of_case),
+            "costs": dict(self.costs),
+            "worker_costs": dict(self.worker_costs),
+            "run_alone_cases": sorted(self.run_alone_cases),
+        }
+        Path(path).write_text(json.dumps(listing), encoding="utf-8")
+
+    @classmethod
+    def read(cls, path: Path) -> ShardKeyListing:
+        """The listing :meth:`write` wrote to ``path``."""
+        listing = json.loads(Path(path).read_text(encoding="utf-8"))
+        return cls(
+            key_of_case=listing["key_of_case"],
+            costs=listing["costs"],
+            worker_costs=listing["worker_costs"],
+            run_alone_cases=frozenset(listing["run_alone_cases"]),
+        )
 
 
 def _count(name: str, raw: str) -> int:
@@ -260,6 +336,56 @@ def current_shard(
     """This run's :class:`Shard` by :func:`resolve_shard`'s rule, or ``None``."""
     resolved = resolve_shard(env, from_gtest)
     return None if resolved is None else Shard(*resolved)
+
+
+def add_shard_argument(
+    parser: argparse.ArgumentParser, *, help: str, list_help: str
+) -> None:
+    """Give a runner's ``parser`` the :data:`ACTIVATION_FLAG` option and the
+    :data:`LIST_KEYS_FLAG` option, which every split runner takes
+    (``tools/check_entry_times.py`` lists each split entry with it).
+
+    :func:`shard_from_arguments` and :func:`list_keys_path` read the parsed
+    values. ``help`` says what the runner's share is; ``list_help`` what the
+    runner lists, each case with its shard key, instead of running.
+    """
+    parser.add_argument(
+        ACTIVATION_FLAG, dest="shard_from_gtest_env", action="store_true", help=help
+    )
+    parser.add_argument(
+        LIST_KEYS_FLAG,
+        dest="list_shard_keys",
+        type=Path,
+        default=None,
+        help=f"with {ACTIVATION_FLAG}: {list_help}",
+    )
+
+
+def shard_from_arguments(
+    parser: argparse.ArgumentParser, arguments: argparse.Namespace
+) -> Shard | None:
+    """The run's :class:`Shard` when ``arguments`` carry :data:`ACTIVATION_FLAG`
+    (from :func:`add_shard_argument`) and a shard is set, else ``None``.
+
+    A malformed or out-of-range shard, or :data:`LIST_KEYS_FLAG` without
+    :data:`ACTIVATION_FLAG`, is a usage error, reported through ``parser``
+    (exit status 2).
+    """
+    if arguments.list_shard_keys is not None and not arguments.shard_from_gtest_env:
+        parser.error(f"{LIST_KEYS_FLAG} needs {ACTIVATION_FLAG}")
+    if not arguments.shard_from_gtest_env:
+        return None
+    try:
+        return current_shard(from_gtest=True)
+    except ValueError as error:
+        parser.error(f"rocke-ctest-shard: {error}")
+
+
+def list_keys_path(arguments: argparse.Namespace) -> Path | None:
+    """Where the run writes its :class:`ShardKeyListing` instead of running,
+    from the :data:`LIST_KEYS_FLAG` of :func:`add_shard_argument`; ``None``
+    when the run runs."""
+    return arguments.list_shard_keys
 
 
 # This process's worker identity once adopt_worker() has taken it from the

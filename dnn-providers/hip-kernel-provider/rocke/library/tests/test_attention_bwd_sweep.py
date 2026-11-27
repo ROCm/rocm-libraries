@@ -288,22 +288,49 @@ def test_full_crossing_keeps_exactly_the_combinations_whose_couplings_hold():
                 assert kept == _every_combination(c, full, p, sw.SCHEDULE_EXTRA)
 
 
-def _every_combination(c, rel, point, names):
-    """``point`` crossed with every whole combination of ``names`` whose
-    couplings all hold, each combination tested on its own."""
+def test_full_crossing_retests_a_coupling_that_waits_on_a_later_knob():
+    """``loop_sync``'s coupling reads ``barrier_merge``, which the stage
+    assigns later, so the crossing defers that test until ``barrier_merge`` is
+    set. On a sliced G4 point the deferred test fails for some combinations;
+    the crossing must still drop exactly those."""
+    full = sw.Release(sw.ALL_RELEASED, "full")
+    names = sw.SCHEDULE_EXTRA
+    assert names.index("loop_sync") < names.index("barrier_merge")
+    slice_config = _sl("gfx942", 64)
+    candidate = sw.Candidate.make(slice_config, sw.default_knobs(slice_config))
+    point = next(
+        p
+        for p in sw.schedule_values(candidate, full, extras=False)
+        if p["g4_slicing"] == "slice"
+    )
+    failed = [knobs for _, knobs in _combinations(candidate, full, point, names)]
+    assert frozenset({"loop_sync"}) in failed
+    assert sw.with_extras(candidate, full, [point], names) == _every_combination(
+        candidate, full, point, names
+    )
+
+
+def _combinations(c, rel, point, names):
+    """``point`` crossed with every whole combination of ``names``, each with
+    the knobs whose couplings fail on it, testing each combination on its own."""
     ctx = sw._knob_context(c, point)
     axes = [
         (n, sw._extra_values(c, rel, n, ctx, coupled=False))
         for n in names
         if rel.has(n)
     ]
-    out = []
     for combo in itertools.product(*(vals for _, vals in axes)):
         q = {**point, **dict(zip((n for n, _ in axes), combo))}
         qctx = {**ctx, **q}
-        if all(sw.backward_axis(n).applies(q[n], qctx) for n, _ in axes):
-            out.append(q)
-    return out
+        yield q, frozenset(
+            n for n, _ in axes if not sw.backward_axis(n).applies(q[n], qctx)
+        )
+
+
+def _every_combination(c, rel, point, names):
+    """``point`` crossed with every whole combination of ``names`` whose
+    couplings all hold, each combination tested on its own."""
+    return [q for q, failed in _combinations(c, rel, point, names) if not failed]
 
 
 def test_backend_alloc_dedupes_with_a_policy_none_resolution():
@@ -353,6 +380,8 @@ def test_tuning_knobs_leave_head_pack_to_the_plan():
     assert c2.tuning_knobs()["head_pack"] is True
 
 
+# Walks the whole unpruned structure space of four slices: minutes, not seconds.
+@pytest.mark.exhaustive
 def test_fallback_structure_order_is_meaningful_before_the_key():
     """Fewest arch VGPRs, then AGPRs, then the structure nearest the default,
     then LDS; the key only breaks exact ties."""

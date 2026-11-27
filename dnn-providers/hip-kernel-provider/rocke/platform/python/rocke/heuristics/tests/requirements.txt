@@ -1,0 +1,9 @@
+# The packages the kernel-selection heuristics need beyond rocKE's own
+# requirements (rocke/platform/requirements.txt): its training, prediction and
+# data scripts import them, and so do its tests. Not rocKE dependencies: of the
+# CTest entries only the comprehensive-tier rocke_heuristics_pytest needs them,
+# and its cases skip where they are not installed (_requirements.py).
+pandas
+scikit-learn
+lightgbm>=4.0
+pyarrow

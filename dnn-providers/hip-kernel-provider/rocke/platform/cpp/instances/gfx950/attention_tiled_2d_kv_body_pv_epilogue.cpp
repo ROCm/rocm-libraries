@@ -1097,7 +1097,7 @@ rocke_kernel_def_t* rocke_gfx950_attn2d_emit_epilogue(rocke_gfx950_attn2d_build_
             /* After the O stripes, not before: emitted ahead of them, the LSE
              * store let LLVM fuse the O multiply and FP16 convert into
              * v_fma_mixlo_f16 (one rounding; LSE-off rounds twice), moving FP16
-             * O by 1 ulp versus LSE-off on MI300X/MI355X (ROCm 10). Here the O
+             * O by 1 ulp versus LSE-off on gfx942 / gfx950 (ROCm 10). Here the O
              * ISA matches LSE-off. Slot r's row is wave_row_base +
              * _in_warp_row(r); the 16 lanes of a row group agree, lane_col == 0
              * (one per lane_rg) writes. */

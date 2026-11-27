@@ -13,6 +13,7 @@
 #include "rocke/lower_hip.h"
 
 #include "rocke/ir.h"
+#include "rocke/ir_internal.h"
 #include "rocke/serialized_ir_internal.h"
 #include "rocke/strbuf.h"
 
@@ -32,6 +33,15 @@ rocke_status_t rocke_lower_serialized_ir_to_hip(const char* ir_text,
     if(status != ROCKE_OK)
     {
         return status;
+    }
+    if(!ckc::serialized_ir_names_target(arch))
+    {
+        /* Unlike rocke_lower_kernel_to_hip, this entry has no default target,
+         * as rocke_lower_serialized_ir_to_llvm has none; the checks run in the
+         * same order as there. */
+        rocke_ir_builder_free(&b);
+        ckc::serialized_ir_report(message, ROCKE_NO_TARGET_REASON);
+        return ROCKE_ERR_VALUE;
     }
     rocke_lower_hip_opts_t opts = {};
     opts.arch = arch;

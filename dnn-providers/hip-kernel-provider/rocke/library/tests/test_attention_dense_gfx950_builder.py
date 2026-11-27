@@ -24,7 +24,7 @@ from parity.attention_dense_gfx950_emit import (
 from rocke.assets import platform_instances_dir
 from rocke.core.golden_file import rerecord_hint
 from rocke.core.ir_serialize import canonicalize, serialize
-from rocke.core.lower_llvm import LLVM_FLAVORS, _lower_kernel_to_llvm_python
+from rocke.core.lower_llvm import LLVM_FLAVORS, lower_kernel_to_llvm
 from rocke.tests.lanes import REQUIRE_CPP_ENGINE_ENV
 
 _FAMILY = "attention_dense_gfx950"
@@ -102,7 +102,8 @@ def _native_matches(executable, index, mode, expected_bytes, flavor):
 
 
 @pytest.mark.parametrize("index", range(len(_CONFIGS)))
-def test_gfx950_dense_builder_output(index, expected, native_emitter):
+def test_gfx950_dense_builder_output(index, expected, native_emitter, monkeypatch):
+    monkeypatch.setenv("ROCKE_BACKEND", "python")
     kernel = build_attention_dense(spec_for_index(index), arch="gfx950")
     key = str(index)
     hint = rerecord_hint("differential", [_FAMILY])
@@ -115,9 +116,7 @@ def test_gfx950_dense_builder_output(index, expected, native_emitter):
             native_emitter, index, "ir", serialize(kernel).encode(), LLVM_FLAVORS[0]
         )
     for flavor in LLVM_FLAVORS:
-        ll = _lower_kernel_to_llvm_python(
-            kernel, arch="gfx950", llvm_flavor=flavor
-        ).encode()
+        ll = lower_kernel_to_llvm(kernel, arch="gfx950", llvm_flavor=flavor).encode()
         assert hashlib.sha256(ll).hexdigest() == expected[flavor][key], hint
         if native_emitter is not None:
             _native_matches(native_emitter, index, "ll", ll, flavor)

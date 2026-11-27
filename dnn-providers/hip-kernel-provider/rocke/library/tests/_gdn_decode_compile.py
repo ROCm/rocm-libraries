@@ -29,6 +29,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from rocke.tests.comgr import compile_kernel_or_skip, require_comgr_target
 from rocke.tests.compiler_tools import require_tools_or_skip
 
 from ._parallel_compile import compile_in_workers
@@ -49,11 +50,7 @@ def _toolchain():
 
 def compiled_resources(kernel, arch: str = ARCH):
     """Compile ``kernel`` through comgr and return its ``ResourceInfo``."""
-    compiling, _ = _toolchain()
-    try:
-        art = compiling.compile_kernel(kernel, arch=arch, capture_ir_text=False)
-    except ImportError as e:  # pragma: no cover - env-dependent
-        require_tools_or_skip(f"comgr toolchain unavailable: {e}")
+    art = compile_kernel_or_skip(kernel, arch=arch)
     return _code_object_resources(bytes(art.hsaco))
 
 
@@ -82,7 +79,10 @@ class CompileOutcome:
 
 def compile_each(kernels: Sequence, arch: str = ARCH) -> list[CompileOutcome]:
     """Every kernel of ``kernels`` compiled, in order, in worker processes (see
-    the module docstring); a kernel's failure is its own outcome."""
+    the module docstring); a kernel's failure is its own outcome. A host whose
+    COMGR does not load or cannot target ``arch`` takes the compiler-tool policy
+    first (``require_comgr_target``)."""
+    require_comgr_target(arch)
     compiling, _ = _toolchain()
     inputs, outcomes = [], []
     for kernel in kernels:

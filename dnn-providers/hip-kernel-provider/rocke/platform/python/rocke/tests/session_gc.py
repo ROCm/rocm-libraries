@@ -14,7 +14,9 @@ next younger generation, so the older generations are collected less often per
 allocation too, in proportion.
 
 Each root ``conftest.py`` of the test trees calls :func:`use_test_session_gc`
-from ``pytest_configure``, before any test module is collected.
+from ``pytest_configure``, through
+``rocke.tests.pytest_roots.configure_pytest_root``, before any test module is
+collected.
 """
 
 from __future__ import annotations

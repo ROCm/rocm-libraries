@@ -64,7 +64,7 @@ latency (ms), correctness vs the torch reference (max abs / mean abs
    atomic-add into an `f32 Y` accumulator). This is **not** a tuned
    production Triton kernel — it's a fair-baseline reference. AITER's
    tuned `e2e_moe` Triton kernel currently crashes with a
-   memory-access fault on MI355X (gfx950); the script falls back to
+   memory-access fault on gfx950; the script falls back to
    this purpose-written kernel until that is fixed upstream.
 4. **CK Tile C++** — `build/bin/tile_example_fused_moe` invoked via
    `subprocess` with matching `-t / -e / -k / -h / -i / -prec_*`
@@ -210,7 +210,7 @@ per-expert loop driving small per-expert matmuls"** — measured in
 real conditions for both, with no fp16↔fp32 traffic that wouldn't
 happen in production.
 
-### Latest results (MI355X, gfx950, ROCm 7.2, torch 2.12)
+### Latest results (gfx950, ROCm 7.2, torch 2.12)
 
 `--attempts 10 --warmup 3 --dtype f16`. Speedup is `(other) / (CK DSL)`,
 so values > 1 mean CK DSL is faster.
@@ -740,7 +740,7 @@ implementations that already solved the problem" applies directly.
 ### Caveats / known issues
 
 - **AITER `e2e_moe` Triton kernel crashes** with a memory-access
-  fault on MI355X / gfx950 regardless of torch / ROCm version (likely
+  fault on gfx950 regardless of torch / ROCm version (likely
   an AITER kernel-arch mismatch). The script's `run_triton` path uses
   a purpose-written single-kernel fallback instead. Re-enable AITER
   once the gfx950 issue is fixed upstream.
@@ -833,7 +833,7 @@ PYTHONPATH=python python \
   --attempts 10 --warmup 3
 ```
 
-### Latest results (MI355X, gfx950, ROCm 7.2, torch 2.12)
+### Latest results (gfx950, ROCm 7.2, torch 2.12)
 
 `--attempts 10 --warmup 3`. Latency in ms (mean over 10 graph-replay
 iterations); lower is better. The best per scenario is bolded.

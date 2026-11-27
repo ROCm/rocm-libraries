@@ -12,7 +12,8 @@ instruction:
 - the catalog row (dtypes, shape, fragment lengths in logical values per lane);
 - the lowered call in both engines at every LLVM flavor: the intrinsic, the
   register type of every argument and the immediates, including the signedness
-  flags the row's operand dtypes give;
+  flags the row's operand dtypes give; below LLVM 23 both engines refuse the
+  i8 instruction, whose call is the LLVM 23 form, with the same message;
 - that the module compiles and links for gfx1250 and that LLVM selects the
   named instruction (compile-verified, not run; skips where the compiler does
   not accept gfx1250, and for the i8 instruction where the compiler is older
@@ -42,12 +43,10 @@ from rocke.core.ir import (
     dtype_to_ir_type,
     type_bits,
 )
-from rocke.core.lower_llvm import (
-    LLVM_FLAVOR_LLVM23,
-    LLVM_FLAVORS,
-    _resolve_llvm_flavor,
-)
-from rocke.tests.engines import lower_with_both_engines
+from rocke.core.isa.matrix_call_lowering import llvm23_matrix_op_refusal
+from rocke.core.isa.matrix_calls import MATRIX_CALLS
+from rocke.core.lower_llvm import LLVM_FLAVORS, _resolve_llvm_flavor
+from rocke.tests.engines import assert_both_engines_reject, lower_with_both_engines
 from rocke.tests.ir_validity import assert_target_accepts, target_mnemonics
 from rocke.tests.lane_maps import lane_placements
 
@@ -267,6 +266,15 @@ def test_fp8_k128_carries_the_gemm_maps():
 @pytest.mark.parametrize("flavor", LLVM_FLAVORS)
 @pytest.mark.parametrize("op_id", sorted(_CASES))
 def test_both_engines_call_the_intrinsic_with_its_arguments(op_id, flavor):
+    if not MATRIX_CALLS[op_id].lowers_at(flavor):
+        assert_both_engines_reject(
+            _kernel(op_id),
+            "gfx1250",
+            NotImplementedError,
+            llvm23_matrix_op_refusal(op_id, flavor),
+            flavor,
+        )
+        return
     case = _CASES[op_id]
     text = lower_with_both_engines(_kernel(op_id), "gfx1250", flavor)
     assert _call_arguments(text, case.intrinsic) == list(case.arguments)
@@ -280,11 +288,10 @@ def test_gfx1250_compiles_links_and_selects_the_instruction(op_id):
 
     The i8 call is the LLVM 23 form: LLVM 22 declares the instruction without
     the clamp argument and rejects the call, which its arch-domain column
-    records, so the i8 cases need an LLVM 23 compiler."""
+    records, so the lowering refuses it below LLVM 23 and the i8 cases need an
+    LLVM 23 compiler."""
     flavor = _resolve_llvm_flavor()
-    if _CASES[op_id].c == "i32" and LLVM_FLAVORS.index(flavor) < LLVM_FLAVORS.index(
-        LLVM_FLAVOR_LLVM23
-    ):
+    if not MATRIX_CALLS[op_id].lowers_at(flavor):
         pytest.skip(f"the i8 WMMA call is the LLVM 23 form; the host is {flavor}")
     text = lower_with_both_engines(_kernel(op_id), "gfx1250")
     assert_target_accepts(text, "gfx1250")

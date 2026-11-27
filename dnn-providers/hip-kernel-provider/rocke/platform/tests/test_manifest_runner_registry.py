@@ -126,27 +126,52 @@ class TestRunnerRegistry(unittest.TestCase):
                 ]
                 self.assertEqual(len(required), 3, f"{kind} takes {required}")
 
-    def test_unknown_kind_error_lists_what_is_available(self):
+    @staticmethod
+    def _write_manifest(root, manifest):
         import json
+
+        (root / "k.hsaco").write_bytes(b"\x00")
+        (root / "manifest.json").write_text(
+            json.dumps({"kernel_name": "k", "hsaco": "k.hsaco", **manifest})
+        )
+        return root / "manifest.json"
+
+    def test_unknown_kind_error_lists_what_is_available(self):
         import tempfile
         from pathlib import Path
 
-        from rocke.run_manifest import run_manifest
+        from rocke.run_manifest import check_manifest, run_manifest
 
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / "k.hsaco").write_bytes(b"\x00")
-            (root / "manifest.json").write_text(
-                json.dumps(
-                    {"kind": "no_such_kind", "kernel_name": "k", "hsaco": "k.hsaco"}
-                )
-            )
-            with self.assertRaises(ValueError) as ctx:
-                run_manifest(root / "manifest.json")
-        message = str(ctx.exception)
-        self.assertIn("no_such_kind", message)
-        self.assertIn("gemm_fp16", message)
-        self.assertIn("runner_module", message)
+        for entry in (run_manifest, check_manifest):
+            with self.subTest(entry=entry.__name__):
+                with tempfile.TemporaryDirectory() as tmp:
+                    path = self._write_manifest(Path(tmp), {"kind": "no_such_kind"})
+                    with self.assertRaises(ValueError) as ctx:
+                        entry(path)
+                message = str(ctx.exception)
+                self.assertIn("no_such_kind", message)
+                self.assertIn("gemm_fp16", message)
+                self.assertIn("runner_module", message)
+
+    def test_a_refused_problem_is_reported_before_the_device_is_touched(self):
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+
+        from rocke import run_manifest as rm
+
+        # 25 * K reaches 2**24, past the fp8 GEMM's exact-accumulate check.
+        refused = {"kind": "gemm_fp8", "default_shape": [16, 16, 1 << 20]}
+        for entry in (rm.run_manifest, rm.check_manifest):
+            with (
+                self.subTest(entry=entry.__name__),
+                tempfile.TemporaryDirectory() as tmp,
+                mock.patch.object(
+                    rm, "Runtime", side_effect=AssertionError("device touched")
+                ),
+                self.assertRaisesRegex(ValueError, "overflows"),
+            ):
+                entry(self._write_manifest(Path(tmp), refused))
 
     def test_runner_module_is_imported_before_kind_lookup(self):
         import json

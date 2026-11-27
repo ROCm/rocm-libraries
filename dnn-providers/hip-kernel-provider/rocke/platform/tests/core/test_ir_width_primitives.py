@@ -12,7 +12,8 @@ and check accesses with them, so their answers and refusals are pinned here
 apart from any kernel. The C++ twins (``rocke_i_type_bytes``,
 ``rocke_i_elem_of``, ``rocke_i_count_of``, ``rocke_i_vector_access_align``,
 ``rocke_i_smem_vector_access_align``, ``rocke_i_align_attr``,
-``rocke_i_claimed_align``) are pinned in ``test_ir_types.cpp``.
+``rocke_i_claimed_align``) are pinned in ``test_ir_types.cpp``. ``fits_i32`` is
+the signed i32 range an i32 literal or an ``nsw`` result must stay in.
 """
 
 from __future__ import annotations
@@ -31,6 +32,7 @@ from rocke.core.ir import (
     align_attr,
     claimed_align,
     element_type,
+    fits_i32,
     lane_count,
     smem_vector_access_align,
     type_bytes,
@@ -147,3 +149,11 @@ def test_an_alignment_that_is_not_an_integer_is_refused(align, kind):
     message = f"memref.global_store_vN failed - align={kind}, expected an integer"
     with pytest.raises(TypeError, match=f"^{re.escape(message)}$"):
         align_attr(store)
+
+
+@pytest.mark.parametrize(
+    ("value", "fits"),
+    [(-(2**31), True), (2**31 - 1, True), (-(2**31) - 1, False), (2**31, False)],
+)
+def test_fits_i32_is_the_signed_i32_range(value, fits):
+    assert fits_i32(value) is fits

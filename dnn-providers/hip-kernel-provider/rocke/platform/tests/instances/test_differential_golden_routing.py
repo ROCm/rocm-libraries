@@ -346,6 +346,52 @@ class TestShardedGoldenCheck(GoldenGateTree):
         self.assertEqual(code, 0, out)
         self.assertEqual(self.ran, [set(self.current)])
 
+    def test_the_key_listing_names_each_blessed_config_by_its_family(self):
+        self.current["plat0"] = {"0": "plat0-0", "1": "plat0-1"}
+        self.bless_all()
+        listing_path = self.golden.parent.parent / "keys.json"
+        code, out = self.main(
+            "--check-golden",
+            ci_shard.ACTIVATION_FLAG,
+            ci_shard.LIST_KEYS_FLAG,
+            str(listing_path),
+            shard=1,
+        )
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.ran, [])
+        listing = ci_shard.ShardKeyListing.read(listing_path)
+        expected = {
+            f"{name}/llvm23/{config}": name
+            for name, configs in self.current.items()
+            for config in configs
+        }
+        self.assertEqual(dict(listing.key_of_case), expected)
+        self.assertEqual(
+            sorted(case for case, key in expected.items() if key == "plat0"),
+            ["plat0/llvm23/0", "plat0/llvm23/1"],
+        )
+
+    def test_a_listing_with_every_family_excluded_lists_no_case(self):
+        self.bless_all()
+        listing_path = self.golden.parent.parent / "keys.json"
+        excluded = ",".join(self.current)
+        code, out = self.main(
+            "--check-golden",
+            "--exclude",
+            excluded,
+            ci_shard.ACTIVATION_FLAG,
+            ci_shard.LIST_KEYS_FLAG,
+            str(listing_path),
+        )
+        self.assertEqual(code, 0, out)
+        self.assertEqual(ci_shard.ShardKeyListing.read(listing_path).key_of_case, {})
+
+    def test_the_key_listing_is_refused_without_the_shard_flag(self):
+        refused = self.assertRaises(SystemExit)
+        with refused, contextlib.redirect_stderr(io.StringIO()):
+            self.main("--check-golden", ci_shard.LIST_KEYS_FLAG, "keys.json")
+        self.assertEqual(refused.exception.code, 2)
+
     def test_the_flag_is_refused_outside_a_python_only_check(self):
         refused = self.assertRaises(SystemExit)
         with refused, contextlib.redirect_stderr(io.StringIO()):

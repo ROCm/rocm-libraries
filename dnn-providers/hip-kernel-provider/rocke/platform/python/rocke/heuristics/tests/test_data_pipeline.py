@@ -12,6 +12,10 @@ schema validation, and corner cases (empty logs, malformed JSON, single-shape).
 import tempfile
 from pathlib import Path
 
+from ._requirements import skip_without_requirements
+
+skip_without_requirements()
+
 import pandas as pd
 import pytest
 

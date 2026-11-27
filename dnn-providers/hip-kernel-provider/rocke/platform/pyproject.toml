@@ -9,7 +9,10 @@
 # this wheel.
 
 [build-system]
-requires = ["setuptools>=61", "wheel"]
+# setuptools 64 is the first with editable builds (cmake/make_pyenv.py holds the
+# same floor). wheel is needed to build a wheel with a setuptools older than
+# 70.1, which a constrained build environment can still pick.
+requires = ["setuptools>=64", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -24,20 +27,18 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# torch must be the ROCm build for your system (install from the ROCm wheel
-# index, not here); see requirements.txt / BUILD.md.
+# torch is not a dependency; a remaining use takes the ROCm build matching the
+# system ROCm, installed separately (see AGENTS.md).
 dev = [
     # pytest 9 runs subtests itself; rocke.tests.sweep_guard needs its
     # subtest reports.
     "pytest>=9.0",
     "pytest-timeout>=2.4",
     # Independent low-bit numerical reference types:
-    "ml_dtypes>=0.6.0",
+    "ml_dtypes>=0.5.0",
     "pybind11>=3.0",
-    # heuristics test suite (rocke/heuristics/tests):
-    "pandas",
-    "scikit-learn",
-    "lightgbm",
+    # The heuristics tests' own packages are not rocKE dependencies: see
+    # rocke/heuristics/tests/requirements.txt.
 ]
 
 [tool.setuptools]
@@ -49,4 +50,9 @@ include = ["rocke*"]
 
 [tool.setuptools.package-data]
 # The tensor_transforms emit tests compare the printed IR with these goldens.
-rocke = ["**/*.json", "tests/helpers/tiling/tensor_transforms/golden/*.txt"]
+# The heuristics tests read their own requirements file.
+rocke = [
+    "**/*.json",
+    "tests/helpers/tiling/tensor_transforms/golden/*.txt",
+    "heuristics/tests/requirements.txt",
+]

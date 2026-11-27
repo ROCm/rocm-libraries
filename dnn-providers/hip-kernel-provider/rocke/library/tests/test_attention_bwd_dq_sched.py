@@ -515,9 +515,8 @@ def test_llvm_hint_calls_equal_the_model(arch, sched):
 
 def _compile(kernel, arch):
     pytest.importorskip("rocke.runtime.comgr")
-    from ._attention_bwd_resources import compile_or_skip, pin_production_comgr
+    from ._attention_bwd_resources import compile_or_skip
 
-    pin_production_comgr()
     return compile_or_skip(kernel, arch=arch, capture_ir_text=True, backend="python")
 
 

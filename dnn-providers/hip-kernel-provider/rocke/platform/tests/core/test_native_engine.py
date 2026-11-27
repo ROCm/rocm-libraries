@@ -5,7 +5,7 @@ ABI: the same text as the Python lowerer, and each refusal with the engine's
 status, its reason and the documented exception type.
 
 The lowering cases need the shared engine and skip, waiting for the
-shared-library lane, where it is not found. The cases about finding the
+build-variant lane, where it is not found. The cases about finding the
 library run a copy of the module and the modules it imports, all standard
 library only, in a child process with a package tree of its own, so the
 library it finds (or does not) is decided by that tree and its environment
@@ -15,6 +15,7 @@ alone.
 from __future__ import annotations
 
 import ctypes
+import os
 import shutil
 import subprocess
 import sys
@@ -33,7 +34,7 @@ from rocke.core.lower_llvm import (
     _lower_kernel_to_llvm_python,
 )
 from rocke.tests.engines import native_engine_or_skip
-from rocke.tests.lanes import BINDING_LANE, import_or_skip_until
+from rocke.tests.lanes import BUILD_VARIANT, import_or_skip_until
 
 _ARCH = "gfx942"
 
@@ -176,7 +177,7 @@ def test_no_target_is_refused_before_the_engine_is_needed(lower):
 @pytest.mark.parametrize("entry", ["lower_serialized_ir", "lower_serialized_ir_hip"])
 def test_the_binding_refuses_no_target_with_the_same_text(entry):
     """The rocke_engine binding spells the refusal itself, in C++."""
-    binding = import_or_skip_until("rocke_engine", BINDING_LANE)
+    binding = import_or_skip_until("rocke_engine", BUILD_VARIANT)
     with pytest.raises(RuntimeError) as refused:
         getattr(binding, entry)(serialize(_copy_kernel()), arch="")
     assert str(refused.value) == (
@@ -210,10 +211,24 @@ def test_an_unknown_flavor_names_the_engines_flavors():
     )
 
 
+def _isolated_environment(environment: dict[str, str], tree: Path) -> dict[str, str]:
+    """This process's environment without its ``ROCKE_*`` settings, which
+    would choose the engine or the package for the child, with ``environment``
+    over it and ``PYTHONPATH`` naming only ``tree``. The rest is kept: a
+    Python needs some of it to start (``SYSTEMROOT`` on Windows)."""
+    inherited = {
+        name: value
+        for name, value in os.environ.items()
+        if not name.startswith("ROCKE_") and name != "PYTHONPATH"
+    }
+    return {**inherited, **environment, "PYTHONPATH": str(tree)}
+
+
 def _run_isolated_copy(tmp_path: Path, environment: dict[str, str], code: str) -> str:
     """Run ``code`` in a child Python whose only ``rocke`` package is a copy of
     this module and the standard-library modules it imports, in a tree of its
-    own under ``tmp_path``; return its stdout."""
+    own under ``tmp_path``, with :func:`_isolated_environment`; return its
+    stdout."""
     package = tmp_path / "tree" / "rocke"
     (package / "core").mkdir(parents=True)
     (package / "__init__.py").write_text("")
@@ -224,7 +239,7 @@ def _run_isolated_copy(tmp_path: Path, environment: dict[str, str], code: str) -
     run = subprocess.run(
         [sys.executable, "-S", "-c", code],
         cwd=package.parent,
-        env={**environment, "PYTHONPATH": str(package.parent)},
+        env=_isolated_environment(environment, package.parent),
         capture_output=True,
         text=True,
         check=False,
@@ -242,6 +257,22 @@ try:
 except native_engine.SharedEngineNotFound as missing:
     print(missing)
 """
+
+
+def test_the_isolated_child_keeps_the_environment_but_rocke_settings(
+    tmp_path, monkeypatch
+):
+    """The child keeps what a Python needs to start (``SYSTEMROOT`` on Windows
+    stands for it here) and drops the parent's ``ROCKE_*`` settings."""
+    monkeypatch.setenv("ROCKE_TEST_ISOLATION_SENTINEL", "parent")
+    monkeypatch.setenv("NON_ROCKE_ISOLATION_SENTINEL", "kept")
+    code = """
+import os
+print(os.environ.get("NON_ROCKE_ISOLATION_SENTINEL"))
+print(os.environ.get("ROCKE_TEST_ISOLATION_SENTINEL"))
+"""
+    out = _run_isolated_copy(tmp_path, {}, code)
+    assert out.splitlines() == ["kept", "None"]
 
 
 def test_no_library_is_reported_with_where_it_was_looked_for(tmp_path):

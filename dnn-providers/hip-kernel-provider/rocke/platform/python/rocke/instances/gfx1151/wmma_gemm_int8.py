@@ -1,6 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""INT8-storage / f16-compute WMMA GEMM for gfx1151 (RDNA3.5 / Strix Halo).
+"""INT8-storage / f16-compute WMMA GEMM for gfx1151 (RDNA3.5).
 
 A quantized-GEMM sibling of ``instances/gfx1151/wmma_gemm.py``. The operands are
 stored as symmetric per-tensor int8 (A and B); each fragment is converted to f16

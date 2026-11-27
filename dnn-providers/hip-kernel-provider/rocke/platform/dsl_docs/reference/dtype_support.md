@@ -406,11 +406,12 @@ mode. The missing selector and precision contract are described in §2.5.
   `cast_to_f32` / `cast_f32_to` refuse f64, and there are no direct f16/bf16
   conversions or atomics. f64 is in the
   hipDNN enum (`DOUBLE`) but rejected by the MIOpen provider.
-  The f64 MFMA atom `mfma_f64_16x16x4_f64` is declared on gfx90a/gfx942/gfx950,
-  and gfx942 also declares `mfma_f64_4x4x4_f64` (section 4B). Universal GEMM
-  and its batched/grouped wrappers select `mfma_f64_16x16x4_f64` with fp64
-  accumulation on gfx90a, gfx942 and gfx950, every target that declares it;
-  gfx90a, which has no DRAM->LDS DMA, refuses `direct_to_lds` (§5).
+  The f64 MFMA atoms `mfma_f64_16x16x4_f64` and the four-block
+  `mfma_f64_4x4x4_f64` are declared on gfx90a/gfx942/gfx950 (section 4B).
+  Universal GEMM and its batched/grouped wrappers select
+  `mfma_f64_16x16x4_f64` with fp64 accumulation on gfx90a, gfx942 and gfx950,
+  every target that declares it; gfx90a, which has no DRAM->LDS DMA, refuses
+  `direct_to_lds` (§5).
   gfx1250 has no F64 matrix instruction: LLVM gates `V_WMMA_F64_16X16X4_F64` on
   `gfx1251-gemm-insts` (§4A).
 
@@ -516,14 +517,14 @@ to gfx1251, so this is not a missing gfx1250 atom.
 
 `core/arch/data/arch_specs.json` is rocKE's architecture SSOT. An atom that is not
 declared there is unusable by any kernel regardless of what the silicon provides.
-The original basis snapshot, with the gfx942 XF32 and f64 additions noted below:
+The declared atoms per target:
 
 | Arch | Declared matrix atoms | dtypes reachable |
 |---|---|---|
-| `gfx908` | `mfma_f32_{16x16x4,32x32x2}_f32`, `mfma_f32_{16x16x16,32x32x8}_f16`, `mfma_i32_{16x16x16,32x32x8}_i8`, `mfma_f32_{16x16x8,32x32x4}_bf16` | f32, f16, bf16, i8 |
-| `gfx90a` | `mfma_f32_{16x16x16,32x32x8}_{f16,bf16}` + `mfma_f32_{16x16x8,32x32x4}_bf16` + `mfma_f32_{16x16x4,32x32x2}_f32` + `mfma_i32_{16x16x16,32x32x8}_i8` + `mfma_f64_16x16x4_f64` | f32, f16, bf16, i8, f64 |
-| `gfx942` | the gfx90a f32/f16/bf16 set + `mfma_f32_{16x16x32,32x32x16}_{fp8,bf8,fp8_bf8,bf8_fp8}` + `mfma_f32_{16x16x8,32x32x4}_xf32` + `mfma_i32_{16x16x32,32x32x16}_i8` + `mfma_f64_{16x16x4,4x4x4}_f64` | f32, f16, bf16, fp8, bf8, **tf32**, i8, f64 |
-| `gfx950` | the gfx942 set **excluding XF32 and `mfma_f64_4x4x4_f64`** + K-packed `{16x16x32,32x32x16}_{f16,bf16}` + `mfma_i32_{16x16x64,32x32x32}_i8` + `mfma_f32_{16x16x128,32x32x64}_f8f6f4_<a>_<b>` (every format pair; fp8 x fp8 at 16x16x128 is `mfma_f32_16x16x128_fp8`) + `mfma_f32_16x16x128_fp4fp6fp8` + `mfma_scale_f32_16x16x128_f8f6f4` | f32, f16, bf16, fp8, bf8, fp6, bf6, fp4, i8, f64 |
+| `gfx908` | `mfma_f32_{16x16x4,32x32x2}_f32`, `mfma_f32_{16x16x16,32x32x8,4x4x4}_f16`, `mfma_i32_{16x16x16,32x32x8}_i8`, `mfma_f32_{16x16x8,32x32x4}_bf16` | f32, f16, bf16, i8 |
+| `gfx90a` | `mfma_f32_{16x16x16,32x32x8,4x4x4}_{f16,bf16}` + `mfma_f32_{16x16x8,32x32x4}_bf16` + `mfma_f32_{16x16x4,32x32x2}_f32` + `mfma_i32_{16x16x16,32x32x8}_i8` + `mfma_f64_{16x16x4,4x4x4}_f64` | f32, f16, bf16, i8, f64 |
+| `gfx942` | the gfx90a f32/f16/bf16/f64 set + `mfma_f32_{16x16x32,32x32x16}_{fp8,bf8,fp8_bf8,bf8_fp8}` + `mfma_f32_{16x16x8,32x32x4}_xf32` + `mfma_i32_{16x16x32,32x32x16}_i8` | f32, f16, bf16, fp8, bf8, **tf32**, i8, f64 |
+| `gfx950` | the gfx942 set **excluding XF32** + K-packed `{16x16x32,32x32x16}_{f16,bf16}` + `mfma_i32_{16x16x64,32x32x32}_i8` + `mfma_f32_{16x16x128,32x32x64}_f8f6f4_<a>_<b>` (every format pair; fp8 x fp8 at 16x16x128 is `mfma_f32_16x16x128_fp8`) + `mfma_f32_16x16x128_fp4fp6fp8` + `mfma_scale_f32_16x16x128_f8f6f4` | f32, f16, bf16, fp8, bf8, fp6, bf6, fp4, i8, f64 |
 | `gfx1151` | `wmma_f32_16x16x16_{f16,bf16}`, `wmma_i32_16x16x16_{iu8,iu4}` (each also `_u_i`, `_i_u`, `_u_u`), `wmma_f16_16x16x16_f16`, `wmma_bf16_16x16x16_bf16` | f16, bf16, **i8, i4, u8, u4** |
 | `gfx1201` | `wmma_gfx12_f32_16x16x16_{f16,bf16}` + `wmma_gfx12_f32_16x16x16_{fp8_fp8,fp8_bf8,bf8_fp8,bf8_bf8}` + `wmma_gfx12_i32_16x16x16_{iu8,iu4}` + `wmma_gfx12_i32_16x16x32_iu4` (each integer atom also `_u_i`, `_i_u`, `_u_u`) + `wmma_gfx12_f16_16x16x16_f16` + `wmma_gfx12_bf16_16x16x16_bf16` | f16, bf16, fp8, bf8, i8, i4, u8, u4 |
 | `gfx1250` | `wmma_gfx1250_f32_16x16x4_f32`, `..._16x16x32_{f16,bf16}`, `wmma_gfx1250_bf16f32_16x16x32_bf16`, `wmma_gfx1250_f16_16x16x32_f16`, `wmma_gfx1250_bf16_16x16x32_bf16`, `..._16x16x{64,128}_{fp8_fp8,fp8_bf8,bf8_fp8,bf8_bf8}`, `wmma_gfx1250_f16_16x16x{64,128}_{fp8_fp8,fp8_bf8,bf8_fp8,bf8_bf8}`, `wmma_gfx1250_i32_16x16x64_iu8` (also `_u_i`, `_i_u`, `_u_u`), `wmma_gfx1250_f32_16x16x128_f8f6f4_<a>_<b>` (the 21 format pairs with a 6-bit or 4-bit operand), `wmma_gfx1250_f32_32x16x128_f4`, `wmma_scale_f32_16x16x128_fp8_fp8`, `wmma_scale16_f32_16x16x128_fp8_fp8` | f32, f16, bf16, fp8, bf8, fp6, bf6, fp4, i8, u8 (+ fp8 block-scaled) |
@@ -634,8 +635,7 @@ in §2.4 is blocked on it.
 
 #### 4C.6 f64 matrix (closed on CDNA)
 `V_MFMA_F64_*` is present on gfx90a/gfx942/gfx950, and `mfma_f64_16x16x4_f64`
-is declared on all three; gfx942 also declares the four-block
-`mfma_f64_4x4x4_f64` (section 4B).
+and the four-block `mfma_f64_4x4x4_f64` are declared on all three (section 4B).
 gfx1250 has no native F64 matrix instruction and is excluded from this gap.
 
 ### 4D. XF32 / TF32 across the arch set

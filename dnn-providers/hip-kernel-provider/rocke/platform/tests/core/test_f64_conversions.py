@@ -159,6 +159,7 @@ def _edge_value_kernel():
     return b.kernel
 
 
+@pytest.mark.gpu
 def test_f64_arithmetic_and_conversions_are_exact_on_edge_values_on_gpu():
     x = _VALUES
     y = x[::-1].copy()

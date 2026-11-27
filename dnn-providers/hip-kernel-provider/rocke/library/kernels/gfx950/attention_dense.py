@@ -1,4 +1,4 @@
-"""Dense flash-attention prefill kernel for gfx950 (MI355X).
+"""Dense flash-attention prefill kernel for gfx950.
 
 Productized from the ``flash_dense_dualwave_swp`` experiment
 (``kernels/gfx950/experiments/flash_dense_dualwave_swp/``). This is the shippable
@@ -28,7 +28,7 @@ step-1 pipeline with every WINNING lever baked in as always-on (no env gates):
     slab-padded K/V layouts. IGLP-1 owns the wide-path loop schedule and
     K-major PV traversal keeps it at zero spill.
 
-Measured on MI355X (bf16, D=128, causal, 128/8 GQA, Sq=8192, 0 spill, err ~1.46e-3
+Measured on gfx950 (bf16, D=128, causal, 128/8 GQA, Sq=8192, 0 spill, err ~1.46e-3
 vs SDPA). Absolute TFLOPS swing +/-25-30% with auto-clock, so only SAME-SESSION
 ratios are load-bearing; one representative session, each number pinned to its
 config (grid / decode / V-pad / lazy):

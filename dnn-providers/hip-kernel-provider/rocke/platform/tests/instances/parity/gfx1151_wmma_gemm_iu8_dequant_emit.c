@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: MIT
  *
  * tests/parity/gfx1151_wmma_gemm_iu8_dequant_emit.c -- C-side emitter for the
- * gfx1151 (RDNA3.5 / Strix Halo) true-INT8 WMMA GEMM with f16 dequant output
+ * gfx1151 (RDNA3.5) true-INT8 WMMA GEMM with f16 dequant output
  * parity harness. Builds the kernel exactly as the Python emitter does and
  * lowers to LLVM .ll text at arch=gfx1151 (flavor AUTO) for byte-comparison.
  *

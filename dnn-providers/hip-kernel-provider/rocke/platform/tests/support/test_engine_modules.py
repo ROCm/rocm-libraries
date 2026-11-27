@@ -33,24 +33,24 @@ from rocke.tests.engine_modules import (
     read_engine_modules_marker,
 )
 from rocke.tests.engines import hide_shared_engine
-from rocke.tests.lanes import BINDING_LANE, SHARED_LIBRARY_LANE, skip_until_reason
+from rocke.tests.lanes import BUILD_VARIANT, skip_until_reason
 
 _ENGINE = "rocke_engine"
-_NO_PYBIND11 = "the build's Python had no pybind11"
+_PYBIND_OFF = "the build had ROCKE_BUILD_PYBIND off"
 _NO_SHARED = "the build had ROCKE_BUILD_SHARED_ENGINE off"
-_NO_MODULES = {"modules": [], "absent_reason": _NO_PYBIND11}
+_NO_MODULES = {"modules": [], "absent_reason": _PYBIND_OFF}
 _NO_SHARED_ENGINE = {"shared_engine": "", "shared_engine_absent_reason": _NO_SHARED}
 needs_engine = pytest.mark.skipif(
     importlib.util.find_spec(_ENGINE) is None,
     reason=skip_until_reason(
-        BINDING_LANE, reason="the rocke_engine module is not built in this environment"
+        BUILD_VARIANT, reason="the rocke_engine module is not built in this environment"
     ),
 )
 _INSTALLED = native_engine.installed_shared_engine_path()
 needs_installed_shared_engine = pytest.mark.skipif(
     _INSTALLED is None,
     reason=skip_until_reason(
-        SHARED_LIBRARY_LANE,
+        BUILD_VARIANT,
         reason="no shared engine is installed beside the rocke package here",
     ),
 )
@@ -93,13 +93,13 @@ def test_the_marker_reads_back_what_the_build_made(tmp_path):
 def test_the_marker_reads_back_why_the_build_made_none(tmp_path):
     path = _write_marker(tmp_path, {**_NO_MODULES, **_NO_SHARED_ENGINE})
     assert read_engine_modules_marker(path) == EngineModulesMarker(
-        (), _NO_PYBIND11, "", _NO_SHARED
+        (), _PYBIND_OFF, "", _NO_SHARED
     )
 
 
 @pytest.mark.parametrize(
     "modules, absent_reason",
-    [((), ""), ((_ENGINE,), _NO_PYBIND11)],
+    [((), ""), ((_ENGINE,), _PYBIND_OFF)],
     ids=["neither", "both"],
 )
 def test_a_marker_holds_modules_or_a_reason(modules, absent_reason):
@@ -122,7 +122,7 @@ def test_a_marker_holds_a_shared_engine_or_a_reason(shared_engine, absent_reason
         match=r"EngineModulesMarker failed - .*expected either the shared engine "
         r"or the reason the build installs none beside the package",
     ):
-        EngineModulesMarker((), _NO_PYBIND11, shared_engine, absent_reason)
+        EngineModulesMarker((), _PYBIND_OFF, shared_engine, absent_reason)
 
 
 def test_a_marker_names_the_shared_engine_by_file_name():
@@ -131,7 +131,7 @@ def test_a_marker_names_the_shared_engine_by_file_name():
         match=r"EngineModulesMarker failed - shared_engine='lib/librocke.so', "
         r"expected a file name",
     ):
-        EngineModulesMarker((), _NO_PYBIND11, "lib/librocke.so", "")
+        EngineModulesMarker((), _PYBIND_OFF, "lib/librocke.so", "")
 
 
 def test_a_marker_names_python_modules():
@@ -157,7 +157,7 @@ def test_a_build_without_engine_pieces_skips_with_its_reasons(tmp_path, capsys):
     path = _write_marker(tmp_path, {**_NO_MODULES, **_NO_SHARED_ENGINE})
     assert main([str(path)]) == SKIP_EXIT_CODE
     assert capsys.readouterr().out == (
-        f"SKIP: no C++ engine to check: no Python modules ({_NO_PYBIND11}); "
+        f"SKIP: no C++ engine to check: no Python modules ({_PYBIND_OFF}); "
         f"no shared engine ({_NO_SHARED})\n"
     )
 
@@ -220,7 +220,7 @@ def test_an_installed_shared_engine_passes_and_records_its_backend(
     path = _write_marker(tmp_path, {**_NO_MODULES, "shared_engine": _INSTALLED.name})
     assert main([str(path)]) == 0
     assert capsys.readouterr().out.splitlines() == [
-        f"Python modules: none ({_NO_PYBIND11})",
+        f"Python modules: none ({_PYBIND_OFF})",
         f"shared engine: {_INSTALLED}",
         "lower_kernel_to_llvm lowers with the cpp engine",
     ]

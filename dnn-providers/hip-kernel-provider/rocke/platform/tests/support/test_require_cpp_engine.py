@@ -78,7 +78,7 @@ def test_a_missing_engine_skips_without_the_plugin(tmp_path):
     run = _run_cpp_case(tmp_path, plugin=False, hide=True)
     assert run.returncode == 0, run.stdout + run.stderr
     assert "1 skipped" in run.stdout, run.stdout
-    assert "waits for shared-library-lane" in run.stdout, run.stdout
+    assert "waits for build-variant" in run.stdout, run.stdout
 
 
 def test_a_present_engine_runs_the_case_with_the_plugin(tmp_path):

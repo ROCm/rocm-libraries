@@ -19,10 +19,11 @@ from __future__ import annotations
 import unittest
 
 import numpy as np
+import pytest
 from rocke.numeric import storage
 from rocke.numeric.compare import peak_relative_error
 from rocke.runtime.hip_module import get_device_arch
-from rocke.tests.lanes import BINDING_LANE, arch_skip_reason, skip_until
+from rocke.tests.lanes import BUILD_VARIANT, arch_skip_reason, skip_until
 
 from kernels.common.conv_winograd_gemm_wmma import (  # noqa: E402
     WinogradGemmProblem,
@@ -84,7 +85,7 @@ class TestSpec(unittest.TestCase):
         try:
             import rocke_library_engine as eng
         except ModuleNotFoundError:
-            skip_until(BINDING_LANE, reason="rocke_library_engine not built")
+            skip_until(BUILD_VARIANT, reason="rocke_library_engine not built")
         from kernels.conv.engine_bridge import conv_winograd_gemm_wmma_spec_to_dict
 
         spec = _spec(sched="bogus")
@@ -238,6 +239,7 @@ _CASES = (
 )
 
 
+@pytest.mark.gpu
 @unittest.skipUnless(not _gpu_skip(), _gpu_skip() or "no GPU")
 class TestGemmGpu(unittest.TestCase):
     def _check(self, dims, dtype, steps):

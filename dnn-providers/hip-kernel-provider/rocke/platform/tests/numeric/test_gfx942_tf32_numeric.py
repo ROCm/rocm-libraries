@@ -1,9 +1,12 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
+import pytest
 from rocke.examples.gfx942.tf32_numerics import run
 from rocke.tests.arch_marks import arch_specific
 from rocke.tests.engines import all_engines_backend, available_engines
 from rocke.tests.gpu import current_device_arch_in
+
+pytestmark = pytest.mark.gpu
 
 
 @arch_specific(

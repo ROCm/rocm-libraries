@@ -5,7 +5,7 @@
 2×2/s2 maxpool → packed-int4 out`.
 **Target shape:** `N=1, H=2160, W=3840, C=8, K0=32, K1=24` → pooled
 `(1080,1920,24)`, ~50.9 GFLOP (51.0 GOP int).
-**HW:** Strix Halo iGPU, RDNA3.5 (gfx1151 / built `gfx11-generic`), wave32,
+**HW:** gfx1151 integrated GPU, RDNA3.5 (built `gfx11-generic`), wave32,
 virtualized **8-CU / 4-WGP** slice, ~64 KB LDS/CU, no clock control.
 **Status (2026-06-07):** native int8/int4 pipeline, bit-exact, best ≈ **11.68 ms**
 (board2) = the default lever stack **plus `--conv1-int8 --pk-maxpool`** (+3.9 % over

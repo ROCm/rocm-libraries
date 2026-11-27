@@ -1,7 +1,7 @@
 # Unified paged attention on gfx950, from the math up
 
 This file explains *what* the CK DSL `unified_attention` kernels compute and
-*why* they are shaped the way they are on CDNA (gfx950, MI355X, wave64, MFMA).
+*why* they are shaped the way they are on CDNA (gfx950, wave64, MFMA).
 The [`README.md`](README.md) is the parity + optimization history; this file is
 the specification, the data layout, and the two kernel strategies (2D and 3D
 split-KV) the production dispatcher chooses between. §8 additionally documents the
@@ -523,7 +523,7 @@ Same tiling and MFMA/LDS schedule, different outer work assignment:
   scalar setup + K/V-prime cold-start (~4.5 tile-equivalents) is paid once **per
   query block**.
 - **Persistent (grid-stride)** — a 1-D grid of `num_persistent` long-lived CTAs
-  (256 = exactly one 8-wave block per CU on MI355X's 256 CUs at 2 waves/SIMD).
+  (256 = exactly one 8-wave block per CU on gfx950's 256 CUs at 2 waves/SIMD).
   Each CTA grid-strides over the flattened work-item space
   $W = ⌈S_q/256⌉ \cdot H_q \cdot B$, so the fixed per-CTA cold-start is amortized
   once **per CU** instead of once per query block. The tile pipeline (LDS
@@ -584,8 +584,8 @@ at least as long cuts nothing off and counts as plain causal.
 Measurements, L2 counters and the orders ruled out are in the
 [dense attention thread-block mapping case study](../../../../platform/dsl_docs/architecture/attention_thread_block_mapping_case_study.md).
 
-**Measured (MI355X, bf16, D=128, causal, $S = 8192$, 128/8 GQA, 0 spill, err
-≈1.46e-3).** Absolute MI355X TFLOPS swing **±25–30% with auto-clock**, so only
+**Measured (gfx950, bf16, D=128, causal, $S = 8192$, 128/8 GQA, 0 spill, err
+≈1.46e-3).** Absolute gfx950 TFLOPS swing **±25–30% with auto-clock**, so only
 **same-session ratios are load-bearing**; the numbers below are one representative
 session, each pinned to its config (grid / decode / V-pad / lazy):
 

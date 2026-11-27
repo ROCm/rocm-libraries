@@ -1,7 +1,8 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""``parse_kernel_arguments`` reads each kernel's argument list from the code-object
-metadata ``llvm-readelf --notes`` prints.
+"""``parse_kernel_arguments`` reads each kernel's argument list, and
+``parse_kernel_fields`` its other scalar values, from the code-object metadata
+``llvm-readelf --notes`` prints.
 
 The fixture is the shape the tool prints for an AMDHSA code object: a list of
 kernel entries, each with a nested ``.args`` list whose entries the compiler may
@@ -13,7 +14,7 @@ check that the packer's layout matches these offsets is in
 from __future__ import annotations
 
 import pytest
-from rocke.analysis import KernelArgument, parse_kernel_arguments
+from rocke.analysis import KernelArgument, parse_kernel_arguments, parse_kernel_fields
 
 _NOTES = """\
 Displaying notes found in: .note
@@ -66,6 +67,31 @@ def test_each_kernel_gets_its_own_arguments_in_order():
         ),
         "second": (KernelArgument("alpha", "by_value", 0, 4),),
     }
+
+
+def test_each_kernel_gets_its_own_scalar_fields():
+    # .reqd_workgroup_size is a nested list, so it is not a field; an empty
+    # quoted string is.
+    notes = _NOTES.replace(
+        "    .name:           second\n",
+        "    .name:           second\n    .language: ''\n",
+    )
+    assert parse_kernel_fields(notes) == {
+        "first": {
+            "agpr_count": "0",
+            "group_segment_fixed_size": "256",
+            "symbol": "first.kd",
+        },
+        "second": {"language": ""},
+    }
+
+
+def test_a_kernel_without_a_name_has_no_fields():
+    notes = _NOTES.replace("    .name:           second\n", "")
+    with pytest.raises(
+        ValueError, match=r"^a kernel in the code-object metadata has no \.name$"
+    ):
+        parse_kernel_fields(notes)
 
 
 def test_text_without_kernel_metadata_has_no_kernels():

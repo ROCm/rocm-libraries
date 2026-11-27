@@ -16,6 +16,10 @@ import math
 import sys
 from pathlib import Path
 
+from ._requirements import skip_without_requirements
+
+skip_without_requirements()
+
 import numpy as np
 import pytest
 

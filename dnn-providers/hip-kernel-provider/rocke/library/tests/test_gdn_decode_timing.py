@@ -80,6 +80,7 @@ def test_touched_bytes_counts_the_conv_state_pages_of_a_fused_spec():
     assert g.touched_bytes(FUSED, disjoint, batch) == 2 * batch * pages + out
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not get_device_count(), reason="uploads to a HIP device")
 def test_value_sets_are_independent_copies():
     """Each set is its own device copy of every input, holding ``inp``'s
