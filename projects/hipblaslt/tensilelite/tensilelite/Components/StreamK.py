@@ -31,6 +31,7 @@ from .Subtile.SubtileLREmit import localReadResetOffsetsSubtile
 
 from ..Common import IsaVersion, print2, ceilDivide, log2, DataDirection
 from ..Common.Utilities import isMxf4SubtilePath, isSubtileSwizzledTensor
+from ..Common.DebugInstrMask import keepInstrComment
 from ..Component import Component
 from .TileProcessingStrategy import TileProcessingStrategy, TileWork
 from .WorkAssignment import QueuePartition, StaticPartition, \
@@ -2266,7 +2267,7 @@ class StreamK(TileProcessingStrategy):
             # AND_SAVEEXEC reads the mask before saving EXEC in the same registers.
             module.add(andSaveExec(dst=sgpr(mask, laneCount), src=sgpr(mask, laneCount)))
             module.add(BufferStoreB32(src=src, vaddr=vgpr(tmpVgprOff), saddr=sgpr(tmpSgprBuffer, 4), soffset=soffset,
-                                      mubuf=memOrder.flagBufferMubuf(), comment=comment))
+                                      mubuf=memOrder.flagBufferMubuf(), comment=keepInstrComment(writer, comment)))
             # Complete the flag store before restoring EXEC, including replay.
             module.add(memOrder.releaseFence(writer))
             movExec = SMovB64 if laneCount == 2 else SMovB32
@@ -2298,7 +2299,7 @@ class StreamK(TileProcessingStrategy):
         module.add(memOrder.preVolatileVmem(writer, comment="drain xnacks before volatile VMEM load"))
         module.add(BufferLoadB32(dst=dst, vaddr=vgpr(tmpVgprOff), saddr=sgpr(tmpSgprBuffer, 4), soffset=soffset,
                                  mubuf=memOrder.flagBufferMubuf(),
-                                 comment=comment))
+                                 comment=keepInstrComment(writer, comment)))
         writer.vgprPool.checkIn(tmpVgprOff)
         writer.sgprPool.checkIn(tmpSgprBuffer)
 

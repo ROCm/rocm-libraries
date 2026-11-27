@@ -64,6 +64,7 @@
 #include <iterator>
 #include <map>
 #include <memory>
+#include <ostream>
 #include <random>
 #include <string>
 #include <utility>
@@ -1239,13 +1240,14 @@ namespace
         }
     };
 
-    // Uniform summation order keeps a mapping-1 StaggerU on Hybrid StreamK
-    // kernels (perTileExtraIters). A CU budget makes the heuristic pick the
-    // dynamic work-queue sub-mode; with tiles > grid one workgroup runs several
-    // whole tiles, and declareStaggerParms masks sgpr StaggerU to its low 8 bits
-    // on the first tile, so later tiles stagger by mapping 0 (M tile index).
+    // A CU budget makes the heuristic pick the dynamic work-queue sub-mode of
+    // Hybrid StreamK (perTileExtraIters); with tiles > grid one workgroup runs
+    // several whole tiles, and every one of them must reduce in the same
+    // order. Uniform summation order turns StaggerU off; a stagger that reached
+    // only the later tiles a workgroup picks up would still show up here, as
+    // rows of one tile reducing differently from rows of another.
     // gfx950: MT96x32x128 Hybrid, 768 tiles on a 512-workgroup grid.
-    TEST_F(RowUniformity_pre_checkin, HybridDynamicStagger_1536x1536x2048_SmCount160)
+    TEST_F(RowUniformity_pre_checkin, HybridDynamicMultiTile_1536x1536x2048_SmCount160)
     {
         checkDefaultPicksUniform({1536, 1536, 2048, HIP_R_32F, 160});
     }
@@ -1324,6 +1326,13 @@ namespace
         bool        tiledB;
         int64_t     m = 4096;
     };
+
+    // gtest's default printer dumps the raw bytes, padding included, which valgrind flags.
+    void PrintTo(const MXFp6Case& c, std::ostream* os)
+    {
+        *os << "{name=" << c.name << " type=" << c.type << " k=" << c.k
+            << " gfx950Pick=" << c.gfx950Pick << " tiledB=" << c.tiledB << " m=" << c.m << "}";
+    }
 
     // The gfx950 chips the MXFP6 128x4 kernels are registered for: MI350X and MI355X.
     bool onMXFp6RegisteredChip()
@@ -1775,6 +1784,13 @@ namespace
         float       beta;
         bool        hasKernel;
     };
+
+    // gtest's default printer dumps the raw bytes, padding included, which valgrind flags.
+    void PrintTo(const MXFp6SelectionCase& c, std::ostream* os)
+    {
+        *os << "{name=" << c.name << " type=" << c.type << " k=" << c.k << " tiledB=" << c.tiledB
+            << " alpha=" << c.alpha << " beta=" << c.beta << " hasKernel=" << c.hasKernel << "}";
+    }
 
     class RowUniformityMXFp6Selection_smoke
         : public ::testing::TestWithParam<MXFp6SelectionCase>
@@ -2840,7 +2856,10 @@ namespace
                "reaches it and a declared StaggerU must not refuse it";
     }
 
-    TEST(RowUniformityStreamKRejection_pre_checkin, UsoKeepsStaggerOnlyWhenMappingIsAlready1)
+    // Uniform summation order turns StaggerU off whatever its mapping, and the
+    // solution stays admitted because the clamp settles the launch. Mapping 1
+    // staggers by the N tile index, which keeps rows uniform but not columns.
+    TEST(RowUniformityStreamKRejection_pre_checkin, UsoTurnsStaggerOffForEveryMapping)
     {
         const auto hardware                    = probeHardware();
         auto       solution                    = probeSolution();
@@ -2850,13 +2869,27 @@ namespace
         solution->sizeMapping.staggerU         = 16;
         auto problem                           = probeProblem();
         {
+            // With the mode off the declared stagger survives, so the zeros
+            // below are the clamp's doing and not the probe's.
+            auto off = problem;
+            off.setParams().setUniformSummationOrder(0);
+            const int32_t autoWGM
+                = std::get<0>(solution->calculateAutoWGM(off, &hardware, /*skgrid=*/0));
+            const auto [mapping, stagger, shift]
+                = solution->calculateAutoStaggerU(off, &hardware, 0, autoWGM);
+            ASSERT_EQ(mapping, 1u);
+            ASSERT_EQ(stagger, 16u);
+        }
+        {
             const int32_t autoWGM
                 = std::get<0>(solution->calculateAutoWGM(problem, &hardware, /*skgrid=*/0));
             const auto [mapping, stagger, shift]
                 = solution->calculateAutoStaggerU(problem, &hardware, 0, autoWGM);
-            EXPECT_EQ(mapping, 1u);
-            EXPECT_EQ(stagger, 16u);
-            EXPECT_TRUE(solution->uniformSummationOrderSupported(problem, hardware));
+            EXPECT_EQ(mapping, 0u);
+            EXPECT_EQ(stagger, 0u);
+            EXPECT_EQ(shift, 0u);
+            EXPECT_TRUE(solution->uniformSummationOrderSupported(problem, hardware))
+                << "mapping 1 is zeroed too, and the solution stays admitted";
         }
 
         auto remap = probeSolution();
@@ -2899,7 +2932,8 @@ namespace
             << "StreamK remains enabled, staggeru gets disabled";
     }
 
-    TEST(RowUniformityStreamKRejection_pre_checkin, StreamKWithPerTileKeepsMapping1Stagger)
+    // The per-tile extra-iters capability does not bring StaggerU back.
+    TEST(RowUniformityStreamKRejection_pre_checkin, StreamKWithPerTileDisablesStagger)
     {
         const auto hardware                             = probeHardware();
         auto       solution                             = probeSolution();
@@ -2916,9 +2950,11 @@ namespace
         const auto [mapping, stagger, shift]
             = solution->calculateAutoStaggerU(problem, &hardware, grid, autoWGM);
 
-        EXPECT_EQ(mapping, 1u);
-        EXPECT_EQ(stagger, 16u);
-        EXPECT_TRUE(solution->uniformSummationOrderSupported(problem, hardware));
+        EXPECT_EQ(mapping, 0u);
+        EXPECT_EQ(stagger, 0u);
+        EXPECT_EQ(shift, 0u);
+        EXPECT_TRUE(solution->uniformSummationOrderSupported(problem, hardware))
+            << "StreamK remains enabled, staggeru gets disabled";
     }
 
     // The other half of the same rule: frozen hand-written assembly can bake a

@@ -99,7 +99,7 @@ The following table lists all operations currently supported in hipDNN:
 >   - **Convolution Forward + (Bias) + Activation:** Combines convolution forward, optional bias addition, and forward activation
 
 > [!NOTE]
-> **Activation Functions (fused):** Supports ReLU, Clipped ReLU (with configurable upper clip), and CLAMP (with a configurable lower clip and an optional upper clip). Leaky ReLU (non-zero `relu_lower_clip_slope`), Sigmoid and Tanh are **not** supported when fused onto a producer op; use a standalone activation node for those.
+> **Activation Functions (fused):** Supports ReLU, Clipped ReLU (with configurable upper clip), and CLAMP (with a configurable lower clip and an optional upper clip; a batchnorm fusion needs the upper clip, see the ReLU parameters note below). Leaky ReLU (non-zero `relu_lower_clip_slope`), Sigmoid and Tanh are **not** supported when fused onto a producer op; use a standalone activation node for those.
 
 > [!NOTE]
 > **Standalone Activation:** A single-node pointwise graph supports ReLU, Clipped ReLU (configurable upper clip), CLAMP (configurable lower clip and optional upper clip), Leaky ReLU (configurable negative slope), Sigmoid and Tanh. Tensors have rank 1-4. `x` and `y` have identical dims and are both packed with the same layout, in any dimension order; strides of unit dimensions are ignored. A padded, sliced, broadcast or otherwise non-packed tensor is declined because of [MIOpen issue 16024](https://github.com/ROCm/rocm-libraries/issues/16024).
@@ -108,8 +108,12 @@ The following table lists all operations currently supported in hipDNN:
 > **ReLU parameters:** An unset `relu_lower_clip` is treated as 0, an unset `relu_upper_clip` as no
 > upper bound, and an unset `relu_lower_clip_slope` or a slope of exactly 0 as no leaky slope, so
 > equivalent encodings select the same MIOpen activation. A non-zero `relu_lower_clip` without an
-> upper clip runs as CLAMP with the float maximum as its upper bound, as the hipDNN reference does.
-> Leaky ReLU with a non-zero `relu_lower_clip` is not supported.
+> upper clip runs as CLAMP with the float maximum as its upper bound, as the hipDNN reference does,
+> in a standalone activation and in a convolution + (bias) + activation fusion. A batchnorm fusion
+> (training, inference and backward) declines it because of [MIOpen issue
+> 16803](https://github.com/ROCm/rocm-libraries/issues/16803): MIOpen reuses a cached fused
+> batchnorm kernel without comparing the activation clips, so a later graph can run with an earlier
+> graph's clips. Leaky ReLU with a non-zero `relu_lower_clip` is not supported.
 
 > [!NOTE]
 > **Standalone Binary Elementwise:** A single-node pointwise graph supports ADD, SUB, MUL, MAX and MIN

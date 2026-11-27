@@ -197,6 +197,42 @@ TEST(TestFlydslSdpaHeadPad, PacksTheCopiesTokenMajorThroughTheSameTables)
     }
 }
 
+// A packed one-token sequence keeps the real token stride instead of the extent-1 zero every
+// other axis gets: the copy's source and destination rows would otherwise collapse every
+// sequence onto token 0.
+TEST(TestFlydslSdpaHeadPad, KeepsThePackedTokenStrideForAOneTokenSequence)
+{
+    auto spec = compactSpec(7);
+    spec.seqLenQ = 1;
+    spec.seqLenKv = 1;
+    setPacked(spec, {1, 1}, {1, 1});
+    const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec));
+    const auto padded = flydsl_sdpa::buildHeadPadGraph(fixture.context());
+    ASSERT_NE(padded, nullptr);
+    const auto plan = flydsl_sdpa::headPadPlan(fixture.context(), *padded, 0);
+    ASSERT_EQ(plan.inputs.size(), 3U);
+    EXPECT_EQ(plan.inputs[0].uid, FLYDSL_SDPA_RDNA_Q_UID);
+    EXPECT_EQ(plan.inputs[0].strideSequence, spec.heads * spec.headDim);
+    EXPECT_EQ(plan.inputs[1].uid, FLYDSL_SDPA_RDNA_K_UID);
+    EXPECT_EQ(plan.inputs[1].strideSequence, spec.kvHeads * spec.headDim);
+    EXPECT_EQ(plan.inputs[2].uid, FLYDSL_SDPA_RDNA_V_UID);
+    EXPECT_EQ(plan.inputs[2].strideSequence, spec.kvHeads * spec.headDim);
+    EXPECT_EQ(plan.output.strideSequence, spec.heads * spec.headDim);
+}
+
+// A packed one-token sequence whose token stride is zero cannot be addressed: the copy has
+// nothing to tell one sequence's row from another's.
+TEST(TestFlydslSdpaHeadPad, DeclinesAPackedOneTokenSequenceWithAZeroStride)
+{
+    auto spec = compactSpec(7);
+    spec.seqLenQ = 1;
+    spec.seqLenKv = 1;
+    setPacked(spec, {1, 1}, {1, 1});
+    spec.querySequenceStride = 0;
+    const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec));
+    EXPECT_EQ(flydsl_sdpa::buildHeadPadGraph(fixture.context()), nullptr);
+}
+
 TEST(TestFlydslSdpaHeadPad, DeclinesOperandsTheCopyCannotRead)
 {
     {

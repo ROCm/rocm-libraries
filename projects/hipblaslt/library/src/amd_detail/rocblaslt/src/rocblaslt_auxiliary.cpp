@@ -3127,7 +3127,7 @@ rocblaslt_status rocblaslt_matmul_is_algo_supported(rocblaslt_handle        hand
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
         if(auto gate = validate_fused_a2a(handle, prob); gate != rocblaslt_status_success)
             return gate;
-        if(auto gate = rocblaslt_validate_fused_epilogue_dispatch(handle, matmul_descr, matB, matD);
+        if(auto gate = rocblaslt_validate_fusion_dispatch(handle, matmul_descr, matB, matD);
            gate != rocblaslt_status_success)
             return gate;
         if(fused_a2a_lacks_sdma_queues(prob))

@@ -303,6 +303,16 @@ void expectEveryKernelDeclaresItsFamilysSignature(const CdnaEngine& engine)
     EXPECT_GT(checked, 0U);
 }
 
+/// The engine's UED authors `numerical_notes: []`, the claim that no note applies: the engine
+/// is run-to-run deterministic. An absent key states nothing, so a lost key fails here.
+void expectAnExplicitEmptyNumericalNoteList(const CdnaEngine& engine)
+{
+    const auto& set = loadedSet(engine.name);
+
+    ASSERT_TRUE(set.engine.numericalNotes.has_value());
+    EXPECT_TRUE(set.engine.numericalNotes->empty());
+}
+
 TEST(TestFlydslSdpaCdnaPacks, IsOnePackWithAGraphMatchAndOneKernelScopedMatcher)
 {
     expectOnePackWithAGraphMatchAndOneKernelScopedMatcher(GENERIC);
@@ -642,6 +652,11 @@ TEST(TestFlydslSdpaCdnaDualwavePacks, ServesHeadDim256OnFourWaves)
     EXPECT_EQ(wide, every);
 }
 
+TEST(TestFlydslSdpaCdnaDualwavePacks, DeclaresItsNumericalNotes)
+{
+    expectAnExplicitEmptyNumericalNoteList(DUALWAVE);
+}
+
 TEST(TestFlydslSdpaCdnaDecodePacks, IsOnePackWithAGraphMatchAndOneKernelScopedMatcher)
 {
     expectOnePackWithAGraphMatchAndOneKernelScopedMatcher(DECODE);
@@ -655,6 +670,11 @@ TEST(TestFlydslSdpaCdnaDecodePacks, ShipsUniqueObjectsAndOneTopServeAllPerClass)
 TEST(TestFlydslSdpaCdnaDecodePacks, EveryKernelDeclaresItsFamilysSignature)
 {
     expectEveryKernelDeclaresItsFamilysSignature(DECODE);
+}
+
+TEST(TestFlydslSdpaCdnaDecodePacks, DeclaresItsNumericalNotes)
+{
+    expectAnExplicitEmptyNumericalNoteList(DECODE);
 }
 
 } // namespace
