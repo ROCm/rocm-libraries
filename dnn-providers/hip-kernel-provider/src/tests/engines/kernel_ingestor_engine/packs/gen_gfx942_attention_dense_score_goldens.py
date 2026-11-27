@@ -9,12 +9,12 @@ TestGfx942AttentionDenseMatchers.cpp checks the C++ against:
     use_exp2_fast resolve to (default_use_cfvst, default_use_exp2_fast), restated by
     gfx942AttentionDenseCfvstPolicy and gfx942AttentionDenseExp2FastPolicy;
   * SCORE_GOLDENS: every kernel of hipkernel:Gfx942AttentionDense's full enumeration
-    (registry_enumerator over configs/gfx942_attention_dense.engine.yaml), with its cell,
-    the KMD fields the score reads, and whether it is its cell's policy arm on the
-    one-CTA-per-block grid (the gfx942_dense_qbminor base spec, the cell default) or on
-    the persistent grid (the gfx942_dense_persist_aot base spec, D128 cells without an
-    additive bias: the persistent pin does not serve a bias, so a bias cell has no
-    persistent arm). A kernel's use_additive_bias is part of its row.
+    (registry_enumerator over configs/gfx942_attention_dense.engine.yaml and its ALiBi
+    satellite), with its cell, the KMD fields the score reads, and whether it is its
+    cell's policy arm on the one-CTA-per-block grid (the gfx942_dense_qbminor base spec,
+    the cell default) or on the persistent grid (the gfx942_dense_persist_aot base spec,
+    D128 cells without an additive bias: the persistent pin does not serve a bias, so a
+    bias cell has no persistent arm). A kernel's use_additive_bias is part of its row.
 
     cd projects/hipdnn/tools/IngestorGenerator
     .venv/bin/python ../../../../dnn-providers/hip-kernel-provider/src/tests/engines/\\
@@ -38,8 +38,15 @@ sys.path.insert(0, str(GEN / "tools"))
 import registry_enumerator as enumerator  # noqa: E402
 
 OUT = Path(__file__).with_name("TestGfx942AttentionDenseScoreGoldens.inc")
-MANIFEST = GEN / "configs/gfx942_attention_dense.engine.yaml"
+MANIFESTS = (
+    GEN / "configs/gfx942_attention_dense.engine.yaml",
+    GEN / "configs/gfx942_attention_dense_alibi.engine.yaml",
+)
 PERSIST_PIN = "gfx942_dense_persist_aot"
+# The tile the cold score ranks first (BASELINE_BLOCK_M/N in packs/Gfx942AttentionDenseNative.cpp).
+POLICY_TILE = (256, 64)
+# The one-CTA-per-block orders in AttentionDenseGridOrder's order, which the score ranks by.
+GRID_ORDERS = ("qb_minor", "bt_hkv_minor", "hq_minor_swz")
 # The shape every catalog record is built at; the C++ test's records carry the same.
 CANONICAL = {
     "batch": 1,
@@ -70,31 +77,58 @@ def policy_rows():
 
 
 def score_rows():
-    manifest = enumerator.load_manifest(str(MANIFEST))
-    enumerator.bind_provider(manifest.get("provider_root"))
-    registry = enumerator.Registry(manifest)
-    enumeration = enumerator.enumerate_space(manifest, registry)
-    config = enumerator.build_config(manifest, registry, warn=lambda _: None)
-    kernels = config["packs"][0]["kernels"]
-    assert len(kernels) == len(enumeration.rows)
-
-    persist = [p for p, _ in registry.extra_pins if p["spec_id"] == PERSIST_PIN]
-    assert len(persist) == 1, registry.extra_pins
-    cells = registry.cells()
-    # The persistent pin declines a bias cell (the persistent grid has no bias form), so
-    # only the cells without one have a persistent arm.
-    persist_base = {
-        index: registry.base_spec(cell, persist[0])
-        for index, cell in enumerate(cells)
-        if cell["hdim_q"] == 128 and not cell["use_attn_bias"]
-    }
+    # The home's cells first, then its ALiBi satellite's, so the ALiBi cells follow the
+    # swept ones; a section pinning the persistent grid gives its D128 cells a policy arm.
+    cells, persist_base, enumerated = [], {}, []
+    for path in MANIFESTS:
+        arms_before = len(persist_base)
+        manifest = enumerator.load_manifest(str(path))
+        enumerator.bind_provider(manifest.get("provider_root"))
+        registry = enumerator.Registry(manifest)
+        enumeration = enumerator.enumerate_space(manifest, registry)
+        config = enumerator.build_config(manifest, registry, warn=lambda _: None)
+        kernels = config["packs"][0]["kernels"]
+        assert len(kernels) == len(enumeration.rows)
+        enumerated += zip(enumeration.rows, kernels, enumeration.sections)
+        for section in registry.sections():
+            pins = [section.pin, *(p for p, _ in section.extra_pins)]
+            persist = [p for p in pins if p["spec_id"] == PERSIST_PIN]
+            for cell in section.cells():
+                if cell not in cells:
+                    cells.append(cell)
+                # The persistent pin declines a bias cell (the persistent grid has no bias
+                # form), so only the cells without one have a persistent arm.
+                if (
+                    persist
+                    and cell["hdim_q"] == 128
+                    and not cell.get("use_attn_bias")
+                    and not section.spec_overrides
+                ):
+                    base = section.base_spec(cell, persist[0])
+                    persist_base.setdefault(cells.index(cell), base)
+        # A section with spec_overrides (the ALiBi tiles) has no raw base spec: its one
+        # kernel per cell is a persistent arm, and where several such sections serve a cell
+        # the policy arm is the one at the cold score's policy tile (POLICY_TILE).
+        for (cell, spec, _), section in zip(enumeration.rows, enumeration.sections):
+            if section.spec_overrides and section.pin["spec_id"] == PERSIST_PIN:
+                index = cells.index(cell)
+                at_policy_tile = (spec.block_m, spec.block_n) == POLICY_TILE
+                if index not in persist_base or at_policy_tile:
+                    persist_base[index] = spec
+        assert len(persist_base) > arms_before, f"{path.name}: no persistent policy arm"
 
     def cell_index(cell):
         return next(i for i, c in enumerate(cells) if c == cell)
 
     rows = []
     seen_persist = set()
-    for (cell, spec, is_default), kernel in zip(enumeration.rows, kernels):
+    override_defaults = {}
+    for (cell, spec, is_default), kernel, section in enumerated:
+        # The grid policy arm is the cell's default on the one-CTA-per-block grid; an
+        # override section on the persistent grid keeps a default of its own, which is
+        # the persistent arm, not the grid's.
+        if section.spec_overrides and section.pin["spec_id"] == PERSIST_PIN:
+            is_default = False
         md = kernel["metadata"]
         assert all(md[k] == v for k, v in CANONICAL.items()), kernel["name"]
         index = cell_index(cell)
@@ -102,8 +136,25 @@ def score_rows():
         if persistent_policy:
             assert index not in seen_persist, kernel["name"]
             seen_persist.add(index)
+        if is_default and section.spec_overrides:
+            override_defaults.setdefault(index, []).append(len(rows))
         rows.append((index, md, is_default, persistent_policy))
     assert seen_persist == set(persist_base), sorted(set(persist_base) - seen_persist)
+    # Several override sections (the ALiBi tiles) serve a cell, each with a default of its
+    # own: the grid policy arm is the one the score ranks first, by block order (the
+    # AttentionDenseGridOrder enum), then the policy tile.
+    for positions in override_defaults.values():
+        lead = min(
+            positions,
+            key=lambda pos: (
+                GRID_ORDERS.index(rows[pos][1]["nonpersist_decode"]),
+                (rows[pos][1]["block_m"], rows[pos][1]["block_n"]) != POLICY_TILE,
+            ),
+        )
+        for pos in positions:
+            if pos != lead:
+                index, md, _, persistent_policy = rows[pos]
+                rows[pos] = (index, md, False, persistent_policy)
     return rows
 
 
@@ -114,14 +165,14 @@ def render() -> str:
         "// SPDX-License-Identifier:  MIT",
         "",
         "// Generated by gen_gfx942_attention_dense_score_goldens.py from rocKE and the",
-        "// gfx942_attention_dense manifest's full enumeration. Do not edit.",
+        "// gfx942_attention_dense manifests' enumeration (home and ALiBi satellite). Do not edit.",
         "// clang-format off",
         "",
     ]
     # Bind the manifest's rocKE before policy_rows imports it, so both halves of the
     # table come from the same tree whatever is first on sys.path.
     enumerator.bind_provider(
-        enumerator.load_manifest(str(MANIFEST)).get("provider_root")
+        enumerator.load_manifest(str(MANIFESTS[0])).get("provider_root")
     )
     policies = policy_rows()
     scores = score_rows()
@@ -146,6 +197,8 @@ def render() -> str:
         "// use_additive_bias, grid policy arm, persistent policy arm",
         f"inline constexpr std::array<ScoreGolden, {len(scores)}> SCORE_GOLDENS{{{{",
     ]
+    # The ALiBi satellite's records omit use_additive_bias, which the KMD default completes
+    # to 0.
     for index, md, grid_policy, persistent_policy in scores:
         lines.append(
             f'    {{{index}, "{md["dtype"]}", {md["head_size"]}, {md["causal"]}, '
@@ -155,7 +208,7 @@ def render() -> str:
             f'"{md["nonpersist_decode"]}", {md["lds_num_buffers"]}, '
             f'{md["v_reg_prefetch"]}, {md["causal_diag_split"]}, {md["o_store_width"]}, '
             f'"{md["pv_loop_order"]}", {md["use_cfvst"]}, {md["use_exp2_fast"]}, '
-            f'{md["lds_k_group_pad"]}, {md["use_additive_bias"]}, {b(grid_policy)}, '
+            f'{md["lds_k_group_pad"]}, {md.get("use_additive_bias", 0)}, {b(grid_policy)}, '
             f"{b(persistent_policy)}}},"
         )
     lines += ["}};", "", "// clang-format on", ""]

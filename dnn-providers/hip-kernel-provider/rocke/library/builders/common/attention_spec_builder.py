@@ -18,7 +18,7 @@ from dataclasses import replace
 
 from kernels.common.attention_unified import (
     UnifiedAttentionProblem,
-    _has_score_bias,
+    _has_non_alibi_score_bias,
     _enable_combo_2d,
     _enable_early_v_schedule,
     _enable_fast_paged_kv_desc,
@@ -214,7 +214,7 @@ def _base_2d_generic_fields(problem: UnifiedAttentionProblem, arch: str) -> dict
         or (problem.use_sinks and _enable_transposed_qk_32x32(problem, arch))
     )
     skip_legacy_qreg = combo or subflags
-    _bias_active = problem.softcap > 0 or _has_score_bias(problem)
+    _bias_active = problem.softcap > 0 or _has_non_alibi_score_bias(problem)
     mask_opts = (combo_no_sw and not _bias_active) or subflags
     return dict(
         head_size=problem.head_size,

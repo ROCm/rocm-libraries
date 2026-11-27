@@ -83,6 +83,18 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->has_waves_per_eu = false;
         s->waves_per_eu = 0;
         break;
+    case 9: /* ALiBi in the D256 lean body. */
+        set_shape(s, 256, 32, 32, 8, "bf16", 0, 4, 32);
+        s->use_alibi = true;
+        break;
+    case 10: /* ALiBi in the D128 pipe with the head-fold. */
+        set_shape(s, 128, 16, 32, 8, "bf16", 4096, 1, 32);
+        s->use_alibi = true;
+        break;
+    case 11: /* ALiBi in the D128 bs64 single-buffer body, causal, no fold. */
+        set_shape(s, 128, 64, 32, 8, "fp16", 0, 2, 64);
+        s->use_alibi = true;
+        break;
     default:
         return -1;
     }

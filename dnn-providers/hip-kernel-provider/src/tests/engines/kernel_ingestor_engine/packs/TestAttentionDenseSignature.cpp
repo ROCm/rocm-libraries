@@ -3,6 +3,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -45,7 +46,9 @@
  *
  * gfx950 only: every variant declares `persistent: false`, `varlen: false` and
  * `paged: false`. The five-argument form of a baked persistent body (the pointers and
- * scale, no shape) is covered only as a shape the pack must refuse.
+ * scale, no shape) is covered only as a shape the pack must refuse. A `use_alibi: 1`
+ * kernel takes alibi_slopes_ptr after the ten (null at launch: the kernel computes
+ * hipDNN's slopes); an ALiBi graph prepares that form and any other the form without it.
  *
  * requireSignatureMatch compares `kind` and `size`, and `name` only when both sides carry
  * one. The name comparison is the only one that tells the four pointers apart, or `scale`
@@ -100,8 +103,10 @@ const std::vector<std::pair<std::string, std::vector<std::string>>>& persistentD
 
 /// The form the gfx942 persistent body takes on @p decode (qb_major by default): the same
 /// ten arguments, then a magic/shift pair per fast-division divisor, so the pointers and
-/// shape all still line up and only the count differs; lse_ptr last for @p lse.
-std::vector<KernelArgument> persistentAbi(const std::string& decode = "qb_major", bool lse = false)
+/// shape all still line up and only the count differs; alibi_slopes_ptr for @p alibi, then
+/// lse_ptr last for @p lse.
+std::vector<KernelArgument>
+    persistentAbi(const std::string& decode = "qb_major", bool lse = false, bool alibi = false)
 {
     auto signature = pythonAbi();
     for(const auto& [name, divisors] : persistentDecodes())
@@ -117,6 +122,10 @@ std::vector<KernelArgument> persistentAbi(const std::string& decode = "qb_major"
                 signature.push_back(KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, divisor + part});
             }
         }
+    }
+    if(alibi)
+    {
+        signature.push_back(KernelArgument{BUFFER_KIND, POINTER_BYTES, 0, "alibi_slopes_ptr"});
     }
     if(lse)
     {
@@ -511,6 +520,150 @@ TEST(TestGfx950AttentionDenseSignature, RefusesThePersistentFiveArgumentForm)
 }
 
 // =============================================================================
+// The ALiBi form
+// =============================================================================
+
+namespace
+{
+
+/// Both arches serve ALiBi through use_alibi candidates.
+const std::array<const AttentionDenseTestArch*, 2> ALIBI_ARCHES{&GFX942_ATTENTION_DENSE,
+                                                                &GFX950_ATTENTION_DENSE};
+
+/// @p arch's prepare() over a descriptor recording @p recorded, where @p alibi makes both
+/// the graph (alibi_mask) and the candidate (use_alibi) ALiBi ones; @p stats and
+/// @p persistDecode as for prepareFailure.
+std::string alibiPrepareFailure(const AttentionDenseTestArch& arch,
+                                const std::vector<KernelArgument>& recorded,
+                                bool alibi,
+                                Stats stats = Stats::NONE,
+                                const std::string& persistDecode = "")
+{
+    GraphSpec spec = stats == Stats::BOUND ? withStats(GraphSpec{}) : GraphSpec{};
+    spec.alibiMask = alibi;
+    const Graph graph(arch, spec);
+    const auto bound = graph.match();
+    EXPECT_TRUE(bound.has_value()) << "graph_match declined the fixture graph";
+    if(!bound.has_value())
+    {
+        return {};
+    }
+    auto kernel = makeKernel(arch, recorded, persistDecode);
+    kernel.metadata[std::string("use_alibi")] = int64_t{alibi ? 1 : 0};
+    return attention_dense_graphs::prepareFailure(graph, *bound, kernel);
+}
+
+void expectAlibiRefused(const AttentionDenseTestArch& arch,
+                        const std::vector<KernelArgument>& recorded,
+                        const char* what,
+                        bool alibi,
+                        Stats stats = Stats::NONE,
+                        const std::string& persistDecode = "")
+{
+    const std::string failure = alibiPrepareFailure(arch, recorded, alibi, stats, persistDecode);
+    ASSERT_FALSE(failure.empty()) << what << ": prepare() did not fail at all";
+    EXPECT_NE(failure.find(MISMATCH_MARKER), std::string::npos)
+        << what << ", but the failure was: " << failure;
+}
+
+void expectAlibiAccepted(const AttentionDenseTestArch& arch,
+                         const std::vector<KernelArgument>& recorded,
+                         Stats stats = Stats::NONE,
+                         const std::string& persistDecode = "")
+{
+    const std::string failure
+        = alibiPrepareFailure(arch, recorded, /*alibi=*/true, stats, persistDecode);
+    ASSERT_FALSE(failure.empty()) << "the archive named by the fixture does not exist, so "
+                                     "prepare() cannot have succeeded";
+    EXPECT_EQ(failure.find(MISMATCH_MARKER), std::string::npos)
+        << "the pack refused the argument list the rocKE builder declares: " << failure;
+}
+
+} // namespace
+
+TEST(TestAttentionDenseAlibiSignature, AcceptsTheAlibiAbiThePythonDeclares)
+{
+    for(const auto* arch : ALIBI_ARCHES)
+    {
+        SCOPED_TRACE(arch->label);
+        expectAlibiAccepted(*arch, pythonAlibiAbi());
+    }
+}
+
+TEST(TestAttentionDenseAlibiSignature, RefusesTheTenArgumentFormForAnAlibiCandidate)
+{
+    // An ALiBi candidate whose object records no slopes pointer: the launch would write
+    // one argument past the end of its kernarg segment.
+    for(const auto* arch : ALIBI_ARCHES)
+    {
+        SCOPED_TRACE(arch->label);
+        expectAlibiRefused(
+            *arch, pythonAbi(), "an ALiBi variant takes the slopes pointer", /*alibi=*/true);
+    }
+}
+
+TEST(TestAttentionDenseAlibiSignature, RefusesTheAlibiFormForAPlainCandidate)
+{
+    // The kernel would read an unwritten slot as the slopes pointer.
+    for(const auto* arch : ALIBI_ARCHES)
+    {
+        SCOPED_TRACE(arch->label);
+        expectAlibiRefused(
+            *arch, pythonAlibiAbi(), "a plain variant takes no slopes pointer", /*alibi=*/false);
+    }
+}
+
+TEST(TestAttentionDenseAlibiSignature, RefusesTheSlopesPointerUnderAnotherName)
+{
+    // The one slot an ALiBi variant adds is told apart from any other trailing pointer by
+    // its name alone.
+    auto renamed = pythonAlibiAbi();
+    renamed.back().name = "additive_bias_ptr";
+    for(const auto* arch : ALIBI_ARCHES)
+    {
+        SCOPED_TRACE(arch->label);
+        expectAlibiRefused(
+            *arch, renamed, "the eleventh argument is alibi_slopes_ptr", /*alibi=*/true);
+    }
+}
+
+/// gfx942 ALiBi kernels write LSE and run on the persistent grid too: the slopes pointer
+/// follows the shape and any fast-division pairs, and lse_ptr stays last.
+TEST(TestGfx942AttentionDenseSignature, AcceptsTheAlibiFormOnEveryGridWithAndWithoutLse)
+{
+    for(const auto stats : {Stats::NONE, Stats::BOUND})
+    {
+        const bool lse = stats == Stats::BOUND;
+        auto grid = pythonAlibiAbi();
+        if(lse)
+        {
+            grid.push_back(KernelArgument{BUFFER_KIND, POINTER_BYTES, 0, "lse_ptr"});
+        }
+        SCOPED_TRACE(lse ? "lse" : "no lse");
+        expectAlibiAccepted(GFX942_ATTENTION_DENSE, grid, stats);
+        for(const auto& [decode, divisors] : persistentDecodes())
+        {
+            SCOPED_TRACE(decode);
+            expectAlibiAccepted(
+                GFX942_ATTENTION_DENSE, persistentAbi(decode, lse, /*alibi=*/true), stats, decode);
+        }
+    }
+}
+
+TEST(TestGfx942AttentionDenseSignature, RefusesTheLsePointerBeforeTheSlopesPointer)
+{
+    // Swapped, the kernel would write LSE through the null slopes pointer.
+    auto swapped = persistentAbi("qb_major", /*lse=*/true, /*alibi=*/true);
+    std::swap(swapped.at(swapped.size() - 1), swapped.at(swapped.size() - 2));
+    expectAlibiRefused(GFX942_ATTENTION_DENSE,
+                       swapped,
+                       "lse_ptr follows alibi_slopes_ptr",
+                       /*alibi=*/true,
+                       Stats::BOUND,
+                       "qb_major");
+}
+
+// =============================================================================
 // The additive-bias form
 // =============================================================================
 
@@ -810,7 +963,7 @@ TEST(TestGfx942AttentionDenseSignature, RestoresTheLseBiasFormOfABiasPlanWithSta
 // shipped descriptor is checked where it is defined. That says nothing about a BROKEN one: a
 // branch of isConsistent() could be loosened and both engines would still build. These are
 // compile-time checks too, so a loosened rule fails this file's build. Each descriptor below is
-// a coherent one (stats and a bias served) with one rule broken, and must read as inconsistent.
+// a coherent one (stats, a bias and ALiBi served) with one rule broken, and must read as inconsistent.
 
 namespace
 {
@@ -824,7 +977,7 @@ std::optional<bool> unreachedHook(const hipdnn_plugin_sdk::ingestor::KernelDefin
     return std::nullopt;
 }
 
-/// A descriptor that serves stats and a bias, with every rule of isConsistent() met.
+/// A descriptor that serves stats, a bias and ALiBi, with every rule of isConsistent() met.
 constexpr AttentionDenseArch coherentArch()
 {
     AttentionDenseArch arch{};
@@ -839,6 +992,9 @@ constexpr AttentionDenseArch coherentArch()
     arch.currentContract = {"arch.dispatch.v2", AttentionDenseAbi::RUNTIME_HEAD_COUNTS};
     arch.legacyContract = {"arch.dispatch.v1", AttentionDenseAbi::BAKED_HEAD_COUNTS};
     arch.biasContract = {"arch.dispatch.v3", AttentionDenseAbi::RUNTIME_HEAD_COUNTS_WITH_BIAS};
+    arch.tokens.alibi = "arch.alibi";
+    arch.candidateUsesAlibi = &unreachedHook;
+    arch.alibiContract = {"arch.dispatch.alibi.v1", AttentionDenseAbi::RUNTIME_HEAD_COUNTS};
     return arch;
 }
 
@@ -854,7 +1010,7 @@ constexpr bool consistentAfter(Edit edit)
 } // namespace
 
 // The rule is not simply "refuse everything": a coherent descriptor, a plain one that serves
-// neither stats nor a bias (gfx950 serves no stats) and one with no superseded contract (gfx942
+// none of stats, a bias and ALiBi (gfx950 serves no stats) and one with no superseded contract (gfx942
 // has none) are all accepted.
 static_assert(consistentAfter([](AttentionDenseArch&) {}),
               "the coherent baseline must be consistent, or no refusal below means anything");
@@ -862,8 +1018,10 @@ static_assert(consistentAfter([](AttentionDenseArch& arch) {
                   arch.candidateWritesLse = nullptr;
                   arch.candidateAddsBias = nullptr;
                   arch.biasContract = {};
+                  arch.candidateUsesAlibi = nullptr;
+                  arch.alibiContract = {};
               }),
-              "a descriptor that serves neither stats nor a bias is consistent");
+              "a descriptor that serves none of stats, a bias and ALiBi is consistent");
 static_assert(consistentAfter([](AttentionDenseArch& arch) { arch.legacyContract = {}; }),
               "a descriptor with no superseded contract is consistent");
 
@@ -907,6 +1065,31 @@ static_assert(!consistentAfter([](AttentionDenseArch& arch) {
     arch.biasContract.symbol = arch.legacyContract.symbol;
 }),
               "a bias contract under the legacy contract's name must be refused");
+
+// An ALiBi hook and an ALiBi contract come together, with the ALiBi token spelled, the current
+// contract's argument list (the launch adds the slopes pointer) and a name of its own.
+static_assert(!consistentAfter([](AttentionDenseArch& arch) { arch.alibiContract = {}; }),
+              "an ALiBi hook without an ALiBi contract must be refused");
+static_assert(!consistentAfter([](AttentionDenseArch& arch) { arch.candidateUsesAlibi = nullptr; }),
+              "an ALiBi contract without an ALiBi hook must be refused");
+static_assert(!consistentAfter([](AttentionDenseArch& arch) { arch.tokens.alibi = {}; }),
+              "served ALiBi with no ALiBi token must be refused");
+static_assert(!consistentAfter([](AttentionDenseArch& arch) {
+    arch.alibiContract.abi = AttentionDenseAbi::RUNTIME_HEAD_COUNTS_WITH_BIAS;
+}),
+              "an ALiBi contract that launches the bias form must be refused");
+static_assert(!consistentAfter([](AttentionDenseArch& arch) {
+    arch.alibiContract.symbol = arch.currentContract.symbol;
+}),
+              "an ALiBi contract under the current contract's name must be refused");
+static_assert(!consistentAfter([](AttentionDenseArch& arch) {
+    arch.alibiContract.symbol = arch.legacyContract.symbol;
+}),
+              "an ALiBi contract under the legacy contract's name must be refused");
+static_assert(!consistentAfter([](AttentionDenseArch& arch) {
+    arch.alibiContract.symbol = arch.biasContract.symbol;
+}),
+              "an ALiBi contract under the bias contract's name must be refused");
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing
 

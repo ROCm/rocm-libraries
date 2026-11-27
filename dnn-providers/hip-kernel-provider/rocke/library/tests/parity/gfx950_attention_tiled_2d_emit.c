@@ -25,6 +25,9 @@
 #include "rocke/lower_llvm.h"
 #include "rocke/verify.h"
 
+/* The ALiBi designs in the order of the idx81-84 and idx125-128 configs. */
+static const char* const alibi_designs[4] = {"seed_tile", "fma_tile", "seed_split", "fma_split"};
+
 /* Fill `s` for config index `idx`. Returns 0 on success, -1 on unknown idx. */
 static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
 {
@@ -2065,6 +2068,124 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         make_spec(85, s);
         s->use_k_single_buffer = false;
         s->use_v_double_buffer = true;
+        break;
+    /* --- idx124-127: ALiBi at the slope sites idx16/17 miss (lockstep with the
+     *     Python _CONFIGS[124..127]): 124 per-row hoist (GQA, 24 heads); 125-127 the
+     *     transposed 32x32 per-iter (mask-once), hoisted and inline slopes. */
+    case 124:
+        s->head_size = 64;
+        s->block_size = 32;
+        s->num_query_heads = 24;
+        s->num_kv_heads = 6;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->use_alibi = true;
+        break;
+    case 125:
+    case 126:
+    case 127:
+        s->head_size = 64;
+        s->block_size = 32;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 32;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->use_alibi = true;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->block_m_per_warp = 32;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->use_transposed_mask_once = (idx == 125);
+        s->use_transposed_invariant_hoist = (idx == 126);
+        break;
+    /* --- idx128-142: the ALiBi arms (lockstep with the Python _CONFIGS[128..142]):
+     *     128-131 each arm on the transposed mask-limit softmax; default arms 132
+     *     D256 and 133 D192 mask-limit, 134 grouped_kv2, 135 register-P; 136-139 each
+     *     arm on the 16x16 path; 140-142 the other arms on grouped_kv2. */
+    case 128:
+    case 129:
+    case 130:
+    case 131:
+    case 132:
+    case 133:
+    case 134:
+    case 140:
+    case 141:
+    case 142:
+        s->head_size = (idx == 132) ? 256 : (idx == 133) ? 192 : 64;
+        s->block_size = 32;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 32;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->use_alibi = true;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->block_m_per_warp = 32;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        if(idx <= 133)
+        {
+            s->use_transposed_scalar_state = true;
+            s->use_transposed_mask_once = true;
+            s->use_transposed_half_local_pv = true;
+            s->use_mfma32_skip_legacy_qreg = true;
+            s->use_transposed_mask_limit = true;
+        }
+        else
+        {
+            s->use_grouped_kv2_softmax = true;
+        }
+        if(idx <= 131)
+            s->alibi_design = alibi_designs[idx - 128];
+        else if(idx == 140)
+            s->alibi_design = "fma_split";
+        else if(idx == 141)
+            s->alibi_design = "seed_tile";
+        else if(idx == 142)
+            s->alibi_design = "seed_split";
+        break;
+    case 135:
+        s->head_size = 64;
+        s->block_size = 32;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 32;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->use_alibi = true;
+        s->num_seqs = 2;
+        s->has_waves_per_eu = true;
+        s->waves_per_eu = 2;
+        s->use_register_pv = true;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        break;
+    case 136:
+    case 137:
+    case 138:
+    case 139:
+        s->head_size = 64;
+        s->block_size = 32;
+        s->num_query_heads = 24;
+        s->num_kv_heads = 6;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->use_alibi = true;
+        s->block_m_per_warp = 32;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->alibi_design = alibi_designs[idx - 136];
         break;
     default:
         return -1;

@@ -138,6 +138,11 @@ class TestRouting(unittest.TestCase):
                 _req(use_fp8=True, fp8_fnuz=True),
                 r"attention_unified_2d: fp8 K/V on gfx950 [^;]*fnuz-quantised",
             ),
+            # ALiBi and the additive bias are never combined in one kernel.
+            "alibi": (
+                _req(use_alibi=True),
+                r"attention_unified_2d: [^;]*ALiBi does not combine with an additive bias",
+            ),
         }
         for label, (request, reason) in cases.items():
             with self.subTest(case=label), self.assertRaisesRegex(ValueError, reason):

@@ -27,6 +27,7 @@ from .common import (
     _request_errors,
     _tuning_problem,
     _unified_path_coverage,
+    UNIFIED_ALIBI_ARCHES,
 )
 from .dense_rules import DenseSpace, DenseSupports
 from .unified_rules import TUNING_ALGORITHM, AttentionGeometryVariant, unified_space
@@ -51,7 +52,8 @@ DENSE_ALGORITHMS = frozenset(
 def _tuning_precheck(variant: AttentionGeometryVariant):
     """Coverage for one geometry variant, judged by ``_unified_path_coverage``
     on the variant's own path: the scalar check with the tiled-only features
-    (additive bias, LSE) stripped, then that path's gate for those features."""
+    (additive bias, LSE, ALiBi) stripped, then that path's gate for those
+    features."""
 
     def precheck(req):
         problem = _tuning_problem(req)
@@ -130,7 +132,12 @@ def make_tuning_candidate(
                 if variant.builder_kind == "gfx942_4warp_gqa"
                 else ATTENTION_FEATURES | {"lse"}
             )
-            | frozenset(extra_features),
+            | frozenset(extra_features)
+            | (
+                {"alibi", "alibi_external_slopes"}
+                if variant.arch in UNIFIED_ALIBI_ARCHES
+                else set()
+            ),
         ),
         space=unified_space(variant),
         base=_tuning_problem,

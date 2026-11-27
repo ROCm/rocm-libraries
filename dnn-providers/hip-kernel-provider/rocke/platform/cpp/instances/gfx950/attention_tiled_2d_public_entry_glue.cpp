@@ -48,6 +48,7 @@
 #include "rocke/helper_helper_rocke.helpers.attention.h" /* binary_search_seq_idx */
 #include "rocke/helper_helper_rocke.instances.gfx942.attention_tiled_2d.h" /* rocke__mfma_32x32_c_* */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join  */
+#include "rocke/helper_rocke.instances.common._attention_alibi.h"
 #include "rocke/helper_rocke.instances.common._fmha_common.h" /* rocke_attention_check_head_counts */
 #include "rocke/helper_rocke.instances.common.attention_arch.h" /* rocke_require_tiled_attention_arch */
 
@@ -292,6 +293,33 @@ bool rocke_gfx950_attention_tiled_2d_supports(
  *  helpers and the gfx950-specific "leave ctx->target / ctx->qk_atom NULL"
  *  derivation that the phase functions this driver calls expect.
  * ===================================================================== */
+/* Python _alibi_design(spec): the spec's alibi_design, else the measured
+ * default of the paths that took ALiBi only with the arms (mask-limit softmax,
+ * grouped_kv2, register-P). NONE keeps the per-score add of the paths that took
+ * ALiBi before. Runs after validation, so a set design is a known one. */
+static int rocke_gfx950_attn2d_resolve_alibi_design(const rocke_attention_tiled_2d_spec_t* spec)
+{
+    const char* design = spec->alibi_design;
+    if(design == NULL && spec->use_alibi)
+    {
+        if(spec->use_transposed_mask_limit)
+            design = spec->head_size == 256   ? "fma_split"
+                     : spec->head_size == 192 ? "seed_tile"
+                                              : "fma_tile";
+        else if(spec->use_grouped_kv2_softmax || spec->use_register_pv)
+            design = "fma_tile";
+    }
+    if(design == NULL)
+        return ROCKE_GFX950_ATTN2D_AD_NONE;
+    if(strcmp(design, "seed_tile") == 0)
+        return ROCKE_GFX950_ATTN2D_AD_SEED_TILE;
+    if(strcmp(design, "fma_tile") == 0)
+        return ROCKE_GFX950_ATTN2D_AD_FMA_TILE;
+    if(strcmp(design, "seed_split") == 0)
+        return ROCKE_GFX950_ATTN2D_AD_SEED_SPLIT;
+    return ROCKE_GFX950_ATTN2D_AD_FMA_SPLIT;
+}
+
 static bool rocke_gfx950_attn2d_build_ctx_init(rocke_gfx950_attn2d_build_ctx_t* ctx,
                                                rocke_ir_builder_t* b,
                                                const rocke_attention_tiled_2d_spec_t* spec,
@@ -336,6 +364,53 @@ static bool rocke_gfx950_attn2d_build_ctx_init(rocke_gfx950_attn2d_build_ctx_t* 
     const rocke_type_t* dtype = rocke_attention_tiled_2d_spec_dtype_ir(spec);
     ctx->dtype = dtype;
 
+    /* ---- alibi_design (Python __post_init__): a known design, on ALiBi, and
+     * only where the arms run. The arms fold the term into the scale op or the
+     * QK accumulator, so nothing may sit between the scale and the term. ---- */
+    if(spec->alibi_design != NULL)
+    {
+        if(rocke_attn_alibi_design_token(spec->alibi_design) == NULL)
+        {
+            char msg[160];
+            snprintf(msg,
+                     sizeof(msg),
+                     "alibi_design must be one of ['fma_split', 'fma_tile', 'seed_split', "
+                     "'seed_tile'] or None (got '%s')",
+                     spec->alibi_design);
+            rocke_g950_fail(b, ROCKE_ERR_VALUE, msg);
+        }
+        if(!spec->use_alibi)
+            rocke_g950_fail(b, ROCKE_ERR_VALUE, "alibi_design requires use_alibi");
+        char msg[192];
+        if(spec->has_softcap)
+        {
+            snprintf(msg,
+                     sizeof(msg),
+                     "alibi_design=%s is not supported on softcap: softcap applies between "
+                     "the scale and the ALiBi term",
+                     spec->alibi_design);
+            rocke_g950_fail(b, ROCKE_ERR_VALUE, msg);
+        }
+        if(spec->use_qq_bias || spec->use_additive_bias)
+        {
+            snprintf(msg,
+                     sizeof(msg),
+                     "alibi_design=%s is not supported with QQ or additive bias: ALiBi plus "
+                     "a score bias is out of scope",
+                     spec->alibi_design);
+            rocke_g950_fail(b, ROCKE_ERR_VALUE, msg);
+        }
+        if(spec->use_mfma_32x32 && !spec->use_transposed_qk_32x32)
+        {
+            snprintf(msg,
+                     sizeof(msg),
+                     "alibi_design=%s is not supported on the non-transposed 32x32 path: no "
+                     "fast variant runs on it",
+                     spec->alibi_design);
+            rocke_g950_fail(b, ROCKE_ERR_VALUE, msg);
+        }
+    }
+
     /* ---- use_register_pv constraints (Python __post_init__ lines 470-485).
      * Python enforces these at dataclass construction; mirror them here so an
      * invalid register_pv spec is cleanly rejected (build fails) instead of
@@ -365,11 +440,10 @@ static bool rocke_gfx950_attn2d_build_ctx_init(rocke_gfx950_attn2d_build_ctx_t* 
                             "use_register_pv v1 requires no sinks, no sliding window, "
                             "and no softcap");
         }
-        if(spec->use_alibi || spec->use_qq_bias || spec->use_additive_bias)
+        if(spec->use_qq_bias || spec->use_additive_bias)
         {
-            rocke_g950_fail(b,
-                            ROCKE_ERR_VALUE,
-                            "use_register_pv v1 does not support ALiBi, QQ bias, or additive bias");
+            rocke_g950_fail(
+                b, ROCKE_ERR_VALUE, "use_register_pv v1 does not support QQ bias or additive bias");
         }
     }
 
@@ -381,7 +455,7 @@ static bool rocke_gfx950_attn2d_build_ctx_init(rocke_gfx950_attn2d_build_ctx_t* 
         {
             rocke_g950_fail(b,
                             ROCKE_ERR_VALUE,
-                            "transposed softmax VALU opts do not support softcap, ALiBi, "
+                            "transposed softmax VALU opts do not support softcap, "
                             "QQ bias, or additive bias");
         }
         if(spec->use_transposed_invariant_hoist)
@@ -405,7 +479,7 @@ static bool rocke_gfx950_attn2d_build_ctx_init(rocke_gfx950_attn2d_build_ctx_t* 
         {
             rocke_g950_fail(b,
                             ROCKE_ERR_VALUE,
-                            "use_grouped_kv2_softmax v1 does not support softcap, ALiBi, "
+                            "use_grouped_kv2_softmax v1 does not support softcap, "
                             "QQ bias, or additive bias");
         }
     }
@@ -597,6 +671,11 @@ static bool rocke_gfx950_attn2d_build_ctx_init(rocke_gfx950_attn2d_build_ctx_t* 
     ctx->USE_ALIBI = spec->use_alibi;
     ctx->USE_QQ_BIAS = spec->use_qq_bias;
     ctx->USE_ADDITIVE_BIAS = spec->use_additive_bias;
+    ctx->ALIBI_DESIGN = rocke_gfx950_attn2d_resolve_alibi_design(spec);
+    ctx->AD_SEED = ctx->ALIBI_DESIGN == ROCKE_GFX950_ATTN2D_AD_SEED_TILE
+                   || ctx->ALIBI_DESIGN == ROCKE_GFX950_ATTN2D_AD_SEED_SPLIT;
+    ctx->AD_SPLIT = ctx->ALIBI_DESIGN == ROCKE_GFX950_ATTN2D_AD_SEED_SPLIT
+                    || ctx->ALIBI_DESIGN == ROCKE_GFX950_ATTN2D_AD_FMA_SPLIT;
 
     /* transposed-softmax + experimental predicate aliases (Py768-777). */
     ctx->TRANSPOSED_SCALAR_STATE = spec->use_transposed_scalar_state;
@@ -1101,7 +1180,7 @@ static rocke_status_t rocke_g950_attn2d_kernel_name(const rocke_attention_tiled_
 {
     char d_buf[32], b_buf[32], t_buf[32], hkv_buf[64], fhkv_buf[64], kv_buf[64];
     char sw_buf[32], w_buf[32], mw_buf[32], schedb_buf[32], smxil_buf[32], ring_buf[32];
-    char rb_buf[32];
+    char rb_buf[32], ad_buf[8];
     int nqh, nkv;
 
     if(s == NULL || out == NULL)
@@ -1112,6 +1191,16 @@ static rocke_status_t rocke_g950_attn2d_kernel_name(const rocke_attention_tiled_
     /* The name carries the GQA ratio; reject a spec it cannot be formed for. */
     if(nkv <= 0)
         return ROCKE_ERR_VALUE;
+    /* alibi_design adds "ad<token>" only when set, so default names stay. An
+     * unknown design names no token here: the build refuses it with the Python
+     * __post_init__ message. */
+    {
+        const char* ad_token = rocke_attn_alibi_design_token(s->alibi_design);
+        if(ad_token != NULL)
+            snprintf(ad_buf, sizeof(ad_buf), "ad%s", ad_token);
+        else
+            ad_buf[0] = '\0';
+    }
 
     snprintf(d_buf, sizeof(d_buf), "d%d", s->head_size);
     snprintf(b_buf, sizeof(b_buf), "b%d", s->block_size);
@@ -1219,6 +1308,7 @@ static rocke_status_t rocke_g950_attn2d_kernel_name(const rocke_attention_tiled_
             s->use_register_pv ? "regpv" : "",
             s->use_qblock_reverse ? "qrev" : "",
             s->emit_lse ? (s->lse_head_major ? "lsehm" : "lse") : "",
+            ad_buf,
         };
         size_t num_parts = sizeof(parts) / sizeof(parts[0]);
         return rocke_kernel_name_join(

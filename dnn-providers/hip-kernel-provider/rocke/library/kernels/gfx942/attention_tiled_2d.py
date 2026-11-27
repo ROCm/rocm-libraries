@@ -38,6 +38,13 @@ from dataclasses import dataclass, field
 import os
 from typing import ClassVar, Optional, Tuple
 
+from kernels.common._attention_alibi import (
+    ALIBI_DESIGNS,
+    alibi_slope,
+    alibi_slope_log2,
+    alibi_split_lane_terms,
+    alibi_split_tile_offsets,
+)
 from kernels.common._fmha_common import check_head_counts, gqa_ratio
 from kernels.common._lse_store import lse_row_has_mass, lse_store
 from kernels.common.attention_mask_type import band_mask_type
@@ -200,6 +207,8 @@ class UnifiedAttention2DTiledSpec:
     use_sinks: bool
     sliding_window: int
     has_softcap: bool
+    # ALiBi (hipDNN SEM-021): ``alibi_slopes_ptr`` gives the per-query-head slopes;
+    # a null pointer selects hipDNN's built-in slopes from num_query_heads.
     use_alibi: bool = False
     use_qq_bias: bool = False
     num_seqs: int = 0
@@ -509,6 +518,9 @@ class UnifiedAttention2DTiledSpec:
     # only when the kernel is VALU/throughput-bound (the x8 conflict-free-V
     # path); no-op-guarded to sliding_window==0.
     use_causal_mask_phase_split: bool = False
+    # How the ALiBi term enters the scores (``ALIBI_DESIGNS``). None = the
+    # path's default (``_alibi_design``).
+    alibi_design: Optional[str] = None
     # emit_lse: also write the natural-log softmax normalizer (LSE) as FP32
     #   [total_q, num_query_heads, 1] through a trailing ``lse_ptr`` argument.
     #   Off by default; off emits no new IR, so shipped kernels are unchanged.
@@ -518,6 +530,33 @@ class UnifiedAttention2DTiledSpec:
         require_bool("emit_lse", self.emit_lse)
         if self.block_size <= 0:
             raise ValueError(f"block_size must be positive, got {self.block_size}")
+        if self.alibi_design is not None:
+            if self.alibi_design not in ALIBI_DESIGNS:
+                raise ValueError(
+                    f"alibi_design must be one of {sorted(ALIBI_DESIGNS)} or None "
+                    f"(got {self.alibi_design!r})"
+                )
+            if not self.use_alibi:
+                raise ValueError("alibi_design requires use_alibi")
+            # The arms fold the term into the scale op or the QK accumulator, so
+            # nothing may sit between the scale and the term.
+            if self.has_softcap:
+                raise ValueError(
+                    f"alibi_design={self.alibi_design} is not supported on softcap: "
+                    "softcap applies between the scale and the ALiBi term"
+                )
+            if self.use_qq_bias:
+                raise ValueError(
+                    f"alibi_design={self.alibi_design} is not supported with QQ "
+                    "bias: ALiBi plus a score bias is out of scope"
+                )
+            if (
+                self.use_mfma_32x32 or self.use_mfma_32x32x8
+            ) and not self.use_transposed_qk_32x32:
+                raise ValueError(
+                    f"alibi_design={self.alibi_design} is not supported on the "
+                    "non-transposed 32x32 path: no fast variant runs on it"
+                )
         # gfx942 (CDNA3) variant: the narrow ``16x16x16`` default path only.
         # The wide-K (32x32x16 migration) and transpose-read / native-fp8
         # experimental knobs all depend on gfx950-only ISA (wide-K MFMA atoms,
@@ -859,9 +898,9 @@ class UnifiedAttention2DTiledSpec:
                 raise ValueError(
                     "transposed softmax VALU opts require no sliding window"
                 )
-            if self.has_softcap or self.use_alibi or self.use_qq_bias:
+            if self.has_softcap or self.use_qq_bias:
                 raise ValueError(
-                    "transposed softmax VALU opts do not support softcap, ALiBi, or QQ bias"
+                    "transposed softmax VALU opts do not support softcap or QQ bias"
                 )
             if self.use_grouped_kv2_softmax:
                 raise ValueError(
@@ -957,8 +996,8 @@ class UnifiedAttention2DTiledSpec:
                 raise ValueError(
                     "use_register_pv v1 requires no sliding window and no softcap"
                 )
-            if self.use_alibi or self.use_qq_bias:
-                raise ValueError("use_register_pv v1 does not support ALiBi or QQ bias")
+            if self.use_qq_bias:
+                raise ValueError("use_register_pv v1 does not support QQ bias")
         if self.tile_size is not None:
             if self.tile_size <= 0 or self.tile_size % self.block_size != 0:
                 raise ValueError(
@@ -1120,6 +1159,11 @@ class UnifiedAttention2DTiledSpec:
             "cmps" if self.use_causal_mask_phase_split else "",
             "k1buf" if self.use_k_single_buffer else "",
             "lse" if self.emit_lse else "",
+            (
+                "ad" + ALIBI_DESIGNS[self.alibi_design]
+                if self.alibi_design is not None
+                else ""
+            ),
         )
 
 
@@ -1378,6 +1422,21 @@ def supports_tiled_2d(
 # ---------------------------------------------------------------------------
 
 
+def _alibi_design(spec: UnifiedAttention2DTiledSpec) -> Optional[str]:
+    """How the ALiBi term enters the scores (``ALIBI_DESIGNS``): the spec's
+    ``alibi_design``, else the measured default of the paths that took ALiBi
+    only with the arms (mask-limit softmax of the x8 flash family, 16x16
+    register-P). None keeps the per-score add of the paths that took ALiBi
+    before."""
+    if spec.alibi_design is not None or not spec.use_alibi:
+        return spec.alibi_design
+    if spec.use_transposed_mask_limit:
+        return "fma_split"
+    if spec.use_register_pv and not spec.use_mfma_32x32x8:
+        return "fma_tile"
+    return None
+
+
 def build_unified_attention_2d_tiled(
     spec: UnifiedAttention2DTiledSpec, *, arch: str = "gfx942"
 ) -> KernelDef:
@@ -1452,6 +1511,10 @@ def build_unified_attention_2d_tiled(
     USE_SINKS = spec.use_sinks
     USE_ALIBI = spec.use_alibi
     USE_QQ_BIAS = spec.use_qq_bias
+    ALIBI_DESIGN = _alibi_design(spec)
+    LEGACY_ALIBI = USE_ALIBI and ALIBI_DESIGN is None
+    AD_SEED = ALIBI_DESIGN in ("seed_tile", "seed_split")
+    AD_SPLIT = ALIBI_DESIGN in ("seed_split", "fma_split")
     TRANSPOSED_SCALAR_STATE = spec.use_transposed_scalar_state
     TRANSPOSED_INVARIANT_HOIST = spec.use_transposed_invariant_hoist
     TRANSPOSED_MASK_ONCE = spec.use_transposed_mask_once
@@ -1625,6 +1688,7 @@ def build_unified_attention_2d_tiled(
     alibi_slopes_ptr = b.param(
         "alibi_slopes_ptr", PtrType(F32, "global"), readonly=True, align=4
     )
+    # Declared either way (fixed ABI); with use_alibi, null selects the built-in slopes.
     qq_bias_ptr = b.param("qq_bias_ptr", PtrType(F32, "global"), readonly=True, align=4)
     cu_q = b.param(
         "query_start_len_ptr", PtrType(I32, "global"), readonly=True, align=4
@@ -4190,13 +4254,12 @@ def build_unified_attention_2d_tiled(
         hoist_row_ok.append(row_ok)
         hoist_causal_lim.append(causal_lim)
 
-    if USE_ALIBI:
+    AD_TRANSPOSED = ALIBI_DESIGN is not None and USE_MFMA_32X32 and TRANSPOSED_QK_32X32
+    if USE_ALIBI and not AD_TRANSPOSED:
         hoist_alibi = []
         for reg in range(REGS_PER_LANE):
-            qh_r = hoist_qh_r[reg]
-            qh_ok = b.cmp_lt(qh_r, num_qh_p)
-            slope = b.masked_global_load(
-                alibi_slopes_ptr, qh_r, qh_ok, b.const_f32(0.0), dtype=F32, align=4
+            slope = alibi_slope(
+                b, hoist_qh_r[reg], num_heads=num_qh_p, slopes=alibi_slopes_ptr
             )
             hoist_alibi.append(slope)
     else:
@@ -4232,17 +4295,116 @@ def build_unified_attention_2d_tiled(
     # off and ``TRANSPOSED_MASK_ONCE`` is on we recompute per-iter
     # inside the kvloop instead.
     if (
-        USE_ALIBI
+        LEGACY_ALIBI
         and USE_MFMA_32X32
         and TRANSPOSED_QK_32X32
         and TRANSPOSED_INVARIANT_HOIST
     ):
-        st_qh_ok = b.cmp_lt(st_qh, num_qh_p)
-        st_alibi_slope = b.masked_global_load(
-            alibi_slopes_ptr, st_qh, st_qh_ok, b.const_f32(0.0), dtype=F32, align=4
+        st_alibi_slope = alibi_slope(
+            b, st_qh, num_heads=num_qh_p, slopes=alibi_slopes_ptr
         )
     else:
         st_alibi_slope = None
+
+    # ALiBi design arms: loop-invariant state. ``ad_u`` is the slope in the
+    # units the term enters with (raw score units ``slope*log2e/qk_scale`` for a
+    # seed, log2 units for an FMA addend); ``ad_slope_l2`` (log2 units) builds
+    # the split arms' per-tile row offset. Transposed 32x32: one query per lane
+    # (per-lane scalars); 16x16: one query per accumulator row slot (per-reg
+    # lists). The anchor is the query's causal diagonal, as in the per-score add.
+    ad_u = ad_slope_l2 = ad_anchor = ad_rel = ad_e = ad_seed = None
+    ad_key_off = None
+
+    def _f32_vec(vals):
+        v = b.zero_vec_f32(len(vals))
+        for i, x in enumerate(vals):
+            v = b.vec_insert(v, x, i)
+        return v
+
+    if ALIBI_DESIGN is not None:
+        assert not GROUPED_KV2 and not USE_SOFTCAP
+        if AD_TRANSPOSED:
+            _ad_row = b.add(wave_row_base, _mfma_32x32_c_col(b, lane, 0))
+            _ad_qp = b.add(qb_start_pos, b.div(_ad_row, b.const_i32(NQK)))
+            _ad_qh = b.add(
+                b.mul(kv_head_idx, b.const_i32(NQK)),
+                b.mod(_ad_row, b.const_i32(NQK)),
+            )
+            ad_anchor = b.add(context_len, _ad_qp)
+            ad_slope_l2 = alibi_slope_log2(
+                b, _ad_qh, num_heads=num_qh_p, slopes=alibi_slopes_ptr
+            )
+            ad_u = b.fdiv(ad_slope_l2, qk_scale) if AD_SEED else ad_slope_l2
+            # Key of C element ``reg`` of 32-key block ``n``: ``tile_off + n*32
+            # + ad_key_off + (reg//4)*8 + reg%4``.
+            ad_key_off = b.mul(lane_half32, b.const_i32(4))
+            if AD_SPLIT:
+                ad_e = alibi_split_lane_terms(b, ad_u, ad_key_off)
+                if AD_SEED:
+                    # One accumulator init shared by every 32-key block.
+                    ad_seed = _f32_vec(ad_e)
+        else:
+            ad_anchor = hoist_causal_lim
+            ad_slope_l2 = [
+                b.fmul(hoist_alibi[r], rcp_ln2) for r in range(REGS_PER_LANE)
+            ]
+            ad_u = (
+                [b.fdiv(x, qk_scale) for x in ad_slope_l2] if AD_SEED else ad_slope_l2
+            )
+            if AD_SPLIT:
+                # Key of (reg, n) inside the tile: ``n*16 + lane_col``.
+                ad_e = {
+                    (reg, n): b.fmul(
+                        ad_u[reg], b.sitofp_f32(b.add(lane_col, b.const_i32(n * 16)))
+                    )
+                    for reg in range(REGS_PER_LANE)
+                    for n in range(QK_N_TILES)
+                }
+                if AD_SEED:
+                    ad_seed = {
+                        (atom, n): _f32_vec([ad_e[(atom * 4 + i, n)] for i in range(4)])
+                        for atom in range(M_ATOMS_PER_WARP)
+                        for n in range(QK_N_TILES)
+                    }
+            else:
+                ad_rel = [b.sub(lane_col, ad_anchor[r]) for r in range(REGS_PER_LANE)]
+
+    def _ad_tile_base(tile_off):
+        """``*_tile`` arms: the term of the tile's first key per query (per lane
+        on the transposed path, per row slot on 16x16), in ``ad_u`` units."""
+        if AD_TRANSPOSED:
+            return b.fmul(
+                ad_u,
+                b.sitofp_f32(b.sub(b.add(tile_off, ad_key_off), ad_anchor)),
+            )
+        return [
+            b.fmul(ad_u[reg], b.sitofp_f32(b.add(tile_off, ad_rel[reg])))
+            for reg in range(REGS_PER_LANE)
+        ]
+
+    def _ad_tile_term(base, n, reg):
+        """``*_tile`` arms: the term of element ``(n, reg)``, one FMA against a
+        compile-time key offset (emitted at its use to keep live ranges short)."""
+        if AD_TRANSPOSED:
+            c = n * 32 + (reg // 4) * 8 + reg % 4
+            u, b0 = ad_u, base
+        else:
+            c = n * 16
+            u, b0 = ad_u[reg], base[reg]
+        return b.fma(u, b.const_f32(float(c)), b0) if c else b0
+
+    def _ad_qk_init(seed_base, n, atom=0):
+        """QK accumulator init of block ``n`` (``atom`` on 16x16): the seed
+        arms' term in raw score units, else zero."""
+        if ALIBI_DESIGN == "seed_tile":
+            if AD_TRANSPOSED:
+                return _f32_vec([_ad_tile_term(seed_base, n, reg) for reg in range(16)])
+            return _f32_vec(
+                [_ad_tile_term(seed_base, n, atom * 4 + i) for i in range(4)]
+            )
+        if ALIBI_DESIGN == "seed_split":
+            return ad_seed if AD_TRANSPOSED else ad_seed[(atom, n)]
+        return b.zero_vec_f32(16 if USE_MFMA_32X32 else 4)
 
     kv_step = b.const_i32(2 if GROUPED_KV2 else 1)
 
@@ -4287,6 +4449,7 @@ def build_unified_attention_2d_tiled(
         # the const-0 yield below.) Double-buffered K alternates 0<->1.
         nxt_buf = cur_buf if K_SINGLE_BUF else b.sub(b.const_i32(1), cur_buf)
         tile_off = b.mul(kv_tile_iv, b.const_i32(T))
+        ad_seed_base = _ad_tile_base(tile_off) if ALIBI_DESIGN == "seed_tile" else None
         if GROUPED_KV2:
             tile1_iv_raw = b.add(kv_tile_iv, b.const_i32(1))
             tile1_in_range = b.cmp_lt(tile1_iv_raw, tile_end)
@@ -4318,15 +4481,9 @@ def build_unified_attention_2d_tiled(
                 else _st_row_ok_iter_inner
             )
             st_causal_lim_iter = b.add(context_len, st_qp_iter)
-            if USE_ALIBI:
-                st_qh_iter_ok = b.cmp_lt(st_qh_iter, num_qh_p)
-                st_alibi_slope_iter = b.masked_global_load(
-                    alibi_slopes_ptr,
-                    st_qh_iter,
-                    st_qh_iter_ok,
-                    b.const_f32(0.0),
-                    dtype=F32,
-                    align=4,
+            if LEGACY_ALIBI:
+                st_alibi_slope_iter = alibi_slope(
+                    b, st_qh_iter, num_heads=num_qh_p, slopes=alibi_slopes_ptr
                 )
             else:
                 st_alibi_slope_iter = None
@@ -4445,7 +4602,7 @@ def build_unified_attention_2d_tiled(
                     # streaming beat-CK kernel: partial waits are FIFO-count
                     # fences, so the slot map must be pure kg % 3. The live set
                     # {kg, kg+1, kg+2} then occupies three distinct slots.
-                    ST32_n = [b.zero_vec_f32(16) for _ in range(QK_N_TILES)]
+                    ST32_n = [_ad_qk_init(ad_seed_base, n) for n in range(QK_N_TILES)]
                     k_groups = HD // K_SLICE_HD
                     k_steps_per_group = K_SLICE_HD // QK_K_STEP
 
@@ -4524,7 +4681,7 @@ def build_unified_attention_2d_tiled(
                 else:
                     ST32_n = [None] * QK_N_TILES
                     for n in range(QK_N_TILES):
-                        acc32 = b.zero_vec_f32(16)
+                        acc32 = _ad_qk_init(ad_seed_base, n)
                         # K row becomes the M dimension of the transposed score
                         # tile. K_lds layout is [T, HD], so A is K_lds[row, k].
                         k_row_t = b.add(b.const_i32(n * 32), lane_col32)
@@ -4588,6 +4745,10 @@ def build_unified_attention_2d_tiled(
                 # previous 5-stage per-row 32-lane butterfly.
                 st_local_max = neg_inf
                 st_scores = {}
+                ad_nmax = [neg_inf] * QK_N_TILES
+                ad_fma_base = (
+                    _ad_tile_base(tile_off) if ALIBI_DESIGN == "fma_tile" else None
+                )
                 st_groups = [(ST32_n, tile_off)]
                 if GROUPED_KV2:
                     st_groups.append((ST32_n_g1, tile_off_g1))
@@ -4632,7 +4793,7 @@ def build_unified_attention_2d_tiled(
                 # the hoisted ``st_alibi_slope`` (or the per-iter
                 # ``st_alibi_slope_iter``) so the computation is a single
                 # ``v_pk_mul_f32`` chain per (n, reg).
-                if USE_ALIBI:
+                if LEGACY_ALIBI:
                     if TRANSPOSED_INVARIANT_HOIST:
                         slope_for_lane = st_alibi_slope
                     elif TRANSPOSED_MASK_ONCE:
@@ -4648,13 +4809,11 @@ def build_unified_attention_2d_tiled(
                             b.mul(kv_head_idx, b.const_i32(NQK)),
                             b.mod(q_row_t_alibi, b.const_i32(NQK)),
                         )
-                        slope_for_lane = b.masked_global_load(
-                            alibi_slopes_ptr,
+                        slope_for_lane = alibi_slope(
+                            b,
                             qh_t_alibi,
-                            b.cmp_lt(qh_t_alibi, num_qh_p),
-                            b.const_f32(0.0),
-                            dtype=F32,
-                            align=4,
+                            num_heads=num_qh_p,
+                            slopes=alibi_slopes_ptr,
                         )
                 else:
                     slope_for_lane = None
@@ -4728,7 +4887,16 @@ def build_unified_attention_2d_tiled(
                                     dist = b.sub(causal_lim, col_abs)
                                     m_ok = b.land(m_ok, b.cmp_lt(dist, sw_const))
                             s_raw = b.vec_extract(st_regs[n], reg)
-                            s_scaled = b.fmul(s_raw, qk_scale)
+                            if ALIBI_DESIGN == "fma_tile":
+                                s_scaled = b.fma(
+                                    s_raw,
+                                    qk_scale,
+                                    _ad_tile_term(ad_fma_base, n, reg),
+                                )
+                            elif ALIBI_DESIGN == "fma_split":
+                                s_scaled = b.fma(s_raw, qk_scale, ad_e[reg])
+                            else:
+                                s_scaled = b.fmul(s_raw, qk_scale)
                             if USE_SOFTCAP:
                                 s_scaled = b.fmul(
                                     _apply_softcap(b, s_scaled, softcap_p), rcp_ln2
@@ -4739,10 +4907,10 @@ def build_unified_attention_2d_tiled(
                                 if m_ok is None
                                 else b.select(m_ok, s_scaled, neg_inf)
                             )
-                            if USE_ALIBI:
-                                # ``slope * (key_pos - context_len) * RCP_LN2``;
-                                # mirrors AITER ``unified_attention.py:317``.
-                                pos_off = b.sub(col_abs, context_len)
+                            if LEGACY_ALIBI:
+                                # ``slope * (key_pos - causal_lim) * RCP_LN2``: measured
+                                # from the query's diagonal (hipDNN on top-left).
+                                pos_off = b.sub(col_abs, causal_lim)
                                 pos_f = b.sitofp_f32(pos_off)
                                 add_term = b.fmul(
                                     b.fmul(slope_for_lane, pos_f), rcp_ln2
@@ -4769,12 +4937,25 @@ def build_unified_attention_2d_tiled(
                                 )
                                 score = b.fadd(score, b.fmul(qq_v, rcp_ln2))
                             st_scores[(group_idx, n, reg)] = score
-                            st_local_max = b.fmax(st_local_max, score)
+                            if AD_SPLIT:
+                                ad_nmax[n] = b.fmax(ad_nmax[n], score)
+                            else:
+                                st_local_max = b.fmax(st_local_max, score)
+                if AD_SPLIT:
+                    # Split arms: the scores lack the per-row offset of each
+                    # 32-key block; add it to the block's max and fold it into
+                    # the exp2 offset below, so m and l stay exact.
+                    ad_T = alibi_split_tile_offsets(
+                        b, ad_slope_l2, tile_off, ad_anchor, QK_N_TILES
+                    )
+                    for n in range(QK_N_TILES):
+                        st_local_max = b.fmax(st_local_max, b.fadd(ad_nmax[n], ad_T[n]))
                 st_remote_max = b.warp_shuffle_xor(st_local_max, 32)
                 st_tile_max = b.fmax(st_local_max, st_remote_max)
                 st_m_raw = b.fmax(m_vals[0], st_tile_max)
                 st_ok = b.fcmp("ogt", st_m_raw, neg_inf)
                 st_m_new = b.select(st_ok, st_m_raw, zero_f)
+                ad_moff = [b.fsub(st_m_new, t) for t in ad_T] if AD_SPLIT else None
                 cfvst_payload = (
                     _cfvst_load_v_regs(kv_tile_iv)
                     if TRANSPOSED_V_STORE and _CFV_STORE_SPLIT
@@ -4789,7 +4970,10 @@ def build_unified_attention_2d_tiled(
                     for n in range(QK_N_TILES):
                         for reg in range(16):
                             p_t = b.exp2(
-                                b.fsub(st_scores[(group_idx, n, reg)], st_m_new)
+                                b.fsub(
+                                    st_scores[(group_idx, n, reg)],
+                                    ad_moff[n] if AD_SPLIT else st_m_new,
+                                )
                             )
                             PT32_groups[group_idx][n][reg] = p_t
                             st_l_local = b.fadd(st_l_local, p_t)
@@ -4875,7 +5059,10 @@ def build_unified_attention_2d_tiled(
                 for k in range(QK_K_ITERS)
             }
             for n in range(QK_N_TILES):
-                acc_per_atom = [b.zero_vec_f32(4) for _ in range(M_ATOMS_PER_WARP)]
+                acc_per_atom = [
+                    _ad_qk_init(ad_seed_base, n, atom)
+                    for atom in range(M_ATOMS_PER_WARP)
+                ]
                 for k in range(QK_K_ITERS):
                     B_v = qk_b_all[(n, k)]
                     for atom in range(M_ATOMS_PER_WARP):
@@ -4965,8 +5152,8 @@ def build_unified_attention_2d_tiled(
                             _apply_softcap(b, s_scaled, softcap_p), rcp_ln2
                         )
                     score = b.select(m_ok, s_scaled, neg_inf)
-                    if USE_ALIBI:
-                        pos_off = b.sub(col_abs, context_len)
+                    if LEGACY_ALIBI:
+                        pos_off = b.sub(col_abs, causal_lim)
                         pos_f = b.sitofp_f32(pos_off)
                         add_term = b.fmul(b.fmul(alibi_per_row[reg], pos_f), rcp_ln2)
                         score = b.fadd(score, add_term)
@@ -5018,6 +5205,9 @@ def build_unified_attention_2d_tiled(
 
         else:
             masked = {}
+            ad_fma_base = (
+                _ad_tile_base(tile_off) if ALIBI_DESIGN == "fma_tile" else None
+            )
             for reg in range(REGS_PER_LANE):
                 atom = reg // 4
                 in_atom = reg % 4
@@ -5036,17 +5226,24 @@ def build_unified_attention_2d_tiled(
                         dist = b.sub(causal_lim, col_abs)
                         m_ok = b.land(m_ok, b.cmp_lt(dist, sw_const))
                     s_raw = b.vec_extract(S_n[atom][n], in_atom)
-                    s_scaled = b.fmul(s_raw, qk_scale)
+                    if ALIBI_DESIGN == "fma_tile":
+                        s_scaled = b.fma(
+                            s_raw, qk_scale, _ad_tile_term(ad_fma_base, n, reg)
+                        )
+                    elif ALIBI_DESIGN == "fma_split":
+                        s_scaled = b.fma(s_raw, qk_scale, ad_e[(reg, n)])
+                    else:
+                        s_scaled = b.fmul(s_raw, qk_scale)
                     if USE_SOFTCAP:
                         s_scaled = b.fmul(
                             _apply_softcap(b, s_scaled, softcap_p), rcp_ln2
                         )
                     score = b.select(m_ok, s_scaled, neg_inf)
-                    if USE_ALIBI:
+                    if LEGACY_ALIBI:
                         # Triton order: mask first, then add ALiBi. For invalid
                         # cells this is `-inf + finite == -inf`, avoiding any
                         # pre-mask finite arithmetic from leaking into reductions.
-                        pos_off = b.sub(col_abs, context_len)
+                        pos_off = b.sub(col_abs, causal_lim)
                         pos_f = b.sitofp_f32(pos_off)
                         add_term = b.fmul(b.fmul(alibi_per_row[reg], pos_f), rcp_ln2)
                         score = b.fadd(score, add_term)
@@ -5084,6 +5281,7 @@ def build_unified_attention_2d_tiled(
             m_new = []
             m_carry = []
             s_local = {}  # (reg, n) -> the lane's masked score (still owned per-lane)
+            ad_T16 = []
             for reg in range(REGS_PER_LANE):
                 local_max = neg_inf
                 for n in range(QK_N_TILES):
@@ -5091,6 +5289,15 @@ def build_unified_attention_2d_tiled(
                     s_local[(reg, n)] = v
                     local_max = b.fmax(local_max, v)
                 tile_max = _warp_xor_reduce_max(b, local_max)
+                if AD_SPLIT:
+                    # Split arms: add the row's tile offset (log2 units) to the
+                    # max; the exp2 below subtracts it from m (exact m and l).
+                    ad_T16.append(
+                        alibi_split_tile_offsets(
+                            b, ad_slope_l2[reg], tile_off, ad_anchor[reg], 1
+                        )[0]
+                    )
+                    tile_max = b.fadd(tile_max, ad_T16[reg])
                 # Online softmax update (FlashAttention/Triton): see docstring.
                 full_max_raw = b.fmax(m_vals[reg], tile_max)
                 ok = b.fcmp("ogt", full_max_raw, neg_inf)
@@ -5106,7 +5313,12 @@ def build_unified_attention_2d_tiled(
             for reg in range(REGS_PER_LANE):
                 sum_p = zero_f
                 for n in range(QK_N_TILES):
-                    p = b.exp2(b.fsub(s_local[(reg, n)], m_new[reg]))
+                    p = b.exp2(
+                        b.fsub(
+                            s_local[(reg, n)],
+                            b.fsub(m_new[reg], ad_T16[reg]) if AD_SPLIT else m_new[reg],
+                        )
+                    )
                     p_regs_f32[reg][n] = p
                     if not REGISTER_PV:
                         row = hoist_row[reg]
@@ -6108,6 +6320,34 @@ _4WGQA_LOG2E = 1.4426950408889634
 # lean body keeps Q streamed from global and fits. Other head sizes (e.g. D128)
 # are served by the general 4-warp body and the default tiled builder.
 _4WGQA_LEAN_HEAD_SIZES = (192, 256)
+_4WGQA_ALIBI_DESIGN_REFUSAL = (
+    "4-warp GQA kernel does not support alibi_design: it adds the ALiBi term to "
+    "each QK score only"
+)
+
+
+def _4wgqa_alibi_add(b, S_T, u, kv, BN, lane, anchor):
+    """ALiBi for the natural-QK 4-warp bodies: add ``u * (key - anchor)`` to each
+    QK score, ``u = slope / scale``, so the bodies' later ``* scale * log2(e)``
+    yields the term in log2 units (hipDNN SEM-021, measured from the query's
+    causal diagonal ``anchor``). S^T holds the key on the accumulator element
+    (``(i // 4) * 8 + (lane // 32) * 4 + i % 4`` within each 32-key block) and the
+    query on ``lane % 32``. The key offset stays an integer until its use: a
+    float ``u * c_i`` per element would be loop-invariant, and LLVM hoists those
+    products out of the KV loop, which spills these register-bound bodies."""
+    d0 = b.add(
+        b.mul(kv, b.const_i32(BN)),
+        b.sub(b.mul(b.div(lane, b.const_i32(32)), b.const_i32(4)), anchor),
+    )
+    out = []
+    for kt, acc in enumerate(S_T):
+        v = acc
+        for i in range(16):
+            c = kt * 32 + (i // 4) * 8 + i % 4
+            d = b.add(d0, b.const_i32(c)) if c else d0
+            v = b.vec_insert(v, b.fma(u, b.sitofp_f32(d), b.vec_extract(acc, i)), i)
+        out.append(v)
+    return out
 
 
 def _clamp_to_last(b, idx, last):
@@ -6209,7 +6449,9 @@ def _build_gfx942_4warp_gqa_lean(
     b.param("sink_ptr", PtrType(dtype, "global"), readonly=True, align=16)
     BT = b.param("block_tables_ptr", PtrType(I32, "global"), readonly=True, align=16)
     KL = b.param("seq_lens_ptr", PtrType(I32, "global"), readonly=True, align=4)
-    b.param("alibi_slopes_ptr", PtrType(F32, "global"), readonly=True, align=4)
+    alibi_slopes_ptr = b.param(
+        "alibi_slopes_ptr", PtrType(F32, "global"), readonly=True, align=4
+    )
     b.param("qq_bias_ptr", PtrType(F32, "global"), readonly=True, align=4)
     CUQ = b.param(
         "query_start_len_ptr", PtrType(I32, "global"), readonly=True, align=16
@@ -6301,6 +6543,14 @@ def _build_gfx942_4warp_gqa_lean(
     )
     klen_t = b.div(b.add(klen, b.const_i32(BN - 1)), b.const_i32(BN))
     kvend = b.select(b.cmp_lt(causal_t, klen_t), causal_t, klen_t)
+    if spec.use_alibi:
+        # One query head per CTA, one query per lane (``lane % 32``).
+        alibi_u = b.fdiv(
+            alibi_slope(b, qhead, num_heads=hq_p, slopes=alibi_slopes_ptr), scale_p
+        )
+        alibi_anchor = b.add(
+            context_off, b.add(qbase, b.add(wq, at.lane_to_output(b, lane, 0)[1]))
+        )
     loop = b.scf_for_iter(b.const_i32(0), kvend, b.const_i32(1), iters, iv_name="kv")
     with loop as (kv, carry):
         m_old = carry[0]
@@ -6338,6 +6588,8 @@ def _build_gfx942_4warp_gqa_lean(
                 kf = b.global_load_vN(Kp, kelem, dtype, APL, align=APL * 2)
                 S_T[kt] = at.emit(b, kf, q, S_T[kt])
         Sm = [[None] * CPL for _ in range(NKEYT)]
+        if spec.use_alibi:
+            S_T = _4wgqa_alibi_add(b, S_T, alibi_u, kv, BN, lane, alibi_anchor)
         for kt in range(NKEYT):
             for i in range(CPL):
                 rr, cc = at.lane_to_output(b, lane, i)
@@ -6436,6 +6688,8 @@ def build_gfx942_4warp_gqa(
     from ..common.attention_unified import _GFX942_4WARP_LSE_REFUSAL
 
     require_tiled_attention_arch(arch)
+    if spec.alibi_design is not None:
+        raise ValueError(_4WGQA_ALIBI_DESIGN_REFUSAL)
     if spec.emit_lse:
         # This body has no LSE store; refuse rather than build a kernel that
         # carries the "lse" name but takes no lse_ptr and writes nothing.
@@ -6538,7 +6792,9 @@ def build_gfx942_4warp_gqa(
     b.param("sink_ptr", PtrType(dtype, "global"), readonly=True, align=16)
     BT = b.param("block_tables_ptr", PtrType(I32, "global"), readonly=True, align=16)
     KL = b.param("seq_lens_ptr", PtrType(I32, "global"), readonly=True, align=4)
-    b.param("alibi_slopes_ptr", PtrType(F32, "global"), readonly=True, align=4)
+    alibi_slopes_ptr = b.param(
+        "alibi_slopes_ptr", PtrType(F32, "global"), readonly=True, align=4
+    )
     b.param("qq_bias_ptr", PtrType(F32, "global"), readonly=True, align=4)
     CUQ = b.param(
         "query_start_len_ptr", PtrType(I32, "global"), readonly=True, align=16
@@ -6694,6 +6950,24 @@ def build_gfx942_4warp_gqa(
     context_off = b.sub(klen, qlen)  # prefix in KV cache (qlen!=klen: chunked/decode)
     window = int(spec.sliding_window)  # 0 = causal; >0 = SWA (keep dist < window)
     window_p = rt["sliding_window"]  # the size itself is a kernarg
+    if spec.use_alibi:
+        # Per lane: its query's head and causal diagonal (the masks' ``q_g``).
+        alibi_u = b.fdiv(
+            alibi_slope(b, q_row_head, num_heads=hq_p, slopes=alibi_slopes_ptr),
+            scale_p,
+        )
+        _cc = at.lane_to_output(b, lane, 0)[1]
+        alibi_anchor = b.add(
+            context_off,
+            b.add(
+                qbase,
+                (
+                    b.div(b.add(wq, _cc), b.const_i32(FOLD_HEADS))
+                    if _FOLD
+                    else b.add(wq, _cc)
+                ),
+            ),
+        )
     causal_t = b.div(
         b.add(b.add(context_off, qbase), b.const_i32(TOKBLK + BN - 1)), b.const_i32(BN)
     )
@@ -6870,6 +7144,8 @@ def build_gfx942_4warp_gqa(
                     kelem = b.add(k_row[kt], koff)
                     kf = b.global_load_vN(Kp, kelem, dtype, APL, align=APL * 2)
                 S_T[kt] = at.emit(b, kf, q, S_T[kt])
+        if spec.use_alibi:
+            S_T = _4wgqa_alibi_add(b, S_T, alibi_u, kv, BN, lane, alibi_anchor)
         Sm = [[None] * CPL for _ in range(NKEYT)]
         for kt in range(NKEYT):
             for i in range(CPL):

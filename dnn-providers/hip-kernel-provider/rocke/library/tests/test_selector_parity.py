@@ -16,6 +16,9 @@ immediately on any developer machine.
 Bias admission is deliberate: biased combo-geometry problems ride the transposed
 combo path (without the mask-once / mask-limit sub-flags), and the C++ selectors
 in attention_unified_selectors.cpp now do the same.
+ALiBi is not part of it: the gfx950 tiled 2D kernel applies ALiBi on every
+path, so an ALiBi problem takes the path of the same problem without it
+(``TestGfx950AlibiTakesTheOffPath``).
 """
 
 from __future__ import annotations
@@ -203,10 +206,11 @@ class TestCombo2dRouting(unittest.TestCase):
         self.assertFalse(s["use_transposed_mask_limit"])
 
     def test_alibi_combo_gets_fast_paged_kv(self):
+        # The mask-once / mask-limit sub-flags apply ALiBi themselves.
         s = _spec(_combo_prob(use_alibi=True))
         self.assertTrue(s["use_fast_paged_kv_desc"])
-        self.assertFalse(s["use_transposed_mask_once"])
-        self.assertFalse(s["use_transposed_mask_limit"])
+        self.assertTrue(s["use_transposed_mask_once"])
+        self.assertTrue(s["use_transposed_mask_limit"])
 
     def test_softcap_combo_gets_fast_paged_kv(self):
         s = _spec(_combo_prob(softcap=50.0))
@@ -367,9 +371,10 @@ class TestRegisterPv(unittest.TestCase):
         s = _spec(_prob(64, 32, 32, 32, use_qq_bias=True))
         self.assertFalse(s["use_register_pv"])
 
-    def test_register_pv_off_for_alibi(self):
-        s = _spec(_prob(64, 32, 32, 32, use_alibi=True))
-        self.assertFalse(s["use_register_pv"])
+    def test_register_pv_for_alibi_on_gfx950_only(self):
+        problem = _prob(64, 32, 32, 32, max_seqlen_q=64, use_alibi=True)
+        self.assertTrue(_spec(problem)["use_register_pv"])
+        self.assertFalse(_spec(problem, "gfx942")["use_register_pv"])
 
     def test_register_pv_off_for_sinks(self):
         s = _spec(_prob(64, 32, 32, 32, use_sinks=True))
@@ -1366,6 +1371,45 @@ class TestTransposedSubflags(unittest.TestCase):
         s = _spec(_combo_prob(use_qq_bias=True))
         self.assertFalse(s["use_transposed_mask_once"])
         self.assertFalse(s["use_transposed_mask_limit"])
+
+
+# ---------------------------------------------------------------------------
+# gfx950 ALiBi routing
+# ---------------------------------------------------------------------------
+
+
+class TestGfx950AlibiTakesTheOffPath(unittest.TestCase):
+    """The gfx950 tiled 2D kernel applies ALiBi on every path, so ALiBi changes
+    only ``use_alibi`` in the spec. Each case names the family it lands on."""
+
+    _CASES = {
+        "combo": (_combo_prob(), "use_transposed_mask_limit"),
+        "single-batch d128": (
+            _prob(128, 64, 32, 8, num_seqs=1, max_seqlen_q=2048, total_q=2048),
+            "use_transposed_mask_limit",
+        ),
+        "single-batch d192": (
+            _prob(192, 64, 32, 8, num_seqs=1, max_seqlen_q=2048, total_q=2048),
+            "use_transposed_mask_limit",
+        ),
+        "multi-batch d128": (
+            _prob(128, 64, 32, 8, num_seqs=4, max_seqlen_q=1024, total_q=4096),
+            "use_transposed_mask_limit",
+        ),
+        "d256 cohort": (
+            _prob(256, 16, 16, 2, num_seqs=2, max_seqlen_q=4096, total_q=8192),
+            "use_mask_phase_split",
+        ),
+        "register-P": (_prob(64, 32, 32, 32, max_seqlen_q=64), "use_register_pv"),
+    }
+
+    def test_alibi_changes_only_use_alibi(self):
+        for name, (off, family_flag) in self._CASES.items():
+            with self.subTest(name):
+                off_spec = _spec(off)
+                self.assertTrue(off_spec[family_flag])
+                on_spec = _spec(replace(off, use_alibi=True))
+                self.assertEqual(on_spec, {**off_spec, "use_alibi": True})
 
 
 if __name__ == "__main__":

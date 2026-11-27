@@ -124,7 +124,6 @@ class TestD256Gfx942FastGate(unittest.TestCase):
                 dict(sliding_window=256),
                 dict(softcap=30.0),
                 dict(use_sinks=True),
-                dict(use_alibi=True),
                 dict(use_qq_bias=True),
                 dict(use_fp8=True),
             ):
@@ -132,6 +131,12 @@ class TestD256Gfx942FastGate(unittest.TestCase):
                     au._d256_gfx942_fast(_d256_problem(**kw), "gfx942"),
                     msg=f"fast path must exclude {kw}",
                 )
+
+    def test_gate_accepts_alibi(self):
+        with _PinArch("gfx942"):
+            self.assertTrue(
+                au._d256_gfx942_fast(_d256_problem(use_alibi=True), "gfx942")
+            )
 
 
 class TestD256Gfx942BuilderContract(unittest.TestCase):
@@ -167,6 +172,17 @@ class TestD256Gfx942BuilderContract(unittest.TestCase):
             use_d256_fast=True,
         )
         self.assertTrue(ok, msg=why)
+
+    def test_alibi_design_is_refused(self):
+        # The 4-warp bodies have one ALiBi form (the term added to each QK score):
+        # an explicit design arm must fail loud rather than be ignored.
+        with _PinArch("gfx942"):
+            spec = au._tiled_spec_from_problem(_d256_problem(use_alibi=True), "gfx942")
+            t2d.build_gfx942_4warp_gqa(spec, arch="gfx942")
+            with self.assertRaisesRegex(ValueError, "alibi_design"):
+                t2d.build_gfx942_4warp_gqa(
+                    dataclasses.replace(spec, alibi_design="fma_tile"), arch="gfx942"
+                )
 
     def test_d256_entry_delegates_to_lean_natural_qk_body(self):
         """HD==256 must build via the lean natural-QK body

@@ -24,6 +24,7 @@ import pytest
 import yaml
 
 from codegen.config_loader import load_config
+from codegen import prior_ids
 from codegen.generator import IngestorGenerator, resolve_ids
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -76,7 +77,24 @@ def shipped(manifest, selection) -> tuple:
     kdp = directory / "artifacts" / f"{slug}.kdp.json"
     if not kdp.is_file():
         pytest.skip(f"shipped KDP not in this checkout: {kdp}")
-    return directory, kdp, directory / f"{slug}.kmd.json"
+    kmd = directory / f"{slug}.kmd.json"
+    if not kmd.is_file():
+        # A satellite: the engine's KMD is its home's.
+        homes = _engine_ids_from(selection, directory)
+        assert len(homes) == 1, f"{directory} holds no KMD and has no single home"
+        kmd = homes[0] / kmd.name
+    return directory, kdp, kmd
+
+
+def _engine_ids_from(config, shipped_dir: Path) -> list[Path]:
+    """A satellite bundle holds only its KDP (generator README, "More than one bundle
+    for one engine"), so its engine ids come from the engine's other installed
+    bundles; a home holds its UED and needs none."""
+    if any(shipped_dir.glob("*.ued.json")):
+        return []
+    return prior_ids.discover_siblings(
+        shipped_dir.parent, config.engine.name, shipped_dir
+    )
 
 
 @pytest.fixture(scope="module")
@@ -301,12 +319,17 @@ def test_g2_the_shipped_catalog_is_generated_from_the_selection(
         selection,
         out,
         resolution=resolve_ids(
-            selection, out, ids_from=shipped_dir, generated_from=stamp
+            selection,
+            out,
+            ids_from=shipped_dir,
+            engine_ids_from=_engine_ids_from(selection, shipped_dir),
+            generated_from=stamp,
         ),
     )
     descriptors = out / selection.descriptor_dir
     (kdp,) = descriptors.glob("*.kdp.json")
-    (kmd,) = descriptors.glob("*.kmd.json")
+    # A satellite writes only its KDP; its KMD is the home's.
+    (kmd,) = list(descriptors.glob("*.kmd.json")) or [shipped_kmd]
     # --strict-spec: compare the FULL spec dict of every entry, not just the
     # intersection of spec keys present in the shipped catalog.  Without it,
     # a newly added spec field that hkp_pack would hydrate (and that changes
@@ -328,7 +351,8 @@ def test_g2_the_shipped_catalog_is_generated_from_the_selection(
             "--shipped-descriptors",
             str(shipped_kmd.parent),
             "--regenerated-descriptors",
-            str(descriptors),
+            # A satellite generates no engine files: its home's are checked for it.
+            str(kmd.parent),
         ]
     )
     report = capsys.readouterr()
@@ -568,11 +592,17 @@ def test_g3_the_enumerated_registry_reproduces_the_shipped_catalog(
     IngestorGenerator(_ROOT / "templates").render(
         config,
         generated_root,
-        resolution=resolve_ids(config, generated_root, ids_from=shipped_dir),
+        resolution=resolve_ids(
+            config,
+            generated_root,
+            ids_from=shipped_dir,
+            engine_ids_from=_engine_ids_from(config, shipped_dir),
+        ),
     )
     descriptors = generated_root / config.descriptor_dir
     (kdp,) = descriptors.glob("*.kdp.json")
-    (kmd,) = descriptors.glob("*.kmd.json")
+    # A satellite writes only its KDP; its KMD is the home's.
+    (kmd,) = list(descriptors.glob("*.kmd.json")) or [shipped_kmd]
     rc = catalog_diff.main(
         [
             "--shipped",
@@ -587,7 +617,8 @@ def test_g3_the_enumerated_registry_reproduces_the_shipped_catalog(
             "--shipped-descriptors",
             str(shipped_kmd.parent),
             "--regenerated-descriptors",
-            str(descriptors),
+            # A satellite generates no engine files: its home's are checked for it.
+            str(kmd.parent),
         ]
         + (["--subset"] if _full_space(manifest) else [])
     )
@@ -799,8 +830,13 @@ def test_g6_every_shipped_spec_hydrates_and_passes_the_builders_predicate(
 #: needs an entry here.
 # Keyed by builder, or by pack where two packs share a builder name.
 _PREDICATE_DECLINES = {
-    # gfx942 dense declines varlen in its predicate.
+    # gfx942 dense declines varlen in its predicate; its ALiBi satellite refuses varlen
+    # earlier (the ALiBi spec check), so its predicate case is a windowed bottom-right band.
     "gfx942_attention_dense": {"varlen": True},
+    "gfx942_attention_dense_alibi": {
+        "causal_bottom_right": True,
+        "sliding_window": 128,
+    },
     # gfx950 dense ships block_m 128 and 256 only.
     "build_attention_dense": {"block_m": 64},
     # The tiled 2D/3D kernels and the gfx950 and gfx942 split-KV modules (segment +
@@ -864,6 +900,63 @@ def test_g6_catches_a_renamed_field_and_a_declined_spec(manifest, registry_confi
     assert list(by_kernel) == ["renamed", "declined"], failures
     assert all("unexpected spec field" in f for f in by_kernel["renamed"]), failures
     assert all("spec rejected by" in f for f in by_kernel["declined"]), failures
+
+
+def _pinned_resolved_knobs(manifest: dict) -> dict:
+    """Field -> resolving method for each knob a section pins in spec_overrides that the
+    kernel would otherwise resolve itself (a binding with a method)."""
+    sections = [manifest["enumerate"], *manifest["enumerate"].get("also", [])]
+    bindings = manifest["specialization"]["bindings"]
+    return {
+        field: bindings[field]["method"]
+        for section in sections
+        for field in section.get("spec_overrides") or {}
+        if "method" in (bindings.get(field) or {})
+    }
+
+
+# Collected only for the manifests that pin such a knob: a skip for the others would
+# fail a strict run (hipdnn_strict_skips).
+_PINNING_MANIFESTS = [
+    p for p in _MANIFESTS if _pinned_resolved_knobs(enumerator.load_manifest(str(p)))
+]
+
+
+def test_g6_some_manifest_pins_a_resolved_knob():
+    """Keeps the pinned-knob check below from collecting nothing."""
+    assert _PINNING_MANIFESTS
+
+
+@pytest.mark.parametrize(
+    "manifest_path", _PINNING_MANIFESTS, ids=lambda p: p.name, scope="module"
+)
+def test_g6_a_pinned_resolved_knob_is_what_the_kernel_resolves(
+    manifest, selection, registry
+):
+    """A `space: slice` section does not resolve a knob the spec leaves unset for the
+    kernel to resolve (a method binding such as resolved_use_cfvst), so a section that
+    needs its metadata pins the value in spec_overrides. Each shipped kernel's pinned value
+    must be what the kernel resolves with the knob unset: a later change of the kernel's
+    policy shows here instead of leaving the catalog on the old value."""
+    pinned = _pinned_resolved_knobs(manifest)
+    module = importlib.import_module(
+        rocke_compile._module_from_source(manifest["source"])
+    )
+    spec_cls = rocke_compile._resolve_spec_class(
+        module, getattr(module, manifest["builder"])
+    )
+    failures = []
+    for kernel in _selection_kernels(selection):
+        spec = dict(kernel.kernel_source.spec)
+        for field, method in pinned.items():
+            resolved = getattr(
+                rocke_compile.build_spec(spec_cls, {**spec, field: None}), method
+            )()
+            if int(resolved) != int(spec[field]):
+                failures.append(
+                    f"{kernel.name}: {field}={spec[field]}, {method}()={resolved}"
+                )
+    assert not failures, failures
 
 
 def _observation_failures(manifest: dict, kernels: list) -> list:

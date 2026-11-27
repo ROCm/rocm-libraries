@@ -376,6 +376,14 @@ def _matrix_problems():
         p(512, 4, 32, 32, 128, 32, 512, 4096, right_bound=5),
         p(512, 1, 32, 32, 64, 32, 512, 4096, causal_top_left=True, right_bound=-1),
         p(2048, 1, 32, 8, 256, 64, 2048, 2048, right_bound=-1),
+        # ALiBi takes the path of the same problem without it (the tiled 2D
+        # kernel applies it on every path), top-left causal as hipDNN sends it
+        p(2048, 1, 32, 8, 128, 64, 2048, 2048, use_alibi=True),
+        p(4096, 4, 32, 8, 128, 64, 1024, 4096, use_alibi=True),
+        p(1024, 2, 32, 32, 64, 32, 64, 4096, use_alibi=True),
+        p(512, 1, 32, 32, 64, 32, 512, 4096, use_alibi=True),
+        p(64, 64, 32, 32, 64, 16, 2048, 4096, use_sinks=True, use_alibi=True),
+        p(2048, 1, 32, 8, 128, 64, 2048, 2048, use_alibi=True, causal_top_left=True),
     ]
 
 

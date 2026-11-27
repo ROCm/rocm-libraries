@@ -28,6 +28,8 @@ from dispatch.attention.common import ATTENTION_FEATURES
 # The generated tuning candidates are not in this map; their feature set is
 # checked in the tuning-candidate test below.
 _GFX950_DENSE_FEATURES = {
+    "alibi",
+    "alibi_external_slopes",
     "band",
     "causal",
     "full_attention",
@@ -54,7 +56,7 @@ _RDNA_WMMA_FEATURES = {
     "sinks",
     "fp8",
     "softcap",
-    "alibi",
+    "alibi_external_slopes",
     "qq_bias",
     "window_right",
     "attn_bias",
@@ -83,10 +85,14 @@ EXPECTED_FEATURES = {
         "layout_paged",
         "lse",
         "sinks",
+        "alibi",
+        "alibi_external_slopes",
         "sliding_window",
     },
     "attention_gfx942_dense_qbminor": {
         "attn_bias",
+        "alibi",
+        "alibi_external_slopes",
         "causal",
         "causal_bottom_right",
         "layout_dense",
@@ -95,6 +101,8 @@ EXPECTED_FEATURES = {
         "sliding_window",
     },
     "attention_gfx942_dense_persist_aot": {
+        "alibi",
+        "alibi_external_slopes",
         "causal",
         "causal_bottom_right",
         "layout_dense",
@@ -103,6 +111,8 @@ EXPECTED_FEATURES = {
         "sliding_window",
     },
     "attention_gfx942_dense_btminor_aot": {
+        "alibi",
+        "alibi_external_slopes",
         "causal",
         "causal_bottom_right",
         "layout_dense",
@@ -111,6 +121,8 @@ EXPECTED_FEATURES = {
         "sliding_window",
     },
     "attention_gfx942_dense_hqswz_aot": {
+        "alibi",
+        "alibi_external_slopes",
         "causal",
         "causal_bottom_right",
         "layout_dense",
@@ -150,6 +162,8 @@ EXPECTED_FEATURES = {
         "sinks",
         "sliding_window",
         "lse",
+        "alibi",
+        "alibi_external_slopes",
     },
     "attention_unified_3d": {
         "attn_bias",
@@ -162,6 +176,8 @@ EXPECTED_FEATURES = {
         "sliding_window",
         # Both unified paths write LSE (tiled 2D and split-KV).
         "lse",
+        "alibi",
+        "alibi_external_slopes",
     },
 }
 
@@ -547,8 +563,8 @@ class TestAttentionDispatch(unittest.TestCase):
         self.assertTrue(tuning)
         for candidate in tuning:
             # Every unified geometry writes LSE except the gfx942 4-warp GQA one,
-            # and every gfx950 geometry but the non-transposed 32x32 one takes
-            # an additive bias.
+            # every gfx950 geometry but the non-transposed 32x32 one takes an
+            # additive bias, and the gfx942 / gfx950 ones also apply ALiBi.
             expected = set(ATTENTION_FEATURES) | (
                 set() if "_u2d_gfx942_4warp_" in candidate.name else {"lse"}
             )
@@ -556,6 +572,8 @@ class TestAttentionDispatch(unittest.TestCase):
                 "_wide32_" not in candidate.name
             ):
                 expected.add("attn_bias")
+            if candidate.capability.arches[0] in ("gfx942", "gfx950"):
+                expected |= {"alibi", "alibi_external_slopes"}
             with self.subTest(candidate=candidate.name):
                 self.assertEqual(set(candidate.capability.supports_features), expected)
 

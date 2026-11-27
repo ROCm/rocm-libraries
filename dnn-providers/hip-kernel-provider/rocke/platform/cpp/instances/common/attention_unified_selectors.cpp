@@ -118,6 +118,13 @@ static bool has_score_bias(const rocke_unified_attention_problem_t* p)
     return p->use_alibi || p->use_qq_bias || p->use_additive_bias;
 }
 
+/* Python: _has_non_alibi_score_bias(problem). The fast paths that apply ALiBi
+ * still exclude QQ bias and additive bias. */
+static bool has_non_alibi_score_bias(const rocke_unified_attention_problem_t* p)
+{
+    return p->use_qq_bias || p->use_additive_bias;
+}
+
 /* ----------------------------------------------------- gate predicates */
 /* These mirror the Python private predicates (_enable_*). They are static so
  * the selectors stay byte-faithful; not part of the public ABI. */
@@ -266,8 +273,8 @@ static bool enable_i64_kv_addr(const rocke_unified_attention_problem_t* p)
 static bool d256_gfx950_cohort(const rocke_unified_attention_problem_t* p)
 {
     return p->head_size == 256 && strcmp(p->dtype, "bf16") == 0 && !p->use_fp8
-           && p->sliding_window == 0 && p->softcap == 0 && !p->use_sinks && !has_score_bias(p)
-           && p->max_seqlen_q > 1;
+           && p->sliding_window == 0 && p->softcap == 0 && !p->use_sinks
+           && !has_non_alibi_score_bias(p) && p->max_seqlen_q > 1;
 }
 
 /* Python: _d256_gfx950_fast(problem). */
@@ -282,7 +289,8 @@ static bool d256_gfx950_fast(const rocke_unified_attention_problem_t* p, const c
 static bool gfx942_4warp_eligible(const rocke_unified_attention_problem_t* p, const char* arch)
 {
     return arch_is(arch, "gfx942") && !p->use_fp8 && p->softcap == 0 && !p->use_sinks
-           && !has_score_bias(p) && p->max_seqlen_q > 1 && !enable_i64_kv_addr(p) && !p->emit_lse;
+           && !has_non_alibi_score_bias(p) && p->max_seqlen_q > 1 && !enable_i64_kv_addr(p)
+           && !p->emit_lse;
 }
 
 /* Python: _d256_gfx942_fast(problem). */
@@ -435,16 +443,18 @@ static bool enable_transposed_subflags(const rocke_unified_attention_problem_t* 
     {
         return false;
     }
-    /* The VALU sub-flags do not support softcap or any score bias; the spec
-     * validator enforces this. */
-    if(p->softcap > 0 || has_score_bias(p))
+    /* The VALU sub-flags do not support softcap, QQ bias or additive bias (the
+     * spec validator enforces this); they apply ALiBi. */
+    if(p->softcap > 0 || has_non_alibi_score_bias(p))
     {
         return false;
     }
     return enable_transposed_qk_32x32(p, arch);
 }
 
-/* Python: _enable_gfx942_small_q_narrow(problem). */
+/* Python: _enable_gfx942_small_q_narrow(problem). The gate decides the same with
+ * ALiBi as without it: ALiBi keeps the narrow route (register-P is decided by its
+ * own gate). */
 static bool enable_gfx942_small_q_narrow(const rocke_unified_attention_problem_t* p,
                                          const char* arch)
 {
@@ -452,16 +462,19 @@ static bool enable_gfx942_small_q_narrow(const rocke_unified_attention_problem_t
            && (strcmp(p->dtype, "fp16") == 0 || strcmp(p->dtype, "bf16") == 0) && !p->use_fp8
            && (p->head_size == 64 || p->head_size == 128)
            && (p->max_seqlen_q > 1 && p->max_seqlen_q <= 768) && p->sliding_window == 0
-           && !p->use_sinks && p->softcap == 0 && !has_score_bias(p);
+           && !p->use_sinks && p->softcap == 0 && !has_non_alibi_score_bias(p);
 }
 
-/* Python: _enable_gfx942_fp16_flash(problem). */
+/* Python: _enable_gfx942_fp16_flash(problem). The gate decides the same with
+ * ALiBi as without it: the x8 flash kernel applies ALiBi (mask-limit softmax
+ * arms). */
 static bool enable_gfx942_fp16_flash(const rocke_unified_attention_problem_t* p, const char* arch)
 {
     return arch_is(arch, "gfx942") && (p->head_size == 64 || p->head_size == 128)
            && strcmp(p->dtype, "fp16") == 0 && !p->use_fp8
            && (p->sliding_window == 0 || p->head_size == 128) && !p->use_sinks && p->softcap == 0
-           && !has_score_bias(p) && !(enable_gfx942_small_q_narrow(p, arch) && nqpk(p) > 1);
+           && !has_non_alibi_score_bias(p)
+           && !(enable_gfx942_small_q_narrow(p, arch) && nqpk(p) > 1);
 }
 
 /* Python: _enable_gfx942_d128_fp16_flash(problem). */
@@ -495,7 +508,8 @@ static bool enable_gfx950_sink_prefill_wpe3(const rocke_unified_attention_proble
     return arch_is(arch, "gfx950")
            && (strcmp(p->dtype, "bf16") == 0 || strcmp(p->dtype, "fp16") == 0) && !p->use_fp8
            && p->head_size == 64 && p->block_size == 16 && p->num_seqs <= 1 && p->max_seqlen_q > 1
-           && p->use_sinks && p->sliding_window == 0 && p->softcap == 0 && !has_score_bias(p);
+           && p->use_sinks && p->sliding_window == 0 && p->softcap == 0
+           && !has_non_alibi_score_bias(p);
 }
 
 /* Python's ``os.environ.get(name, "").strip().lower()``: the value of ``name``,
@@ -601,7 +615,8 @@ bool rocke_unified_attn_enable_gfx942_bf16_flash(const rocke_unified_attention_p
     return arch_is(arch, "gfx942") && (p->head_size == 64 || p->head_size == 128)
            && strcmp(p->dtype, "bf16") == 0 && !p->use_fp8
            && (p->sliding_window == 0 || p->head_size == 128) && !p->use_sinks && p->softcap == 0
-           && !has_score_bias(p) && p->max_seqlen_q > 1 && !enable_gfx942_small_q_narrow(p, arch);
+           && !has_non_alibi_score_bias(p) && p->max_seqlen_q > 1
+           && !enable_gfx942_small_q_narrow(p, arch);
 }
 
 bool rocke_unified_attn_enable_gfx942_d128_smalltile_doublek(
@@ -1290,7 +1305,18 @@ static bool enable_register_pv(const rocke_unified_attention_problem_t* p, const
     {
         return false;
     }
-    if(p->softcap > 0 || has_score_bias(p))
+    if(p->softcap > 0)
+    {
+        return false;
+    }
+    /* Both arches' kernels apply ALiBi on register-P, but on gfx942 the 16x16
+     * config without register-P is faster with ALiBi, so gfx942 keeps ALiBi off
+     * it. */
+    if(p->use_alibi && !arch_is(arch, "gfx950"))
+    {
+        return false;
+    }
+    if(p->use_qq_bias || p->use_additive_bias)
     {
         return false;
     }
@@ -1486,7 +1512,8 @@ static rocke_attention_tiled_2d_spec_t
     /* Sinks on the transposed 32x32 path seed the running max per lane row, which
      * only the scalar-state layout maps correctly, so sinks always take it. */
     bool scalar_state = combo || subflags || (p->use_sinks && enable_transposed_qk_32x32(p, arch));
-    bool bias_active = (p->softcap > 0) || has_score_bias(p);
+    /* The mask opts apply ALiBi themselves; only other score terms turn them off. */
+    bool bias_active = (p->softcap > 0) || has_non_alibi_score_bias(p);
     bool mask_opts = (combo_no_sw && !bias_active) || subflags;
     int tile_size = rocke_unified_attn_select_2d_tile_size(p, arch);
 

@@ -54,8 +54,19 @@ _WINDOW_TILE = "bm128"
 _WINDOW_NUM_PERSISTENT = 2 * _DEFAULT_NUM_PERSISTENT
 _WINDOW_TILE_MAX_CTAS_PER_CU = 8
 _FEATURES = frozenset(
-    {"causal", "sliding_window", "full_attention", "band", "sinks", "lse"}
+    {
+        "causal",
+        "sliding_window",
+        "full_attention",
+        "band",
+        "sinks",
+        "lse",
+        "alibi",
+        "alibi_external_slopes",
+    }
 )
+# Served by the grid body only.
+_GRID_FEATURES = _FEATURES | {"causal_bottom_right", "layout_paged"}
 
 
 @dataclass(frozen=True)
@@ -87,11 +98,10 @@ GFX950_DENSE_VARIANTS: Tuple[Gfx950DenseVariant, ...] = (
         wide_lds_dma=False,
         # Additive bias is grid-body only, and fp32 only (see _base_spec). fp8 KV is
         # grid-only too -- the spec rejects persistent/paged (so the persistent
-        # variants advertise neither). The spec also rejects bias with paged K/V or
-        # fp8 KV, so the candidates declare both features and a request for either
-        # pair is reported as a refused pin.
-        features=_FEATURES
-        | {"causal_bottom_right", "attn_bias", "layout_paged", "fp8"},
+        # variants advertise neither). The spec also rejects bias with paged K/V,
+        # fp8 KV or ALiBi, so the candidates declare the features and a request for
+        # any such pair is reported as a refused pin.
+        features=_GRID_FEATURES | {"attn_bias", "fp8"},
     ),
     # The grid body at the qb_minor block order: the grid the hipDNN kernel ingestor
     # launches, so it serves hipDNN's fp32 attn_mask too.
@@ -100,7 +110,7 @@ GFX950_DENSE_VARIANTS: Tuple[Gfx950DenseVariant, ...] = (
         DENSE_GRID_ALGORITHM,
         persistent=False,
         wide_lds_dma=False,
-        features=_FEATURES | {"causal_bottom_right", "attn_bias", "layout_paged"},
+        features=_GRID_FEATURES | {"attn_bias"},
         nonpersist_decode="qb_minor",
     ),
     Gfx950DenseVariant(
@@ -315,6 +325,7 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
         right_bound=right_bound,
         kv_segments=kv_segments,
         use_additive_bias=use_bias,
+        use_alibi=bool(req.use_alibi),
         **dense_paged_fields(req),
         kv_storage_dtype="fp8e4m3" if req.use_fp8 else None,
     )
@@ -342,9 +353,10 @@ def dense_auto_order(req: AttentionRequest) -> Tuple[str, ...]:
     bm, bn = int(geometry["block_m"]), int(geometry["block_n"])
     sq, sk = int(req.seqlen_q), int(req.seqlen_k)
     work_items = -(-sq // bm) * int(req.nhead_q) * int(req.batch)
-    persistent = not moving_bottom_right and work_items >= _DEFAULT_NUM_PERSISTENT
+    grid_only = moving_bottom_right
+    persistent = not grid_only and work_items >= _DEFAULT_NUM_PERSISTENT
     wide_ok = (
-        not moving_bottom_right
+        not grid_only
         and int(req.hdim_q) == int(req.hdim_v) == 128
         and causal
         and not int(req.sliding_window)

@@ -65,6 +65,25 @@ TEST(TestIngestorDispatchAliases, ASupersededContractKeepsItsOwnHandler)
                            << " resolves to the current contract's handler";
 }
 
+// Saving requires the saved name to resolve to the handler that saved the plan, and the
+// current handler saves ALiBi plans, so the ALiBi name must resolve to it (not to v1's).
+TEST(TestIngestorDispatchAliases, TheAlibiContractResolvesToTheCurrentHandler)
+{
+    registerNativeIngestorSymbols();
+
+    const auto* current
+        = DispatchRegistry<Handle>::tryResolve("hipkernel.gfx950_attention_dense.dispatch");
+    const auto* v1 = DispatchRegistry<Handle>::tryResolve(
+        std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1));
+    const auto* alibi = DispatchRegistry<Handle>::tryResolve(
+        std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_ALIBI_V1));
+
+    ASSERT_NE(alibi, nullptr) << GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_ALIBI_V1
+                              << " is not registered";
+    EXPECT_EQ(alibi, current);
+    EXPECT_NE(alibi, v1);
+}
+
 // The catalog's handler saves a bias plan under v3, and a plan may be saved only under a
 // name registered to the handler that saves it, so v3 resolves to the current handler.
 TEST(TestIngestorDispatchAliases, TheBiasContractIsServedByTheCurrentHandler)
@@ -75,11 +94,11 @@ TEST(TestIngestorDispatchAliases, TheBiasContractIsServedByTheCurrentHandler)
                      GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V3);
 }
 
-// gfx942's plain contract is v1 and its bias contract v2, both served by the one handler
-// of the unversioned name, so a plan saved through the catalog's handler names that same
-// handler; v1 is not superseded (no gfx942 kernel ever baked the head counts), and it has
-// no version it never defined.
-TEST(TestIngestorDispatchAliases, Gfx942AttentionDenseServesItsTwoContractsOnItsCatalogHandler)
+// gfx942's plain contract is v1, its bias contract v2 and its ALiBi contract alibi.v1, all
+// served by the one handler of the unversioned name, so a plan saved through the catalog's
+// handler names that same handler; v1 is not superseded (no gfx942 kernel ever baked the
+// head counts), and it has no version it never defined.
+TEST(TestIngestorDispatchAliases, Gfx942AttentionDenseServesItsContractsOnItsCatalogHandler)
 {
     registerNativeIngestorSymbols();
 
@@ -87,6 +106,8 @@ TEST(TestIngestorDispatchAliases, Gfx942AttentionDenseServesItsTwoContractsOnIts
                      GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V1);
     expectOneHandler("hipkernel.gfx942_attention_dense.dispatch",
                      GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V2);
+    expectOneHandler("hipkernel.gfx942_attention_dense.dispatch",
+                     GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_ALIBI_V1);
     EXPECT_EQ(DispatchRegistry<Handle>::tryResolve("hipkernel.gfx942_attention_dense.dispatch.v3"),
               nullptr);
 }

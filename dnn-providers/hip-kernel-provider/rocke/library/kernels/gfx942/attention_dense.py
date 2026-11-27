@@ -261,6 +261,14 @@ from kernels.common._attention_additive_bias import (
     make_bias_floor,
     validate_dense_additive_bias,
 )
+from kernels.common._attention_alibi import (
+    alibi_lse_shift,
+    alibi_slope_log2,
+    alibi_split_lane_terms,
+    alibi_split_tile_offsets,
+    alibi_tile_bias,
+    check_alibi_slopes,
+)
 from kernels.common._lse_store import (
     dense_row_has_key,
     lse_store,
@@ -605,6 +613,10 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
             )
         if self.use_bias_x4 is not None and not self.use_additive_bias:
             raise ValueError("use_bias_x4 applies only with use_additive_bias=True")
+        # No body emits ALiBi together with an additive bias (hipDNN sends one or
+        # the other), so the pair is refused rather than left untested.
+        if self.use_alibi and self.use_additive_bias:
+            raise ValueError("use_alibi is not supported with use_additive_bias")
 
     def resolved_use_cfvst(self) -> bool:
         """Resolved conflict-free-V decision (``None`` -> :func:`default_use_cfvst`)."""
@@ -1561,6 +1573,14 @@ def supports_attention_dense(
     return True, ""
 
 
+def _alibi_design(spec: Gfx942AttentionDenseSpec) -> str:
+    """How the ALiBi term enters the scores (``ALIBI_DESIGNS``): the spec's
+    ``alibi_design``, else the family's measured default."""
+    if spec.alibi_design is not None:
+        return spec.alibi_design
+    return "fma_tile" if spec.head_size == 64 else "seed_tile"
+
+
 def build_attention_dense(
     spec: Gfx942AttentionDenseSpec,
     *,
@@ -1723,6 +1743,19 @@ def _build_attention_dense_single_buffer(
     if spec.use_sinks:
         sinks = b.param(
             "sink_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
+        )
+    ALIBI = spec.use_alibi
+    # ALiBi design (see alibi_split_tile_offsets).
+    AD = _alibi_design(spec) if ALIBI else None
+    AD_SPLIT = AD in ("seed_split", "fma_split")
+    alibi_slopes = None
+    if spec.use_alibi:
+        alibi_slopes = b.param(
+            "alibi_slopes_ptr",
+            PtrType(F32, "global"),
+            noalias=True,
+            readonly=True,
+            align=4,
         )
     block_tables = kv_lens = bt_stride = None
     if spec.paged:
@@ -2019,6 +2052,34 @@ def _build_attention_dense_single_buffer(
             hkv = b.div(hq, gqa_p if spec.runtime_shape else b.const_i32(gqa))
         diag_off = _diag_off() if BR else None
         q_tok0 = b.add(b.mul(qb, b.const_i32(BLOCK_M)), b.mul(wave, b.const_i32(32)))
+        if ALIBI:
+            alibi_slope = alibi_slope_log2(
+                b,
+                hq,
+                num_heads=hq_p if spec.runtime_shape else Hq,
+                slopes=alibi_slopes,
+            )
+            # The bias seeds the QK accumulator, so it is in raw (unscaled) units.
+            alibi_slope_raw = b.fdiv(alibi_slope, qk_scale)
+            # Per-row anchor: the query's diagonal if causal, else the last key
+            # (see _attention_alibi).
+            alibi_query = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
+            if not causal:
+                alibi_anchor = b.sub(
+                    seqlen_kv_p if spec.runtime_shape else b.const_i32(Skv),
+                    b.const_i32(1),
+                )
+            elif BR:
+                alibi_anchor = b.add(alibi_query, diag_off)
+            else:
+                alibi_anchor = alibi_query
+            alibi_lane_key = b.mul(lane_h, b.const_i32(4))
+            if AD == "seed_split":
+                alibi_split_seed = b.vec_pack(
+                    alibi_split_lane_terms(b, alibi_slope_raw, alibi_lane_key), F32
+                )
+            elif AD == "fma_split":
+                alibi_split_d = alibi_split_lane_terms(b, alibi_slope, alibi_lane_key)
         # NOT hoisted into a local shared with o_base below: the IR builder is
         # side-effecting, so `b.const_i32(Sq)` EMITS a node at the point it is
         # written. Hoisting moves that node earlier and lets the second use CSE
@@ -2229,11 +2290,36 @@ def _build_attention_dense_single_buffer(
                 values.append((b.bitcast(x0, I32), b.bitcast(x1, I32)))
             return values
 
-        def do_qk(kbuf=None):
+        def do_qk(tile_idx, kbuf=None):
             """S^T = K@Q^T via the 32x32x8 atom (K-doubled)."""
             s_reg = []
+            if ALIBI and not AD_SPLIT:
+                bias = alibi_tile_bias(
+                    b,
+                    alibi_slope_raw if AD == "seed_tile" else alibi_slope,
+                    b.mul(tile_idx, b.const_i32(BN)),
+                    alibi_lane_key,
+                    alibi_anchor,
+                    N_SUB,
+                )
+            if AD_SPLIT:
+                # Log2 units. seed_split folds it into the scale FMA (no max/exp2
+                # change); fma_split moves the sub-block max and exp2 offset by it.
+                offs = alibi_split_tile_offsets(
+                    b,
+                    alibi_slope,
+                    b.mul(tile_idx, b.const_i32(BN)),
+                    alibi_anchor,
+                    N_SUB,
+                )
             for nsub in range(N_SUB):
-                acc = b.zero_vec_f32(16)
+                # ALiBi seeds the accumulator, so the MFMA adds the bias for free.
+                if ALIBI and AD == "seed_tile":
+                    acc = b.vec_pack(bias[nsub], F32)
+                elif ALIBI and AD == "seed_split":
+                    acc = alibi_split_seed
+                else:
+                    acc = b.zero_vec_f32(16)
                 krow = b.add(b.const_i32(nsub * 32), lane_m)
                 if KPAD_D64:
                     # 2-row-group padded K_lds[1, BN//2, 2*D+pad]: decompose the
@@ -2265,10 +2351,28 @@ def _build_attention_dense_single_buffer(
                     acc = mfma_32x32x8_for_dtype(b, dtype, k_pack, q_packs[ks], acc)
                 # Into the log2 domain in fp32, so masking, the row max and
                 # exp2(s - m) all see the same rounded score (s - m <= 0).
-                s_reg.append(
-                    [b.fmul(b.vec_extract(acc, i), qk_scale) for i in range(16)]
-                )
-            return s_reg
+                if ALIBI and AD == "fma_tile":
+                    term = bias[nsub]
+                elif ALIBI and AD == "fma_split":
+                    term = alibi_split_d
+                elif ALIBI and AD == "seed_split":
+                    term = [offs[nsub]] * 16
+                else:
+                    term = None
+                if term is None:
+                    s_reg.append(
+                        [b.fmul(b.vec_extract(acc, i), qk_scale) for i in range(16)]
+                    )
+                else:
+                    s_reg.append(
+                        [
+                            b.fma(b.vec_extract(acc, i), qk_scale, term[i])
+                            for i in range(16)
+                        ]
+                    )
+            if ALIBI and AD == "fma_split":
+                return s_reg, offs
+            return s_reg, None
 
         def do_mask(s_reg, tile_idx, lower=False, upper=True):
             # upper: causal bound (ktok <= query_tok). lower: sliding-window bound
@@ -2445,7 +2549,7 @@ def _build_attention_dense_single_buffer(
                             floor=bias_floor,
                         )
 
-        def softmax_pv(s, j, m_i, l_i, o_acc, masked):
+        def softmax_pv(s, offs, j, m_i, l_i, o_acc, masked):
             """One KV tile's mask -> online softmax -> PV update, shared by the
             single-buffer ``tile_compute`` and the KDB/VPF pipeline so both
             honour the same exp2, fused-rescale and PV scheduling knobs. Returns
@@ -2475,8 +2579,15 @@ def _build_attention_dense_single_buffer(
             # tile max over keys (both lane-halves) for this query.
             local_max = neg_inf
             for nsub in range(N_SUB):
+                if offs is None:
+                    for i in range(16):
+                        local_max = b.fmax(local_max, s[nsub][i])
+                    continue
+                # Split arms: the sub-block's offset completes the term of its max.
+                sub_max = neg_inf
                 for i in range(16):
-                    local_max = b.fmax(local_max, s[nsub][i])
+                    sub_max = b.fmax(sub_max, s[nsub][i])
+                local_max = b.fmax(local_max, b.fadd(sub_max, offs[nsub]))
             tile_max = b.fmax(local_max, b.warp_shuffle_xor(local_max, 32))
             m_new = b.fmax(m_i, tile_max)
             # P2: exp2_fast (llvm.amdgcn.exp2.f32 -> one v_exp_f32) drops the ~5-VALU
@@ -2504,6 +2615,7 @@ def _build_attention_dense_single_buffer(
             # once, and i steps 0,1,2,3 / 4,5,6,7 / ... within each nsub -- the
             # identical accumulation order as a nested (nsub,i) loop, so l_local and
             # the packed casts are numerically bit-identical: pure live-range relief.
+            m_subs = [b.fsub(m_new, t) for t in offs] if offs else [m_new] * N_SUB
             l_local = b.const_f32(0.0)
             p_packs = []
             for kk in range(KK_STEPS):
@@ -2511,7 +2623,7 @@ def _build_attention_dense_single_buffer(
                 base_i = (kk % 4) * 4
                 elems = []
                 for j2 in range(4):
-                    pv = exp2(b.fsub(s[nsub][base_i + j2], m_new))
+                    pv = exp2(b.fsub(s[nsub][base_i + j2], m_subs[nsub]))
                     l_local = b.fadd(l_local, pv)
                     elems.append(pv if PACK_P_BF16 else b.cast_f32_to(pv, dtype))
                 if PACK_P_BF16:
@@ -2542,8 +2654,8 @@ def _build_attention_dense_single_buffer(
             m_i = carry[0]
             l_i = carry[1]
             o_acc = list(carry[2 : 2 + D_TILES])
-            s = do_qk()
-            m_new, l_new, o_acc = softmax_pv(s, j, m_i, l_i, o_acc, masked)
+            s, offs = do_qk(j)
+            m_new, l_new, o_acc = softmax_pv(s, offs, j, m_i, l_i, o_acc, masked)
             return (m_new, l_new, *o_acc)
 
         # Wave-uniform skip of (wave, tile) pairs a sliding window fully masks.
@@ -2700,7 +2812,7 @@ def _build_attention_dense_single_buffer(
                 # or the preceding iteration. With one K slot, do not overwrite
                 # it until *all* waves have completed current-tile LDS reads.
                 kbuf = b.mod(j, b.const_i32(K_BUFS))
-                s = do_qk(kbuf)
+                s, offs = do_qk(j, kbuf)
                 next_j = b.add(j, b.const_i32(1))
                 next_kbuf = b.mod(next_j, b.const_i32(K_BUFS))
                 if USE_KDB:
@@ -2711,7 +2823,7 @@ def _build_attention_dense_single_buffer(
                     v_next = _cfvst_load_v_pipeline(next_j)
                 # The pipeline cohort has no sliding window, so masked=True
                 # applies only the causal upper bound.
-                m_new, l_new, o_acc = softmax_pv(s, j, m_i, l_i, o_acc, masked)
+                m_new, l_new, o_acc = softmax_pv(s, offs, j, m_i, l_i, o_acc, masked)
 
                 # WAR: finish all waves' K/V LDS reads before a single K slot
                 # or the (always single-buffered) V slot can be overwritten.
@@ -2783,8 +2895,8 @@ def _build_attention_dense_single_buffer(
             l_i = loop_res[1]
             o_acc = list(loop_res[2 : 2 + D_TILES])
             last_kbuf = b.mod(last_j, b.const_i32(K_BUFS))
-            s = do_qk(last_kbuf)
-            m_i, l_i, o_acc = softmax_pv(s, last_j, m_i, l_i, o_acc, True)
+            s, offs = do_qk(last_j, last_kbuf)
+            m_i, l_i, o_acc = softmax_pv(s, offs, last_j, m_i, l_i, o_acc, True)
             b.sync_lds_only()
 
         elif causal and not SW and DIAG_SPLIT:
@@ -2993,8 +3105,13 @@ def _build_attention_dense_single_buffer(
                 else row_has_key
             )
             # Both half-waves hold the same query row; one of them writes its LSE.
+            m_lse = m_i
+            if ALIBI and not causal:
+                m_lse = b.fadd(
+                    m_i, alibi_lse_shift(b, alibi_slope, alibi_anchor, alibi_query)
+                )
             with b.scf_if(b.cmp_eq(lane_h, b.const_i32(0))):
-                lse_store(b, lse, lse_index, m_i, l_i, row_has_mass=row_has_mass)
+                lse_store(b, lse, lse_index, m_lse, l_i, row_has_mass=row_has_mass)
         _emit_o_store(
             b,
             o,
@@ -3114,11 +3231,12 @@ def attention_dense_signature(spec: AttentionDenseSpec):
     ``spec.runtime_kernarg_fields`` entry: the shape (batch, seqlen_q, seqlen_kv,
     num_query_heads, num_kv_heads), then on the persistent grid a magic/shift pair
     per work-decode divisor. Then a ``sink_ptr`` ([Hq], q dtype) when
-    ``spec.use_sinks``, ``block_tables``/``kv_lens`` (i32 pointers) and
-    ``block_table_stride`` (i32) when ``spec.paged``, and an f32 ``lse_ptr`` when
-    ``spec.emit_lse``, in that order, then the KV-segment workspace pointers when
-    ``spec.kv_segments > 1``, and last the additive-bias pointer and its three i32
-    strides when ``spec.use_additive_bias``.
+    ``spec.use_sinks``, an f32 ``alibi_slopes_ptr`` ([Hq], null for the
+    built-in slopes) when ``spec.use_alibi``, ``block_tables``/``kv_lens`` (i32
+    pointers) and ``block_table_stride`` (i32) when ``spec.paged``, and an f32
+    ``lse_ptr`` when ``spec.emit_lse``, in that order, then the KV-segment workspace
+    pointers when ``spec.kv_segments > 1``, and last the additive-bias pointer and
+    its three i32 strides when ``spec.use_additive_bias``.
 
     THE single definition of this kernel's ABI -- the builder and the benchmark both
     call it rather than re-deriving the parameter list, so a reordering cannot drift
@@ -3146,6 +3264,8 @@ def attention_dense_signature(spec: AttentionDenseSpec):
     if spec.use_sinks:
         # Mirrors the sink_ptr param declared after the runtime kernarg fields.
         sig = sig.ptr("sink_ptr", spec.dtype)
+    if spec.use_alibi:
+        sig = sig.ptr("alibi_slopes_ptr", "f32")
     if spec.paged:
         sig = (
             sig.ptr("block_tables", "i32")
@@ -3193,6 +3313,7 @@ def run_attention_dense_torch(
     sinks=None,
     lse=None,
     additive_bias=None,
+    alibi_slopes=None,
     block_tables=None,
     kv_lens=None,
     validate_paged: bool = True,
@@ -3202,7 +3323,9 @@ def run_attention_dense_torch(
     ``[B, Skv, Hkv, D]``, dense contiguous; ``scale`` is the softmax scale (1/sqrt(D)),
     in ``[2**-64, 2**4]``: :func:`check_dense_scale` raises for any other.
     ``sinks`` is the per-query-head sink logit ``[Hq]`` in q's dtype, required iff
-    ``spec.use_sinks``. With ``spec.paged``, ``k``/``v`` are the page caches
+    ``spec.use_sinks``. ``alibi_slopes`` is the optional fp32 per-query-head ALiBi
+    slope ``[Hq]`` (``spec.use_alibi`` only); ``None`` selects hipDNN's built-in slopes.
+    With ``spec.paged``, ``k``/``v`` are the page caches
     ``[num_kv_blocks, block_size, Hkv, D]`` and ``block_tables`` ([B, max_pages] i32)
     / ``kv_lens`` ([B] i32) are required; ``validate_paged=False`` skips the host check
     of their contents (a device->host sync), see
@@ -3273,6 +3396,7 @@ def run_attention_dense_torch(
             raise ValueError("sinks must be contiguous")
         if not sinks.is_cuda:
             raise ValueError("sinks must be a CUDA tensor")
+    check_alibi_slopes(spec, alibi_slopes)
     # q is read only for a bias launch: plain launches may pass placeholder operands.
     bias_strides = validate_dense_additive_bias(
         spec,
@@ -3317,6 +3441,8 @@ def run_attention_dense_torch(
     vals.update(attention_dense_runtime_args(spec))
     if spec.use_sinks:
         vals["sink_ptr"] = sinks
+    if spec.use_alibi:
+        vals["alibi_slopes_ptr"] = alibi_slopes if alibi_slopes is not None else 0
     if spec.paged:
         vals.update(paged_launch_args(block_tables, kv_lens))
     if spec.emit_lse:

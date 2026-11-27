@@ -174,11 +174,21 @@ def _lse_variants():
         yield replace(base, emit_lse=True, **kw)
 
 
+def _alibi_combo_variants():
+    for base, top_left, kw in itertools.product(
+        (_problem(), _problem(dtype="fp16", head_size=64)),
+        (False, True),
+        ({"use_sinks": True}, {"emit_lse": True}),
+    ):
+        yield replace(base, use_alibi=True, causal_top_left=top_left, **kw)
+
+
 def _gate_problems():
     yield from _shape_variants()
     for base in (_problem(), _problem(head_size=96)):
         yield from _flag_variants(base)
     yield from _lse_variants()
+    yield from _alibi_combo_variants()
 
 
 def _python_gate(fn, p, arch):

@@ -965,6 +965,8 @@ void t2d_read(const py::dict& d, Store& st, rocke_attention_tiled_2d_spec_t& s)
         s.kv_storage_dtype = st.keep(v);
     if(a_str(d, "kv_cache_policy", v))
         s.kv_cache_policy = st.keep(v);
+    if(a_str(d, "alibi_design", v))
+        s.alibi_design = st.keep(v);
 }
 
 rocke_attention_tiled_2d_spec_t t2d_build(const py::dict& d, Store& st)
@@ -1626,6 +1628,7 @@ static py::dict spec_to_dict(const rocke_attention_tiled_2d_spec_t& s)
     d["causal_top_left"] = s.causal_top_left;
     d["right_bound"] = s.right_bound;
     d["use_qblock_reverse"] = s.use_qblock_reverse;
+    d["alibi_design"] = s.alibi_design ? py::cast(std::string(s.alibi_design)) : py::none();
     d["emit_lse"] = s.emit_lse;
     d["lse_layout"] = s.lse_head_major ? "head_major" : "token_major";
     return d;

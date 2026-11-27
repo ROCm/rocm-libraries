@@ -262,11 +262,16 @@ std::optional<BoundTokens> gfx950AttentionUnified3DGraphMatches(const MatchConte
         return std::nullopt;
     }
 
+    // No ALiBi (TOKEN_NAMES has no ALiBi token): under the top-left causal mask hipDNN defines
+    // ALiBi for, a single query sees only key 0, where the ALiBi term is 0, so Unified2D serves
+    // those graphs instead of this catalog carrying ALiBi kernels with no effect. Decode ALiBi
+    // that changes the result (unmasked or bottom-right) is left undefined by hipDNN.
     const auto matched = unified_attention::matchAttributes(context,
                                                             *operands->attributes,
                                                             problem,
                                                             GFX950_ATTENTION_UNIFIED_3D_ENGINE_NAME,
-                                                            GFX950_UNIFIED_ATTENTION_TRAITS);
+                                                            GFX950_UNIFIED_ATTENTION_TRAITS,
+                                                            TOKEN_NAMES);
     if(!matched.has_value())
     {
         return std::nullopt;

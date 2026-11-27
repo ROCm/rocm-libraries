@@ -101,6 +101,7 @@ SDPA_UNIFIED_FEATURES = frozenset(
         "padded",
         "ragged",
         "lse",
+        "alibi",  # top-left causal only, never with a bias (value_rejects, _bias_reject)
         "bias",
         "bias_broadcast",
         "mma_core_mode",
@@ -118,7 +119,6 @@ _DECLINED = declined_table(
         "dtype_mixed",
         "compute_dtype",
         "scale_tensor",
-        "alibi",
         "sinks",
         "dropout",
         "paged",
@@ -199,6 +199,10 @@ def _bias_reject(req: SdpaRequest) -> tuple[bool, str] | None:
     """
     if req.bias is None:
         return None
+    if req.alibi:
+        # Out of scope: the ALiBi arms (alibi_design) refuse a score bias, and
+        # nothing tests the pair on the paths that would add both.
+        return False, "bias: ALiBi with an additive bias is not supported"
     bias = req.bias.tensor
     if bias.ragged_offset is not None:
         return False, "bias: a ragged bias is not carried by the unified kernels"

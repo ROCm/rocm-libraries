@@ -69,6 +69,8 @@ struct AttentionDenseTestArch
     std::string_view biasContractSymbol;
     /// The arch's writer of the launch values a save stores.
     AttentionDenseLaunchValuesWriter launchValues;
+    /// Binds an ALiBi flag and ships use_alibi forms (both arches do).
+    bool bindsAlibi;
 };
 
 inline constexpr AttentionDenseTestArch GFX942_ATTENTION_DENSE{
@@ -86,7 +88,8 @@ inline constexpr AttentionDenseTestArch GFX942_ATTENTION_DENSE{
     "hipkernel:Gfx942AttentionDense",
     "hipkernel.gfx942_attention_dense.dispatch.v1",
     "hipkernel.gfx942_attention_dense.dispatch.v2",
-    &gfx942LaunchValues};
+    &gfx942LaunchValues,
+    true};
 
 inline constexpr AttentionDenseTestArch GFX950_ATTENTION_DENSE{
     "Gfx950",
@@ -103,7 +106,8 @@ inline constexpr AttentionDenseTestArch GFX950_ATTENTION_DENSE{
     "hipkernel:Gfx950AttentionDense",
     "hipkernel.gfx950_attention_dense.dispatch.v2",
     "hipkernel.gfx950_attention_dense.dispatch.v3",
-    &gfx950AttentionDenseLaunchValues};
+    &gfx950AttentionDenseLaunchValues,
+    true};
 
 /// The arches a case on the additive bias runs on: those that serve one.
 inline std::vector<const AttentionDenseTestArch*> biasServingArches()

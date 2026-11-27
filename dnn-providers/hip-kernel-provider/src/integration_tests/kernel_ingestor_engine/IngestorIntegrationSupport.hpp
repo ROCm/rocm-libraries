@@ -336,13 +336,22 @@ inline std::string describeKey(const MetadataKey& key)
     return text;
 }
 
-// Whether kernel carries every field of key at the key's value.
+// Whether kernel carries every field of key at the key's value. A home bundle's descriptors omit
+// use_alibi (builder_default: only its ALiBi satellite builds the field) and an ALiBi satellite's
+// omit use_additive_bias (matcher-only there: no ALiBi kernel adds a bias); the engine completes
+// either omitted field to the KMD default 0, so a kernel without it carries 0.
 inline bool carriesKey(const hipdnn_plugin_sdk::ingestor::KernelDescriptor& kernel,
                        const MetadataKey& key)
 {
     return std::all_of(key.begin(), key.end(), [&kernel](const auto& field) {
         const auto value = kernel.metadata.find(field.first);
-        return value != kernel.metadata.end() && value->second == field.second;
+        if(value == kernel.metadata.end())
+        {
+            const auto* wanted = std::get_if<int64_t>(&field.second);
+            return (field.first == "use_alibi" || field.first == "use_additive_bias")
+                   && wanted != nullptr && *wanted == 0;
+        }
+        return value->second == field.second;
     });
 }
 
@@ -640,6 +649,9 @@ struct IngestorSdpaGraphSpec
     // The layouts of K and V. Q and O are BSHD.
     SdpaLayout kLayout = SdpaLayout::BSHD;
     SdpaLayout vLayout = SdpaLayout::BSHD;
+    // Sets alibi_mask: hipDNN's ALiBi, which hipDNN defines with a top-left causal mask only
+    // (SdpaSemanticsRegister SEM-021).
+    bool alibi = false;
     // K and V are one tensor (one descriptor, one buffer), so the graph has three unique
     // inputs instead of four. vLayout is ignored.
     bool sharedKv = false;
@@ -792,6 +804,10 @@ inline SdpaGraph buildSdpaGraph(const std::string& name, const IngestorSdpaGraph
     if(shape.withStats)
     {
         attributes.set_generate_stats(true);
+    }
+    if(shape.alibi)
+    {
+        attributes.set_alibi_mask(true);
     }
     if(shape.bias != IngestorSdpaBias::NONE)
     {

@@ -1,0 +1,198 @@
+dialect: packaged
+authored_subpath: rocKE/gfx950_attention_dense_alibi
+engine:
+  name: hipkernel:Gfx950AttentionDense
+  census_name_symbol: GFX950_ATTENTION_DENSE_ENGINE_NAME
+  sdk_version: 1.0.0
+  behavior_notes:
+  - supports_graph_capture
+  knobs:
+  - block_m
+  - block_n
+  heuristic: native
+  heuristics:
+    sort_kernel_catalog:
+      gfx950:
+      - a1e85dc0-4c37-495a-b8d3-5b49a1b5f8f8
+      - 83088640-725f-4fd2-8e3b-1259b7ebb898
+  trained_catalog_sha256:
+    gfx950: 520640f58adf672d3d0c56cb986c07b034b8490f8af09d26668aa74152ffc675
+kmd_fields:
+- name: dtype
+  type: string
+- name: head_size
+  type: int
+  default_value: 128
+- name: causal
+  type: int
+  default_value: 1
+- name: ragged
+  type: int
+  default_value: 0
+- name: sliding_window
+  type: int
+  default_value: 0
+- name: batch
+  type: int
+  default_value: 1
+- name: seqlen_q
+  type: int
+  default_value: 512
+- name: seqlen_kv
+  type: int
+  default_value: 512
+- name: block_m
+  type: int
+  default_value: 256
+- name: block_n
+  type: int
+  default_value: 64
+# Additive bias (an fp32 attn_mask tensor); 0 on every kernel built before it.
+- name: use_additive_bias
+  type: int
+  default_value: 0
+- name: use_alibi
+  type: int
+  default_value: 0
+  builder_default: true
+specialization:
+  metadata_fields:
+  - dtype
+  - head_size
+  - causal
+  - ragged
+  - sliding_window
+  - batch
+  - seqlen_q
+  - seqlen_kv
+  - block_m
+  - block_n
+  - use_additive_bias
+  - use_alibi
+  matcher_only_fields: []
+  vocabulary:
+    dtype:
+      bf16: BF16
+      fp16: FP16
+  bindings:
+    dtype:
+      field: dtype
+    head_size:
+      field: head_size
+    causal:
+      field: causal
+    ragged:
+      field: ragged
+    sliding_window:
+      field: sliding_window
+    batch:
+      field: batch
+    seqlen_q:
+      field: seqlen_q
+    seqlen_kv:
+      field: seqlen_kv
+    block_m:
+      field: block_m
+    block_n:
+      field: block_n
+    use_additive_bias:
+      field: use_additive_bias
+    use_alibi:
+      field: use_alibi
+kernel_source_kind: rocke
+workspace_policy: none
+reduction:
+  fields:
+    feature:
+    - dtype
+    - head_size
+    - causal
+    - sliding_window
+    - ragged
+    - batch
+    - seqlen_q
+    - seqlen_kv
+    - use_alibi
+    performance:
+    - name: block_m
+      divides: seqlen_q
+    - name: block_n
+      divides: seqlen_kv
+    - name: waves_per_eu
+    - name: lazy_rescale
+    - name: lds_k_group_pad
+    - name: lds_v_row_pad
+    - name: lds_k_row_pad
+    - name: lazy_rescale_threshold
+    - name: use_exp2_fast
+    - name: exp_per_pv_step
+      unset_resolves_by: resolved_exp_per_pv_step
+    - name: partial_vmcnt_prefetch
+    - name: pv_priority
+    - name: pv_sched_fence
+      unset_resolves_by: resolved_pv_sched_fence
+    - name: pv_sched_group_template
+      unset_resolves_by: resolved_pv_sched_group_template
+    - name: iglp_mode
+      unset_resolves_by: resolved_iglp_mode
+    - name: pv_sched_fence_mask
+    - name: pv_sched_group_ds_read
+    - name: pv_loop_order
+      unset_resolves_by: resolved_pv_loop_order
+    - name: causal_diag_split
+    - name: o_store_width
+    ignored: []
+  aot_budget_per_arch: 1000
+packs:
+- name: gfx950_attention_dense_alibi
+  arch:
+  - gfx950
+  kernel_defaults:
+    kind: rocke
+    source: kernels/gfx950/attention_dense.py
+    builder: build_attention_dense
+  variants:
+  - name: attention_{tag}_d{head_size}_c1_bm{block_m}_bn{block_n}_alibi.gfx950
+    metadata: [dtype, head_size, causal, ragged, sliding_window, batch, seqlen_q, seqlen_kv, block_m, block_n, use_additive_bias, use_alibi]
+    spec_order: [dtype, head_size, num_query_heads, num_kv_heads, causal, batch, seqlen_q, seqlen_kv, sliding_window, ragged, varlen, paged, persistent, block_m, block_n, waves_per_eu, lds_k_group_pad, lds_v_row_pad, lazy_rescale, wide_lds_dma, interleave, persist_decode, nonpersist_decode, num_persistent, block_size, num_kv_blocks, use_sinks, use_alibi]
+    vocabulary:
+      dtype:
+        bf16: BF16
+        fp16: FP16
+    spec_defaults: {num_query_heads: 8, num_kv_heads: 8, causal: true, batch: 1, seqlen_q: 512, seqlen_kv: 512, sliding_window: 0, ragged: false, varlen: false, paged: false, persistent: false, waves_per_eu: 2, lds_k_group_pad: 8, lds_v_row_pad: 32, lazy_rescale: true, wide_lds_dma: false, interleave: false, persist_decode: auto, nonpersist_decode: qb_minor, num_persistent: 256, block_size: 0, num_kv_blocks: 0, use_sinks: false, use_alibi: true}
+    knob_sets:
+      knobs0:
+      - {block_m: 256, block_n: 64, tag: dense.bf16, default: true}
+      - {block_m: 128, block_n: 32, tag: dense.bf16}
+      - {block_m: 128, block_n: 64, tag: dense.bf16}
+      - {block_m: 128, block_n: 128, tag: dense.bf16}
+      - {block_m: 256, block_n: 32, tag: dense.bf16}
+      - {block_m: 256, block_n: 128, tag: dense.bf16}
+      - {block_m: 256, block_n: 256, tag: dense.bf16}
+      knobs1:
+      - {block_m: 256, block_n: 64, tag: dense.fp16, default: true}
+      - {block_m: 128, block_n: 32, tag: dense.fp16}
+      - {block_m: 128, block_n: 64, tag: dense.fp16}
+      - {block_m: 128, block_n: 128, tag: dense.fp16}
+      - {block_m: 256, block_n: 32, tag: dense.fp16}
+      - {block_m: 256, block_n: 128, tag: dense.fp16}
+      - {block_m: 256, block_n: 256, tag: dense.fp16}
+      knobs2:
+      - {block_m: 256, block_n: 64, tag: dense.bf16, default: true}
+      - {block_m: 128, block_n: 32, tag: dense.bf16}
+      - {block_m: 128, block_n: 64, tag: dense.bf16}
+      - {block_m: 128, block_n: 128, tag: dense.bf16}
+      - {block_m: 256, block_n: 32, tag: dense.bf16}
+      - {block_m: 256, block_n: 128, tag: dense.bf16}
+      knobs3:
+      - {block_m: 256, block_n: 64, tag: dense.fp16, default: true}
+      - {block_m: 128, block_n: 32, tag: dense.fp16}
+      - {block_m: 128, block_n: 64, tag: dense.fp16}
+      - {block_m: 128, block_n: 128, tag: dense.fp16}
+      - {block_m: 256, block_n: 32, tag: dense.fp16}
+      - {block_m: 256, block_n: 128, tag: dense.fp16}
+    shapes:
+    - {dtype: bf16, head_size: 64, knobs: knobs0, resolved: {use_additive_bias: 0}}
+    - {dtype: fp16, head_size: 64, knobs: knobs1, resolved: {use_additive_bias: 0}}
+    - {dtype: bf16, head_size: 128, knobs: knobs2, resolved: {use_additive_bias: 0}}
+    - {dtype: fp16, head_size: 128, knobs: knobs3, resolved: {use_additive_bias: 0}}

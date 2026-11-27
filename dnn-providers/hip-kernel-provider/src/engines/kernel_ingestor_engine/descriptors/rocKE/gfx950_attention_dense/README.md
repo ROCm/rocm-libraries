@@ -23,6 +23,11 @@ builder `build_attention_dense`). Engine: `hipkernel:Gfx950AttentionDense`.
   does for a row of `-inf` scores. A finite value, `finfo(float32).min` included, is a
   score like any other (a row of them gets the uniform softmax), and a NaN on a visible
   key makes its row NaN, as in the reference.
+- ALiBi (`use_alibi`, hipDNN's `alibi_mask` with the slopes computed in the kernel): the 26 kernels
+  (the causal plain variants of this bundle, built with ALiBi) live in the satellite bundle
+  `../gfx950_attention_dense_alibi/` (same engine and KMD, KDP of its own).
+- ALiBi together with an `attn_mask`: no kernel adds both, so the engine declines such a
+  graph under the cause `alibi_mask`.
 - Query heads and KV heads: any. They are not variant fields -- the kernel reads
   `num_query_heads` / `num_kv_heads` as kernargs from the graph, so one variant per
   (dtype, head_size, causal, tile) serves every head configuration, the bias variants

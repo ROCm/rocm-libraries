@@ -133,6 +133,21 @@ overlap any input or the output; supplying it with the flag off is an error. The
 dispatcher exposes it as `AttentionRequest(emit_lse=True)` pinned to `gfx942_dense`,
 with the buffer passed as `tensors["lse"]` to `bind_torch`; hipDNN does not yet.
 
+### Optional ALiBi
+
+`use_alibi=True` adds the ALiBi term `slope(h) * (k - q)` to the scaled scores before
+the mask (hipDNN semantics). The kernel reads a caller FP32 `[Hq]` tensor passed as
+`alibi_slopes=` to `run_attention_dense_torch`, or, when none is passed (a null
+`alibi_slopes_ptr`), computes hipDNN's slopes from the query head count; one binary
+serves both.
+`q` and `k` are top-left positions; with `emit_lse=True` the LSE includes the term.
+hipDNN defines ALiBi on the top-left diagonal only, so bottom-right causal with ALiBi
+refuses `emit_lse` (its LSE would depend on that choice; O does not). With the flag off the emitted kernel is
+unchanged. Sinks need a top-left causal mask; paged and packed (varlen) inputs
+and an additive bias (`use_additive_bias`, below) are refused. The dispatcher
+exposes it as `AttentionRequest(use_alibi=True[, use_alibi_external_slopes=True])`; the
+second flag says the caller passes slopes as `tensors["alibi_slopes"]` to `bind_torch`
+and selects the same kernel.
 ### Optional additive bias through the direct runner
 
 An additive bias (hipDNN's `attn_mask`, PyTorch's float `attn_mask`) is added to the
@@ -173,7 +188,8 @@ run_attention_dense_torch(
   makes its row NaN (O and `LSE`), as in the reference; a NaN on a key the mask removes is
   ignored. A bias above about 2.3e38 overflows to a NaN row.
 - **Composes with** every mask the kernel serves (none, top-left and bottom-right
-  causal, sliding window), sinks and LSE, fp16/bf16, D64/D128, and both grids.
+  causal, sliding window), sinks and LSE, fp16/bf16, D64/D128, and both grids; not
+  with ALiBi (the spec refuses `use_alibi` with `use_additive_bias`).
 - **Refused** by `supports_attention_dense`: the KV-segment split (`kv_segments > 1`;
   its segment store skips the bias epilogue), the opt-in K double-buffer / V
   register-prefetch pipeline (`lds_num_buffers=2`, `v_reg_prefetch=True`; the bias

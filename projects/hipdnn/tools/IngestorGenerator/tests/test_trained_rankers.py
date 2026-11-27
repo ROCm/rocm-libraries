@@ -246,10 +246,26 @@ def _binds_a_ranker(path: Path) -> bool:
     return bool((engine.get("heuristics") or {}).get("sort_kernel_catalog"))
 
 
+def _is_satellite(path: Path) -> bool:
+    """Whether the config is a satellite bundle: its installed directory holds no UED
+    (generator README, "More than one bundle for one engine"). Its engine block,
+    rankers included, must equal its home's (generate.py refuses otherwise) and is
+    checked there; the rankers rank the home's catalog."""
+    subpath = yaml.safe_load(path.read_text()).get("authored_subpath")
+    installed = _DESCRIPTORS / subpath if subpath else None
+    return (
+        installed is not None
+        and installed.is_dir()
+        and not any(installed.glob("*.ued.json"))
+    )
+
+
 _SELECTIONS = [
     p
     for p in sorted((_ROOT / "configs").glob("*.yaml"))
-    if not p.name.endswith(".engine.yaml") and _binds_a_ranker(p)
+    if not p.name.endswith(".engine.yaml")
+    and _binds_a_ranker(p)
+    and not _is_satellite(p)
 ]
 
 

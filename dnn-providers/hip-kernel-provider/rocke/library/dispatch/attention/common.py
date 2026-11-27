@@ -194,6 +194,11 @@ class AttentionRequest(OperatorRequest):
     layout: str = "auto"  # "auto" | "dense" | "ragged" | "paged"
     use_softcap: bool = False
     use_alibi: bool = False
+    # With ``use_alibi``: the caller binds the slopes as ``tensors["alibi_slopes"]``
+    # (feature ``alibi_external_slopes``) instead of using hipDNN's per-head slopes
+    # from ``nhead_q`` (feature ``alibi``). Admission only: CDNA kernels take either
+    # at run time, while gfx1151 implements caller slopes alone.
+    use_alibi_external_slopes: bool = False
     use_qq_bias: bool = False
     # Dense additive attention bias ``[B|1, H|1, Sq|1, Sk]`` (unit-stride keys)
     # added to the scaled scores; ``attn_bias_dtype`` is "f32" or "q" (the Q
@@ -353,7 +358,9 @@ class AttentionRequest(OperatorRequest):
         if bool(self.use_softcap):
             active.add("softcap")
         if bool(self.use_alibi):
-            active.add("alibi")
+            active.add(
+                "alibi_external_slopes" if self.use_alibi_external_slopes else "alibi"
+            )
         if bool(self.use_qq_bias):
             active.add("qq_bias")
         if bool(self.use_attn_bias):
@@ -451,6 +458,10 @@ def _request_errors(
         errors.append(
             f"use_attn_bias must be a bool, got {type(req.use_attn_bias).__name__}"
         )
+    if bool(getattr(req, "use_alibi_external_slopes", False)) and not bool(
+        getattr(req, "use_alibi", False)
+    ):
+        errors.append("use_alibi_external_slopes requires use_alibi")
     if type(req.runtime_head_dims) is not bool:
         errors.append(
             "runtime_head_dims must be a bool, got "
@@ -806,7 +817,14 @@ def normalize_band(
         return AttentionBand(
             None, 0 if sq == 1 and not uniform_lengths else None, Alignment.BOTTOM_RIGHT
         )
-    if sq == sk and (uniform_lengths or not _has_no_mask_kernel(req.arch)):
+    # The arch fold would turn top-left ALiBi with LSE or sinks into the bottom-right
+    # case its gate refuses as undefined; unfolded, the arch gate names the missing
+    # kernel.
+    alibi_on_diagonal = bool(req.use_alibi) and (
+        bool(req.emit_lse) or bool(req.use_sinks)
+    )
+    folds = not _has_no_mask_kernel(req.arch) and not alibi_on_diagonal
+    if sq == sk and (uniform_lengths or folds):
         align = Alignment.BOTTOM_RIGHT
     return AttentionBand(left_bound, right_bound, align)
 
@@ -854,7 +872,12 @@ def _problem_with_num_cus(
         causal_top_left=band.top_left,
         right_bound=band.kernel_right_bound,
         emit_lse=bool(req.emit_lse),
+        use_alibi=bool(req.use_alibi),
     )
+
+
+# ALiBi runs on the gfx942 / gfx950 tiled unified paths only.
+UNIFIED_ALIBI_ARCHES = ("gfx942", "gfx950")
 
 
 def _unified_path_coverage(
@@ -863,22 +886,27 @@ def _unified_path_coverage(
     """Whether the unified ``path`` ("2d" / "3d") can run ``problem``.
 
     The scalar gate knows nothing about the tiled-only features (additive
-    bias, the LSE output), so it judges the problem with both stripped: its
-    other checks (e.g. a q_dtype override) apply whether or not either feature
-    is requested. When the stripped problem passes and either feature is on,
-    the path's tiled gate (``_explicit_path_supported``, shared with the
-    strided-decode candidate) judges the real problem; it limits each feature
-    to the arches and paths that implement it. The unified kernels take an
-    fp32 bias only, which only the request can tell.
+    bias, the LSE output, ALiBi), so it judges the problem with them stripped:
+    its other checks (e.g. a q_dtype override) apply whether or not any of them
+    is requested. When the stripped problem passes and one is on, the path's
+    tiled gate (``_explicit_path_supported``, shared with the strided-decode
+    candidate) judges the real problem; it limits each feature to the arches and
+    paths that implement it. The unified kernels take an fp32 bias only, which
+    only the request can tell, and never ALiBi together with a bias.
     """
     if problem.use_additive_bias and str(req.attn_bias_dtype).strip().lower() != "f32":
         return False, (
             "unified attention takes an f32 additive bias only, got "
             f"attn_bias_dtype={req.attn_bias_dtype!r}"
         )
-    base = replace(problem, emit_lse=False, use_additive_bias=False)
+    if problem.use_alibi:
+        if arch not in UNIFIED_ALIBI_ARCHES:
+            return False, f"unified ALiBi runs on {UNIFIED_ALIBI_ARCHES} only"
+        if problem.use_additive_bias:
+            return False, "unified ALiBi does not combine with an additive bias"
+    base = replace(problem, emit_lse=False, use_additive_bias=False, use_alibi=False)
     ok, why = supports_native_unified_attention(base, arch=arch)
-    if ok and (problem.use_additive_bias or problem.emit_lse):
+    if ok and (problem.use_additive_bias or problem.emit_lse or problem.use_alibi):
         return _explicit_path_supported(problem, None, path, arch)
     return ok, why
 
@@ -1097,12 +1125,13 @@ class AttentionTuningSpec:
             # token-major), so those keys and the spec_hash taken over them are the
             # ones stored before the fields existed. The RDNA WMMA prefill
             # ``dense_q`` / ``seqused_q`` layout options (from the request's fields
-            # of the same names) are left out the same way while they are off.
+            # of the same names) are left out the same way while they are off,
+            # and ``alibi_design`` while it is None (the path's default design).
             return tuple(
                 (f.name, repr(getattr(spec, f.name)))
                 for f in fields(spec)
                 if not (
-                    f.name in ("emit_lse", *QUERY_SIDE_OPTIONS)
+                    f.name in ("emit_lse", "alibi_design", *QUERY_SIDE_OPTIONS)
                     and not getattr(spec, f.name)
                 )
                 and not (f.name == "lse_layout" and spec.lse_layout == "token_major")

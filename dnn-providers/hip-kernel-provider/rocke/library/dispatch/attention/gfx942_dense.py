@@ -74,6 +74,20 @@ _AOT_GRIDS = (
     ),
 )
 
+# What the ingestor's grid candidates admit: the kernel's features, ALiBi included
+# (hipDNN's alibi_mask is served by use_alibi kernels on every grid).
+_INGESTOR_FEATURES = frozenset(
+    {
+        "causal",
+        "causal_bottom_right",
+        "sliding_window",
+        "sinks",
+        "alibi",
+        "alibi_external_slopes",
+        "lse",
+    }
+)
+
 # block_n (KV tile) the default spec ships; 64 is the resource-efficient peak
 # (see AttentionDenseSpec.block_n). The knob space sweeps block_m / block_n.
 _DENSE_BLOCK_N = 64
@@ -414,6 +428,7 @@ def _make_spec(
         causal_diag_split=diag_split,
         window_wave_skip=window_wave_skip,
         use_additive_bias=req.use_attn_bias,
+        use_alibi=bool(req.use_alibi),
         **dense_paged_fields(req),
     )
 
@@ -451,16 +466,19 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
         base_spec=tuned_base_spec,
         supports=_supports,
         # Dense: causal (top-left or bottom-right), sliding-window and sinks (alone
-        # or combined), optional LSE output, fp32 additive bias (both grids; see
-        # ``tuned_base_spec``) and paged K/V. The spec refuses a bias with paged K/V,
-        # so a request for both is reported as a refused pin. Head size stays out:
-        # D64/D128 coverage is ``supports_attention_dense``'s call.
+        # or combined), ALiBi, optional LSE output, fp32 additive bias (both grids;
+        # see ``tuned_base_spec``) and paged K/V. The spec refuses a bias with paged
+        # K/V or with ALiBi, so a request for either pair is reported as a refused
+        # pin. Head size stays out: D64/D128 coverage is ``supports_attention_dense``'s
+        # call.
         features=frozenset(
             {
                 "causal",
                 "causal_bottom_right",
                 "sliding_window",
                 "sinks",
+                "alibi",
+                "alibi_external_slopes",
                 "lse",
                 "attn_bias",
                 "layout_paged",
@@ -484,16 +502,9 @@ def _make_gfx942_attention_dense_qbminor_candidate() -> KernelCandidate:
         variant_id=_QBMINOR_VARIANT_ID,
         base_spec=_qbminor_base_spec,
         supports=_supports,
-        features=frozenset(
-            {
-                "causal",
-                "causal_bottom_right",
-                "sliding_window",
-                "sinks",
-                "lse",
-                "attn_bias",
-            }
-        ),
+        # The qb_minor grid also serves the fp32 additive bias (refused with ALiBi
+        # by the spec, so a request for both is a refused pin).
+        features=_INGESTOR_FEATURES | {"attn_bias"},
         recorded=frozenset({"waves_per_eu"}),
         pinned_axes=_PINNED_GRID_AXES,
     )
@@ -522,9 +533,7 @@ def _make_gfx942_attention_dense_aot_candidate(
             nonpersist_decode=nonpersist_decode,
         ),
         supports=_supports,
-        features=frozenset(
-            {"causal", "causal_bottom_right", "sliding_window", "sinks", "lse"}
-        ),
+        features=_INGESTOR_FEATURES,
         recorded=frozenset({"waves_per_eu"}),
         axis_names=None if persistent else frozenset(),
         pinned_axes=_PINNED_GRID_AXES,

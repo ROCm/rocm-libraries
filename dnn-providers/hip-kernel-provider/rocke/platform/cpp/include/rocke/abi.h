@@ -151,8 +151,11 @@ extern "C" {
  *     mask-band fields, which changes their sizes;
  *     rocke_gfx942_attention_tiled_2d_supports_args_t gained use_d256_fast; the
  *     unified-attention selectors take an explicit arch argument, and
- *     rocke_unified_attn_set_resolved_arch is gone. */
-#define ROCKE_ABI_VERSION 22
+ *     rocke_unified_attn_set_resolved_arch is gone.
+ * 23: rocke_attention_tiled_2d_spec_t gained alibi_design (const char*, NULL
+ *     = the path's default) after use_additive_bias, at its end, which
+ *     changes its size. */
+#define ROCKE_ABI_VERSION 23
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
  * 2: list-tagged ("l") kernel attrs such as cluster_dims; level-1 engines drop them.

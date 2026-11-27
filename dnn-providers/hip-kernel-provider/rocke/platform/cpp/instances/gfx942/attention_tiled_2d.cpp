@@ -36,6 +36,7 @@
 
 #include "rocke/error.hpp"
 #include "rocke/helper_helper_rocke.instances.gfx942.attention_tiled_2d.h"
+#include "rocke/helper_rocke.instances.common._attention_alibi.h"
 #include "rocke/instance_attention_unified_internal.h"
 #include "rocke/ir.h"
 
@@ -293,6 +294,53 @@ bool rocke_attention_tiled_2d_spec_validate(rocke_ir_builder_t* b,
         rocke_attn2d_set_err(
             b, ROCKE_ERR_VALUE, "block_size must be positive, got %d", s->block_size);
         return false;
+    }
+
+    /* The ALiBi arms fold the term into the scale op or the QK accumulator, so
+     * nothing may sit between the scale and the term. */
+    if(s->alibi_design != NULL)
+    {
+        if(rocke_attn_alibi_design_token(s->alibi_design) == NULL)
+        {
+            rocke_attn2d_set_err(b,
+                                 ROCKE_ERR_VALUE,
+                                 "alibi_design must be one of ['fma_split', 'fma_tile', "
+                                 "'seed_split', 'seed_tile'] or None (got '%s')",
+                                 s->alibi_design);
+            return false;
+        }
+        if(!s->use_alibi)
+        {
+            rocke_attn2d_set_err(b, ROCKE_ERR_VALUE, "alibi_design requires use_alibi");
+            return false;
+        }
+        if(s->has_softcap)
+        {
+            rocke_attn2d_set_err(b,
+                                 ROCKE_ERR_VALUE,
+                                 "alibi_design=%s is not supported on softcap: softcap applies "
+                                 "between the scale and the ALiBi term",
+                                 s->alibi_design);
+            return false;
+        }
+        if(s->use_qq_bias)
+        {
+            rocke_attn2d_set_err(b,
+                                 ROCKE_ERR_VALUE,
+                                 "alibi_design=%s is not supported with QQ bias: ALiBi plus a "
+                                 "score bias is out of scope",
+                                 s->alibi_design);
+            return false;
+        }
+        if((s->use_mfma_32x32 || s->use_mfma_32x32x8) && !s->use_transposed_qk_32x32)
+        {
+            rocke_attn2d_set_err(b,
+                                 ROCKE_ERR_VALUE,
+                                 "alibi_design=%s is not supported on the non-transposed 32x32 "
+                                 "path: no fast variant runs on it",
+                                 s->alibi_design);
+            return false;
+        }
     }
 
     /* The Python gfx942 spec has no band fields; only a hand-built C spec can
@@ -717,12 +765,11 @@ bool rocke_attention_tiled_2d_spec_validate(rocke_ir_builder_t* b,
                 b, ROCKE_ERR_VALUE, "transposed softmax VALU opts require no sliding window");
             return false;
         }
-        if(s->has_softcap || s->use_alibi || s->use_qq_bias)
+        if(s->has_softcap || s->use_qq_bias)
         {
             rocke_attn2d_set_err(b,
                                  ROCKE_ERR_VALUE,
-                                 "transposed softmax VALU opts do not support softcap, ALiBi, "
-                                 "or QQ bias");
+                                 "transposed softmax VALU opts do not support softcap or QQ bias");
             return false;
         }
     }
@@ -788,10 +835,9 @@ bool rocke_attention_tiled_2d_spec_validate(rocke_ir_builder_t* b,
                 b, ROCKE_ERR_VALUE, "use_register_pv v1 requires no sliding window and no softcap");
             return false;
         }
-        if(s->use_alibi || s->use_qq_bias)
+        if(s->use_qq_bias)
         {
-            rocke_attn2d_set_err(
-                b, ROCKE_ERR_VALUE, "use_register_pv v1 does not support ALiBi or QQ bias");
+            rocke_attn2d_set_err(b, ROCKE_ERR_VALUE, "use_register_pv v1 does not support QQ bias");
             return false;
         }
     }

@@ -74,6 +74,12 @@ kmd_fields:
 - name: use_additive_bias
   type: int
   default_value: 0
+# 1 for a kernel that adds hipDNN's ALiBi (satellite bundle gfx950_attention_dense_alibi);
+# builder_default keeps it out of this bundle's descriptors.
+- name: use_alibi
+  type: int
+  default_value: 0
+  builder_default: true
 specialization:
   metadata_fields:
   - dtype
@@ -87,7 +93,8 @@ specialization:
   - block_m
   - block_n
   - use_additive_bias
-  matcher_only_fields: []
+  # The ALiBi satellite's field: no kernel here is built with it (builder_default).
+  matcher_only_fields: [use_alibi]
   vocabulary:
     dtype:
       bf16: BF16
@@ -244,15 +251,15 @@ launch_surface:
   - name: matcher
     python_source: kernels/gfx950/attention_dense.py:build_attention_dense
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/AttentionDenseNative.cpp
-    kmd_fields: [dtype, head_size, causal, sliding_window, ragged, block_m, block_n, use_additive_bias]
+    kmd_fields: [dtype, head_size, causal, sliding_window, ragged, block_m, block_n, use_additive_bias, use_alibi]
     guard: >
       kernelMatches() returns false (no panic) if dtype, head_size, causal,
-      sliding_window or use_additive_bias disagrees with the graph (an attn_mask
-      tensor asks for use_additive_bias=1), the candidate's tile is illegal, or
-      the candidate is ragged (ragged != 0). The metadata carries no head
-      counts and none are compared: one kernel serves every (num_query_heads,
-      num_kv_heads), and their legality (positive, Hq % Hkv == 0, 32-bit
-      extents) is checked on the graph by
+      sliding_window, use_additive_bias or use_alibi disagrees with the graph (an
+      attn_mask tensor asks for use_additive_bias=1, alibi_mask for use_alibi=1),
+      the candidate's tile is illegal, or the candidate is ragged (ragged != 0).
+      The metadata carries no head counts and none are compared: one kernel
+      serves every (num_query_heads, num_kv_heads), and their legality
+      (positive, Hq % Hkv == 0, 32-bit extents) is checked on the graph by
       gfx950AttentionDenseGraphMatches(). The metadata's batch, seqlen_q and
       seqlen_kv are build inputs of a shape-generic kernel and are never
       compared; the graph's shape enters only through seqlen_q % block_m == 0
@@ -262,17 +269,19 @@ launch_surface:
   - name: kernargs
     python_source: kernels/gfx950/attention_dense.py:build_attention_dense
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/AttentionDenseNative.cpp
-    kmd_fields: [ragged, seqlen_q, batch, use_additive_bias]
+    kmd_fields: [ragged, seqlen_q, batch, use_additive_bias, use_alibi]
     guard: >
       kernelSignature(RUNTIME_HEAD_COUNTS), the catalog's dispatch.v2 contract,
       returns the 10-arg form
       (q,k,v,o,scale,batch,seqlen_q,seqlen_kv,num_query_heads,num_kv_heads):
       the runtime-shape grid body reads the shape and both head counts as
       kernargs, all taken from the graph at launch (the metadata carries no head
-      fields). kernelSignature(BAKED_HEAD_COUNTS), the 8-arg form, is used only
+      fields). A use_alibi=1 candidate takes the 11-arg form, alibi_slopes_ptr
+      last, which the launch passes as null (hipDNN's slopes, computed in the
+      kernel from num_query_heads). kernelSignature(BAKED_HEAD_COUNTS), the 8-arg form, is used only
       to restore plans saved under dispatch.v1. A use_additive_bias=1 candidate
       takes the 14-arg dispatch.v3 form: the v2 list, then additive_bias_ptr and
-      its batch/head/sq strides last. Every variant is non-persistent
+      its batch/head/sq strides last. No kernel adds both. Every variant is non-persistent
       and on the runtime-shape path, which enumerate.pin and the aligned catalog
       keep true. use_sinks=False; no sink_ptr slot. Validated at prepare() time
       by buildIngestorKernelCode(..., expectedSignature).
@@ -289,6 +298,18 @@ launch_surface:
       the record omits it, 1 for a bias kernel, and nullopt (kernelMatches
       declines, prepare() throws) for any other type or value, so a malformed
       record never reads as a plain kernel.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionDenseMatchers.cpp
+  # Which candidates add ALiBi, read through the arch descriptor's candidateUsesAlibi.
+  - name: alibi
+    python_source: kernels/gfx950/attention_dense.py:attention_dense_signature
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseNative.cpp
+    kmd_fields: [use_alibi]
+    guard: >
+      candidateUsesAlibi() reads use_alibi as 0 or 1 (absent is 0, the KMD default) and
+      answers nullopt for any other value, which kernelMatches() declines and prepare()
+      refuses with BAD_PARAM. kernelMatches() admits a candidate only when use_alibi ==
+      (the graph sets alibi_mask), and graph_match binds alibi_mask only with a top-left
+      causal mask; a use_alibi=1 candidate takes alibi_slopes_ptr after the head counts.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionDenseMatchers.cpp
 
   # The cold ranking reads only the tile, through the shared candidateTile().

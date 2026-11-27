@@ -10,6 +10,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -121,8 +122,8 @@ IngestorPlanPayload validConvFwdPayload()
 }
 
 // The gfx950 dense-attention arguments, named as the engine declares them: v1 stops at
-// seqlen_kv, v2 adds the two head counts.
-std::vector<KernelArgument> gfx950AttentionDenseSignature(bool withHeads)
+// seqlen_kv, v2 adds the two head counts, and alibi.v1 then the slopes pointer.
+std::vector<KernelArgument> gfx950AttentionDenseSignature(bool withHeads, bool withAlibi = false)
 {
     std::vector<KernelArgument> signature{KernelArgument{"global_buffer", 8, 0, "q_ptr"},
                                           KernelArgument{"global_buffer", 8, 8, "k_ptr"},
@@ -137,12 +138,18 @@ std::vector<KernelArgument> gfx950AttentionDenseSignature(bool withHeads)
         signature.push_back(KernelArgument{"by_value", 4, 48, "num_query_heads"});
         signature.push_back(KernelArgument{"by_value", 4, 52, "num_kv_heads"});
     }
+    if(withAlibi)
+    {
+        signature.push_back(KernelArgument{"global_buffer", 8, 56, "alibi_slopes_ptr"});
+    }
     return signature;
 }
 
 // A gfx950 dense-attention payload under `dispatchSymbol` that passes every check before the
 // module load when its signature is the one that contract launches.
-IngestorPlanPayload gfx950AttentionDensePayload(std::string_view dispatchSymbol, bool withHeads)
+IngestorPlanPayload gfx950AttentionDensePayload(std::string_view dispatchSymbol,
+                                                bool withHeads,
+                                                bool withAlibi = false)
 {
     const AttentionDenseBinding binding{1, 2, 3, 4, 1, 0, 0.125F};
     AttentionDenseProblem problem;
@@ -158,7 +165,7 @@ IngestorPlanPayload gfx950AttentionDensePayload(std::string_view dispatchSymbol,
     payload.dispatchSymbol = std::string(dispatchSymbol);
     payload.launchValues = gfx950AttentionDenseLaunchValues(binding, problem, int64_t{256});
     payload.symbol = "attention_dense";
-    payload.recordedSignature = gfx950AttentionDenseSignature(withHeads);
+    payload.recordedSignature = gfx950AttentionDenseSignature(withHeads, withAlibi);
     return payload;
 }
 
@@ -458,15 +465,22 @@ TEST_F(TestIngestorPlanRestoreChecks, RefusesASignatureThePackDoesNotLaunch)
 
 // Each gfx950 dense-attention contract restores only the code object it launches: v1 the
 // 8-argument kernels that bake the head counts, v2 the 10-argument kernels that read them,
-// and v3 the 14-argument bias kernels.
+// alibi.v1 the 11-argument ALiBi kernels and v3 the 14-argument bias kernels. A plain plan
+// naming an ALiBi or a bias kernel, or the reverse, would launch with too few or too many
+// arguments.
 TEST_F(TestIngestorPlanRestoreChecks, Gfx950AttentionDenseContractsRefuseTheOtherSignature)
 {
-    expectRefusal(gfx950AttentionDensePayload(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1, true),
-                  HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
-                  "the saved kernel's arguments do not match what this provider launches");
-    expectRefusal(gfx950AttentionDensePayload(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2, false),
-                  HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
-                  "the saved kernel's arguments do not match what this provider launches");
+    for(const auto& [dispatchSymbol, withHeads, withAlibi] :
+        {std::tuple{GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1, true, false},
+         std::tuple{GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2, false, false},
+         std::tuple{GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2, true, true},
+         std::tuple{GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_ALIBI_V1, true, false}})
+    {
+        SCOPED_TRACE(std::string(dispatchSymbol) + (withAlibi ? " with ALiBi" : ""));
+        expectRefusal(gfx950AttentionDensePayload(dispatchSymbol, withHeads, withAlibi),
+                      HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
+                      "the saved kernel's arguments do not match what this provider launches");
+    }
     expectRefusal(gfx950AttentionDenseBiasPayload(/*withBiasTail=*/false),
                   HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
                   "the saved kernel's arguments do not match what this provider launches");
@@ -476,12 +490,13 @@ TEST_F(TestIngestorPlanRestoreChecks, Gfx950AttentionDenseContractsRefuseTheOthe
 // block_m then refuses. No case reaches the module load, so no device is needed.
 TEST_F(TestIngestorPlanRestoreChecks, Gfx950AttentionDenseContractsAcceptTheirOwnSignature)
 {
-    for(const auto& [dispatchSymbol, withHeads] :
-        {std::pair{GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1, false},
-         std::pair{GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2, true}})
+    for(const auto& [dispatchSymbol, withHeads, withAlibi] :
+        {std::tuple{GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1, false, false},
+         std::tuple{GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2, true, false},
+         std::tuple{GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_ALIBI_V1, true, true}})
     {
         SCOPED_TRACE(std::string(dispatchSymbol));
-        auto payload = gfx950AttentionDensePayload(dispatchSymbol, withHeads);
+        auto payload = gfx950AttentionDensePayload(dispatchSymbol, withHeads, withAlibi);
         payload.launchValues["block_m"] = int64_t{64};
         expectRefusal(payload, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "launch value 'block_m'");
     }

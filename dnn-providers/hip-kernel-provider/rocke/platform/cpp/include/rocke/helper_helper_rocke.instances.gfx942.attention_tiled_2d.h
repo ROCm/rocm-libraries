@@ -194,9 +194,12 @@ typedef struct rocke_attention_tiled_2d_spec
     bool causal_top_left; /* False */
     int right_bound; /* 0 */
     /* gfx950 only (on gfx942, rocke_gfx942_attn2d_build_ctx_init rejects it).
-     * Adds four kernel params, before lse_ptr. Kept last: inserting a field
-     * moves every later one (abi.h). */
+     * Adds four kernel params, before lse_ptr. New fields go at the end:
+     * inserting a field moves every later one (abi.h). */
     bool use_additive_bias; /* False */
+    /* alibi_design (Python Optional[str], NULL == None = the path's default
+     * design). */
+    const char* alibi_design; /* NULL */
 } rocke_attention_tiled_2d_spec_t;
 
 /* Materialise every defaulted field (the dataclass defaults). The required

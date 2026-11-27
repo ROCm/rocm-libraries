@@ -9,6 +9,7 @@
 #include "rocke/error.hpp"
 #include "rocke/helper_instance_gfx950_attention_tiled_2d_fastkv_regp.h"
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join */
+#include "rocke/helper_rocke.instances.common._attention_alibi.h"
 #include "rocke/helper_rocke.instances.common._fmha_common.h" /* rocke_attention_check_head_counts */
 
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
@@ -53,11 +54,20 @@ static rocke_status_t rocke__fastkv_gfx950_base_name(const rocke_attention_tiled
                                                      size_t out_cap)
 {
     char t_buf[32], hkv_buf[64], fhkv_buf[64], kv_buf[64], sw_buf[32], w_buf[32], mw_buf[32];
-    char d_buf[16], b_buf[16];
+    char d_buf[16], b_buf[16], ad_buf[8];
 
     /* The name carries the GQA ratio; reject a spec it cannot be formed for. */
     if(s == NULL || out == NULL || s->num_kv_heads <= 0)
         return ROCKE_ERR_VALUE;
+    if(s->alibi_design != NULL)
+    {
+        const char* ad_token = rocke_attn_alibi_design_token(s->alibi_design);
+        if(ad_token == NULL)
+            return ROCKE_ERR_VALUE;
+        snprintf(ad_buf, sizeof(ad_buf), "ad%s", ad_token);
+    }
+    else
+        ad_buf[0] = '\0';
 
     snprintf(d_buf, sizeof(d_buf), "d%d", s->head_size);
     snprintf(b_buf, sizeof(b_buf), "b%d", s->block_size);
@@ -125,6 +135,7 @@ static rocke_status_t rocke__fastkv_gfx950_base_name(const rocke_attention_tiled
             s->use_fp8_mfma_pv ? "fp8pv" : "",
             s->use_register_pv ? "regpv" : "",
             s->emit_lse ? (s->lse_head_major ? "lsehm" : "lse") : "",
+            ad_buf,
         };
         size_t num_parts = sizeof(parts) / sizeof(parts[0]);
         return rocke_kernel_name_join(

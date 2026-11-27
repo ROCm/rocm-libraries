@@ -156,6 +156,10 @@ def _variant_axes(variant: AttentionGeometryVariant):
 
 
 _LSE_OUTPUT_FIELDS = frozenset({"emit_lse", "lse_layout"})
+# Kernel fields left out of the defaults fingerprint: the LSE outputs, and
+# ``alibi_design`` (None = the path's default ALiBi design), so config_keys and
+# stored pins stay as before the fields existed.
+_UNFINGERPRINTED_KERNEL_FIELDS = _LSE_OUTPUT_FIELDS | {"alibi_design"}
 
 
 @lru_cache(maxsize=None)
@@ -365,7 +369,7 @@ class UnifiedSpace(WavesPerEuSpace):
             "kernel": {
                 name: value
                 for name, value in _declared_defaults(type(kernel.kernel_spec))
-                if name not in recorded and name not in _LSE_OUTPUT_FIELDS
+                if name not in recorded and name not in _UNFINGERPRINTED_KERNEL_FIELDS
             },
             "reduce": (
                 None

@@ -1346,7 +1346,7 @@ _CONFIGS[117] = {**_CONFIGS[107], "emit_lse": True}
 # reason, a typo included).
 _EXPECTED_REJECTIONS = {
     111: r"use_additive_bias does not support use_transposed_mask_once",
-    112: r"use_register_pv v1 does not support ALiBi, QQ bias, or additive bias",
+    112: r"use_register_pv v1 does not support QQ bias or additive bias",
     113: r"use_additive_bias does not support use_transposed_invariant_hoist",
     114: r"use_additive_bias does not support the non-transposed 32x32 path",
     115: r"use_grouped_kv2_softmax v1 does not support .*additive bias",
@@ -1988,6 +1988,95 @@ _CONFIGS[123] = {
     "use_k_single_buffer": False,
     "use_v_double_buffer": True,
 }
+
+# --- idx124-127: ALiBi at the slope sites idx16/17 miss: per-row hoist (124, GQA with 24 heads so the slope formula's
+#     tail heads appear), and the transposed 32x32 per-iter (125, mask-once),
+#     hoisted (126) and inline (127) per-lane slopes.
+_CONFIGS[124] = dict(
+    head_size=64,
+    block_size=32,
+    num_query_heads=24,
+    num_kv_heads=6,
+    dtype="bf16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    use_alibi=True,
+)
+_TRANSPOSED_ALIBI = dict(
+    head_size=64,
+    block_size=32,
+    num_query_heads=32,
+    num_kv_heads=32,
+    dtype="bf16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    use_alibi=True,
+    use_mfma_32x32=True,
+    use_transposed_qk_32x32=True,
+    block_m_per_warp=32,
+    tile_size=64,
+)
+_CONFIGS[125] = {**_TRANSPOSED_ALIBI, "use_transposed_mask_once": True}
+_CONFIGS[126] = {**_TRANSPOSED_ALIBI, "use_transposed_invariant_hoist": True}
+_CONFIGS[127] = dict(_TRANSPOSED_ALIBI)
+
+# --- idx128-142: the ALiBi arms (alibi_design). 128-131 each arm on the transposed
+#     mask-limit softmax; default arms: 132 D256 mask-limit (fma_split), 133 D192
+#     mask-limit (seed_tile), 134 grouped_kv2 and 135 register-P (fma_tile); 136-139
+#     each arm on the 16x16 path (two atoms, four N-tiles); 140-142 the other arms
+#     on grouped_kv2 (second-tile seed, two split groups).
+_MLIM_ALIBI = {
+    **_TRANSPOSED_ALIBI,
+    "use_transposed_scalar_state": True,
+    "use_transposed_mask_once": True,
+    "use_transposed_half_local_pv": True,
+    "use_mfma32_skip_legacy_qreg": True,
+    "use_transposed_mask_limit": True,
+}
+_ALIBI_16X16 = dict(
+    head_size=64,
+    block_size=32,
+    num_query_heads=24,
+    num_kv_heads=6,
+    dtype="bf16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    use_alibi=True,
+    block_m_per_warp=32,
+    tile_size=64,
+)
+_CONFIGS[128] = {**_MLIM_ALIBI, "alibi_design": "seed_tile"}
+_CONFIGS[129] = {**_MLIM_ALIBI, "alibi_design": "fma_tile"}
+_CONFIGS[130] = {**_MLIM_ALIBI, "alibi_design": "seed_split"}
+_CONFIGS[131] = {**_MLIM_ALIBI, "alibi_design": "fma_split"}
+_CONFIGS[132] = {**_MLIM_ALIBI, "head_size": 256}
+_CONFIGS[133] = {**_MLIM_ALIBI, "head_size": 192}
+_CONFIGS[134] = {**_TRANSPOSED_ALIBI, "use_grouped_kv2_softmax": True}
+_CONFIGS[135] = dict(
+    head_size=64,
+    block_size=32,
+    num_query_heads=32,
+    num_kv_heads=32,
+    dtype="bf16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    use_alibi=True,
+    num_seqs=2,
+    waves_per_eu=2,
+    use_register_pv=True,
+    tile_size=64,
+)
+_CONFIGS[136] = {**_ALIBI_16X16, "alibi_design": "seed_tile"}
+_CONFIGS[137] = {**_ALIBI_16X16, "alibi_design": "fma_tile"}
+_CONFIGS[138] = {**_ALIBI_16X16, "alibi_design": "seed_split"}
+_CONFIGS[139] = {**_ALIBI_16X16, "alibi_design": "fma_split"}
+_CONFIGS[140] = {**_CONFIGS[134], "alibi_design": "fma_split"}
+_CONFIGS[141] = {**_CONFIGS[134], "alibi_design": "seed_tile"}
+_CONFIGS[142] = {**_CONFIGS[134], "alibi_design": "seed_split"}
 
 
 def _spec(idx: int) -> UnifiedAttention2DTiledSpec:

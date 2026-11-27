@@ -117,6 +117,10 @@ _GEOMETRY_FIELDS = frozenset(
 # Inert 3D spec fields, kept so saved specs that set them still load.
 _INERT_3D_FIELDS = frozenset({"use_invariant_hoist"})
 
+# ALiBi design levers: each builder defaults to the design measured best for its
+# body; an explicit value is for A/B runs, so tuning never sweeps it.
+_DESIGN_LEVER_FIELDS = frozenset({"alibi_design"})
+
 
 class TestTuningSpace(unittest.TestCase):
     def test_every_kernel_tuning_field_is_swept(self):
@@ -147,6 +151,7 @@ class TestTuningSpace(unittest.TestCase):
                         - codepath
                         - KNOWN_WRONG_KNOBS[arch]
                         - (_INERT_3D_FIELDS if path == "3d" else frozenset())
+                        - _DESIGN_LEVER_FIELDS
                     )
                     self.assertFalse(missing, sorted(missing))
 
@@ -810,7 +815,7 @@ def _dense_swept_fields(arch="gfx950"):
 
 
 def _assert_dense_fields_classified(case, arch, spec_type):
-    fields = {f.name for f in dataclasses.fields(spec_type)}
+    fields = {f.name for f in dataclasses.fields(spec_type)} - _DESIGN_LEVER_FIELDS
     swept = _dense_swept_fields(arch)
     fixed = (
         DENSE_PROBLEM_FIELDS

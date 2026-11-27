@@ -40,6 +40,7 @@
 
 #include "rocke/helper_helper_rocke.instances.common.attention_unified_selectors.h" /* rocke_unified_attn_tiled_2d_lds_bytes */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join */
+#include "rocke/helper_rocke.instances.common._attention_alibi.h"
 #include "rocke/helper_rocke.instances.common._fmha_common.h" /* rocke_attention_check_head_counts */
 #include "rocke/helper_rocke.instances.common.attention_arch.h" /* rocke_require_tiled_attention_arch */
 
@@ -482,7 +483,7 @@ static rocke_status_t
      * as the Python kernel_name does. */
     char d_buf[32], b_buf[32], t_buf[32], hkv_buf[64], fhkv_buf[64], kv_buf[64];
     char sw_buf[32], w_buf[32], wpe_buf[32], mw_buf[32], kvcp_buf[64];
-    char rd_buf[32], ks_buf[32];
+    char rd_buf[32], ks_buf[32], ad_buf[8];
     int nqh, nkv;
 
     if(s == NULL || out == NULL)
@@ -543,6 +544,16 @@ static rocke_status_t
         snprintf(ks_buf, sizeof(ks_buf), "ks%d", s->k_slice_hd);
     else
         ks_buf[0] = '\0';
+    /* alibi_design adds "ad<token>" only when set, so default names stay. An
+     * unknown design names no token here: the build refuses it with the Python
+     * __post_init__ message. */
+    {
+        const char* ad_token = rocke_attn_alibi_design_token(s->alibi_design);
+        if(ad_token != NULL)
+            snprintf(ad_buf, sizeof(ad_buf), "ad%s", ad_token);
+        else
+            ad_buf[0] = '\0';
+    }
 
     {
         const char* cfvnosplit
@@ -606,6 +617,7 @@ static rocke_status_t
             s->use_causal_mask_phase_split ? "cmps" : "",
             s->use_k_single_buffer ? "k1buf" : "",
             s->emit_lse ? "lse" : "",
+            ad_buf,
         };
         size_t num_parts = sizeof(parts) / sizeof(parts[0]);
         return rocke_kernel_name_join(

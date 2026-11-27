@@ -87,7 +87,6 @@ _DECLINED_CASES = {
     "dtype_mixed": replace(_BASE, o=bshd(2, 4, 8, 128, "fp32")),
     "compute_dtype": replace(_BASE, compute_dtype="fp16"),
     "scale_tensor": replace(_BASE, scale_source="tensor", scale_tensor=packed((1,))),
-    "alibi": replace(_BASE, alibi=True),
     "sinks": replace(_BASE, sink_token=packed((1, 4, 1, 1))),
     "dropout": replace(_BASE, dropout=SdpaDropout(0.1)),
     "paged": paged(_BASE),
@@ -118,7 +117,6 @@ def test_declined_feature_is_declined_with_a_declined_features_reason(feature):
 # follow-on (a reference oracle, a schema), not a permanent kernel/ABI limit.
 _NOT_YET_IMPLEMENTED_FEATURES = {
     "scale_tensor",
-    "alibi",
     "sinks",
     "dropout",
     "paged",
@@ -212,6 +210,39 @@ def test_unknown_arch_declines():
 
 def test_mma_core_mode_matching_the_dtype_is_admitted():
     _admitted(replace(_BASE, mma_core_mode="fp16"))
+
+
+# --- ALiBi: hipDNN defines it only with top-left causal masking (SEM-021) -----
+
+
+@pytest.mark.parametrize("arch", ARCHES)
+@pytest.mark.parametrize("left_bound", [-1, 4], ids=["causal", "window"])
+def test_alibi_with_top_left_causal_is_admitted(arch, left_bound):
+    _admitted(
+        _unified_request(arch=arch, alibi=True, right_bound=0, left_bound=left_bound)
+    )
+
+
+_ALIBI_OFF_TOP_LEFT_CAUSAL = {
+    "no_mask": {},
+    "bottom_right_square": {"right_bound": 0, "diagonal": "bottom_right"},
+    "bottom_right": {"s_q": 4, "right_bound": 0, "diagonal": "bottom_right"},
+    "right_bound": {"left_bound": 4, "right_bound": 1},
+}
+
+
+@pytest.mark.parametrize("arch", ARCHES)
+@pytest.mark.parametrize("band", sorted(_ALIBI_OFF_TOP_LEFT_CAUSAL))
+def test_alibi_off_top_left_causal_is_declined(arch, band):
+    req = _unified_request(arch=arch, alibi=True, **_ALIBI_OFF_TOP_LEFT_CAUSAL[band])
+    assert _declined(req).startswith("alibi:")
+
+
+def test_alibi_with_bias_is_declined_as_bias():
+    req = _unified_request(
+        alibi=True, right_bound=0, bias=SdpaBias(packed((2, 4, 8, 8)))
+    )
+    assert _declined(req) == "bias: ALiBi with an additive bias is not supported"
 
 
 def test_mma_core_mode_other_than_the_dtype_is_declined():

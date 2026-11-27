@@ -89,6 +89,7 @@ SDPA_DENSE_FEATURES = frozenset(
         "window_br",
         "noncausal_window",
         "lse",
+        "alibi",  # top-left causal only (value_rejects)
         "mma_core_mode",
         "implementation_hint",
     }
@@ -110,7 +111,6 @@ _DECLINED = declined_table(
         "scale_tensor",
         "bias",
         "bias_broadcast",
-        "alibi",
         "sinks",
         "padded",
         "ragged",

@@ -114,6 +114,21 @@ TEST_P(TestAttentionDenseMatch, ServesTheBaseGraphAndRecord)
 // and BFLOAT16; UNSET leaves the choice to the provider.
 // =============================================================================
 
+/// Both arches serve ALiBi and an additive bias, but no kernel adds both, so a graph that asks
+/// for both is declined for its alibi_mask, though each alone is served.
+TEST_P(TestAttentionDenseMatch, DeclinesAlibiWithAnAdditiveBias)
+{
+    auto spec = withBias({BATCH, HEADS, SEQ, SEQ});
+    ASSERT_TRUE(matchGraph(arch(), spec).has_value());
+    auto alibiOnly = GraphSpec{};
+    alibiOnly.alibiMask = true;
+    ASSERT_TRUE(matchGraph(arch(), alibiOnly).has_value());
+
+    spec.alibiMask = true;
+    const auto decline = loggedDecline(arch(), spec);
+    EXPECT_EQ(decline.cause, "alibi_mask") << decline.detail;
+}
+
 TEST_P(TestAttentionDenseMatch, ServesTheComputeTypesItsFloatAccumulationMeets)
 {
     for(const auto computeType : {data_objects::DataType::UNSET,

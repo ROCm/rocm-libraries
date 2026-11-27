@@ -317,6 +317,9 @@ _SPEC_PERTURBATIONS = {
     "chiplet_num_xcds": (1, 4),
     "lazy_rescale": (False, True),
     "use_sinks": (True,),
+    "use_alibi": (True,),
+    # ALiBi design lever: legal only with use_alibi -> the *_alibi base.
+    "alibi_design": ("fma_tile", "seed_split", "fma_split"),
 }
 
 # The gfx942-private half of the same table: fields Gfx942AttentionDenseSpec adds on
@@ -409,6 +412,8 @@ _INJECTIVITY_BASES = {
     "d64_bf16": dict(head_size=64, dtype="bf16"),
     # The sliding-window base is what makes window_wave_skip reachable.
     "d128_fp16_swa": dict(head_size=128, dtype="fp16", sliding_window=128),
+    # The ALiBi base is what makes alibi_design reachable.
+    "d128_bf16_alibi": dict(head_size=128, dtype="bf16", use_alibi=True),
     "persistent_d128_fp16": dict(
         head_size=128,
         dtype="fp16",

@@ -46,6 +46,22 @@ def _require_contiguous(tensor, name: str) -> None:
         raise ValueError(f"{name} must be contiguous")
 
 
+def _check_alibi_slopes_bound(request, slopes) -> None:
+    """Slopes are bound iff the request said the caller passes them
+    (``use_alibi_external_slopes``). The kernel takes either: without a tensor
+    it gets a null pointer and uses hipDNN's built-in slopes, so a forgotten
+    tensor would silently change the bias."""
+    external = bool(getattr(request, "use_alibi_external_slopes", False))
+    if external and slopes is None:
+        raise ValueError(
+            "use_alibi_external_slopes=True requires tensors['alibi_slopes']"
+        )
+    if slopes is not None and not external:
+        raise ValueError(
+            "tensors['alibi_slopes'] was given but use_alibi_external_slopes is off"
+        )
+
+
 def _tolist(tensor, name: str):
     value = tensor
     for method in ("detach", "cpu"):
@@ -93,6 +109,8 @@ def validate_tuning_attention_contract(request, problem, spec) -> None:
             f"request.use_attn_bias={bool(request.use_attn_bias)} disagrees with "
             f"problem.use_additive_bias={problem.use_additive_bias}"
         )
+    if bool(request.use_alibi) != bool(problem.use_alibi):
+        raise ValueError("request.use_alibi disagrees with problem.use_alibi")
 
     kernel_spec = spec.kernel_spec
     for name, expected in (
@@ -307,6 +325,7 @@ _DENSE_OPTIONAL_INPUTS = {
             "sinks",
             "lse",
             "additive_bias",
+            "alibi_slopes",
         }
     ),
     "gfx950": frozenset(
@@ -318,6 +337,7 @@ _DENSE_OPTIONAL_INPUTS = {
             "sinks",
             "lse",
             "additive_bias",
+            "alibi_slopes",
         }
     ),
 }
@@ -437,7 +457,9 @@ def bind_dense_attention_torch(
             "sinks": _kw.get("sinks", tensors.get("sinks")),
             "lse": _kw.get("lse", tensors.get("lse")),
             "additive_bias": _kw.get("additive_bias", tensors.get("attn_bias")),
+            "alibi_slopes": _kw.get("alibi_slopes", tensors.get("alibi_slopes")),
         }
+        _check_alibi_slopes_bound(request, optional["alibi_slopes"])
         accepted = _DENSE_OPTIONAL_INPUTS[str(request.arch)]
         for name, value in optional.items():
             if value is None:
@@ -643,6 +665,8 @@ def bind_tuning_attention_torch(
 
     def launch(**_kw):
         _reject_additive_bias_inputs(_kw, "launch kwargs")
+        alibi_slopes = _kw.get("alibi_slopes", tensors.get("alibi_slopes"))
+        _check_alibi_slopes_bound(request, alibi_slopes)
         return run_unified_attention_torch(
             problem=problem,
             q=tensors["q"],
@@ -657,7 +681,7 @@ def bind_tuning_attention_torch(
             block_table=tensors["block_table"],
             softcap=float(_kw.get("softcap", tensors.get("softcap", 0.0))),
             sinks=_kw.get("sinks", tensors.get("sinks")),
-            alibi_slopes=_kw.get("alibi_slopes", tensors.get("alibi_slopes")),
+            alibi_slopes=alibi_slopes,
             qq_bias=_kw.get("qq_bias", tensors.get("qq_bias")),
             backend=backend,
             stream=int(_kw.get("stream", stream)),

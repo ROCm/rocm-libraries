@@ -41,8 +41,9 @@
  * causal sliding window baked per candidate, the stats
  * (LSE) output an emit_lse candidate writes, the launch grid each candidate is built for
  * (the qb_minor, bt_hkv_minor or hq_minor_swz block order, or the D128 persistent grid),
- * and the launch contracts: v1 for a plan without an additive bias, v2 (v1's arguments,
- * then the bias's) for one with. The bias itself (fp32 attn_mask) is matched and launched by
+ * the use_alibi variants that serve ALiBi, and the launch contracts: v1 for a plan without
+ * an additive bias or ALiBi, v2 (v1's arguments, then the bias's) for one with a bias, and
+ * alibi.v1 for one with ALiBi. The bias itself (fp32 attn_mask) is matched and launched by
  * the shared code, as on gfx950.
  *
  * The body reads both head counts at runtime as well as batch and the sequence lengths
@@ -77,6 +78,8 @@ constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.gfx942_attention_dense.d
 constexpr std::string_view LDS_ROW_PAD_FIELD = "lds_row_pad";
 constexpr std::string_view PV_PRIORITY_FIELD = "pv_priority";
 constexpr std::string_view EMIT_LSE_FIELD = "emit_lse";
+/// 1 for a kernel that adds ALiBi with hipDNN's slopes.
+constexpr std::string_view USE_ALIBI_FIELD = "use_alibi";
 constexpr std::string_view HEAD_SIZE_FIELD = "head_size";
 constexpr std::string_view SLIDING_WINDOW_FIELD = "sliding_window";
 constexpr std::string_view CAUSAL_FIELD = "causal";
@@ -133,6 +136,23 @@ std::optional<bool> candidateWritesLse(const KernelDefinition& kernel)
         return std::nullopt;
     }
     return *emitLse == 1;
+}
+
+/// Whether a candidate adds ALiBi: use_alibi 1 or 0. A record without the field reads as a
+/// plain kernel (the KMD default 0); any other value is malformed and declines rather than
+/// reading as a plain kernel.
+std::optional<bool> candidateUsesAlibi(const KernelDefinition& kernel)
+{
+    if(kernel.metadata.find(std::string(USE_ALIBI_FIELD)) == kernel.metadata.end())
+    {
+        return false;
+    }
+    const auto useAlibi = attention_dense::integerMetadata(kernel, USE_ALIBI_FIELD);
+    if(!useAlibi.has_value() || (*useAlibi != 0 && *useAlibi != 1))
+    {
+        return std::nullopt;
+    }
+    return *useAlibi == 1;
 }
 
 /**
@@ -212,6 +232,7 @@ constexpr attention_dense::AttentionDenseArch gfx942Arch()
     arch.tokens.biasStrideBatch = "gfx942_attention_dense.bias.stride_batch";
     arch.tokens.biasStrideHead = "gfx942_attention_dense.bias.stride_head";
     arch.tokens.biasStrideQuery = "gfx942_attention_dense.bias.stride_query";
+    arch.tokens.alibi = "gfx942_attention_dense.alibi";
     // The head fields of the KMD are canonical build inputs, never compared.
     arch.isSupportedTile = &isSupportedGfx942AttentionDenseTile;
     arch.geometry = &gfx942Geometry;
@@ -225,6 +246,9 @@ constexpr attention_dense::AttentionDenseArch gfx942Arch()
     // catalog pairs each kernel with a graph that has one or has none. The shared hook reads
     // the field as gfx950 does: absent is the KMD default 0, not a malformed record.
     arch.candidateAddsBias = &attention_dense::candidateAdditiveBias;
+    // ALiBi with hipDNN's slopes on the top-left causal band: the use_alibi variants serve
+    // it, on every grid, with or without LSE, and (qb_minor grid) with every shipped window.
+    arch.candidateUsesAlibi = &candidateUsesAlibi;
     arch.currentContract = {GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V1,
                             attention_dense::AttentionDenseAbi::RUNTIME_HEAD_COUNTS};
     // No gfx942 kernel ever baked the head counts, so there is no superseded contract.
@@ -233,13 +257,16 @@ constexpr attention_dense::AttentionDenseArch gfx942Arch()
     // the plain contract and its plans are unchanged.
     arch.biasContract = {GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V2,
                          attention_dense::AttentionDenseAbi::RUNTIME_HEAD_COUNTS_WITH_BIAS};
+    arch.alibiContract = {GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_ALIBI_V1,
+                          attention_dense::AttentionDenseAbi::RUNTIME_HEAD_COUNTS};
     return arch;
 }
 
 constexpr attention_dense::AttentionDenseArch GFX942_ARCH = gfx942Arch();
 static_assert(GFX942_ARCH.isConsistent(),
-              "gfx942Arch(): a served feature's token is unspelled, or the bias hook and the bias "
-              "contract do not come together (their tokens, name and kernel-argument form)");
+              "gfx942Arch(): a served feature's token is unspelled, or the bias or ALiBi hook "
+              "and its contract do not come together (their tokens, name and kernel-argument "
+              "form)");
 
 std::optional<BoundTokens> gfx942AttentionDenseGraphMatches(const MatchContext& context)
 {
@@ -495,6 +522,9 @@ void registerGfx942AttentionDenseSymbols(SymbolScope<Handle>& scope)
     scope.add(std::string(GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V1),
               &gfx942AttentionDenseDispatchHandler());
     scope.add(std::string(GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V2),
+              &gfx942AttentionDenseDispatchHandler());
+    // ALiBi plans: saved by the v1 handler, so their name must resolve to it.
+    scope.add(std::string(GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_ALIBI_V1),
               &gfx942AttentionDenseDispatchHandler());
 }
 

@@ -153,6 +153,12 @@ kmd_fields:
 - name: use_additive_bias
   type: int
   default_value: 0
+# 1 for a kernel that adds hipDNN's ALiBi (satellite bundle gfx942_attention_dense_alibi);
+# builder_default keeps it out of this bundle's descriptors.
+- name: use_alibi
+  type: int
+  default_value: 0
+  builder_default: true
 specialization:
   metadata_fields:
   - dtype
@@ -184,7 +190,8 @@ specialization:
   - use_cfvst
   - use_exp2_fast
   - use_additive_bias
-  matcher_only_fields: []
+  # The ALiBi satellite's field: no kernel here is built with it (builder_default).
+  matcher_only_fields: [use_alibi]
   vocabulary:
     dtype:
       bf16: BF16

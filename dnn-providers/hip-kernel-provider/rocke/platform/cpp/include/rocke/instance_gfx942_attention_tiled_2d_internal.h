@@ -104,6 +104,14 @@ extern "C" {
 /* QK / PV N-tiles (T/16 or HD/16); <=16. */
 #define ROCKE_GFX942_ATTN2D_MAX_N_TILES 16
 
+/* Resolved ALiBi design (Python _alibi_design; ALIBI_DESIGNS). NONE = the
+ * per-score add of the paths that took ALiBi before the arms. */
+#define ROCKE_GFX942_ATTN2D_AD_NONE 0
+#define ROCKE_GFX942_ATTN2D_AD_SEED_TILE 1
+#define ROCKE_GFX942_ATTN2D_AD_FMA_TILE 2
+#define ROCKE_GFX942_ATTN2D_AD_SEED_SPLIT 3
+#define ROCKE_GFX942_ATTN2D_AD_FMA_SPLIT 4
+
 /* ============================================================ *
  *  rocke_gfx942_attn2d_build_ctx_t
  *
@@ -364,11 +372,36 @@ typedef struct rocke_gfx942_attn2d_build_ctx
     rocke_value_t* hoist_q_head[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
     rocke_value_t* hoist_row_mask[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
     /* Transposed-32x32 per-lane invariants hoisted before the KV loop under
-     * TRANSPOSED_INVARIANT_HOIST (NULL otherwise). */
+     * TRANSPOSED_INVARIANT_HOIST (NULL otherwise). st_alibi_slope_hoist is the
+     * per-lane slope of the per-score add (LEGACY_ALIBI only). */
     rocke_value_t* st_qp_hoist;
     rocke_value_t* st_row_ok_hoist;
     rocke_value_t* st_causal_lim_hoist;
     rocke_value_t* st_alibi_slope_hoist;
+
+    /* ---- ALiBi arms (Python _alibi_design and the ad_* state) ---- *
+     * ALIBI_DESIGN is the resolved design (ROCKE_GFX942_ATTN2D_AD_*); NONE keeps
+     * the per-score add (LEGACY_ALIBI when ALiBi is on). The values are
+     * loop-invariant, set by the LICM hoist. ad_u is the slope in the units the
+     * term enters with (raw score units for a seed, log2 units for an FMA
+     * addend); ad_slope_l2 (log2 units) builds the split arms' per-tile row
+     * offset. Transposed 32x32 (AD_TRANSPOSED): one query per lane (scalars,
+     * ad_e[16] / ad_seed); 16x16: one query per accumulator row slot (the *_r
+     * arrays, ad_e16[reg][n], ad_seed16[atom][n]); the anchor is hoist_state_row. */
+    int ALIBI_DESIGN;
+    bool LEGACY_ALIBI, AD_SEED, AD_SPLIT, AD_TRANSPOSED;
+    rocke_value_t* ad_u;
+    rocke_value_t* ad_slope_l2;
+    rocke_value_t* ad_anchor;
+    rocke_value_t* ad_key_off;
+    rocke_value_t* ad_e[16];
+    rocke_value_t* ad_seed;
+    rocke_value_t* ad_u_r[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
+    rocke_value_t* ad_slope_l2_r[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
+    rocke_value_t* ad_rel_r[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
+    rocke_value_t* ad_e16[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE][ROCKE_GFX942_ATTN2D_MAX_N_TILES];
+    rocke_value_t* ad_seed16[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE]
+                            [ROCKE_GFX942_ATTN2D_MAX_N_TILES];
 
     /* ---- KV-loop body live carry (set per _emit_kv_body invocation) ---- *
      * The current loop iter var + the unpacked m/l/acc carry the inner QK/mask/
@@ -427,6 +460,10 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
 
 /* ----- per-lane row map + bit helpers (lines 2031-2052) ----- */
 rocke_value_t* rocke_gfx942_attn2d_in_warp_row(rocke_gfx942_attn2d_build_ctx_t* ctx, int r);
+/* An f32 vector of the ``n`` values ``vals`` (Python _f32_vec): the ALiBi seed
+ * arms' QK accumulator inits. */
+rocke_value_t*
+    rocke_gfx942_attn2d_f32_vec(rocke_ir_builder_t* b, rocke_value_t* const* vals, int n);
 rocke_value_t* rocke_gfx942_attn2d_state_row(rocke_gfx942_attn2d_build_ctx_t* ctx, int r);
 rocke_value_t*
     rocke_gfx942_attn2d_bit2(rocke_gfx942_attn2d_build_ctx_t* ctx, rocke_value_t* v, int bit);
