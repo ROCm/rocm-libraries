@@ -74,6 +74,8 @@ hipblasStatus_t RocBlasLtStatusToHIPStatus(rocblaslt_status_ status)
         return HIPBLAS_STATUS_INVALID_VALUE;
     case rocblaslt_status_arch_mismatch:
         return HIPBLAS_STATUS_ARCH_MISMATCH;
+    case rocblaslt_status_not_supported:
+        return HIPBLAS_STATUS_NOT_SUPPORTED;
     default:
         throw HIPBLAS_STATUS_INVALID_ENUM;
     }
@@ -1643,6 +1645,11 @@ hipblasStatus_t
         desc->opB = static_cast<hipblasOperation_t>(value);
         break;
     }
+    case HIPBLASLT_MATRIX_TRANSFORM_DESC_C_SCALE_MODE_EXT:
+    {
+        desc->scaleModeC = static_cast<hipblasLtMatmulMatrixScale_t>(value);
+        break;
+    }
     default:
         assert(false && "Unknown attribute");
         rocblaslt::Debug::Instance().markerStop();
@@ -1703,6 +1710,11 @@ hipblasStatus_t
     case HIPBLASLT_MATRIX_TRANSFORM_DESC_TRANSB:
     {
         value = static_cast<int32_t>(desc->opB);
+        break;
+    }
+    case HIPBLASLT_MATRIX_TRANSFORM_DESC_C_SCALE_MODE_EXT:
+    {
+        value = static_cast<int32_t>(desc->scaleModeC);
         break;
     }
     default:

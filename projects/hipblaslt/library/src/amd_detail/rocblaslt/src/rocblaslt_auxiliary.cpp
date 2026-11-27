@@ -956,6 +956,8 @@ RocblasltContractionProblem construct_rocblaslt_problem(rocblaslt_handle        
 
     // Encoding is a solution predicate; set it on every search path.
     problem.int4EncodingA = matmul_descr->int4_encoding_a_ext;
+    problem.orderA            = matA->order;
+    problem.orderB            = matB->order;
     problem.deviceScalarAlpha = isDeviceScalarAlphaPointerMode(matmul_descr->pointermode);
 
     if(adaptive_sm_count_applies(handle, matmul_descr))
@@ -1892,6 +1894,10 @@ rocblaslt_status rocblaslt_matmul_desc_set_attribute(rocblaslt_matmul_desc      
                         matmulDesc->scaleAType
                             = RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT;
                         break;
+                    case HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_PAGE24_EXT:
+                        matmulDesc->scaleAType = RocblasltContractionProblem::ScalingFormat::
+                            Block_32_UE8M0_128_4_PAGE24_EXT;
+                        break;
                     case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16BF_EXT:
                         matmulDesc->scaleAType
                             = RocblasltContractionProblem::ScalingFormat::Block_32_BF16;
@@ -2010,6 +2016,10 @@ rocblaslt_status rocblaslt_matmul_desc_set_attribute(rocblaslt_matmul_desc      
                     case HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT:
                         matmulDesc->scaleBType
                             = RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT;
+                        break;
+                    case HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_PAGE24_EXT:
+                        matmulDesc->scaleBType = RocblasltContractionProblem::ScalingFormat::
+                            Block_32_UE8M0_128_4_PAGE24_EXT;
                         break;
                     case HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F:
                         matmulDesc->scaleBType = RocblasltContractionProblem::ScalingFormat::Scalar;
@@ -2447,6 +2457,12 @@ rocblaslt_status rocblaslt_matmul_desc_get_attribute(rocblaslt_matmul_desc      
                         mode = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT;
                     }
                     else if(matmulDesc->scaleAType
+                            == RocblasltContractionProblem::ScalingFormat::
+                                Block_32_UE8M0_128_4_PAGE24_EXT)
+                    {
+                        mode = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_PAGE24_EXT;
+                    }
+                    else if(matmulDesc->scaleAType
                             == RocblasltContractionProblem::ScalingFormat::Block_32_BF16)
                     {
                         mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16BF_EXT;
@@ -2584,6 +2600,12 @@ rocblaslt_status rocblaslt_matmul_desc_get_attribute(rocblaslt_matmul_desc      
                             == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT)
                     {
                         mode = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT;
+                    }
+                    else if(matmulDesc->scaleBType
+                            == RocblasltContractionProblem::ScalingFormat::
+                                Block_32_UE8M0_128_4_PAGE24_EXT)
+                    {
+                        mode = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_PAGE24_EXT;
                     }
                     else if(matmulDesc->scaleBType
                             == RocblasltContractionProblem::ScalingFormat::Scalar)

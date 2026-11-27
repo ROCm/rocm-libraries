@@ -432,6 +432,20 @@ def getRealDataTypeB(dataType):
 
 _INT4_ENCODING_CHAR = {"Signed": "", "UnsignedBias8": "U8"}
 
+# Integer ids of the SwizzleLayoutA and SwizzleLayoutB values, as the C++ ProblemType and
+# the SwizzleLayoutA and SwizzleLayoutB predicates read them (SwizzleLayout.hpp). Append only.
+SWIZZLE_LAYOUT_IDS = {
+    "Default": 0,
+    "P48": 1,
+    "P16": 2,
+    "P48Page24": 3,
+    "P48Page24Split": 4,
+}
+
+def swizzleLayoutToken(layout):
+    """Suffix of STA or STB in problem and placeholder names; empty for Default."""
+    return "" if layout == "Default" else layout
+
 ################################################################################
 # ProblemType
 # name of solution should begin with name of problemType, and arguments can be listed out explicitly
@@ -544,6 +558,9 @@ _defaultProblemType = {
     "SupportUserArgs": True,
     "SwizzleTensorA": False,
     "SwizzleTensorB": False,
+    # Tile layout of a swizzled operand: a key of SWIZZLE_LAYOUT_IDS.
+    "SwizzleLayoutA": "Default",
+    "SwizzleLayoutB": "Default",
     "isMixMode": False,  # True means this is a mix-mode problem, i.e. Float8BFloat6 or BFloat6Float8
     "MetadataLayout": 0,
     # MX Block: extent of one MX scaling block along the bound (K) dimension.
@@ -1433,10 +1450,10 @@ class ProblemType(Mapping):
       name.append("MXB" + self["DataTypeMXSB"].toChar() + "B" + tile)
 
     if self["SwizzleTensorA"]:
-      name.append("STA")
+      name.append("STA" + swizzleLayoutToken(self["SwizzleLayoutA"]))
 
     if self["SwizzleTensorB"]:
-      name.append("STB")
+      name.append("STB" + swizzleLayoutToken(self["SwizzleLayoutB"]))
 
     # Other
     other = ""

@@ -1,12 +1,12 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Argument validation of HIPBLASLT_ORDER_COL256_R128_EXT and
-// HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT through the C, ext and grouped ext
-// APIs. An invalid combination is refused before solution selection on every
-// architecture. A valid one is accepted whether or not a kernel exists: hipblasLtMatmul
-// without an algo runs one or reports none. That searches for a solution, so the valid
-// cases run on gfx950 only.
+// Argument validation of the HIPBLASLT_ORDER_COL256_R128_* orders and the
+// HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT and _128_4_PAGE24_EXT scale modes
+// through the C, ext and grouped ext APIs. An invalid combination is refused before
+// solution selection on every architecture. A valid one is accepted whether or not a
+// kernel exists: hipblasLtMatmul without an algo runs one or reports none. That searches
+// for a solution, so the valid cases run on gfx950 only.
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
@@ -15,14 +15,20 @@
 
 #include <ostream>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace
 {
-    constexpr auto kTiled = HIPBLASLT_ORDER_COL256_R128_EXT;
-    constexpr auto kCol   = HIPBLASLT_ORDER_COL;
-    constexpr auto kScale = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT;
-    constexpr auto kBlk32 = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
+    constexpr auto kTiled       = HIPBLASLT_ORDER_COL256_R128_EXT;
+    constexpr auto kP48         = HIPBLASLT_ORDER_COL256_R128_P48_EXT;
+    constexpr auto kP16         = HIPBLASLT_ORDER_COL256_R128_P16_EXT;
+    constexpr auto kPlaced      = HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_EXT;
+    constexpr auto kPlacedSplit = HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_SPLIT_EXT;
+    constexpr auto kCol         = HIPBLASLT_ORDER_COL;
+    constexpr auto kScale       = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT;
+    constexpr auto kPlacedScale = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_PAGE24_EXT;
+    constexpr auto kBlk32       = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
 
     struct Fp6Case
     {
@@ -68,6 +74,15 @@ namespace
         c.name  = name;
         c.valid = valid;
         return c;
+    }
+
+    // A in both halves of its blocks with its scales placed, B split across the two halves.
+    void setPlaced(Fp6Case& c)
+    {
+        c.orderA = kPlaced;
+        c.orderB = kPlacedSplit;
+        c.scaleA = kPlacedScale;
+        c.m = c.n = 4096;
     }
 
     std::vector<Fp6Case> cases()
@@ -125,6 +140,84 @@ namespace
         v.back().ldbPad = 128;
         v.push_back(make("tiled_lda_above_k", false));
         v.back().ldaPad = 128;
+
+        // The other tile orders, each valid only in its own combination, so none is taken
+        // for HIPBLASLT_ORDER_COL256_R128_EXT or for a plain order.
+        v.push_back(make("p48_both", true));
+        v.back().orderA = v.back().orderB = kP48;
+        v.push_back(make("e3m2_p48_both", true));
+        v.back().orderA = v.back().orderB = kP48;
+        v.back().typeA = v.back().typeB = HIP_R_6F_E3M2;
+        v.push_back(make("p16_a_plain_b", true));
+        v.back().orderA = kP16;
+        v.back().orderB = kCol;
+        v.back().n      = 128;
+        v.push_back(make("placed", true));
+        setPlaced(v.back());
+
+        v.push_back(make("p48_a_tiled_b", false));
+        v.back().orderA = kP48;
+        v.push_back(make("tiled_a_p48_b", false));
+        v.back().orderB = kP48;
+        v.push_back(make("p48_a_plain_b", false));
+        v.back().orderA = kP48;
+        v.back().orderB = kCol;
+        v.back().n      = 128;
+        v.push_back(make("p16_both", false));
+        v.back().orderA = v.back().orderB = kP16;
+        v.push_back(make("p16_a_tiled_b", false));
+        v.back().orderA = kP16;
+        v.push_back(make("plain_a_p16_b", false));
+        v.back().orderA = kCol;
+        v.back().orderB = kP16;
+        v.push_back(make("p48_ordinary_scales", false));
+        v.back().orderA = v.back().orderB = kP48;
+        v.back().scaleA = v.back().scaleB = kBlk32;
+        v.push_back(make("fp8_p48", false));
+        v.back().orderA = v.back().orderB = kP48;
+        v.back().typeA = v.back().typeB = HIP_R_8F_E4M3;
+        v.push_back(make("p48_lda_above_k", false));
+        v.back().orderA = v.back().orderB = kP48;
+        v.back().ldaPad                   = 128;
+
+        v.push_back(make("placed_a_plain_b", false));
+        setPlaced(v.back());
+        v.back().orderB = kCol;
+        v.push_back(make("placed_a_p48_b", false));
+        setPlaced(v.back());
+        v.back().orderB = kP48;
+        v.push_back(make("placed_split_on_a", false));
+        setPlaced(v.back());
+        std::swap(v.back().orderA, v.back().orderB);
+        v.push_back(make("placed_split_on_both", false));
+        setPlaced(v.back());
+        v.back().orderA = kPlacedSplit;
+        v.push_back(make("placed_unsplit_on_both", false));
+        setPlaced(v.back());
+        v.back().orderB = kPlaced;
+        v.push_back(make("placed_orders_dense_scales", false));
+        setPlaced(v.back());
+        v.back().scaleA = kScale;
+        v.push_back(make("placed_scale_on_b", false));
+        setPlaced(v.back());
+        std::swap(v.back().scaleA, v.back().scaleB);
+        v.push_back(make("placed_scales_on_both", false));
+        setPlaced(v.back());
+        v.back().scaleB = kPlacedScale;
+        v.push_back(make("placed_scale_on_tiled", false));
+        v.back().scaleA = kPlacedScale;
+        v.push_back(make("placed_scale_on_plain", false));
+        v.back().orderA = v.back().orderB = kCol;
+        v.back().scaleA                   = kPlacedScale;
+        v.push_back(make("placed_m_not_4096", false));
+        setPlaced(v.back());
+        v.back().m = 3840;
+        v.push_back(make("placed_n_not_4096", false));
+        setPlaced(v.back());
+        v.back().n = 3840;
+        v.push_back(make("placed_k_above_98304", false));
+        setPlaced(v.back());
+        v.back().k = 98304 + 128;
         return v;
     }
 

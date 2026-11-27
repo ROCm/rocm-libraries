@@ -326,6 +326,8 @@ namespace TensileLite
                 iot::mapOptional(io, "mxTypeB", s.mxTypeB);
                 iot::mapOptional(io, "swizzleTensorA", s.swizzleTensorA);
                 iot::mapOptional(io, "swizzleTensorB", s.swizzleTensorB);
+                iot::mapOptional(io, "swizzleLayoutA", s.swizzleLayoutA);
+                iot::mapOptional(io, "swizzleLayoutB", s.swizzleLayoutB);
                 iot::mapOptional(io, "fusedGemmA2A", s.fusedGemmA2A);
                 iot::mapOptional(io, "stochasticRounding", s.stochasticRounding);
                 iot::mapOptional(io, "metadataLayout", s.metadataLayout);

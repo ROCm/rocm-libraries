@@ -3090,6 +3090,73 @@ namespace TensileLite
                 }
             };
 
+            // SwizzleLayout id of the swizzled A tile layout (see SwizzleLayout.hpp).
+            struct SwizzleLayoutA : public Predicate_CRTP<SwizzleLayoutA, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                int value = 0;
+
+                SwizzleLayoutA() = default;
+                SwizzleLayoutA(int value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "SwizzleLayoutA";
+                }
+
+                bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return problem.swizzleLayoutA() == value;
+                }
+
+                bool debugEval(ContractionProblemGemm const& problem,
+                               std::ostream&                 stream) const override
+                {
+                    return debugEvalCmp(
+                        problem, stream, "prob", problem.swizzleLayoutA(), "==", "sol", value);
+                }
+            };
+
+            struct SwizzleLayoutB : public Predicate_CRTP<SwizzleLayoutB, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                int value = 0;
+
+                SwizzleLayoutB() = default;
+                SwizzleLayoutB(int value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "SwizzleLayoutB";
+                }
+
+                bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return problem.swizzleLayoutB() == value;
+                }
+
+                bool debugEval(ContractionProblemGemm const& problem,
+                               std::ostream&                 stream) const override
+                {
+                    return debugEvalCmp(
+                        problem, stream, "prob", problem.swizzleLayoutB(), "==", "sol", value);
+                }
+            };
+
             // MX scale layout of the solution. The host does not tell formats below
             // kFirstExactFormat apart, so they match each other; a later format on
             // either side must equal the other side.

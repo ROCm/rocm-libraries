@@ -53,6 +53,8 @@
     'StochasticRounding',
     'StridedBatched',
     'SupportUserArgs',
+    'SwizzleLayoutA',
+    'SwizzleLayoutB',
     'SwizzleTensorA',
     'SwizzleTensorB',
     'TileAwareSelection',
@@ -227,6 +229,12 @@
     ]),
     'SupportUserArgs': list([
       'bool',
+    ]),
+    'SwizzleLayoutA': list([
+      'str',
+    ]),
+    'SwizzleLayoutB': list([
+      'str',
     ]),
     'SwizzleTensorA': list([
       'bool',

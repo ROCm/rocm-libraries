@@ -1369,6 +1369,27 @@ namespace TensileLite
             m_swizzleTensorB = swizzle;
         }
 
+        // SwizzleLayout id of the swizzled A and B tile layouts (see SwizzleLayout.hpp).
+        int swizzleLayoutA() const
+        {
+            return m_swizzleLayoutA;
+        }
+
+        int swizzleLayoutB() const
+        {
+            return m_swizzleLayoutB;
+        }
+
+        void setSwizzleLayoutA(int layout)
+        {
+            m_swizzleLayoutA = layout;
+        }
+
+        void setSwizzleLayoutB(int layout)
+        {
+            m_swizzleLayoutB = layout;
+        }
+
         // MXScaleFormat id of the host scale layout (see Contractions.py).
         // 0 for every layout the host does not tell apart.
         int mxScaleFormat() const
@@ -1734,6 +1755,8 @@ namespace TensileLite
         bool             m_outputAmaxD             = false;
         bool             m_swizzleTensorA          = false;
         bool             m_swizzleTensorB          = false;
+        int              m_swizzleLayoutA          = 0;
+        int              m_swizzleLayoutB          = 0;
         int              m_mxScaleFormat           = 0;
         bool             m_fusedGemmA2A            = false;
         int64_t          m_fusedA2AExtent          = 0;

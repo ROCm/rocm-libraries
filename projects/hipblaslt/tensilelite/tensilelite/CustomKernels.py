@@ -96,6 +96,7 @@ _METADATA_NAME_TO_SEMANTIC = {
     "skGrid":                 "SKGrid",
     "skTiles":                "SKTilesAndSplit",
     "ESMRuntimeSupported":    "ESMRuntimeSupported",
+    "aidc":                   "AIDPlacementBit",
     "batchOffsetD":           "BatchOffsetD",
     "batchOffsetC":           "BatchOffsetC",
     "batchOffsetA":           "BatchOffsetA",

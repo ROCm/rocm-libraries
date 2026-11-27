@@ -28,8 +28,8 @@ Lives under ``tensilelite/SolutionStructs/Validators/`` so other Solution-level
 validators can join it.
 
 Public entry points: :func:`validateMXScaleFormatCombination` (gfx1250's
-``v_wmma_scale_f32_16x16x128_f8f6f4`` MX path) and
-:func:`validateHostPreSwizzle128x4`.
+``v_wmma_scale_f32_16x16x128_f8f6f4`` MX path), :func:`validateHostPreSwizzle128x4`,
+:func:`validateSwizzleLayout` and :func:`checkCustomKernelSwizzleLayout`.
 """
 
 from rocisa.enum import DataTypeEnum
@@ -106,6 +106,57 @@ def validateHostPreSwizzle128x4(state, isHandwrittenCustomKernel, printRejection
                % ".".join(str(v) for v in state["ISA"]))
         return False
     return True
+
+
+def validateSwizzleLayout(state, isHandwrittenCustomKernel, printRejectionReason):
+    """Reject a ``SwizzleLayoutA`` or ``SwizzleLayoutB`` other than ``Default`` outside a
+    handwritten custom kernel with ``MXScaleFormat="HostPreSwizzle128x4"``.
+
+    The kernel writer has no load path for these FP6 tile layouts, which the host
+    describes only together with the 128x4 scale modes.
+
+    Returns:
+        ``True`` if the state is valid; ``False`` after a reject, in which case
+        ``state["Valid"]`` is also ``False``.
+    """
+    pt = state["ProblemType"]
+    layouts = {x: pt.get("SwizzleLayout" + x, "Default") for x in "AB"}
+    if all(layout == "Default" for layout in layouts.values()):
+        return True
+    named = ", ".join("SwizzleLayout%s=%s" % (x, layout) for x, layout in layouts.items()
+                      if layout != "Default")
+    if not isHandwrittenCustomKernel:
+        reject(state, printRejectionReason,
+               "%s is only implemented by handwritten custom kernels" % named)
+        return False
+    if state.get("MXScaleFormat") != "HostPreSwizzle128x4":
+        reject(state, printRejectionReason,
+               "%s requires MXScaleFormat=HostPreSwizzle128x4, got %s"
+               % (named, state.get("MXScaleFormat")))
+        return False
+    return True
+
+
+def checkCustomKernelSwizzleLayout(kernelName, customConfig, problemType, srcFile=""):
+    """Raise ValueError unless the ``SwizzleLayoutA`` and ``SwizzleLayoutB`` of a custom
+    kernel's ``custom.config`` ProblemType equal those of the logic file that names it.
+
+    The logic file's ProblemType replaces the kernel's, and its layouts pick the
+    problem-type row. A kernel whose layout is stated in only one of the two files
+    would otherwise share the Default (``HIPBLASLT_ORDER_COL256_R128_EXT``) row and its
+    Equality keys. Both files omitting the keys is the Default layout, which every
+    kernel predating the other layouts has.
+    """
+    kernelType = customConfig.get("ProblemType") or {}
+    for x in "AB":
+        key = "SwizzleLayout" + x
+        declared = kernelType.get(key, "Default")
+        logic = problemType.get(key, "Default")
+        if declared != logic:
+            raise ValueError(
+                "Custom kernel '%s' has %s %s in custom.config but %s in the logic file %s; "
+                "set the same %s in both ProblemTypes"
+                % (kernelName, key, declared, logic, srcFile or "<unknown>", key))
 
 
 def _mxMatrixLabel(dtValue):

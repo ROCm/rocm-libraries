@@ -92,7 +92,8 @@ from ..Components.CustomSchedule import hasCustomSchedule
 from ..Component import TensorDataMover
 from ..Components.TensorDataMover import TensorDataMoverLoad
 from .Utilities import TDM_PAD_INTERVAL_LIMIT, isSubtileIterateMode, reject, roundupRatio, pvar
-from .Validators.MXScaleFormat import validateHostPreSwizzle128x4, validateMXScaleFormatCombination
+from .Validators.MXScaleFormat import validateHostPreSwizzle128x4, validateMXScaleFormatCombination, \
+    validateSwizzleLayout
 from .Validators.Subtile import (subtileStackForTLU1, subtileTLU1StackReason,
                                  validateSubtileGRKPartition)
 from ..Common.Utilities import isMxf4SubtilePath, isSubtileSwizzledTensor, plsinDataTypes, swizzleTensorMaxDepthU
@@ -147,6 +148,8 @@ def _deriveAndValidateMXScaleLayoutAndTransport(state, asmCaps, archCaps, printR
   isGfx950     = state["ISA"] == (9, 5, 0)
 
   if not validateHostPreSwizzle128x4(state, False, printRejectionReason):
+    return False
+  if not validateSwizzleLayout(state, False, printRejectionReason):
     return False
 
   # MXLoadInst default: TDM iff TDMInst != 0; otherwise BufferLoad.
@@ -1061,10 +1064,13 @@ class Solution(collections.abc.Mapping):
     if isHandwrittenCustomKernel:
       Solution._assignCustomKernelParameters(self._state)
       self._name = self._state["CustomKernel"]["name"]
-      validateHostPreSwizzle128x4(self._state, True, printSolutionRejectionReason)
+      if validateHostPreSwizzle128x4(self._state, True, printSolutionRejectionReason):
+        validateSwizzleLayout(self._state, True, printSolutionRejectionReason)
     else:
       # Pre-derived states skip assignDerivedParameters' own check.
       if not validateHostPreSwizzle128x4(self._state, False, printSolutionRejectionReason):
+        return
+      if not validateSwizzleLayout(self._state, False, printSolutionRejectionReason):
         return
       savedCustomKernel = self._state.pop("CustomKernel", None) if "CustomKernel" in self._state else None
       Solution.assignDerivedParameters(

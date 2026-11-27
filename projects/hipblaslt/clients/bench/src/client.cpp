@@ -60,6 +60,90 @@ struct perf_matmul : hipblaslt_test_valid
     }
 };
 
+// --orderA, --orderB and the 1019 scale mode select one of the FP6 order and scale pairs
+// hipblaslt.h documents; any other combination fails here instead of running another layout.
+void validate_fp6_tile_orders(const Arguments& arg)
+{
+    auto const isTileOrder = [](int32_t order) {
+        return order >= HIPBLASLT_ORDER_COL256_R128_EXT
+               && order <= HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_SPLIT_EXT;
+    };
+    if((arg.order_a != 0 && !isTileOrder(arg.order_a))
+       || (arg.order_b != 0 && !isTileOrder(arg.order_b)))
+        throw std::invalid_argument("--orderA and --orderB accept 0, 104, 105, 106, 107 or 108; got "
+                                    "--orderA "
+                                    + std::to_string(arg.order_a) + " --orderB "
+                                    + std::to_string(arg.order_b));
+    if(arg.order_a != 0 && !arg.swizzle_a)
+        throw std::invalid_argument("--orderA " + std::to_string(arg.order_a)
+                                    + " needs --swizzleA");
+    if(arg.order_b != 0 && !arg.swizzle_b)
+        throw std::invalid_argument("--orderB " + std::to_string(arg.order_b)
+                                    + " needs --swizzleB");
+
+    auto const page24 = hipblaslt_scaling_format::Block_32_UE8M0_128_4_PAGE24_EXT;
+    if(arg.order_a == 0 && arg.order_b == 0 && arg.scaleA != page24 && arg.scaleB != page24)
+        return;
+
+    auto const isFp6 = [](hipDataType t) { return t == HIP_R_6F_E2M3 || t == HIP_R_6F_E3M2; };
+    if(!isFp6(arg.a_type) || !isFp6(arg.b_type))
+        throw std::invalid_argument("--orderA, --orderB and --scaleA/--scaleB 1019 need --a_type "
+                                    "and --b_type f6_r or bf6_r");
+
+    int32_t const col    = HIPBLASLT_ORDER_COL;
+    int32_t const orderA = !arg.swizzle_a          ? col
+                           : arg.order_a != 0      ? arg.order_a
+                                                   : int32_t(HIPBLASLT_ORDER_COL256_R128_EXT);
+    int32_t const orderB = !arg.swizzle_b          ? col
+                           : arg.order_b != 0      ? arg.order_b
+                                                   : int32_t(HIPBLASLT_ORDER_COL256_R128_EXT);
+    auto const    tile   = hipblaslt_scaling_format::Block_32_UE8M0_128_4_EXT;
+    struct Pair
+    {
+        int32_t                  orderA, orderB;
+        hipblaslt_scaling_format scaleA, scaleB;
+    };
+    static const Pair pairs[] = {
+        {HIPBLASLT_ORDER_COL256_R128_EXT, HIPBLASLT_ORDER_COL256_R128_EXT, tile, tile},
+        {HIPBLASLT_ORDER_COL256_R128_EXT, col, tile, tile},
+        {HIPBLASLT_ORDER_COL256_R128_P48_EXT, HIPBLASLT_ORDER_COL256_R128_P48_EXT, tile, tile},
+        {HIPBLASLT_ORDER_COL256_R128_P16_EXT, col, tile, tile},
+        {HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_EXT,
+         HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_SPLIT_EXT,
+         page24,
+         tile},
+    };
+    auto const name = [&](int32_t order) {
+        return order == col ? std::string("column (no --swizzle)") : std::to_string(order);
+    };
+    if(std::none_of(std::begin(pairs), std::end(pairs), [&](const Pair& p) {
+           return p.orderA == orderA && p.orderB == orderB && p.scaleA == arg.scaleA
+                  && p.scaleB == arg.scaleB;
+       }))
+        throw std::invalid_argument(
+            "Unsupported FP6 order and scale pair: A order " + name(orderA) + " with --scaleA "
+            + std::to_string(int(arg.scaleA)) + ", B order " + name(orderB) + " with --scaleB "
+            + std::to_string(int(arg.scaleB))
+            + ". Supported: A 104 with B 104 or column, A 105 with B 105, A 106 with B column, "
+              "each with --scaleA 1018 --scaleB 1018; A 107 with B 108, --scaleA 1019 --scaleB "
+              "1018.");
+
+    if(arg.transA != 'T' || arg.transB != 'N' || arg.batch_count != 1 || arg.grouped_gemm)
+        throw std::invalid_argument("The FP6 128x4 orders need --transA T --transB N, batch count "
+                                    "1 and no grouped GEMM");
+    if(arg.lda[0] != arg.K[0] || arg.ldb[0] != arg.K[0])
+        throw std::invalid_argument("The FP6 128x4 orders need --lda and --ldb equal to K = "
+                                    + std::to_string(arg.K[0]) + "; got --lda "
+                                    + std::to_string(arg.lda[0]) + " --ldb "
+                                    + std::to_string(arg.ldb[0]));
+    if(orderA == HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_EXT
+       && (arg.M[0] != 4096 || arg.N[0] != 4096 || arg.K[0] % 128 != 0 || arg.K[0] / 128 > 768))
+        throw std::invalid_argument("A in order 107 and B in order 108 need m = n = 4096 and K a "
+                                    "multiple of 128 of at most 98304; got m = "
+                                    + std::to_string(arg.M[0]) + " n = " + std::to_string(arg.N[0])
+                                    + " k = " + std::to_string(arg.K[0]));
+}
+
 int run_bench_test(Arguments&         arg,
                    const std::string& filter,
                    bool               any_stride,
@@ -168,6 +252,8 @@ int run_bench_test(Arguments&         arg,
             arg.stride_e[i] = min_stride_e;
         }
     }
+
+    validate_fp6_tile_orders(arg);
 
     // Check for F8 OCP data types and convert to NANOO
     {
@@ -472,6 +558,18 @@ try
          value<bool>(&arg.swizzle_b)->default_value(false),
          "Enable tensor swizzling for B")
 
+        ("orderA",
+         value<int32_t>(&arg.order_a)->default_value(0),
+         "hipblasLtOrder_t of the swizzled A, in place of the one --swizzleA picks for its type; 0 keeps that one. "
+         "f6_r/bf6_r with --swizzleA: 104 = COL256_R128, 105 = COL256_R128_P48, 106 = COL256_R128_P16, "
+         "107 = COL256_R128_P48_PAGE24. Pairs: 104 with B in 104 or column, 105 with B in 105, "
+         "106 with B in column (no --swizzleB), 107 with B in 108 and --scaleA 1019.")
+
+        ("orderB",
+         value<int32_t>(&arg.order_b)->default_value(0),
+         "hipblasLtOrder_t of the swizzled B, in place of the one --swizzleB picks for its type; 0 keeps that one. "
+         "f6_r/bf6_r with --swizzleB: 104, 105, or 108 = COL256_R128_P48_PAGE24_SPLIT (with A in 107). See --orderA.")
+
         ("batch_count",
          value<int32_t>(&arg.batch_count)->default_value(1),
          "Number of matrices. Only applicable to batched and strided_batched routines")
@@ -617,7 +715,8 @@ try
         ("scaleA",
          value<int>(&scaleAFormat)->default_value(0),
          "Apply scale for A buffer. 0 = None, 1 = scalar, 2 = vector, 3 = B32E8, 4 = B16E8, 5 = B32E4M3, 6 = B16E4M3, 7 = B32E5M3, 8 = B16E5M3, 1001 = block_preswizzled_32x8, "
-         "1018 = B32E8 in 128x4 tiles (f6_r/bf6_r TN with --swizzleA and optionally --swizzleB, on A and B). "
+         "1018 = B32E8 in 128x4 tiles (f6_r/bf6_r TN with --swizzleA and optionally --swizzleB, on A and B), "
+         "1019 = 1018 scales placed in 2 MiB pages (f6_r/bf6_r TN, on A only, with --orderA 107 --orderB 108, m = 4096, and --scaleB 1018). "
          "w4a16 group scales (require --a_type i4_r), numbered as hipblasLtMatmulMatrixScale_t: "
          "bf16 scales: 1006 = VEC32, 1007 = VEC64, 1008 = VEC128, 1009 = VEC32_ZP, "
          "1010 = VEC64_ZP, 1011 = VEC128_ZP; fp16 scales: 1012..1017 in the same "
@@ -632,7 +731,8 @@ try
         ("scaleB",
          value<int>(&scaleBFormat)->default_value(0),
          "Apply scale for B buffer. 0 = None, 1 = scalar, 2 = vector, 3 = B32E8, 4 = B16E8, 5 = B32E4M3, 6 = B16E4M3, 7 = B32E5M3, 8 = B16E5M3, 1001 = block_preswizzled_32x8, "
-         "1018 = B32E8 in 128x4 tiles (f6_r/bf6_r TN with --swizzleA and optionally --swizzleB, on A and B).")
+         "1018 = B32E8 in 128x4 tiles (f6_r/bf6_r TN with --swizzleA and optionally --swizzleB, on A and B), "
+         "1019 = 1018 scales placed in 2 MiB pages (A only; --scaleB 1019 is rejected, see --scaleA).")
 
         ("scaleC",
          value<int>(&scaleCFormat)->default_value(0),
@@ -1240,10 +1340,14 @@ try
             return hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT;
         if(s == 1018)
             return hipblaslt_scaling_format::Block_32_UE8M0_128_4_EXT;
+        if(s == 1019)
+            return hipblaslt_scaling_format::Block_32_UE8M0_128_4_PAGE24_EXT;
         // w4a16 group scales; numbered as hipblasLtMatmulMatrixScale_t.
         if(s >= 1006 && s <= 1017)
             return static_cast<hipblaslt_scaling_format>(s);
-        return hipblaslt_scaling_format::none;
+        // Running such a value unscaled would replay a logged line as another problem.
+        throw std::invalid_argument("Unsupported value for --scaleA or --scaleB: "
+                                    + std::to_string(s));
     };
     arg.scaleA = scaleInt2Enum(scaleAFormat);
     arg.scaleB = scaleInt2Enum(scaleBFormat);
@@ -1263,7 +1367,8 @@ try
                             || arg.scaleA == hipblaslt_scaling_format::Block_32_UE5M3
                             || arg.scaleA == hipblaslt_scaling_format::Block_16_UE5M3
                             || arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT
-                            || arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_128_4_EXT))
+                            || arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_128_4_EXT
+                            || arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_128_4_PAGE24_EXT))
         throw std::invalid_argument("Only Tensorwide scaling is supported when batch_mode is HIPBLASLT_BATCH_MODE_POINTER_ARRAY (General Batched Gemm) for matrix A.");
     if(arg.batch_mode == 1 && (arg.scaleB == hipblaslt_scaling_format::Vector
                             || arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0
@@ -1273,7 +1378,8 @@ try
                             || arg.scaleB == hipblaslt_scaling_format::Block_32_UE5M3
                             || arg.scaleB == hipblaslt_scaling_format::Block_16_UE5M3
                             || arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT
-                            || arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_128_4_EXT))
+                            || arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_128_4_EXT
+                            || arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_128_4_PAGE24_EXT))
         throw std::invalid_argument("Only Tensorwide scaling is supported when batch_mode is HIPBLASLT_BATCH_MODE_POINTER_ARRAY (General Batched Gemm) for matrix B.");
 
     // Block scaling only allows F8/F6/F4

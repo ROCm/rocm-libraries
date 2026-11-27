@@ -133,6 +133,44 @@ hipblasLtOrder_t orderForDatatype(hipDataType datatype)
     }
 }
 
+// The order of a swizzled operand: orderOverride (--orderA, --orderB) when set.
+hipblasLtOrder_t swizzleOrder(hipDataType datatype, int32_t orderOverride)
+{
+    return orderOverride != 0 ? static_cast<hipblasLtOrder_t>(orderOverride)
+                              : orderForDatatype(datatype);
+}
+
+bool isPlacedFp6Order(hipblasLtOrder_t order)
+{
+    return order == HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_EXT
+           || order == HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_SPLIT_EXT;
+}
+
+// HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_PAGE24_EXT: scale starts with the
+// [rows][K block] scales of a K-contiguous operand and is replaced by their placed image.
+void placePage24Scales(HipHostBuffer& scale, size_t rows, size_t kBlocks)
+{
+    if(rows != mx_tile128x4::kPlacedScaleRows)
+        throw std::invalid_argument("HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_PAGE24_EXT "
+                                    "needs 4096 rows; got "
+                                    + std::to_string(rows));
+    uint8_t* const             bytes = scale.as<uint8_t>();
+    std::vector<uint8_t> const raw(bytes, bytes + rows * kBlocks);
+    std::vector<uint8_t> const placed = mx_tile128x4::placeScales(raw, kBlocks);
+    if(placed.size() > scale.getNumBytes())
+        throw std::invalid_argument("placed scale buffer is smaller than the mode needs");
+    std::memcpy(bytes, placed.data(), placed.size());
+}
+
+// A placed FP6 operand's device block is larger than its host copy: only the host bytes
+// are uploaded, to the first block, which the swizzle later overwrites in every block.
+hipError_t uploadOperand(HipDeviceBuffer& dBuf, const HipHostBuffer& hBuf, size_t block_count)
+{
+    if(dBuf.getNumBytes() / block_count <= hBuf.getNumBytes())
+        return synchronize(dBuf, hBuf, block_count);
+    return hipMemcpy(dBuf.as<char>(), hBuf.as<char>(), hBuf.getNumBytes(), hipMemcpyHostToDevice);
+}
+
 void calculateKforSwizzling(
     hipDataType datatype, const Arguments& arg, size_t& MiK, size_t& MiKv, size_t& PackK)
 {
@@ -485,15 +523,45 @@ void swizzle_tensor_type(HipHostBuffer&       dst,
     }
 }
 
-// HIPBLASLT_ORDER_COL256_R128_EXT. src holds m_n packed FP6 rows of k elements.
-void tile_fp6_tensor(
-    HipHostBuffer& dst, const HipHostBuffer& src, size_t b, size_t m_n, size_t k, size_t ld)
+// The HIPBLASLT_ORDER_COL256_R128_* orders. src holds m_n packed FP6 rows of k elements.
+void tile_fp6_tensor(HipHostBuffer&       dst,
+                     const HipHostBuffer& src,
+                     size_t               b,
+                     size_t               m_n,
+                     size_t               k,
+                     size_t               ld,
+                     hipblasLtOrder_t     order)
 {
     if(ld != k)
-        throw std::invalid_argument("HIPBLASLT_ORDER_COL256_R128_EXT requires ld equal to K");
+        throw std::invalid_argument("HIPBLASLT_ORDER_COL256_R128_* orders require ld equal to K");
     if(b != 1)
-        throw std::invalid_argument("HIPBLASLT_ORDER_COL256_R128_EXT requires batch count 1");
-    mx_tile128x4::tileFp6Data(dst.as<uint8_t>(), src.as<uint8_t>(), m_n, k);
+        throw std::invalid_argument("HIPBLASLT_ORDER_COL256_R128_* orders require batch count 1");
+    uint8_t*       out = dst.as<uint8_t>();
+    uint8_t const* in  = src.as<uint8_t>();
+    switch(order)
+    {
+    case HIPBLASLT_ORDER_COL256_R128_EXT:
+        mx_tile128x4::tileFp6Data(out, in, m_n, k);
+        return;
+    case HIPBLASLT_ORDER_COL256_R128_P48_EXT:
+        mx_tile128x4::tileFp6Data(out, in, m_n, k, mx_tile128x4::TileOrder::P48);
+        return;
+    case HIPBLASLT_ORDER_COL256_R128_P16_EXT:
+        mx_tile128x4::tileFp6Data(out, in, m_n, k, mx_tile128x4::TileOrder::P16);
+        return;
+    case HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_EXT:
+    case HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_SPLIT_EXT:
+    {
+        bool const split = order == HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_SPLIT_EXT;
+        if(dst.getNumBytes() < mx_tile128x4::placedFp6Bytes(m_n, split))
+            throw std::invalid_argument("placed FP6 buffer is smaller than the order needs");
+        std::memset(out, 0, dst.getNumBytes());
+        mx_tile128x4::placeFp6Data(out, in, m_n, k, split);
+        return;
+    }
+    default:
+        throw std::invalid_argument("FP6 swizzle: unsupported order " + std::to_string(order));
+    }
 }
 
 void swizzle_operand(HipHostBuffer&       dst,
@@ -503,10 +571,11 @@ void swizzle_operand(HipHostBuffer&       dst,
                      size_t               b,
                      size_t               m_n,
                      size_t               k,
-                     size_t               ld)
+                     size_t               ld,
+                     int32_t              orderOverride)
 {
     if(isFp6Datatype(datatype))
-        tile_fp6_tensor(dst, src, b, m_n, k, ld);
+        tile_fp6_tensor(dst, src, b, m_n, k, ld, swizzleOrder(datatype, orderOverride));
     else
         swizzle_tensor_type(dst, src, datatype, arg, b, m_n, k, ld, false);
 }
@@ -2347,6 +2416,10 @@ void testing_matmul_with_bias(const Arguments& arg,
                                    << std::endl;
             }
             size_dA[i] = (batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY) ? stride_swizzle : (num_batches[i] * stride_swizzle);
+            hipblasLtOrder_t const orderA = swizzleOrder(TiA, arg.order_a);
+            if(isPlacedFp6Order(orderA))
+                size_dA[i] = mx_tile128x4::placedFp6Bytes(
+                    M[i], orderA == HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_SPLIT_EXT);
         }
 
         if(batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
@@ -2378,6 +2451,10 @@ void testing_matmul_with_bias(const Arguments& arg,
                                    << std::endl;
             }
             size_dB[i] = (batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY) ? stride_swizzle : (num_batches[i] * stride_swizzle);
+            hipblasLtOrder_t const orderB = swizzleOrder(TiB, arg.order_b);
+            if(isPlacedFp6Order(orderB))
+                size_dB[i] = mx_tile128x4::placedFp6Bytes(
+                    N[i], orderB == HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_SPLIT_EXT);
         }
         if(batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
         {
@@ -2798,14 +2875,14 @@ void testing_matmul_with_bias(const Arguments& arg,
 
         if(do_swizzle_a)
         {
-            hipblasLtOrder_t orderA = orderForDatatype(TiA);
+            hipblasLtOrder_t orderA = swizzleOrder(TiA, arg.order_a);
             CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutSetAttribute(
                 matA[i], HIPBLASLT_MATRIX_LAYOUT_ORDER, &orderA, sizeof(orderA)));
         }
 
         if(do_swizzle_b)
         {
-            hipblasLtOrder_t orderB = orderForDatatype(TiB);
+            hipblasLtOrder_t orderB = swizzleOrder(TiB, arg.order_b);
             CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutSetAttribute(
                 matB[i], HIPBLASLT_MATRIX_LAYOUT_ORDER, &orderB, sizeof(orderB)));
         }
@@ -3520,7 +3597,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                 refAAll.insert(refAAll.end(), batchRef.begin(), batchRef.end());
             }
             refA.emplace_back(std::move(refAAll));
-            CHECK_HIP_ERROR(synchronize(dA[i], hA[i], block_count));
+            if(arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_128_4_PAGE24_EXT)
+                placePage24Scales(hScaleA[i], M[i], K[i] / blockSize(arg.scaleA));
+            CHECK_HIP_ERROR(uploadOperand(dA[i], hA[i], block_count));
             CHECK_HIP_ERROR(synchronize(dScaleA[i], hScaleA[i], block_count));
 #else
 #ifdef GOOGLE_TEST
@@ -3633,7 +3712,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                 refBAll.insert(refBAll.end(), batchRef.begin(), batchRef.end());
             }
             refB.emplace_back(std::move(refBAll));
-            CHECK_HIP_ERROR(synchronize(dB[i], hB[i], block_count));
+            if(arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_128_4_PAGE24_EXT)
+                placePage24Scales(hScaleB[i], N[i], K[i] / blockSize(arg.scaleB));
+            CHECK_HIP_ERROR(uploadOperand(dB[i], hB[i], block_count));
             CHECK_HIP_ERROR(synchronize(dScaleB[i], hScaleB[i], block_count));
 #else
 #ifdef GOOGLE_TEST
@@ -3819,7 +3900,8 @@ void testing_matmul_with_bias(const Arguments& arg,
             {
                 HipHostBuffer tmp(TiA, size_dA[i]);
                 CHECK_HOST_ALLOCATION(host_allocation_failure(tmp));
-                swizzle_operand(tmp, hA[i], TiA, arg, num_batches[i], M[i], K[i], lda[i]);
+                swizzle_operand(
+                    tmp, hA[i], TiA, arg, num_batches[i], M[i], K[i], lda[i], arg.order_a);
                 CHECK_HIP_ERROR(synchronize(dA[i], tmp, block_count));
             }
 
@@ -3827,7 +3909,8 @@ void testing_matmul_with_bias(const Arguments& arg,
             {
                 HipHostBuffer tmp(TiB, size_dB[i]);
                 CHECK_HOST_ALLOCATION(host_allocation_failure(tmp));
-                swizzle_operand(tmp, hB[i], TiB, arg, num_batches[i], N[i], K[i], ldb[i]);
+                swizzle_operand(
+                    tmp, hB[i], TiB, arg, num_batches[i], N[i], K[i], ldb[i], arg.order_b);
                 CHECK_HIP_ERROR(synchronize(dB[i], tmp, block_count));
             }
 
@@ -4117,6 +4200,10 @@ void testing_matmul_with_bias(const Arguments& arg,
                 {
                     mode = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT;
                 }
+                else if(arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_128_4_PAGE24_EXT)
+                {
+                    mode = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_PAGE24_EXT;
+                }
                 else if(isW4A16Scaling(arg.scaleA))
                 {
                     // Client scale values match the public API enum.
@@ -4182,6 +4269,10 @@ void testing_matmul_with_bias(const Arguments& arg,
                 else if(arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_128_4_EXT)
                 {
                     mode = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT;
+                }
+                else if(arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_128_4_PAGE24_EXT)
+                {
+                    mode = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_PAGE24_EXT;
                 }
 
                 if(mode != HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F)
@@ -4317,7 +4408,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                 {
                     HipHostBuffer tmp(TiA, size_dA[i]);
                     CHECK_HOST_ALLOCATION(host_allocation_failure(tmp));
-                    swizzle_operand(tmp, hA[batchCount], TiA, arg, 1, M[i], K[i], lda[i]);
+                    swizzle_operand(
+                        tmp, hA[batchCount], TiA, arg, 1, M[i], K[i], lda[i], arg.order_a);
                     CHECK_HIP_ERROR(synchronize(dA[batchCount], tmp, block_count));
                 }
 
@@ -4325,7 +4417,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                 {
                     HipHostBuffer tmp(TiB, size_dB[i]);
                     CHECK_HOST_ALLOCATION(host_allocation_failure(tmp));
-                    swizzle_operand(tmp, hB[batchCount], TiB, arg, 1, N[i], K[i], ldb[i]);
+                    swizzle_operand(
+                        tmp, hB[batchCount], TiB, arg, 1, N[i], K[i], ldb[i], arg.order_b);
                     CHECK_HIP_ERROR(synchronize(dB[batchCount], tmp, block_count));
                 }
                 //// copy data from CPU to device end
@@ -4724,6 +4817,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                             return HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT;
                         case hipblaslt_scaling_format::Block_32_UE8M0_128_4_EXT:
                             return HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT;
+                        case hipblaslt_scaling_format::Block_32_UE8M0_128_4_PAGE24_EXT:
+                            return HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_PAGE24_EXT;
                         default:
                             // Client scale values match the public API enum.
                             if(isW4A16Scaling(f))
@@ -4790,12 +4885,12 @@ void testing_matmul_with_bias(const Arguments& arg,
 
         if(do_swizzle_a)
         {
-            hipblasLtOrder_t orderA = orderForDatatype(TiA);
+            hipblasLtOrder_t orderA = swizzleOrder(TiA, arg.order_a);
             extproblemtype.setOrderA(orderA);
         }
         if(do_swizzle_b)
         {
-            hipblasLtOrder_t orderB = orderForDatatype(TiB);
+            hipblasLtOrder_t orderB = swizzleOrder(TiB, arg.order_b);
             extproblemtype.setOrderB(orderB);
         }
     }

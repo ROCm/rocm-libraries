@@ -30,7 +30,8 @@ from . import Contractions
 from .Common import state, IsaInfo
 from .Common.Architectures import gfxToIsa, supportsChipIdPredicate
 from .SolutionStructs.Naming import getSolutionNameMin, getKernelNameMin
-from .SolutionStructs.Problem import isFusedA2A, splitFusedA2ARow
+from .SolutionStructs.Problem import isFusedA2A, splitFusedA2ARow, SWIZZLE_LAYOUT_IDS, \
+    swizzleLayoutToken
 
 class SingleSolutionLibrary:
     Tag = "Single"
@@ -538,11 +539,12 @@ class MasterSolutionLibrary:
                         tile = str(problemType.mxBlockFreeB) + 'x' + tile
                     placeholderName += ('_MXB' + str(problemType.mxTypeB) + 'B' + tile)
 
+                layoutNames = {v: k for k, v in SWIZZLE_LAYOUT_IDS.items()}
                 if problemType.swizzleTensorA:
-                    placeholderName += '_STA'
+                    placeholderName += '_STA' + swizzleLayoutToken(layoutNames[getattr(problemType, 'swizzleLayoutA', 0)])
 
                 if problemType.swizzleTensorB:
-                    placeholderName += '_STB'
+                    placeholderName += '_STB' + swizzleLayoutToken(layoutNames[getattr(problemType, 'swizzleLayoutB', 0)])
 
                 if problemType.useBias:
                     placeholderName += '_Bias'

@@ -190,6 +190,22 @@ inline bool isFp6Datatype(hipDataType datatype)
            || datatype == static_cast<hipDataType>(HIP_R_6F_E3M2);
 }
 
+/// The FP6 orders tiled in 256 columns by 128 rows.
+inline bool isFp6TiledOrder(hipblasLtOrder_t order)
+{
+    switch(order)
+    {
+    case HIPBLASLT_ORDER_COL256_R128_EXT:
+    case HIPBLASLT_ORDER_COL256_R128_P48_EXT:
+    case HIPBLASLT_ORDER_COL256_R128_P16_EXT:
+    case HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_EXT:
+    case HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_SPLIT_EXT:
+        return true;
+    default:
+        return false;
+    }
+}
+
 inline bool isValidOrderForDatatype(hipDataType datatype, hipblasLtOrder_t order)
 {
     if((datatype == HIP_R_16F && order != HIPBLASLT_ORDER_COL16_4R8)
@@ -197,18 +213,21 @@ inline bool isValidOrderForDatatype(hipDataType datatype, hipblasLtOrder_t order
        || (datatype == HIP_R_8F_E4M3 && order != HIPBLASLT_ORDER_COL16_4R16)
        || (datatype == HIP_R_8F_E4M3_FNUZ && order != HIPBLASLT_ORDER_COL16_4R16)
        || (datatype == HIP_R_4F_E2M1 && order != HIPBLASLT_ORDER_COL16_4R32)
-       || (isFp6Datatype(datatype) && order != HIPBLASLT_ORDER_COL256_R128_EXT))
+       || (isFp6Datatype(datatype) && !isFp6TiledOrder(order)))
     {
         return false;
     }
     return true;
 }
 
-/// HIPBLASLT_ORDER_COL256_R128_EXT and HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT
-/// describe one input layout: accepted only together, on both A and B of an FP6 TN GEMM,
-/// except that B may keep HIPBLASLT_ORDER_COL.
-/// Shared by rocblaslt_matmul_valid_args and the ext and grouped setProblem paths.
-/// Returns rocblaslt_status_continue if the problem uses neither or uses them validly.
+/// The FP6 tiled orders and the 128x4 scale modes describe one input layout, accepted only
+/// in these combinations of an FP6 TN GEMM:
+///   A COL256_R128  B COL256_R128 or COL  scales 128_4, 128_4
+///   A P48          B P48                 scales 128_4, 128_4
+///   A P16          B COL                 scales 128_4, 128_4
+///   A P48_PAGE24  B P48_PAGE24_SPLIT     scales 128_4_PAGE24, 128_4 (m = n = 4096, K/128 <= 768)
+/// B in COL has ldb = K. Shared by rocblaslt_matmul_valid_args and the ext and grouped
+/// setProblem paths. Returns rocblaslt_status_continue if the problem uses neither or uses them validly.
 inline rocblaslt_status
     validateFp6Tile128x4Args(hipDataType                                typeA,
                              hipDataType                                typeB,
@@ -224,21 +243,25 @@ inline rocblaslt_status
                              int64_t                                    lda,
                              int64_t                                    ldb)
 {
-    constexpr auto kScale = RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT;
-    const bool     tiledA = orderA == HIPBLASLT_ORDER_COL256_R128_EXT;
-    const bool     tiledB = orderB == HIPBLASLT_ORDER_COL256_R128_EXT;
-    const bool     scaleA = scaleAType == kScale;
-    const bool     scaleB = scaleBType == kScale;
+    using Scale            = RocblasltContractionProblem::ScalingFormat;
+    constexpr auto kScale  = Scale::Block_32_UE8M0_128_4_EXT;
+    constexpr auto kPlaced = Scale::Block_32_UE8M0_128_4_PAGE24_EXT;
+    const bool     tiledA  = isFp6TiledOrder(orderA);
+    const bool     tiledB  = isFp6TiledOrder(orderB);
+    const bool     scaleA  = scaleAType == kScale || scaleAType == kPlaced;
+    const bool     scaleB  = scaleBType == kScale || scaleBType == kPlaced;
+    const bool     placedA = orderA == HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_EXT;
+    const bool     dense   = scaleAType == kScale && scaleBType == kScale;
     // isValidOrderForDatatype for FP6, which the ext and grouped paths do not call.
     auto fp6OrderOk = [](hipDataType type, hipblasLtOrder_t order) {
-        return !isFp6Datatype(type) || order == HIPBLASLT_ORDER_COL
-               || order == HIPBLASLT_ORDER_ROW || order == HIPBLASLT_ORDER_COL256_R128_EXT;
+        return !isFp6Datatype(type) || order == HIPBLASLT_ORDER_COL || order == HIPBLASLT_ORDER_ROW
+               || isFp6TiledOrder(order);
     };
     if(!fp6OrderOk(typeA, orderA) || !fp6OrderOk(typeB, orderB))
     {
         log_error(__func__,
                   "HIP_R_6F_E2M3 and HIP_R_6F_E3M2 support only HIPBLASLT_ORDER_COL, "
-                  "HIPBLASLT_ORDER_ROW and HIPBLASLT_ORDER_COL256_R128_EXT; got orderA=",
+                  "HIPBLASLT_ORDER_ROW and the HIPBLASLT_ORDER_COL256_R128 orders; got orderA=",
                   static_cast<int>(orderA),
                   " orderB=",
                   static_cast<int>(orderB));
@@ -246,12 +269,31 @@ inline rocblaslt_status
     }
     if(!tiledA && !tiledB && !scaleA && !scaleB)
         return rocblaslt_status_continue;
-    if(!(tiledA && (tiledB || orderB == HIPBLASLT_ORDER_COL) && scaleA && scaleB))
+    bool pairOk = false;
+    switch(orderA)
+    {
+    case HIPBLASLT_ORDER_COL256_R128_EXT:
+        pairOk = dense && (orderB == orderA || orderB == HIPBLASLT_ORDER_COL);
+        break;
+    case HIPBLASLT_ORDER_COL256_R128_P48_EXT:
+        pairOk = dense && orderB == orderA;
+        break;
+    case HIPBLASLT_ORDER_COL256_R128_P16_EXT:
+        pairOk = dense && orderB == HIPBLASLT_ORDER_COL;
+        break;
+    case HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_EXT:
+        pairOk = orderB == HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_SPLIT_EXT
+                 && scaleAType == kPlaced && scaleBType == kScale;
+        break;
+    default:
+        break;
+    }
+    if(!pairOk)
     {
         log_error(__func__,
-                  "HIPBLASLT_ORDER_COL256_R128_EXT and "
-                  "HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT must be set together on "
-                  "both A and B, except that B may use HIPBLASLT_ORDER_COL; got orderA=",
+                  "the HIPBLASLT_ORDER_COL256_R128 orders and the "
+                  "HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4 scale modes must be set "
+                  "together on A and B, in a combination listed for the orders; got orderA=",
                   static_cast<int>(orderA),
                   " orderB=",
                   static_cast<int>(orderB),
@@ -264,8 +306,8 @@ inline rocblaslt_status
     if(!isFp6Datatype(typeA) || !isFp6Datatype(typeB))
     {
         log_error(__func__,
-                  "HIPBLASLT_ORDER_COL256_R128_EXT requires HIP_R_6F_E2M3 or HIP_R_6F_E3M2 A and "
-                  "B; got a_type=",
+                  "the HIPBLASLT_ORDER_COL256_R128 orders require HIP_R_6F_E2M3 or HIP_R_6F_E3M2 "
+                  "A and B; got a_type=",
                   static_cast<int>(typeA),
                   " b_type=",
                   static_cast<int>(typeB));
@@ -274,14 +316,14 @@ inline rocblaslt_status
     if(opA != HIPBLAS_OP_T || opB != HIPBLAS_OP_N)
     {
         log_error(__func__,
-                  "HIPBLASLT_ORDER_COL256_R128_EXT requires opA = HIPBLAS_OP_T and opB = "
+                  "the HIPBLASLT_ORDER_COL256_R128 orders require opA = HIPBLAS_OP_T and opB = "
                   "HIPBLAS_OP_N");
         return rocblaslt_status_invalid_value;
     }
     if(m % 256 != 0 || k % 128 != 0 || n % (tiledB ? 256 : 128) != 0 || lda != k || ldb != k)
     {
         log_error(__func__,
-                  "HIPBLASLT_ORDER_COL256_R128_EXT requires m to be a multiple of 256, k a "
+                  "the HIPBLASLT_ORDER_COL256_R128 orders require m to be a multiple of 256, k a "
                   "multiple of 128, n a multiple of 256 with B in that order and of 128 "
                   "otherwise, and lda = ldb = k; got m=",
                   m,
@@ -293,6 +335,18 @@ inline rocblaslt_status
                   lda,
                   " ldb=",
                   ldb);
+        return rocblaslt_status_invalid_value;
+    }
+    if(placedA && (m != 4096 || n != 4096 || k / 128 > 768))
+    {
+        log_error(__func__,
+                  "HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_EXT requires m = n = 4096 and k at most "
+                  "98304; got m=",
+                  m,
+                  " n=",
+                  n,
+                  " k=",
+                  k);
         return rocblaslt_status_invalid_value;
     }
     return rocblaslt_status_continue;
@@ -778,7 +832,11 @@ inline rocblaslt_status
     const bool w4a16ScalarB
         = isW4A16ScaleFormat(scaleAType)
           && scaleBType == RocblasltContractionProblem::ScalingFormat::Scalar;
-    if(!w4a16ScalarB
+    // validateFp6Tile128x4Args checks the orders this pair needs.
+    const bool placed128x4
+        = scaleAType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_PAGE24_EXT
+          && scaleBType == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT;
+    if(!w4a16ScalarB && !placed128x4
        && scaleAType != RocblasltContractionProblem::ScalingFormat::None
        && scaleBType != RocblasltContractionProblem::ScalingFormat::None
        && scaleAType != scaleBType)

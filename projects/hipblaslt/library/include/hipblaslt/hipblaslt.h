@@ -392,7 +392,8 @@ typedef enum {
     HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16F_ZP_EXT = 1015, /**<Equivalent to ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16BF_ZP_EXT`` with ``HIP_R_16F`` scales. */
     HIPBLASLT_MATMUL_MATRIX_SCALE_VEC64_16F_ZP_EXT = 1016, /**<Equivalent to ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16F_ZP_EXT`` with a block size of 64. */
     HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_16F_ZP_EXT = 1017, /**<Equivalent to ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16F_ZP_EXT`` with a block size of 128. */
-    HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT = 1018, /**<Scaling factors are 8-bit ``R_8F_UE8M0`` values, one for each 32-element block in the K dimension, shuffled in tiles of 128 rows by 4 blocks. For an operand with ``R`` rows (M for A, N for B), the scale of row ``r`` and K block ``kb`` is at byte ``((s*(R/128) + r/128)*64 + 16*g + r%16)*8 + (r%128)/16``, where ``s = kb/4`` and ``g = kb%4``. ``R`` must be a multiple of 128 and the number of K blocks a multiple of 4. Supported for ``HIP_R_6F_E2M3`` and ``HIP_R_6F_E3M2`` A and B only, on both A and B together, with ``HIPBLASLT_ORDER_COL256_R128_EXT`` on A and on B or ``HIPBLASLT_ORDER_COL`` with ``ldb = K`` on B, ``HIPBLAS_OP_T`` for A and ``HIPBLAS_OP_N`` for B. Solutions are specific to an architecture and to exact problem sizes, and need beta = 0, which hipblasLtMatmulAlgoGetHeuristic() does not assume: query them with the extension API's heuristic. */
+    HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT = 1018, /**<Scaling factors are 8-bit ``R_8F_UE8M0`` values, one for each 32-element block in the K dimension, shuffled in tiles of 128 rows by 4 blocks. For an operand with ``R`` rows (M for A, N for B), the scale of row ``r`` and K block ``kb`` is at byte ``((s*(R/128) + r/128)*64 + 16*g + r%16)*8 + (r%128)/16``, where ``s = kb/4`` and ``g = kb%4``. ``R`` must be a multiple of 128 and the number of K blocks a multiple of 4. Supported for ``HIP_R_6F_E2M3`` and ``HIP_R_6F_E3M2`` A and B only, on both A and B together, with ``HIPBLASLT_ORDER_COL256_R128_EXT`` on A and on B or ``HIPBLASLT_ORDER_COL`` with ``ldb = K`` on B, ``HIPBLASLT_ORDER_COL256_R128_P48_EXT`` on A and B, or ``HIPBLASLT_ORDER_COL256_R128_P16_EXT`` on A and ``HIPBLASLT_ORDER_COL`` with ``ldb = K`` on B, ``HIPBLAS_OP_T`` for A and ``HIPBLAS_OP_N`` for B. Also supported on B alone, with ``HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_PAGE24_EXT`` on A. Solutions are specific to an architecture and to exact problem sizes, and need beta = 0, which hipblasLtMatmulAlgoGetHeuristic() does not assume: query them with the extension API's heuristic. */
+    HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_PAGE24_EXT = 1019, /**<``HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT`` scales of 4096 rows placed in 2 MiB pages, each 8 KiB written twice. With ``s = kb/4``, the scale at byte ``x`` of the dense layout, ``y = x%16384``, goes to ``2*(s/24)*2097152 + (s%24)*32768 + 16384*(y/8192) + 8192*h + y%8192`` for both ``h = 0`` and ``h = 1``. The buffer is ``(2*ceil((K/128)/24) + 2)*2097152`` bytes. Supported on A only, with A in ``HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_EXT`` and ``m = 4096``, and with ``HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT`` on B. ``hipblasLtMatrixTransform`` writes these scales from the dense layout on gfx950, for ``K = 65536`` only. */
     HIPBLASLT_MATMUL_MATRIX_SCALE_END
 } hipblasLtMatmulMatrixScale_t;
 
@@ -548,7 +549,53 @@ typedef enum {
    * ``HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT``. Set on A, with B in this order or in
    * ``HIPBLASLT_ORDER_COL``.
    */
-  HIPBLASLT_ORDER_COL256_R128_EXT = 104
+  HIPBLASLT_ORDER_COL256_R128_EXT = 104,
+  /**
+   * The tiles, tile offsets, and 24-byte column groups of ``HIPBLASLT_ORDER_COL256_R128_EXT``, with a
+   * different order inside the tile. With ``j = (c%256)/32``, ``p = ((c%256)/16)%2`` and
+   * ``l = 16*kg + c%16``, byte ``b`` of the group is at ``3072*j + 48*l + 24*p + b`` in the tile.
+   * Same size and leading-dimension rules as ``HIPBLASLT_ORDER_COL256_R128_EXT``. Requires
+   * ``HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT``. Set on both A and B.
+   */
+  HIPBLASLT_ORDER_COL256_R128_P48_EXT = 105,
+  /**
+   * As ``HIPBLASLT_ORDER_COL256_R128_P48_EXT``, with the 48 bytes at ``3072*j + 48*l`` split into three
+   * 16-byte planes: byte ``t = 24*p + b`` is at ``3072*j + 1024*(t/16) + 16*l + t%16`` in the tile.
+   * Requires ``HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT``. Set on A, with B in
+   * ``HIPBLASLT_ORDER_COL``. ``hipblasLtMatrixTransform`` writes this order from
+   * ``HIPBLASLT_ORDER_COL`` on gfx950, for ``rows = 65536`` and ``cols = 4096`` only.
+   */
+  HIPBLASLT_ORDER_COL256_R128_P16_EXT = 106,
+  /**
+   * ``HIPBLASLT_ORDER_COL256_R128_P48_EXT`` tiles placed in 64 KiB blocks of 2 MiB pages, each tile
+   * written to both 8 KiB halves of its pieces. Tile ``t = c/256`` at K step ``s = row/128`` goes to
+   * block row ``t``; its byte ``x`` goes to
+   * ``16384*(x/6144) + 8192*h + 4096*((x%6144)/3072) + x%3072`` in the block, for both ``h = 0`` and
+   * ``h = 1``. Block row ``r`` at step ``s`` starts at byte
+   * ``(64*r + 2*(s/24) + (r/2)%2)*2097152 + (s%24 + r%8)*65536``. The GEMM chooses which of the two
+   * halves each work-group reads from the device's ``xgmi_physical_id``, so that each 8 KiB is read
+   * by the die it is on when the buffer starts at a 512 MiB-aligned offset of a 2 MiB-aligned,
+   * physically contiguous allocation (``hipExtMallocWithFlags`` with ``hipDeviceMallocContiguous``).
+   * That affects speed only: in any other buffer the GEMM reads the same bytes and gives the same
+   * results, more slowly. That rule is known on amdgpu 6.19 and 7.1 only, and solutions for this
+   * order are not selected on other drivers. The buffer is ``(64*(cols/256) + 2)*2097152`` bytes,
+   * and bytes outside the blocks are not read. ``K/128`` has to be at most 768. Requires
+   * ``HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_PAGE24_EXT``. Set on A, with B in
+   * ``HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_SPLIT_EXT``. ``hipblasLtMatrixTransform`` writes this
+   * order from ``HIPBLASLT_ORDER_COL256_R128_P48_EXT`` on gfx950, for ``rows = 65536`` and
+   * ``cols = 4096`` only.
+   */
+  HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_EXT = 107,
+  /**
+   * As ``HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_EXT``, with 16 tiles (``cols = 4096``) sharing 8 block
+   * rows: tile ``t`` goes to block row ``t%8``, in half ``h = t/8`` only, so tiles ``t`` and ``t^8``
+   * fill the two halves of one block. The buffer is ``514*2097152`` bytes. Requires
+   * ``HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT``. Set on B, with A in
+   * ``HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_EXT``. ``hipblasLtMatrixTransform`` writes this order
+   * from ``HIPBLASLT_ORDER_COL256_R128_P48_EXT`` on gfx950, for ``rows = 65536`` and ``cols = 4096``
+   * only.
+   */
+  HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_SPLIT_EXT = 108
 } hipblasLtOrder_t;
 
 /** Matrix transform descriptor attributes to define details of the operation.
@@ -578,6 +625,25 @@ typedef enum {
    * int32_t, default: HIPBLAS_OP_N
    */
   HIPBLASLT_MATRIX_TRANSFORM_DESC_TRANSB,
+
+  /** Block-scale layout written to C, see hipblasLtMatmulMatrixScale_t.
+   *
+   * With ``HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT``, A holds the
+   * ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0`` scales of an operand with ``R`` rows (M for A,
+   * N for B) and ``K`` elements per row, as a ``HIP_R_8F_UE8M0`` matrix in ``HIPBLASLT_ORDER_COL``
+   * with ``K/32`` rows, ``R`` columns and a leading dimension of ``K/32``. Cdesc must equal Adesc,
+   * and the transform writes those scales to C in the 128x4 layout. Supported on gfx950 for
+   * ``R = 4096`` and ``K = 65536`` only.
+   *
+   * With ``HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_PAGE24_EXT``, A holds the GEMM's A scales already
+   * in the ``HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT`` layout, described as above, and the
+   * transform places them in C, a buffer of the size that mode gives. Same devices and shape. No
+   * other block-scale mode is supported.
+   *
+   * int32_t, default: ``HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F``, for which A, B and C hold
+   * matrices.
+   */
+  HIPBLASLT_MATRIX_TRANSFORM_DESC_C_SCALE_MODE_EXT,
 } hipblasLtMatrixTransformDescAttributes_t;
 
 #if defined(__HIP_PLATFORM_AMD__)
@@ -1577,6 +1643,23 @@ hipblasStatus_t
  *  \details
  *   The matrix layout conversion helper (``C = alpha * op(A) + beta * op(B)``),
  * can be used to change the memory order of the data or to scale and shift the values.
+ *
+ *   It also packs a 4096-row MXFP6 operand with ``K = 65536`` on gfx950: its data from
+ * ``HIPBLASLT_ORDER_COL`` to ``HIPBLASLT_ORDER_COL256_R128_P16_EXT`` (same type, shape and
+ * leading dimension in Adesc and Cdesc), and its scales to
+ * ``HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT`` (see
+ * ``HIPBLASLT_MATRIX_TRANSFORM_DESC_C_SCALE_MODE_EXT``). It also places such an operand for the
+ * page24 GEMM: data from ``HIPBLASLT_ORDER_COL256_R128_P48_EXT`` to
+ * ``HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_EXT`` (A) or
+ * ``HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_SPLIT_EXT`` (B), and A's scales from
+ * ``HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT`` to
+ * ``HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_PAGE24_EXT``, writing only the bytes those
+ * layouts place. A pack reads A and writes C, which must
+ * not overlap. It needs ``HIPBLASLT_MATRIX_TRANSFORM_DESC_TRANSA`` to be ``HIPBLAS_OP_N`` and B
+ * to be NULL, does not read alpha or beta, and returns ``HIPBLAS_STATUS_ARCH_MISMATCH`` on other
+ * devices. A page24 placement reads ``/sys/module/amdgpu/version`` and returns
+ * ``HIPBLAS_STATUS_NOT_SUPPORTED`` without writing C on a driver other than amdgpu 6.19 or 7.1. Any other ``HIPBLASLT_ORDER_COL256_R128_*`` order or
+ * block-scale mode, and any other shape, returns ``HIPBLAS_STATUS_INVALID_VALUE``.
  * @param[in]  lightHandle   Pointer to the allocated hipBLASLt handle for the
  * hipBLASLt context. See \ref hipblasLtHandle_t.
  * @param[in]  transformDesc Pointer to the allocated matrix transform descriptor.
