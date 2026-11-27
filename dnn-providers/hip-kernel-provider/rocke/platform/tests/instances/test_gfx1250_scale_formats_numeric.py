@@ -10,6 +10,8 @@ import pytest
 from rocke.core.arch.target import _gfx1250_scale_combination_valid
 from rocke.tests.subprocess_launcher import rocke_python_command
 
+pytestmark = pytest.mark.gpu
+
 _MODULE = "rocke.examples.gfx1250.gemm.scale_formats_gemm"
 
 # Independent scale encodings through both COMGR and HIP.

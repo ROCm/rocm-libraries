@@ -23,6 +23,7 @@ from .isa import (
     analyze_hsaco,
     parse_isa,
     parse_kernel_arguments,
+    parse_kernel_fields,
     parse_resources,
     read_code_object_notes,
 )
@@ -40,6 +41,7 @@ __all__ = [
     "compare_variant_reports",
     "parse_isa",
     "parse_kernel_arguments",
+    "parse_kernel_fields",
     "parse_resources",
     "read_code_object_notes",
 ]

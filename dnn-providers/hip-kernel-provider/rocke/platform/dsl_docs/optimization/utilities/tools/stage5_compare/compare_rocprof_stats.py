@@ -44,7 +44,7 @@ def parse_kernel_trace(filepath):
 
 def calculate_occupancy(vgpr, agpr, lds_bytes):
     """Calculate theoretical occupancy for gfx950"""
-    # gfx950 limits (MI355X)
+    # gfx950 limits
     MAX_VGPR_PER_CU = 512  # Total VGPRs per CU
     MAX_WAVES_PER_CU = 16  # Hardware limit
     LDS_PER_CU = 163840  # 160 KB
@@ -150,7 +150,7 @@ else:
     print("")
 
 print()
-print("Occupancy Analysis (gfx950 MI355X):")
+print("Occupancy Analysis (gfx950):")
 print("-" * 90)
 
 rocke_occ, rocke_vgpr_lim, rocke_lds_lim = calculate_occupancy(

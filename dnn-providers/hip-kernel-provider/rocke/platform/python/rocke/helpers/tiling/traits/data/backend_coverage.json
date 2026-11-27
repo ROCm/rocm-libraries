@@ -312,9 +312,9 @@
    "gfx950": [{"class": "issuable", "backend_op": "mfma_f64_16x16x4_f64"}]
   },
   "mfma_f64_4x4x4f64": {
-   "gfx90a": [{"class": "no_backend_op"}],
+   "gfx90a": [{"class": "multi_block", "backend_op": "mfma_f64_4x4x4_f64"}],
    "gfx942": [{"class": "multi_block", "backend_op": "mfma_f64_4x4x4_f64"}],
-   "gfx950": [{"class": "no_backend_op"}]
+   "gfx950": [{"class": "multi_block", "backend_op": "mfma_f64_4x4x4_f64"}]
   },
   "mfma_i32_16x16x16i8": {
    "gfx908": [{"class": "issuable", "backend_op": "mfma_i32_16x16x16_i8"}],

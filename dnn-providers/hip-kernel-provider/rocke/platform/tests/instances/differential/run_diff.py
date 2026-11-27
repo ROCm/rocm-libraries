@@ -119,7 +119,15 @@ from golden_store import (  # noqa: E402 -- HERE bootstrap above
     compare,
 )
 from rocke.core.golden_file import rerecord_hint
-from rocke.tests.ci_shard import ACTIVATION_FLAG, Shard, current_shard, header_line
+from rocke.tests.ci_shard import (
+    ACTIVATION_FLAG,
+    Shard,
+    ShardKeyListing,
+    add_shard_argument,
+    header_line,
+    list_keys_path,
+    shard_from_arguments,
+)
 from rocke.tests.host_cpus import available_cpus
 from rocke.tests.staged_payload import point_locators_at_staged_payload
 
@@ -693,6 +701,7 @@ REFUSAL_COMPARED_FAMILIES = frozenset(
         "buffer_load_vN",
         "buffer_store_vN",
         "coalesced_loader_async",
+        "img2col",
         "tensor_view_buffer",
     }
 )
@@ -1336,8 +1345,9 @@ def main():
     ap.add_argument(
         "--flavor",
         default="",
-        help="LLVM flavor to emit for and to record / check under (llvm20, "
-        "llvm22, llvm23); default ROCKE_LLVM_FLAVOR, else the host's flavor. "
+        help="LLVM flavor to emit for and to record / check under "
+        f"({', '.join(_llvm_flavors())}); default ROCKE_LLVM_FLAVOR, else the host's "
+        "flavor. "
         "--python-only --mode ll takes a comma-separated list, or 'all' for "
         "every flavor rocke qualifies, and emits for all of them in one pool",
     )
@@ -1354,13 +1364,13 @@ def main():
         "Python reference hashes, and the flavor is a lowering argument, so "
         "any host can record or check every flavor this way.",
     )
-    ap.add_argument(
-        ACTIVATION_FLAG,
-        dest="shard_from_gtest_env",
-        action="store_true",
+    add_shard_argument(
+        ap,
         help="with --python-only --check-golden: check only the families of this "
         "CI shard, from ROCKE_TEST_SHARD or else GTEST_SHARD_INDEX and "
         "GTEST_TOTAL_SHARDS (rocke.tests.ci_shard); without either, every family",
+        list_help="write the cases the CI shards split, keyed by family, to this path "
+        "instead of checking them",
     )
     args = ap.parse_args()
     if args.record_golden and args.check_golden:
@@ -1369,10 +1379,8 @@ def main():
         ap.error("--python-only only runs the golden record / check")
     if args.shard_from_gtest_env and not (args.python_only and args.check_golden):
         ap.error(f"{ACTIVATION_FLAG} needs --python-only --check-golden")
-    try:
-        shard = current_shard(from_gtest=True) if args.shard_from_gtest_env else None
-    except ValueError as error:
-        ap.error(f"rocke-ctest-shard: {error}")
+    shard = shard_from_arguments(ap, args)
+    listing = list_keys_path(args)
 
     global PY_REF_ROOT, SHIM_DIR
     if args.pyroot:
@@ -1399,6 +1407,9 @@ def main():
         kept = [(n, d) for n, d in fams if n not in excluded]
         if fams and not kept:
             # The caller compares these families in another lane.
+            if listing is not None:
+                ShardKeyListing({}).write(listing)
+                return 0
             print(
                 f"[diff] every selected family is excluded ({args.exclude}); nothing to do"
             )
@@ -1413,6 +1424,9 @@ def main():
             # empty the section. A typo in --only must not do either.
             print(f"\nNO_FAMILIES: {GATE_FAIL['NO_FAMILIES']}")
             return 1
+        if listing is not None:
+            _shard_key_listing(args, kind, flavors, fams).write(listing)
+            return 0
         run_fams = fams
         if args.shard_from_gtest_env:
             print(header_line(shard))
@@ -1562,9 +1576,9 @@ def _golden_files(args, fams) -> dict[Path, set[str]]:
 def _misrouted_families(kind, flavor, fams) -> list[str]:
     """Run families blessed in a golden file other than the one anchoring them.
 
-    Checked against the wrong file, a family's configs read as NEW
-    (informational) and the check prints GOLDEN OK; its blessings in the
-    other file name the misrouting instead."""
+    Checked against the wrong file, a family's configs read as new, which
+    fails the check without naming the cause; its blessings in the other file
+    name the misrouting instead."""
     sections = {
         path: GoldenStore.load(path).section(kind, flavor)
         for path in (GOLDEN_FILE, LIB_GOLDEN_FILE)
@@ -1617,6 +1631,22 @@ def _golden_step(args, kind, flavor, cur, scope, failures, fams, shard=None):
             args, kind, flavor, golden_file, store, file_cur, file_scope, failures
         )
     return status
+
+
+def _shard_key_listing(args, kind, flavors, fams) -> ShardKeyListing:
+    """The cases a sharded golden check splits, keyed by family as the shards
+    split them: each blessed config of each selected family at each flavor the
+    run checks. A family with no blessed config is one case."""
+    key_of_case = {}
+    files = _golden_files(args, fams)
+    for flavor in dict.fromkeys(selected_llvm_flavor(f) for f in flavors):
+        for golden_file, names in files.items():
+            section = GoldenStore.load(golden_file).section(kind, flavor)
+            for family in sorted(names):
+                configs = section.get(family) or {"": ""}
+                for config in configs:
+                    key_of_case[f"{family}/{flavor}/{config}"] = family
+    return ShardKeyListing(key_of_case)
 
 
 def _shard_scope(

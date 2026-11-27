@@ -19,7 +19,7 @@ from kernels.common.attention_kv_cache import KvTensorLayout, StridedKvCacheLayo
 from kernels.common.attention_unified import _tiled_3d_signatures
 from rocke.core.golden_file import rerecord_hint, write_golden_json
 from rocke.core.verify import verify
-from rocke.tests.lanes import BINDING_LANE, TORCH_IN_CI, import_or_skip_until
+from rocke.tests.lanes import BUILD_VARIANT, TICKET, import_or_skip_until
 
 from ._tiled_3d_binding_ir import lower_like_tiled_3d_binding
 
@@ -223,7 +223,7 @@ def test_strided_dispatch_rejects_unresolved_pins(arch, changes):
 def test_native_strided_builder_matches_python(arch, flavor, waves_per_eu, monkeypatch):
     from dataclasses import asdict
 
-    engine = import_or_skip_until("rocke_engine", BINDING_LANE)
+    engine = import_or_skip_until("rocke_engine", BUILD_VARIANT)
 
     monkeypatch.setenv("ROCKE_LLVM_FLAVOR", flavor)
     module = import_module(f"kernels.{arch}.attention_tiled_3d")
@@ -451,7 +451,7 @@ def test_dense_decode_route_keeps_strided_limits(arch):
 
 
 def _dense_decode_tensors(order, *, batch=3, heads_q=8, heads_k=2, seqlen=65, dim=128):
-    torch = import_or_skip_until("torch", TORCH_IN_CI)
+    torch = import_or_skip_until("torch", TICKET)
 
     def make(heads, rows):
         shape = (
@@ -469,7 +469,7 @@ def _dense_decode_tensors(order, *, batch=3, heads_q=8, heads_k=2, seqlen=65, di
 
 @pytest.mark.parametrize("order", ["bshd", "bhsd"])
 def test_dense_decode_binding_passes_strided_views(order, monkeypatch):
-    torch = import_or_skip_until("torch", TORCH_IN_CI)
+    torch = import_or_skip_until("torch", TICKET)
 
     from dispatch.attention import dispatch_attention
     from kernels.common import attention_unified as au

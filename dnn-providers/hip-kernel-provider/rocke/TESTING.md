@@ -13,6 +13,24 @@ SPDX-License-Identifier: MIT
 > When the code and this document disagree, that disagreement is a bug in one of
 > them; fix it, don't route around it.
 
+## What CI checks today
+
+> - **No CI job builds rocKE**, on a pull request or on a schedule
+>   ([G11](#72-platform-quality-gaps-question-b)), so no rocKE test runs in CI.
+>   A pull request runs only the pre-commit hooks of the repository root
+>   `.pre-commit-config.yaml`: the `rocke-*` hooks, which are rocKE's own checks,
+>   and the generic ones (formatting, YAML, large files, bandit).
+> - **When CI builds rocKE again, the pull-request job tests GPUs on gfx942
+>   (Linux) and gfx110X (Windows) only**, at the pinned TheRock revision
+>   ([§5.0.2, Which GPUs run tests](#502-ci-shards-and-rocke-item-sharding)).
+>   No pull request tests gfx950 (AICK-3411).
+> - **Byte identity runs locally, not in CI**
+>   ([G10](#72-platform-quality-gaps-question-b)). Run it yourself.
+> - The `rocke-pending-lanes` hook checks that every test file is assigned to a
+>   CI entry (one that the quick or standard tier selects) or has a recorded
+>   reason ([§5.4](#54-tests-that-do-not-run-normally-one-registry)). That is
+>   bookkeeping: an assigned file runs only once a CI job builds rocKE.
+
 ## 0. Purpose, scope, and the other two docs
 
 **This doc defines the strategy**, validation requirements, and CI replay
@@ -77,7 +95,7 @@ something *different*, and conflating them is how false confidence creeps in.
 
 | Oracle type | Question it answers | Mechanism in rocKE | Serves |
 |---|---|---|---|
-| **Reference oracle** | Is the math correct? | Run on GPU, compare to an independent reference (numpy / torch) | Kernel correctness (A) |
+| **Reference oracle** | Is the math correct? | Run on GPU, compare to an independent reference (numpy; the legacy torch references are being removed) | Kernel correctness (A) |
 | **Oracle-free (closed-form / property)** | Is the math correct, without a reference implementation? | Run on GPU on inputs whose exact output follows from first principles (e.g. zero-Q attention: uniform probabilities over the legal keys); check the stored bits exactly or against a modeled error bound, and re-run the check under deliberately wrong rules that must be rejected | Kernel correctness (A), on the constructed inputs |
 | **Regression / characterization** | Did the output change? | sha256 of canonical IR vs. a pinned baseline | Platform output stability (B) |
 | **Differential / pseudo-oracle** | Do the two implementations agree? | **Byte-identity** of emitted IR, Python engine vs C++ engine | Platform equivalence (B) |
@@ -109,7 +127,8 @@ Question A. The quality of the *artifacts* rocKE emits.
 
 The **reference oracle**, and the *only* place ground-truth correctness is
 established: emit → compile → launch on a **HIP device** → compare to an
-independent numpy/torch reference. These lanes are the narrowest and slowest part
+independent numpy reference (legacy lanes still compare to torch until their
+uses are removed). These lanes are the narrowest and slowest part
 of the strategy, require a GPU (legacy lanes skip off-device; required pinned-reference lanes fail), and are where
 the strategy's biggest holes live (see
 [§7](#7-current-state-vs-target-the-gap-registry-wip)):
@@ -210,7 +229,7 @@ the strategy's biggest holes live (see
   distinguishes production-selected instances from explicit kernel configurations.
 
 - The [oracle-free attention lane](library/tests/oracle_free/README.md)
-  (`rocke_oracle_free_pytest`, quick tier) launches the shipped gfx942 dense
+  (`rocke_oracle_free_pytest`, standard tier) launches the shipped gfx942 dense
   kernel, at whatever configuration dispatch resolves, on zero-Q inputs whose
   outputs are uniform probabilities over the legal keys. It requires every
   stored bit to equal the correctly rounded closed form (a proven zero-ULP
@@ -254,12 +273,14 @@ Performance is **non-functional** — it answers *"is it fast enough?"*, not *"i
 correct?"* — so it is not a correctness oracle, though its baseline check is a
 regression-style comparison.
 
-- **Exists:** a threshold-based perf-baseline gate (per-workload baseline, metric,
-  direction, and tolerances such as `max_slowdown` / `min_fraction`), plus the
-  `benchmark/` suites. **⚠** This is *not* a sha "golden" — a within-tolerance
-  slowdown passes and a correctness-preserving speedup passes.
-- **⚠ WIP:** the `benchmark/` suites are orphaned (no gated tier) and there is no
-  perf lane in CI. Performance is in scope but only partially wired (gap **G8**).
+- **Exists:** `rocke.benchmark.perf` composes a kernel's counters, occupancy and
+  timing into one record and compares a run with its baseline by their spread,
+  and `library/benchmarks/` holds the sweep drivers. **⚠** This is *not* a sha
+  "golden" — a slowdown within the spread passes and a correctness-preserving
+  speedup passes.
+- Benchmarks run in the benchmarking tier on its own system, never in a CI tier
+  ([§5.0.3](#503-choosing-a-tier-and-an-entry-for-a-test)). That tier is only
+  partially wired (gap **G8**).
 
 ---
 
@@ -491,7 +512,10 @@ snapshot equality. In CI the entry passes `--rocke-shard-from-gtest-env`, so
 each CI shard probes and compares only the declaration keys it owns, and the
 toolchain, method and processor checks run on every shard; the shards together
 check every key once. A formerly `ok` cell must still be `ok`; becoming unavailable,
-crashing, timing out, or losing a measurement fails. Previously accepted processor
+crashing, or losing a measurement fails. A probe of an `ok` cell that does not
+finish within the probe time limit says the host was slow, not that support was
+lost: with no failure besides it, the check is unvalidated, which the entry
+reports as a skip (exit 77) naming the cells. Previously accepted processor
 names must remain accepted too. Both `ok` and `arch_absent` records require an
 accepted processor; flavor-axis negatives and no-data can precede rejection.
 
@@ -680,13 +704,12 @@ work to quick/standard pre-merge and post-merge runs;
 [§5.0.2](#502-ci-shards-and-rocke-item-sharding) says which CI jobs run
 comprehensive and full today. Fast
 counted/resource files remain source-runner coverage rather than expanding the
-existing attention CTest. The compiler gate preserves the
-existing resource-table qualification:
-LLVM 22 with the reference ROCm 7.2 comgr. Its register thresholds and final-ISA
-expectations are calibrated to that toolchain; LLVM 23 and LLVM 24 remain valid
-emission/parity profiles but are not qualified by this code-object resource gate.
-An unavailable or mismatched reference compiler produces one gate-level outcome
-before any rows compile. Exact installed
+existing attention CTest. Tests use the loaded compiler
+([the test compiler rule](platform/dsl_docs/reference/env_flags.md#compiler-detection-and-provenance)).
+The backward resource gate is the one exception left: its thresholds keep the
+toolchain they were calibrated on until AICK-3320 unpins it, so on any other
+compiler the compiler gate skips every row
+([how](platform/tests/README.md#library-unit-and-explicit-host-gates)). Exact installed
 CTest names and scopes live in the
 [rocKE test inventory](platform/tests/README.md#library-unit-and-explicit-host-gates).
 
@@ -791,7 +814,10 @@ entry, measured with `--durations`.
 
 **How an entry turns on sharding.** `platform/CMakeLists.txt` defines
 `_ROCKE_INSTALLED_PYTEST` as
-`python -m pytest -p rocke.tests.ctest_shard --rocke-shard-from-gtest-env`.
+`python -m pytest -p rocke.tests.ctest_shard --rocke-shard-from-gtest-env`;
+a build that installs the shared C++ engine beside the package appends
+`-p rocke.tests.require_cpp_engine` (the `ROCKE_REQUIRE_CPP_ENGINE` row of
+[`platform/AGENTS.md`](platform/AGENTS.md)'s environment table says what it does).
 Every installed rocKE pytest entry starts its command with this variable,
 except the explicit gates. Use it for each new installed pytest entry. The
 configure stops with an error when an installed entry that runs pytest (its
@@ -889,6 +915,8 @@ no other process of this entry exists meanwhile; its lines are prefixed with
 another option that needs one process runs in one process. The workers of
 entries that a parallel `ctest -j` runs at once take their CPU blocks from a
 rotation the entry picks from its process id, so they mostly land apart.
+Why this plugin and not pytest-xdist:
+[`platform/tests/worker_processes_decision.md`](platform/tests/worker_processes_decision.md).
 
 **The explicit gates are never sharded.** `rocke_library_counted_structural_gate`
 and `rocke_library_counted_compiler_gate` do not use `_ROCKE_INSTALLED_PYTEST`.
@@ -905,19 +933,69 @@ inputs); re-check them when that pin moves.
 
 | CI job | Runs on | Tier | CI shards | Builds rocKE |
 |---|---|---|---|---|
-| `therock-multi-arch-ci.yml` | a pull request or push whose changed paths all belong to projects in the repo config or to a directory the configure script also classifies (here `dnn-providers/cmake`), when one of them is hip-kernel-provider or a project TheRock's consumer graph links to it (such as hipDNN), or that changes a TheRock CI workflow (every configured project is tested) | standard | 4 | yes |
-| `therock-multi-arch-ci.yml` | a manual dispatch, or a pull request or push that touches shared CI files or an unclassified path: the configure step then tests every project | quick | 1 | yes |
+| `therock-multi-arch-ci.yml` | a pull request or push whose changed paths all belong to projects in the repo config or to a directory the configure script also classifies (here `dnn-providers/cmake`), when one of them is hip-kernel-provider or a project TheRock's consumer graph links to it (such as hipDNN), or that changes a TheRock CI workflow (every configured project is tested) | standard | 4 | no |
+| `therock-multi-arch-ci.yml` | a manual dispatch, or a pull request or push that touches shared CI files or an unclassified path: the configure step then tests every project | quick | 1 | no |
 | `therock-multi-arch-ci-nightly.yml` | the nightly schedule | comprehensive | 4 | no |
-| `hipdnn-superbuild-ci.yml` | a pull request that changes hipDNN or provider files other than docs, and its own nightly schedule | `full`, then entries without a tier label | n/a (one job per OS) | yes; tests the build tree only |
+| `hipdnn-superbuild-ci.yml` | a pull request that changes hipDNN or provider files other than docs, and its own nightly schedule | `full`, then entries without a tier label | n/a (one job per OS) | no |
 
-TheRock jobs run the installed entries. The scheduled TheRock job does not
-build rocKE: TheRock's flag `THEROCK_FLAG_HIPKERNELPROVIDER_ENABLE_ROCKE` is off
-by default, and only `therock-multi-arch-ci.yml` turns it on, through
-`extra_cmake_options`. Thus an installed entry that starts at comprehensive or
-full runs in no CI job (⚠ [G11](#72-platform-quality-gaps-question-b)). The hipDNN
-superbuild runs every build-tree entry (the test binaries and Python checks
-that `platform/tests/cmake/` and `library/cpp/tests/` register) and no
-installed entry.
+The "Builds rocKE" column is why no rocKE CTest entry runs in CI
+([What CI checks today](#what-ci-checks-today)). TheRock's
+flag `THEROCK_FLAG_HIPKERNELPROVIDER_ENABLE_ROCKE` is off by default, and no
+workflow under `.github/workflows/` passes it in its `external_repo` input. The
+hipDNN superbuild configures with `--preset hipdnn-dev-all`, which leaves the provider's
+`HIPKERNELPROVIDER_ENABLE_ROCKE` at its default, off
+(`dnn-providers/hip-kernel-provider/CMakeLists.txt`). The tier column says what
+each job selects once it builds rocKE: TheRock jobs run the installed entries,
+and the superbuild runs the build-tree entries (the test binaries and Python
+checks that `platform/tests/cmake/` and `library/cpp/tests/` register). The
+source-tree checks of a pull request run instead as pre-commit hooks of the
+repository root `.pre-commit-config.yaml`, which the `pre-commit.yml` workflow
+runs on each pull request to develop that changes rocKE:
+
+- `rocke-library-reach`: platform's imports of the library packages only shrink;
+- `rocke-pending-lanes`: every test file is assigned to a CI entry or has a
+  recorded reason, no CTest entry without the GPU lock selects a test
+  module that marks a test `gpu` (or that imports a GPU launch entry point
+  and marks none), and the quick tier keeps to its budgets and runs no GPU
+  entry ([Budgets](#budgets));
+- `rocke-pending-lanes-on-deletion`: `rocke-pending-lanes` for a change that
+  only deletes files it reads;
+- `rocke-compliance`: the files a change adds or edits pass the compliance
+  patterns;
+- `rocke-compliance-rules`: when the patterns or their scanner change, the
+  scanner's tests and a scan of the whole tree;
+- `rocke-no-torch`: no new torch use;
+- `rocke-toolchain-pins`: no new toolchain pin in test or library code;
+- `rocke-arch-table-engine-parity`: the two engines' arch tables agree;
+- `rocke-gemm-spec-dict-binding-parity`: the GEMM spec dicts match the engine
+  binding;
+- `rocke-emitter-pair-parity`: the C and Python emitters agree on HIP text and
+  refusals;
+- `rocke-emitter-pair-files`: the emitter-pair hook's file pattern takes every
+  file its entries read;
+- `rocke-hook-checks`: the hook tools and the hook config pass their tests.
+
+Each hook runs only when a change touches a file it reads, except
+`rocke-pending-lanes-on-deletion`, which runs on every change (a git diff when
+nothing is deleted). They run at every commit after `pre-commit install`;
+`pre-commit install --hook-type pre-push` runs them, with every other hook of
+the file, at push instead. CI runs every hook on each pull request either way.
+
+**Which GPUs run tests.** The pull-request job, `therock-multi-arch-ci.yml`,
+selects these GPU families; TheRock's family matrix
+(`amdgpu_family_matrix.py` at the pinned commit) decides where each one's tests
+run. A family's tests include rocKE's entries only in a job that builds rocKE.
+
+| Family (targets) | Platform | Selected by the pull-request job | Tests run on |
+|---|---|---|---|
+| gfx94X (gfx942) | Linux | yes | pull requests, pushes, TheRock's submodule-bump runs, nightly |
+| gfx950 | Linux | yes | TheRock's submodule-bump runs only |
+| gfx125X (gfx1250) | Linux | yes, build only | nightly runs only |
+| gfx110X (gfx1100-gfx1103) | Windows | yes | every trigger |
+| gfx90a | Linux | no | none in rocm-libraries CI |
+
+[What CI checks today](#what-ci-checks-today) gives what this means for a pull
+request.
 
 **Dependency on TheRock.** Item sharding needs two TheRock behaviours.
 TheRock exports `GTEST_SHARD_INDEX` and `GTEST_TOTAL_SHARDS` to every CTest
@@ -972,6 +1050,34 @@ discovered, gated and split; this section says where a new or moved test goes.
 The owners of the hip-kernel-provider test tiers set this policy; change this
 section with it.
 
+**The tiers.** This table is the one definition of each tier; every other
+description of the tiers points here. The budgets themselves are in
+[Budgets](#budgets).
+
+| Tier | What passing proves | What belongs there | What does not | Budget (rocKE's share) |
+|---|---|---|---|---|
+| quick | rocKE compiled, packaged and imports, and one trivial thing runs end to end. It does not prove that rocKE works. | Unit tests and the most basic enablement checks. | Coverage of any kind: goldens, parity, GPU numeric and reference suites, sweeps. | Q1 for the tier, Q2 per item; no GPU entry outside its allowlist |
+| standard | The change keeps rocKE correct on the regular cases. It is the pre-merge tier, for every pull request that touches the provider. | Regular cases: unit suites at full breadth, goldens and byte stability, parity, GPU numeric checks and pinned references. New tests go here by default. | Exhaustive matrices and heavy resource gates. | S4 per CI shard |
+| comprehensive, full | The exhaustive and heavy cases still pass. Scheduled runs only; no CI job runs them today ([§5.0.2](#502-ci-shards-and-rocke-item-sharding)). | Exhaustive sweeps and explicit resource gates; say in the pull request which job runs the entry. | Anything a pull request must pass; a test moved there only to make room. | None set |
+| benchmarks | Nothing in CI: never in any tier above. | Timing, throughput and performance-baseline checks, run separately on a dedicated benchmarking system. | Correctness checks, which take a CI tier. | Not a CI budget |
+
+**Why quick stays tiny.** Quick is the fast check that a build works: that
+rocKE compiled, packaged, imports and runs one trivial thing end to end. Being
+that small, it can also be used to bring up simulators, new hardware or new CI
+environments.
+
+**The quick rule.** Quick is for unit tests and the most basic enablement
+checks only: did it build, package, import and run one trivial thing. It is not
+where coverage goes. rocKE's whole quick share is capped (Q1), and it holds no
+GPU numeric or reference test. New tests go to standard by default. Adding to
+quick needs a reason stated in the pull request and must stay within budget;
+the checks fail a quick entry that is over its budgets or uses the GPU
+([Budgets](#budgets)).
+
+No CI job builds rocKE yet, so no tier runs in CI today
+([What CI checks today](#what-ci-checks-today)); which job runs which tier once
+one does is in [§5.0.2](#502-ci-shards-and-rocke-item-sharding).
+
 **Test at the cheapest level that proves the claim.** Go up a level only for
 what the level below cannot see.
 
@@ -979,53 +1085,53 @@ what the level below cannot see.
 |---|---|---|
 | 1. Host unit and contract | A spec rule, a pure function, a typed refusal | standard |
 | 2. IR structure | The emitted IR has the claimed shape | standard |
-| 3. Golden | The Python engine's output bytes are stable | quick, as a case in the existing golden corpus |
-| 4. Installed artifact | The installed tree imports and packages | quick for the import smoke; otherwise standard |
-| 5. GPU numeric | A kernel computes the right result | quick for a published operation's pinned reference lane; otherwise standard |
+| 3. Golden | The Python engine's output bytes are stable | standard, as a case in the existing golden corpus |
+| 4. Installed artifact | The installed tree imports and packages | quick for the import smoke and the engine-modules check; otherwise standard |
+| 5. GPU numeric | A kernel computes the right result | standard, including each published operation's pinned reference lane |
 | 6. Explicit resource gate | An exhaustive matrix, a compiler or resource qualification | comprehensive or full (see below) |
 
 **Make the test prove the claim.** Each new refusal has a test that asserts the
-error's type and message. Each claim in a docstring, commit message or PR text has a test that
-fails if the claim is false: assert the property claimed (the `align N` of a
-load, not only its vector type). Use real inputs, not stubs.
+error's type and message. A claim people rely on has a test that fails if the
+claim is false: assert the property claimed (the `align N` of a load, not only
+its vector type). Use real inputs, not stubs. A one-time claim (a measurement,
+"IR unchanged") needs evidence in the PR instead. Drop a claim you can't back.
 
-The quick golden entries lower with the Python engine only. The byte-identity
+The golden entries lower with the Python engine only. The byte-identity
 gate over the kernel families runs in `tests/run_all.py`, through
 `tools/check_byte_identity.py`
 ([§4.3](#43-do-the-two-implementations-agree-the-migration-gate)), and in no CTest
 entry (⚠ [G10](#72-platform-quality-gaps-question-b)).
 
-**quick is a smoke tier.** It runs unsplit on one CI shard, and a failure there
-must mean that rocKE cannot be used or that a shipped kernel is wrong. It admits
-only:
+**The quick entries.** The `quick` category of
+`ROCKE_ENGINE_test_categories_external.yaml` lists them, and only that list puts
+an entry in quick: no registration carries the quick label itself. Quick runs
+unsplit on one CI shard. The import smoke, `rocke_python_import_smoke`, which
+builds one GEMM kernel and lowers it to LLVM IR, is its one end-to-end check, and
+`rocke_engine_modules_check` checks that the engine pieces the build made are
+packaged. Both run on the host: launching a kernel would take several seconds of
+Q1, and the standard tier's GPU checks launch kernels. A quick entry registered
+as GPU work (the `gpu` label or the `rocke_gpu` lock) needs
+`GPU_ENTRY_ALLOWLIST` in
+[`tools/check_entry_times.py`](tools/check_entry_times.py) to name it with its
+reason; only the one end-to-end check may be there.
 
-- the import smoke, `rocke_python_import_smoke`;
-- golden byte stability (`rocke_golden_static`, `rocke_differential_golden_*`):
-  add cases to their corpus, not new golden entries;
-- the core refusal and parity contracts of shipped kernel families, including
-  their small non-pytest contract binaries within S3;
-- the pinned GPU reference lane of each published operation.
-
-Sweeps, matrices, tuning-space walks, doc examples, tool and runner tests, and
-tests of an unshipped family belong in standard. Which contracts count as core
-for each family is part of the domain test strategy, which refines this list.
-State the reason for a quick addition in the pull request.
-
-**standard is the default home of every new test.** Only entries whose command
-starts with `_ROCKE_INSTALLED_PYTEST` are split over the CI shards item by item;
-every other entry runs whole on every CI shard
+**Which standard entries split across the CI shards.** Only entries whose
+command starts with `_ROCKE_INSTALLED_PYTEST`, and the runners that take their
+share under `--rocke-shard-from-gtest-env`, are split over the CI shards item by
+item; every other entry runs whole on every CI shard
 ([§5.0.2](#502-ci-shards-and-rocke-item-sharding)).
 
-**comprehensive and full** are for explicit resource gates and other
-scheduled-only entries. [§5.0.2](#502-ci-shards-and-rocke-item-sharding) says
-which CI jobs run these tiers today; say in the pull request where an installed
-entry placed there runs.
-Do not move a test there to make room.
+**Benchmarks.** A benchmark's verdict is a time, a throughput or a comparison
+with a performance baseline, so it is never a CTest entry. A host test of the
+benchmark tooling checks correctness and takes a CI tier like any other test.
 
-**Where a new file lands.** The one list of quick entries is the `quick`
-category of `ROCKE_ENGINE_test_categories_external.yaml`, whose header states
-the quick-tier rule. The platform pytest parts (`rocke_pytest_<part>`), the
-tiling entries and the library unit, IR and GPU numeric suites start at
+| Test | Placement |
+|---|---|
+| A host test of the benchmark tooling, such as `platform/tests/benchmark/test_occupancy_targets.py` (the occupancy model of `rocke.benchmark.perf`); it times nothing | A CI tier, as any host test. |
+| Anti-example: a CTest entry that runs a kernel sweep and fails when a kernel is slower than its baseline | Its verdict is a time: it belongs in the benchmarking tier, not in CI. |
+
+**Where a new file lands.** The platform pytest parts (`rocke_pytest_<part>`),
+the tiling entries and the library unit, IR and GPU numeric suites start at
 standard. A new file under `platform/tests`, under the tiling tests, or under
 `library/tests/dispatch/attention/` or `library/tests/sdpa/` joins one of them
 with no edit if it is installed and its entry's filters select it, so it runs in
@@ -1044,10 +1150,10 @@ CTest processes, gets a standard entry modeled on `rocke_ctest_shard_pytest` in
 
 - start its command as [§5.0.2](#502-ci-shards-and-rocke-item-sharding) requires;
 - list it under `python-standard` in `ROCKE_ENGINE_test_categories_external.yaml`,
-  which gives it the labels of standard and every later tier; choose a name
-  that no quick pattern matches (`*_reference_unit_pytest`,
-  `*_gpu_gfx<target>_pytest`), or quick runs it too, and leave the
-  `rocke_pytest_` prefix to the platform parts;
+  which gives it the labels of standard and every later tier; leave the
+  name patterns of the pinned reference lanes (`*_reference_unit_pytest`,
+  `*_gpu_gfx<target>_pytest`) to those lanes and the `rocke_pytest_` prefix to
+  the platform parts;
 - keep its files out of the shared entries: for `platform/tests`, `list(APPEND)`
   the file to `_ROCKE_PLATFORM_PYTEST_IGNORE_<part>`; for the two library
   directories, add an `--ignore` for the file to its entry in
@@ -1055,9 +1161,10 @@ CTest processes, gets a standard entry modeled on `rocke_ctest_shard_pytest` in
   and the `gpu` marker, so moving a tiling file to its own entry needs a CMake
   change.
 
-A quick addition, one that the list above admits, goes in its own entry under
-the `quick` category; each of its items stays within Q2, and the change adds at
-most Q3 to quick.
+A quick addition is a unit test or a basic enablement check that the tier table
+admits, with its reason stated in the pull request. It goes in its own entry
+under the `quick` category; each of its items stays within Q2, and the change
+adds at most Q3 to quick.
 
 **Place a test so that sharding can split it.**
 
@@ -1069,10 +1176,15 @@ most Q3 to quick.
    every case, or when many tests of a module share one slow parameter id.
    Parameterize per case, so a sweep is many small keys, not one large one. A
    module fixture is paid on every CI shard that gets an item of the module.
-4. Set pytest `--timeout` and CTest `TIMEOUT` from measured time with the
-   headroom of S2; make a slow test cheaper rather than raise a limit. A GPU
-   pytest entry takes `_ROCKE_INSTALLED_PYTEST_GPU_TEST_LIMIT`
-   (`platform/CMakeLists.txt` says why).
+4. Give a new entry the CTest `TIMEOUT` of its resource class (cpu, toolchain
+   or gpu) from
+   [`platform/tests/cmake/TestTimeouts.cmake`](platform/tests/cmake/TestTimeouts.cmake),
+   which says what each class covers and why the limit is not tuned per entry;
+   `platform/tests/test_engine_linkage.py` fails an entry with no `TIMEOUT` or
+   with any value that file does not set. Set the entry's pytest `--timeout`
+   from measured time with the headroom of S2. A GPU pytest entry ends its
+   command with `_ROCKE_INSTALLED_PYTEST_GPU_TEST_LIMIT`, or with a lower
+   `--timeout` plus the thread method (`platform/CMakeLists.txt` says why).
 
 **Keep a slow test inside its limits.** The budgets below and the limits of
 every lane that runs a test (pytest `--timeout`, CTest `TIMEOUT`, any
@@ -1122,19 +1234,73 @@ log.
 
 #### Budgets
 
-> **Proposed, pending agreement with the owners of the hip-kernel-provider test
-> tiers.** Change them here only. Times are wall time on a CI runner, as the CI
-> log shows it; the Test step of a CI shard has a 30-minute limit.
+Times are wall time on a CI runner, as the CI log shows it; the Test step of a
+CI shard has a 30-minute limit. Q1, Q2 and S4 are checked (below the table).
+The other budgets are proposed, pending agreement with the owners of the
+hip-kernel-provider test tiers, and no check holds them; change them here only.
 
 | Id | Budget | Value | Why |
 |---|---|---|---|
-| Q1 | rocKE's share of the quick shard | 5 min | TheRock targets under 5 min for a whole quick shard; rocKE takes several times that today. |
-| Q2 | One item in a quick entry | 2 s | Almost every quick item is far below it; the few above it take a large share of quick time. |
-| Q3 | A new quick entry, or what one change adds to quick | 15 s | A small fraction of Q1; every entry also pays start-up and collection. |
-| G1 | One new golden case, over all golden entries and LLVM flavors | 0.25 s | `rocke_golden_static`, `rocke_differential_golden_ll` and `rocke_differential_golden_canonical` split across CI shards under `--rocke-shard-from-gtest-env` (by case and by family), but quick runs as one shard, so each case still runs there whole. `rocke_arch_domain_reproducibility` (standard) splits its declaration keys the same way; its toolchain, method and processor checks run on every shard. |
-| S1 | One shard key in a sharded entry | 30 s | A key runs whole on one shard; this is half of the 60 s per-item `--timeout` of the `rocke_pytest_<part>` and tiling entries. |
-| S2 | Limit headroom | pytest `--timeout` at least 2× the slowest item; CTest `TIMEOUT` at least 2× the entry's longest run, which is its unsplit run if the entry is in quick | The worst case stays under half of each limit. |
-| S3 | A new non-pytest entry in quick or standard | 1 s | It runs whole on every CI shard. The golden entries and `rocke_optimization_barrier_hip_pair` are existing exceptions. |
+| Q1 | rocKE's share of the quick shard | 30 s | The whole quick shard, of every project in it, targets 5 min; rocKE is one of many, so its share stays a small fraction. Checked. |
+| Q2 | One item in a quick entry | 2 s | One slow item takes a large share of Q1. Checked: a pytest test, or the whole run of a non-pytest entry. |
+| Q3 | A new quick entry, or what one change adds to quick | 5 s | A sixth of Q1; every entry also pays start-up and collection. |
+| G1 | One new golden case, over all golden entries and LLVM flavors | 0.25 s | `rocke_golden_static`, `rocke_differential_golden_ll` and `rocke_differential_golden_canonical` split across CI shards under `--rocke-shard-from-gtest-env` (by case and by family). `rocke_arch_domain_reproducibility` (standard) splits its declaration keys the same way; its toolchain, method and processor checks run on every shard. `rocke_optimization_barrier_hip_pair` splits its HIP emitter configurations and its range-boundary check the same way. |
+| S1 | One shard key in a sharded entry | 30 s | A key runs whole on one shard; this is half of the 60 s per-item `--timeout` of the `rocke_pytest_<part>` and tiling entries. In an entry with a lower `--timeout` (several library entries use 30 s), S2 holds each item to half of it. |
+| S2 | Limit headroom | The slowest item under half its pytest `--timeout`; the entry's longest run, which is its unsplit run if the entry is in quick, under half its CTest `TIMEOUT` | The worst case stays under half of each limit. The CTest `TIMEOUT` is its resource class's limit, so an entry near half of it gets cheaper or splits; the limit does not move. |
+| S3 | A new non-pytest entry in quick or standard | 1 s | It runs whole on every CI shard unless it takes its share under `--rocke-shard-from-gtest-env`. The golden entries and `rocke_optimization_barrier_hip_pair` are existing exceptions: each splits across the CI shards that way. |
+| S4 | rocKE's share of each standard shard | 540 s | Under a third of the 30-minute step; the rest of the step is left to the provider's other tests. Checked for the slowest shard, not the average. |
+
+[`tools/check_entry_times.py`](tools/check_entry_times.py) enforces Q1, Q2, S4
+and quick's GPU rule (its `CI_TIERS` holds the same values), and the
+standard-tier CTest entry `rocke_entry_time_check` runs its `check`. The time
+rules judge the installed entries, which CI runs. It projects every shard from
+the times in `tools/entry_times.json` (recorded from CI logs, per operating
+system) and the live CTest registration. It places the cases of each split entry
+as CI does: it collects a pytest entry's tests, and every other split runner
+(the non-pytest entries of G1 and S3) lists its cases under
+`--rocke-list-shard-keys` (`rocke.tests.ci_shard.LIST_KEYS_FLAG`, which
+`add_shard_argument` gives a runner with its shard flag). It places their shard
+keys by their `rocke_shard_cost` marks and the hash, and spreads each shard's
+keys over the entry's workers. So heavy keys that the hash puts on one shard
+show on that shard. It fails when one entry alone is over its tier's budget on a
+shard, when any shard is over its limit (the budget, or the ceiling
+`entry_times.json` records for a tier already over budget; a ceiling only goes
+down), when an entry that a tier runs has no recorded time (a new entry, or one
+whose time was removed), when a quick entry may have an item over Q2 (a quick
+pytest entry over Q2 as a whole needs its test times, recorded from a log of a
+run with pytest's `--durations` report), or when a quick entry uses the GPU
+outside its allowlist; record times from a CI log with `check_entry_times.py
+record`, and drop the times of entries no longer registered with
+`check_entry_times.py prune`. The tool's docstring gives the `check`, `record`,
+`prune` and `lower-ceiling` commands. The check needs a provider install on the
+operating system it judges, because the tier labels and the tests it collects
+exist only there. So the `windows` column of `entry_times.json` is judged only
+when the check runs on Windows; the entries it has no time for stay untimed
+until a Windows run records them. Run `ctest -R '^rocke_entry_time_check$'` in
+`<install>/bin/hip_kernel_provider`. The `rocke-pending-lanes` pre-commit hook
+runs `platform/tests/tools/test_quick_tier.py`, which holds the quick tier to
+the same rules on a configure of the entries, against the recorded times of the
+operating system it runs on, for every change to rocKE or its categories; it
+also refuses a GPU entry among the build-tree quick entries.
+
+**GPU tests.** A test that launches GPU work (device memory, a code object or a
+kernel launch) carries the `gpu` mark. The host CTest entries deselect it, and
+only a GPU entry runs it: a GPU entry takes the CTest resource lock `rocke_gpu`,
+so a parallel `ctest -j` never runs two of them at once on the one GPU.
+`platform/tests/tools/test_gpu_work_placement.py` refuses an entry without the
+lock that selects a module marking a test `gpu`, or one importing a GPU launch
+entry point with no test marked; its docstring says what it does not see. A GPU pytest entry limits each test to 120 s
+(`ROCKE_TEST_ITEM_TIMEOUT_GPU` in `platform/tests/cmake/TestTimeouts.cmake`),
+or to its own lower `--timeout`. A test slower than half of that declares its
+slowest measured CI time with `@pytest.mark.rocke_measured_seconds(seconds)`,
+which raises that test's limit alone to twice the time
+(`rocke.tests.item_time_limit`). Every GPU pytest entry also loads
+`rocke.tests.require_gpu`, which fails a run that finds no GPU (its docstring
+says why). Where the build installs the shared C++ engine beside the package,
+every GPU pytest entry also loads `rocke.tests.differential_engines`, which
+sets `ROCKE_BACKEND=both`: its tests run the kernels the Python engine builds,
+which the provider ships, and each lowering fails when the C++ engine's output
+differs.
 
 To review where a test lives (level, tier, entry, shard keys, budgets), use the
 checklist in [`agents/team_members/test_architect.md`](agents/team_members/test_architect.md).
@@ -1454,63 +1620,115 @@ the suspect's PR.
 
 ### 5.4 Tests that do not run normally: one registry
 
-Every test that CI does not run normally is recorded in one data module,
-[`platform/python/rocke/tests/pending_lanes.py`](platform/python/rocke/tests/pending_lanes.py),
-with its reason, owner and expiry. It holds three kinds of record:
+Every test that the CI entries do not run normally is recorded in one data module,
+[`platform/python/rocke/tests/pending_lanes.py`](platform/python/rocke/tests/pending_lanes.py).
+Each record names its reason, the GitHub team that owns the test (`team`, one of
+`TEAMS`, a CODEOWNERS team of its path) and the issue that tracks it (`issue`, a
+Jira id or `ROCm/<repo>#<n>`). A record without a filed issue is refused: file
+one first. It holds three kinds of record:
 
-| Kind | Records | Expired entry |
+| Kind | Records | Longest expiry | Expired record |
+|---|---|---|---|
+| `PendingTest` | a test file (or one test of it, `node`) waiting for a lane; the file is not known to be broken. With `whole_file=True` the file is assigned to no CI entry, and the record covers every case of it and is its file's only record. Otherwise the file is assigned to a CI entry, and the record covers only the cases that declare its lane where they skip (below). One record per lane a file's cases wait for | 90 days from when it is written | fails a change that touches it (its lines in the registry, or its test file); otherwise a warning. A scheduled run with `--strict-expiry` fails every one |
+| `MeasuredBudget` | the scratch bytes one test allows one kernel on the compilers it was measured on (`Compilers`: an LLVM major, llvm-project commits, or both; two builds of one major can differ), while its retune is decided; any other compiler gets the strict rule | 90 days | as `PendingTest` |
+| `QuarantinedTest` | one test known to fail (a flake, or a defect that turns develop red), by item id `<file>::<node name>` of a test function (not a class); a name without parameters covers all of them, or, with `params`, those whose parameter ids include each of them (one record for one defect across several cases). May name the GPU arches and the compilers (`Compilers`) it fails with, to be held out there only; no two entries may cover one test, so one entry names every arch and compiler it fails on; at most `QUARANTINE_CAP` (10) at once | 30 days | as `PendingTest`; its test stays held out until the record is re-decided |
+
+Every pending entry holds a lane ticket (`LaneTicket`, listed in
+`LANE_TICKETS`) and takes its lane, issue and expiry from it: the issue that
+tracks one lane's entries and the one date, set to when the lane's capability
+is expected, by which all of them are re-decided. The check refuses an entry
+whose ticket `LANE_TICKETS` does not list. The measured budgets share one issue
+and one date the same way.
+
+A record whose expiry is further away than its longest window is refused when
+the registry loads. Reaching the date means re-deciding the record: fix the
+test, move it, or write a new date with the reason; dates are spread so the
+records of one area come due together, not the whole registry at once. The
+windows and the expiry dates are reviewed at each expiry wave. A daily
+scheduled run (the rocKE merge monitor, outside this repository) runs the
+check with `--strict-expiry`, which fails on every expired record.
+
+**Four lanes.** A lane is what pull-request CI lacks that a test needs
+([`rocke.tests.lanes`](platform/python/rocke/tests/lanes.py)). The finer
+distinction (which arch, which tool, which ticket) is in the reason and the
+record's issue, not in the lane:
+
+| Lane | Waits for | Examples |
 |---|---|---|
-| `PendingTest` | a test file (or one test of it, `node`) waiting for a lane; the file is not known to be broken. Under a lane no CI entry runs yet (a scheduled run, an unlanded PR) it covers every case of the file; under a lane CI lacks (torch, a gfx950 or gfx1250 runner, the C++ engine's Python modules) it covers only the cases that declare that lane where they skip (below). One entry per lane a file's cases wait for; a file under a lane that waits for torch imports torch | warns, and fails only a change that touches the registry or that file (every scheduled run under `--strict-expiry`) |
-| `MeasuredBudget` | the scratch bytes one test allows one kernel on the compilers it was measured on (`Compilers`: an LLVM major, llvm-project commits, or both; two builds of one major can differ), while its retune is decided; any other compiler gets the strict rule | as `PendingTest` |
-| `QuarantinedTest` | one test known to fail (a flake, or a defect that turns develop red), by item id `<file>::<node name>`; a name without parameters covers all of them. Needs an issue (`AICK-1234`, `ROCm/<repo>#<n>`, or `none filed yet`); may name the GPU arches and the compilers (`Compilers`) it fails with, to be held out there only; at most `QUARANTINE_CAP` (10) at once | always fails |
+| `RUNNER_HARDWARE` (`runner-hardware`) | hardware no pull-request runner has: a GPU of an arch outside `PR_RUNNER_ARCHES` (gfx942 and gfx1100, the runners' confirmed hardware), or a second GPU | gfx950, gfx908, gfx90a, gfx1101 to gfx1103, gfx115x, gfx1200, gfx1201 and gfx1250 cases; the two-GPU cases (`skip_needing_gpus`) |
+| `BUILD_VARIANT` (`build-variant`) | a build or test environment CI does not provide | the C++ engine's Python modules (pybind11), the shared librocke on the Windows build, hipcc and the LLVM tools, optional packages |
+| `TICKET` (`ticket`) | work the record's issue tracks | CTest entries not added yet, a tier decision, a scheduled run (comprehensive tier, exhaustive cohort: `-m 'not exhaustive'` deselects to this lane), a torch-free rewrite |
+| `SOURCE_TREE` (`source-tree`) | a source checkout (`run_all.py`) | cases that read platform tools, C++ sources, docs or git history; `-m 'not integration'` deselects to this lane |
 
-**A skipped case names its lane where it skips.** The lanes are
-[`rocke.tests.lanes`](platform/python/rocke/tests/lanes.py). A case that skips
-because CI lacks what a lane gives says so with the lane, never with words a
-script has to interpret; a case that needs a GPU states the arches it needs,
-and the lanes module books the runner lane they wait for (none when a CI
-runner has one of them):
+**A skipped case names its lane where it skips.** A case that skips because CI
+lacks what a lane gives says so with the lane, never with words a script has to
+interpret; a case that needs a GPU states the arches it needs, and the lanes
+module books `RUNNER_HARDWARE` when no pull-request runner has any of them:
 
 ```python
 from rocke.tests.lanes import (
-    BINDING_LANE, TORCH_IN_CI,
+    BUILD_VARIANT, TICKET,
     arch_skip_reason, import_or_skip_until, skip_needing_arch, skip_until_reason,
 )
 
 skip_needing_arch(("gfx950",), reason="needs a gfx950 GPU, found gfx942")
 @pytest.mark.skipif(arch != "gfx950", reason=arch_skip_reason(("gfx950",), "..."))
-torch = import_or_skip_until("torch", TORCH_IN_CI)
-@pytest.mark.skipif(no_engine, reason=skip_until_reason(BINDING_LANE, reason="..."))
+torch = import_or_skip_until("torch", TICKET)  # its record names the torch follow-up
+@pytest.mark.skipif(no_engine, reason=skip_until_reason(BUILD_VARIANT, reason="..."))
 ```
 
 The shared helpers declare for you: `rocke.tests.gpu.current_device_arch_in`
-the runner lane of the arches a case needs; the engine helpers `BINDING_LANE`
-(a module that is installed but fails to import is a defect, not a wait); the
-missing-tool helpers (`rocke.tests.compiler_tools`, `rocke.tests.llc`)
-`CI_TEST_TOOLS`; the source-tree helpers `SOURCE_TREE_CASES`; a case a CI entry
-deselects by `-m 'not exhaustive'` or `'not integration'` waits for the lane of
-that marker. A skip for any other reason (a defect, a configuration refused on
-its own arch, a missing installed artifact) names no lane, and no entry can
-cover it: it shows up in limbo until it is fixed or quarantined. A case that
-can never run (a refused request, a state the code cannot build) is not kept
-as a skip: after the owner's review it is left out of the parametrization, or
-the test is deleted.
+and `run_on_device` the runner hardware of the arches a case needs; the engine
+helpers and the missing-tool helpers (`rocke.tests.compiler_tools`,
+`rocke.tests.llc`) `BUILD_VARIANT` (a module that is installed but fails to
+import is a defect, not a wait); the source-tree helpers `SOURCE_TREE`. A skip
+for any other reason (a defect, a configuration refused on its own arch, a
+missing installed artifact, a platform a developer machine lacks) names no lane
+and says what it needs in plain words; no record can cover it, so in CI
+it shows up in limbo until it is fixed or quarantined. A case that can never run
+(a refused request, a state the code cannot build) is not kept as a skip: after
+the owner's review it is left out of the parametrization, or the test is
+deleted. A case that waits for hardware, engine support or data that has not
+landed is kept on purpose, under a ticket record that says what it waits for.
 
-The pytest roots of `platform/tests` and `library/tests` skip a quarantined test
-with the reason `quarantined: <issue>` (plus `on <arch>` for an arch-scoped entry
-and `with llvm-project <commit>`, or `with LLVM <major>`, for a compiler-scoped
-one), so it stays visible in every report; `ROCKE_QUARANTINE=ignore` runs it to
-debug or fix it. A pending file that fails once its lane runs moves to
-quarantine; it does not stay pending.
+The pytest roots of `platform/tests`, `library/tests` and the tiling tests
+(`platform/python/rocke/tests/helpers/tiling`, which its CI entries collect on
+its own) skip a quarantined test with the reason `quarantined: <issue>` (plus
+`on <arch>` for an arch-scoped entry and `with llvm-project <commit>`, or
+`with LLVM <major>`, for a compiler-scoped one), so it stays visible in every
+report; `ROCKE_QUARANTINE=ignore` runs it to debug or fix it. A pending file
+that fails once its lane runs moves to quarantine; it does not stay pending.
 
 Two checks hold the tree to the registry. The PR gate
 [`platform/tests/tools/test_pending_lanes.py`](platform/tests/tools/test_pending_lanes.py)
-works per file: every test file runs in a CI-run entry or is pending, no entry
-is stale (its test gone, or its lane's kind no longer true), and no test names
-a runner lane or writes a declaration by hand.
+(the `rocke-pending-lanes` pre-commit hook in pull-request CI, [§5.0.2](#502-ci-shards-and-rocke-item-sharding))
+works per file. It fails when:
+
+- a test file is assigned to no CI entry and has no record, or a record is
+  stale (its test gone, a whole-file record's file assigned to a CI entry, or a
+  case record's file assigned to none);
+- a record's team is not a CODEOWNERS team of its test;
+- a pending entry's lane ticket is missing from `LANE_TICKETS`, or two listed
+  tickets share an issue;
+- a test file calls an arch helper with arches no pull-request runner has (a
+  literal, or a module-level name bound to one) and has no `RUNNER_HARDWARE`
+  or whole-file record;
+- a test names the runner lane, or writes a lane reason by hand: a skip reason
+  written at the skip that says "waits for" or "waiting on", or names CI or a
+  runner, without the lane helpers, or any string that reads as a lane
+  declaration;
+- an expired record this change touches (the hook's diff base is
+  `ROCKE_CHANGE_BASE`, else pre-commit's `--from-ref`; a run that names neither,
+  such as the CTest entry, has no change, and its expired records only warn).
+
 [`tools/limbo_audit.py`](tools/limbo_audit.py) works per case, from the run
 records (`rocke.tests.run_records`) of the CI lanes: it fails on each case no
-lane ran that no record covers.
+lane ran that no record covers, which the file-level check cannot see (arches
+computed at run time, a skip with no lane). The docstrings of
+`rocke.tests.run_records` and `tools/limbo_audit.py` give the commands that
+write the records and run the audit. A test that starts pytest over a fixture
+tree of its own passes `fixture_session_environment()` from
+`rocke.tests.run_records` to that process, so its sessions write no records.
 
 **A sweep that checked nothing fails.** The same pytest roots fail a test whose
 subtests all skipped (`rocke.tests.sweep_guard`): skip such a test as a whole
@@ -1534,6 +1752,32 @@ Cross-cutting properties every change must preserve:
   reference an absolute or repo-rooted path; the tree drops into another repo
   verbatim.
 - **SSOT** — the MMA/arch fragment tables have one meaning shared by both engines.
+- **No torch** — rocKE does not use torch: references are numpy
+  (`rocke.numeric`), device data is `DeviceArray`. Existing uses are being
+  removed; the allowlist only shrinks. `rocke_no_torch_check`
+  (`platform/tests/tools/test_no_torch.py`, build tree, standard tier; in
+  pull-request CI the `rocke-no-torch` pre-commit hook) reads every
+  Python, requirements, `pyproject.toml` and CMake file under `rocke/` with
+  `rocke.tests.torch_uses` and fails on a use that
+  `platform/tests/tools/no_torch_allowlist.txt` does not list, and on a listed
+  line that no longer matches the tree. Until a test's use is removed, it
+  declares torch with `import_or_skip_until("torch", TICKET)`, under a record
+  that names the torch follow-up ticket; code that
+  still needs torch imports it lazily behind a guard. When you
+  remove a use, remove its line (or its kind); never add one. Names that only
+  carry torch (`run_unified_attention_torch`) are not uses:
+  `python -m rocke.tests.torch_uses --names` lists them.
+- **No toolchain pins** — tests use the compiler rocKE's discovery loads; the
+  rule is in
+  [`env_flags.md`](platform/dsl_docs/reference/env_flags.md#compiler-detection-and-provenance).
+  `rocke_toolchain_pins_check` (`platform/tests/tools/test_toolchain_pins.py`,
+  build tree, standard tier; in pull-request CI the `rocke-toolchain-pins`
+  pre-commit hook) reads every test and library Python file with
+  `rocke.tests.toolchain_pins` (which names the kinds of pin) and fails on a
+  pin that `platform/tests/tools/toolchain_pins_allowlist.txt` does not list,
+  and on a listed line that no longer matches the tree. Each line names the
+  issue that removes it; when you remove a pin, remove its line (or its kind);
+  never add one.
 
 ## 7. Current state vs target: the gap registry (WIP)
 
@@ -1557,7 +1801,7 @@ Read coverage from the emitter configs ([`platform/tests/README.md`](platform/te
 | G3 | **No C-engine on-GPU correctness lane** | C++ engine numerics validated only transitively (byte-identity to the Python engine) | Add a C-emitted `.ll` → HSACO → launch → compare lane |
 | G4 | **Two overlapping correctness lanes** | Duplication between the platform and legacy numeric lanes | Consolidate to one canonical lane (needs GPU validation) |
 | G5 | **Loose correctness verdict** — single worst-case tolerance (fp16 `atol=rtol=1e-2`) | Structural bugs can hide inside dtype-truncation noise; no structural-vs-quantization separation; NaN/Inf/denormal caught only incidentally | Split structural from dtype tolerance; add numeric edge-case tests |
-| G8 | **Performance largely ungated** ([§3.2](#32-are-the-kernels-fast)) | Perf regression caught only by a manual smoke gate; benchmark suites orphaned | Wire a perf tier into CI |
+| G8 | **Performance largely ungated** ([§3.2](#32-are-the-kernels-fast)) | Perf regression caught only by a manual smoke gate | Run the benchmark suites in the benchmarking tier, on its own system; performance does not run in CI |
 
 > **Reference CI policy:** pinned-reference verification runs with NumPy and
 > ROCm, without installing Torch. Independent oracles, including optional Torch,
@@ -1568,11 +1812,11 @@ Read coverage from the emitter configs ([`platform/tests/README.md`](platform/te
 
 | # | Gap | Impact | Target |
 |---|---|---|---|
-| G6 | **Partially enrolled `library/` behavioral pytest** | Installed CTest registers explicit attention, convolution, DSA, MLA, GDN/KDA, library-host (`rocke_library_host_pytest`: shared dispatch helpers, benchmark early stop, occupancy calibration), reference-contract, and GPU cohorts, plus the comprehensive-tier `rocke_library_conv_exhaustive_pytest` for the `exhaustive` items of the conv files, but source tests outside the explicit CMake selections remain ungated; the C++/Python engine parity files (`test_selector_cpp_parity.py`, `test_attention_ir_cpp_parity.py`, `test_gdn_decode_ir_cpp_parity.py`) run in `rocke_library_engine_parity_pytest` and the selector's full grid in the comprehensive-tier `rocke_library_engine_parity_exhaustive_pytest`, neither registered on Windows, where provider builds make no engine modules; on Linux every case of theirs skips where the build's Python had no pybind11, which is TheRock's CI build environment until it gains pybind11, and the standard-tier `rocke_engine_modules_check` reports that reason (it reads the configure's marker `tests/rocke_engine_modules.json`, and fails instead when a module the build made does not import or the `cpp` backend falls back to the Python engine); registration or adding a file under `library/tests/` does not establish CI coverage; the GDN/KDA host entry `rocke_library_gdn_pytest` is not registered on Windows (a slow case in `test_gdn_decode_fused.py`), so Windows runs no GDN/KDA decode host pytest (the KDA chunkwise IR hashes stay covered by `rocke_golden_static`); the TF32 conv build-and-lower matrices and comgr ISA checks (`rocke_library_conv_tf32_lowering_pytest`) are not registered on Windows either, to fit the Windows shard time, so Windows runs only the representative TF32 builds in `rocke_library_conv_tf32_pytest`; on Windows, `rocke_library_attention_cpu_pytest` leaves out the gfx942 dense prefill host tests and their IR golden; the GDN/KDA GPU numeric files skip on the Windows GPU lanes, which lack gfx950/gfx942 devices | Audit registered-but-unselected entries and unregistered files; enroll each in an owned CTest tier or document why it remains manual |
-| G7 | **Orphaned `platform/python` pytest** (heuristics, benchmark) | `platform/python/rocke/tests/in_tree_suites.py` lists the in-package directories `platform/tests/in_tree` runs; every test file that runs in no CI lane is in `platform/python/rocke/tests/pending_lanes.py` with its reason and the lane it waits for | Enrol each listed file as its lane lands |
+| G6 | **Partially enrolled `library/` behavioral pytest** | Installed CTest registers explicit attention, convolution, DSA, MLA, GDN/KDA, library-host (`rocke_library_host_pytest`: shared dispatch helpers, benchmark early stop, occupancy calibration), reference-contract, and GPU cohorts, plus the comprehensive-tier `rocke_library_conv_exhaustive_pytest` for the `exhaustive` items of the conv files, but source tests outside the explicit CMake selections remain ungated; the C++/Python engine parity files (`test_selector_cpp_parity.py`, `test_attention_ir_cpp_parity.py`, `test_gdn_decode_ir_cpp_parity.py`) run in `rocke_library_engine_parity_pytest` and the selector's full grid in the comprehensive-tier `rocke_library_engine_parity_exhaustive_pytest`, neither registered on Windows, where provider builds make no engine modules; on Linux every case of theirs skips where the configure did not set `ROCKE_BUILD_PYBIND=ON`, which a provider build does not (it uses no pybind11), and the standard-tier `rocke_engine_modules_check` reports that reason (it reads the configure's marker `tests/rocke_engine_modules.json`, and fails instead when a module the build made does not import or the `cpp` backend falls back to the Python engine); registration or adding a file under `library/tests/` does not establish CI coverage; the GDN/KDA host entry `rocke_library_gdn_pytest` is not registered on Windows (a slow case in `test_gdn_decode_fused.py`), so Windows runs no GDN/KDA decode host pytest (the KDA chunkwise IR hashes stay covered by `rocke_golden_static`); the TF32 conv build-and-lower matrices and comgr ISA checks (`rocke_library_conv_tf32_lowering_pytest`) are not registered on Windows either, to fit the Windows shard time, so Windows runs only the representative TF32 builds in `rocke_library_conv_tf32_pytest`; on Windows, `rocke_library_attention_cpu_pytest` leaves out the gfx942 dense prefill host tests and their IR golden; the GDN/KDA GPU numeric files skip on the Windows GPU lanes, which lack gfx950/gfx942 devices | Audit registered-but-unselected entries and unregistered files; enroll each in an owned CTest tier or document why it remains manual |
+| G7 | **Orphaned `platform/python` pytest** (heuristics, benchmark) | `platform/python/rocke/tests/in_tree_suites.py` lists the in-package directories `platform/tests/in_tree` runs; every test file that is assigned to no CI entry is in `platform/python/rocke/tests/pending_lanes.py` with its reason and the lane it waits for | Enrol each listed file as its lane lands |
 | G9 | **Legacy discovered pytest contains resource-bound work** | The affordable runner now excludes the largest marked matrices from execution and isolates selected files, but collection still imports and parameterizes every discovered module; additional unmarked structural/compiler cohorts remain in the default lane | Move each remaining resource-bound cohort behind a named structural/compiler CTest, then remove its transitional `exhaustive` marker |
-| G10 | **No CI job runs the byte-identity gate** ([§4.3](#43-do-the-two-implementations-agree-the-migration-gate)) | Only `tests/run_all.py` runs `tools/check_byte_identity.py`; no CTest entry or workflow does. Where the build made no engine modules (CI today, see G6), the C++-engine cases of the installed IR tests skip. A pull request whose author skipped the developer gate can merge with the two engines emitting different IR | Run the gate in pull-request CI (tracked in AICK-2301) and on each merge to develop (tracked in AICK-2929) |
-| G11 | **No CI job runs the installed comprehensive and full entries** ([§5.0.2](#502-ci-shards-and-rocke-item-sharding)) | The scheduled TheRock job selects comprehensive but does not build rocKE; the hipDNN superbuild selects full but tests the build tree only. The installed entries that start at comprehensive (such as the library gates and contracts that [`platform/tests/README.md`](platform/tests/README.md) lists as comprehensive and full) run nowhere in CI | Build rocKE in the scheduled TheRock job (tracked in AICK-2925) |
+| G10 | **No CI job runs the byte-identity gate** ([§4.3](#43-do-the-two-implementations-agree-the-migration-gate)) | Only `tests/run_all.py` runs `tools/check_byte_identity.py`; no CTest entry or workflow does. Where the build made no engine modules (see G6), the C++-engine cases of the installed IR tests skip. A pull request whose author skipped the developer gate can merge with the two engines emitting different IR | Run the gate in pull-request CI (tracked in AICK-2301) and on each merge to develop (tracked in AICK-2929) |
+| G11 | **No CI job builds rocKE** ([§5.0.2](#502-ci-shards-and-rocke-item-sharding)) | No TheRock workflow and not the hipDNN superbuild turns rocKE on, so no rocKE CTest entry of any tier, installed or build-tree, runs in CI; only the source-tree checks run, as the `rocke-*` pre-commit hooks, beside the repository's generic hooks ([What CI checks today](#what-ci-checks-today)) | Build rocKE in the pull-request and scheduled TheRock jobs (the scheduled job tracked in AICK-2925) |
 
 ### 7.3 What "green" does and does not mean today
 
@@ -1593,9 +1837,8 @@ reference under that lane's numerical contract. A green installed host lane or a
 GPU lane that selected no matching test, skipped, or performed zero comparisons
 does not make that claim. The remaining numerical holes are G1–G5.
 
-A green **CI run** does not prove that the two engines emit the same IR: no CI
-job runs the byte-identity gate (G10). No CI run, pull-request or scheduled,
-covers the installed comprehensive and full entries (G11).
+A green **CI run** proves only that the pre-commit hooks that
+[What CI checks today](#what-ci-checks-today) lists passed.
 
 ---
 
@@ -1739,9 +1982,13 @@ verification. This restriction is confined to reference workers and does not
 change the runtime's behavior for other callers or the legacy Torch test suites.
 
 Each installed operation/architecture pair has its own CTest entry:
-`rocke_<operation>_gpu_<arch>_pytest`, with a timeout of five minutes per
-installed variant. CTest passes `--rocke-reference-operation` and
-`--rocke-reference-arch` to select that architecture's variants; shared
+`rocke_<operation>_gpu_<arch>_pytest`, with the gpu class CTest `TIMEOUT` and
+the GPU per-test limit ([§5.0.3](#503-choosing-a-tier-and-an-entry-for-a-test));
+each request to a reference worker has its own timeout. The
+[GPU reference workflow](library/tests/reference_common/docs/gpu-reference-workflow.md#enroll-provider-test-selection)
+says how the CTest limit covers the variants of one entry. CTest passes
+`--rocke-reference-operation` and `--rocke-reference-arch` to select that
+architecture's variants; shared
 negative checks still run for each selected variant. A different GPU
 lane exits with code 77, recorded by CTest as skipped. On the intended lane,
 missing hardware, missing bundles, and validation errors fail the test.

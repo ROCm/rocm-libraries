@@ -18,11 +18,11 @@ An AMDGPU 128-bit buffer descriptor used for bounds-checked raw buffer loads / s
 
 ## CDNA
 
-AMD compute-die architecture family. CDNA3 = gfx942 (MI300X / MI325X); CDNA4 = gfx950 (MI350X). Both are wave64 MFMA targets.
+AMD compute-die architecture family. CDNA3 = gfx942; CDNA4 = gfx950. Both are wave64 MFMA targets.
 
 ## CHIPLET / XCD
 
-Accelerated Compute Die. MI300X / MI325X / MI350X have 8 XCDs. The default linear blockIdx round-robins WGs across XCDs (worst-case for L2 reuse). `chiplet_transform_chunked` remaps so every `chunk_size` consecutive WGs land on the same XCD.
+Accelerated Compute Die. gfx950 and the 304-CU gfx942 part have 8 XCDs; the 228-CU gfx942 part has 6. The default linear blockIdx round-robins WGs across XCDs (worst-case for L2 reuse). `chiplet_transform_chunked` remaps so every `chunk_size` consecutive WGs land on the same XCD.
 
 ## COMGR
 

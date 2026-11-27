@@ -615,7 +615,7 @@ def run_triton(
     """Pure-Triton fused MoE baseline (single-kernel implementation).
 
     AITER's tuned ``e2e_moe`` Triton kernel crashes with a memory
-    access fault on MI355X (gfx950) regardless of the torch / ROCm
+    access fault on gfx950 regardless of the torch / ROCm
     version (likely an AITER kernel-arch mismatch). We sidestep that
     by emitting a small purpose-written Triton kernel that mirrors
     the algorithmic shape of the CK DSL pipeline: per ``(token, k)``

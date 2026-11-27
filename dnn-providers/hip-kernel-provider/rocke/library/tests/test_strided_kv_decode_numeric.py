@@ -23,7 +23,7 @@ import pytest
 from rocke.numeric import storage
 from rocke.runtime.device_array import DeviceArray
 from rocke.runtime.hip_module import Runtime, get_device_arch
-from rocke.tests.lanes import TORCH_IN_CI, import_or_skip_until
+from rocke.tests.lanes import TICKET, import_or_skip_until
 
 from ._attention_unified_support import (
     decode_reference,
@@ -53,7 +53,7 @@ def gpu():
 @pytest.fixture(scope="module")
 def torch_gpu(gpu):
     """Torch with a GPU, for the torch-caller features (graphs, torch streams)."""
-    torch = import_or_skip_until("torch", TORCH_IN_CI)
+    torch = import_or_skip_until("torch", TICKET)
     if not torch.cuda.is_available():
         pytest.skip("torch has no GPU here")
     return torch, gpu
@@ -233,6 +233,9 @@ def test_strided_lds_admission_numeric(gpu, dtype, dim, block, tile):
     )
     problem = attention_problem(request)
     q, k, v = _decode_inputs(np.random.default_rng(314), dtype, 3, 8, 2, 65, dim)
+    # Written to the output before each launch: a row the kernel leaves
+    # unwritten fails the comparison instead of matching a zero reference.
+    unwritten = np.full(q.shape, np.nan, np.float32)
     lengths = [0, 64, 65]
     reference = _reference(q, k, v, lengths, 0)
     arrays = _RockeArrays()
@@ -240,7 +243,7 @@ def test_strided_lds_admission_numeric(gpu, dtype, dim, block, tile):
         q=arrays.half(q, dtype),
         k=arrays.strided_kv(k, "bshd", dtype),
         v=arrays.strided_kv(v, "bhsd", dtype),
-        out=arrays.half(np.zeros(q.shape, np.float32), dtype),
+        out=arrays.half(unwritten, dtype),
         cu_seqlens_q=arrays.ints(range(4)),
         seqused_k=arrays.ints(lengths),
     )
@@ -273,6 +276,7 @@ def test_strided_lds_admission_numeric(gpu, dtype, dim, block, tile):
     out = arrays.read(tensors["out"], dtype)
     np.testing.assert_allclose(out, reference, atol=atol, rtol=rtol)
     if tile is None:
+        tensors["out"].write(storage.encode(unwritten, dtype))
         au.run_unified_attention_torch(**kwargs)
         out = arrays.read(tensors["out"], dtype)
         np.testing.assert_allclose(out, reference, atol=atol, rtol=rtol)

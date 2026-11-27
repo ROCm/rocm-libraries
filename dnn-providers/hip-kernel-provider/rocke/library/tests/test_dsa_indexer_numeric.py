@@ -65,7 +65,7 @@ def test_indexer_scores_match_oracle(arch, Q, Sk, HI, D, block, q_pos_base, body
         pytest.skip(arch_skip_reason((arch,), f"needs a {arch} GPU"))
 
     from rocke.helpers.compile import compile_kernel
-    from rocke.run_manifest import run_manifest
+    from rocke.run_manifest import check_manifest
 
     from builders.common.dsa.manifest import make_lightning_indexer_manifest
     from kernels.common.lightning_indexer import (
@@ -101,7 +101,7 @@ def test_indexer_scores_match_oracle(arch, Q, Sk, HI, D, block, q_pos_base, body
         hsaco_path = tmp / f"{spec.kernel_name()}.hsaco"
         man_path.write_text(json.dumps(manifest))
         hsaco_path.write_bytes(artifact.hsaco)
-        summary = run_manifest(man_path, hsaco_path, shape=None, verify=True)
+        summary = check_manifest(man_path, hsaco_path, shape=None, verify=True)
 
     assert summary.bad_count == 0, (
         f"{arch}: {summary.bad_count}/{summary.total} scores exceed tol={_TOL} "

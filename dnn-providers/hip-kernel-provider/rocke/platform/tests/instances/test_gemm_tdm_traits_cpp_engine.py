@@ -21,7 +21,7 @@ import sys
 import unittest
 from dataclasses import replace
 
-from rocke.tests.lanes import BINDING_LANE, skip_until
+from rocke.tests.lanes import BUILD_VARIANT, skip_until
 
 # pytest.ini uses --import-mode=importlib, which does not put this directory on
 # sys.path: without the insert the sibling import below only resolves when an
@@ -151,7 +151,7 @@ class TestGemmTdmTraitsCppEngine(unittest.TestCase):
             import rocke_engine  # noqa: F401
         except ModuleNotFoundError as e:
             skip_until(
-                BINDING_LANE, reason=f"rocke_engine C++ binding not importable: {e}"
+                BUILD_VARIANT, reason=f"rocke_engine C++ binding not importable: {e}"
             )
 
     def test_both_engines_emit_identical_kernels(self):

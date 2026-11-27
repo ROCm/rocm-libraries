@@ -4158,9 +4158,12 @@ def render_coalescing(
             show_xlabel=(g == nsimd - 1),
         )
         col = _FUSED_GREEN if fg["fused"] else _SCATTER_RED
+        verdict = (
+            "FUSED" if fg["fused"] else f"SCATTERED {fg['lines']}/{fg['min_lines']}x"
+        )
         ax.set_title(
             f"SIMD {g}  (lanes {g * grp}-{g * grp + grp - 1}):  {fg['lines']} cache line(s), "
-            f"{'FUSED' if fg['fused'] else f'SCATTERED {fg['lines']}/{fg['min_lines']}x'}",
+            f"{verdict}",
             fontsize=8.5,
             weight="bold",
             color=col,

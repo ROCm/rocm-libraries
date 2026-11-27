@@ -246,16 +246,21 @@ class TestDefaultUniformKDecode(unittest.TestCase):
             self.assertIn("tapk" if tapk else "ukd", job.identity.label())
 
     def test_jit_sweep_worker_uses_the_policy(self):
-        from benchmarks.common.benchmark_implicit_gemm_conv import _build_dgrad_one
+        from benchmarks.common.benchmark_implicit_gemm_conv import (
+            DgradCombo,
+            build_dgrad_sweep_kernel,
+        )
         from kernels.common._conv_implicit_gemm_common import ConvProblem
 
         problem = ConvProblem(
             N=2, Hi=16, Wi=16, C=64, K=64, Y=2, X=2, sH=2, sW=2, groups=1
         )
-        combo = (64, 64, 64, 2, 2, 32, "mem", "cshuffle", 1)
-        out = _build_dgrad_one((combo, problem, "bf16", "gfx950", 8, 8, 8))
-        self.assertIsNotNone(out)
-        _combo, spec, _sk, kernel = out
+        combo = DgradCombo(64, 64, 64, 2, 2, 32, "mem", "cshuffle", 1)
+        built = build_dgrad_sweep_kernel(
+            combo, problem=problem, dtype="bf16", arch="gfx950"
+        )
+        self.assertIsNotNone(built)
+        spec, kernel = built
         self.assertTrue(spec.uniform_k_decode)
         self.assertTrue(kernel.name.endswith("_ukd"))
 

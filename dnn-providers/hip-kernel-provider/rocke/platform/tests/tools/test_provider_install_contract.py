@@ -14,11 +14,12 @@ from __future__ import annotations
 
 import re
 import shutil
-import subprocess
 from pathlib import Path
 
 import pytest
 from rocke.assets import platform_root
+from rocke.tests.cmake_embedding import configure_embedded_rocke
+from rocke.tests.lanes import SOURCE_TREE, skip_until
 
 pytestmark = pytest.mark.integration
 
@@ -40,9 +41,15 @@ TESTS_OFF = (
 def rocke() -> Path:
     root = platform_root().parent
     if not (root / "CMakeLists.txt").is_file():
-        pytest.skip("rocKE source CMake project is absent from this test artifact")
+        skip_until(
+            SOURCE_TREE,
+            reason="rocKE source CMake project is absent from this test artifact",
+        )
     if shutil.which("cmake") is None:
-        pytest.skip("cmake is required for the source configuration contract")
+        skip_until(
+            SOURCE_TREE,
+            reason="cmake is required for the source configuration contract",
+        )
     return root
 
 
@@ -50,28 +57,24 @@ def rocke() -> Path:
 def provider_cmake(rocke: Path) -> str:
     path = rocke.parent / "CMakeLists.txt"
     if not path.is_file():
-        pytest.skip("hip-kernel-provider CMake project is absent from this checkout")
+        skip_until(
+            SOURCE_TREE,
+            reason="hip-kernel-provider CMake project is absent from this checkout",
+        )
     return path.read_text()
 
 
 def _configure(rocke: Path, build: Path, *options: str) -> str:
-    """Configure rocke/ and return the text of every generated install script."""
-    result = subprocess.run(
-        [
-            "cmake",
-            "-S",
-            str(rocke),
-            "-B",
-            str(build),
-            "-DROCKE_BUILD_PYENV=OFF",
-            # GNUInstallDirs picks lib64 on native 64-bit Fedora/RHEL; pin it so the
-            # lib/... destinations asserted below do not depend on the host.
-            "-DCMAKE_INSTALL_LIBDIR=lib",
-            *options,
-        ],
-        capture_output=True,
-        check=False,
-        text=True,
+    """Configure rocke/ inside a wrapper project, as the provider embeds it, and
+    return the text of every generated install script."""
+    result = configure_embedded_rocke(
+        rocke,
+        build,
+        "-DROCKE_BUILD_PYENV=OFF",
+        # GNUInstallDirs picks lib64 on native 64-bit Fedora/RHEL; pin it so the
+        # lib/... destinations asserted below do not depend on the host.
+        "-DCMAKE_INSTALL_LIBDIR=lib",
+        *options,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     scripts = sorted(build.rglob("cmake_install.cmake"))
@@ -88,6 +91,13 @@ def _installs_under(install: str, directory: str) -> bool:
         )
         is not None
     )
+
+
+def _excludes_file(install: str, file_name: str) -> bool:
+    """True when an install(DIRECTORY) rule excludes every file named
+    ``file_name``; CMake writes a PATTERN as an escaped REGEX."""
+    escaped = "".join(c if c.isalnum() else "\\\\" + c for c in file_name)
+    return f'REGEX "/{escaped}$" EXCLUDE' in install
 
 
 def test_provider_follows_tests_switch(provider_cmake: str) -> None:
@@ -147,3 +157,18 @@ def test_provider_tests_off_installs_no_rocke_content(
     assert not _installs_under(install, "bin")
     assert not _installs_under(install, "lib")
     assert not _installs_under(install, "include")
+
+
+def test_source_checkout_scans_are_not_installed(rocke: Path, tmp_path: Path) -> None:
+    # These tests scan every tracked file of the source checkout, so an
+    # installed copy could only skip; they run in the build tree instead.
+    install = _configure(
+        rocke,
+        tmp_path / "build",
+        "-DROCKE_INSTALL_TESTS=ON",
+        "-DROCKE_INSTALL_PYTHON_TESTS=ON",
+    )
+
+    assert _excludes_file(install, "test_compliance_patterns.py")
+    assert _excludes_file(install, "test_no_torch.py")
+    assert _excludes_file(install, "test_toolchain_pins.py")

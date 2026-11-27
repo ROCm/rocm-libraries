@@ -16,6 +16,7 @@
 #include "rocke/dtypes_internal.h"
 #include "rocke/error.hpp"
 #include "rocke/ir_internal.h"
+#include "rocke/llvm_profile_internal.h"
 #include "rocke/lower_llvm_internal.h"
 #include "rocke/mfma_scale_internal.h"
 
@@ -64,10 +65,18 @@ static constexpr rocke_matrix_call_t wmma(const char* intrinsic,
                                           const rocke_matrix_arg_t (&args)[N],
                                           rocke_matrix_register_t operand,
                                           rocke_matrix_register_t acc,
-                                          const char* decl_key = NULL)
+                                          const char* decl_key = NULL,
+                                          bool requires_llvm23 = false)
 {
-    return rocke_matrix_call_t{
-        intrinsic, args, N, as_is(operand), as_is(operand), as_is(acc), as_is(acc), decl_key};
+    return rocke_matrix_call_t{intrinsic,
+                               args,
+                               N,
+                               as_is(operand),
+                               as_is(operand),
+                               as_is(acc),
+                               as_is(acc),
+                               decl_key,
+                               requires_llvm23};
 }
 
 /* gfx12 fp8 / bf8 WMMA: (A, B, C). */
@@ -398,13 +407,16 @@ static constexpr rocke_matrix_call_entry_t k_listed_calls[] = {
           reg("f16", 8))},
     /* gfx1250 i8 -> i32: 32 i8 per lane in eight words. This is the LLVM 23
      * call; LLVM 22 declares the instruction without the clamp argument (its
-     * arch-domain column records this declaration as unknown). */
+     * arch-domain column records this declaration as unknown), so the lowering
+     * refuses it below LLVM 23. */
     ROCKE_INTEGER_MMA_ROWS("wmma_gfx1250_i32_16x16x64_iu8",
                            8,
                            wmma("llvm.amdgcn.wmma.i32.16x16x64.iu8.v8i32.v8i32",
                                 k_gfx1250_integer_wmma_args,
                                 reg("i32", 8),
-                                reg("i32", 8))),
+                                reg("i32", 8),
+                                NULL /* decl_key */,
+                                true /* requires_llvm23 */)),
 };
 
 namespace
@@ -594,6 +606,11 @@ const rocke_matrix_call_t* rocke_matrix_call_for(const char* op_id)
             return &entry.call;
     }
     return NULL;
+}
+
+bool rocke_matrix_call_lowers_at(const rocke_matrix_call_t* call, rocke_llvm_flavor_t flavor)
+{
+    return !call->requires_llvm23 || rocke_ll_profile_has(flavor, ROCKE_LL_CAP_LLVM23_TARGET_OPS);
 }
 
 const char* rocke_matrix_call_key(const rocke_matrix_call_t* call)

@@ -222,9 +222,8 @@ from .fusion_validation import (
 )
 from .geometry import WarpGrid
 from .grid import (
-    NUM_XCDS_MI300X,
-    NUM_XCDS_MI325X,
-    NUM_XCDS_MI350X,
+    NUM_XCDS_GFX942,
+    NUM_XCDS_GFX950,
     SuperTileSwizzleResult,
     chiplet_aware_super_tile,
     chiplet_aware_super_tile_dynamic,
@@ -489,9 +488,8 @@ __all__ = [
     "make_autotune_key",
     "spec_replace",
     # Chiplet / grid swizzle (multi-XCD L2 locality)
-    "NUM_XCDS_MI300X",
-    "NUM_XCDS_MI325X",
-    "NUM_XCDS_MI350X",
+    "NUM_XCDS_GFX942",
+    "NUM_XCDS_GFX950",
     "SuperTileSwizzleResult",
     "chiplet_aware_super_tile",
     "chiplet_aware_super_tile_dynamic",

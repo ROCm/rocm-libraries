@@ -45,7 +45,7 @@ by `2^(ea + eb - 254)` before summing. With large codes two products of
 opposite sign can each overflow, and `inf - inf` is NaN although the true sum
 is an ordinary f32. `mx_gemm` tracks the largest code a wave saw and, above
 the safe code, recomputes with `add_mx_scaled_dot`
-([instances/common/mx_gemm.py:582-600](../../python/rocke/instances/common/mx_gemm.py)).
+(`build_mx_gemm` in [instances/common/mx_gemm.py](../../python/rocke/instances/common/mx_gemm.py)).
 The bound depends on the element format's max, which for fp8 depends on the
 target ([Quick values](./README.md#quick-values)).
 

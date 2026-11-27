@@ -1,6 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Build + numeric-verify the gfx1151 WMMA GEMM on a Strix Halo node.
+"""Build + numeric-verify the gfx1151 WMMA GEMM on a gfx1151 node.
 
 Builds the RDNA3.5 WMMA GEMM, writes a gemm manifest, and runs
 ``rocke.run_manifest --verify`` (numpy reference ``C = A @ B.T``, RCR f16).

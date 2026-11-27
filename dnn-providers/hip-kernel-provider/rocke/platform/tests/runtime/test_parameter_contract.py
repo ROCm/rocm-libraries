@@ -400,6 +400,7 @@ def _check_door(launcher: KernelLauncher, stream: int) -> None:
     np.testing.assert_array_equal(untouched.read(), np.zeros(128, dtype=np.int32))
 
 
+@pytest.mark.gpu
 def test_gpu_from_artifact_checks_a_kernel_compiled_through_llvm(stream):
     arch = current_device_arch()
     _check_door(
@@ -407,6 +408,7 @@ def test_gpu_from_artifact_checks_a_kernel_compiled_through_llvm(stream):
     )
 
 
+@pytest.mark.gpu
 def test_gpu_from_artifact_checks_a_kernel_compiled_through_hipcc(stream):
     """The contract is read from the KernelDef the artifact holds, so a kernel
     compiled through hipcc is checked exactly like one compiled through LLVM."""
@@ -421,6 +423,7 @@ def test_gpu_from_artifact_checks_a_kernel_compiled_through_hipcc(stream):
     )
 
 
+@pytest.mark.gpu
 def test_gpu_from_artifact_picks_a_kernel_of_a_module(stream):
     arch = current_device_arch()
     companion = IRBuilder("fill_companion")
@@ -438,6 +441,7 @@ def test_gpu_from_artifact_picks_a_kernel_of_a_module(stream):
     assert other.supports({"K": 4}).reasons[0].startswith("K = 4: needs K eq 3")
 
 
+@pytest.mark.gpu
 def test_gpu_bind_checks_once_when_it_packs(stream):
     arch = current_device_arch()
     launcher = KernelLauncher.from_artifact(compile_kernel(_fill_kernel(), arch=arch))
@@ -454,6 +458,7 @@ def test_gpu_bind_checks_once_when_it_packs(stream):
         )
 
 
+@pytest.mark.gpu
 def test_gpu_a_passed_block_must_equal_the_workgroup_size(stream):
     """make_kernel and PipelineLauncher pass their block on; each launch
     accepts one equal to the kernel's workgroup_size and refuses another."""
@@ -482,6 +487,7 @@ def test_gpu_a_passed_block_must_equal_the_workgroup_size(stream):
         )
 
 
+@pytest.mark.gpu
 def test_gpu_first_supported_returns_the_first_launcher_that_accepts():
     arch = current_device_arch()
     aligned = KernelLauncher.from_artifact(compile_kernel(_fill_kernel(), arch=arch))
@@ -501,6 +507,7 @@ def test_gpu_first_supported_returns_the_first_launcher_that_accepts():
     assert "\n  fill_loose:\n    M = -1: needs M ge 0" in str(caught.value)
 
 
+@pytest.mark.gpu
 def test_gpu_a_launcher_built_from_bytes_checks_nothing(stream):
     """The raw constructor sees only code-object bytes, which carry no contract:
     it has none, cannot answer supports, and launches as it always did, as does

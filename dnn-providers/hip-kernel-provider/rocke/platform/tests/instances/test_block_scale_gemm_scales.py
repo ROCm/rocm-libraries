@@ -15,10 +15,11 @@ scale serves them all.
 Checks:
 
 * On the host, on the kernel's LLVM IR for gfx942 and gfx950, fp8 and bf8,
-  and A scale groups of one and two rows (with the C++ engine importable,
-  each engine's builder, ``build_block_scale_gemm`` and
+  and A scale groups of one and two rows, once on the Python builder's kernel
+  and once where each engine's builder, ``build_block_scale_gemm`` and
   ``rocke_build_block_scale_gemm``, builds the kernel from the spec, both
-  kernels are lowered, and the two texts must be the same byte for byte):
+  kernels are lowered and the two texts must be the same byte for byte (that
+  case needs the C++ engine's Python modules):
   every output gets one term per K group ``kg``, each term scaled with
   exactly one A scale, from ``AScale[row // gm, kg]``, and one B scale, from
   ``BScale[kg, col // gn]``, where ``(row, col)`` is the cell the kernel
@@ -45,7 +46,7 @@ from rocke.instances.common.block_scale_gemm import (
     block_scale_gemm_signature,
     build_block_scale_gemm,
 )
-from rocke.tests.engines import lower_spec_with_all_engines
+from rocke.tests.engines import ENGINES, Engine, lower_spec_with_engine
 from rocke.tests.fp8_gemm_checks import (
     EXACT_OPERAND_VALUES,
     GEMM_TOLERANCE,
@@ -58,12 +59,13 @@ _GPU_ARCHS = ("gfx942", "gfx950")
 _MANTISSAS = ("fp8e4m3", "bf8e5m2")
 
 
-def _lowered_llvm(spec: BlockScaleGemmSpec, arch: str) -> str:
-    """The kernel's LLVM IR for ``spec`` on ``arch`` from every engine
-    (``lower_spec_with_all_engines``)."""
-    return lower_spec_with_all_engines(
+def _lowered_llvm(spec: BlockScaleGemmSpec, arch: str, engine: Engine) -> str:
+    """The kernel's LLVM IR for ``spec`` on ``arch`` as ``engine``'s builder
+    builds it (``lower_spec_with_engine``)."""
+    return lower_spec_with_engine(
         spec,
         arch,
+        engine=engine,
         build_kernel=build_block_scale_gemm,
         lower_spec=lower_block_scale_gemm,
     )
@@ -111,12 +113,15 @@ _HOST_TARGETS = [
 ]
 
 
+@pytest.mark.parametrize("engine", ENGINES)
 @pytest.mark.parametrize(
     "arch, mantissa, group_m",
     _HOST_TARGETS,
     ids=[f"{a}-{d}-gm{g}" for a, d, g in _HOST_TARGETS],
 )
-def test_each_output_is_scaled_with_its_own_row_and_column(arch, mantissa, group_m):
+def test_each_output_is_scaled_with_its_own_row_and_column(
+    arch, mantissa, group_m, engine
+):
     """Every output gets one term per K group, scaled with the A scale of its
     own row's scale group and the B scale of its own column's, for every
     lane and output tile.
@@ -140,7 +145,7 @@ def test_each_output_is_scaled_with_its_own_row_and_column(arch, mantissa, group
         group_size_mnk=(group_m, group_n, group_k),
     )
     groups = spec.K // group_k
-    ir = _KernelIR(_lowered_llvm(spec, arch))
+    ir = _KernelIR(_lowered_llvm(spec, arch, engine))
     work_items = {
         ir.call_named("llvm.amdgcn.workitem.id.x"): np.arange(spec.block_size)[
             :, None, None, None
@@ -218,11 +223,12 @@ def gpu_arch():
 
 def _run_block_scale_gemm(arch, spec, *, a, a_scale, b, b_scale) -> np.ndarray:
     """Run the block-scaled GEMM of ``spec`` on the GPU and return C as an
-    (M, N) f32 array. The kernel run is the one :func:`_lowered_llvm`
-    returns. ``a`` (M, K) and ``b`` (K, N) are element bytes, ``a_scale``
-    (M / gm, K / gk) and ``b_scale`` (K / gk, N / gn) f32, all row-major."""
+    (M, N) f32 array. The kernel run is the one the Python builder and engine
+    give (:func:`_lowered_llvm`). ``a`` (M, K) and ``b`` (K, N) are element
+    bytes, ``a_scale`` (M / gm, K / gk) and ``b_scale`` (K / gk, N / gn) f32,
+    all row-major."""
     artifact = compile_kernel(build_block_scale_gemm(spec, arch=arch), arch=arch)
-    assert artifact.llvm_text == _lowered_llvm(spec, arch)
+    assert artifact.llvm_text == _lowered_llvm(spec, arch, "python")
     host = {
         "A": np.ascontiguousarray(a, dtype=np.uint8),
         "B": np.ascontiguousarray(b, dtype=np.uint8),
@@ -269,6 +275,7 @@ def _check_against_reference(got, want):
     assert error <= GEMM_TOLERANCE * np.abs(want[finite]).max(), error
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("mantissa", _MANTISSAS)
 @pytest.mark.parametrize("special_values", [False, True], ids=["finite", "inf-nan"])
 def test_row_and_column_scales_on_gpu(gpu_arch, mantissa, special_values):

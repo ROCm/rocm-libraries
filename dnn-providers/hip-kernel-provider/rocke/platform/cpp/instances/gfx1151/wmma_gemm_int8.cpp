@@ -4,7 +4,7 @@
  * instance_gfx1151_wmma_gemm_int8.c -- C99 port of
  * rocke/instances/gfx1151/wmma_gemm_int8.py.
  *
- * The gfx1151 (RDNA3.5 / Strix Halo) INT8-storage / f16-compute WMMA GEMM
+ * The gfx1151 (RDNA3.5) INT8-storage / f16-compute WMMA GEMM
  * kernel: one wave32 per 16x16 output tile, no LDS, RCR layout (C = A @ B.T).
  * Operands are stored as symmetric per-tensor int8 and dequantized to f16 on
  * chip; the combined scale (scale_a*scale_b) is folded into the epilogue. The

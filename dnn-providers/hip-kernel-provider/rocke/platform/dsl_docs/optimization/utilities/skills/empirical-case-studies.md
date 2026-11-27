@@ -1,6 +1,6 @@
 # Empirical Case Studies - GPU Kernel Optimization
 
-Real-world empirical data from kernel optimization experiments on AMD MI350X/MI355X (gfx950) hardware.
+Real-world empirical data from kernel optimization experiments on gfx950 hardware.
 
 ## Purpose
 
@@ -119,11 +119,11 @@ else:  # 96KB ≤ LDS < 128KB
 
 ### Architecture-Specific LDS Capacities
 
-| Architecture | GPU | LDS per CU | Notes |
-|--------------|-----|------------|-------|
-| gfx90a | MI210 | 64 KB | LDS capacity is precious - XOR swizzle preferred |
-| gfx940 | MI300 | 64 KB | LDS capacity is precious - XOR swizzle preferred |
-| gfx950 | MI350X/MI355X | 160 KB | Abundant LDS - padding swizzle often wins |
+| Architecture | LDS per CU | Notes |
+|--------------|------------|-------|
+| gfx90a | 64 KB | LDS capacity is precious - XOR swizzle preferred |
+| gfx940 / gfx942 | 64 KB | LDS capacity is precious - XOR swizzle preferred |
+| gfx950 | 160 KB | Abundant LDS - padding swizzle often wins |
 
 ### Performance Trade-offs by Architecture
 
@@ -158,9 +158,9 @@ the guidance is not merely "manual hints don't help" — on gfx950 the hints a k
 transcribes from a reference can actively hurt. See **Case Study 7**. Lever:
 `TraitSpec.emit_sched_hints` (default `None` = arch-resolved, hints OFF on gfx950).
 
-### Opcode-Specific Conflict Behavior (gfx950/MI350X)
+### Opcode-Specific Conflict Behavior (gfx950)
 
-From empirical LDS studies on MI350X:
+From empirical LDS studies on gfx950:
 
 **Conflict periods by opcode:**
 - `ds_read_b64`, `ds_read_b128`: **64-dword conflict period**
@@ -178,9 +178,9 @@ From empirical LDS studies on MI350X:
 
 **Critical asymmetry**: Swizzle layouts tuned for reads may not protect the write path. Read and write conflict behavior on the same LDS region can differ and may need separate swizzle strategies.
 
-**For deeper analysis**, see two out-of-tree articles:
-- "Four Things to Know About LDS Bank Conflicts on MI350X"
-- "Empirically Characterizing LDS Bank Conflicts on AMD MI350X"
+**For deeper analysis**, see two out-of-tree articles on gfx950 LDS bank
+conflicts: one on four of their properties, one that characterizes them
+empirically.
 
 ---
 

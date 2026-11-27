@@ -167,6 +167,7 @@ def test_optimized_decode_keeps_negative_zero(arch):
 
 
 # The optimizer runs only when asked; run the codes through both paths.
+@pytest.mark.gpu
 @pytest.mark.parametrize("optimize_ir", [False, True], ids=["plain", "optimized"])
 def test_all_fp6_codes_decode_to_the_spec_value_on_gpu(gpu_arch, optimize_ir):
     got = _decode_on_gpu(gpu_arch, optimize_ir)

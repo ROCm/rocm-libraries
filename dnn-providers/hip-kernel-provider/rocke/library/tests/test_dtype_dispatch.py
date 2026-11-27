@@ -49,6 +49,7 @@ from ._direct_conv_numeric import (
     direct_dgrad_reference,
     direct_fwd_reference,
     launch_direct_conv,
+    poisoned,
 )
 
 GPU_ARCH = get_device_arch(0)
@@ -442,7 +443,8 @@ def _run_direct_fwd(arch: str, cpg: int, dtype: str) -> Tuple[bool, str]:
             artifact,
             p,
             (x, w),
-            np.zeros((N, p.Ho, p.Wo, groups * cpg), storage.host_dtype(dtype)),
+            # NaN-filled: an element left unwritten fails the comparison.
+            poisoned((N, p.Ho, p.Wo, groups * cpg), dtype, 0xFF),
             grid=grid,
             block=block,
         )
@@ -503,7 +505,8 @@ def _run_direct_dgrad(arch: str, cpg: int, dtype: str) -> Tuple[bool, str]:
             artifact,
             p,
             (dy, w),
-            np.zeros((N, H, W, total_c), storage.host_dtype(dtype)),
+            # NaN-filled: an element left unwritten fails the comparison.
+            poisoned((N, H, W, total_c), dtype, 0xFF),
             grid=grid,
             block=block,
             direction="dgrad",

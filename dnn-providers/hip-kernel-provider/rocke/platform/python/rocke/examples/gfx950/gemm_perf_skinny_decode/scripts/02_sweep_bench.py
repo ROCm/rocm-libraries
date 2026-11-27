@@ -13,7 +13,7 @@ What we measure:
     Per kernel: best of N attempts, each with W warmup + I timed launches.
     Time is HIP-event wall clock from rocke.run_manifest.
     Memory traffic uses the runbook's bytes_xfer = 2*(M*K + N*K + M*N).
-    Roofline HBM = 8 TB/s for MI355X HBM3e.
+    Roofline HBM = 8 TB/s for gfx950 HBM3e.
 
 What we DON'T do:
     No --verify (run_manifest verify path allocates fp16 buffers regardless
@@ -169,7 +169,7 @@ WARMUP_ITERS = 20
 TIMED_ITERS = 200
 ATTEMPTS = 5
 
-HBM_PEAK_GBS = 8000.0  # MI355X HBM3e
+HBM_PEAK_GBS = 8000.0  # gfx950 HBM3e
 PEAK_BF16_TF = 2500.0
 
 BUILD = ROOT / "build"

@@ -4,7 +4,7 @@
 """Which tests did no CI lane run, with no recorded reason? A per-test audit.
 
 ``platform/tests/tools/test_pending_lanes.py`` checks, file by file, that every
-test file is in a CI-run CTest entry or recorded in ``rocke.tests.pending_lanes``.
+test file is assigned to a CI entry or recorded in ``rocke.tests.pending_lanes``.
 It cannot see a single test that skips or is deselected in every CI lane while
 the rest of its file runs, nor a file recorded under one lane whose other
 tests skip for another reason. This audit sees both, from what CI lanes did:
@@ -32,8 +32,10 @@ any other name for a lane without a GPU::
         --universe <records of a --collect-only run> --report limbo.md
 
 Records name test files by their path in the tree that ran them (an installed
-tree or a source checkout); the audit maps each to the source test file whose
-path is the longest unique suffix of it.
+tree or a source checkout), on any operating system; the audit maps each to the
+source test file whose path is the longest unique suffix of it. A lane none of
+whose records maps to a source test file is no evidence, and fails the audit
+as a test in limbo does.
 """
 
 from __future__ import annotations
@@ -52,7 +54,11 @@ if _SOURCE_PACKAGE_ROOT.is_dir() and str(_SOURCE_PACKAGE_ROOT) not in sys.path:
     sys.path.insert(0, str(_SOURCE_PACKAGE_ROOT))
 
 from rocke.core.arch.target import known_arches
-from rocke.tests.pending_lanes import TEST_FILE_ROOTS, waiting_entry
+from rocke.tests.pending_lanes import (
+    TEST_FILE_ROOTS,
+    python_files_under_test_roots,
+    waiting_entry,
+)
 from rocke.tests.run_records import OTHER_SHARD, RunRecord, read_run_records
 
 __all__ = [
@@ -62,15 +68,15 @@ __all__ = [
     "audit",
     "lane_run",
     "main",
-    "python_files",
     "universe_of",
 ]
 
 ROCKE_DIR = Path(__file__).resolve().parents[1]
 _GFX = re.compile(r"\bgfx[0-9a-f]+\b")
-# pytest's skip reason for the placeholder case of a test whose parameter set is
-# empty in that run (a parameter set that depends on the GPU, for one).
-_EMPTY_PARAMETER_SET = "got empty parameter set"
+# The parameter id of the placeholder case pytest makes for a test whose
+# parameter set is empty in a run (a parameter set that depends on the GPU, for
+# one); one part of the id of a test with stacked parametrizes.
+_EMPTY_PARAMETER_SET_ID = "NOTSET"
 # How far a test got in a lane, lowest first; a lane keeps the furthest. An
 # unfinished test was to run, but its process ended first (run_records).
 _PROGRESS = ("collected", "deselected", "unfinished", "skipped", "ran")
@@ -91,7 +97,9 @@ class SourcePaths:
 
     def source_of(self, path: str) -> str | None:
         if path not in self._mapped:
-            parts = Path(path).as_posix().split("/")
+            # Records name files with "/" (run_records); a record a Windows
+            # run wrote with "\\" maps the same on any reader's OS.
+            parts = path.replace("\\", "/").split("/")
             self._mapped[path] = next(
                 (
                     hits[0]
@@ -104,30 +112,19 @@ class SourcePaths:
         return self._mapped[path]
 
 
-def python_files(rocke_dir: Path) -> list[str]:
-    """Every Python file under the test file roots of ``rocke_dir``, relative to
-    it: the files a run may collect tests from (an entry may name a test module
-    that is not ``test_*.py``)."""
-    return [
-        file.relative_to(rocke_dir).as_posix()
-        for root in TEST_FILE_ROOTS
-        for file in (rocke_dir / root).rglob("*.py")
-        if "__pycache__" not in file.parts
-    ]
-
-
 TestId = tuple[str, str]  # (source test file, pytest node name)
 
 
 @dataclass
 class LaneRun:
     """What one CI lane did with each test: its furthest event and, when it
-    did not run the test, why."""
+    did not run the test, every reason its entries gave for that event (one
+    lane runs several entries, so one test can have several)."""
 
     name: str
     gpu_arch: str | None  # None: the lane had no GPU
     progress: dict[TestId, str] = field(default_factory=dict)
-    reasons: dict[TestId, str] = field(default_factory=dict)
+    reasons: dict[TestId, list[str]] = field(default_factory=dict)
     # Test files skipped whole at collection -> the reason.
     skipped_files: dict[str, str] = field(default_factory=dict)
     # Test files that failed to collect, which fails the lane visibly.
@@ -135,11 +132,21 @@ class LaneRun:
     unmapped: set[str] = field(default_factory=set)
 
     def note(self, test: TestId, event: str, reason: str) -> None:
+        """Keep the furthest event of ``test`` and every reason given for it."""
         current = self.progress.get(test)
-        if current is None or _PROGRESS.index(event) >= _PROGRESS.index(current):
+        if current is not None and _PROGRESS.index(event) < _PROGRESS.index(current):
+            return
+        if event != current:
             self.progress[test] = event
-            if reason:
-                self.reasons[test] = reason
+            self.reasons[test] = []
+        if reason and reason not in self.reasons[test]:
+            self.reasons[test].append(reason)
+
+    @property
+    def observed_nothing(self) -> bool:
+        """Whether none of the lane's records named a source test file: its
+        records are missing or from another tree, so it is no evidence."""
+        return not (self.progress or self.skipped_files or self.failed_files)
 
     def ran(self, test: TestId) -> bool:
         return self.progress.get(test) == "ran" or test[0] in self.failed_files
@@ -152,11 +159,19 @@ class LaneRun:
         rather than running it to a skip."""
         return self.progress.get(test) == "deselected"
 
-    def why_not_run(self, test: TestId) -> str:
-        """Why the lane, which collected ``test``, did not run it."""
+    def reasons_not_run(self, test: TestId) -> tuple[str, ...]:
+        """Every reason the lane, which collected ``test``, gave for not
+        running it."""
         if test[0] in self.skipped_files:
-            return self.skipped_files[test[0]]
-        return self.reasons.get(test, "collected, but no run of it was recorded")
+            return (self.skipped_files[test[0]],)
+        return tuple(self.reasons.get(test) or ()) or (
+            "collected, but no run of it was recorded",
+        )
+
+    def why_not_run(self, test: TestId) -> str:
+        """Why the lane, which collected ``test``, did not run it: its reasons,
+        joined."""
+        return " / ".join(self.reasons_not_run(test))
 
 
 def lane_run(
@@ -224,28 +239,23 @@ def _accounted_for(test: TestId, lanes: list[LaneRun]) -> bool:
         return waiting_entry(path, node, None) is not None
     recorded = 0
     for lane in observed:
-        reason = lane.why_not_run(test)
-        if (
+        reasons = lane.reasons_not_run(test)
+        if any(
             waiting_entry(path, node, reason, deselected=lane.deselected(test))
             is not None
+            for reason in reasons
         ):
             recorded += 1
-        elif not _defers(lane, test, reason, lanes):
+        elif not any(_defers(lane, test, reason, lanes) for reason in reasons):
             return False
     return recorded > 0
 
 
-def _placeholder_of_a_test_that_ran(
-    test: TestId, lanes: list[LaneRun], ran_functions: set[TestId]
-) -> bool:
-    """Whether ``test`` is the placeholder pytest makes where a test's parameter
-    set is empty, of a test another case of which ran: no case is missing."""
-    path, node = test
-    return (path, node.partition("[")[0]) in ran_functions and all(
-        lane.why_not_run(test).startswith(_EMPTY_PARAMETER_SET)
-        for lane in lanes
-        if lane.collected(test)
-    )
+def _is_empty_parameter_set_placeholder(node: str) -> bool:
+    """Whether the test ``node`` is the placeholder pytest makes where a test's
+    parameter set is empty."""
+    _, _, parameter_id = node.partition("[")
+    return _EMPTY_PARAMETER_SET_ID in parameter_id.removesuffix("]").split("-")
 
 
 def audit(lanes: list[LaneRun], universe: Iterable[TestId] = ()) -> list[LimboTest]:
@@ -261,11 +271,19 @@ def audit(lanes: list[LaneRun], universe: Iterable[TestId] = ()) -> list[LimboTe
         if path not in known_files
     }
     ran = {test for test in tests if any(lane.ran(test) for lane in lanes)}
-    ran_functions = {(path, node.partition("[")[0]) for path, node in ran}
+    # A test whose parameter set is empty in one run and not in another has
+    # its real cases audited one by one, so its placeholder stands for no case.
+    functions_with_cases = {
+        (path, node.partition("[")[0])
+        for path, node in tests
+        if not _is_empty_parameter_set_placeholder(node)
+    }
     limbo = []
     for test in sorted(tests - ran):
-        if _accounted_for(test, lanes) or _placeholder_of_a_test_that_ran(
-            test, lanes, ran_functions
+        path, node = test
+        if _accounted_for(test, lanes) or (
+            _is_empty_parameter_set_placeholder(node)
+            and (path, node.partition("[")[0]) in functions_with_cases
         ):
             continue
         limbo.append(
@@ -291,6 +309,10 @@ def report(limbo: list[LimboTest], lanes: list[LaneRun]) -> str:
             f"and rocke.tests.pending_lanes does not account for: {len(limbo)}."
         ),
     ]
+    empty = [lane.name for lane in lanes if lane.observed_nothing]
+    if empty:
+        evidence = "Lanes with no record naming a source test file, so no evidence"
+        lines += ["", f"{evidence}: {', '.join(empty)}"]
     unmapped = sorted(set().union(*(lane.unmapped for lane in lanes)))
     if unmapped:
         lines += ["", f"Records naming no source test file: {len(unmapped)}"]
@@ -346,7 +368,16 @@ def main(argv: list[str] | None = None) -> int:
         help="the rocke source directory the records ran (default: this checkout)",
     )
     args = parser.parse_args(argv)
-    source_paths = SourcePaths(python_files(args.tree))
+    try:
+        tree_files = python_files_under_test_roots(args.tree)
+    except RuntimeError as error:
+        parser.error(str(error))
+    if not tree_files:
+        parser.error(
+            f"limbo_audit failed - tree={str(args.tree)!r}, expected a rocke "
+            f"source checkout with Python files under {', '.join(TEST_FILE_ROOTS)}"
+        )
+    source_paths = SourcePaths(tree_files)
     lanes = [
         lane_run(name, read_run_records(directory), source_paths)
         for name, directory in args.lane
@@ -365,7 +396,7 @@ def main(argv: list[str] | None = None) -> int:
         if len(text) < 20000
         else text[:20000] + "\n[report truncated; see --report]"
     )
-    return 1 if limbo else 0
+    return 1 if limbo or any(lane.observed_nothing for lane in lanes) else 0
 
 
 if __name__ == "__main__":

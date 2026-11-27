@@ -544,6 +544,7 @@ def test_hip_source_compiles(arch):
         assert _compile_via_hipcc(_lshr_kernel(case), arch).hsaco, _id(case)
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("route", ["llvm", "hipcc"])
 def test_gpu_matches_a_logical_shift(route):
     arch = current_device_arch()

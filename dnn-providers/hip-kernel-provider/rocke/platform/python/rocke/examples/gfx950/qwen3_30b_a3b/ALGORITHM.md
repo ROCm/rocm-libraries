@@ -2,7 +2,7 @@
 
 This is the *why* behind the seven benchmark scripts in this folder: what one
 decode step of **Qwen3-30B-A3B** actually computes, why each layer is shaped the
-way it is on gfx950 (MI355X), and — the recurring theme of the whole example —
+way it is on gfx950, and — the recurring theme of the whole example —
 **why for kernels this small the win is almost never "a faster kernel" but
 "a cheaper way to dispatch it."**
 
@@ -132,7 +132,7 @@ tile_n = 16` tile with `warp_tile = (16, 16, 32)`, `pipeline="mem"`,
    deeply enough to hide HBM fetch latency and amortizes the fixed per-tile
    overhead (LDS alloc, barrier, store). `01` uses `tile_k = 512` for the
    `N = 2560` QKV shape and `tile_k = 1024` for the square `N = K = 2048` O-proj.
-3. **Chiplet swizzle (`chiplet_swizzle=True`).** MI355X has 8 XCDs, each with its
+3. **Chiplet swizzle (`chiplet_swizzle=True`).** gfx950 has 8 XCDs, each with its
    own L2 slice. The default CTA linearization piles work onto one XCD's L2; the
    `chiplet_wgm` / `chiplet_chunk_size` mapping spreads CTAs across all 8 XCDs so
    each L2 sees a different, non-overlapping `B`-tile shard. `01` uses

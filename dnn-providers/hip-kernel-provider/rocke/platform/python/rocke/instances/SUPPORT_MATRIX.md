@@ -247,7 +247,7 @@ parity runs on the matching device and is not implied by the ✅ here.
   parity emitter builds unmerged configs exclusively, so merged *wgrad* specs
   carry no structural parity coverage and are verified by on-GPU numerics
   alone. That gap predates the forward port and is tracked as follow-up work.
-- **GPU-numeric verification on gfx1151** (launched on the Radeon 8060S,
+- **GPU-numeric verification on gfx1151** (launched on a 40-CU gfx1151,
   output compared against a numpy reference). **Verified PASS:**
   `elementwise`, `reduce2d`, `rmsnorm2d`, `layernorm2d`, `transpose2d`,
   `batched_transpose2d`, `transpose_bc`, `permute_nd`, `pooling2d`,

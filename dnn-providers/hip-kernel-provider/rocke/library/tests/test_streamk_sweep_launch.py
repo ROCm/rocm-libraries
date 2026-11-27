@@ -21,6 +21,7 @@ from __future__ import annotations
 import unittest
 
 import numpy as np
+import pytest
 from rocke.numeric import storage
 from rocke.runtime.hip_module import get_device_arch
 
@@ -194,6 +195,7 @@ def _gpu_skip_reason() -> str:
 _GPU_SKIP_REASON = _gpu_skip_reason()
 
 
+@pytest.mark.gpu
 @unittest.skipUnless(not _GPU_SKIP_REASON, _GPU_SKIP_REASON or "no GPU")
 class TestStreamKSweepLaunchGpu(unittest.TestCase):
     """The helper's ``run()`` on the GPU for the all-data-parallel shape."""

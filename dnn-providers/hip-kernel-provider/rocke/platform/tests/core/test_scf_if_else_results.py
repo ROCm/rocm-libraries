@@ -22,7 +22,7 @@ unrolled loop of zero trips, directly in its body or in an scf.if there; a
 loop in a branch keeps its own yield; and, when a GPU is present, a kernel
 whose lanes take both branches on the LLVM and the hipcc route. The refusals
 run the verifier and the Python lowerings everywhere, and the C++ lowerings
-where the ``rocke_engine`` binding is built.
+where the shared ``librocke`` loads (``rocke.tests.engines``).
 """
 
 from __future__ import annotations
@@ -825,17 +825,6 @@ def test_an_unrolled_loop_of_zero_trips_refuses_a_malformed_scf_if(
 # --------------------------------------------------------------------------
 
 
-def _gpu_arch():
-    try:
-        from rocke.runtime.hip_module import get_device_arch
-    except ImportError:
-        return None
-    try:
-        return get_device_arch()
-    except Exception:  # noqa: BLE001 - no HIP runtime means no GPU test
-        return None
-
-
 def _run(blob, kernel_name, x):
     """Launch one workgroup of ``LANES`` lanes; return Y, Z and W."""
     from rocke.runtime.hip_module import Runtime
@@ -869,11 +858,12 @@ def _run(blob, kernel_name, x):
     return outputs
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("route", ["llvm", "hipcc"])
 def test_gpu_lanes_take_both_branches(route):
-    arch = _gpu_arch()
-    if not arch:
-        pytest.skip("no GPU")
+    from rocke.tests.gpu import current_device_arch
+
+    arch = current_device_arch()
     kernel = _branch_kernel(f"if_else_gpu_{route}")
     if route == "llvm":
         from rocke.helpers.compile import compile_kernel

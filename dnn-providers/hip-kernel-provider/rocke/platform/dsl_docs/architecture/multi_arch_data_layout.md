@@ -816,12 +816,12 @@ drives backend selection.
 
 | gfx | async LDS | fp8/bf8 MFMA | bf16 atom | VMCNT bits | LDS KB | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| gfx908 | no | no | classic | 6 | 64 | MI100 |
-| gfx90a | no | no | `.1k` | 6 | 64 | MI200 |
-| gfx942 | yes | yes | `.1k` | 6 | 64 | MI300; f16/bf16 atoms 16x16x16, 32x32x8 only |
-| gfx950 | yes | yes (incl. fp4) | `.1k` | 6 | 160 | MI350; `ds_read_*_tr_*`; adds k=32 f16/bf16 atoms 16x16x32, 32x32x16 |
+| gfx908 | no | no | classic | 6 | 64 | |
+| gfx90a | no | no | `.1k` | 6 | 64 | |
+| gfx942 | yes | yes | `.1k` | 6 | 64 | f16/bf16 atoms 16x16x16, 32x32x8 only |
+| gfx950 | yes | yes (incl. fp4) | `.1k` | 6 | 160 | `ds_read_*_tr_*`; adds k=32 f16/bf16 atoms 16x16x32, 32x32x16 |
 | gfx1100 | no | no (WMMA) | WMMA | n/a | 64 | RDNA3, wave32 |
-| gfx1151 | no | no (WMMA) | WMMA | n/a | 64 | RDNA3.5 (Strix Halo), wave32; shipped RDNA target |
+| gfx1151 | no | no (WMMA) | WMMA | n/a | 64 | RDNA3.5, wave32; shipped RDNA target |
 | gfx1201 | no | no (WMMA) | WMMA | n/a | 64 | RDNA4, wave32 |
 
 > MMA-catalog note (not IR drift): the k=32 f16/bf16 MFMA atoms

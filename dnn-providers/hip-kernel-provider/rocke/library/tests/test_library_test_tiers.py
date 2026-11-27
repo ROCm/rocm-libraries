@@ -16,6 +16,8 @@ from types import SimpleNamespace
 
 import pytest
 import rocke
+from rocke.core.lower_llvm import LLVM_FLAVORS
+from rocke.tests.lanes import TICKET, skip_until_reason
 from rocke.tests.run_records import fixture_session_environment
 from rocke.tests.subprocess_launcher import (
     rocke_python_command,
@@ -30,6 +32,7 @@ from ._attention_bwd_counted_cases import (
     require_explicit_gate_entrypoint,
     selected_isa_arch,
 )
+from ._attention_bwd_resources import GATE_FLAVOR
 from ._child_pytest import pin_child_rootdir
 from ._explicit_gate_policy import (
     configured_selection_is_partial,
@@ -387,7 +390,7 @@ def test_required_compiler_gate_cannot_inherit_optional_policy(monkeypatch):
 
 def test_compiler_preflight_accepts_reference_toolchain():
     assert (
-        gate_config._qualification_gap(
+        gate_config._preflight_outcome(
             "llvm22",
             "llvm22",
             "comgr3.0/rocm7.2",
@@ -399,52 +402,149 @@ def test_compiler_preflight_accepts_reference_toolchain():
 
 
 @pytest.mark.parametrize(
-    "requested,active,comgr,targets,match",
+    "requested,active,comgr,match",
     [
+        ("llvm24", "llvm24", "comgr3.5/rocm10.3", "requires LLVM flavor llvm22"),
+        ("llvm22", "llvm23", "comgr3.0/rocm7.2", "loaded compiler of LLVM flavor"),
+        ("llvm22", "llvm22", "comgr3.5/rocm10.3", "requires ROCm 7.2 comgr"),
+        ("llvm22", "llvm22", None, "requires ROCm 7.2"),
+    ],
+)
+def test_a_toolchain_that_is_not_the_reference_skips_the_gate(
+    requested, active, comgr, match
+):
+    """Another LLVM flavor or comgr is a fact about the host, not a defect:
+    the preflight skips the gate, saying how the toolchain differs."""
+    action, why = gate_config._preflight_outcome(
+        requested, active, comgr, frozenset(("gfx942",)), ("gfx942",)
+    )
+    assert action == gate_config._SKIP
+    assert match in why
+
+
+@pytest.mark.parametrize(
+    "active,targets,match",
+    [
+        (None, frozenset(("gfx942",)), "could not query the active comgr"),
+        ("llvm22", None, "could not query comgr ISA targets"),
+        ("llvm22", frozenset(("gfx950",)), "does not support gfx942"),
+    ],
+)
+def test_a_broken_toolchain_fails_the_gate(active, targets, match):
+    """A toolchain query that fails, or the reference toolchain without a gate
+    arch, is broken, not merely another toolchain: the preflight fails."""
+    action, why = gate_config._preflight_outcome(
+        "llvm22", active, "comgr3.0/rocm7.2", targets, ("gfx942",)
+    )
+    assert action == gate_config._STOP
+    assert match in why
+
+
+@pytest.mark.parametrize(
+    "requested,active,comgr,gap",
+    [
+        ("llvm22", "llvm22", "comgr3.0/rocm7.2", None),
         (
             "llvm24",
-            "llvm24",
-            "comgr3.5/rocm10.3",
-            frozenset(("gfx942",)),
-            "requires LLVM flavor llvm22",
+            "llvm22",
+            "comgr3.0/rocm7.2",
+            "requires LLVM flavor llvm22, got 'llvm24'",
         ),
         (
             "llvm22",
             "llvm23",
             "comgr3.0/rocm7.2",
-            frozenset(("gfx942",)),
-            "does not match",
-        ),
-        (
-            "llvm22",
-            None,
-            "comgr3.0/rocm7.2",
-            frozenset(("gfx942",)),
-            "could not query",
+            "requires a loaded compiler of LLVM flavor llvm22, got 'llvm23'",
         ),
         (
             "llvm22",
             "llvm22",
             "comgr3.5/rocm10.3",
-            frozenset(("gfx942",)),
-            "requires ROCm 7.2 comgr",
+            "requires ROCm 7.2 comgr, got comgr3.5/rocm10.3",
         ),
-        ("llvm22", "llvm22", None, frozenset(("gfx942",)), "requires ROCm 7.2"),
-        ("llvm22", "llvm22", "comgr3.0/rocm7.2", None, "ISA targets"),
-        (
-            "llvm22",
-            "llvm22",
-            "comgr3.0/rocm7.2",
-            frozenset(("gfx950",)),
-            "gfx942",
-        ),
+        ("llvm22", "llvm22", None, "requires ROCm 7.2 comgr, got None"),
     ],
 )
-def test_compiler_preflight_rejects_unqualified_toolchain(
-    requested, active, comgr, targets, match
+def test_the_reference_toolchain_gap_names_the_pinned_part(
+    requested, active, comgr, gap
 ):
-    gap = gate_config._qualification_gap(requested, active, comgr, targets, ("gfx942",))
-    assert match in gap
+    found = gate_config._reference_toolchain_gap(requested, active, comgr)
+    assert found == (gap if gap is None else f"resource gate {gap}")
+
+
+@pytest.mark.worker_integration
+def test_a_required_compiler_gate_skips_off_its_reference_toolchain(tmp_path):
+    """On a compiler other than the gate's reference toolchain the compiler gate
+    skips every case as waiting for AICK-3320, in required mode too, and ends
+    the session with 77 (a skip to CTest); its session attestation says so."""
+    other_flavor = next(flavor for flavor in LLVM_FLAVORS if flavor != GATE_FLAVOR)
+    pin_child_rootdir(tmp_path)
+    gate = tmp_path / _EXPECTED_GATES["counted-compiler"].name
+    gate.write_text("def test_one_row():\n    pass\n", encoding="utf-8")
+    sentinel = tmp_path / "session.json"
+    environment = fixture_session_environment()
+    environment.update(
+        {
+            "ROCKE_EXPLICIT_GATE_RUN": "1",
+            "ROCKE_EXPLICIT_GATE_PARTIAL": "0",
+            "ROCKE_EXPLICIT_GATE_SENTINEL": str(sentinel),
+            "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+            "ROCKE_COUNTED_ISA_OPTIONAL": "0",
+            "ROCKE_LLVM_FLAVOR": other_flavor,
+        }
+    )
+    result = subprocess.run(
+        rocke_python_command(
+            "-m", "pytest", "-q", "-rs", "-p", "tests.gates.conftest", str(gate)
+        ),
+        cwd=_GATE_DIR.parent.parent,
+        env=rocke_subprocess_env(environment),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    output = result.stdout + result.stderr
+    assert result.returncode == 77, output
+    reason = skip_until_reason(
+        TICKET,
+        reason=f"counted ISA gate resource gate requires LLVM flavor {GATE_FLAVOR}, "
+        f"got {other_flavor!r}; the gate keeps its reference toolchain until "
+        "AICK-3320 unpins it",
+    )
+    assert "1 skipped" in output and reason in output, output
+    attestation = json.loads(sentinel.read_text(encoding="utf-8"))
+    assert attestation == {"collected": 1, "exitstatus": 77, "skipped_for": reason}
+
+
+@pytest.mark.parametrize(
+    "required,code,verdict", [(False, 0, "INCOMPLETE"), (True, 77, "RED")]
+)
+def test_source_runner_judges_a_gate_that_skipped_its_cases(
+    required, code, verdict, monkeypatch, capsys
+):
+    """A gate that skipped its cases off its reference toolchain (exit 77) is
+    an INCOMPLETE run, or a failure when the run requires the gate; the runner
+    names why it skipped either way."""
+
+    def gate_skipped_its_cases(*args, **kwargs):
+        output = (kwargs.get("env") or {}).get("ROCKE_EXPLICIT_GATE_SENTINEL")
+        if output:
+            Path(output).write_text(
+                json.dumps({"collected": 1, "exitstatus": 77, "skipped_for": "why"})
+            )
+        return SimpleNamespace(returncode=77)
+
+    monkeypatch.setattr(run_all.subprocess, "run", gate_skipped_its_cases)
+    monkeypatch.setattr(
+        run_all.sys,
+        "argv",
+        ["run_all.py", "--no-ir-gates", "--jobs", "0", "--gate", "counted-compiler"]
+        + (["--require-compiler-gate"] if required else []),
+    )
+    assert run_all.main() == code
+    out = capsys.readouterr().out
+    assert "rocke library gate: counted-compiler: skipped for: why" in out
+    assert f"RESULT: {verdict}" in out
 
 
 @pytest.mark.parametrize(

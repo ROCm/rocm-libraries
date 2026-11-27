@@ -29,7 +29,7 @@ from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.tests.engines import lower_hip_with_both_engines, lower_with_both_engines
 from rocke.tests.ir_validity import assert_target_accepts
 
-_ADMITTED = "f16 / bf16 / i16 / f32 / i32 / tf32 / f64 / fp8e4m3 / bf8e5m2 / i8"
+_ADMITTED = "f16 / bf16 / i16 / f32 / i32 / tf32 / f64 / i64 / fp8e4m3 / bf8e5m2 / i8"
 
 
 def _byte_copy_kernel(dtype: Type) -> KernelDef:

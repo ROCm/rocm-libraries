@@ -32,7 +32,7 @@ class ArchProfile:
     example_args: List[str]  # extra CLI args for the build
     slurm_constraint: str  # sinfo AVAIL_FEATURES token (e.g. "GFX942")
     # gres uses generic gpu:1 + a feature constraint; specific gres names
-    # (gfx942-mi300x:1 etc.) vary per node so we keep it generic.
+    # vary per node so we keep it generic.
     slurm_gres: str = "gpu:1"
     slurm_time: str = "00:15:00"
     slurm_partition: str = "defq"
@@ -86,14 +86,15 @@ DOCKER_IMAGE = os.environ.get("ROCKE_DOCKER_IMAGE", "")
 DOCKER_EXTRA_FLAGS = os.environ.get("ROCKE_DOCKER_EXTRA_FLAGS", "")
 # Extra `srun` args appended after the base flags (space-separated, shlex
 # parsed). Useful to pin/avoid specific nodes, e.g.
-# ROCKE_SLURM_EXTRA="--nodelist=ctr-halo-b48-02" or "--exclude=ctr-halo-b48-01"
+# ROCKE_SLURM_EXTRA="--nodelist=<node>" or "--exclude=<node>"
 # when some matching nodes have their GPU bound to vfio-pci, not amdgpu.
 SLURM_EXTRA = os.environ.get("ROCKE_SLURM_EXTRA", "")
 
 
 ARCHES: Dict[str, ArchProfile] = {
-    # $HOME on the login node is only NFS-shared to MARKHAM compute nodes;
-    # constrain to MARKHAM so the staged dir is visible inside srun.
+    # $HOME on the login node may be NFS-shared to only some compute nodes;
+    # constrain to the nodes whose NFS share holds $HOME so the staged dir is
+    # visible inside srun.
     "gfx942": ArchProfile(
         arch="gfx942",
         example_module="rocke.examples.gfx942.gemm_demo",
@@ -119,7 +120,7 @@ ARCHES: Dict[str, ArchProfile] = {
         ],
         slurm_constraint="GFX1151",
     ),
-    # RDNA4 / Navi 48. MARKHAM nodes (NFS-visible HOME), ROCm 7.2.0. Lane map is
+    # RDNA4. Nodes whose NFS share holds $HOME, ROCm 7.2.0. Lane map is
     # hardware-confirmed (Stage 3 probe passed bit-exact), so the default example
     # is now the MatMulNBits large-N verify on a real Qwen3.5-9B shape
     # (attn out_proj: N=4096, K=4096, int4/g32). Swap N/K via example_args to

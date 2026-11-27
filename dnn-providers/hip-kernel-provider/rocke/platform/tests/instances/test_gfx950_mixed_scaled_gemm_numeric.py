@@ -7,6 +7,8 @@ from itertools import product
 import pytest
 from rocke.tests.arch_marks import arch_specific
 
+pytestmark = pytest.mark.gpu
+
 FORMATS = ("fp8", "bf8", "fp6", "bf6", "fp4")
 
 

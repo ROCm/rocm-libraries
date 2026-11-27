@@ -20,7 +20,8 @@ from rocke.tests import ctest_listing
 from rocke.tests.ctest_listing import list_ctest_entries
 
 from rocke.tests.engines import IR_LOWER_CLI_ENV
-from rocke.tests.lanes import SOURCE_TREE_CASES, skip_until
+from rocke.tests.lanes import BUILD_VARIANT, SOURCE_TREE, skip_until
+from rocke.tests.platform_build import cmake_cache_entries
 
 
 @pytest.fixture
@@ -397,6 +398,47 @@ def test_backend_width_gate_runs_its_named_check_with_the_entrys_pytest_timeout(
     ]
 
 
+@pytest.mark.parametrize("keep_going", [False, True])
+def test_backend_width_gate_waits_for_the_fast_stages_unless_asked_to_keep_going(
+    runner, monkeypatch, tmp_path, capsys, keep_going
+):
+    """The gate compiles kernels, so a failed earlier stage stops the run before it
+    (TESTING.md, section 5.0.1); --keep-going runs it anyway, and the run stays red."""
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        failed_gate = Path(command[1]).name == "check_byte_identity.py"
+        return subprocess.CompletedProcess(command, 1 if failed_gate else 0)
+
+    monkeypatch.setattr(runner.subprocess, "run", run)
+    monkeypatch.setattr(runner, "ctest_ready", lambda *_args: False)
+    monkeypatch.setattr(
+        runner.sys,
+        "argv",
+        [
+            "run_all.py",
+            "--no-guard",
+            "--no-ir-validity",
+            "--no-arch-domain",
+            "--no-pytest",
+            "--build-root",
+            str(tmp_path),
+            *(["--keep-going"] if keep_going else []),
+        ],
+    )
+
+    assert runner.main() == 1
+    width_checks = [
+        command
+        for command in calls
+        if any(Path(part).name == "check_backend_access_width.py" for part in command)
+    ]
+    assert len(width_checks) == (1 if keep_going else 0)
+    not_run = "backend access-width gate: NOT RUN" in capsys.readouterr().out
+    assert not_run == (not keep_going)
+
+
 @pytest.mark.parametrize(
     "selector",
     [
@@ -575,7 +617,7 @@ def test_pytest_build_configuration_owns_shared_engine(runner, monkeypatch, tmp_
 def test_arch_domain_ctest_registration_contract(runner, tmp_path):
     if not (runner.ROCKE / "CMakeLists.txt").is_file():
         skip_until(
-            SOURCE_TREE_CASES,
+            SOURCE_TREE,
             reason="source CMake project is absent from the installed test artifact",
         )
     if not all(shutil.which(tool) for tool in ("cmake", "ctest")):
@@ -632,14 +674,35 @@ def test_missing_build_reports_native_coverage_skip(runner, tmp_path, capsys):
 
 
 @pytest.mark.parametrize(
-    "relative", ["tests/rocke_ir_lower_cli", "tests/Release/rocke_ir_lower_cli.exe"]
+    "record", ["rocke_ir_lower_cli.path", "Release/rocke_ir_lower_cli.path"]
 )
-def test_built_hip_lowering_program_is_passed_to_pytest(runner, tmp_path, relative):
+@pytest.mark.parametrize(
+    "relative",
+    ["tests/rocke_ir_lower_cli", "bin/hip_kernel_provider_rocke_ir_lower_cli_test.exe"],
+    ids=["standalone", "provider"],
+)
+def test_recorded_hip_lowering_program_is_passed_to_pytest(
+    runner, tmp_path, record, relative
+):
+    """The configure records the program's path (one record per configuration in a
+    multi-config build), so a provider build's renamed program in bin/ is found."""
     program = tmp_path / relative
     program.parent.mkdir(parents=True)
     program.touch()
+    (tmp_path / record).parent.mkdir(exist_ok=True)
+    (tmp_path / record).write_text(f"{program}\n")
     env = runner.native_pytest_env(tmp_path, "Release")
     assert env[IR_LOWER_CLI_ENV] == str(program.resolve())
+
+
+def test_a_built_hip_lowering_program_without_a_record_is_not_guessed(
+    runner, tmp_path, capsys
+):
+    program = tmp_path / "tests" / "rocke_ir_lower_cli"
+    program.parent.mkdir()
+    program.touch()
+    assert IR_LOWER_CLI_ENV not in runner.native_pytest_env(tmp_path, "Release")
+    assert "native HIP lowering program: SKIPPED" in capsys.readouterr().out
 
 
 def test_missing_hip_lowering_program_reports_the_skip(runner, tmp_path, capsys):
@@ -770,7 +833,10 @@ def test_fresh_build_prepares_entire_ctest_suite(
     runner, monkeypatch, tmp_path, override
 ):
     if not all(shutil.which(tool) for tool in ("cmake", "ctest", "ninja")):
-        pytest.skip("CMake, CTest, and Ninja required for fresh-build regression")
+        skip_until(
+            BUILD_VARIANT,
+            reason="CMake, CTest, and Ninja required for fresh-build regression",
+        )
     source = tmp_path / "source"
     source.mkdir()
     # One parity name proves real CTest discovery, using the existing CMake
@@ -811,7 +877,10 @@ def test_fresh_build_prepares_entire_ctest_suite(
         executable.touch()
         monkeypatch.setenv("ROCKE_STORAGE_TEST", str(executable))
     env = runner.native_pytest_env(build, "Release")
-    expected = executable if override else Path(shutil.which("cmake"))
+    # The parity entry runs the CMake program that configured the tree, which
+    # need not be the `cmake` on PATH (a launcher script, for one).
+    configured_cmake = Path(cmake_cache_entries(build)["CMAKE_COMMAND"])
+    expected = executable if override else configured_cmake
     assert env["ROCKE_STORAGE_TEST"] == str(expected.resolve())
     assert (build / "rocke_storage.ready").is_file()
     assert (build / "whole_suite.ready").is_file()
@@ -821,7 +890,9 @@ def test_multi_config_build_supplies_its_archive(runner, monkeypatch, tmp_path):
     if runner.sys.platform != "linux" or not all(
         shutil.which(tool) for tool in ("cmake", "ninja", "c++")
     ):
-        pytest.skip("Linux, CMake, Ninja, and C++ compiler required")
+        skip_until(
+            BUILD_VARIANT, reason="Linux, CMake, Ninja, and C++ compiler required"
+        )
     source = tmp_path / "source"
     source.mkdir()
     (source / "core.cpp").write_text("int fixture() { return 0; }\n")

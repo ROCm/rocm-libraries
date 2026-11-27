@@ -28,7 +28,7 @@ from rocke.examples.gfx1250.qwen3_30b_a3b.qwen3_30b_a3b_shapes import (
     Qwen3A3BConfig,
     layer_shapes,
 )
-from rocke.tests.lanes import TORCH_IN_CI, skip_until
+from rocke.tests.lanes import TICKET, skip_until
 
 
 class TestGfx1250QwenLayerTable(unittest.TestCase):
@@ -147,7 +147,7 @@ class TestGfx1250QwenCustomOps(unittest.TestCase):
         try:
             import torch
         except ModuleNotFoundError as exc:
-            skip_until(TORCH_IN_CI, reason=f"torch unavailable: {exc}")
+            skip_until(TICKET, reason=f"torch unavailable: {exc}")
         except Exception as exc:  # installed, but failing to load
             self.skipTest(f"torch unavailable: {exc}")
 
@@ -176,7 +176,7 @@ class TestGfx1250QwenOneLayerHarness(unittest.TestCase):
         try:
             import torch
         except ModuleNotFoundError as exc:
-            skip_until(TORCH_IN_CI, reason=f"torch unavailable: {exc}")
+            skip_until(TICKET, reason=f"torch unavailable: {exc}")
         except Exception as exc:  # installed, but failing to load
             self.skipTest(f"torch unavailable: {exc}")
 

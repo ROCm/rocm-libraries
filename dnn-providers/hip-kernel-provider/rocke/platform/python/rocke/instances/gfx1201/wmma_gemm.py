@@ -1,6 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""WMMA GEMM for gfx1201 (RDNA4 / Navi 48).
+"""WMMA GEMM for gfx1201 (RDNA4).
 
 Mirror of ``instances/gfx1151/wmma_gemm.py`` but built around the RDNA4 WMMA
 fragment ABI, which differs from RDNA3/3.5 in three ways:

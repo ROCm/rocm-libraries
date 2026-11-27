@@ -182,6 +182,62 @@ static rocke_value_t* rocke_red_tree_reduce_scalars(rocke_ir_builder_t* b,
     return rocke_tree_reduce(b, rocke_red_combine_cb, (void*)(intptr_t)combine, parts, n);
 }
 
+/* ---------------------------------------------------- butterfly_allreduce */
+
+/* reduction.py: _BUTTERFLY_MAX_STAGES -- masks 1 .. 32 of a 64-lane wave. */
+static const int ROCKE_BUTTERFLY_MAX_STAGES = 6;
+
+static bool rocke_red_is_i64(const rocke_value_t* v)
+{
+    return v != NULL && v->type != NULL && v->type->name != NULL
+           && strcmp(v->type->name, "i64") == 0;
+}
+
+/* reduction.py: _butterfly_exchange(b, value, lane_xor) -- what lane
+ * l ^ lane_xor holds, once the stages below lane_xor ran. */
+static rocke_value_t*
+    rocke_red_butterfly_exchange(rocke_ir_builder_t* b, rocke_value_t* value, int lane_xor)
+{
+    if(rocke_red_is_i64(value))
+    {
+        rocke_value_t* halves = rocke_b_bitcast(b, value, rocke_vector_type(b, rocke_i32(), 2));
+        rocke_value_t* remote_halves[2];
+        int half;
+        for(half = 0; half < 2; ++half)
+        {
+            rocke_value_t* own_half = rocke_b_vec_extract(b, halves, half);
+            remote_halves[half] = rocke_red_butterfly_exchange(b, own_half, lane_xor);
+        }
+        return rocke_b_bitcast(b, rocke_b_vec_pack(b, remote_halves, 2, rocke_i32()), rocke_i64());
+    }
+    if(lane_xor <= 8 && (rocke_red_is_f32(value) || rocke_red_is_i32(value)))
+    {
+        return rocke_b_warp_shuffle_xor_dpp(b, value, lane_xor <= 2 ? lane_xor : 2 * lane_xor - 1);
+    }
+    return rocke_b_warp_shuffle_xor(b, value, lane_xor);
+}
+
+rocke_value_t* rocke_butterfly_allreduce(
+    rocke_ir_builder_t* b, rocke_value_t* value, rocke_combine_fn combine, void* user, int stages)
+{
+    int stage;
+    if(stages < 0 || stages > ROCKE_BUTTERFLY_MAX_STAGES)
+    {
+        return (rocke_value_t*)rocke_red_set_err(
+            b,
+            ROCKE_ERR_VALUE,
+            "butterfly_allreduce failed - stages=%d, expected 0 .. %d",
+            stages,
+            ROCKE_BUTTERFLY_MAX_STAGES);
+    }
+    for(stage = 0; stage < stages; ++stage)
+    {
+        rocke_value_t* remote = rocke_red_butterfly_exchange(b, value, 1 << stage);
+        value = combine(b, value, remote, user);
+    }
+    return value;
+}
+
 /* _warp_xor_reduce(b, val, combine, wave_size): wave-internal XOR butterfly
  * reduce -- no LDS round-trip. Mirrors reduction.py::_warp_xor_reduce. */
 static rocke_value_t* rocke_red_warp_xor_reduce(rocke_ir_builder_t* b,
@@ -189,36 +245,17 @@ static rocke_value_t* rocke_red_warp_xor_reduce(rocke_ir_builder_t* b,
                                                 rocke_reduce_combine_t combine,
                                                 int wave_size)
 {
-    int stages;
-    int k;
-    rocke_value_t* cur;
-
     if(wave_size & (wave_size - 1))
     {
         return (rocke_value_t*)rocke_red_set_err(
             b, ROCKE_ERR_VALUE, "wave_size %d is not a power of two", wave_size);
     }
-    stages = rocke_red_bit_length(wave_size) - 1;
-    cur = val;
-    for(k = 0; k < stages; ++k)
-    {
-        /* For f32/i32, stages inside the 16-lane DPP row ride
-         * warp_shuffle_xor_dpp (VALU DPP, no LDS crossbar / no lgkmcnt(0)
-         * wait): masks 1 and 2 as themselves (quad_perm on gfx9), masks 4
-         * and 8 as dpp masks 7 and 15 (row_half_mirror / row_mirror). The
-         * stages ascend, so each quad (half-row) already holds one value and
-         * the i ^ 7 (i ^ 15) partner matches i ^ 4 (i ^ 8). Masks 16 and 32
-         * stay on ds_swizzle / ds_bpermute. Mirrors
-         * reduction.py::_warp_xor_reduce. */
-        int mask = 1 << k;
-        rocke_value_t* remote;
-        if(mask <= 8 && (rocke_red_is_f32(cur) || rocke_red_is_i32(cur)))
-            remote = rocke_b_warp_shuffle_xor_dpp(b, cur, mask <= 2 ? mask : 2 * mask - 1);
-        else
-            remote = rocke_b_warp_shuffle_xor(b, cur, mask);
-        cur = rocke_red_emit_combine(b, combine, cur, remote);
-    }
-    return cur;
+    /* Mirrors reduction.py::_warp_xor_reduce. */
+    return rocke_butterfly_allreduce(b,
+                                     val,
+                                     rocke_red_combine_cb,
+                                     (void*)(intptr_t)combine,
+                                     rocke_red_bit_length(wave_size) - 1);
 }
 
 /* --------------------------------------------------------- block_lds_reduce */
