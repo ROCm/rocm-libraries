@@ -26,11 +26,16 @@
   },
   "metadata": "6638c9a9-4a0d-5704-95b9-db8774e663e4",
   "knobs": [
+    "head_dim",
     "block_m",
+    "kv_align",
     "waves_per_eu",
     "kv_gpfetch",
+    "head_dim_v",
+    "qk_mask",
     "dv_split",
-    "k_chunk"
+    "k_chunk",
+    "bias_kstrided"
   ],
   "behavior_notes": [
     "supports_graph_capture"

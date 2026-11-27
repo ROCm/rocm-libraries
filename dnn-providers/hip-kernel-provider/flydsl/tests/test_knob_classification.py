@@ -8,8 +8,8 @@ as the variant space. A field the graph fixes (``has_bias``, ``dtype``) or a tie
 bound the matcher gates on (``head_dim_max``) is no choice: offering it would have a
 caller pin, and a model rank on, a value the graph already decided.
 ``gen_descriptors.py`` classifies every metadata field into one of three sets and
-exposes ``TUNING_FIELDS`` plus, for an SDPA backward op, the graph-determined fields its
-kernels differ in while serving the same graph (``ALTERNATIVE_KNOBS``); these tests hold
+exposes ``TUNING_FIELDS`` plus, for an SDPA op, the graph-determined fields its kernels
+differ in while serving the same graph (``ALTERNATIVE_KNOBS``, ``FORWARD_ALTERNATIVE_KNOBS``); these tests hold
 the shipped UEDs to that and require the generator to refuse a field it cannot classify. A slotted engine (the SDPA backward
 split) is descriptor-only and keeps its knobs per slot, against each slot's own KMD. They
 read only the op-level descriptors in git, so they need no ``dvc pull``. They also hold the
@@ -89,7 +89,9 @@ def _assert_exposes_exactly_tuning_fields(ued_path: Path, root: Path) -> None:
     ued = json.loads(ued_path.read_text(encoding="utf-8"))
     for label, op, knobs, fields in _knob_owners(ued, ued_path.parent, root):
         assert knobs == gen_descriptors.knob_fields(op, fields), label
-        alternatives = gen_descriptors.ALTERNATIVE_KNOBS.get(op, frozenset())
+        alternatives = gen_descriptors.ALTERNATIVE_KNOBS.get(
+            op, frozenset()
+        ) | gen_descriptors.FORWARD_ALTERNATIVE_KNOBS.get(op, frozenset())
         assert (
             not set(knobs) & gen_descriptors.GRAPH_DETERMINED_FIELDS - alternatives
         ), label
@@ -157,6 +159,20 @@ def test_the_alternative_knobs_are_graph_determined_alternatives_never_feature_f
         assert op.startswith("sdpa_bwd_"), op
         assert fields <= gen_descriptors.GRAPH_DETERMINED_FIELDS, op
         assert not fields & features, op
+
+
+def test_the_forward_alternative_knobs_are_graph_determined_alternatives_of_the_forward_engines() -> (
+    None
+):
+    features = {"dtype", "causal", "has_dropout", "has_bias", "reduce_symbol", "sink"}
+    assert set(gen_descriptors.FORWARD_ALTERNATIVE_KNOBS) == {
+        "sdpa_cdna",
+        "sdpa_cdna_dualwave",
+    }
+    for op, fields in gen_descriptors.FORWARD_ALTERNATIVE_KNOBS.items():
+        assert fields <= gen_descriptors.GRAPH_DETERMINED_FIELDS, op
+        assert not fields & features, op
+        assert not fields & gen_descriptors.TUNING_FIELDS, op
 
 
 def test_the_three_field_sets_are_disjoint() -> None:
