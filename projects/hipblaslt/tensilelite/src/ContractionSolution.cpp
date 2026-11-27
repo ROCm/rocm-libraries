@@ -7316,6 +7316,11 @@ namespace TensileLite
             };
 
             size_t     grid    = tiles; // Fallback
+            // A dynamic launch that keeps every tile whole: it uses no per-part
+            // flags or arrival counters, so the flag-region clamp below skips it.
+            // Only the dynamic grid policy sets it, deliberately: grids from
+            // persistentFixedGrid or persistentGridMultiplier keep the clamp.
+            bool dynamicWholeTiles = false;
 
             // If K==0, run kernel as DP with Alpha=0 to skip main loop and apply beta*c
             size_t z = 1;
@@ -7343,8 +7348,12 @@ namespace TensileLite
                 if(self.sizeMapping.hasDynamicAssignment() || sk5DynamicSubMode())
                 {
                     // Fill every CU to the kernel's occupancy, capped by the work
-                    // items and the flag region (StreamK::Dynamic::maxGrid).
-                    grid = self.streamKDynamicDecomposition(problem, hardware, tiles).grid;
+                    // items and, when tiles are split, the flag region
+                    // (StreamK::Dynamic::maxGrid).
+                    const auto dynamicSplit
+                        = self.streamKDynamicDecomposition(problem, hardware, tiles);
+                    grid              = dynamicSplit.grid;
+                    dynamicWholeTiles = dynamicSplit.tiles == 0;
                 }
                 else
                 {
@@ -7708,6 +7717,10 @@ namespace TensileLite
             //     (see the Flags kernarg in singleCallArgs)
             //   - parallel reduction is passed Flags == nullptr, and the kernel
             //     branches on that to skip the flag protocol
+            //   - a dynamic launch that keeps every tile whole (SKTiles == 0)
+            //     publishes no partials, so it reads only the queue counters;
+            //     a workgroup past the resident count finds its queue empty
+            //     and exits
             //   - tiles % grid == 0 spreads the tiles evenly over the
             //     workgroups, so no partial tiles exist to fix up. It is what
             //     excludes every data-parallel path: they all arrive at grid ==
@@ -7728,7 +7741,7 @@ namespace TensileLite
             const bool usesFlagRegion = self.sizeMapping.streamKAtomic == 0
                                         && !self.sizeMapping.isPersistentDataParallel()
                                         && reductionStrat != origami::reduction_t::parallel
-                                        && grid > 0 && (tiles % grid) != 0;
+                                        && !dynamicWholeTiles && grid > 0 && (tiles % grid) != 0;
 
             // SK4 and the SK4 sub-path of SK5 start their flags after the
             // per-XCD work-queue counters, so they index fewer entries than the
@@ -7813,6 +7826,7 @@ namespace TensileLite
         if(AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware))
         {
             in.maxGrid = StreamK::Dynamic::maxGrid(*pAMDGPU, sizeMapping.CUOccupancy, in.flagSlots);
+            in.wholeTileMaxGrid = StreamK::Dynamic::residentGrid(*pAMDGPU, sizeMapping.CUOccupancy);
             // One part per CU, within that grid.
             in.splitCUs = std::min(static_cast<size_t>(pAMDGPU->computeUnitCount), in.maxGrid);
             // Size the split for the CU-count hint, as origami's num_cus does for
