@@ -258,7 +258,8 @@ SHAPE_KNOBS = {"N", "head_dim", "head_dim_v"}
 # serves a graph at all (dtype, causal or window, dropout, has_bias, the reduce kernel).
 # The runtime also requires the kernels that serve one graph to have distinct knob tuples
 # (GenericPlanBuilder's enumeration), so a field that tells apart kernels serving the same
-# graph must be a knob, whatever else it is; ALTERNATIVE_KNOBS below lists those per op.
+# graph must be a knob, whatever else it is; ALTERNATIVE_KNOBS (SDPA backward) and
+# FORWARD_ALTERNATIVE_KNOBS (SDPA forward) below list those per op.
 #
 # Fields the graph fixes rather than the tuner choosing. They belong in the
 # metadata schema -- the matcher needs every one of them to pick a variant --
@@ -283,8 +284,9 @@ SHAPE_KNOBS = {"N", "head_dim", "head_dim_v"}
 # staged in LDS, directly where a staged row serves the graph too, or directly with no
 # staged alternative) and `u2_role` (the value-head split: which of Hk == Hv or Hk != Hv
 # graphs a row serves) say which graphs an object serves. The matchers keep
-# reading all of them; the ones several kernels of an SDPA backward op share a graph on
-# are also knobs of that op (ALTERNATIVE_KNOBS).
+# reading all of them; the ones several kernels of an SDPA op share a graph on
+# are also knobs of that op (ALTERNATIVE_KNOBS for the backward ops,
+# FORWARD_ALTERNATIVE_KNOBS for the forward CDNA engines).
 GRAPH_DETERMINED_FIELDS = {
     "N",
     "dtype",
@@ -379,6 +381,27 @@ ALTERNATIVE_KNOBS: dict[str, frozenset[str]] = {
     "sdpa_bwd_merged": frozenset({"padded", "gqa_pack", "store_db"}),
 }
 
+# Graph-determined fields that are also knobs of one SDPA forward engine, because the kernels of that
+# engine that serve one graph differ in them. Same rule as ALTERNATIVE_KNOBS, kept apart because the
+# forward engines are unslotted: their candidates are every kernel the graph and kernel matchers
+# accept, and `tests/test_sdpa_fwd_enumeration.py` and the census cases of `TestFlydslSdpaCdnaPacks`
+# check the sets. Per engine, the values the kernels serving one graph differ in are:
+#   head_dim       the Q/K head dim an object is built for: a graph is served by its own tile and
+#                  by a wider one (gfx90a and gfx942 separate the Dv != D classes by it)
+#   head_dim_v     the V head dim an object is built for (gfx950 separates the Dv != D classes by it)
+#   qk_mask        an object that masks Q/K columns beyond the head dim and an exact-width one
+#   kv_align       a key-aligned and an any-key-length object
+#   bias_kstrided  a vectorized and a key-strided bias object
+#   any_diagonal   (dual-wave) an object for a zero diagonal offset and one for any offset
+# Each set is the smallest that separates every pair of kernels serving one graph on every shipped
+# arch.
+FORWARD_ALTERNATIVE_KNOBS: dict[str, frozenset[str]] = {
+    "sdpa_cdna": frozenset(
+        {"head_dim", "head_dim_v", "qk_mask", "kv_align", "bias_kstrided"}
+    ),
+    "sdpa_cdna_dualwave": frozenset({"any_diagonal"}),
+}
+
 
 # Per op, the knobs an instance row may leave out, which the KMD reads at the value given here. The KMD of an op is one for every arch,
 # so its schema holds these knobs whichever arch's rows are being described: prep's ``vec_tail`` is set only on the padded gfx942 and
@@ -391,7 +414,9 @@ def knob_fields(op: str, fields: Any) -> list[str]:
     return [
         f
         for f in fields
-        if f in TUNING_FIELDS or f in ALTERNATIVE_KNOBS.get(op, frozenset())
+        if f in TUNING_FIELDS
+        or f in ALTERNATIVE_KNOBS.get(op, frozenset())
+        or f in FORWARD_ALTERNATIVE_KNOBS.get(op, frozenset())
     ]
 
 
@@ -1214,7 +1239,7 @@ def _fields_for_op(entries: list[KernelEntry]) -> dict[str, str]:
                 f"{entries[0].op}: metadata field '{name}' must be in exactly one of "
                 f"GRAPH_DETERMINED_FIELDS, SELECTION_FIELDS and TUNING_FIELDS "
                 f"(found in {homes or 'none'}); only TUNING_FIELDS and the op's "
-                f"ALTERNATIVE_KNOBS become knobs"
+                f"ALTERNATIVE_KNOBS and FORWARD_ALTERNATIVE_KNOBS become knobs"
             )
     return fields
 

@@ -7,10 +7,12 @@
 #if defined(HIPDNN_ENABLE_KERNEL_INGESTOR) && defined(HIPDNN_ENGINE_FLYDSL)
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <map>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <string>
@@ -22,8 +24,12 @@
 
 #include <gtest/gtest.h>
 
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
+#include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
+#include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 
+#include "engines/kernel_ingestor_engine/packs/FlydslSdpaRdnaTestGraphs.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 
 /**
@@ -311,6 +317,267 @@ void expectAnExplicitEmptyNumericalNoteList(const CdnaEngine& engine)
 
     ASSERT_TRUE(set.engine.numericalNotes.has_value());
     EXPECT_TRUE(set.engine.numericalNotes->empty());
+}
+
+/// The matchers of the generic and dual-wave engines, restated rather than shared with the pack
+/// so a rename on either side fails here. The census calls only the graph and kernel matchers.
+constexpr PackSymbols GENERIC_MATCHERS{"hipkernel:flydsl_sdpa_cdna",
+                                       "hipkernel.flydsl_sdpa_cdna.graph_match",
+                                       "",
+                                       "hipkernel.flydsl_sdpa_cdna.kernel_match",
+                                       "",
+                                       "",
+                                       "",
+                                       "",
+                                       ""};
+constexpr PackSymbols DUALWAVE_MATCHERS{"hipkernel:flydsl_sdpa_cdna_dualwave",
+                                        "hipkernel.flydsl_sdpa_cdna_dualwave.graph_match",
+                                        "",
+                                        "hipkernel.flydsl_sdpa_cdna_dualwave.kernel_match",
+                                        "",
+                                        "",
+                                        "",
+                                        "",
+                                        ""};
+
+/// The kernel @p kernel of @p pack as the engine's matchers read it, promoted from the loaded
+/// descriptors. A kernel may narrow the arch list its pack claims but never reach outside it,
+/// so an empty list on the kernel means "the pack's".
+template <typename Pack, typename Kernel>
+KernelDefinition definitionOf(const Pack& pack, const Kernel& kernel)
+{
+    return KernelDefinition{kernel.id,
+                            pack.id,
+                            pack.dispatchId,
+                            kernel.source,
+                            kernel.metadata,
+                            kernel.priority,
+                            kernel.arch.empty() ? pack.arch : kernel.arch,
+                            kernel.originDirectory,
+                            kernel.name,
+                            kernel.treeRoot,
+                            kernel.sources,
+                            nullptr,
+                            nullptr};
+}
+
+/// The first pair of @p kernels (the candidates of one graph) whose tuples of @p knobs are
+/// equal, as "name and name"; nullopt when every tuple is unique.
+///
+/// The predicate of GenericPlanBuilder's enumeration ("Ambiguous enrolled knob tuple"): two
+/// candidates with the same value of every enrolled knob cannot be told apart by an
+/// EngineVariant's knob settings. A kernel enters with the knobs it carries.
+std::optional<std::string> ambiguousKnobTuple(const std::vector<const KernelDefinition*>& kernels,
+                                              const std::vector<std::string>& knobs)
+{
+    std::map<std::vector<std::pair<std::string, MetadataValue>>, std::string> identities;
+    for(const auto* kernel : kernels)
+    {
+        std::vector<std::pair<std::string, MetadataValue>> tuple;
+        for(const auto& knob : knobs)
+        {
+            const auto found = kernel->metadata.find(knob);
+            if(found != kernel->metadata.end())
+            {
+                tuple.emplace_back(knob, found->second);
+            }
+        }
+        const auto inserted = identities.emplace(std::move(tuple), kernel->name);
+        if(!inserted.second)
+        {
+            return inserted.first->second + " and " + kernel->name;
+        }
+    }
+    return std::nullopt;
+}
+
+/// The bias of kind @p kind (0 none, 1 packed in the query dtype, 2 packed FLOAT, 3 keys not
+/// contiguous, 4 broadcast along the keys) on @p spec.
+void setCensusBias(SdpaGraphSpec& spec, int kind)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+
+    spec.withBias = kind != 0;
+    const auto sq = spec.seqLenQ;
+    const auto skv = spec.seqLenKv;
+    switch(kind)
+    {
+    case 1:
+        spec.biasDataType = spec.dataType;
+        break;
+    case 2:
+        spec.biasDataType = DataType::FLOAT;
+        break;
+    case 3:
+        spec.biasDataType = spec.dataType;
+        spec.biasDims = {1, 1, sq, skv};
+        spec.biasStrides = {2 * sq * skv, 2 * sq * skv, 2 * skv, 2};
+        break;
+    case 4:
+        spec.biasDataType = spec.dataType;
+        spec.biasDims = {1, 1, sq, 1};
+        spec.biasStrides = {sq, sq, 1, 1};
+        break;
+    default:
+        break;
+    }
+}
+
+/// Per engine and census arch, every pair of candidates (the kernels the engine's graph and
+/// kernel matchers both admit) of one graph has distinct values of the UED's knobs. Over the
+/// graph set of the knob census: f16, bf16 and f32; the head dims of a fixed ladder and of the
+/// shipped objects, each within 8 of them; a V head dim equal to Q/K's or one of 32 to 512; every
+/// mask kind; aligned and unaligned key lengths, with and without a diagonal offset; no bias, a
+/// packed bias in the query dtype and in FLOAT, a bias with non-contiguous keys and one
+/// broadcast along the keys; a sink; dropout.
+void expectDistinctKnobTuplesForEveryGraph(const CdnaEngine& engine, const PackSymbols& matchers)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+
+    const auto arch = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_EXPECTED_ARCH");
+    ASSERT_FALSE(arch.empty())
+        << "HIPDNN_TEST_EXPECTED_ARCH is unset, so this census has no arch to match on; the "
+           "architecture is supplied by the census entry.";
+    const auto& set = loadedSet(engine.name);
+
+    // The definitions the engine's matchers read; the vector is complete before any pointer into it.
+    std::vector<KernelDefinition> definitions;
+    std::set<int64_t> headDims
+        = {16, 32, 40, 48, 56, 64, 72, 80, 96, 112, 120, 128, 136, 160, 192, 224, 256};
+    for(const auto& pack : set.packs)
+    {
+        for(const auto& kernel : pack.kernels)
+        {
+            const auto& definition = definitions.emplace_back(definitionOf(pack, kernel));
+            for(const char* field : {"head_dim", "head_dim_v"})
+            {
+                if(const auto* shipped = tryGetMetadataField<int64_t>(definition.metadata, field))
+                {
+                    for(const int64_t delta : {-8, 0, 8})
+                    {
+                        headDims.insert(*shipped + delta);
+                    }
+                }
+            }
+        }
+    }
+    std::vector<const KernelDefinition*> kernels;
+    for(const auto& definition : definitions)
+    {
+        kernels.push_back(&definition);
+    }
+    headDims.erase(headDims.begin(), headDims.upper_bound(0));
+    headDims.erase(headDims.upper_bound(512), headDims.end());
+
+    auto properties = testDeviceProperties();
+    properties.gcnArchName = arch;
+    properties.multiProcessorCount = 64;
+
+    const std::array<std::pair<const char*, DataType>, 3> dtypes
+        = {{{"f16", DataType::HALF}, {"bf16", DataType::BFLOAT16}, {"f32", DataType::FLOAT}}};
+    const std::array<SdpaMask, 4> masks = {SdpaMask::NONE,
+                                           SdpaMask::TOP_LEFT_CAUSAL,
+                                           SdpaMask::BOTTOM_RIGHT_CAUSAL,
+                                           SdpaMask::SLIDING_WINDOW};
+    const std::array<std::pair<int64_t, int64_t>, 5> lengths
+        = {{{256, 256}, {128, 256}, {256, 252}, {256, 100}, {256, 334}}};
+
+    std::set<std::vector<const KernelDefinition*>> seen;
+    std::set<std::string> failures;
+    size_t checked = 0;
+    for(const auto& [dtypeName, dtype] : dtypes)
+    {
+        for(const int64_t headDim : headDims)
+        {
+            const std::set<int64_t> valueHeadDims = {headDim, 32, 64, 128, 256, 512};
+            for(const int64_t valueHeadDim : valueHeadDims)
+            {
+                for(const auto mask : masks)
+                {
+                    for(const auto& [seqLenQ, seqLenKv] : lengths)
+                    {
+                        for(int bias = 0; bias < 5; ++bias)
+                        {
+                            for(const bool sink : {false, true})
+                            {
+                                for(const bool dropout : {false, true})
+                                {
+                                    SdpaGraphSpec spec;
+                                    spec.batch = 1;
+                                    spec.heads = 8;
+                                    spec.kvHeads = 2;
+                                    spec.seqLenQ = seqLenQ;
+                                    spec.seqLenKv = seqLenKv;
+                                    spec.headDim = headDim;
+                                    spec.dataType = dtype;
+                                    spec.mask = mask;
+                                    spec.scaleKind = SdpaScale::ABSENT;
+                                    spec.withSink = sink;
+                                    if(valueHeadDim != headDim)
+                                    {
+                                        spec.valueHeadDim = valueHeadDim;
+                                    }
+                                    if(dropout)
+                                    {
+                                        setDropout(spec, 0.1F);
+                                    }
+                                    setCensusBias(spec, bias);
+
+                                    const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec),
+                                                               properties);
+                                    const auto bound = matchesGraph(matchers, fixture.context());
+                                    if(!bound.has_value())
+                                    {
+                                        continue;
+                                    }
+                                    std::vector<const KernelDefinition*> candidates;
+                                    for(const auto* kernel : kernels)
+                                    {
+                                        if(matchesKernel(
+                                               matchers, fixture.context(), *kernel, *bound))
+                                        {
+                                            candidates.push_back(kernel);
+                                        }
+                                    }
+                                    if(candidates.empty() || !seen.insert(candidates).second)
+                                    {
+                                        continue;
+                                    }
+                                    ++checked;
+                                    if(const auto pair
+                                       = ambiguousKnobTuple(candidates, set.engine.knobs))
+                                    {
+                                        std::ostringstream graph;
+                                        graph << dtypeName << " head_dim " << headDim << "/"
+                                              << valueHeadDim << " mask " << static_cast<int>(mask)
+                                              << " Sq/Skv " << seqLenQ << "/" << seqLenKv
+                                              << " bias " << bias << " sink " << sink << " dropout "
+                                              << dropout << ": " << *pair;
+                                        failures.insert(graph.str());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    EXPECT_GT(checked, 0U) << "no graph of the set is served by " << engine.name << " on " << arch;
+    std::ostringstream report;
+    size_t shown = 0;
+    for(const auto& failure : failures)
+    {
+        if(shown++ == 10)
+        {
+            break;
+        }
+        report << "\n  " << failure;
+    }
+    EXPECT_TRUE(failures.empty()) << failures.size() << " of " << checked
+                                  << " distinct candidate sets of " << engine.name << " on " << arch
+                                  << " have two candidates with one knob tuple; first:"
+                                  << report.str();
 }
 
 TEST(TestFlydslSdpaCdnaPacks, IsOnePackWithAGraphMatchAndOneKernelScopedMatcher)
@@ -604,6 +871,13 @@ TEST(TestFlydslSdpaCdnaPacks, EveryKernelDeclaresItsFamilysSignature)
     expectEveryKernelDeclaresItsFamilysSignature(GENERIC);
 }
 
+/// The knob census: per arch, the candidates of every graph of the set have distinct knob tuples,
+/// as the plan builder's enumeration requires.
+TEST(TestFlydslSdpaCdnaPacks, EveryGraphsCandidatesHaveDistinctKnobTuples)
+{
+    expectDistinctKnobTuplesForEveryGraph(GENERIC, GENERIC_MATCHERS);
+}
+
 TEST(TestFlydslSdpaCdnaDualwavePacks, IsOnePackWithAGraphMatchAndOneKernelScopedMatcher)
 {
     expectOnePackWithAGraphMatchAndOneKernelScopedMatcher(DUALWAVE);
@@ -655,6 +929,13 @@ TEST(TestFlydslSdpaCdnaDualwavePacks, ServesHeadDim256OnFourWaves)
 TEST(TestFlydslSdpaCdnaDualwavePacks, DeclaresItsNumericalNotes)
 {
     expectAnExplicitEmptyNumericalNoteList(DUALWAVE);
+}
+
+/// The knob census: per arch, the candidates of every graph of the set have distinct knob tuples,
+/// as the plan builder's enumeration requires.
+TEST(TestFlydslSdpaCdnaDualwavePacks, EveryGraphsCandidatesHaveDistinctKnobTuples)
+{
+    expectDistinctKnobTuplesForEveryGraph(DUALWAVE, DUALWAVE_MATCHERS);
 }
 
 TEST(TestFlydslSdpaCdnaDecodePacks, IsOnePackWithAGraphMatchAndOneKernelScopedMatcher)
