@@ -625,3 +625,83 @@ def test_the_command_fails_on_a_test_in_limbo_and_writes_its_report(tmp_path):
     )
     with pytest.raises(SystemExit):
         limbo_audit.main(["--lane", "gfx942"])
+
+
+def _main(tree: Path, lanes: dict[str, Path], report: Path, *options: str) -> int:
+    """The command's exit status over ``lanes`` of ``tree``, writing ``report``."""
+    arguments = [f"--lane={name}={records}" for name, records in lanes.items()]
+    return limbo_audit.main(
+        [*arguments, "--tree", str(tree), "--report", str(report), *options]
+    )
+
+
+# A test that fails in the first run of a lane and passes in the next, as one
+# that passes on a CI step's retry: the first run leaves the marker file.
+_FAILS_ONCE = """
+import os
+from pathlib import Path
+
+def test_passes():
+    pass
+
+def test_fails_once():
+    marker = Path(os.environ["FAKE_ATTEMPT_MARKER"])
+    if not marker.exists():
+        marker.touch()
+        raise AssertionError("first attempt")
+"""
+
+
+def test_a_test_that_passed_only_on_a_retry_fails_the_audit(tmp_path):
+    """Two runs of one lane into one records directory, as a CI step and its
+    retry: the test that failed in the first is reported with how it ended,
+    though it passed in the second, and the command fails."""
+    tree = _tree_with(tmp_path, {UNREGISTERED_FILE: _FAILS_ONCE})
+    records = tmp_path / "gfx942"
+    attempt = {"FAKE_ATTEMPT_MARKER": str(tmp_path / "attempted")}
+    _run_lane(tree, records, "gfx942", environment=attempt, statuses=(1,))
+    _run_lane(tree, records, "gfx942", environment=attempt)
+    source_paths = limbo_audit.SourcePaths(python_files_under_test_roots(tree))
+    lane = limbo_audit.lane_run("gfx942", read_run_records(records), source_paths)
+    assert limbo_audit.failed_tests([lane]) == [
+        limbo_audit.FailedTest(
+            UNREGISTERED_FILE, "test_fails_once", {"gfx942": ("failed",)}
+        )
+    ]
+    assert _audit(tree, {"gfx942": records}) == {}
+    report = tmp_path / "limbo.md"
+    assert _main(tree, {"gfx942": records}, report) == 1
+    text = report.read_text()
+    assert "Tests that failed in a lane, a passed retry included: 1." in text
+    assert f"| `{UNREGISTERED_FILE}` | `test_fails_once` | gfx942: failed |" in text
+
+
+def test_a_test_whose_process_ended_first_is_a_failure_of_its_lane(tmp_path):
+    """A process that ended before its test did (a per-test time limit) failed
+    that test, even when a later run of the lane passed it."""
+    tree = _tree_with(
+        tmp_path,
+        {
+            UNREGISTERED_FILE: """
+import os
+from pathlib import Path
+
+def test_ends_the_process_once():
+    marker = Path(os.environ["FAKE_ATTEMPT_MARKER"])
+    if not marker.exists():
+        marker.touch()
+        os._exit(1)
+""",
+        },
+    )
+    records = tmp_path / "gfx942"
+    attempt = {"FAKE_ATTEMPT_MARKER": str(tmp_path / "attempted")}
+    _run_lane(tree, records, "gfx942", environment=attempt, statuses=(1,))
+    _run_lane(tree, records, "gfx942", environment=attempt)
+    source_paths = limbo_audit.SourcePaths(python_files_under_test_roots(tree))
+    lane = limbo_audit.lane_run("gfx942", read_run_records(records), source_paths)
+    assert limbo_audit.failed_tests([lane]) == [
+        limbo_audit.FailedTest(
+            UNREGISTERED_FILE, "test_ends_the_process_once", {"gfx942": ("unfinished",)}
+        )
+    ]

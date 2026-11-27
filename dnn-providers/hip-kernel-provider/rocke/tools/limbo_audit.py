@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Which tests did no CI lane run, with no recorded reason? A per-test audit.
+"""Which tests did no CI lane run, with no recorded reason, and which failed in
+one? A per-test audit of CI runs.
 
 ``platform/tests/tools/test_pending_lanes.py`` checks, file by file, that every
 test file is assigned to a CI entry or recorded in ``rocke.tests.pending_lanes``.
@@ -36,6 +37,12 @@ tree or a source checkout), on any operating system; the audit maps each to the
 source test file whose path is the longest unique suffix of it. A lane none of
 whose records maps to a source test file is no evidence, and fails the audit
 as a test in limbo does.
+
+A test that failed in a lane fails the audit too: one whose body failed or
+whose setup or teardown raised, whose process ended before it did, or whose
+file failed to collect, in any run the lane's records hold, even if another
+run of it passed. A lane's records directory kept across a CI step's retries
+holds every attempt, so a test that passed only on a retry is red here.
 """
 
 from __future__ import annotations
@@ -59,13 +66,20 @@ from rocke.tests.pending_lanes import (
     python_files_under_test_roots,
     waiting_entry,
 )
-from rocke.tests.run_records import OTHER_SHARD, RunRecord, read_run_records
+from rocke.tests.run_records import (
+    FAILED_OUTCOMES,
+    OTHER_SHARD,
+    RunRecord,
+    read_run_records,
+)
 
 __all__ = [
+    "FailedTest",
     "LaneRun",
     "LimboTest",
     "SourcePaths",
     "audit",
+    "failed_tests",
     "lane_run",
     "main",
     "universe_of",
@@ -77,6 +91,10 @@ _GFX = re.compile(r"\bgfx[0-9a-f]+\b")
 # parameter set is empty in a run (a parameter set that depends on the GPU, for
 # one); one part of the id of a test with stacked parametrizes.
 _EMPTY_PARAMETER_SET_ID = "NOTSET"
+# How a failed attempt of a test ended, besides FAILED_OUTCOMES: its process
+# ended first, or its file failed to collect (node "").
+_UNFINISHED = "unfinished"
+_COLLECT_ERROR = "collect error"
 # How far a test got in a lane, lowest first; a lane keeps the furthest. An
 # unfinished test was to run, but its process ended first (run_records).
 _PROGRESS = ("collected", "deselected", "unfinished", "skipped", "ran")
@@ -130,6 +148,8 @@ class LaneRun:
     # Test files that failed to collect, which fails the lane visibly.
     failed_files: set[str] = field(default_factory=set)
     unmapped: set[str] = field(default_factory=set)
+    # Each test that failed in a run of the lane -> how each failed run ended.
+    failures: dict[TestId, list[str]] = field(default_factory=dict)
 
     def note(self, test: TestId, event: str, reason: str) -> None:
         """Keep the furthest event of ``test`` and every reason given for it."""
@@ -141,6 +161,10 @@ class LaneRun:
             self.reasons[test] = []
         if reason and reason not in self.reasons[test]:
             self.reasons[test].append(reason)
+
+    def note_failure(self, test: TestId, outcome: str) -> None:
+        """Keep how one run of ``test`` failed."""
+        self.failures.setdefault(test, []).append(outcome)
 
     @property
     def observed_nothing(self) -> bool:
@@ -191,10 +215,16 @@ def lane_run(
             lane.skipped_files[source] = record.reason
         elif record.event == "collect_error":
             lane.failed_files.add(source)
+            lane.note_failure((source, ""), _COLLECT_ERROR)
         elif record.event == "deselected" and record.reason == OTHER_SHARD:
             other_shard.add((source, record.node))
         else:
-            lane.note((source, record.node), record.event, record.reason)
+            test = (source, record.node)
+            if record.event == "unfinished":
+                lane.note_failure(test, _UNFINISHED)
+            elif record.event == "ran" and record.reason in FAILED_OUTCOMES:
+                lane.note_failure(test, record.reason)
+            lane.note(test, record.event, record.reason)
     for test in other_shard:
         if lane.progress.get(test) == "collected":
             del lane.progress[test]
@@ -219,6 +249,33 @@ class LimboTest:
     path: str
     node: str
     reasons: Mapping[str, str]  # lane name -> why it did not run the test
+
+
+@dataclass(frozen=True)
+class FailedTest:
+    """A test that failed in a lane: how each failed run of it ended, by lane.
+    ``node`` is "" for a test file that failed to collect."""
+
+    path: str
+    node: str
+    outcomes: Mapping[str, tuple[str, ...]]  # lane name -> failed runs' outcomes
+
+
+def failed_tests(lanes: list[LaneRun]) -> list[FailedTest]:
+    """Every test that failed in a run of any of ``lanes``, whether or not
+    another run of it passed."""
+    tests = sorted(set().union(*(lane.failures for lane in lanes)))
+    return [
+        FailedTest(
+            *test,
+            {
+                lane.name: tuple(lane.failures[test])
+                for lane in lanes
+                if test in lane.failures
+            },
+        )
+        for test in tests
+    ]
 
 
 def _defers(lane: LaneRun, test: TestId, reason: str, lanes: list[LaneRun]) -> bool:
@@ -299,20 +356,37 @@ def audit(lanes: list[LaneRun], universe: Iterable[TestId] = ()) -> list[LimboTe
     return limbo
 
 
-def report(limbo: list[LimboTest], lanes: list[LaneRun]) -> str:
-    """The audit's report: a count, then each test in limbo with its reasons."""
+def report(
+    limbo: list[LimboTest], failed: list[FailedTest], lanes: list[LaneRun]
+) -> str:
+    """The audit's report: the counts, each test that failed, then each test
+    in limbo with its reasons."""
     lines = [
-        "# Tests in limbo",
+        "# Audit of CI runs",
         "",
         (
             f"Lanes: {', '.join(lane.name for lane in lanes)}. Tests no lane ran "
             f"and rocke.tests.pending_lanes does not account for: {len(limbo)}."
         ),
+        "",
+        f"Tests that failed in a lane, a passed retry included: {len(failed)}.",
     ]
     empty = [lane.name for lane in lanes if lane.observed_nothing]
     if empty:
         evidence = "Lanes with no record naming a source test file, so no evidence"
         lines += ["", f"{evidence}: {', '.join(empty)}"]
+    if failed:
+        lines += [
+            "",
+            "| test file | test | how each failed run ended |",
+            "|---|---|---|",
+        ]
+        for test in failed:
+            how = "; ".join(
+                f"{name}: {', '.join(outcomes)}"
+                for name, outcomes in test.outcomes.items()
+            )
+            lines.append(f"| `{test.path}` | `{test.node}` | {how} |")
     unmapped = sorted(set().union(*(lane.unmapped for lane in lanes)))
     if unmapped:
         lines += ["", f"Records naming no source test file: {len(unmapped)}"]
@@ -388,7 +462,8 @@ def main(argv: list[str] | None = None) -> int:
         else set()
     )
     limbo = audit(lanes, universe)
-    text = report(limbo, lanes)
+    failed = failed_tests(lanes)
+    text = report(limbo, failed, lanes)
     if args.report:
         args.report.write_text(text, encoding="utf-8")
     print(
@@ -396,7 +471,8 @@ def main(argv: list[str] | None = None) -> int:
         if len(text) < 20000
         else text[:20000] + "\n[report truncated; see --report]"
     )
-    return 1 if limbo or any(lane.observed_nothing for lane in lanes) else 0
+    no_evidence = any(lane.observed_nothing for lane in lanes)
+    return 1 if limbo or failed or no_evidence else 0
 
 
 if __name__ == "__main__":

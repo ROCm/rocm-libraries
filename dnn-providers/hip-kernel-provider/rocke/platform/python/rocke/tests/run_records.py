@@ -76,6 +76,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "EVENTS",
+    "FAILED_OUTCOMES",
     "OTHER_SHARD",
     "RAN_OUTCOMES",
     "RECORDS_DIR_ENV",
@@ -111,6 +112,8 @@ OTHER_SHARD = "deselected: another shard of this entry runs it"
 # How a ``ran`` test ended: its body passed or failed, an expected failure
 # failed or passed (non-strict), or its setup or teardown raised.
 RAN_OUTCOMES = frozenset({"passed", "failed", "xfailed", "xpassed", "error"})
+# The outcomes of RAN_OUTCOMES that fail the run.
+FAILED_OUTCOMES = frozenset({"failed", "error"})
 _SKIP_PREFIX = "Skipped: "
 _DESELECTION_REASON = pytest.StashKey[str]()
 
