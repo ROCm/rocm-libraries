@@ -1147,9 +1147,20 @@ struct GirAccessData {
     bool operator==(const GirAccessData&) const = default;
 };
 
+/// GIR action ids are 1-based in the IR so 0 can mean "no action on this path yet". Producers
+/// number from 0; only a serializer or a diagnostic converts back.
+inline constexpr uint64_t girInternalActionId(uint64_t external) {
+    return external + 1;
+}
+inline constexpr uint64_t girExternalActionId(uint64_t internal) {
+    return internal - 1;
+}
+
 /// The instruction's GIR identity and what it touches.  Survives rocisa conversion, logical
 /// lowering, CFG splitting, and scheduling; only the facts that belong to NO instruction (the
 /// generation table and the phi edges) stay in the module frame contract.
+///
+/// `actionId` and `anchorAction` are internal ids: the constructor shifts what it is given.
 struct GirActionData : public TypedModifier<GirActionData> {
     static constexpr Modifier::Type Type = Modifier::Type::GIR_ACTION;
 
@@ -1162,8 +1173,8 @@ struct GirActionData : public TypedModifier<GirActionData> {
                            GirActionKind kind = GirActionKind::Other,
                            std::vector<GirAccessData> accesses = {})
         : TypedModifier<GirActionData>(),
-          actionId(actionId),
-          anchorAction(anchorAction),
+          actionId(girInternalActionId(actionId)),
+          anchorAction(girInternalActionId(anchorAction)),
           kind(kind),
           accesses(std::move(accesses)) {}
 };

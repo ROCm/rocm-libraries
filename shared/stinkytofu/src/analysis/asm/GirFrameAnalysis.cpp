@@ -277,8 +277,7 @@ std::unordered_map<GirFrameNode, HazardState, GirFrameNodeHash> reachingHazards(
         for (const GirFrameNode& successor : successors->second) {
             auto target = incoming.find(successor);
             if (target == incoming.end()) continue;
-            const HazardState& outgoing =
-                frames.insideOneGirBlock(node.block, successor.block) ? walked : aged;
+            const HazardState& outgoing = frames.insideOneGirBlock(node, successor) ? walked : aged;
             if (mergeHazardState(target->second, outgoing)) work.push_back(successor);
         }
     }
@@ -496,6 +495,74 @@ bool GirFrameAnalysis::Result::insideOneGirBlock(const BasicBlock* from,
     return source->second == target->second;
 }
 
+std::optional<uint64_t> GirFrameAnalysis::Result::girBlockOfNode(const GirFrameNode& node) const {
+    auto owner = girBlockOf.find(node.block);
+    if (owner != girBlockOf.end()) return owner->second;
+    // An action-less piece carries the block it is still inside in `incomingAction`; 0 there is
+    // the initial reset, i.e. no action has been seen on this path yet.
+    if (node.incomingAction != 0) return node.incomingAction;
+    return std::nullopt;
+}
+
+bool GirFrameAnalysis::Result::insideOneGirBlock(const GirFrameNode& from,
+                                                 const GirFrameNode& to) const {
+    if (isBackEdge(from.block, to.block)) return false;
+    const std::optional<uint64_t> source = girBlockOfNode(from);
+    const std::optional<uint64_t> target = girBlockOfNode(to);
+    // Only two KNOWN and different GIR blocks are a crossing; an end no action has named says
+    // nothing about distance.
+    if (!source || !target) return true;
+    return *source == *target;
+}
+
+BasicBlock* GirFrameAnalysis::Result::girSkipSource(const BasicBlock* block) const {
+    auto owner = girBlockOf.find(block);
+    if (owner == girBlockOf.end()) return nullptr;
+    const uint64_t anchor = owner->second;
+    const auto inGroup = [&](const BasicBlock* candidate) {
+        auto found = girBlockOf.find(candidate);
+        return found != girBlockOf.end() && found->second == anchor;
+    };
+
+    // Walk the GIR block from where it is ENTERED, refusing `block`. Starting anywhere else would
+    // call the group's own entry skippable, since leaving by the exit trivially avoids it.
+    std::deque<BasicBlock*> work;
+    std::unordered_set<const BasicBlock*> seen{block};
+    for (const auto& [candidate, candidateAnchor] : girBlockOf) {
+        if (candidateAnchor != anchor || candidate == block) continue;
+        auto* entry = const_cast<BasicBlock*>(candidate);
+        const auto& predecessors = entry->getPredecessors();
+        if (!predecessors.empty() && std::none_of(predecessors.begin(), predecessors.end(),
+                                                  [&](BasicBlock* pred) { return !inGroup(pred); }))
+            continue;
+        if (seen.insert(entry).second) work.push_back(entry);
+    }
+
+    bool escapes = false;
+    while (!work.empty()) {
+        BasicBlock* node = work.front();
+        work.pop_front();
+        for (BasicBlock* successor : node->getSuccessors()) {
+            if (successor == block) continue;
+            if (!inGroup(successor)) {
+                escapes = true;  // an agent left the GIR block without running `block`
+                continue;
+            }
+            if (seen.insert(successor).second) work.push_back(successor);
+        }
+    }
+    if (!escapes) return nullptr;
+
+    // The branch that does the skipping enters `block`, so it is one of its PREDECESSORS. Reading
+    // the answer off them, rather than off the blocks the walk reached, keeps the same candidates
+    // in a CFG order: a hash map of pointers has none, and the seam must be the same every run.
+    for (BasicBlock* predecessor : block->getPredecessors())
+        if (predecessor != block && seen.contains(predecessor) &&
+            predecessor->getSuccessors().size() > 1)
+            return predecessor;
+    return nullptr;
+}
+
 const std::vector<GirFrame>& GirFrameAnalysis::Result::frames(const BasicBlock* block) const {
     static const std::vector<GirFrame> empty;
     auto it = blockFrames.find(const_cast<BasicBlock*>(block));
@@ -517,6 +584,15 @@ GirFrameAnalysis::Result GirFrameAnalysis::run(Function& function, AnalysisManag
     }
     if (!encoded->loaded) return result;
     result.contract = *encoded;
+    // A contract names actions in the producer's numbering; everything below this is internal.
+    for (GirFrameIncomingSpec& in : result.contract.incomings) {
+        in.destinationAction = girInternalActionId(in.destinationAction);
+        in.sourceAction = girInternalActionId(in.sourceAction);
+    }
+    for (GirFrameRequiresSpec& need : result.contract.requires_) {
+        need.destinationAction = girInternalActionId(need.destinationAction);
+        need.sourceAction = girInternalActionId(need.sourceAction);
+    }
 
     std::unordered_map<StinkyInstruction*, size_t> instructionIndex;
     std::unordered_map<BasicBlock*, uint64_t> blockAnchorOrder;
@@ -530,32 +606,33 @@ GirFrameAnalysis::Result GirFrameAnalysis::run(Function& function, AnalysisManag
             if (!inst) continue;
             instructionIndex[inst] = index++;
             if (const auto* action = inst->getModifier<GirActionData>()) {
-                result.actionInstructions[action->actionId].push_back(inst);
-                blockActions[&block].insert(action->actionId);
+                const uint64_t actionId = action->actionId;
+                const uint64_t anchorAction = action->anchorAction;
+                result.actionInstructions[actionId].push_back(inst);
+                blockActions[&block].insert(actionId);
                 // The action and what it touches are facts ABOUT THIS INSTRUCTION, so they come
                 // off the modifier.  Legalization can split one rocisa instruction into several
                 // carrying the same id, so only the first occurrence contributes its accesses.
                 auto [spec, fresh] = result.contract.actions.try_emplace(
-                    action->actionId,
-                    GirActionSpec{action->actionId, action->anchorAction, action->kind, {}});
+                    actionId, GirActionSpec{actionId, anchorAction, action->kind, {}});
                 if (fresh) {
                     for (const GirAccessData& touch : action->accesses) {
                         if (touch.ring < 1)
                             STINKY_UNREACHABLE("GirFrameAnalysis: access ring must be positive");
                         spec->second.accesses.push_back(result.contract.accesses.size());
                         result.contract.accesses.push_back(GirAccessSpec{
-                            action->actionId, touch.isWrite, touch.genId, touch.ring, touch.gdelta,
+                            actionId, touch.isWrite, touch.genId, touch.ring, touch.gdelta,
                             touch.absolute, touch.crossAgent, touch.operand});
                     }
                 }
                 const uint64_t canonical = spec->second.anchorAction;
                 realizedAnchors.insert(canonical);
                 anchorBlocks[canonical].insert(&block);
-                auto [order, inserted] = blockAnchorOrder.emplace(&block, action->actionId);
+                auto [order, inserted] = blockAnchorOrder.emplace(&block, actionId);
                 if (inserted) {
                     result.girBlockOf[&block] = canonical;
-                } else if (action->actionId > order->second) {
-                    order->second = action->actionId;
+                } else if (actionId > order->second) {
+                    order->second = actionId;
                     result.girBlockOf[&block] = canonical;
                 }
             }
@@ -620,8 +697,9 @@ GirFrameAnalysis::Result GirFrameAnalysis::run(Function& function, AnalysisManag
             !namedActions.contains(incoming.destinationAction))
             STINKY_UNREACHABLE(
                 ("GirFrameAnalysis: INCOMING names unknown action (src=" +
-                 std::to_string(incoming.sourceAction) + (source ? " here" : " ABSENT") +
-                 ", dst=" + std::to_string(incoming.destinationAction) +
+                 std::to_string(girExternalActionId(incoming.sourceAction)) +
+                 (source ? " here" : " ABSENT") +
+                 ", dst=" + std::to_string(girExternalActionId(incoming.destinationAction)) +
                  (destination ? " here" : " ABSENT") + ", function " + function.getName() + ")")
                     .c_str());
         if (!source || !destination)
@@ -766,6 +844,39 @@ GirFrameAnalysis::Result GirFrameAnalysis::run(Function& function, AnalysisManag
         }
     }
 
+    // A state that can be entered and never left does not exist. Lowering spells one GIR edge as
+    // a chain of scaffold branches, and those carry no action for a `requires` to name, so an arm
+    // is admitted into a branch it cannot take and is only refused at the next block that owns an
+    // action -- by then the state is built. Dropping it needs a fixpoint: losing one state can
+    // leave the predecessor that reached it with no feasible exit of its own.
+    for (bool pruned = true; pruned;) {
+        pruned = false;
+        for (BasicBlock& block : function) {
+            auto states = frameSets.find(&block);
+            if (states == frameSets.end() || block.getSuccessors().empty()) continue;
+            for (auto state = states->second.begin(); state != states->second.end();) {
+                const GirFrameNode node{&block, state->first, state->second};
+                // An edge escapes only if the state it LANDS IN still stands: a successor dropped
+                // on an earlier round is no exit either.
+                const bool escapes = std::any_of(
+                    block.getSuccessors().begin(), block.getSuccessors().end(),
+                    [&](BasicBlock* succ) {
+                        if (!edgeFeasible(node, succ)) return false;
+                        const GirFrameNode next = advanceNode(node, succ);
+                        auto landing = frameSets.find(succ);
+                        return landing != frameSets.end() &&
+                               landing->second.contains({next.frame, next.incomingAction});
+                    });
+                if (escapes) {
+                    ++state;
+                    continue;
+                }
+                state = states->second.erase(state);
+                pruned = true;
+            }
+        }
+    }
+
     // Program order, not `frameSets` order: a pointer-keyed hash map iterates differently
     // between runs, and the edge map keeps what it is given.
     for (BasicBlock& block : function) {
@@ -777,8 +888,17 @@ GirFrameAnalysis::Result GirFrameAnalysis::run(Function& function, AnalysisManag
         for (const auto& [frame, incomingAction] : states->second) {
             GirFrameNode node{&block, frame, incomingAction};
             auto& successors = result.edges[node];
-            for (BasicBlock* succ : block.getSuccessors())
-                if (edgeFeasible(node, succ)) successors.push_back(advanceNode(node, succ));
+            for (BasicBlock* succ : block.getSuccessors()) {
+                if (!edgeFeasible(node, succ)) continue;
+                // A state the prune dropped is gone: naming it here would hand a walk an edge to
+                // a node the graph no longer holds, which reads as running off the end of it.
+                GirFrameNode next = advanceNode(node, succ);
+                auto landing = frameSets.find(succ);
+                if (landing == frameSets.end() ||
+                    !landing->second.contains({next.frame, next.incomingAction}))
+                    continue;
+                successors.push_back(std::move(next));
+            }
         }
     }
 
@@ -807,8 +927,10 @@ GirFrameAnalysis::Result GirFrameAnalysis::run(Function& function, AnalysisManag
                 }
                 generation %= access.ring;
                 if (generation < 0) generation += access.ring;
-                result.occurrences.push_back({inst, instructionIndex.at(inst), accessIndex, frame,
-                                              concreteStorage(access, generation, storageIds)});
+                const int storage = concreteStorage(access, generation, storageIds);
+                result.storageRing[storage] = access.operand;
+                result.occurrences.push_back(
+                    {inst, instructionIndex.at(inst), accessIndex, frame, storage});
             }
         }
         // An action that survived lowering but whose kind matches none of its instructions drops
@@ -816,7 +938,8 @@ GirFrameAnalysis::Result GirFrameAnalysis::run(Function& function, AnalysisManag
         // Either the kind is mislabelled (an unknown `.stir` spelling parses to `Other`) or the
         // family above is missing the opcode that realizes it.
         if (!realized)
-            STINKY_UNREACHABLE(("GirFrameAnalysis: action " + std::to_string(access.actionId) +
+            STINKY_UNREACHABLE(("GirFrameAnalysis: action " +
+                                std::to_string(girExternalActionId(access.actionId)) +
                                 " declares kind " +
                                 std::to_string(static_cast<int>(actionSpec->second.kind)) +
                                 " but none of its instructions performs that access")
@@ -949,7 +1072,7 @@ static GirHazardFenceCover coverOfHazard(
         auto successors = frames.edges.find(step.node);
         if (successors == frames.edges.end()) continue;
         for (const GirFrameNode& successor : successors->second) {
-            const int advance = frames.insideOneGirBlock(step.node.block, successor.block) ? 0 : 1;
+            const int advance = frames.insideOneGirBlock(step.node, successor) ? 0 : 1;
             if (step.gap + advance > hazard.gap) continue;
             Step next{step.producerNode, successor,     0, step.gap + advance, step.anchor,
                       step.anchorNode,   step.anchorGap};
