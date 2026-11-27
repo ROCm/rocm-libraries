@@ -681,7 +681,7 @@ namespace
         {
             const auto& r = results.GetTestPartResult(i);
             if(r.failed()
-               && std::string(r.message()).find("uniform_check failed") != std::string::npos)
+               && std::string(r.message()).find("uniform_check row failed") != std::string::npos)
                 uniformFailures++;
             else
                 ADD_FAILURE() << r.message();
@@ -735,6 +735,11 @@ namespace
     TEST(UniformCheckBench, pre_checkin_OneRowSkipsRowCheck)
     {
         expectSingleLineSkips(hipblaslt_uniform_check::row, 1, 64, "M is 1");
+    }
+
+    TEST(UniformCheckBench, pre_checkin_OneColumnSkipsColumnCheck)
+    {
+        expectSingleLineSkips(hipblaslt_uniform_check::column, 64, 1, "N is 1");
     }
 
     TEST(PreswizzledScaleLayout, smoke_rejects_nontransposed_A)

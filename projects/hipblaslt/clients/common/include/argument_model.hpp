@@ -181,7 +181,7 @@ public:
                   double                      max_ulp = 0.0,
                   double                      avg_ulp = 0.0,
                   const hipblaslt_bench::TimingResult& timing = {},
-                  const UniformCheckResult&            row_uniform = {})
+                  const UniformCheckResult&            uniform = {})
     {
         hipblaslt_internal_ostream name_list;
         hipblaslt_internal_ostream value_list;
@@ -341,11 +341,12 @@ public:
         }
 
         // After the tuning-file write, so tuning files keep their columns.
-        if(row_uniform.status != UniformCheckResult::Status::off)
+        if(uniform.status != UniformCheckResult::Status::off)
         {
-            print("row_uniform", row_uniform.status_name());
-            print("row_uniform_bad_cols", row_uniform.bad);
-            print("row_uniform_first_row", row_uniform.first);
+            const bool col = arg.uniform_check == hipblaslt_uniform_check::column;
+            print(col ? "col_uniform" : "row_uniform", uniform.status_name());
+            print(col ? "col_uniform_bad_rows" : "row_uniform_bad_cols", uniform.bad);
+            print(col ? "col_uniform_first_col" : "row_uniform_first_row", uniform.first);
         }
 
         str << name_list << "\n" << value_list << std::endl;
