@@ -63,3 +63,24 @@ def test_a_directory_the_script_adds_to_sys_path_is_not_searched(tmp_path):
     closure = script_import_closure(tmp_path / "main.py", [])
     assert (tmp_path / "extra/helper.py").resolve() not in closure.files
     assert closure.unresolved == {"helper"}
+
+
+def test_a_namespace_package_is_searched_and_holds_no_file(tmp_path):
+    """A directory without ``__init__.py`` is a namespace package: its modules
+    are reached through it, in every search root that holds a part of it."""
+    _write(
+        tmp_path,
+        {
+            "main.py": "import space.first\nfrom space import second\n",
+            "lib_a/space/first.py": "VALUE = 1\n",
+            "lib_b/space/second.py": "VALUE = 2\n",
+        },
+    )
+    closure = script_import_closure(
+        tmp_path / "main.py", [tmp_path / "lib_a", tmp_path / "lib_b"]
+    )
+    assert closure.files == {
+        (tmp_path / relative).resolve()
+        for relative in ("main.py", "lib_a/space/first.py", "lib_b/space/second.py")
+    }
+    assert closure.unresolved == frozenset()

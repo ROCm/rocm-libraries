@@ -8,7 +8,9 @@ is affected by a change to any of them. The search reads each file's bytecode,
 so every import statement counts, function-level and ``TYPE_CHECKING`` ones
 included. It cannot follow a module named only at run time
 (``importlib.import_module`` of a computed name, a file loaded by path) or a
-file read as data. An import it cannot resolve in the search roots, the
+file read as data. A namespace package (a directory without ``__init__.py``)
+is searched as Python searches it, and holds no file of its own. An import it
+cannot resolve in the search roots, the
 standard library or the interpreter's built-in modules is reported by its
 top-level name, so a caller can tell an installed package from code the search
 did not reach (a module found through a ``sys.path`` entry the script adds at
@@ -17,6 +19,7 @@ run time, for one).
 
 from __future__ import annotations
 
+import importlib.machinery
 import modulefinder
 import sys
 from collections.abc import Iterable, Mapping
@@ -33,6 +36,42 @@ class ImportClosure:
 
     files: frozenset[Path]
     unresolved: frozenset[str]
+
+
+class _NamespaceAwareFinder(modulefinder.ModuleFinder):
+    """``modulefinder.ModuleFinder``, which fails with ``AttributeError`` on a
+    namespace package, made to load one as Python does: a package whose search
+    path is every directory of that name the search finds, with no file."""
+
+    def __init__(self, path: list[str]) -> None:
+        super().__init__(path=path)
+        self._namespace_locations: dict[str, list[str]] = {}
+
+    def find_module(self, name, path, parent=None):
+        fullname = f"{parent.__name__}.{name}" if parent is not None else name
+        spec = importlib.machinery.PathFinder.find_spec(
+            name, self.path if path is None else path
+        )
+        if (
+            fullname in self.excludes
+            or spec is None
+            or spec.loader is not None
+            or not spec.submodule_search_locations
+        ):
+            return super().find_module(name, path, parent)
+        locations = list(spec.submodule_search_locations)
+        self._namespace_locations[fullname] = locations
+        # The base class loads a package found this way through load_package;
+        # its kind constant has no public name.
+        return None, locations[0], ("", "", modulefinder._PKG_DIRECTORY)
+
+    def load_package(self, fqname, pathname):
+        locations = self._namespace_locations.get(fqname)
+        if locations is None:
+            return super().load_package(fqname, pathname)
+        package = self.add_module(fqname)
+        package.__path__ = locations
+        return package
 
 
 def _is_relative_import_name(
@@ -72,7 +111,7 @@ def script_import_closure(script: Path, search_roots: Iterable[Path]) -> ImportC
     ``script`` and every file found there; an import of the standard library
     is neither a file nor unresolved."""
     roots = [script.resolve().parent, *(Path(root).resolve() for root in search_roots)]
-    finder = modulefinder.ModuleFinder(path=[str(root) for root in roots])
+    finder = _NamespaceAwareFinder([str(root) for root in roots])
     finder.run_script(str(script))
     files = frozenset(
         Path(module.__file__).resolve()
