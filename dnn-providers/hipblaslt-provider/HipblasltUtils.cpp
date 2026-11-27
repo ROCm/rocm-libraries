@@ -121,6 +121,85 @@ hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper findTensor
                                                        + std::to_string(uid));
 }
 
+MatrixOrder matrixOrder(const std::vector<int64_t>& dims, const std::vector<int64_t>& strides)
+{
+    const auto rank = dims.size();
+    if(rank < 2 || strides.size() != rank)
+    {
+        return MatrixOrder::UNSUPPORTED;
+    }
+    if(dims[rank - 1] == 1 || strides[rank - 1] == 1)
+    {
+        return MatrixOrder::ROW_MAJOR;
+    }
+    if(dims[rank - 2] == 1 || strides[rank - 2] == 1)
+    {
+        return MatrixOrder::COLUMN_MAJOR;
+    }
+    return MatrixOrder::UNSUPPORTED;
+}
+
+hipblasOperation_t operandTranspose(
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tensor)
+{
+    const auto order = matrixOrder(tensor.dims(), tensor.strides());
+    if(order == MatrixOrder::ROW_MAJOR)
+    {
+        return HIPBLAS_OP_N;
+    }
+    if(order == MatrixOrder::COLUMN_MAJOR)
+    {
+        return HIPBLAS_OP_T;
+    }
+    throw hipdnn_plugin_sdk::HipdnnPluginException(
+        HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Unsupported stride for input matrix: " + tensor.name());
+}
+
+int64_t leadingDimension(
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tensor)
+{
+    const auto& dims = tensor.dims();
+    const auto& strides = tensor.strides();
+    const auto order = matrixOrder(dims, strides);
+    if(order == MatrixOrder::UNSUPPORTED)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Unsupported matrix: only column major and row major matrices are supported");
+    }
+
+    const auto rank = dims.size();
+    if(order == MatrixOrder::ROW_MAJOR)
+    {
+        return (dims[rank - 2] == 1) ? dims[rank - 1] : strides[rank - 2]; // row stride
+    }
+    return strides[rank - 1]; // column stride
+}
+
+void requireRowMajorOutput(
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tensor)
+{
+    if(matrixOrder(tensor.dims(), tensor.strides()) != MatrixOrder::ROW_MAJOR)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Unsupported output layout: hipBLASLt engine requires a row-major output matrix: "
+                + tensor.name());
+    }
+    const auto& dims = tensor.dims();
+    const auto rows = dims[dims.size() - 2];
+    const auto cols = dims[dims.size() - 1];
+    const auto ld = leadingDimension(tensor);
+    if(rows > 1 && ld < cols)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Output rows overlap: row stride " + std::to_string(ld)
+                + " is smaller than the column count " + std::to_string(cols)
+                + ". UID: " + std::to_string(tensor.uid()));
+    }
+}
+
 bool isDenseRowMajor(const std::vector<int64_t>& dims, const std::vector<int64_t>& strides)
 {
     if(dims.size() != strides.size())

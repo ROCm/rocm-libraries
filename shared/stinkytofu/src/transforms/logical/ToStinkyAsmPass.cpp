@@ -181,6 +181,11 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
         if (!irInst->comment.empty()) {
             asmInst->addModifier(CommentData(irInst->comment));
         }
+        // A fence can be a GIR block's ONLY content -- an arm that moves nothing still has to be
+        // a block the frame graph can name -- so it carries the action naming that block.
+        if (irInst->giraction.has_value()) {
+            asmInst->addModifier<GirActionData>(irInst->giraction.value());
+        }
         return asmInst;
     }
     // ====================================================================
@@ -592,6 +597,11 @@ class ToStinkyAsmPassImpl : public Pass {
                 if (asmInst) {
                     // Insert assembly instruction before the logical instruction
                     bb.insertIR(it, asmInst);
+
+                    // removeIR/safeErase bypass the erase observer, so a group endpoint
+                    // on the logical node would dangle; hand it to its replacement.
+                    if (Function* parent = bb.getParent(); parent && parent->eraseObserver())
+                        parent->eraseObserver()(logicalInst, asmInst, asmInst);
 
                     // Remove the logical instruction from IRList
                     auto toRemove = it;

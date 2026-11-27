@@ -83,6 +83,7 @@
 #include <Tensile/hip/HipUtils.hpp>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <complex>
@@ -753,25 +754,24 @@ namespace
     }
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
-    TensileLite::FusedA2A toTensileFusedA2A(RocblasltFusedEpilogueInfo::Mode mode)
+    TensileLite::FusedA2A toTensileFusedA2A(RocblasltFusionInfo::Mode mode)
     {
         switch(mode)
         {
-        case RocblasltFusedEpilogueInfo::Mode::GemmA2A:
+        case RocblasltFusionInfo::Mode::GemmA2A:
             return TensileLite::FusedA2A::GemmA2A;
-        case RocblasltFusedEpilogueInfo::Mode::A2AGemm:
+        case RocblasltFusionInfo::Mode::A2AGemm:
             return TensileLite::FusedA2A::A2AGemm;
-        case RocblasltFusedEpilogueInfo::Mode::Disabled:
+        case RocblasltFusionInfo::Mode::Disabled:
             break;
         }
         return TensileLite::FusedA2A::Disabled;
     }
 
     // An A2AGemm prologue gathers all of K unless the caller set the extent.
-    int64_t fusedA2AExtent(const RocblasltFusedEpilogueInfo&  info,
-                           const RocblasltContractionProblem& prob)
+    int64_t fusedA2AExtent(const RocblasltFusionInfo& info, const RocblasltContractionProblem& prob)
     {
-        if(info.mode == RocblasltFusedEpilogueInfo::Mode::A2AGemm && info.a2aExtent == 0)
+        if(info.mode == RocblasltFusionInfo::Mode::A2AGemm && info.a2aExtent == 0)
             return prob.k;
         return info.a2aExtent;
     }
@@ -779,17 +779,19 @@ namespace
     // Entry j of the kernel's buffer table: for GemmA2A rank j's receive buffer;
     // for A2AGemm rank j's B, except this rank's own entry, which is its gather
     // buffer.
-    std::vector<void*> fusedA2ABufferTable(const RocblasltFusedEpilogueInfo&  info,
-                                           const RocblasltContractionProblem& prob)
+    std::array<void*, HIPBLASLT_DEVICE_COMM_MAX_WORLD>
+        fusedA2ABufferTable(const RocblasltFusionInfo&         info,
+                            const RocblasltContractionProblem& prob)
     {
-        const size_t world = prob.fused_a2a_world;
-        if(info.mode != RocblasltFusedEpilogueInfo::Mode::A2AGemm)
+        const size_t world
+            = std::min<size_t>(prob.fused_a2a_world, HIPBLASLT_DEVICE_COMM_MAX_WORLD);
+        std::array<void*, HIPBLASLT_DEVICE_COMM_MAX_WORLD> table = {};
+        if(info.mode != RocblasltFusionInfo::Mode::A2AGemm)
         {
-            if(info.a2aRecvPtrs == nullptr)
-                return std::vector<void*>(world, nullptr);
-            return std::vector<void*>(info.a2aRecvPtrs, info.a2aRecvPtrs + world);
+            if(info.a2aRecvPtrs != nullptr)
+                std::copy_n(info.a2aRecvPtrs, world, table.begin());
+            return table;
         }
-        std::vector<void*> table(world, nullptr);
         for(size_t j = 0; j < world && j < info.a2aPeerBCount; ++j)
             table[j] = info.a2aPeerBPtrs[j];
         if(prob.fused_a2a_rank < world)
@@ -2487,7 +2489,7 @@ namespace
         tensileProblem.setScaleD(compute_type);
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
-        RocblasltFusedEpilogueInfo fusedInfo;
+        RocblasltFusionInfo fusedInfo;
         if(rocblaslt_resolve_fused_a2a(prob, fusedInfo))
         {
             tensileProblem.setFusedA2A(toTensileFusedA2A(fusedInfo.mode));
@@ -2837,7 +2839,7 @@ namespace
         tensileProblem.setScaleD(compute_type);
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
-        RocblasltFusedEpilogueInfo fusedInfo;
+        RocblasltFusionInfo fusedInfo;
         if(rocblaslt_resolve_fused_a2a(prob, fusedInfo))
         {
             tensileProblem.setFusedA2A(toTensileFusedA2A(fusedInfo.mode));
@@ -3156,18 +3158,18 @@ namespace
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
         // Device-side fused-A2A operands.
-        RocblasltFusedEpilogueInfo fusedInfo;
+        RocblasltFusionInfo fusedInfo;
         if(rocblaslt_resolve_fused_a2a(prob, fusedInfo))
         {
-            const std::vector<void*> buffers = fusedA2ABufferTable(fusedInfo, prob);
-            inputs.fusedA2ACounter           = prob.Synchronizer;
-            inputs.fusedA2APeers  = rocblaslt::buildFusedA2APeerFields(prob.fused_a2a_peer_flag,
+            const auto buffers     = fusedA2ABufferTable(fusedInfo, prob);
+            inputs.fusedA2ACounter = prob.Synchronizer;
+            inputs.fusedA2APeers   = rocblaslt::buildFusedA2APeerFields(prob.fused_a2a_peer_flag,
                                                                       buffers.data(),
                                                                       prob.fused_a2a_world,
                                                                       fusedInfo.commChannel,
                                                                       fusedInfo.a2aSdmaQueues);
-            inputs.fusedA2AMyRank = prob.fused_a2a_rank;
-            inputs.fusedA2ADrain  = rocblaslt::fusedA2ADrainFor(fusedInfo.a2aCompletionMode);
+            inputs.fusedA2AMyRank  = prob.fused_a2a_rank;
+            inputs.fusedA2ADrain   = rocblaslt::fusedA2ADrainFor(fusedInfo.a2aCompletionMode);
         }
 #endif
 
@@ -4281,7 +4283,7 @@ bool useRocRoller(rocblaslt_handle handle, const RocblasltContractionProblem& pr
 {
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
     // Do not use rocRoller for a fused all-to-all
-    RocblasltFusedEpilogueInfo fusedInfo;
+    RocblasltFusionInfo fusedInfo;
     if(rocblaslt_resolve_fused_a2a(prob, fusedInfo))
         return false;
 #endif
@@ -5242,7 +5244,7 @@ namespace
     bool isFusedAllToAll(const RocblasltContractionProblem& prob)
     {
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
-        RocblasltFusedEpilogueInfo info;
+        RocblasltFusionInfo info;
         return rocblaslt_resolve_fused_a2a(prob, info);
 #else
         static_cast<void>(prob);

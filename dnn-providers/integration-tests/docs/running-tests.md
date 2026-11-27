@@ -21,7 +21,7 @@ a copy of the bundle tree in `build/lib/integration-test-bundles/`
 | `hipdnn_integration_tests` | The bundles (plus any C++ tests compiled in) against **one provider's engine** | yes |
 | `hipdnn_golden_data_tests` | Our checked-in golden `.bin` data against the CPU/GPU reference executors | **no** |
 | `hipdnn_gpu_ref_tests` | The GPU/CPU reference executors themselves | no |
-| `hipdnn_integration_tests_unit_tests` | The harness (discovery, TOML, claims, verdicts) — no device needed | no |
+| `hipdnn_integration_tests_unit_tests` | The harness (discovery, TOML, claims, verdicts) and the GPU reference plan builders and executors. The quick tier needs no device; the tests that need one carry the `Device` suite marker and run in standard | no |
 
 `hipdnn_integration_tests` is built once in `dnn-providers/integration-tests/`
 and run by **each provider** against its own plugin. That is how one bundle
@@ -546,16 +546,26 @@ lanes follow:
   `Standard`.
 - A test with **no** tier prefix runs only from `comprehensive` up.
 
-### The project's own binaries use a catch-all
+### The project's own binaries
 
 `dnn-providers/integration-tests/test_categories.yaml` (for the harness unit
-tests and `hipdnn_golden_data_tests`) and `test_categories_gpu_ref.yaml` (for
-`hipdnn_gpu_ref_tests`) write their quick tier as an exclusion: `*` minus
-`Standard*`, `Comprehensive*` and `Full*`. Therefore any test without a tier
-prefix goes into quick. If the quick tier starts to time out, look for a large
-shape that has no prefix. `test_categories_gpu_ref.yaml` also moves the
-reduced-precision and mixed-type comparison cases to standard by name pattern
-(the list is in that file), so its quick tier holds the fp32 comparison cases.
+tests and `hipdnn_golden_data_tests`) writes its quick tier as an exclusion: `*` minus
+`Standard*`, `Comprehensive*` and `Full*`, minus the unit tests that need a device (suite
+names with the marker `Device`, for example `TestGpuMatmulPlanPureDeviceFp32`), which
+compile GPU kernels. Therefore any other test without a tier prefix goes into quick. If
+the quick tier starts to time out, look for a large shape that has no prefix, or for a
+device test whose suite lacks the marker.
+
+`test_categories_gpu_ref.yaml` (for `hipdnn_gpu_ref_tests`) does the opposite: quick is
+an opt-in list (`Quick/*` plus a short list of named tests, one fp32 case per kernel
+family) and standard is the catch-all, so a new test runs in standard. The
+`hipdnn_gpu_ref_tests_tier_partition` and `hipdnn_integration_tests_unit_tests_tier_partition`
+CTest checks fail when a test of the binary runs in no tier or in two, or when a pattern of the
+YAML breaks the shared parser's pattern rule. The unit-test check also runs the quick tier with
+no visible device (`HIP_VISIBLE_DEVICES` and `ROCR_VISIBLE_DEVICES` set to -1) and fails when
+that run exits non-zero or a test skips for lack of a device; as a control it fails when no
+standard test skips in the same environment, because the device is then not hidden. They run
+in the superbuild lane (they carry no tier label).
 In GTest filter syntax, only the first `-` starts the negative list. A `:-`
 between patterns does not negate.
 

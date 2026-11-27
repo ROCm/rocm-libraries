@@ -37,7 +37,6 @@ GlobalParameters:
   EnqueuesPerSync: 1
   PrintWinnersOnly: true
   Architecture: gfx1250
-  CpuThreads: 1
   PrintLevel: 2
   CodeObjectVersion: '4'
 BenchmarkProblems:

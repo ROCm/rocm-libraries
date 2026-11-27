@@ -177,6 +177,12 @@ enum class target_arch : unsigned int
     gfx1011 = 1011,
     gfx1012 = 1012,
     gfx1030 = 1030,
+    gfx1031 = 1031,
+    gfx1032 = 1032,
+    gfx1033 = 1033,
+    gfx1034 = 1034,
+    gfx1035 = 1035,
+    gfx1036 = 1036,
     gfx1100 = 1100,
     gfx1101 = 1101,
     gfx1102 = 1102,
@@ -251,7 +257,13 @@ constexpr gen gen_from_target_arch(target_arch i)
         case target_arch::gfx1010:
         case target_arch::gfx1011:
         case target_arch::gfx1012: return gen::rdna1;
-        case target_arch::gfx1030: return gen::rdna2;
+        case target_arch::gfx1030:
+        case target_arch::gfx1031:
+        case target_arch::gfx1032:
+        case target_arch::gfx1033:
+        case target_arch::gfx1034:
+        case target_arch::gfx1035:
+        case target_arch::gfx1036: return gen::rdna2;
         case target_arch::gfx1100:
         case target_arch::gfx1101:
         case target_arch::gfx1102:
@@ -333,6 +345,12 @@ constexpr target_arch get_target_arch_from_name(const char* const arch_name, con
     ROCPRIM_RETURN_IF_ARCH(gfx1011);
     ROCPRIM_RETURN_IF_ARCH(gfx1012);
     ROCPRIM_RETURN_IF_ARCH(gfx1030);
+    ROCPRIM_RETURN_IF_ARCH(gfx1031);
+    ROCPRIM_RETURN_IF_ARCH(gfx1032);
+    ROCPRIM_RETURN_IF_ARCH(gfx1033);
+    ROCPRIM_RETURN_IF_ARCH(gfx1034);
+    ROCPRIM_RETURN_IF_ARCH(gfx1035);
+    ROCPRIM_RETURN_IF_ARCH(gfx1036);
     ROCPRIM_RETURN_IF_ARCH(gfx1100);
     ROCPRIM_RETURN_IF_ARCH(gfx1101);
     ROCPRIM_RETURN_IF_ARCH(gfx1102);
