@@ -644,6 +644,12 @@ hiptensorStatus_t hiptensorCreatePermutation(const hiptensorHandle_t            
         return status;
     }
 
+    if(auto status = hiptensor::checkUnaryOperator("hiptensorCreatePermutation", opA, "opA");
+       status != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return status;
+    }
+
     *desc = new hiptensorOperationDescriptor();
 
     (*desc)->mTag        = 0u;
@@ -731,6 +737,23 @@ hiptensorStatus_t hiptensorCreateElementwiseBinary(const hiptensorHandle_t      
         {
             return status;
         }
+    }
+
+    for(auto const& [op, opName] : {std::pair{opA, "opA"}, std::pair{opC, "opC"}})
+    {
+        if(auto status
+           = hiptensor::checkUnaryOperator("hiptensorCreateElementwiseBinary", op, opName);
+           status != HIPTENSOR_STATUS_SUCCESS)
+        {
+            return status;
+        }
+    }
+
+    if(auto status
+       = hiptensor::checkBinaryOperator("hiptensorCreateElementwiseBinary", opAC, "opAC");
+       status != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return status;
     }
 
     *desc                = new hiptensorOperationDescriptor();
@@ -829,6 +852,27 @@ hiptensorStatus_t hiptensorCreateElementwiseTrinary(const hiptensorHandle_t     
         }
     }
 
+    for(auto const& [op, opName] :
+        {std::pair{opA, "opA"}, std::pair{opB, "opB"}, std::pair{opC, "opC"}})
+    {
+        if(auto status
+           = hiptensor::checkUnaryOperator("hiptensorCreateElementwiseTrinary", op, opName);
+           status != HIPTENSOR_STATUS_SUCCESS)
+        {
+            return status;
+        }
+    }
+
+    for(auto const& [op, opName] : {std::pair{opAB, "opAB"}, std::pair{opABC, "opABC"}})
+    {
+        if(auto status
+           = hiptensor::checkBinaryOperator("hiptensorCreateElementwiseTrinary", op, opName);
+           status != HIPTENSOR_STATUS_SUCCESS)
+        {
+            return status;
+        }
+    }
+
     *desc                = new hiptensorOperationDescriptor();
     (*desc)->mTag        = 0u;
     (*desc)->mScalarType = *hiptensor::convertToHipTensorDataType(descCompute);
@@ -895,6 +939,22 @@ hiptensorStatus_t hiptensorCreateReduction(const hiptensorHandle_t            ha
     if(checkResult != HIPTENSOR_STATUS_SUCCESS)
     {
         return checkResult;
+    }
+
+    for(auto const& [op, opName] : {std::pair{opA, "opA"}, std::pair{opC, "opC"}})
+    {
+        if(auto status = hiptensor::checkUnaryOperator("hiptensorCreateReduction", op, opName);
+           status != HIPTENSOR_STATUS_SUCCESS)
+        {
+            return status;
+        }
+    }
+
+    if(auto status
+       = hiptensor::checkBinaryOperator("hiptensorCreateReduction", opReduce, "opReduce");
+       status != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return status;
     }
 
     *desc                = new hiptensorOperationDescriptor();

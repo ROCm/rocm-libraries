@@ -63,6 +63,7 @@ Unit tests live in `test/00_unit/` and are built with the `add_hiptensor_unit_te
 | `batched_contraction_test` | `hiptensorCreateContraction` / `hiptensorCreateContractionTrinary` return `HIPTENSOR_STATUS_NOT_SUPPORTED` for batched modes (a mode shared by both inputs and the output) and accept non-batched ones. No kernel launch |
 | `elementwise_mode_test` | Elementwise mode validation: subset and reordered input modes are accepted; a mode missing from the output or repeated within a tensor returns `NOT_SUPPORTED`; a shared mode with mismatched extents returns `INVALID_VALUE`; a permute or trinary op whose output data type differs from its input's returns `NOT_SUPPORTED`. Allocates small device buffers but launches no kernel |
 | `elementwise_instance_selection_test` | Tuned hyper-parameter lookup for permutation instances: extents above the largest tuned edge of the rank 2 and 3 tables use the last edge's entry instead of reading past the table. No kernel launch |
+| `operator_validation_test` | Operator argument validation at descriptor creation: for permute, elementwise binary/trinary, reduction, and binary/trinary contraction, a per-operand operator (`opA`..`opD`) that is not unary, or a combining operator (`opAC`, `opAB`, `opABC`, `opReduce`) other than `ADD`/`MUL`/`MAX`/`MIN`, returns `INVALID_VALUE`, including values outside `hiptensorOperator_t`; the operator of an operand that is not given (contraction `opC` without C, trinary contraction `opD` without D) accepts any value. Contraction cases skip on `ARCH_MISMATCH`. Creates a hipTensor handle and descriptors but launches no kernel |
 | `reduction_mode_test` | CPU reduction reference mode handling: an output mode that the input carries is reduced; an output mode missing from the input returns `INVALID_VALUE`. Creates a hipTensor handle and descriptors but launches no kernel |
 | `elementwise_broadcast_test` | Elementwise broadcast results for permute, binary, and trinary (inputs carrying a subset of the output modes). Launches kernels, so it **requires a GPU** |
 | `api_attribute_test` | Attribute accessors (`hiptensorOperationDescriptorSetAttribute`/`GetAttribute`, `hiptensorPlanPreferenceSetAttribute`, `hiptensorPlanGetAttribute`): a `NULL` handle or object returns `NOT_INITIALIZED`, a `NULL` buffer or a buffer whose size doesn't match the attribute returns `INVALID_VALUE` and copies nothing, unknown attributes return `NOT_SUPPORTED`; values round-trip, padding takes one `uint32_t` per output mode and one output element for the value, and setting it leaves the other attributes intact. Creates a permutation plan but launches no kernel |
@@ -92,7 +93,6 @@ To run a subset of GoogleTest cases in any hipTensor test binary, pass `--gtest_
 ```bash
 ./bin/concurrency_test --gtest_filter='AllOps/ConcurrencyTest.*/Permute_*'
 ```
-
 
 **What is NOT covered by unit tests:**
 
@@ -163,10 +163,6 @@ Integration tests are device tests. They require a physical AMD GPU matching the
 | Reduction — CPU impl | `reduction_cpu_impl_test` | CPU reference validation (host test) |
 
 All device tests compare GPU results against a CPU reference implementation using a per-type tolerance.
-
-**GPU-required tests:** All `bilinear_contraction_test_*`, `scale_contraction_test_*`, `complex_*`, `trinary_*`, `*_unary_ops_test`, `contraction_padded_strides_test`, `rank*_elementwise_*`, `rank*_reduction_test`, `plan_cache_test`, `plan_cache_lru_test`, `plan_lifetime_test`, `concurrency_test`, `elementwise_broadcast_test`, `elementwise_output_strides_test`, `elementwise_trinary_op_order_test`.
-
-**CPU-only (host) tests:** `contraction_mode_test`, `elementwise_cpu_test`, `reduction_cpu_impl_test`, and the `00_unit/` binaries (`logger_test`, `yaml_test`, `elementwise_op_test`, `util_test`, `hiptensor_options_test`, `elementwise_instance_selection_test`). `api_attribute_test`, `batched_contraction_test`, `elementwise_mode_test`, and `reduction_mode_test` launch no kernels but create a hipTensor handle and descriptors (`elementwise_mode_test` also allocates small device buffers).
 
 **Test tiers (CTest labels):**
 

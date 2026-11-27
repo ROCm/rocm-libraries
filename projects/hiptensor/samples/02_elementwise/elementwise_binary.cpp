@@ -185,7 +185,7 @@ int main()
                                          /* unary operator C  */ HIPTENSOR_OP_IDENTITY,
                                          descD,
                                          modeD.data(),
-                                         /* unary operator AC */ HIPTENSOR_OP_ADD,
+                                         /* binary operator AC */ HIPTENSOR_OP_ADD,
                                          descCompute));
 
     /*****************************
