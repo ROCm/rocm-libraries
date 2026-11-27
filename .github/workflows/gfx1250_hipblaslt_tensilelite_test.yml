@@ -96,7 +96,9 @@ jobs:
           # labels from org membership; non-members never get them.
           jq -e --argjson org "$ORG_LABELS" 'any(.[]; . as $x | $org | index($x) != null)' <<<"$LABELS" >/dev/null \
             || skip "PR #$PR has no ROCm org label"
-          FILES="$(gh api --paginate "repos/$REPO/pulls/$PR/files" --jq '.[].filename')"
+          # The Python bindings are tested by Component CI, so they alone don't run this job.
+          ALL_FILES="$(gh api --paginate "repos/$REPO/pulls/$PR/files" --jq '.[] | .filename, (.previous_filename // empty)')"
+          FILES="$(grep -v '^projects/hipblaslt/python/' <<<"$ALL_FILES" || true)"
           # ci-env/action.yml holds therock-ref: a bump PR runs the job, so a compiler change
           # shows up there as the SDK compiler warning.
           grep -qE '^(projects/hipblaslt|shared/(origami|stinkytofu|mxdatagenerator)|cmake)/|^\.github/workflows/gfx1250_hipblaslt_tensilelite_test\.yml$|^\.github/actions/ci-env/action\.yml$' <<<"$FILES" \
