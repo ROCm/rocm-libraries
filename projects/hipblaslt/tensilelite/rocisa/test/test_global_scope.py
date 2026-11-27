@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""gfx1250 cache scope on SMEM loads and on global load / store."""
+"""gfx1250 cache scope on SMEM loads, global load / store and the 64-bit SADDR atomics."""
 
 import os
 import shutil
@@ -12,6 +12,8 @@ from rocisa.code import Module, SignatureBase
 from rocisa.container import GLOBALModifiers, SMEMModifiers, sgpr, vgpr
 from rocisa.enum import CacheScope
 from rocisa.instruction import (
+    GlobalAtomicCmpswapB64Saddr,
+    GlobalAtomicMaxU64Saddr,
     GlobalLoadB32,
     GlobalStoreB32,
     GlobalStoreB128,
@@ -59,6 +61,18 @@ _CASES = {
                                 saddr=vgpr("off", 1, False, False, True),
                                 modifier=GLOBALModifiers(offset=16, scope=CacheScope.SCOPE_DEV)),
         "global_store_b128 v[0:1], v[4:7], off offset:16 scope:SCOPE_DEV",
+    ),
+    "global_atomic_cmpswap_b64": (
+        lambda: GlobalAtomicCmpswapB64Saddr(
+            dst=vgpr(0, 2), vaddr=vgpr(2), data=vgpr(4, 4), saddr=sgpr(0, 2),
+            modifier=GLOBALModifiers(scope=CacheScope.SCOPE_DEV)),
+        "global_atomic_cmpswap_b64 v[0:1], v2, v[4:7], s[0:1] scope:SCOPE_DEV th:TH_ATOMIC_RETURN",
+    ),
+    "global_atomic_max_u64": (
+        lambda: GlobalAtomicMaxU64Saddr(
+            dst=vgpr(0, 2), vaddr=vgpr(2), data=vgpr(4, 2), saddr=sgpr(0, 2),
+            modifier=GLOBALModifiers(scope=CacheScope.SCOPE_DEV)),
+        "global_atomic_max_u64 v[0:1], v2, v[4:5], s[0:1] scope:SCOPE_DEV th:TH_ATOMIC_RETURN",
     ),
 }
 

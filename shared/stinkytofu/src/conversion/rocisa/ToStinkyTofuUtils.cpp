@@ -739,10 +739,10 @@ void attachTrue16ModifiersFromOperands(StinkyInstruction* stinkyInst,
 }
 
 /// The GLOBALStoreInstruction subclasses whose rocisa GLOBALModifiers are translated:
-/// the SADDR returning atomic and global_store_b32/b64/b128, not the
+/// the SADDR returning atomics and global_store_b32/b64/b128, not the
 /// global_store_async_from_lds_* family.
 const rocisa::GLOBALStoreInstruction* globalStoreWithModifiers(const rocisa::Instruction* inst) {
-    if (dynamic_cast<const rocisa::GlobalAtomicIncU32Saddr*>(inst) ||
+    if (dynamic_cast<const rocisa::GLOBALAtomicSaddrInstruction*>(inst) ||
         dynamic_cast<const rocisa::GlobalStoreB32*>(inst) ||
         dynamic_cast<const rocisa::GlobalStoreB64*>(inst) ||
         dynamic_cast<const rocisa::GlobalStoreB128*>(inst)) {
