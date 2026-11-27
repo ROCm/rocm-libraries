@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the Software), to deal
@@ -97,6 +97,16 @@ extern "C" {
 *
 *  \note
 *  This routine does not support batched computation.
+*
+*  \note
+*  For a matrix with at least one row, no non-zero entries and a unit diagonal, \f$op(A)\f$ is the identity, so
+*  the first iteration gives the exact solution \f$y = \alpha x\f$ and later iterations do not change it.
+*  Without \p host_tol, \p y is set to \f$\alpha x\f$ and \p host_nmaxiter[0] is unchanged. With
+*  \p host_tol, \p y is set to \f$\alpha x\f$ and \p host_nmaxiter[0] to 1, unless the input \p y
+*  already satisfies \f$\Vert \alpha x - y_0 \Vert_{\infty} \le\f$ \p host_tol[0], in which case \p y
+*  is unchanged and \p host_nmaxiter[0] is set to 0. \p host_history[0] is
+*  \f$\Vert \alpha x - y_0 \Vert_{\infty}\f$ and the residuals recorded after it are zero. As for a
+*  non-empty matrix, nothing is done if \p host_nmaxiter[0] is not positive.
 *
 *  @param[in]
 *  handle        handle to the rocSPARSE library context queue.
