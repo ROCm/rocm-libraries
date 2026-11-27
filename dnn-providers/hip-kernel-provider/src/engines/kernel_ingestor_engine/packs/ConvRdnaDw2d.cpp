@@ -248,14 +248,23 @@ bool isVariantOf(const KernelDefinition& kernel, const ConvProblem& problem)
 
 void addCompileOptions(compilation::KernelCompileOptions& options,
                        const ConvProblem& problem,
-                       const Geometry& geometry)
+                       const Geometry& geometry,
+                       bool hasBias)
 {
     if(geometry.generic)
     {
         options.add("DW_GENERIC", 1);
         options.add("DW_DTYPE", genericDtypeCode(problem.dtype));
         options.add("DW_NDHWC", problem.layout == Layout::CHANNELS_LAST ? 1 : 0);
+        if(hasBias)
+        {
+            options.add("DW_HAS_BIAS", 1);
+        }
         return;
+    }
+    if(hasBias)
+    {
+        options.add("HAS_BIAS", 1);
     }
     options.add("IO_DTYPE", ioDtype(problem.dtype));
     options.add("FILTER_H", problem.filter[1]);
@@ -271,20 +280,26 @@ void addCompileOptions(compilation::KernelCompileOptions& options,
 }
 
 /// Mirrors the argument lists of the two kernels and launch() below one for one.
-const std::vector<KernelArgument>& kernelSignature(bool generic)
+const std::vector<KernelArgument>& kernelSignature(bool generic, bool hasBias)
 {
     static const KernelArgument s_buffer{
         "global_buffer", static_cast<uint32_t>(sizeof(void*)), 0, ""};
     static const KernelArgument s_scalar{"by_value", static_cast<uint32_t>(sizeof(int)), 0, ""};
-    const auto make = [](size_t scalars) {
-        std::vector<KernelArgument> signature{s_buffer, s_buffer, s_buffer};
+    const auto make = [](size_t buffers, size_t scalars) {
+        std::vector<KernelArgument> signature(buffers, s_buffer);
         signature.insert(signature.end(), scalars, s_scalar);
         return signature;
     };
     // Specialized: N, C, iH, iW, oH, oW. Generic (the dw3d kernel): N, C, Di, Hi, Wi, K, Do, Ho,
-    // Wo, Z, Y, X, sd, sh, sw, pd, ph, pw, dd, dh, dw.
-    static const std::vector<KernelArgument> s_specialized = make(6);
-    static const std::vector<KernelArgument> s_generic = make(21);
+    // Wo, Z, Y, X, sd, sh, sw, pd, ph, pw, dd, dh, dw. The bias pointer follows `out`.
+    static const std::vector<KernelArgument> s_specialized = make(3, 6);
+    static const std::vector<KernelArgument> s_generic = make(3, 21);
+    static const std::vector<KernelArgument> s_specializedBias = make(4, 6);
+    static const std::vector<KernelArgument> s_genericBias = make(4, 21);
+    if(hasBias)
+    {
+        return generic ? s_genericBias : s_specializedBias;
+    }
     return generic ? s_generic : s_specialized;
 }
 
@@ -294,41 +309,51 @@ void launch(const compilation::IRunnableKernel& kernel,
             const void* w,
             void* y,
             const ConvProblem& p,
-            const Geometry& geometry)
+            const Geometry& geometry,
+            const void* bias,
+            bool hasBias)
 {
-    if(geometry.generic)
+    const auto run = [&](auto&&... buffers) {
+        if(geometry.generic)
+        {
+            // The dw3d generic kernel with depth 1: unit depth extent, filter, stride and
+            // dilation, no depth padding.
+            kernel.launch(stream,
+                          buffers...,
+                          p.n,
+                          p.c,
+                          1,
+                          p.in[1],
+                          p.in[2],
+                          p.k,
+                          1,
+                          p.out[1],
+                          p.out[2],
+                          1,
+                          p.filter[1],
+                          p.filter[2],
+                          1,
+                          p.stride[1],
+                          p.stride[2],
+                          0,
+                          p.pad[1],
+                          p.pad[2],
+                          1,
+                          p.dilation[1],
+                          p.dilation[2]);
+            return;
+        }
+        // Filter, padding, stride and dilation are compiled into the specialized variant.
+        kernel.launch(stream, buffers..., p.n, p.c, p.in[1], p.in[2], p.out[1], p.out[2]);
+    };
+    if(hasBias)
     {
-        // The dw3d generic kernel with depth 1: unit depth extent, filter, stride and
-        // dilation, no depth padding.
-        kernel.launch(stream,
-                      x,
-                      w,
-                      y,
-                      p.n,
-                      p.c,
-                      1,
-                      p.in[1],
-                      p.in[2],
-                      p.k,
-                      1,
-                      p.out[1],
-                      p.out[2],
-                      1,
-                      p.filter[1],
-                      p.filter[2],
-                      1,
-                      p.stride[1],
-                      p.stride[2],
-                      0,
-                      p.pad[1],
-                      p.pad[2],
-                      1,
-                      p.dilation[1],
-                      p.dilation[2]);
-        return;
+        run(x, w, y, bias);
     }
-    // Filter, padding, stride and dilation are compiled into the specialized variant.
-    kernel.launch(stream, x, w, y, p.n, p.c, p.in[1], p.in[2], p.out[1], p.out[2]);
+    else
+    {
+        run(x, w, y);
+    }
 }
 
 void addProblemLaunchValues(MetadataValues& values,

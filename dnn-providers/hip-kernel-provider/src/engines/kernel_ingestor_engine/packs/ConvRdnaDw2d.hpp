@@ -25,7 +25,8 @@
  *        problem, the generic kernel of the dw3d bundle with depth 1. Which problems they serve,
  *        which variant a problem takes and how it walks the output, how a variant is compiled
  *        and launched, and the problem half of a saved launch. `hip_conv_fwd_dw2d_rdna` runs them
- *        as they are.
+ *        as they are, `hip_conv_fwd_bias_dw2d_rdna` with their bias epilogue (HAS_BIAS in the
+ *        specialized kernel, DW_HAS_BIAS in the generic one).
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::conv_rdna::dw2d
 {
@@ -66,19 +67,26 @@ bool isVariantOf(const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel,
 /// The defines a variant is built with, for a kernel compiled at run time.
 void addCompileOptions(compilation::KernelCompileOptions& options,
                        const ConvProblem& problem,
-                       const Geometry& geometry);
+                       const Geometry& geometry,
+                       bool hasBias = false);
 
-/// The argument list of the specialized or the generic kernel.
-const std::vector<hipdnn_plugin_sdk::ingestor::KernelArgument>& kernelSignature(bool generic);
+/// The argument list of the specialized or the generic kernel: in, wei, out, [bias,] then the
+/// ints.
+const std::vector<hipdnn_plugin_sdk::ingestor::KernelArgument>&
+    kernelSignature(bool generic, bool hasBias = false);
 
 /// Launches the kernel over the grid of @p problem and @p geometry (set by the caller).
+/// @p hasBias is set exactly when the kernel was built with its bias epilogue; @p bias is then
+/// passed after `y` whatever its value, so the argument list always matches the kernel's.
 void launch(const compilation::IRunnableKernel& kernel,
             hipStream_t stream,
             const void* x,
             const void* w,
             void* y,
             const ConvProblem& problem,
-            const Geometry& geometry);
+            const Geometry& geometry,
+            const void* bias = nullptr,
+            bool hasBias = false);
 
 /// The problem and geometry values of a saved launch: `n`, `c`, `k`, per spatial axis (`_h`,
 /// `_w`) `in_`, `filter_`, `out_`, `pad_`, `stride_`, `dilation_`, and the geometry `generic`,

@@ -1,0 +1,1665 @@
+{
+  "version": "1.0",
+  "id": "46ede1f6-c2b8-495e-87c0-94b497a2f15d",
+  "name": "hipkernel:hip_conv_fwd_bias_dw2d_rdna",
+  "matchers": [
+    "1423527c-4431-435d-854a-eb897a4cc66f"
+  ],
+  "engine": "cf1226e5-8c7a-4414-af25-826d47277240",
+  "dispatch": "48f602be-b629-4ebe-9f0c-be81face06a3",
+  "provenance": {
+    "specialization_contract": {
+      "schema_version": 1,
+      "consumers": [
+        {
+          "engine_id": "cf1226e5-8c7a-4414-af25-826d47277240",
+          "kmd_id": "d846a3d6-84f5-4e2c-a9e5-73a3785aabc3",
+          "metadata_fields": [],
+          "matcher_only_fields": [
+            "kernel_family",
+            "variant",
+            "dtype",
+            "layout",
+            "filter_h",
+            "filter_w",
+            "stride",
+            "dilation"
+          ],
+          "bindings": {},
+          "vocabulary": {}
+        }
+      ]
+    }
+  },
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "2210a65e-652a-4583-9ead-8c370d6bb011",
+      "name": "hip_conv_fwd_bias_dw2d_rdna.f32_nchw_k3x3_s1",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "../conv_dw2d_rdna/kernels/ConvFwdDepthwise2d.cpp",
+        "entry": "ConvFwdDepthwise2d",
+        "build": {
+          "defines": {
+            "IO_DTYPE": "float",
+            "FILTER_H": 3,
+            "FILTER_W": 3,
+            "PAD_H": 1,
+            "PAD_W": 1,
+            "STRIDE_H": 1,
+            "STRIDE_W": 1,
+            "DILATION_H": 1,
+            "DILATION_W": 1,
+            "OUT_PER_LANE": 2,
+            "LANE_ON_DILATION_GRID": 0,
+            "HAS_BIAS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dw2d_direct",
+        "variant": "specialized",
+        "dtype": "FLOAT",
+        "layout": "CHANNELS_FIRST",
+        "filter_h": 3,
+        "filter_w": 3,
+        "stride": 1,
+        "dilation": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "ae98a478-8002-49c9-84d0-87ac8be9c705",
+      "name": "hip_conv_fwd_bias_dw2d_rdna.f32_nchw_k3x3_s2",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "../conv_dw2d_rdna/kernels/ConvFwdDepthwise2d.cpp",
+        "entry": "ConvFwdDepthwise2d",
+        "build": {
+          "defines": {
+            "IO_DTYPE": "float",
+            "FILTER_H": 3,
+            "FILTER_W": 3,
+            "PAD_H": 1,
+            "PAD_W": 1,
+            "STRIDE_H": 2,
+            "STRIDE_W": 2,
+            "DILATION_H": 1,
+            "DILATION_W": 1,
+            "OUT_PER_LANE": 2,
+            "LANE_ON_DILATION_GRID": 0,
+            "HAS_BIAS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dw2d_direct",
+        "variant": "specialized",
+        "dtype": "FLOAT",
+        "layout": "CHANNELS_FIRST",
+        "filter_h": 3,
+        "filter_w": 3,
+        "stride": 2,
+        "dilation": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "97de6efd-27a4-41e6-9442-00f3c569e742",
+      "name": "hip_conv_fwd_bias_dw2d_rdna.f32_nchw_k5x5_s1",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "../conv_dw2d_rdna/kernels/ConvFwdDepthwise2d.cpp",
+        "entry": "ConvFwdDepthwise2d",
+        "build": {
+          "defines": {
+            "IO_DTYPE": "float",
+            "FILTER_H": 5,
+            "FILTER_W": 5,
+            "PAD_H": 2,
+            "PAD_W": 2,
+            "STRIDE_H": 1,
+            "STRIDE_W": 1,
+            "DILATION_H": 1,
+            "DILATION_W": 1,
+            "OUT_PER_LANE": 2,
+            "LANE_ON_DILATION_GRID": 0,
+            "HAS_BIAS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dw2d_direct",
+        "variant": "specialized",
+        "dtype": "FLOAT",
+        "layout": "CHANNELS_FIRST",
+        "filter_h": 5,
+        "filter_w": 5,
+        "stride": 1,
+        "dilation": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "f07967ae-c855-4649-984b-6e333747bc78",
+      "name": "hip_conv_fwd_bias_dw2d_rdna.f32_nchw_k5x5_s2",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "../conv_dw2d_rdna/kernels/ConvFwdDepthwise2d.cpp",
+        "entry": "ConvFwdDepthwise2d",
+        "build": {
+          "defines": {
+            "IO_DTYPE": "float",
+            "FILTER_H": 5,
+            "FILTER_W": 5,
+            "PAD_H": 2,
+            "PAD_W": 2,
+            "STRIDE_H": 2,
+            "STRIDE_W": 2,
+            "DILATION_H": 1,
+            "DILATION_W": 1,
+            "OUT_PER_LANE": 2,
+            "LANE_ON_DILATION_GRID": 0,
+            "HAS_BIAS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dw2d_direct",
+        "variant": "specialized",
+        "dtype": "FLOAT",
+        "layout": "CHANNELS_FIRST",
+        "filter_h": 5,
+        "filter_w": 5,
+        "stride": 2,
+        "dilation": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "3c3c4db8-ae2f-4450-be4e-30764bd53d07",
+      "name": "hip_conv_fwd_bias_dw2d_rdna.f32_nchw_k7x7_s1",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "../conv_dw2d_rdna/kernels/ConvFwdDepthwise2d.cpp",
+        "entry": "ConvFwdDepthwise2d",
+        "build": {
+          "defines": {
+            "IO_DTYPE": "float",
+            "FILTER_H": 7,
+            "FILTER_W": 7,
+            "PAD_H": 3,
+            "PAD_W": 3,
+            "STRIDE_H": 1,
+            "STRIDE_W": 1,
+            "DILATION_H": 1,
+            "DILATION_W": 1,
+            "OUT_PER_LANE": 2,
+            "LANE_ON_DILATION_GRID": 0,
+            "HAS_BIAS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dw2d_direct",
+        "variant": "specialized",
+        "dtype": "FLOAT",
+        "layout": "CHANNELS_FIRST",
+        "filter_h": 7,
+        "filter_w": 7,
+        "stride": 1,
+        "dilation": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "d0ff364b-7fac-4b45-856e-9ffe37dcc3ec",
+      "name": "hip_conv_fwd_bias_dw2d_rdna.f32_nchw_k7x7_s2",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "../conv_dw2d_rdna/kernels/ConvFwdDepthwise2d.cpp",
+        "entry": "ConvFwdDepthwise2d",
+        "build": {
+          "defines": {
+            "IO_DTYPE": "float",
+            "FILTER_H": 7,
+            "FILTER_W": 7,
+            "PAD_H": 3,
+            "PAD_W": 3,
+            "STRIDE_H": 2,
+            "STRIDE_W": 2,
+            "DILATION_H": 1,
+            "DILATION_W": 1,
+            "OUT_PER_LANE": 2,
+            "LANE_ON_DILATION_GRID": 0,
+            "HAS_BIAS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dw2d_direct",
+        "variant": "specialized",
+        "dtype": "FLOAT",
+        "layout": "CHANNELS_FIRST",
+        "filter_h": 7,
+        "filter_w": 7,
+        "stride": 2,
+        "dilation": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "6b797fed-215c-46ec-a5a5-bd53c6866259",
+      "name": "hip_conv_fwd_bias_dw2d_rdna.f32_nchw_k1x31_s1",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "../conv_dw2d_rdna/kernels/ConvFwdDepthwise2d.cpp",
+        "entry": "ConvFwdDepthwise2d",
+        "build": {
+          "defines": {
+            "IO_DTYPE": "float",
+            "FILTER_H": 1,
+            "FILTER_W": 31,
+            "PAD_H": 0,
+            "PAD_W": 15,
+            "STRIDE_H": 1,
+            "STRIDE_W": 1,
+            "DILATION_H": 1,
+            "DILATION_W": 1,
+            "OUT_PER_LANE": 2,
+            "LANE_ON_DILATION_GRID": 0,
+            "HAS_BIAS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dw2d_direct",
+        "variant": "specialized",
+        "dtype": "FLOAT",
+        "layout": "CHANNELS_FIRST",
+        "filter_h": 1,
+        "filter_w": 31,
+        "stride": 1,
+        "dilation": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "b21d8eca-7f9e-40f1-b025-abf23c47d290",
+      "name": "hip_conv_fwd_bias_dw2d_rdna.f32_nchw_k3x3_d2",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "../conv_dw2d_rdna/kernels/ConvFwdDepthwise2d.cpp",
+        "entry": "ConvFwdDepthwise2d",
+        "build": {
+          "defines": {
+            "IO_DTYPE": "float",
+            "FILTER_H": 3,
+            "FILTER_W": 3,
+            "PAD_H": 2,
+            "PAD_W": 2,
+            "STRIDE_H": 1,
+            "STRIDE_W": 1,
+            "DILATION_H": 2,
+            "DILATION_W": 2,
+            "OUT_PER_LANE": 2,
+            "LANE_ON_DILATION_GRID": 1,
+            "HAS_BIAS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dw2d_direct",
+        "variant": "specialized",
+        "dtype": "FLOAT",
+        "layout": "CHANNELS_FIRST",
+        "filter_h": 3,
+        "filter_w": 3,
+        "stride": 1,
+        "dilation": 2
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "2299c01d-d758-4267-b620-d7cf345b8111",
+      "name": "hip_conv_fwd_bias_dw2d_rdna.f32_nchw_k3x3_d4",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "../conv_dw2d_rdna/kernels/ConvFwdDepthwise2d.cpp",
+        "entry": "ConvFwdDepthwise2d",
+        "build": {
+          "defines": {
+            "IO_DTYPE": "float",
+            "FILTER_H": 3,
+            "FILTER_W": 3,
+            "PAD_H": 4,
+            "PAD_W": 4,
+            "STRIDE_H": 1,
+            "STRIDE_W": 1,
+            "DILATION_H": 4,
+            "DILATION_W": 4,
+            "OUT_PER_LANE": 2,
+            "LANE_ON_DILATION_GRID": 1,
+            "HAS_BIAS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dw2d_direct",
+        "variant": "specialized",
+        "dtype": "FLOAT",
+        "layout": "CHANNELS_FIRST",
+        "filter_h": 3,
+        "filter_w": 3,
+        "stride": 1,
+        "dilation": 4
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "ee157515-683b-4ebc-b528-5ad2a3c3f9d1",
+      "name": "hip_conv_fwd_bias_dw2d_rdna.f32_nchw_k3x3_d6",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "../conv_dw2d_rdna/kernels/ConvFwdDepthwise2d.cpp",
+        "entry": "ConvFwdDepthwise2d",
+        "build": {
+          "defines": {
+            "IO_DTYPE": "float",
+            "FILTER_H": 3,
+            "FILTER_W": 3,
+            "PAD_H": 6,
+            "PAD_W": 6,
+            "STRIDE_H": 1,
+            "STRIDE_W": 1,
+            "DILATION_H": 6,
+            "DILATION_W": 6,
+            "OUT_PER_LANE": 2,
+            "LANE_ON_DILATION_GRID": 1,
+            "HAS_BIAS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dw2d_direct",
+        "variant": "specialized",
+        "dtype": "FLOAT",
+        "layout": "CHANNELS_FIRST",
+        "filter_h": 3,
+        "filter_w": 3,
+        "stride": 1,
+        "dilation": 6
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "97f0ee9e-4e66-4d03-9a9b-846ef7d6c8e2",
+      "name": "hip_conv_fwd_bias_dw2d_rdna.f32_nchw_k3x3_d12",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "../conv_dw2d_rdna/kernels/ConvFwdDepthwise2d.cpp",
+        "entry": "ConvFwdDepthwise2d",
+        "build": {
+          "defines": {
+            "IO_DTYPE": "float",
+            "FILTER_H": 3,
+            "FILTER_W": 3,
+            "PAD_H": 12,
+            "PAD_W": 12,
+            "STRIDE_H": 1,
+            "STRIDE_W": 1,
+            "DILATION_H": 12,
+            "DILATION_W": 12,
+            "OUT_PER_LANE": 2,
+            "LANE_ON_DILATION_GRID": 1,
+            "HAS_BIAS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dw2d_direct",
+        "variant": "specialized",
+        "dtype": "FLOAT",
+        "layout": "CHANNELS_FIRST",
+        "filter_h": 3,
+        "filter_w": 3,
+        "stride": 1,
+        "dilation": 12
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "02ba95c8-4676-45f1-b6a2-0e4876b11bbb",
+      "name": "hip_conv_fwd_bias_dw2d_rdna.f32_nchw_k3x3_d18",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "../conv_dw2d_rdna/kernels/ConvFwdDepthwise2d.cpp",
+        "entry": "ConvFwdDepthwise2d",
+        "build": {
+          "defines": {
+            "IO_DTYPE": "float",
+            "FILTER_H": 3,
+            "FILTER_W": 3,
+            "PAD_H": 18,
+            "PAD_W": 18,
+            "STRIDE_H": 1,
+            "STRIDE_W": 1,
+            "DILATION_H": 18,
+            "DILATION_W": 18,
+            "OUT_PER_LANE": 2,
+            "LANE_ON_DILATION_GRID": 1,
+            "HAS_BIAS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dw2d_direct",
+        "variant": "specialized",
+        "dtype": "FLOAT",
+        "layout": "CHANNELS_FIRST",
+        "filter_h": 3,
+        "filter_w": 3,
+        "stride": 1,
+        "dilation": 18
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "196025b9-61ad-4638-b548-277892f20441",
+      "name": "hip_conv_fwd_bias_dw2d_rdna.f32_nchw_k5x5_d2",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "../conv_dw2d_rdna/kernels/ConvFwdDepthwise2d.cpp",
+        "entry": "ConvFwdDepthwise2d",
+        "build": {
+          "defines": {
+            "IO_DTYPE": "float",
+            "FILTER_H": 5,
+            "FILTER_W": 5,
+            "PAD_H": 4,
+            "PAD_W": 4,
+            "STRIDE_H": 1,
+            "STRIDE_W": 1,
+            "DILATION_H": 2,
+            "DILATION_W": 2,
+            "OUT_PER_LANE": 2,
+            "LANE_ON_DILATION_GRID": 1,
+            "HAS_BIAS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dw2d_direct",
+        "variant": "specialized",
+        "dtype": "FLOAT",
+        "layout": "CHANNELS_FIRST",
+        "filter_h": 5,
+        "filter_w": 5,
+        "stride": 1,
+        "dilation": 2
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "17c412a8-8bcc-4fda-9ca1-0a23b389f870",
+      "name": "hip_conv_fwd_bias_dw2d_rdna.f32_nchw_generic",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "../conv_dw3d_rdna/kernels/ConvFwdDepthwise3d.cpp",
+        "entry": "ConvFwdDepthwise3d",
+        "build": {
+          "defines": {
+            "DW_GENERIC": 1,
+            "DW_DTYPE": 0,
+            "DW_NDHWC": 0,
+            "DW_HAS_BIAS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dw2d_direct",
+        "variant": "generic",
+        "dtype": "FLOAT",
+        "layout": "CHANNELS_FIRST",
+        "filter_h": 0,
+        "filter_w": 0,
+        "stride": 0,
+        "dilation": 0
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "7f393819-da94-4b13-9fa7-fc36dd63e105",
+      "name": "hip_conv_fwd_bias_dw2d_rdna.f32_nhwc_generic",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "../conv_dw3d_rdna/kernels/ConvFwdDepthwise3d.cpp",
+        "entry": "ConvFwdDepthwise3d",
+        "build": {
+          "defines": {
+            "DW_GENERIC": 1,
+            "DW_DTYPE": 0,
+            "DW_NDHWC": 1,
+            "DW_HAS_BIAS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dw2d_direct",
+        "variant": "generic",
+        "dtype": "FLOAT",
+        "layout": "CHANNELS_LAST",
+        "filter_h": 0,
+        "filter_w": 0,
+        "stride": 0,
+        "dilation": 0
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "ed1abec4-3ecf-4c66-a0f8-cb574b4c6b16",
+      "name": "hip_conv_fwd_bias_dw2d_rdna.f16_nchw_k3x3_s1",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "../conv_dw2d_rdna/kernels/ConvFwdDepthwise2d.cpp",
+        "entry": "ConvFwdDepthwise2d",
+        "build": {
+          "defines": {
+            "IO_DTYPE": "__half",
+            "FILTER_H": 3,
+            "FILTER_W": 3,
+            "PAD_H": 1,
+            "PAD_W": 1,
+            "STRIDE_H": 1,
+            "STRIDE_W": 1,
+            "DILATION_H": 1,
+            "DILATION_W": 1,
+            "OUT_PER_LANE": 2,
+            "LANE_ON_DILATION_GRID": 0,
+            "HAS_BIAS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dw2d_direct",
+        "variant": "specialized",
+        "dtype": "HALF",
+        "layout": "CHANNELS_FIRST",
+        "filter_h": 3,
+        "filter_w": 3,
+        "stride": 1,
+        "dilation": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "b71b49a1-ccd6-418a-8dc7-9e58993669fa",
+      "name": "hip_conv_fwd_bias_dw2d_rdna.f16_nchw_k3x3_s2",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "../conv_dw2d_rdna/kernels/ConvFwdDepthwise2d.cpp",
+        "entry": "ConvFwdDepthwise2d",
+        "build": {
+          "defines": {
+            "IO_DTYPE": "__half",
+            "FILTER_H": 3,
+            "FILTER_W": 3,
+            "PAD_H": 1,
+            "PAD_W": 1,
+            "STRIDE_H": 2,
+            "STRIDE_W": 2,
+            "DILATION_H": 1,
+            "DILATION_W": 1,
+            "OUT_PER_LANE": 2,
+            "LANE_ON_DILATION_GRID": 0,
+            "HAS_BIAS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dw2d_direct",
+        "variant": "specialized",
+        "dtype": "HALF",
+        "layout": "CHANNELS_FIRST",
+        "filter_h": 3,
+        "filter_w": 3,
+        "stride": 2,
+        "dilation": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "d7d217af-d506-4c63-a024-4a27cde98529",
+      "name": "hip_conv_fwd_bias_dw2d_rdna.f16_nchw_k5x5_s1",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "../conv_dw2d_rdna/kernels/ConvFwdDepthwise2d.cpp",
+        "entry": "ConvFwdDepthwise2d",
+        "build": {
+          "defines": {
+            "IO_DTYPE": "__half",
+            "FILTER_H": 5,
+            "FILTER_W": 5,
+            "PAD_H": 2,
+            "PAD_W": 2,
+            "STRIDE_H": 1,
+            "STRIDE_W": 1,
+            "DILATION_H": 1,
+            "DILATION_W": 1,
+            "OUT_PER_LANE": 2,
+            "LANE_ON_DILATION_GRID": 0,
+            "HAS_BIAS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dw2d_direct",
+        "variant": "specialized",
+        "dtype": "HALF",
+        "layout": "CHANNELS_FIRST",
+        "filter_h": 5,
+        "filter_w": 5,
+        "stride": 1,
+        "dilation": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "4c3f82ed-776a-4e9e-8504-b011cc92f15b",
+      "name": "hip_conv_fwd_bias_dw2d_rdna.f16_nchw_k5x5_s2",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "../conv_dw2d_rdna/kernels/ConvFwdDepthwise2d.cpp",
+        "entry": "ConvFwdDepthwise2d",
+        "build": {
+          "defines": {
+            "IO_DTYPE": "__half",
+            "FILTER_H": 5,
+            "FILTER_W": 5,
+            "PAD_H": 2,
+            "PAD_W": 2,
+            "STRIDE_H": 2,
+            "STRIDE_W": 2,
+            "DILATION_H": 1,
+            "DILATION_W": 1,
+            "OUT_PER_LANE": 2,
+            "LANE_ON_DILATION_GRID": 0,
+            "HAS_BIAS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dw2d_direct",
+        "variant": "specialized",
+        "dtype": "HALF",
+        "layout": "CHANNELS_FIRST",
+        "filter_h": 5,
+        "filter_w": 5,
+        "stride": 2,
+        "dilation": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "bef22406-4a6a-4382-810e-a0c251bd266d",
+      "name": "hip_conv_fwd_bias_dw2d_rdna.f16_nchw_k7x7_s1",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "../conv_dw2d_rdna/kernels/ConvFwdDepthwise2d.cpp",
+        "entry": "ConvFwdDepthwise2d",
+        "build": {
+          "defines": {
+            "IO_DTYPE": "__half",
+            "FILTER_H": 7,
+            "FILTER_W": 7,
+            "PAD_H": 3,
+            "PAD_W": 3,
+            "STRIDE_H": 1,
+            "STRIDE_W": 1,
+            "DILATION_H": 1,
+            "DILATION_W": 1,
+            "OUT_PER_LANE": 2,
+            "LANE_ON_DILATION_GRID": 0,
+            "HAS_BIAS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dw2d_direct",
+        "variant": "specialized",
+        "dtype": "HALF",
+        "layout": "CHANNELS_FIRST",
+        "filter_h": 7,
+        "filter_w": 7,
+        "stride": 1,
+        "dilation": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "ba5500c3-5ec8-4c3b-be2f-300170e1aa94",
+      "name": "hip_conv_fwd_bias_dw2d_rdna.f16_nchw_k7x7_s2",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "../conv_dw2d_rdna/kernels/ConvFwdDepthwise2d.cpp",
+        "entry": "ConvFwdDepthwise2d",
+        "build": {
+          "defines": {
+            "IO_DTYPE": "__half",
+            "FILTER_H": 7,
+            "FILTER_W": 7,
+            "PAD_H": 3,
+            "PAD_W": 3,
+            "STRIDE_H": 2,
+            "STRIDE_W": 2,
+            "DILATION_H": 1,
+            "DILATION_W": 1,
+            "OUT_PER_LANE": 2,
+            "LANE_ON_DILATION_GRID": 0,
+            "HAS_BIAS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dw2d_direct",
+        "variant": "specialized",
+        "dtype": "HALF",
+        "layout": "CHANNELS_FIRST",
+        "filter_h": 7,
+        "filter_w": 7,
+        "stride": 2,
+        "dilation": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "cd8c4420-0db7-405d-81d3-4ba66977b241",
+      "name": "hip_conv_fwd_bias_dw2d_rdna.f16_nchw_k1x31_s1",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "../conv_dw2d_rdna/kernels/ConvFwdDepthwise2d.cpp",
+        "entry": "ConvFwdDepthwise2d",
+        "build": {
+          "defines": {
+            "IO_DTYPE": "__half",
+            "FILTER_H": 1,
+            "FILTER_W": 31,
+            "PAD_H": 0,
+            "PAD_W": 15,
+            "STRIDE_H": 1,
+            "STRIDE_W": 1,
+            "DILATION_H": 1,
+            "DILATION_W": 1,
+            "OUT_PER_LANE": 2,
+            "LANE_ON_DILATION_GRID": 0,
+            "HAS_BIAS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dw2d_direct",
+        "variant": "specialized",
+        "dtype": "HALF",
+        "layout": "CHANNELS_FIRST",
+        "filter_h": 1,
+        "filter_w": 31,
+        "stride": 1,
+        "dilation": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "6dc79d29-5652-44a0-82b6-7bd485a86939",
+      "name": "hip_conv_fwd_bias_dw2d_rdna.f16_nchw_k3x3_d2",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "../conv_dw2d_rdna/kernels/ConvFwdDepthwise2d.cpp",
+        "entry": "ConvFwdDepthwise2d",
+        "build": {
+          "defines": {
+            "IO_DTYPE": "__half",
+            "FILTER_H": 3,
+            "FILTER_W": 3,
+            "PAD_H": 2,
+            "PAD_W": 2,
+            "STRIDE_H": 1,
+            "STRIDE_W": 1,
+            "DILATION_H": 2,
+            "DILATION_W": 2,
+            "OUT_PER_LANE": 4,
+            "LANE_ON_DILATION_GRID": 1,
+            "HAS_BIAS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dw2d_direct",
+        "variant": "specialized",
+        "dtype": "HALF",
+        "layout": "CHANNELS_FIRST",
+        "filter_h": 3,
+        "filter_w": 3,
+        "stride": 1,
+        "dilation": 2
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "64e30dc9-29bd-4d32-a696-7dfcbe8c8354",
+      "name": "hip_conv_fwd_bias_dw2d_rdna.f16_nchw_k3x3_d4",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "../conv_dw2d_rdna/kernels/ConvFwdDepthwise2d.cpp",
+        "entry": "ConvFwdDepthwise2d",
+        "build": {
+          "defines": {
+            "IO_DTYPE": "__half",
+            "FILTER_H": 3,
+            "FILTER_W": 3,
+            "PAD_H": 4,
+            "PAD_W": 4,
+            "STRIDE_H": 1,
+            "STRIDE_W": 1,
+            "DILATION_H": 4,
+            "DILATION_W": 4,
+            "OUT_PER_LANE": 4,
+            "LANE_ON_DILATION_GRID": 1,
+            "HAS_BIAS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dw2d_direct",
+        "variant": "specialized",
+        "dtype": "HALF",
+        "layout": "CHANNELS_FIRST",
+        "filter_h": 3,
+        "filter_w": 3,
+        "stride": 1,
+        "dilation": 4
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "c1190763-874f-485e-a06b-4c16f7775b59",
+      "name": "hip_conv_fwd_bias_dw2d_rdna.f16_nchw_k3x3_d6",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "../conv_dw2d_rdna/kernels/ConvFwdDepthwise2d.cpp",
+        "entry": "ConvFwdDepthwise2d",
+        "build": {
+          "defines": {
+            "IO_DTYPE": "__half",
+            "FILTER_H": 3,
+            "FILTER_W": 3,
+            "PAD_H": 6,
+            "PAD_W": 6,
+            "STRIDE_H": 1,
+            "STRIDE_W": 1,
+            "DILATION_H": 6,
+            "DILATION_W": 6,
+            "OUT_PER_LANE": 4,
+            "LANE_ON_DILATION_GRID": 1,
+            "HAS_BIAS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dw2d_direct",
+        "variant": "specialized",
+        "dtype": "HALF",
+        "layout": "CHANNELS_FIRST",
+        "filter_h": 3,
+        "filter_w": 3,
+        "stride": 1,
+        "dilation": 6
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "f2712fb2-9c5e-4747-9b7a-750e2b9b382e",
+      "name": "hip_conv_fwd_bias_dw2d_rdna.f16_nchw_k3x3_d12",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "../conv_dw2d_rdna/kernels/ConvFwdDepthwise2d.cpp",
+        "entry": "ConvFwdDepthwise2d",
+        "build": {
+          "defines": {
+            "IO_DTYPE": "__half",
+            "FILTER_H": 3,
+            "FILTER_W": 3,
+            "PAD_H": 12,
+            "PAD_W": 12,
+            "STRIDE_H": 1,
+            "STRIDE_W": 1,
+            "DILATION_H": 12,
+            "DILATION_W": 12,
+            "OUT_PER_LANE": 4,
+            "LANE_ON_DILATION_GRID": 1,
+            "HAS_BIAS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dw2d_direct",
+        "variant": "specialized",
+        "dtype": "HALF",
+        "layout": "CHANNELS_FIRST",
+        "filter_h": 3,
+        "filter_w": 3,
+        "stride": 1,
+        "dilation": 12
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "1208bdf8-a184-4748-8710-785b14850efe",
+      "name": "hip_conv_fwd_bias_dw2d_rdna.f16_nchw_k3x3_d18",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "../conv_dw2d_rdna/kernels/ConvFwdDepthwise2d.cpp",
+        "entry": "ConvFwdDepthwise2d",
+        "build": {
+          "defines": {
+            "IO_DTYPE": "__half",
+            "FILTER_H": 3,
+            "FILTER_W": 3,
+            "PAD_H": 18,
+            "PAD_W": 18,
+            "STRIDE_H": 1,
+            "STRIDE_W": 1,
+            "DILATION_H": 18,
+            "DILATION_W": 18,
+            "OUT_PER_LANE": 4,
+            "LANE_ON_DILATION_GRID": 1,
+            "HAS_BIAS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dw2d_direct",
+        "variant": "specialized",
+        "dtype": "HALF",
+        "layout": "CHANNELS_FIRST",
+        "filter_h": 3,
+        "filter_w": 3,
+        "stride": 1,
+        "dilation": 18
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "16dad989-99fc-4592-9e4e-62f53e8ecb61",
+      "name": "hip_conv_fwd_bias_dw2d_rdna.f16_nchw_k5x5_d2",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "../conv_dw2d_rdna/kernels/ConvFwdDepthwise2d.cpp",
+        "entry": "ConvFwdDepthwise2d",
+        "build": {
+          "defines": {
+            "IO_DTYPE": "__half",
+            "FILTER_H": 5,
+            "FILTER_W": 5,
+            "PAD_H": 4,
+            "PAD_W": 4,
+            "STRIDE_H": 1,
+            "STRIDE_W": 1,
+            "DILATION_H": 2,
+            "DILATION_W": 2,
+            "OUT_PER_LANE": 4,
+            "LANE_ON_DILATION_GRID": 1,
+            "HAS_BIAS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dw2d_direct",
+        "variant": "specialized",
+        "dtype": "HALF",
+        "layout": "CHANNELS_FIRST",
+        "filter_h": 5,
+        "filter_w": 5,
+        "stride": 1,
+        "dilation": 2
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "8db4872b-46c0-44d4-b416-05c998f89478",
+      "name": "hip_conv_fwd_bias_dw2d_rdna.f16_nchw_generic",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "../conv_dw3d_rdna/kernels/ConvFwdDepthwise3d.cpp",
+        "entry": "ConvFwdDepthwise3d",
+        "build": {
+          "defines": {
+            "DW_GENERIC": 1,
+            "DW_DTYPE": 1,
+            "DW_NDHWC": 0,
+            "DW_HAS_BIAS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dw2d_direct",
+        "variant": "generic",
+        "dtype": "HALF",
+        "layout": "CHANNELS_FIRST",
+        "filter_h": 0,
+        "filter_w": 0,
+        "stride": 0,
+        "dilation": 0
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "bd4258d0-000e-481d-b6d9-c149b3d991e3",
+      "name": "hip_conv_fwd_bias_dw2d_rdna.f16_nhwc_generic",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "../conv_dw3d_rdna/kernels/ConvFwdDepthwise3d.cpp",
+        "entry": "ConvFwdDepthwise3d",
+        "build": {
+          "defines": {
+            "DW_GENERIC": 1,
+            "DW_DTYPE": 1,
+            "DW_NDHWC": 1,
+            "DW_HAS_BIAS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dw2d_direct",
+        "variant": "generic",
+        "dtype": "HALF",
+        "layout": "CHANNELS_LAST",
+        "filter_h": 0,
+        "filter_w": 0,
+        "stride": 0,
+        "dilation": 0
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "0f1d1a92-ec94-48a8-87a3-886e59c64c1e",
+      "name": "hip_conv_fwd_bias_dw2d_rdna.bf16_nchw_k3x3_s1",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "../conv_dw2d_rdna/kernels/ConvFwdDepthwise2d.cpp",
+        "entry": "ConvFwdDepthwise2d",
+        "build": {
+          "defines": {
+            "IO_DTYPE": "__hip_bfloat16",
+            "FILTER_H": 3,
+            "FILTER_W": 3,
+            "PAD_H": 1,
+            "PAD_W": 1,
+            "STRIDE_H": 1,
+            "STRIDE_W": 1,
+            "DILATION_H": 1,
+            "DILATION_W": 1,
+            "OUT_PER_LANE": 2,
+            "LANE_ON_DILATION_GRID": 0,
+            "HAS_BIAS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dw2d_direct",
+        "variant": "specialized",
+        "dtype": "BFLOAT16",
+        "layout": "CHANNELS_FIRST",
+        "filter_h": 3,
+        "filter_w": 3,
+        "stride": 1,
+        "dilation": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "6e677334-0736-4a7d-ad14-9df7a17d4c28",
+      "name": "hip_conv_fwd_bias_dw2d_rdna.bf16_nchw_k3x3_s2",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "../conv_dw2d_rdna/kernels/ConvFwdDepthwise2d.cpp",
+        "entry": "ConvFwdDepthwise2d",
+        "build": {
+          "defines": {
+            "IO_DTYPE": "__hip_bfloat16",
+            "FILTER_H": 3,
+            "FILTER_W": 3,
+            "PAD_H": 1,
+            "PAD_W": 1,
+            "STRIDE_H": 2,
+            "STRIDE_W": 2,
+            "DILATION_H": 1,
+            "DILATION_W": 1,
+            "OUT_PER_LANE": 2,
+            "LANE_ON_DILATION_GRID": 0,
+            "HAS_BIAS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dw2d_direct",
+        "variant": "specialized",
+        "dtype": "BFLOAT16",
+        "layout": "CHANNELS_FIRST",
+        "filter_h": 3,
+        "filter_w": 3,
+        "stride": 2,
+        "dilation": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "9a70d423-7277-4faf-b39e-ef622fc4c793",
+      "name": "hip_conv_fwd_bias_dw2d_rdna.bf16_nchw_k5x5_s1",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "../conv_dw2d_rdna/kernels/ConvFwdDepthwise2d.cpp",
+        "entry": "ConvFwdDepthwise2d",
+        "build": {
+          "defines": {
+            "IO_DTYPE": "__hip_bfloat16",
+            "FILTER_H": 5,
+            "FILTER_W": 5,
+            "PAD_H": 2,
+            "PAD_W": 2,
+            "STRIDE_H": 1,
+            "STRIDE_W": 1,
+            "DILATION_H": 1,
+            "DILATION_W": 1,
+            "OUT_PER_LANE": 2,
+            "LANE_ON_DILATION_GRID": 0,
+            "HAS_BIAS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dw2d_direct",
+        "variant": "specialized",
+        "dtype": "BFLOAT16",
+        "layout": "CHANNELS_FIRST",
+        "filter_h": 5,
+        "filter_w": 5,
+        "stride": 1,
+        "dilation": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "1e5262ce-3b58-4db7-8e0c-b4787941accb",
+      "name": "hip_conv_fwd_bias_dw2d_rdna.bf16_nchw_k5x5_s2",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "../conv_dw2d_rdna/kernels/ConvFwdDepthwise2d.cpp",
+        "entry": "ConvFwdDepthwise2d",
+        "build": {
+          "defines": {
+            "IO_DTYPE": "__hip_bfloat16",
+            "FILTER_H": 5,
+            "FILTER_W": 5,
+            "PAD_H": 2,
+            "PAD_W": 2,
+            "STRIDE_H": 2,
+            "STRIDE_W": 2,
+            "DILATION_H": 1,
+            "DILATION_W": 1,
+            "OUT_PER_LANE": 2,
+            "LANE_ON_DILATION_GRID": 0,
+            "HAS_BIAS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dw2d_direct",
+        "variant": "specialized",
+        "dtype": "BFLOAT16",
+        "layout": "CHANNELS_FIRST",
+        "filter_h": 5,
+        "filter_w": 5,
+        "stride": 2,
+        "dilation": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "adff7983-38ce-4b46-811b-babe19cd4e07",
+      "name": "hip_conv_fwd_bias_dw2d_rdna.bf16_nchw_k7x7_s1",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "../conv_dw2d_rdna/kernels/ConvFwdDepthwise2d.cpp",
+        "entry": "ConvFwdDepthwise2d",
+        "build": {
+          "defines": {
+            "IO_DTYPE": "__hip_bfloat16",
+            "FILTER_H": 7,
+            "FILTER_W": 7,
+            "PAD_H": 3,
+            "PAD_W": 3,
+            "STRIDE_H": 1,
+            "STRIDE_W": 1,
+            "DILATION_H": 1,
+            "DILATION_W": 1,
+            "OUT_PER_LANE": 2,
+            "LANE_ON_DILATION_GRID": 0,
+            "HAS_BIAS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dw2d_direct",
+        "variant": "specialized",
+        "dtype": "BFLOAT16",
+        "layout": "CHANNELS_FIRST",
+        "filter_h": 7,
+        "filter_w": 7,
+        "stride": 1,
+        "dilation": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "42255c80-e764-420f-9bf3-ab9642bbbbb1",
+      "name": "hip_conv_fwd_bias_dw2d_rdna.bf16_nchw_k7x7_s2",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "../conv_dw2d_rdna/kernels/ConvFwdDepthwise2d.cpp",
+        "entry": "ConvFwdDepthwise2d",
+        "build": {
+          "defines": {
+            "IO_DTYPE": "__hip_bfloat16",
+            "FILTER_H": 7,
+            "FILTER_W": 7,
+            "PAD_H": 3,
+            "PAD_W": 3,
+            "STRIDE_H": 2,
+            "STRIDE_W": 2,
+            "DILATION_H": 1,
+            "DILATION_W": 1,
+            "OUT_PER_LANE": 2,
+            "LANE_ON_DILATION_GRID": 0,
+            "HAS_BIAS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dw2d_direct",
+        "variant": "specialized",
+        "dtype": "BFLOAT16",
+        "layout": "CHANNELS_FIRST",
+        "filter_h": 7,
+        "filter_w": 7,
+        "stride": 2,
+        "dilation": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "57eebe31-b871-4960-9420-a31b5fd900f9",
+      "name": "hip_conv_fwd_bias_dw2d_rdna.bf16_nchw_k1x31_s1",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "../conv_dw2d_rdna/kernels/ConvFwdDepthwise2d.cpp",
+        "entry": "ConvFwdDepthwise2d",
+        "build": {
+          "defines": {
+            "IO_DTYPE": "__hip_bfloat16",
+            "FILTER_H": 1,
+            "FILTER_W": 31,
+            "PAD_H": 0,
+            "PAD_W": 15,
+            "STRIDE_H": 1,
+            "STRIDE_W": 1,
+            "DILATION_H": 1,
+            "DILATION_W": 1,
+            "OUT_PER_LANE": 2,
+            "LANE_ON_DILATION_GRID": 0,
+            "HAS_BIAS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dw2d_direct",
+        "variant": "specialized",
+        "dtype": "BFLOAT16",
+        "layout": "CHANNELS_FIRST",
+        "filter_h": 1,
+        "filter_w": 31,
+        "stride": 1,
+        "dilation": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "5021e163-5156-4844-acdd-59885da9ec1d",
+      "name": "hip_conv_fwd_bias_dw2d_rdna.bf16_nchw_k3x3_d2",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "../conv_dw2d_rdna/kernels/ConvFwdDepthwise2d.cpp",
+        "entry": "ConvFwdDepthwise2d",
+        "build": {
+          "defines": {
+            "IO_DTYPE": "__hip_bfloat16",
+            "FILTER_H": 3,
+            "FILTER_W": 3,
+            "PAD_H": 2,
+            "PAD_W": 2,
+            "STRIDE_H": 1,
+            "STRIDE_W": 1,
+            "DILATION_H": 2,
+            "DILATION_W": 2,
+            "OUT_PER_LANE": 4,
+            "LANE_ON_DILATION_GRID": 1,
+            "HAS_BIAS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dw2d_direct",
+        "variant": "specialized",
+        "dtype": "BFLOAT16",
+        "layout": "CHANNELS_FIRST",
+        "filter_h": 3,
+        "filter_w": 3,
+        "stride": 1,
+        "dilation": 2
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "5a87d11f-0a95-4001-97ab-5d3e7ec45be4",
+      "name": "hip_conv_fwd_bias_dw2d_rdna.bf16_nchw_k3x3_d4",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "../conv_dw2d_rdna/kernels/ConvFwdDepthwise2d.cpp",
+        "entry": "ConvFwdDepthwise2d",
+        "build": {
+          "defines": {
+            "IO_DTYPE": "__hip_bfloat16",
+            "FILTER_H": 3,
+            "FILTER_W": 3,
+            "PAD_H": 4,
+            "PAD_W": 4,
+            "STRIDE_H": 1,
+            "STRIDE_W": 1,
+            "DILATION_H": 4,
+            "DILATION_W": 4,
+            "OUT_PER_LANE": 4,
+            "LANE_ON_DILATION_GRID": 1,
+            "HAS_BIAS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dw2d_direct",
+        "variant": "specialized",
+        "dtype": "BFLOAT16",
+        "layout": "CHANNELS_FIRST",
+        "filter_h": 3,
+        "filter_w": 3,
+        "stride": 1,
+        "dilation": 4
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "918a271f-2071-44fe-9657-9b892ff494a9",
+      "name": "hip_conv_fwd_bias_dw2d_rdna.bf16_nchw_k3x3_d6",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "../conv_dw2d_rdna/kernels/ConvFwdDepthwise2d.cpp",
+        "entry": "ConvFwdDepthwise2d",
+        "build": {
+          "defines": {
+            "IO_DTYPE": "__hip_bfloat16",
+            "FILTER_H": 3,
+            "FILTER_W": 3,
+            "PAD_H": 6,
+            "PAD_W": 6,
+            "STRIDE_H": 1,
+            "STRIDE_W": 1,
+            "DILATION_H": 6,
+            "DILATION_W": 6,
+            "OUT_PER_LANE": 4,
+            "LANE_ON_DILATION_GRID": 1,
+            "HAS_BIAS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dw2d_direct",
+        "variant": "specialized",
+        "dtype": "BFLOAT16",
+        "layout": "CHANNELS_FIRST",
+        "filter_h": 3,
+        "filter_w": 3,
+        "stride": 1,
+        "dilation": 6
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "f1fde70f-f564-4238-95fb-d39f73c1feaf",
+      "name": "hip_conv_fwd_bias_dw2d_rdna.bf16_nchw_k3x3_d12",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "../conv_dw2d_rdna/kernels/ConvFwdDepthwise2d.cpp",
+        "entry": "ConvFwdDepthwise2d",
+        "build": {
+          "defines": {
+            "IO_DTYPE": "__hip_bfloat16",
+            "FILTER_H": 3,
+            "FILTER_W": 3,
+            "PAD_H": 12,
+            "PAD_W": 12,
+            "STRIDE_H": 1,
+            "STRIDE_W": 1,
+            "DILATION_H": 12,
+            "DILATION_W": 12,
+            "OUT_PER_LANE": 4,
+            "LANE_ON_DILATION_GRID": 1,
+            "HAS_BIAS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dw2d_direct",
+        "variant": "specialized",
+        "dtype": "BFLOAT16",
+        "layout": "CHANNELS_FIRST",
+        "filter_h": 3,
+        "filter_w": 3,
+        "stride": 1,
+        "dilation": 12
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "febf1b36-09dd-4879-ae87-99c04128929b",
+      "name": "hip_conv_fwd_bias_dw2d_rdna.bf16_nchw_k3x3_d18",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "../conv_dw2d_rdna/kernels/ConvFwdDepthwise2d.cpp",
+        "entry": "ConvFwdDepthwise2d",
+        "build": {
+          "defines": {
+            "IO_DTYPE": "__hip_bfloat16",
+            "FILTER_H": 3,
+            "FILTER_W": 3,
+            "PAD_H": 18,
+            "PAD_W": 18,
+            "STRIDE_H": 1,
+            "STRIDE_W": 1,
+            "DILATION_H": 18,
+            "DILATION_W": 18,
+            "OUT_PER_LANE": 4,
+            "LANE_ON_DILATION_GRID": 1,
+            "HAS_BIAS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dw2d_direct",
+        "variant": "specialized",
+        "dtype": "BFLOAT16",
+        "layout": "CHANNELS_FIRST",
+        "filter_h": 3,
+        "filter_w": 3,
+        "stride": 1,
+        "dilation": 18
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "6f887d1e-5b4d-439b-a522-4da39d9d6b94",
+      "name": "hip_conv_fwd_bias_dw2d_rdna.bf16_nchw_k5x5_d2",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "../conv_dw2d_rdna/kernels/ConvFwdDepthwise2d.cpp",
+        "entry": "ConvFwdDepthwise2d",
+        "build": {
+          "defines": {
+            "IO_DTYPE": "__hip_bfloat16",
+            "FILTER_H": 5,
+            "FILTER_W": 5,
+            "PAD_H": 4,
+            "PAD_W": 4,
+            "STRIDE_H": 1,
+            "STRIDE_W": 1,
+            "DILATION_H": 2,
+            "DILATION_W": 2,
+            "OUT_PER_LANE": 4,
+            "LANE_ON_DILATION_GRID": 1,
+            "HAS_BIAS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dw2d_direct",
+        "variant": "specialized",
+        "dtype": "BFLOAT16",
+        "layout": "CHANNELS_FIRST",
+        "filter_h": 5,
+        "filter_w": 5,
+        "stride": 1,
+        "dilation": 2
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "ae0db57c-1e1b-45df-8ecf-c7e84a6063dc",
+      "name": "hip_conv_fwd_bias_dw2d_rdna.bf16_nchw_generic",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "../conv_dw3d_rdna/kernels/ConvFwdDepthwise3d.cpp",
+        "entry": "ConvFwdDepthwise3d",
+        "build": {
+          "defines": {
+            "DW_GENERIC": 1,
+            "DW_DTYPE": 2,
+            "DW_NDHWC": 0,
+            "DW_HAS_BIAS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dw2d_direct",
+        "variant": "generic",
+        "dtype": "BFLOAT16",
+        "layout": "CHANNELS_FIRST",
+        "filter_h": 0,
+        "filter_w": 0,
+        "stride": 0,
+        "dilation": 0
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "e49b1b64-111a-4bd1-aa2d-27ea5651d833",
+      "name": "hip_conv_fwd_bias_dw2d_rdna.bf16_nhwc_generic",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "../conv_dw3d_rdna/kernels/ConvFwdDepthwise3d.cpp",
+        "entry": "ConvFwdDepthwise3d",
+        "build": {
+          "defines": {
+            "DW_GENERIC": 1,
+            "DW_DTYPE": 2,
+            "DW_NDHWC": 1,
+            "DW_HAS_BIAS": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dw2d_direct",
+        "variant": "generic",
+        "dtype": "BFLOAT16",
+        "layout": "CHANNELS_LAST",
+        "filter_h": 0,
+        "filter_w": 0,
+        "stride": 0,
+        "dilation": 0
+      },
+      "priority": 0
+    }
+  ],
+  "arch": [
+    "gfx1100",
+    "gfx1101",
+    "gfx1102",
+    "gfx1103",
+    "gfx1150",
+    "gfx1151",
+    "gfx1152",
+    "gfx1153",
+    "gfx1200",
+    "gfx1201"
+  ]
+}

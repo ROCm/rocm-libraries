@@ -1,0 +1,39 @@
+{
+  "version": "1.0",
+  "id": "d846a3d6-84f5-4e2c-a9e5-73a3785aabc3",
+  "name": "hip_conv_fwd_bias_dw2d_rdna variant fields",
+  "fields": [
+    {
+      "name": "kernel_family",
+      "type": "string"
+    },
+    {
+      "name": "variant",
+      "type": "string"
+    },
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "layout",
+      "type": "string"
+    },
+    {
+      "name": "filter_h",
+      "type": "int"
+    },
+    {
+      "name": "filter_w",
+      "type": "int"
+    },
+    {
+      "name": "stride",
+      "type": "int"
+    },
+    {
+      "name": "dilation",
+      "type": "int"
+    }
+  ]
+}

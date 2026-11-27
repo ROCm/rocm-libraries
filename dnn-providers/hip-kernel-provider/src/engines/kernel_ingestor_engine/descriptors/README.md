@@ -22,6 +22,7 @@ under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds the rocKE and hip bundles below
 | `hip/conv_rdna/` | `hipkernel:hip_conv_fwd_fma_igemm_rdna` | `packs/HipConvFwdFmaIgemmRdnaNative.cpp` (shares `packs/ConvRdnaCommon.cpp`) |
 | `hip/conv_dw3d_rdna/` | `hipkernel:hip_conv_fwd_dw3d_rdna` | `packs/HipConvFwdDw3dRdnaNative.cpp` (shares `packs/ConvRdnaCommon.cpp`) |
 | `hip/conv_dw2d_rdna/` | `hipkernel:hip_conv_fwd_dw2d_rdna` | `packs/HipConvFwdDw2dRdnaNative.cpp` (shares `packs/ConvRdnaCommon.cpp`, `packs/ConvRdnaDw2d.cpp`) |
+| `hip/conv_bias_dw2d_rdna/` | `hipkernel:hip_conv_fwd_bias_dw2d_rdna` | `packs/HipConvFwdBiasDw2dRdnaNative.cpp` (shares `packs/ConvRdnaCommon.cpp`, `packs/ConvRdnaDw2d.cpp`) |
 
 The `gfx950_attention_dense`, `gfx950_attention_unified_2d`, `gfx950_attention_unified_3d`,
 `gfx942_attention_unified_2d`, `gfx942_attention_unified_3d`, `gfx942_attention_dense`,
@@ -58,6 +59,12 @@ also serves 1-D convs as 1xK: variants specialized at compile time on the filter
 stride and dilation for common shapes. Its generic variants, one per dtype and layout, build
 the generic kernel of `hip/conv_dw3d_rdna/` with depth 1. Its descriptors are generated from
 `projects/hipdnn/tools/IngestorGenerator/configs/hip_conv_fwd_dw2d_rdna.yaml`.
+
+`hip/conv_bias_dw2d_rdna/` holds no kernel source of its own: its UKDs name the same
+depthwise 2-D kernel built with its bias epilogue (`HAS_BIAS`), and for the generic variants the
+generic kernel of `hip/conv_dw3d_rdna/` built with `DW_HAS_BIAS`. Its
+descriptors are generated from
+`projects/hipdnn/tools/IngestorGenerator/configs/hip_conv_fwd_bias_dw2d_rdna.yaml`.
 
 `FlyDSL/<op>/`, one bundle per op, whose kernels are **pre-built** and stored beside
 their descriptors under `FlyDSL/<op>/<target>/`, as `kind: "hsaco"` UKDs inline in
