@@ -237,6 +237,32 @@ class DsSpreadPacer {
         for (Stage& st : stages_) restartLate(st, wmmaIssued);
     }
 
+    // The stages a queue fill of `fill` WMMAs from `wmmaIssued` holds (open by the fill's end,
+    // loads left): their loads, their earliest end, and the longest back-to-back run it leaves.
+    // Each restarts at the fill's end as noteHeldUntil() does and spreads its loads over the
+    // batches left; with no WMMA left before its end they all go in a row.
+    struct Held {
+        int loads = 0;
+        int end = INT_MAX;
+        int run = 0;
+    };
+    Held heldByFill(int wmmaIssued, int fill) const {
+        Held h;
+        if (!active_) return h;
+        const int at = wmmaIssued + std::max(0, fill);
+        for (Stage st : stages_) {
+            const int left = st.total - st.issued;
+            if (left <= 0 || st.start > at) continue;
+            restartLate(st, at);
+            const int batchesLeft = at >= wmmaTotal_ ? 0 : st.batches - batchOf(st, at);
+            h.loads += left;
+            h.end = std::min(h.end, st.end);
+            h.run =
+                std::max(h.run, batchesLeft > 0 ? (left + batchesLeft - 1) / batchesLeft : left);
+        }
+        return h;
+    }
+
     // A ds_load issued with `wmmaIssued` WMMAs of the region issued so far.
     void noteIssue(unsigned nodeId, int wmmaIssued) {
         auto it = stageOf_.find(nodeId);
