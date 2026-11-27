@@ -458,19 +458,23 @@ bool packingArithmeticFits(const std::vector<int64_t>& dims, const std::vector<i
     return sumFits(space, 1);
 }
 
-// True when a tensor with a zero dim, and no negative dim, has the canonical strides of
-// channels-first or channels-last (generateStrides) on every dim of extent other than 1, and no
-// broadcast axis (hasBroadcastAxis). isTensorPacked never counts a tensor with a zero dim as
-// packed, but such a tensor has no elements, so its canonical strides are as packed as any:
-// readTensor counts it as packed. The strides of extent-1 dims are ignored here as isTensorPacked
-// ignores them, so framework strides that give a non-zero stride to an extent-1 dim outer to the
-// zero dim count too: PyTorch's [64, 64, 8, 1] for [1, 0, 8, 8], whose canonical strides are
-// [0, 64, 8, 1]. classifyLayout compares every stride, so such a tensor takes a layout class only
-// when all its strides are canonical; otherwise it has none and is judged as any packed tensor
-// without one (forward accepts it through checkForwardLayout's strict layout, backward declines it
-// by the layout rule). generateStrides gives stride 0 to every dim outer to the zero dim in the
-// layout's memory order; when one of those dims has an extent above 1 it is a broadcast axis and
-// the tensor stays not packed.
+// True when a tensor has a zero dim, no negative dim, no broadcast axis (hasBroadcastAxis: a dim
+// of extent above 1 at stride 0), and the canonical strides of channels-first or channels-last
+// (generateStrides) on every dim except those of extent 1. Zero-extent dims are compared.
+// isTensorPacked never counts a tensor with a zero dim as packed, but such a tensor has no
+// elements, so its canonical strides are as packed as any: readTensor counts it as packed. The
+// strides of extent-1 dims are ignored here as isTensorPacked ignores them, so framework strides
+// that give a non-zero stride to an extent-1 dim outer to the zero dim count too: PyTorch's
+// [64, 64, 8, 1] for [1, 0, 8, 8], whose canonical strides are [0, 64, 8, 1]. generateStrides
+// gives stride 0 to every dim outer to the zero dim in the layout's memory order; when one of
+// those dims has an extent above 1 it is a broadcast axis and the tensor stays not packed.
+//
+// Counting as packed does not mean accepted. classifyLayout compares every stride, so such a
+// tensor takes a layout class only when all its strides are canonical; otherwise it has none.
+// Forward accepts a tensor with no layout class only when checkForwardLayout finds the three
+// tensors strictly in one layout (isStrictlyInLayout); [1, 0, 8, 8] with strides [1, 64, 8, 1]
+// is packed but strictly in neither layout, so forward declines it. Backward applies the layout
+// rule (checkLayout), which judges every stride, so it declines any tensor with no layout class.
 bool isCanonicalEmptyTensor(const std::vector<int64_t>& dims, const std::vector<int64_t>& strides)
 {
     const auto isZero = [](int64_t dim) { return dim == 0; };

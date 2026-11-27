@@ -394,6 +394,7 @@ struct HeuristicDescriptor
     /// alone for a code object that carries a packer `identity` (rocKE). A prebuilt (FlyDSL) or HIP-compiled code
     /// object enters the selector revision by its `sha256`: regenerating a prebuilt one moves
     /// both, and a HIP-compiled one moves both on every compiler change.
+    /// Introduced in hipdnn_plugin_sdk 1.2.0.
     std::string trainedAgainstCodegenRevision;
     /// The role-map entry that resolved this model: backfilled by
     /// DescriptorLoader::resolveRole from the owning UED, never authored in the UHD
@@ -817,6 +818,7 @@ struct KernelSource
     /// compiler, for a code object it compiled from rocKE IR. It moves when the kernel's code
     /// changes but not on a compiler bump within one LLVM flavor, so the selector revision
     /// hashes it in place of @ref sha256 (RFC 0019 §8.1). Empty for a prebuilt or HIP-compiled code object.
+    /// Introduced in hipdnn_plugin_sdk 1.2.0.
     std::string identity;
 };
 

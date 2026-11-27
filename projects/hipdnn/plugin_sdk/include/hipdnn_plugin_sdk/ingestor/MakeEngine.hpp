@@ -295,6 +295,7 @@ inline std::string engineSelectorRevision(const DescriptorSet& set)
 /// Moves with any rebuilt code object, including one only a compiler change rebuilt, which the
 /// selector revision does not see for a kernel with an identity. A model that records another
 /// codegen revision still binds; the engine warns that it was measured on other code objects.
+/// Introduced in hipdnn_plugin_sdk 1.2.0.
 inline std::string engineCodegenRevision(const DescriptorSet& set)
 {
     auto codeObjects = nlohmann::json::object();
@@ -314,6 +315,7 @@ inline std::string engineCodegenRevision(const DescriptorSet& set)
 
 /// @brief What an engine's L1 binding compares a model's `trained_against` to: the descriptor
 /// dependencies of enginePredictionProvenance, plus the engine's codegen_revision.
+/// Introduced in hipdnn_plugin_sdk 1.2.0.
 inline nlohmann::json engineBindingProvenance(const DescriptorSet& set)
 {
     auto provenance = enginePredictionProvenance(set);

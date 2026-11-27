@@ -1,0 +1,16 @@
+{
+  "description": "sdk_version may carry an alphanumeric tweak after MAJOR.MINOR.PATCH, which the loader ignores.",
+  "valid": true,
+  "ued": {
+    "version": "1.0",
+    "id": "4965bcad-6a5c-5f9a-a125-63a6b8f5060c",
+    "name": "ued_fixture:sdk_version_tweak_valid",
+    "metadata": "0aed085b-9fff-54ee-96e1-b20c3f2f6524",
+    "sdk_version": "1.0.0.abc1234",
+    "graph_match": {
+      "nodes": [
+        {"kind": "op", "id": "pointwise", "op": "pointwise", "operands": {"in_0": "$input_a", "in_1": "$input_b"}, "results": {"out_0": "$output"}}
+      ]
+    }
+  }
+}

@@ -73,9 +73,9 @@
       "addedInVersion": "1.0"
     },
     "sdk_version": {
-      "description": "hipDNN graph schema version this pattern was authored against, as MAJOR.MINOR.PATCH; defaults to the engine plugin API baseline when absent.",
+      "description": "hipDNN graph schema version this pattern was authored against, as MAJOR.MINOR.PATCH (unsigned decimal integers that fit a 32-bit int) with an optional '.TWEAK' of ASCII letters and digits that the loader ignores; defaults to the engine plugin API baseline when absent.",
       "type": "string",
-      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(\\.[0-9A-Za-z]+)?$",
       "addedInVersion": "1.0"
     },
     "sort_kernel_catalog": {
