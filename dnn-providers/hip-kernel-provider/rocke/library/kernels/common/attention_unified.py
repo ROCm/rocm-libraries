@@ -6326,9 +6326,10 @@ def run_unified_attention_torch(
     ``alibi_slopes`` is an optional `[num_query_heads]` f32 tensor; when
     supplied, the kernel applies the ALiBi linear bias on each row.
     ``qq_bias`` is an optional 2D f32 query-to-query bias; ``qq_bias_stride_0``
-    is its first-axis stride (in elements). Both follow AITER's Triton
-    semantics exactly and require the corresponding ``problem.use_alibi`` /
-    ``problem.use_qq_bias`` flags to be set.
+    is its first-axis stride (in elements), which the kernels take as their
+    ``qq_bias_stride0`` argument (the name packed kernel descriptors record).
+    Both follow AITER's Triton semantics exactly and require the corresponding
+    ``problem.use_alibi`` / ``problem.use_qq_bias`` flags to be set.
 
     ``additive_bias`` is an f32 tensor read as
     ``bias[seq*batch_stride + q_head*head_stride + q_row*sq_stride + k]``
