@@ -18,6 +18,7 @@ from kernels.gfx942.attention_tiled_3d import (
     UnifiedAttentionReduceTiledSpec,
 )
 from rocke.helpers import KernelModule
+from rocke.tests.comgr import require_comgr_target
 
 
 def _spec(head_size=128, hq=32, hkv=8, dtype="fp16", num_segments=16):
@@ -305,14 +306,7 @@ def test_resolved_tile_size_override_is_the_tile_the_kernel_runs(tile):
 def test_module_compiles_to_one_code_object():
     """Both kernels link into one gfx942 code object (comgr, no GPU). Only a
     missing comgr, or one without a gfx942 target, skips; a compile error fails."""
-    try:
-        from rocke.runtime.comgr import supported_isas
-
-        isas = supported_isas()
-    except Exception as exc:  # noqa: BLE001 - env-dependent
-        pytest.skip(f"comgr toolchain unavailable: {exc}")
-    if "amdgcn-amd-amdhsa--gfx942" not in isas:
-        pytest.skip("the loaded comgr has no gfx942 target")
+    require_comgr_target("gfx942")
     from rocke.helpers import compile_module
 
     seg, reduce = _runtime_specs(128, 16, batch=4)

@@ -21,6 +21,7 @@ from rocke.core.ir import KernelDef, Region
 from rocke.core.llvm_profile import measured_flavor_for_llvm
 from rocke.helpers.compile import compile_kernel, lower_kernel_for_comgr
 from rocke.runtime.comgr import loaded_compiler_info
+from rocke.tests.lanes import BUILD_VARIANT, skip_until
 
 
 def _require_a_comgr_that_rejects_gfx1154() -> None:
@@ -32,8 +33,12 @@ def _require_a_comgr_that_rejects_gfx1154() -> None:
     flavor = measured_flavor_for_llvm(info.llvm_version[0])
     column = None if flavor is None else arch_domain.load(flavor)
     if column is None or column.accepts_processor("gfx1154") is not False:
-        pytest.skip(
-            f"the loaded compiler ({info.describe()}) is not measured to reject gfx1154"
+        skip_until(
+            BUILD_VARIANT,
+            reason=(
+                f"the loaded compiler ({info.describe()}) is not measured to reject "
+                "gfx1154"
+            ),
         )
 
 

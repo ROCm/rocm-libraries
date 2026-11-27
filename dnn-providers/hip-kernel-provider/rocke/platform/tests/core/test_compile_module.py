@@ -16,7 +16,7 @@ import importlib
 from unittest import mock
 
 import pytest
-from rocke.analysis import parse_kernel_arguments
+from rocke.analysis import parse_kernel_arguments, parse_kernel_fields
 from rocke.core.ir import F32, I32, IRBuilder, KernelDef, PtrType, Region
 from rocke.helpers import KernelModule, ModuleArtifact, compile_module
 from rocke.runtime.comgr import ComgrTimings
@@ -152,6 +152,7 @@ def test_compile_module_lowers_each_kernel_and_links_in_order() -> None:
     assert build.call_args.args[0] == texts
     assert build.call_args.kwargs["isa"] == "amdgcn-amd-amdhsa--gfx1101"
     assert build.call_args.kwargs["options"] == ["-O3"]
+    assert artifact.options == ("-O3",)
     single.assert_not_called()
     assert artifact.llvm_texts == texts
     assert artifact.hsaco == b"hsaco"
@@ -234,7 +235,10 @@ def test_compile_module_emits_one_object_exporting_every_kernel(arch: str) -> No
         ("by_value", 4, 24, "N"),
     ]
     # Each kernel keeps its own LDS pool through the link.
-    assert notes.count(".group_segment_fixed_size: 256") == 2
+    assert {
+        name: fields["group_segment_fixed_size"]
+        for name, fields in parse_kernel_fields(notes).items()
+    } == {"toy_module_scale": "256", "toy_module_merge": "256"}
 
     # Every kernel lowers to exactly the text it lowers to alone.
     for kernel, text in zip(module.kernels, artifact.llvm_texts):

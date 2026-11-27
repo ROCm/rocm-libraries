@@ -201,42 +201,34 @@ review:
 ### Virtualenv for GPU and numeric lanes
 
 Requirements: use a virtualenv outside the `rocke/platform/` tree for GPU/numeric lanes
-so torch, numpy, and pytest resolve from the same interpreter without the
-relative-path guard scanning local venv metadata. For now, use `~/rocke-venv`:
+so numpy and pytest resolve from the same interpreter without the relative-path
+guard scanning local venv metadata. For now, use `~/rocke-venv`:
 
 ```bash
 python3 -m venv ~/rocke-venv
 . ~/rocke-venv/bin/activate
-python - <<'PY' || python -m pip install --index-url https://download.pytorch.org/whl/rocm7.0 torch
-import torch
-print(torch.__version__, torch.version.hip)
-PY
 python -m pip install -r requirements.txt
-python - <<'PY'
-import torch
-print(torch.__version__, torch.version.hip)
-PY
 ```
 
-`requirements.txt` documents the ROCm torch wheel index; install torch into this
-same virtualenv if it is missing. Do **not** use the default PyPI CPU torch for
-GPU/numeric lanes. On-GPU lanes also need a HIP-visible device + ROCm `comgr`.
+On-GPU lanes also need a HIP-visible device + ROCm `comgr`. Torch is not needed
+(see "No torch" below); its legacy cases skip without it. To run them anyway,
+install a ROCm torch wheel matching the system ROCm into the same virtualenv
+(from the PyTorch wheel index named after that ROCm release), never the default
+PyPI CPU torch, and check it:
 
-### torch is OPTIONAL
+```bash
+python -c 'import torch; print(torch.__version__, torch.version.hip)'
+```
 
-rocke is consumed downstream by PyTorch, so a hard dependency on torch would be
-circular. torch is therefore **optional** and the only hard dep is `numpy`
-(`pyproject.toml` / `requirements.txt`). torch is needed only for three lanes:
+### No torch
 
-1. the `torch.fx` fusion frontend (`torch_backend.py`, `helpers/fuse.py`
-   graph capture);
-2. torch-tensor launch integration (`runtime/torch_interop.py`);
-3. on-GPU numeric verification against torch eager.
-
-Everything else runs torch-free: IR build, lower, `comgr` compile, numpy launch,
-the byte-identity gate, and the CPU test suite (torch-only tests `importorskip`;
-GPU tests skip via a torch-free `/dev/kfd` probe). `tests/run_all.py` is GREEN
-with neither torch nor a GPU installed.
+rocke does not use torch; the only hard dep is `numpy` (`pyproject.toml` /
+`requirements.txt`). The rule, its check (`rocke_no_torch_check`) and the
+allowlist of the uses still being removed are in
+[`TESTING.md` §6](../TESTING.md#6-invariants--contracts). IR build, lower,
+`comgr` compile, numpy launch, the byte-identity gate, and the CPU test suite run
+torch-free (GPU tests skip via a torch-free `/dev/kfd` probe); `tests/run_all.py`
+is GREEN with neither torch nor a GPU installed.
 
 ### ROCm library discovery (libamd_comgr / libamdhip64)
 
@@ -361,11 +353,10 @@ GPU node.
   `rocke.runtime.hip_module.get_device_arch()` and fall back to `gfx950`.
   *Note*: For non-`gfx950` targets, pass `target_architecture` and beware that some code
   paths still silently fall back to `gfx950` on non-GPU systems.
-- **torch is optional, never import it from a library to gain a side effect.**
-  numpy is the only hard dep. torch is needed only for the fusion frontend,
-  torch-tensor launch, and on-GPU torch-eager numeric checks; gate it behind
-  `importorskip` in tests and lazy/guarded imports in code. The ROCm-lib
-  resolver must keep discovering `comgr`/HIP without importing torch.
+- **No torch; never import it from a library to gain a side effect.** The rule
+  is in [`TESTING.md` §6](../TESTING.md#6-invariants--contracts) (see "No torch"
+  above). The ROCm-lib resolver must keep discovering `comgr`/HIP without
+  importing torch.
 
 ## Code style
 

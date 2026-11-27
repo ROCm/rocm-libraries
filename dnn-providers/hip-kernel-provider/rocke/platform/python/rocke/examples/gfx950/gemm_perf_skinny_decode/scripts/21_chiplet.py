@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 """Step 21: chiplet_swizzle on the DTLA winner.
 
-MI355X has multiple XCDs. Default CTA ordering scatters consecutive WGs
+gfx950 has multiple XCDs. Default CTA ordering scatters consecutive WGs
 across XCDs so each XCD's L2 sees uncorrelated traffic. chiplet_swizzle
 remaps WGIDs so consecutive WGs land on the same XCD -> better L2 reuse
 for cross-CTA shared data (here: A, which is the same 16KB reused by

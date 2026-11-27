@@ -16,7 +16,7 @@ from rocke.analysis.lds.model import (
     ProfileIdentity,
 )
 from rocke.analysis.lds.serialization import dumps, loads
-from rocke.tests.lanes import CI_TEST_TOOLS, import_or_skip_until
+from rocke.tests.lanes import BUILD_VARIANT, import_or_skip_until
 
 
 def _result() -> LdsConflictResult:
@@ -93,7 +93,7 @@ def test_checked_in_schema_is_valid_json_for_schema_version_one():
 
 
 def test_checked_in_schema_accepts_canonical_document_when_jsonschema_is_available():
-    jsonschema = import_or_skip_until("jsonschema", CI_TEST_TOOLS)
+    jsonschema = import_or_skip_until("jsonschema", BUILD_VARIANT)
     schema = _load_schema()
 
     jsonschema.Draft202012Validator.check_schema(schema)

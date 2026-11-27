@@ -19,6 +19,13 @@ _PYROOT = _ROCKE / "python"
 if str(_PYROOT) not in sys.path:
     sys.path.insert(0, str(_PYROOT))
 
+# A session started from a git hook inherits the hook's GIT_DIR and
+# GIT_INDEX_FILE, which would point every git command a test runs, even in a
+# scratch directory, at the repository being committed to.
+from rocke.tests.git_environment import drop_inherited_git_repository_variables
+
+drop_inherited_git_repository_variables()
+
 
 def pytest_addoption(parser):
     # tools/test_pending_lanes.py: a scheduled run fails on any expired entry;
@@ -61,13 +68,6 @@ def pytest_runtest_makereport(item, call):
     report = outcome.get_result()
     report.outcome = "skipped"
     report.longrepr = (str(item.path), item.location[1] + 1, str(call.excinfo.value))
-
-
-def pytest_collection_modifyitems(config, items):
-    """Skip the quarantined tests (``rocke.tests.quarantine``)."""
-    from rocke.tests.quarantine import skip_quarantined_items
-
-    skip_quarantined_items(items, _HERE, "platform/tests")
 
 
 def pytest_collection_finish(session):
@@ -124,17 +124,8 @@ point_locators_at_staged_payload(_HERE)
 
 
 def pytest_configure(config):
-    """Apply the test session's garbage collector setting
-    (``rocke.tests.session_gc``), declare the shard-cost and run-alone marks
-    for runs that do not load the ``rocke.tests.ctest_shard`` and
-    ``rocke.tests.ctest_workers`` plugins, and fail a sweep whose
-    subtests all skipped (``rocke.tests.sweep_guard``)."""
-    from rocke.tests.ctest_shard import register_shard_cost_marker
-    from rocke.tests.ctest_workers import register_run_alone_marker
-    from rocke.tests.session_gc import use_test_session_gc
-    from rocke.tests.sweep_guard import register_sweep_guard
+    """Install what every rocKE pytest root installs
+    (``rocke.tests.pytest_roots``)."""
+    from rocke.tests.pytest_roots import configure_pytest_root
 
-    use_test_session_gc()
-    register_shard_cost_marker(config)
-    register_run_alone_marker(config)
-    register_sweep_guard(config)
+    configure_pytest_root(config, _HERE, "platform/tests")

@@ -14,7 +14,9 @@ import ast
 import contextlib
 import io
 import json
+import os
 import re
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -772,6 +774,7 @@ class SupportComparisonTest(unittest.TestCase):
             "invalid",
             "unknown_changed",
             "unavailable_changed",
+            "timed_out",
         }
         for before, row in G._CELL_TRANSITIONS.items():
             with self.subTest(before=before):
@@ -812,7 +815,6 @@ class SupportComparisonTest(unittest.TestCase):
             G.STATUS_NAME_ABSENT,
             G.STATUS_TARGET_UNSUPPORTED,
             G.STATUS_TOOLCHAIN_CRASH,
-            G.STATUS_TOOLCHAIN_TIMEOUT,
         ):
             with self.subTest(status=status):
                 self.assertEqual(G._cell_transition(G.STATUS_OK, status), "loss")
@@ -823,6 +825,24 @@ class SupportComparisonTest(unittest.TestCase):
                 self.assertIn(
                     f"a.b/{self.ARCH}: ok -> {status}", comparison.failures[0]
                 )
+
+    def test_a_working_cell_whose_probe_timed_out_is_unvalidated_not_lost(self):
+        """A probe that did not finish says the host was slow, not that the
+        toolchain lost support: the cell is reported as timed out, and no
+        failure is recorded."""
+        self.assertEqual(
+            G._cell_transition(G.STATUS_OK, G.STATUS_TOOLCHAIN_TIMEOUT), "timed_out"
+        )
+        comparison = G._compare_support(
+            self._doc(), self._doc(G.STATUS_TOOLCHAIN_TIMEOUT)
+        )
+        self.assertEqual(comparison.failures, [])
+        self.assertEqual(
+            comparison.timed_out,
+            [f"a.b/{self.ARCH}: ok -> {G.STATUS_TOOLCHAIN_TIMEOUT}"],
+        )
+        # Reported once, as timed out, not again as no-data.
+        self.assertEqual(comparison.changes["unvalidated"], [])
 
     def test_gains_and_measurement_improvements_pass(self):
         for before, after, category in (
@@ -1258,3 +1278,70 @@ class ShardedCheckTest(unittest.TestCase):
                         self.assertEqual(cut[name], doc[name])
                 for name, keys in seen.items():
                     self.assertEqual(keys, set(doc[name]))
+
+
+class ShardKeyListingTest(unittest.TestCase):
+    """Under ``LIST_KEYS_FLAG`` the generator writes the probes a sharded check
+    splits instead of probing them, keyed by declaration key."""
+
+    def test_the_listing_is_refused_without_the_shard_flag(self):
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(Path(G.__file__)),
+                "--check",
+                ci_shard.LIST_KEYS_FLAG,
+                "keys.json",
+            ],
+            capture_output=True,
+            text=True,
+            env=self._environment(),
+            check=False,
+        )
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn(
+            f"{ci_shard.LIST_KEYS_FLAG} needs {ci_shard.ACTIVATION_FLAG}",
+            result.stderr,
+        )
+
+    @staticmethod
+    def _environment() -> dict[str, str]:
+        """This process's environment without a CI shard, with the rocke
+        package on the generator's path."""
+        environment = ci_shard.unsharded_environment()
+        rocke_root = str(Path(ci_shard.__file__).resolve().parents[2])
+        environment["PYTHONPATH"] = os.pathsep.join(
+            [rocke_root, environment.get("PYTHONPATH", "")]
+        )
+        return environment
+
+    def test_each_declaration_key_lists_one_probe_per_wired_arch(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            listing_path = Path(scratch) / "keys.json"
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(Path(G.__file__)),
+                    "--check",
+                    "--unvalidated-exit-code",
+                    "77",
+                    ci_shard.ACTIVATION_FLAG,
+                    ci_shard.LIST_KEYS_FLAG,
+                    str(listing_path),
+                ],
+                capture_output=True,
+                text=True,
+                env=self._environment(),
+                check=False,
+            )
+            if result.returncode == 77:
+                self.skipTest("no LLVM toolchain this generator can validate with")
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            listing = ci_shard.ShardKeyListing.read(listing_path)
+        arches = sorted(wired_arches())
+        probes_of: dict[str, list[str]] = {}
+        for probe, key in listing.key_of_case.items():
+            probes_of.setdefault(key, []).append(probe)
+        self.assertTrue(probes_of)
+        for key, probes in probes_of.items():
+            self.assertEqual(sorted(probes), [f"{key}/{arch}" for arch in arches])

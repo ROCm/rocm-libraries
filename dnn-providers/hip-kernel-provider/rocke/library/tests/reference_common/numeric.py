@@ -16,7 +16,7 @@ import numpy as np
 
 
 def encode(values: np.ndarray, dtype: str) -> np.ndarray:
-    """Store fp16 values or round-to-nearest-even bf16 bits without Torch."""
+    """Store fp16 values or round-to-nearest-even bf16 bits with NumPy."""
     values = np.ascontiguousarray(values, dtype=np.float32)
     if dtype == "fp16":
         return values.astype("<f2")

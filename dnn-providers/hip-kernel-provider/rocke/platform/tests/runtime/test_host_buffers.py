@@ -31,6 +31,7 @@ def _allocation(array: np.ndarray) -> object:
     return array
 
 
+@pytest.mark.gpu
 def test_gpu_pinned_arrays_round_trip_through_the_device():
     current_device_arch()
     from rocke.runtime.hip_module import Runtime
@@ -48,11 +49,13 @@ def test_gpu_pinned_arrays_round_trip_through_the_device():
     np.testing.assert_array_equal(back, values)
 
 
+@pytest.mark.gpu
 def test_gpu_pinned_empty_takes_an_empty_shape():
     current_device_arch()
     assert pinned_empty((0, 5), np.float32).shape == (0, 5)
 
 
+@pytest.mark.gpu
 def test_gpu_the_allocation_lives_until_the_last_view_is_gone():
     current_device_arch()
     array = pinned_copy(np.arange(8, dtype=np.float32))

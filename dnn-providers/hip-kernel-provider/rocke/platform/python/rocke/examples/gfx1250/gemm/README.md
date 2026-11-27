@@ -7,7 +7,7 @@ Example argument parsing normalizes aliases before checking supported choices.
 
 Run these modules from an installed rocKE environment, or with the platform's
 `python` directory on `PYTHONPATH`. They require a gfx1250 device, matching
-LLVM 23 ROCm libraries, NumPy, and `ml_dtypes`. Torch is optional.
+LLVM 23 ROCm libraries, NumPy, and `ml_dtypes`; they do not use torch.
 
 | Example | Matrix inputs | Scale contract |
 | --- | --- | --- |

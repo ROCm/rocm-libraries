@@ -152,7 +152,7 @@ _SCHED_CADENCE = os.environ.get("ROCKE_FP8_SCHED", "iglp1").strip().lower()
 # the same XCD share the same m_block (= same expert weights) => per-expert weight
 # columns stay resident in that XCD's L2 across the 28 inter slices.
 #   0 -> OFF (default; byte-identical IR / digest, the kept-best path)
-#   N>0 -> remap with N = XCD count (8 on MI355X). The linear workgroup id
+#   N>0 -> remap with N = XCD count (8 on gfx950). The linear workgroup id
 #          ``bx*gy + by`` is re-tiled into (xcd, slot) so each XCD owns a
 #          contiguous run of inter slices for ONE m_block at a time.
 _XCD_REMAP = int(os.environ.get("ROCKE_FP8_XCD", "8"))

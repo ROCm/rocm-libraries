@@ -1,4 +1,4 @@
-"""Ragged MoE grouped GEMM kernel builder for gfx950 (MI355X).
+"""Ragged MoE grouped GEMM kernel builder for gfx950.
 
 Fused gather (A via token indices) + grouped bf16 GEMM + weighted scatter (C).
 CDNA4 optimizations: DTL cooperative loads, prologue overlap (PLOG), epilogue

@@ -13,6 +13,10 @@ parameter space validity, config validation, and batch vs single extraction pari
 import sys
 from pathlib import Path
 
+from ._requirements import skip_without_requirements
+
+skip_without_requirements()
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -26,7 +30,7 @@ from feature_engine import (
 
 @pytest.fixture
 def fe():
-    """Default feature engine with MI355X-like hardware."""
+    """Default feature engine with gfx950-like hardware."""
     return GemmUniversalFeatureEngine(
         num_cus=256,
         lds_capacity=65536,

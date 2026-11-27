@@ -44,7 +44,7 @@ Optimization steps
   5. In production the AITER call goes through tgemm dispatch overhead;
      DSL via graph is 13× faster wall-clock.
 
-Results (MI355X / gfx950, M=2, N=2048, bf16)
+Results (gfx950, M=2, N=2048, bf16)
 ----------------------------------------------
   Backend                  Latency    Speedup
   AITER (production call)   5.90µs    1.00×

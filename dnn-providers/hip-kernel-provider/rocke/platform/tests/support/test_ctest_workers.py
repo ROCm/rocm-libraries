@@ -57,9 +57,15 @@ _TREE = """
         pass
 """
 
-needs_two_cpus = pytest.mark.skipif(
-    available_cpus() < _WORKERS, reason="starting two workers needs two CPUs"
-)
+
+def starts_two_workers(test):
+    """Mark ``test``, which starts a run of two worker processes: it runs
+    alone, so under this file's own workers it keeps every CPU of the entry
+    rather than one worker's share, and it skips only on a one-CPU host."""
+    needs_two_cpus = pytest.mark.skipif(
+        available_cpus() < _WORKERS, reason="starting two workers needs two CPUs"
+    )
+    return pytest.mark.rocke_run_alone(needs_two_cpus(test))
 
 
 def _write_tree(root: Path, source: str = _TREE) -> Path:
@@ -135,7 +141,7 @@ def _ran(records: Path) -> collections.Counter[str]:
     )
 
 
-@needs_two_cpus
+@starts_two_workers
 @pytest.mark.parametrize("shard", [None, "1/3"])
 def test_each_selected_test_runs_in_exactly_one_worker(tmp_path, shard):
     tree = _write_tree(tmp_path)
@@ -176,7 +182,7 @@ def test_each_selected_test_runs_in_exactly_one_worker(tmp_path, shard):
     assert split.stdout.count(" passed") == _WORKERS, split.stdout[-3000:]
 
 
-@needs_two_cpus
+@starts_two_workers
 def test_a_failing_test_fails_the_run_and_shows_its_output(tmp_path):
     tree = _write_tree(
         tmp_path,
@@ -192,7 +198,7 @@ def test_a_failing_test_fails_the_run_and_shows_its_output(tmp_path):
     assert "the run exits 1" in result.stdout
 
 
-@needs_two_cpus
+@starts_two_workers
 def test_a_worker_with_no_share_passes(tmp_path):
     tree = _write_tree(
         tmp_path,
@@ -207,7 +213,7 @@ def test_a_worker_with_no_share_passes(tmp_path):
     assert result.stdout.count("kept 0 of 1") == _WORKERS - 1
 
 
-@needs_two_cpus
+@starts_two_workers
 def test_a_run_that_selects_nothing_exits_as_without_workers(tmp_path):
     tree = _write_tree(tmp_path)
     alone = _run(tree, None, "-k", "no_test_has_this_name")
@@ -217,7 +223,7 @@ def test_a_run_that_selects_nothing_exits_as_without_workers(tmp_path):
     assert alone.returncode == split.returncode == pytest.ExitCode.NO_TESTS_COLLECTED
 
 
-@needs_two_cpus
+@starts_two_workers
 @pytest.mark.parametrize(
     "option",
     [["--collect-only"], ["-x"], ["--maxfail", "2"], ["--junitxml", "report.xml"]],
@@ -229,7 +235,7 @@ def test_a_run_that_needs_one_process_runs_in_it(tmp_path, option):
     assert "rocke-ctest-workers" not in result.stdout
 
 
-@needs_two_cpus
+@starts_two_workers
 def test_each_worker_gets_its_own_basetemp(tmp_path):
     tree = _write_tree(
         tmp_path,
@@ -253,7 +259,7 @@ def test_each_worker_gets_its_own_basetemp(tmp_path):
     assert sorted(path.name for path in basetemp.iterdir()) == ["worker0", "worker1"]
 
 
-@needs_two_cpus
+@starts_two_workers
 def test_a_process_a_worker_test_starts_is_no_worker(tmp_path):
     tree = _write_tree(
         tmp_path,
@@ -272,7 +278,7 @@ def test_a_process_a_worker_test_starts_is_no_worker(tmp_path):
     assert result.returncode == 0, result.stdout[-3000:]
 
 
-@needs_two_cpus
+@starts_two_workers
 def test_each_worker_runs_on_its_share_of_the_cpus(tmp_path):
     tree = _write_tree(
         tmp_path,
@@ -304,7 +310,7 @@ def test_each_worker_runs_on_its_share_of_the_cpus(tmp_path):
         assert len({cpu for cpus in blocks for cpu in cpus}) == _WORKERS * share
 
 
-@needs_two_cpus
+@starts_two_workers
 @pytest.mark.skipif(sys.platform != "linux", reason="reads /proc, kills with SIGKILL")
 def test_a_worker_stops_when_the_run_is_killed(tmp_path):
     tree = _write_tree(
@@ -428,7 +434,7 @@ def _events(tree: Path) -> list[dict]:
     ]
 
 
-@needs_two_cpus
+@starts_two_workers
 def test_run_alone_tests_run_after_every_worker_has_exited(tmp_path):
     """No run-alone test overlaps any other test or any worker process: they
     run, one after another, in one process started once every worker ended."""
@@ -477,7 +483,7 @@ def test_run_alone_tests_run_after_every_worker_has_exited(tmp_path):
     assert len(_ran(tmp_path / "records")) == 11
 
 
-@needs_two_cpus
+@starts_two_workers
 def test_no_run_alone_process_starts_when_none_is_selected(tmp_path):
     tree = _write_run_alone_tree(tmp_path)
     result = _run(tree, None, "-k", "not alone", WORKERS_OPTION, str(_WORKERS))
@@ -487,7 +493,7 @@ def test_no_run_alone_process_starts_when_none_is_selected(tmp_path):
     assert f"{_WORKERS} workers exited [0, 0] in" in result.stdout
 
 
-@needs_two_cpus
+@starts_two_workers
 def test_no_run_alone_process_starts_after_an_interrupted_worker(tmp_path):
     tree = _write_run_alone_tree(
         tmp_path,
@@ -503,7 +509,7 @@ def test_no_run_alone_process_starts_after_an_interrupted_worker(tmp_path):
     assert "run-alone" not in result.stdout
 
 
-@needs_two_cpus
+@starts_two_workers
 def test_the_run_alone_process_runs_only_its_ci_shards_tests(tmp_path):
     tree = _write_tree(
         tmp_path,
@@ -537,7 +543,7 @@ def test_the_run_alone_process_runs_only_its_ci_shards_tests(tmp_path):
     assert ran_alone == alone_one
 
 
-@needs_two_cpus
+@starts_two_workers
 def test_run_alone_tests_run_when_worker_0_reports_nothing(tmp_path):
     """A worker 0 that ends before it reports its selection does not lose the
     run-alone tests: the run-alone process runs them all the same."""
@@ -559,7 +565,7 @@ def test_run_alone_tests_run_when_worker_0_reports_nothing(tmp_path):
     assert {"test_alone[2gib]", "test_alone[4gib]", "test_alone_too"} <= ran.keys()
 
 
-@needs_two_cpus
+@starts_two_workers
 def test_a_test_past_its_time_limit_is_named_and_fails_the_run(tmp_path):
     """pytest-timeout's thread method, as the GPU entries run it, ends a
     worker whose test stalls: the worker's output names that test, the run

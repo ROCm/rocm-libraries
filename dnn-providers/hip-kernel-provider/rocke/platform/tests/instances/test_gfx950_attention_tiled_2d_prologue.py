@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 from rocke.tests.arch_marks import arch_specific
-from rocke.tests.lanes import SOURCE_TREE_CASES, skip_until_reason
+from rocke.tests.lanes import SOURCE_TREE, skip_until_reason
 
 CPP = Path(__file__).resolve().parents[2] / "cpp"
 GLUE = CPP / "instances" / "gfx950" / "attention_tiled_2d_public_entry_glue.cpp"
@@ -27,9 +27,15 @@ GLUE = CPP / "instances" / "gfx950" / "attention_tiled_2d_public_entry_glue.cpp"
 pytestmark = pytest.mark.skipif(
     not GLUE.exists(),
     reason=skip_until_reason(
-        SOURCE_TREE_CASES,
+        SOURCE_TREE,
         reason="reads the platform sources, which an installed test layout omits",
     ),
+)
+
+# Why the checks are gfx950's alone: the gfx942 port has its own prologue file.
+_GFX950_ONLY = (
+    "the test checks the build prologue of the gfx950 tiled 2D attention C++ "
+    "port; the gfx942 port keeps its prologue in a file of its own"
 )
 
 # bool NAME(rocke_gfx950_attn2d_build_ctx_t*, rocke_ir_builder_t*,
@@ -61,7 +67,7 @@ def _prologues() -> list[tuple[str, str, str]]:
 
 @arch_specific(
     ("gfx950",),
-    reason="the test reads the gfx950 tiled 2D attention C++ glue file; cpp/instances/gfx942 has no tiled 2D attention file",
+    reason=_GFX950_ONLY,
 )
 def test_there_is_one_prologue_and_it_is_file_local():
     glue = GLUE.relative_to(CPP).as_posix()
@@ -75,7 +81,7 @@ def test_there_is_one_prologue_and_it_is_file_local():
 
 @arch_specific(
     ("gfx950",),
-    reason="the test reads the gfx950 tiled 2D attention C++ glue file; cpp/instances/gfx942 has no tiled 2D attention file",
+    reason=_GFX950_ONLY,
 )
 def test_the_driver_calls_it():
     assert re.search(

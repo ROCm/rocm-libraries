@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""gfx1151 (RDNA3.5 / Strix Halo) deep-fused conv + maxpool, real quantization.
+"""gfx1151 (RDNA3.5) deep-fused conv + maxpool, real quantization.
 
 Wave32/WMMA sibling of ``instances/gfx950/deep_fused_conv_pool.py``. It computes
 the encoder_0 block

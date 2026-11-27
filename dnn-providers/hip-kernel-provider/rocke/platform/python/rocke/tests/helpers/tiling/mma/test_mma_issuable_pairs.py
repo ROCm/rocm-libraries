@@ -6,8 +6,9 @@
 The pairs are read from the record (``traits/data/backend_coverage.json``), never written by hand: each
 ``issuable`` (instruction, target) pair of a family the driver feeds, once per recorded operand-dtype
 variant, drives a single-instruction TileMma whose A, B, C and result dtypes are the instruction's own.
-The tile must lower to that instruction's LLVM intrinsic, and its result Fragment must carry the
-instruction's result dtype (which differs from the accumulator's for one row).
+The tile must lower, at the LLVM flavor the record was measured at, to that instruction's LLVM
+intrinsic, and its result Fragment must carry the instruction's result dtype (which differs from
+the accumulator's for one row).
 
 Every kernel is lowered by each engine (``rocke.tests.engines.lower_with_engine`` over
 ``ENGINES``), and the C++ engine must emit the Python engine's IR; where the ``rocke_engine``
@@ -121,7 +122,9 @@ def test_issuable_instruction_drives_a_tile_that_lowers_to_it(
     # The result carries the instruction's result dtype, the accumulator's for every row but the
     # bf16-from-f32 one.
     assert result.dtype == mma.d_dtype == dtype_to_ir_type(mma.traits.d_dtype)
-    ir = lower_with_engine(kernel, target, engine=engine)
+    ir = lower_with_engine(
+        kernel, target, engine=engine, llvm_flavor=_COVERAGE.llvm_flavor
+    )
     assert len(intrinsic_calls(ir, mma.traits.llvm_intrinsic)) == 1
 
 

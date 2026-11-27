@@ -90,7 +90,9 @@ public:
     {
 #ifdef __linux__
         // The first matmul case in a process also loads the kernel library, which raised the
-        // peak by about 0.6 GiB on gfx90a, so the check starts with the second case.
+        // peak by about 0.6 GiB on gfx90a, so the check starts with the second case. A later
+        // case that is the first of its problem type still loads that type's kernels (about
+        // 2 GiB for f16 on 96-CU gfx1250), and the check counts that against its estimate.
         static std::atomic<bool> first_case{true};
         const bool               first = first_case.exchange(false);
         const char*              on    = std::getenv("HIPBLASLT_TEST_CHECK_MEMORY_ESTIMATE");

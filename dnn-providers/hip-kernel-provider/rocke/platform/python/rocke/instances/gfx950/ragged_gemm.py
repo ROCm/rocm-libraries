@@ -1,4 +1,4 @@
-"""Ragged grouped GEMM kernel builder for gfx950 (MI355X).
+"""Ragged grouped GEMM kernel builder for gfx950.
 
 Pure ragged grouped bf16 GEMM with variable M per expert. No gather/scatter,
 no top-k, no routing weights. Each expert owns a contiguous slice of A and C;

@@ -44,7 +44,7 @@ from rocke.tests.compiler_tools import require_tools_or_skip
 from rocke.tests.engines import (
     ENGINES,
     engine_modules_available,
-    instance_llvm_from_all_engines,
+    instance_llvm_from_engine,
     lower_with_engine,
 )
 from rocke.tests.fp8_gemm_checks import Fp8HostCodec, fp8_host_codec
@@ -537,14 +537,18 @@ def _quant_spec(case, *, vec: int):
 )
 @pytest.mark.parametrize("vec", [2, 4])
 @pytest.mark.parametrize("case", _quant_instances(), ids=lambda case: case[0])
-def test_quant_instances_scale_to_the_target_fp8_bound(case, vec, arch, other_arch):
+@pytest.mark.parametrize("engine", ENGINES)
+def test_quant_instances_scale_to_the_target_fp8_bound(
+    case, vec, arch, other_arch, engine
+):
     """The row scale ``amax * (1 / bound)`` uses the bound of ``arch``'s e4m3
-    encoding, on the scalar (vec 2) and the packed (vec 4) path, and the C++
-    builder emits the same IR as the Python one."""
+    encoding, on the scalar (vec 2) and the packed (vec 4) path, in the Python
+    builder's kernel and in the C++ builder's, which emits the same IR."""
     family, build, _, _, _ = case
-    text = instance_llvm_from_all_engines(
+    text = instance_llvm_from_engine(
         _quant_spec(case, vec=vec),
         arch,
+        engine=engine,
         build_kernel=build,
         binding=f"{family}_lower_llvm",
     )
@@ -675,6 +679,7 @@ def _bound_and_step(qdtype: str, arch: str) -> tuple[float, float]:
     return bound, float(magnitudes[-1] - magnitudes[-2])
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("qdtype", ["fp8e4m3", "bf8e5m2"])
 def test_fp8_conversion_does_not_saturate_on_gpu(qdtype):
     """The bare f32 -> fp8 / bf8 conversion gives NaN for a value past the
@@ -696,6 +701,7 @@ def test_fp8_conversion_does_not_saturate_on_gpu(qdtype):
         assert np.isnan(_host_codec(qdtype, arch).decode_table()[codes]).all(), codes
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("qdtype", ["fp8e4m3", "bf8e5m2", "i8"])
 def test_quantize_scalar_f32_saturates_and_keeps_nan_on_gpu(qdtype):
     """quantize_scalar_f32 on the GPU's encoding: values within the bound are
@@ -740,6 +746,7 @@ def test_quantize_scalar_f32_saturates_and_keeps_nan_on_gpu(qdtype):
     np.testing.assert_array_equal(got, expected, err_msg=f"{qdtype} on {arch}")
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("vec", [2, 4])
 def test_smoothquant_fp8_output_is_exact_and_reaches_the_bound_on_gpu(vec):
     """SmoothQuant scales each row to the bound of the GPU's e4m3 encoding:

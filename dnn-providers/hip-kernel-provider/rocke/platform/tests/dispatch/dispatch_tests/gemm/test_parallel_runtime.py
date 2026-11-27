@@ -1,6 +1,10 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Threaded compile+run smoke for the GEMM dispatcher."""
+"""Threaded compile+run smoke for the GEMM dispatcher.
+
+Each run launches the kernel once through ``rocke.run_manifest --untimed``: this
+is a correctness check and times nothing.
+"""
 
 from __future__ import annotations
 
@@ -10,15 +14,19 @@ import unittest
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+import pytest
 from rocke.dispatch import GemmRequest, dispatch_gemm_fp16
 from rocke.dispatch.gemm import build_kernel
 from rocke.helpers import compile_kernel, make_gemm_manifest, write_artifact
+from rocke.run_manifest import UNTIMED_LAUNCH_LINE
 from rocke.runtime.hip_module import get_device_arch
 from rocke.tests.arch_marks import COVERED_ARCHES
 from rocke.tests.subprocess_launcher import (
     rocke_python_command,
     rocke_subprocess_env,
 )
+
+pytestmark = pytest.mark.gpu
 
 # The runtime bodies below build+launch a code object for the device arch, so gate on
 # the exact arch (via the rocke HIP runtime, no torch): on any other device the launch
@@ -38,8 +46,6 @@ def _compile_and_run(req: GemmRequest, shape: tuple[int, int, int]) -> str:
         block_k=spec.tile.tile_k,
         threads_per_block=spec.block_size,
         default_shape=shape,
-        warmup_iters=1,
-        timed_iters=3,
         args_signature=list(result.signature),
         atoms=["dispatcher-fp16-gemm-parallel-runtime-test"],
         extra={"dispatcher_kernel_id": result.kernel_id.as_dict()},
@@ -55,6 +61,7 @@ def _compile_and_run(req: GemmRequest, shape: tuple[int, int, int]) -> str:
             "--shape",
             ",".join(str(x) for x in shape),
             "--verify",
+            "--untimed",
         ),
         text=True,
         capture_output=True,
@@ -88,7 +95,8 @@ class TestGemmParallelRuntime(unittest.TestCase):
             for future in as_completed(futures):
                 out = future.result()
                 self.assertIn("bad=0/", out)
-                self.assertIn("Perf:", out)
+                self.assertIn(UNTIMED_LAUNCH_LINE, out)
+                self.assertNotIn("Perf:", out)
 
 
 if __name__ == "__main__":

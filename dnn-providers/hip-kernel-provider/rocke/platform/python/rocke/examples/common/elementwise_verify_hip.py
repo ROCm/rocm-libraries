@@ -13,7 +13,6 @@ pack/store, f32 promote, store) is numerically correct on the target arch.
 from __future__ import annotations
 
 import argparse
-import ctypes
 import struct
 
 import numpy as np
@@ -24,11 +23,9 @@ from rocke.instances.common.elementwise import (
     build_elementwise,
     elementwise_grid,
 )
+from rocke.numeric import storage
 from rocke.runtime.hip_module import Runtime
-
-
-def _as_u8(a):
-    return (ctypes.c_uint8 * int(a.nbytes)).from_buffer(a)
+from rocke.runtime.host_buffers import as_u8_buffer
 
 
 def main() -> int:
@@ -54,33 +51,17 @@ def main() -> int:
     )
 
     rng = np.random.default_rng(0x1234)
-    import torch
-
-    A_f32 = rng.integers(-8, 9, size=(args.n,), dtype=np.int16).astype(np.float32)
-    B_f32 = rng.integers(-8, 9, size=(args.n,), dtype=np.int16).astype(np.float32)
-    A_u16 = (
-        torch.from_numpy(A_f32)
-        .to(torch.float16)
-        .view(torch.int16)
-        .numpy()
-        .view(np.uint16)
-    )
-    B_u16 = (
-        torch.from_numpy(B_f32)
-        .to(torch.float16)
-        .view(torch.int16)
-        .numpy()
-        .view(np.uint16)
-    )
+    A_f16 = storage.encode(rng.integers(-8, 9, size=(args.n,), dtype=np.int16), "fp16")
+    B_f16 = storage.encode(rng.integers(-8, 9, size=(args.n,), dtype=np.int16), "fp16")
 
     rt = Runtime()
     mod = rt.load_module(art.hsaco)
     fn = mod.get_function(art.kernel_name)
-    A_dev = rt.alloc(A_u16.nbytes)
-    B_dev = rt.alloc(B_u16.nbytes)
+    A_dev = rt.alloc(A_f16.nbytes)
+    B_dev = rt.alloc(B_f16.nbytes)
     C_dev = rt.alloc(args.n * 2)
-    rt.memcpy_h2d(A_dev, _as_u8(A_u16), A_u16.nbytes)
-    rt.memcpy_h2d(B_dev, _as_u8(B_u16), B_u16.nbytes)
+    rt.memcpy_h2d(A_dev, as_u8_buffer(A_f16), A_f16.nbytes)
+    rt.memcpy_h2d(B_dev, as_u8_buffer(B_f16), B_f16.nbytes)
     rt.memset(C_dev, 0, args.n * 2)
 
     grid = elementwise_grid(args.n, spec)
@@ -89,27 +70,12 @@ def main() -> int:
     rt.launch(fn, grid, block, pack, stream=0)
     rt.stream_sync(0)
 
-    out_buf = (ctypes.c_uint8 * (args.n * 2))()
-    rt.memcpy_d2h(out_buf, C_dev, args.n * 2)
-    C_out = (
-        torch.from_numpy(np.frombuffer(bytes(out_buf), dtype=np.int16).copy())
-        .view(torch.float16)
-        .to(torch.float32)
-        .numpy()
+    C_f16 = np.empty(args.n, dtype=np.float16)
+    rt.memcpy_d2h(as_u8_buffer(C_f16), C_dev, C_f16.nbytes)
+    C_out = storage.decode(C_f16, "fp16")
+    ref = storage.round_to(
+        storage.decode(A_f16, "fp16") + storage.decode(B_f16, "fp16"), "fp16"
     )
-    A_h = (
-        torch.from_numpy(A_u16.view(np.int16))
-        .view(torch.float16)
-        .to(torch.float32)
-        .numpy()
-    )
-    B_h = (
-        torch.from_numpy(B_u16.view(np.int16))
-        .view(torch.float16)
-        .to(torch.float32)
-        .numpy()
-    )
-    ref = torch.from_numpy(A_h + B_h).to(torch.float16).to(torch.float32).numpy()
 
     rt.free(A_dev)
     rt.free(B_dev)

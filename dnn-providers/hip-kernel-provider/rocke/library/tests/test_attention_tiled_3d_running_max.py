@@ -47,7 +47,7 @@ from rocke.numeric.sdpa_reference import sdpa_reference
 from rocke.runtime.hip_module import Runtime, get_device_arch, get_device_num_cus
 from rocke.runtime.host_buffers import as_u8_buffer
 from rocke.runtime.launcher import DeviceMem
-from rocke.tests.lanes import BINDING_LANE, import_or_skip_until
+from rocke.tests.lanes import BUILD_VARIANT, import_or_skip_until
 
 from ._tiled_3d_binding_ir import lower_like_tiled_3d_binding
 
@@ -345,7 +345,7 @@ def test_decode_sink(gpu):
 def test_native_builder_matches_python(arch, q_len, kv_len, num_segments, use_sinks):
     # The GPU tests run the Python builders; the C++ builders, which serve
     # kernels without Python, must emit the same IR for their specs.
-    engine = import_or_skip_until("rocke_engine", BINDING_LANE)
+    engine = import_or_skip_until("rocke_engine", BUILD_VARIANT)
     # The explicit specs do not depend on the CU count.
     problem = _problem(1, q_len=q_len, kv_len=kv_len, use_sinks=use_sinks)
     spec = _explicit_spec(problem, arch, num_segments)

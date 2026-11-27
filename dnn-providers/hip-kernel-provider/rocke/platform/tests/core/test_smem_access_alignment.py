@@ -54,6 +54,7 @@ from rocke.tests.engines import (
     lower_hip_with_engine,
     lower_with_engine,
 )
+from rocke.tests.lanes import BUILD_VARIANT, skip_until
 
 _ARCH = "gfx942"
 
@@ -699,7 +700,7 @@ def test_the_hip_source_of_a_one_lane_vector_store_compiles():
     the C++ engine's too (:func:`test_a_one_lane_vector_is_a_one_element_store`
     holds the two equal)."""
     if shutil.which("hipcc") is None:
-        pytest.skip("hipcc not found")
+        skip_until(BUILD_VARIANT, reason="hipcc not found")
     from rocke.helpers.compile import compile_kernel_via_hipcc
 
     assert compile_kernel_via_hipcc(_one_lane_vector_store(), arch=_ARCH).hsaco

@@ -21,7 +21,7 @@ order for the single-wave `fuse_conv` tiles, with the script that regenerates it
 - [4. Results](#4-results)
   - [4.1 ROCm 7.1.0](#41-rocm-710-llvm20-comgr-sha-256-b3e6941ac89a1ba6)
   - [4.2 ROCm 7.13](#42-rocm-713-llvm23-comgr-sha-256-dd9edec7b6e078a2)
-  - [4.3 ROCm 10 pre-release](#43-rocm-10-pre-release-llvm23-comgr-sha-256-f18da4b1298b9c6f)
+  - [4.3 ROCm 10](#43-rocm-10-llvm23-comgr-sha-256-f18da4b1298b9c6f)
 - [5. Decisions](#5-decisions)
 - [6. Measured speed](#6-measured-speed)
 - [7. Reproducing](#7-reproducing)
@@ -120,7 +120,7 @@ Fused tiles (228 cases; modeled waves per SIMD, merge base → head):
 - spill stops (3): `(1,2,1)`: GDN bf16 rn; `(1,4,1)`: GDN bf16 cv; `(4,4,1)`: GDN f32 cv;
 - spill grows on 47 and shrinks on 28 cases that already spilled.
 
-### 4.3 ROCm 10 pre-release (`llvm23`, comgr SHA-256 `f18da4b1298b9c6f…`)
+### 4.3 ROCm 10 (`llvm23`, comgr SHA-256 `f18da4b1298b9c6f…`)
 
 Dispatcher tiles (modeled waves per SIMD, merge base → head):
 

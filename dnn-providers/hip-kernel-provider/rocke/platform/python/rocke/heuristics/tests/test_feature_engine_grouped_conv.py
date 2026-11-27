@@ -12,6 +12,11 @@ Run: python3 -m pytest heuristics/tests/test_feature_engine_grouped_conv.py -v
 
 import sys
 import unittest
+
+from ._requirements import skip_without_requirements
+
+skip_without_requirements()
+
 import numpy as np
 import pandas as pd
 from pathlib import Path

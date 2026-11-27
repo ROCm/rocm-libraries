@@ -3,15 +3,20 @@
 
 """Skip the tests ``rocke.tests.pending_lanes.QUARANTINED`` holds.
 
-Each pytest root that applies the quarantine calls :func:`skip_quarantined_items`
-from its ``pytest_collection_modifyitems`` hook, with its own directory and that
-directory's path relative to the rocke directory (one of
-``pending_lanes.QUARANTINE_TREES``). Items are matched by their path below that
-directory, which the install keeps (``platform/tests`` installs as ``tests``,
-``library/tests`` as ``tests/library/tests``)::
+Each pytest root (one of ``pending_lanes.QUARANTINE_TREES``) installs the
+quarantine with :func:`register_quarantine`, through
+``rocke.tests.pytest_roots.configure_pytest_root``, with its own directory and
+that directory's path relative to the rocke directory. Items are matched by
+their path below that directory, which the install keeps (``platform/tests``
+installs as ``tests``, ``library/tests`` as ``tests/library/tests``)::
 
-    def pytest_collection_modifyitems(config, items):
-        skip_quarantined_items(items, Path(__file__).parent, "library/tests")
+    register_quarantine(config, Path(__file__).resolve().parent, "library/tests")
+
+The quarantine's collection hook is a plain one, and pluggy runs every
+``tryfirst`` hook first: a root's own ``tryfirst`` marking (the tiling tree's
+``gpu`` mark) and selection (the library tree's reference cases and
+``ROCKE_TEST_SHARD``) see the items before it does. The ``rocke.tests.ctest_shard``
+plugin's selection (``trylast``) comes after it.
 
 A quarantined item is skipped with the reason ``quarantined: <issue>``, so it
 stays visible in every report. An entry that names GPU arches skips its item
@@ -45,10 +50,57 @@ from .pending_lanes import (
     quarantined_test,
 )
 
-__all__ = ["QUARANTINE_ENV", "skip_quarantined_items"]
+__all__ = [
+    "QUARANTINE_ENV",
+    "quarantine_plugin_name",
+    "register_quarantine",
+    "skip_quarantined_items",
+]
 
 # Set to "ignore" to run quarantined tests.
 QUARANTINE_ENV = "ROCKE_QUARANTINE"
+
+_PLUGIN_NAME_PREFIX = "rocke-quarantine:"
+
+
+def _require_quarantine_tree(caller: str, tree_path: str) -> None:
+    if tree_path not in QUARANTINE_TREES:
+        raise ValueError(
+            f"{caller} failed - tree_path={tree_path!r}, expected one of "
+            f"pending_lanes.QUARANTINE_TREES {QUARANTINE_TREES}"
+        )
+
+
+class _SkipQuarantinedItems:
+    """The collection hook that skips the quarantined items of one tree."""
+
+    def __init__(self, tree_root: Path, tree_path: str) -> None:
+        self._tree_root = tree_root
+        self._tree_path = tree_path
+
+    def pytest_collection_modifyitems(self, items: list[pytest.Item]) -> None:
+        skip_quarantined_items(items, self._tree_root, self._tree_path)
+
+
+def quarantine_plugin_name(tree_path: str) -> str:
+    """The name :func:`register_quarantine` registers the quarantine of the
+    tree ``tree_path`` under. A session that collects the tests of several
+    roots holds one quarantine per tree, each under its own name."""
+    _require_quarantine_tree("quarantine_plugin_name", tree_path)
+    return f"{_PLUGIN_NAME_PREFIX}{tree_path}"
+
+
+def register_quarantine(config: pytest.Config, tree_root: Path, tree_path: str) -> None:
+    """Skip the quarantined tests under ``tree_root`` in this pytest session,
+    once per tree; ``tree_path`` is ``tree_root`` relative to the rocke
+    directory, one of ``pending_lanes.QUARANTINE_TREES``."""
+    _require_quarantine_tree("register_quarantine", tree_path)
+    plugin_name = quarantine_plugin_name(tree_path)
+    if config.pluginmanager.has_plugin(plugin_name):
+        return
+    config.pluginmanager.register(
+        _SkipQuarantinedItems(tree_root, tree_path), plugin_name
+    )
 
 
 def skip_quarantined_items(
@@ -56,12 +108,9 @@ def skip_quarantined_items(
 ) -> None:
     """Mark each of ``items`` under ``tree_root`` that a quarantine entry covers
     to be skipped; ``tree_path`` is ``tree_root`` relative to the rocke
-    directory."""
-    if tree_path not in QUARANTINE_TREES:
-        raise ValueError(
-            f"skip_quarantined_items failed - tree_path={tree_path!r}, expected "
-            f"one of pending_lanes.QUARANTINE_TREES {QUARANTINE_TREES}"
-        )
+    directory. The primitive under :func:`register_quarantine`, whose plugin
+    calls it on each collection."""
+    _require_quarantine_tree("skip_quarantined_items", tree_path)
     mode = os.environ.get(QUARANTINE_ENV, "")
     if mode not in ("", "ignore"):
         raise ValueError(

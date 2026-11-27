@@ -30,6 +30,16 @@ Documentation for rocFFT is available at
 * Fixed a crash in `rocfft_execute` for in-place multi-device plans when `out_buffer` is null.
 * Fixed data races on work memory that could cause sporadic incorrect results for
   multi-device transforms requiring work memory.
+* Fixed hangs or incorrect results of multi-process transforms that redistribute data between
+  MPI ranks when a rank owns no brick or several bricks of an input or output field.
+* Fixed failures of single-process transforms without RCCL support when an input or output
+  field has several bricks on the same device.
+
+### Known issues
+
+* Some multi-device plans may read their input before the work queued on the streams set with
+  `rocfft_execution_info_set_stream` is complete. Synchronize these streams before calling
+  `rocfft_execute`. This issue will be addressed in an upcoming release.
 
 ## rocFFT 1.0.41 for ROCm 10.2
 

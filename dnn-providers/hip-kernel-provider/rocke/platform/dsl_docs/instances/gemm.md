@@ -161,9 +161,8 @@ block_m0 = block_id_y * tile_m
 If `chiplet_swizzle=True`, both block IDs are remapped through `helpers/grid.py::super_tile_swizzle` (or its compile-time variant), keeping `chunk_size` consecutive logical workgroups on the same XCD. The launch grid is unchanged; the remap happens at kernel entry from the flattened blockIdx. Constants:
 
 ```text
-NUM_XCDS_MI300X = 8 # CDNA3
-NUM_XCDS_MI325X = 8 # CDNA3
-NUM_XCDS_MI350X = 8 # CDNA4 (physical XCDs may differ)
+NUM_XCDS_GFX942 = 8 # the 304-CU gfx942 part (the 228-CU part has 6)
+NUM_XCDS_GFX950 = 8
 ```
 
 `chiplet_wgm` is the WGM super-tile group size (default 8); `chiplet_chunk_size` is the WGs-per-XCD granularity (default 64).

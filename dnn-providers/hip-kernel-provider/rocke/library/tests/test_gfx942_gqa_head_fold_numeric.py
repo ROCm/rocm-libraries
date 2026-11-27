@@ -22,11 +22,13 @@ window mask, this fails.
 
 from __future__ import annotations
 
+import math
 import re
 
 import numpy as np
 import pytest
-from rocke.tests.gpu import current_device_arch_in
+from rocke.core.storage import element_bytes
+from rocke.tests.gpu import current_device_arch_in, skip_without_device_memory
 
 from kernels import UnifiedAttentionProblem
 from kernels.common import attention_unified as au
@@ -106,8 +108,16 @@ def test_numeric_cohort_routes_to_fold(gfx942, bs):
 # ---------------------------------------------------------------------------
 
 
+# Its K and V caches take 2 to 4 GiB of the device, so it runs with no other
+# test process on the device (rocke.tests.ctest_workers).
+@pytest.mark.rocke_run_alone
 @pytest.mark.parametrize("bs", [16, 32])
-@pytest.mark.parametrize("sq,window", [(2048, 512), (8192, 4096)])
+# The S=8192 cases run a long FP64 host reference: rough gfx942 CI seconds, so
+# the CI shards and their workers share them (rocke.tests.ctest_shard).
+@pytest.mark.parametrize(
+    "sq,window",
+    [(2048, 512), pytest.param(8192, 4096, marks=pytest.mark.rocke_shard_cost(10))],
+)
 @pytest.mark.parametrize("hq,hk", [(32, 8)])
 def test_fold_numeric_vs_fp32_windowed_oracle(gfx942_device, sq, hq, hk, window, bs):
     """Launch the production fold kernel at randn magnitude and assert max_abs
@@ -128,12 +138,16 @@ def test_fold_numeric_vs_fp32_windowed_oracle(gfx942_device, sq, hq, hk, window,
     """
     assert window < sq, "window must be < seqlen to exercise SWA masking"
 
+    shape = (_NUM_BLOCKS, bs, hk, 128)
+    skip_without_device_memory(
+        2 * math.prod(shape) * element_bytes("bf16"),
+        "the gfx942 head-fold guardrail's K and V caches",
+    )
     rng = np.random.default_rng(0)
     pages = -(-sq // bs)
     # The sequence's pages are scattered over the whole cache; the rest of the
     # cache holds filler a misaddressed read would pick up.
     page_ids = rng.choice(_NUM_BLOCKS, size=pages, replace=False).astype(np.int32)
-    shape = (_NUM_BLOCKS, bs, hk, 128)
     used_k, used_v = (random_half(rng, (pages, *shape[1:]), "bf16") for _ in "kv")
     query = random_half(rng, (sq, hq, 128), "bf16")
     scale = 128**-0.5

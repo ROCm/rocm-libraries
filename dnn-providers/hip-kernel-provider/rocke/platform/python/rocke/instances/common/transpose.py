@@ -153,7 +153,7 @@ the workload sizes we benchmark today:
   bound -- the ~256 CTAs amortise poorly against ~3-5us launch cost.
   Morton can't help; cache reuse isn't the bottleneck.
 * At large sizes (4096x4096+) the kernel saturates HBM at
-  ~5700 GB/s on MI355X (close to peak). There's no spare bandwidth
+  ~5700 GB/s on gfx950 (close to peak). There's no spare bandwidth
   for cache tricks to claw back.
 
 In the middle band (2048x2048) row-major beats Morton by ~25%

@@ -323,15 +323,6 @@ def test_adapter_compiler_target_must_match_the_bundle(monkeypatch, recorded):
             cli.OPERATION.validate_cases(manifest, "gfx942", _FAMILY)
 
 
-def test_unsupported_torch_device_fails_before_creating_output(tmp_path):
-    output = tmp_path / "bundle"
-    with pytest.raises(ValueError, match="must be one of cpu"):
-        cli.qualify(
-            tmp_path / "missing", output, 3, variant=_FAMILY, torch_reference="cuda"
-        )
-    assert not output.exists()
-
-
 @pytest.mark.parametrize("failure", [None, "old", "current", "target"])
 def test_verification_uses_gpu_outputs_and_frozen_scale_only(
     tmp_path, monkeypatch, failure
@@ -565,9 +556,8 @@ def _baseline_snapshot(tmp_path):
     return baseline
 
 
-@pytest.mark.parametrize("with_torch", [False, True])
 def test_qualification_freezes_self_contained_replay_support(
-    tmp_path, monkeypatch, capsys, with_torch
+    tmp_path, monkeypatch, capsys
 ):
     """Exercise qualification plumbing with a synthetic GPU-worker result."""
     import subprocess
@@ -590,23 +580,7 @@ def test_qualification_freezes_self_contained_replay_support(
 
     monkeypatch.setattr(common_cli, "run_worker", worker)
     bundle = tmp_path / "bundle"
-    if with_torch:
-        import types
-        from conv_reference import torch_reference
-
-        monkeypatch.setitem(sys.modules, "torch", types.ModuleType("torch"))
-        monkeypatch.setattr(
-            torch_reference,
-            "cross_check",
-            lambda *args: {"results": {"float32": {"baseline_error_bound": 0.001}}},
-        )
-    cli.qualify(
-        baseline,
-        bundle,
-        repetitions=3,
-        variant=_FAMILY,
-        torch_reference="cpu" if with_torch else None,
-    )
+    cli.qualify(baseline, bundle, repetitions=3, variant=_FAMILY)
     assert capsys.readouterr().out.startswith(
         "convolution gfx942 implicit_gemm_fwd: qualifying 1 enrolled cases\n"
     )
@@ -626,10 +600,7 @@ def test_qualification_freezes_self_contained_replay_support(
     assert lock["cohort_sha256"] == cli.OPERATION.enrolled_cohort_digest(
         "gfx942", _FAMILY
     )
-    assert manifest["cases"][case.id]["budget"]["baseline_error_bound"] == (
-        0.001 if with_torch else 0
-    )
-    assert ("torch_reference" in manifest["cases"][case.id]) == with_torch
+    assert manifest["cases"][case.id]["budget"]["baseline_error_bound"] == 0
     assert not list(bundle.rglob("*.npz"))
     assert (bundle / "payload/runner/reference_common/numeric.py").is_file()
     # -I removes inherited source paths; the frozen runner must import alone.

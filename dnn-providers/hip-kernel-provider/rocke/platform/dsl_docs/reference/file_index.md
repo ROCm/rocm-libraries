@@ -79,7 +79,7 @@ A by-file map of the `rocke` package. Symbols listed are the primary contents (p
 | `helpers/qk_scale.py` | `QkScaleSpec`, `QkScaleLayout`, `load_q_scale_for_block`, `load_k_scale_for_block`, `apply_qk_scales`. Per-head or per-block Q/K scale loaders for Sage attention; one ``v_mul_f32`` per score after the AMDGPU combiner folds the scale-multiply pair. |
 | `helpers/codebook.py` | `codebook_lookup_i8_to_fp8`, `codebook_lookup_i8_to_bf8`, `codebook_lookup_i4_pair_to_fp8`, `codebook_lookup_i4_pair_to_bf8`, `apply_per_tensor_scale`. i8 / i4 -> {fp8, bf8} codebook dequant chains for the Sage int variants; reuses 's `unpack_i4_byte_to_pair_i32` for the i4 unpack. |
 | `helpers/sparse_iter.py` | `BlockSparseSpec`, `VsaSparseSpec`, `block_sparse_iter`, `vsa_lut_iter`, `load_block_count`. Block-sparse bitmap loop + variable-size attention LUT loop primitives shared between the Jenga and VSA sparse-attention kernels. |
-| `helpers/grid.py` | `NUM_XCDS_MI300X`, `NUM_XCDS_MI325X`, `NUM_XCDS_MI350X`, `SuperTileSwizzleResult`, `chiplet_aware_super_tile`, `chiplet_aware_super_tile_dynamic`, `chiplet_transform_chunked`, `xcd_remap`, `xcd_remap_plane`, `super_tile_swizzle`, etc. |
+| `helpers/grid.py` | `NUM_XCDS_GFX942`, `NUM_XCDS_GFX950`, `SuperTileSwizzleResult`, `chiplet_aware_super_tile`, `chiplet_aware_super_tile_dynamic`, `chiplet_transform_chunked`, `xcd_remap`, `xcd_remap_plane`, `super_tile_swizzle`, etc. |
 | `helpers/autotune.py` | `Autotuner`, `AutotuneConfig`, `AutotuneKey`, `AutotuneResult`, `autotune_sweep`, `make_autotune_key`, `spec_replace`. |
 | `helpers/fuse.py` | Graph-level fusion driver: `compile_fn`, `explain_fn`, `fuse_matmul_bias_relu`, `EpilogueOp`, `BiasAdd`, `Cast`, `Clamp`, `GELU`, `ReLU`, `ResidualAdd`, `ResidualMul`, `Scale`, `SiLU`, `FusedEpilogue`, `FusionMatchError`, `FusionPlan`, `dtype_to_ir`, `ir_dtype_zero`, `ir_dtype_const`, `ir_dtype_global_load`. |
 | `helpers/fusion_ir.py` | `FusionGraph`, `FusionOp`, `FusionRegion`, `FusionTensor`, `build_graph`. |
@@ -180,7 +180,7 @@ Python-only family (the C++-engine statement and waiver: `dsl_docs/instances/att
 | `library/kernels/common/attention_bwd_dq.py` | `AttnBwdDqSpec`, `validate_attn_bwd_dq_spec`, `build_attn_bwd_dq`. Split dQ kernel. |
 | `library/kernels/common/attention_bwd_aux.py` | `AttnBwdAuxSpec`, prep / convert / reduce / page-role builders. |
 | `library/kernels/common/attention_bwd_plan.py` | `AttnBwdRequest`, `attn_bwd_support`, `attn_bwd_plan`, `attn_bwd_declaration`, `AttnBwdPolicy`, `shipped_policy`, `attn_bwd_tuning_key`. |
-| `library/kernels/common/attention_bwd_run.py`, `attention_bwd_cache.py`, `attention_bwd_comgr.py` | Launch glue; on-disk code-object cache (`ROCKE_BWD_HSACO_CACHE`); torch-free production comgr pin. |
+| `library/kernels/common/attention_bwd_run.py`, `attention_bwd_cache.py`, `attention_bwd_comgr.py` | Launch glue; on-disk code-object cache (`ROCKE_BWD_HSACO_CACHE`); the process-tree directory of comgr's code-object cache. |
 | `library/kernels/common/attention_bwd_unified.py`, `attention_bwd_unified_plan.py`, `attention_bwd_unified_run.py` | Unified (paged KV) spec, builder, request, predicate, plan, launch glue. |
 | `library/kernels/common/attention_dense_bwd_spec.py`, `attention_dense_bwd_plan.py`, `attention_dense_bwd_dq.py`, `_attention_dense_bwd_shell.py`; `library/kernels/{gfx942,gfx950}/attention_dense_bwd.py` | Dense (shape-specialised) family: spec (incl. `ArchAttentionDenseBwdSpec`, the target-parameterised spec the per-arch specs bind), plan, dense split dQ kernel, shell, per-arch builders. |
 | `library/kernels/common/_attention_bwd_*.py`, `_lse_store.py` | Family glue: tile step (`_body`), block GEMM (`_gemm`), fragments (`_frag`), LDS planner (`_lds`), rings (`_ring`), counted waits (`_counted`), VALU levers (`_valu`), tiles (`_tiles`), split dQ body (`_dqbody`), arch capabilities (`_caps`), band (`_band`), addressing (`_addr`), paged addressing (`_paged`), sinks (`_sinks`), CTA decode (`_worklist`), stage tables (`_sched`), resource refusals (`_refusals`); the forward LSE store. |
@@ -197,7 +197,7 @@ Python-only family (the C++-engine statement and waiver: `dsl_docs/instances/att
 |---------------------------------------------------|--------------------------------------------------------------------|
 | `examples/common/distribution_reduce_demo.py` | 1D distribution-driven reduce demo. |
 | `examples/common/distribution_2d_add_demo.py` | 2D distribution-driven add demo. |
-| `examples/common/ck_tile_parity.py` | Small-op parity harness vs torch reference. |
+| `examples/common/ck_tile_parity.py` | Small-op parity harness vs numpy references. |
 
 The attention parity harnesses are not examples; they live in the library, one
 per arch:

@@ -8,7 +8,7 @@ variants:
   - {arch: gfx950, encoding: "OCP e5m2"}
   - {arch: gfx1201, encoding: "OCP e5m2"}
   - {arch: gfx12-generic, encoding: "OCP e5m2"}
-status: on develop; NaN-keeping quantization pending
+status: on develop
 related: [platform/python/rocke/helpers/quant.py, platform/python/rocke/core/ir.py, platform/python/rocke/numeric/fp8.py]
 ---
 
@@ -61,23 +61,13 @@ states the same ([core/ir.py:3568-3586](../../python/rocke/core/ir.py)).
 
 ## Policy
 
-Same as [fp8e4m3](./datatype_fp8_e4m3.md#policy) (**pending**), including
-the exception for the packed routes: NaN stays NaN, +-inf and finite overflow
-give +-max, which is 57344 in both encodings, RNE, and FNUZ never produces
-`0x80` for a zero.
+Same as [fp8e4m3](./datatype_fp8_e4m3.md#policy): NaN stays NaN, +-inf and
+finite overflow give +-max, which is 57344 in both encodings, RNE, and FNUZ
+never produces `0x80` for a zero. The
+[packed routes](./datatype_fp8_e4m3.md#packed-routes) apply no clamp here
+either.
 rocKE's policy therefore differs from OCP's non-saturating e5m2, where
 infinity survives: a quantized bf8 tensor from rocKE holds no infinities.
-
-### Develop today
-
-`QUANT_MAX_ABS["bf8e5m2"]` is 57344, right for both encodings
-([helpers/quant.py:80-84](../../python/rocke/helpers/quant.py)). The only
-difference from the policy is NaN: `clamp_f32` sends it to -57344 on both
-targets. Measured on gfx950: NaN gives -57344, +-inf gives +-57344, and 61440
-and 1e30 give 57344. The unclamped paths (`skip_clamp_on_pack`, the packed
-4-wide routes) give the bare conversion's results above
-([list](./datatype_fp8_e4m3.md#develop-today)). **Pending**: NaN is kept
-([Pending changes](./README.md#pending-changes)).
 
 ## Known differences from other libraries
 
@@ -94,8 +84,8 @@ The NaN rows of the [fp8e4m3 table](./datatype_fp8_e4m3.md#known-differences-fro
 
 | rule | test |
 |---|---|
-| OCP e5m2 decode table: infinities and NaNs at the all-ones exponent, matches ml_dtypes | [tests/numeric/test_fp8_codec.py](../../tests/numeric/test_fp8_codec.py) |
-| **pending**: bare conversion on the GPU (OCP gives `0x7c` / `0xfc` for overflow and +-inf); `quantize_scalar_f32` saturates and keeps NaN | `tests/core/test_dtypes.py` on the pending branch |
+| OCP e5m2 decode table: infinities and NaNs at the all-ones exponent; OCP and FNUZ tables match ml_dtypes | [tests/numeric/test_fp8_codec.py](../../tests/numeric/test_fp8_codec.py) |
+| bare conversion on the GPU (OCP gives `0x7c` / `0xfc` for overflow and +-inf); `quantize_scalar_f32` saturates and keeps NaN | [tests/core/test_dtypes.py](../../tests/core/test_dtypes.py) (`test_fp8_conversion_does_not_saturate_on_gpu`, `test_quantize_scalar_f32_saturates_and_keeps_nan_on_gpu`) |
 
 ## How to decide
 

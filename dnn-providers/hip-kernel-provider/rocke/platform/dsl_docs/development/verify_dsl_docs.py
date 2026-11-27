@@ -198,9 +198,8 @@ _imp(
         "sig_scalar",
         "MANIFEST_SCHEMA",
         "make_simple_op_manifest",
-        "NUM_XCDS_MI300X",
-        "NUM_XCDS_MI325X",
-        "NUM_XCDS_MI350X",
+        "NUM_XCDS_GFX942",
+        "NUM_XCDS_GFX950",
         "SuperTileSwizzleResult",
         "chiplet_aware_super_tile",
         "chiplet_aware_super_tile_dynamic",
@@ -757,9 +756,8 @@ check("QDType/quant_*/quantize round-trip", t_quant)
 section("chiplet")
 
 from rocke.helpers import (
-    NUM_XCDS_MI300X,
-    NUM_XCDS_MI325X,
-    NUM_XCDS_MI350X,
+    NUM_XCDS_GFX942,
+    NUM_XCDS_GFX950,
     chiplet_transform_chunked,
     chiplet_transform_chunked_runtime,
     xcd_remap,
@@ -767,7 +765,7 @@ from rocke.helpers import (
 
 
 def t_chiplet() -> None:
-    assert NUM_XCDS_MI300X == 8 == NUM_XCDS_MI325X == NUM_XCDS_MI350X
+    assert NUM_XCDS_GFX942 == 8 == NUM_XCDS_GFX950
     b = builder("t_chiplet")
     wgid = b.block_id_x()
     chiplet_transform_chunked(b, wgid, num_wgs=512, num_xcds=8, chunk_size=64)
