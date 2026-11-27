@@ -559,6 +559,7 @@ device configurations are not ASAN-covered.
 | No tracked quarantine list (owner + ticket + expiry) for `known_bug` cases | Low | Low | `*known_bug*` excluded from gating; linkage is ad-hoc |
 | No TSAN/UBSAN/MSAN | High | High | ASAN only |
 | No independent third-party numerical reference (only in-tree host reference and unit tests) | Medium | High | Device results are compared with an in-tree host implementation; a bug shared with that host reference is not caught by any suite |
+| No measured test strength: mutation testing is not run in CI or nightly | Medium | High | Manual, out-of-tree mutation runs against selected areas; no fixed or published baseline |
 
 ---
 

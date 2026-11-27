@@ -117,6 +117,8 @@ namespace
         float                 beta      = -0.5f;
         bool                  empty     = false;
         bool                  big       = false;
+        // A symmetric product that returns not_implemented is accepted unless set.
+        bool must_succeed = false;
     };
 
     template <typename T>
@@ -189,9 +191,11 @@ namespace
                           c.device ? dbeta.ptr : &beta,
                           dy);
         }
-        // rocsparse_csrmv.h documents not_implemented for a matrix type other than
-        // general; a symmetric product that succeeds is checked.
-        if(sym)
+        // rocsparse_csrmv.h still documents not_implemented for a matrix type other
+        // than general, but the library implements the symmetric product for real
+        // data: the cases with must_succeed require it. The other symmetric cases
+        // also accept not_implemented; a symmetric product that succeeds is checked.
+        if(sym && !c.must_succeed)
             ASSERT_TRUE(st == rocsparse_status_success || st == rocsparse_status_not_implemented)
                 << st;
         else
@@ -290,6 +294,85 @@ namespace
                 if(::testing::Test::HasFailure())
                     return;
             }
+    }
+
+    TEST_F(L2DeviceCsrmv, symmetric_many_row_blocks)
+    {
+        // A symmetric matrix whose stored triangle spans many row blocks of the
+        // adaptive symmetric kernel (1024 entries each): every block but the last
+        // takes the unrolled streaming path, which has its own column index
+        // handling. Both index bases, analysed (adaptive) and not (row split). Both
+        // paths are implemented for real data, so the product must succeed and be
+        // checked (no not_implemented leniency).
+        for(const int base : {1, 0})
+            for(const int info_mode : {2, 0})
+                for(const bool device : {false, true})
+                {
+                    csrmv_case c;
+                    c.mtype        = rocsparse_matrix_type_symmetric;
+                    c.n            = 3000;
+                    c.base         = base;
+                    c.info_mode    = info_mode;
+                    c.device       = device;
+                    c.must_succeed = true;
+                    run_csrmv<float>(handle, c);
+                    if(::testing::Test::HasFailure())
+                        return;
+                }
+        csrmv_case c;
+        c.mtype        = rocsparse_matrix_type_symmetric;
+        c.n            = 2500;
+        c.base         = 1;
+        c.info_mode    = 2;
+        c.must_succeed = true;
+        run_csrmv<double>(handle, c);
+    }
+
+    TEST_F(L2DeviceCsrmv, non_square_symmetric_or_triangular_is_rejected)
+    {
+        // A symmetric or triangular matrix must be square; the shape check comes
+        // before the quick return for an empty matrix, so no product is run.
+        mat_descr general, symmetric, triangular;
+        ASSERT_TRUE(general.d && symmetric.d && triangular.d);
+        ASSERT_EQ(rocsparse_set_mat_type(symmetric, rocsparse_matrix_type_symmetric),
+                  rocsparse_status_success);
+        ASSERT_EQ(rocsparse_set_mat_type(triangular, rocsparse_matrix_type_triangular),
+                  rocsparse_status_success);
+        device_vector<float> val(std::vector<float>(4, 1.0f)), x(std::vector<float>(8, 1.0f)),
+            y(std::vector<float>(8, 1.0f));
+        device_vector<rocsparse_int> ptr(std::vector<rocsparse_int>(9, 0)),
+            ind(std::vector<rocsparse_int>(4, 0));
+        ASSERT_TRUE(val.ptr && x.ptr && y.ptr && ptr.ptr && ind.ptr);
+        const float alpha = 1.0f;
+        const float beta  = 1.0f;
+
+        auto call = [&](const mat_descr& descr, rocsparse_int m, rocsparse_int n) {
+            return csrmv<float>(handle,
+                                rocsparse_operation_none,
+                                m,
+                                n,
+                                0,
+                                &alpha,
+                                descr.d,
+                                val.ptr,
+                                ptr.ptr,
+                                ind.ptr,
+                                nullptr,
+                                x.ptr,
+                                &beta,
+                                y.ptr);
+        };
+        for(const auto& shape :
+            std::vector<std::pair<rocsparse_int, rocsparse_int>>{{5, 3}, {3, 5}, {8, 0}, {0, 8}})
+        {
+            SCOPED_TRACE(::testing::Message() << "m=" << shape.first << " n=" << shape.second);
+            EXPECT_EQ(call(general, shape.first, shape.second), rocsparse_status_success);
+            EXPECT_EQ(call(symmetric, shape.first, shape.second), rocsparse_status_invalid_size);
+            EXPECT_EQ(call(triangular, shape.first, shape.second), rocsparse_status_invalid_size);
+        }
+        // Square shapes pass the check.
+        EXPECT_EQ(call(symmetric, 4, 4), rocsparse_status_success);
+        EXPECT_EQ(call(triangular, 4, 4), rocsparse_status_success);
     }
 
     TEST_F(L2DeviceCsrmv, empty_matrix_scales_y)

@@ -288,6 +288,59 @@ namespace
         sweep<float>(fmt::coo, A, false, rocsparse_spmv_alg_coo, 32);
     }
 
+    TEST_F(L2DeviceFormats, coo_segmented_several_loops_per_block)
+    {
+        // The segmented COO kernel caps its grid at
+        //   maxblocks = (2 * multiProcessorCount * maxThreadsPerBlock - 1) / dim + 1
+        // blocks of `dim` threads, so a matrix with more than about
+        // 2 * multiProcessorCount * maxThreadsPerBlock entries makes every block loop
+        // over several chunks of entries, and a row that ends exactly at a chunk
+        // boundary has its partial sum flushed by the first thread of the next
+        // chunk. The matrices are sized from the device so that every block runs
+        // at least two loops wherever the test runs: twice the cap plus a margin.
+        //
+        // Chunks hold `dim` = 256 entries (128 only above 52 entries per device
+        // thread, far larger than these matrices), so a chunk boundary is a multiple
+        // of 256. The first matrix puts a row end on every multiple of 256 (64 rows
+        // of 3, 4, 5, ..., 4 entries hold exactly 256), so every boundary flushes;
+        // the second has rows of 1 to 5 entries (period 15, coprime with 256), so
+        // about a third of the boundaries end a row and the others carry a row over.
+        int             dev  = 0;
+        hipDeviceProp_t prop = {};
+        ASSERT_EQ(hipGetDevice(&dev), hipSuccess);
+        ASSERT_EQ(hipGetDeviceProperties(&prop, dev), hipSuccess);
+        const int64_t cap = 2 * static_cast<int64_t>(prop.multiProcessorCount)
+                            * static_cast<int64_t>(prop.maxThreadsPerBlock);
+
+        const int32_t rows_aligned = static_cast<int32_t>((2 * cap) / 4 + 10000);
+        const auto    aligned      = make_csr_by_length<float>(
+            rows_aligned, 2003, 0, [](int32_t i) { return (i % 64 == 63) ? 4 : 3 + (i % 3); });
+        ASSERT_GT(static_cast<int64_t>(aligned.nnz()), 2 * cap);
+        for(const auto f : {fmt::coo, fmt::coo_aos})
+            for(const int base : {0, 1})
+            {
+                mv_case c;
+                c.format           = f;
+                c.alg              = rocsparse_spmv_alg_coo;
+                c.base             = base;
+                c.preprocess       = (base == 1);
+                host_csr<float> Ab = aligned;
+                rebase(Ab, base);
+                run_generic<float>(handle, Ab, c);
+                if(HasFailure())
+                    return;
+            }
+
+        const int32_t rows_mixed = static_cast<int32_t>((2 * cap) / 3 + 10000);
+        const auto    mixed
+            = make_csr_by_length<float>(rows_mixed, 2003, 0, [](int32_t i) { return 1 + (i % 5); });
+        ASSERT_GT(static_cast<int64_t>(mixed.nnz()), 2 * cap);
+        mv_case c;
+        c.format = fmt::coo;
+        c.alg    = rocsparse_spmv_alg_coo;
+        run_generic<float>(handle, mixed, c);
+    }
+
     TEST_F(L2DeviceFormats, coo_double_and_complex)
     {
         sweep<double>(fmt::coo,

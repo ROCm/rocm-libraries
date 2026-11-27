@@ -134,11 +134,12 @@ namespace convut
     // Value with the given real and imaginary parts (the imaginary part is ignored for
     // real types).
     template <typename T>
-    T make_val(int re, int im = 0)
+    T make_val(double re, double im = 0)
     {
         if constexpr(is_complex_v<T>)
         {
-            return T(re, im);
+            using R = decltype(std::abs(T{}));
+            return T(static_cast<R>(re), static_cast<R>(im));
         }
         else
         {

@@ -37,20 +37,22 @@ namespace
 {
     struct GemmiCase
     {
-        int64_t m      = 7;
-        int64_t n      = 6;
-        int64_t k      = 5;
-        cplx    alpha  = cplx(2.0, 0.0);
-        cplx    beta   = cplx(-1.0, 0.0);
-        bool    device = false;
-        int64_t pad    = 2;
+        int64_t              m      = 7;
+        int64_t              n      = 6;
+        int64_t              k      = 5;
+        cplx                 alpha  = cplx(2.0, 0.0);
+        cplx                 beta   = cplx(-1.0, 0.0);
+        bool                 device = false;
+        int64_t              pad    = 2;
+        rocsparse_index_base base   = rocsparse_index_base_zero;
     };
 
     template <typename T>
     void run_gemmi(rocsparse_handle handle, const GemmiCase& c)
     {
         SCOPED_TRACE("m=" + std::to_string(c.m) + " n=" + std::to_string(c.n)
-                     + " k=" + std::to_string(c.k) + " device=" + std::to_string(c.device));
+                     + " k=" + std::to_string(c.k) + " device=" + std::to_string(c.device)
+                     + " base=" + std::to_string(static_cast<int>(c.base)));
         Rng         rng(static_cast<uint64_t>(c.m * 7 + c.n * 3 + c.k) + 11);
         const Csr   B  = random_csr<T>(c.n, c.k, 4, rng); // n x k, op(B) = B^T is k x n
         const Dense Ad = random_dense<T>(c.m, c.k, rng);
@@ -61,12 +63,13 @@ namespace
 
         DevBuf<T>             dA  = up_raw<T>(store_dense<T>(Ad, rocsparse_order_column, lda));
         DevBuf<T>             dC  = up_raw<T>(store_dense<T>(C0, rocsparse_order_column, ldc));
-        DevBuf<rocsparse_int> ptr = up_idx<rocsparse_int>(B.ptr);
-        DevBuf<rocsparse_int> col = up_idx<rocsparse_int>(B.col);
+        const int64_t         b   = static_cast<int64_t>(c.base);
+        DevBuf<rocsparse_int> ptr = up_idx<rocsparse_int>(B.ptr, b);
+        DevBuf<rocsparse_int> col = up_idx<rocsparse_int>(B.col, b);
         DevBuf<T>             val = up_val<T>(B.val);
         ASSERT_TRUE(dA.ptr && dC.ptr && ptr.ptr && col.ptr && val.ptr);
 
-        MatDescrH        descr;
+        MatDescrH        descr(c.base);
         Scalar<T>        alpha(c.alpha, c.device);
         Scalar<T>        beta(c.beta, c.device);
         PointerModeGuard mode(handle, mode_of(c.device));
@@ -163,4 +166,28 @@ TEST_F(ExtraGemmi, empty_C)
         if(HasFatalFailure())
             return;
     }
+}
+
+// One-based B: the index base has to be removed from the column index of B,
+// which selects the column of A (a kernel that keeps it shifts every product by
+// one column). Every thread-block size of the wave32 launch tuning (m <= 64,
+// <= 128, larger; one size on wave64) and both scalar modes.
+TEST_F(ExtraGemmi, index_base_one)
+{
+    for(int64_t m : {5, 64, 65, 129})
+        for(bool device : {false, true})
+        {
+            GemmiCase c;
+            c.m      = m;
+            c.n      = 9;
+            c.k      = 11;
+            c.device = device;
+            c.base   = rocsparse_index_base_one;
+            run_gemmi<float>(handle, c);
+            if(HasFatalFailure())
+                return;
+            run_gemmi<rocsparse_double_complex>(handle, c);
+            if(HasFatalFailure())
+                return;
+        }
 }

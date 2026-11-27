@@ -22,9 +22,10 @@
  *
  * ************************************************************************ */
 
-// check_matrix_csr / check_matrix_gebsr / check_matrix_coo: rows of different lengths (the
-// CSR checker picks a lane-group width from the average row length), unsorted block
-// columns, and the value types of the COO checker.
+// check_matrix_csr / check_matrix_gebsr / check_matrix_coo / check_matrix_ell: rows of
+// different lengths (the CSR checker picks a lane-group width from the average row length),
+// unsorted block columns, the value types of the COO checker, and a repeated column in a
+// sorted ELL row.
 
 #include "unit_test_device_conv_common.hpp"
 
@@ -318,5 +319,74 @@ namespace
         run_coo<rocsparse_double_complex>(handle);
         // A non-general matrix type needs a square matrix.
         check_coo<float>(handle, 3, 5, {1.0f, 2.0f}, {0, 1}, {0, 3}, 0, sym_type, sorted, false);
+    }
+
+    // ------------------------------------------------------------------
+    // ELL: column-major storage, entry j of row r at index m * j + r, padding -1.
+    // ------------------------------------------------------------------
+    rocsparse_data_status check_ell(rocsparse_handle          handle,
+                                    I                         m,
+                                    I                         n,
+                                    I                         width,
+                                    const std::vector<float>& val,
+                                    const std::vector<I>&     ind,
+                                    int                       base,
+                                    rocsparse_storage_mode    storage)
+    {
+        DevBuf<I>     d_ind(ind);
+        DevBuf<float> d_val(val);
+        const auto    call = [&](auto f, auto... tail) {
+            return f(handle,
+                     m,
+                     n,
+                     width,
+                     d_val.get(),
+                     d_ind.get(),
+                     base_of(base),
+                     gen_type,
+                     rocsparse_fill_mode_lower,
+                     storage,
+                     tail...);
+        };
+        return run_checker(
+            call, rocsparse_scheck_matrix_ell_buffer_size, rocsparse_scheck_matrix_ell);
+    }
+
+    // A sorted ELL row must have strictly increasing columns: a repeated column is a
+    // defect like a decreasing pair. The kernel reports it as a sorting error; the header
+    // promises duplicate detection, so duplicate_entry is accepted as well. In unsorted
+    // storage the checker does not look for duplicates at all (rocm-libraries#15891), so
+    // that case is not pinned here; a decreasing pair is legitimately fine there.
+    TEST_F(ConvCheck, CheckEllDuplicateColumn)
+    {
+        const I m = 3, n = 6, width = 3;
+        for(int base : {0, 1})
+        {
+            SCOPED_TRACE("base " + std::to_string(base));
+            // Row 0: columns 0, 2, 4. Row 1: columns 1, 3 and padding. Row 2: 0, 1, 5.
+            std::vector<I> ind(m * width);
+            const I        cols[3][3] = {{0, 2, 4}, {1, 3, -1}, {0, 1, 5}};
+            for(I r = 0; r < m; ++r)
+                for(I j = 0; j < width; ++j)
+                    ind[m * j + r] = cols[r][j] < 0 ? I(-1) : cols[r][j] + base;
+            const std::vector<float> val(m * width, 1.0f);
+            EXPECT_EQ(check_ell(handle, m, n, width, val, ind, base, sorted), ds_ok);
+            EXPECT_EQ(check_ell(handle, m, n, width, val, ind, base, unsorted), ds_ok);
+
+            // Row 2 repeats column 1 in its third slot: 0, 1, 1 is sorted but not strictly.
+            std::vector<I> dup    = ind;
+            dup[m * 2 + 2]        = 1 + base;
+            const auto dup_status = check_ell(handle, m, n, width, val, dup, base, sorted);
+            EXPECT_TRUE(dup_status == rocsparse_data_status_invalid_sorting
+                        || dup_status == rocsparse_data_status_duplicate_entry)
+                << "data status " << dup_status;
+
+            // Row 0 with its last two columns swapped: 0, 4, 2.
+            std::vector<I> dec = ind;
+            std::swap(dec[m * 1 + 0], dec[m * 2 + 0]);
+            EXPECT_EQ(check_ell(handle, m, n, width, val, dec, base, sorted),
+                      rocsparse_data_status_invalid_sorting);
+            EXPECT_EQ(check_ell(handle, m, n, width, val, dec, base, unsorted), ds_ok);
+        }
     }
 } // namespace

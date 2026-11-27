@@ -31,8 +31,9 @@
 //   C = alpha * A * B              (beta == nullptr)
 //   C = beta * D                   (alpha == nullptr)
 //
-// For every case the whole of C (row pointer, column indices, block values) is
-// compared with a host reference.
+// For every compute case the whole of C (row pointer, column indices, block
+// values) is compared with a host reference. The buffer size tests compare
+// the sizes the library reports and check that the reported buffer is enough.
 //
 #include "unit_test_extra_common.hpp"
 
@@ -62,6 +63,9 @@ namespace
         bool                 empty_B      = false;
         bool                 empty_D      = false;
         uint64_t             seed         = 1;
+        // Bytes allocated after the buffer the library asks for, filled with a guard
+        // value that the nnz and compute stages must leave untouched.
+        size_t guard_tail = 0;
     };
 
     std::string describe(const GemmCase& c)
@@ -195,8 +199,11 @@ namespace
                                                   &bsz),
                       rocsparse_status_success);
         }
-        DevBuf<char> buffer(bsz);
+        DevBuf<char> buffer(bsz + c.guard_tail);
         ASSERT_TRUE(buffer.ptr);
+        constexpr char guard = static_cast<char>(0xA5);
+        if(c.guard_tail > 0)
+            ASSERT_EQ(hipMemset(buffer.ptr, guard, bsz + c.guard_tail), hipSuccess);
 
         rocsparse_int         nnzb_host = -1;
         DevBuf<rocsparse_int> nnzb_dev(size_t{1});
@@ -335,6 +342,13 @@ namespace
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
         expect_bsr_equal<T>(pC.host(), iC.host(), vC.host(), want, c.dir, c.base_C, !c.bsr);
+        if(c.guard_tail > 0)
+        {
+            const std::vector<char> b = buffer.host();
+            EXPECT_EQ(std::count(b.begin() + bsz, b.begin() + bsz + c.guard_tail, guard),
+                      static_cast<std::ptrdiff_t>(c.guard_tail))
+                << "written past the " << bsz << " byte buffer";
+        }
     }
 
     template <typename T>
@@ -808,4 +822,106 @@ TEST_F(ExtraGemm, argument_errors)
             if(HasFatalFailure())
                 return;
         }
+}
+
+// ---------------------------------------------------------------------------
+// The buffer the library asks for is enough: the nnz and compute stages leave a
+// guard tail after it untouched, and C is right. The second shape has rows with
+// more than 32 intermediate products and more than 16 entries of C, which go
+// through the grouped kernels of both stages.
+// ---------------------------------------------------------------------------
+TEST_F(ExtraGemm, csrgemm_buffer_is_large_enough)
+{
+    struct Shape
+    {
+        int64_t m, n, k, max_row_nnz;
+    };
+    for(const Shape& s : {Shape{300, 7, 5, 3}, Shape{300, 64, 64, 12}})
+        for(Mode mode : {Mode::multadd, Mode::mult, Mode::add})
+        {
+            GemmCase c;
+            c.bsr          = false;
+            c.bd           = 1;
+            c.mode         = mode;
+            c.mb           = s.m;
+            c.nb           = s.n;
+            c.kb           = s.k;
+            c.max_row_nnzb = s.max_row_nnz;
+            c.guard_tail   = 4096;
+            run_gemm<float>(handle, c);
+            if(HasFatalFailure())
+                return;
+        }
+}
+
+// ---------------------------------------------------------------------------
+// The buffer of C = alpha * A * B + beta * D holds at least the working arrays
+// of C = alpha * A * B (the grouping of the rows of C and their permutation),
+// and adding entries to D can only add to it. With alpha and beta given,
+// nnz_D == 0 selects the product alone; so the size must not go down when D
+// gains entries.
+// ---------------------------------------------------------------------------
+TEST_F(ExtraGemm, csrgemm_buffer_size_does_not_shrink_with_nnz_D)
+{
+    const int64_t m = 300, n = 7, k = 5;
+    Rng           rng(77);
+    const Bsr     A = random_bsr<float>(m, k, 1, 3, rng);
+    const Bsr     B = random_bsr<float>(k, n, 1, 3, rng);
+    const Bsr     D = random_bsr<float>(m, n, 1, 4, rng);
+    ASSERT_GT(A.nnzb(), 0);
+    ASSERT_GT(B.nnzb(), 0);
+    ASSERT_GT(D.nnzb(), 40);
+
+    DevBuf<rocsparse_int> pA = up_idx<rocsparse_int>(A.ptr), iA = up_idx<rocsparse_int>(A.col);
+    DevBuf<rocsparse_int> pB = up_idx<rocsparse_int>(B.ptr), iB = up_idx<rocsparse_int>(B.col);
+    DevBuf<rocsparse_int> pD = up_idx<rocsparse_int>(D.ptr), iD = up_idx<rocsparse_int>(D.col);
+    // Row pointers of D with the first `nnz` of its entries (the rest of the rows empty).
+    auto d_ptr_with = [&](int64_t nnz) {
+        std::vector<int64_t> p(D.ptr);
+        for(auto& v : p)
+            v = std::min(v, nnz);
+        return up_idx<rocsparse_int>(p);
+    };
+    DevBuf<rocsparse_int> pD0 = d_ptr_with(0), pD1 = d_ptr_with(1), pD40 = d_ptr_with(40);
+    ASSERT_TRUE(pA.ptr && iA.ptr && pB.ptr && iB.ptr && pD.ptr && iD.ptr && pD0.ptr && pD1.ptr
+                && pD40.ptr);
+    MatDescrH   dA, dB, dD;
+    const float alpha = 2.0f, beta = -1.0f;
+
+    auto size_with = [&](rocsparse_int nnz_D, const DevBuf<rocsparse_int>& ptr_D) {
+        MatInfoH info;
+        GemmArgs g;
+        g.bsr       = false;
+        g.handle    = handle;
+        g.mb        = static_cast<rocsparse_int>(m);
+        g.nb        = static_cast<rocsparse_int>(n);
+        g.kb        = static_cast<rocsparse_int>(k);
+        g.alpha     = &alpha;
+        g.beta      = &beta;
+        g.dA        = dA.d;
+        g.dB        = dB.d;
+        g.dD        = dD.d;
+        g.nA        = static_cast<rocsparse_int>(A.nnzb());
+        g.nB        = static_cast<rocsparse_int>(B.nnzb());
+        g.nD        = nnz_D;
+        g.pA        = pA.ptr;
+        g.iA        = iA.ptr;
+        g.pB        = pB.ptr;
+        g.iB        = iB.ptr;
+        g.pD        = ptr_D.ptr;
+        g.iD        = iD.ptr;
+        g.info      = info.i;
+        size_t size = 0;
+        EXPECT_EQ(gemm_buffer_size(g, &size), rocsparse_status_success) << "nnz_D " << nnz_D;
+        return size;
+    };
+
+    const size_t product_only = size_with(0, pD0);
+    const size_t with_one     = size_with(1, pD1);
+    const size_t with_forty   = size_with(40, pD40);
+    const size_t with_all     = size_with(static_cast<rocsparse_int>(D.nnzb()), pD);
+    EXPECT_GT(product_only, size_t{0});
+    EXPECT_GE(with_one, product_only);
+    EXPECT_GE(with_forty, with_one);
+    EXPECT_GE(with_all, with_forty);
 }

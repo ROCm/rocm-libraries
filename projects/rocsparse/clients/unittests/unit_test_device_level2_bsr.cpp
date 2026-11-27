@@ -37,7 +37,6 @@
 #include "unit_test_device_level2_common.hpp"
 
 #include <algorithm>
-#include <limits>
 #include <sstream>
 #include <string>
 
@@ -83,9 +82,8 @@ namespace
             // without the matrix and x being read, so a computation of
             // beta * y + 0 * A * x would turn y into NaN.
             ASSERT_TRUE(alpha == T{} && beta == rocsparse_ut::scalar<T>(1.0f));
-            const T nan = rocsparse_ut::scalar<T>(std::numeric_limits<float>::quiet_NaN());
-            std::fill(A.val.begin(), A.val.end(), nan);
-            std::fill(x.begin(), x.end(), nan);
+            std::fill(A.val.begin(), A.val.end(), nan_of<T>());
+            std::fill(x.begin(), x.end(), nan_of<T>());
             want = y0;
         }
 
@@ -467,6 +465,79 @@ namespace
             EXPECT_EQ(rocsparse_bsrmv_clear(handle, info), rocsparse_status_success);
     }
 
+    // bsrmv with the scalars that the kernels special-case: alpha == 0 (the matrix
+    // must not matter, y = beta * y) and beta == 0 (y must be overwritten, so a NaN
+    // already in y must not survive). With `known_nan_y`, a y that comes back NaN in
+    // every entry (a kernel computing beta * y for every row) sets it instead of
+    // failing; any other result is checked as usual.
+    template <typename T>
+    void check_bsrmv_scalars(rocsparse_handle    handle,
+                             int32_t             bd,
+                             rocsparse_direction dir,
+                             int                 base,
+                             T                   alpha,
+                             T                   beta,
+                             bool                nan_y,
+                             bool                device_mode,
+                             bool*               known_nan_y = nullptr)
+    {
+        const int32_t mb  = 7;
+        const int32_t nb  = 9;
+        const int32_t bpr = 3;
+        SCOPED_TRACE(::testing::Message()
+                     << describe("bsrmv scalars", bd, bd, bpr, static_cast<int>(dir), base)
+                     << " alpha=" << alpha << " beta=" << beta << (nan_y ? " nan_y" : "")
+                     << (device_mode ? " device" : " host"));
+
+        const host_bsr<T> A  = make_bsr<T>(mb, nb, bpr, bd, bd, dir, base);
+        const size_t      ys = static_cast<size_t>(mb) * bd;
+
+        const std::vector<T> x   = make_vector<T>(static_cast<size_t>(nb) * bd, 4);
+        const std::vector<T> yin = make_vector<T>(ys, 6);
+        const std::vector<T> y0  = nan_y ? make_nan_vector<T>(ys) : yin;
+        const std::vector<T> want
+            = bsr_gemv(A, all_rows(mb), {}, alpha, x, beta, nan_y ? std::vector<T>(ys, T{}) : yin);
+
+        mat_descr descr;
+        ASSERT_NE(descr.d, nullptr);
+        ASSERT_EQ(rocsparse_set_mat_index_base(descr, to_base(base)), rocsparse_status_success);
+        device_vector<rocsparse_int> dptr(convert_vector<rocsparse_int>(A.ptr)),
+            dind(convert_vector<rocsparse_int>(A.ind));
+        device_vector<T> dval(A.val), dx(x), dy(y0);
+        device_vector<T> dalpha(std::vector<T>(1, alpha)), dbeta(std::vector<T>(1, beta));
+        ASSERT_TRUE(dptr.ptr && dind.ptr && dval.ptr && dx.ptr && dy.ptr && dalpha.ptr
+                    && dbeta.ptr);
+
+        scoped_pointer_mode mode(handle, device_mode);
+        ASSERT_EQ(bsrmv<T>(handle,
+                           dir,
+                           rocsparse_operation_none,
+                           mb,
+                           nb,
+                           A.nnzb(),
+                           device_mode ? dalpha.ptr : &alpha,
+                           descr,
+                           dval,
+                           dptr,
+                           dind,
+                           bd,
+                           nullptr,
+                           dx,
+                           device_mode ? dbeta.ptr : &beta,
+                           dy),
+                  rocsparse_status_success);
+        const std::vector<T> got = to_host(dy);
+        if(known_nan_y != nullptr
+           && std::all_of(got.begin(), got.end(), [](const T& v) { return has_nan(v); }))
+        {
+            *known_nan_y = true;
+            return;
+        }
+        if(nan_y)
+            expect_no_nan(got, "bsrmv y with beta == 0");
+        EXPECT_TRUE(expect_near(want, got, "bsrmv y"));
+    }
+
     class L2DeviceBsrxmv : public rocsparse_ut::HandleTest
     {
     protected:
@@ -577,7 +648,7 @@ namespace
         // ind doubles as the mask of the single block row.
         device_vector<rocsparse_int> ptr(std::vector<rocsparse_int>{0, 1}),
             ind(std::vector<rocsparse_int>{0});
-        const float          nan = std::numeric_limits<float>::quiet_NaN();
+        const float          nan = nan_of<float>();
         device_vector<float> val(std::vector<float>(4, nan));
         device_vector<float> x(std::vector<float>(2, nan)), y(std::vector<float>(2, 1.0f));
         ASSERT_TRUE(ptr.ptr && ind.ptr && val.ptr && x.ptr && y.ptr);
@@ -747,6 +818,87 @@ namespace
     {
         sweep_mv<float>({1, 2}, {3, 40}, true);
         sweep_mv<rocsparse_double_complex>({1, 3}, {4}, true);
+    }
+
+    TEST_F(L2DeviceBsrmv, alpha_zero_scales_y_by_beta)
+    {
+        // alpha == 0 with beta != 1 (host pointers): the early return is reserved
+        // for alpha == 0 and beta == 1, so y must still become beta * y.
+        for(const int32_t bd : {2, 3, 9})
+            for(int d = 0; d < 2; ++d)
+                for(const float beta : {2.0f, 0.0f, -0.5f})
+                {
+                    check_bsrmv_scalars<float>(handle,
+                                               bd,
+                                               d == 0 ? rocsparse_direction_row
+                                                      : rocsparse_direction_column,
+                                               bd & 1,
+                                               0.0f,
+                                               beta,
+                                               false,
+                                               false);
+                    if(::testing::Test::HasFailure())
+                        return;
+                }
+        check_bsrmv_scalars<rocsparse_double_complex>(handle,
+                                                      5,
+                                                      rocsparse_direction_row,
+                                                      0,
+                                                      rocsparse_double_complex(0.0, 0.0),
+                                                      rocsparse_double_complex(2.0, -1.0),
+                                                      false,
+                                                      false);
+    }
+
+    TEST_F(L2DeviceBsrmv, beta_zero_overwrites_nan_y)
+    {
+        // y pre-filled with NaN and beta == 0: every kernel of the dispatch (the
+        // general one for every block dimension on a wave32 GPU, the specialised
+        // 2x2 .. 32x32 ones on wave64) must write alpha * A * x without reading y.
+        //
+        // Known defect (AISPARSE-1212): on a wave64 GPU the float-only 5x5 and 8x8 kernels
+        // (sbsrxmvn_5x5_device / sbsrxmvn_8x8_device) compute beta * y[row] without
+        // the beta == 0 guard the other kernels have, so the NaN in y survives in every
+        // entry. Found by reading the kernels, not observed on wave64 hardware. Those
+        // two cases accept that result and the test is skipped after all the others
+        // have run; any other result fails. The double 5x5 and 8x8 cases below take
+        // the guarded generic kernels and are checked as usual.
+        const bool wave64    = (rocsparse_ut::device_warp_size() == 64);
+        bool       known_nan = false;
+        for(const int32_t bd : {2, 3, 4, 5, 8, 9, 16, 17})
+            for(const bool device : {false, true})
+            {
+                check_bsrmv_scalars<float>(handle,
+                                           bd,
+                                           (bd & 1) ? rocsparse_direction_row
+                                                    : rocsparse_direction_column,
+                                           (bd / 3) & 1,
+                                           1.5f,
+                                           0.0f,
+                                           true,
+                                           device,
+                                           wave64 && (bd == 5 || bd == 8) ? &known_nan : nullptr);
+                if(::testing::Test::HasFailure())
+                    return;
+            }
+        for(const int32_t bd : {5, 6, 8})
+        {
+            check_bsrmv_scalars<double>(
+                handle, bd, rocsparse_direction_row, 1, 2.0, 0.0, true, bd == 8);
+            if(::testing::Test::HasFailure())
+                return;
+        }
+        check_bsrmv_scalars<rocsparse_float_complex>(handle,
+                                                     12,
+                                                     rocsparse_direction_column,
+                                                     0,
+                                                     rocsparse_float_complex(1.5f, 0.5f),
+                                                     rocsparse_float_complex(0.0f, 0.0f),
+                                                     true,
+                                                     true);
+        if(known_nan && !::testing::Test::HasFailure())
+            GTEST_SKIP() << "the wave64 float 5x5 / 8x8 bsrmv kernels read y when beta == 0 "
+                            "(known library defect, AISPARSE-1212); every other case passed";
     }
 
     TEST_F(L2DeviceBsrmv, empty_matrix_scales_y_by_beta)

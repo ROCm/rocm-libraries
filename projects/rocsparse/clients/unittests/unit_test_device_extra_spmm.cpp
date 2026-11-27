@@ -31,6 +31,8 @@
 //   library/src/level3/rocsparse_csrmm_template_row_split.cpp
 //                                                  (row-split kernels for every
 //                                                   dense column count)
+//   library/src/level3/rocsparse_coomm_*.cpp       (COO atomic / segmented)
+//   library/src/level3/rocsparse_bsrmm_*.cpp       (BSR small / large blocks)
 //
 // All tests go through the public API (rocsparse_spmm, rocsparse_?csrmm). The
 // complete C matrix is compared with a host reference computed in double
@@ -61,6 +63,11 @@ namespace
         bool                 long_rows  = false; // one row touching all columns, one empty row
         int64_t              ld_pad     = 3;
         rocsparse_index_base base       = rocsparse_index_base_zero;
+        // Explicit number of non-zeros per row (overrides max_nnz / long_rows).
+        std::vector<int64_t> row_lengths;
+        // Start from a C filled with quiet NaN: only meaningful with beta == 0,
+        // where the library must overwrite C instead of scaling it.
+        bool nan_C = false;
         // BSR only: block dimension and block direction; m and k count blocks.
         int64_t             bd  = 3;
         rocsparse_direction dir = rocsparse_direction_row;
@@ -76,7 +83,9 @@ namespace
                + " oC=" + std::to_string(static_cast<int>(c.order_C)) + " m=" + std::to_string(c.m)
                + " k=" + std::to_string(c.k) + " n=" + std::to_string(c.n) + " dev="
                + std::to_string(c.device) + " base=" + std::to_string(static_cast<int>(c.base))
-               + " bd=" + std::to_string(c.bd);
+               + " bd=" + std::to_string(c.bd) + " dir=" + std::to_string(static_cast<int>(c.dir))
+               + " beta=(" + std::to_string(c.beta.real()) + "," + std::to_string(c.beta.imag())
+               + ")" + (c.nan_C ? " nan_C" : "");
     }
 
     // Scalar (point) CSR of a BSR matrix.
@@ -129,6 +138,11 @@ namespace
                 len[1] = c.k;
                 len[2] = 0;
             }
+            if(!c.row_lengths.empty())
+            {
+                ASSERT_EQ(static_cast<int64_t>(c.row_lengths.size()), c.m);
+                len = c.row_lengths;
+            }
             A = csr_with_row_lengths<T>(c.m, c.k, len, rng);
         }
 
@@ -139,7 +153,13 @@ namespace
         const Dense opB_logical = random_dense<T>(K, c.n, rng);
         // apply_op is an involution, so applying it gives the stored operand.
         const Dense B_stored = apply_op(opB_logical, c.opB);
-        const Dense C0       = random_dense<T>(M, c.n, rng);
+        Dense       C0       = random_dense<T>(M, c.n, rng);
+        if(c.nan_C)
+        {
+            ASSERT_EQ(c.beta, cplx(0.0, 0.0)) << "nan_C needs beta == 0";
+            for(auto& x : C0.v)
+                x = to_c<T>(rocsparse_ut::nan_of<T>());
+        }
 
         const int64_t ldb = min_ld(B_stored, c.order_B) + c.ld_pad;
         const int64_t ldc = min_ld(C0, c.order_C) + c.ld_pad;
@@ -220,10 +240,12 @@ namespace
             return;
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
+        // With beta == 0 the initial C (NaN here) must not take part: close()
+        // rejects a non-finite difference, so any NaN left in C fails below.
         const Dense want = axpby(to_c<T>(alpha.h),
                                  matmul(apply_op(dense_of(A), c.opA), opB_logical),
-                                 to_c<T>(beta.h),
-                                 C0);
+                                 c.nan_C ? cplx(0.0, 0.0) : to_c<T>(beta.h),
+                                 c.nan_C ? Dense(M, c.n) : C0);
         expect_dense_equal<T>(dC.host(), want, c.order_C, ldc, "C");
         // B is an input only.
         expect_dense_equal<T>(dB.host(), B_stored, c.order_B, ldb, "B");
@@ -363,7 +385,8 @@ TEST_F(ExtraSpmm, scalar_combinations)
 }
 
 // ---------------------------------------------------------------------------
-// beta == 0 for every format, algorithm and kernel family.
+// beta == 0 for every format, algorithm and kernel family. C starts as NaN, so
+// a path that scales C instead of overwriting it fails.
 // ---------------------------------------------------------------------------
 TEST_F(ExtraSpmm, beta_zero)
 {
@@ -392,6 +415,7 @@ TEST_F(ExtraSpmm, beta_zero)
                     c.opA       = opA;
                     c.device    = device;
                     c.beta      = cplx(0.0, 0.0);
+                    c.nan_C     = true;
                     c.long_rows = true;
                     run_spmm<float, int32_t, int32_t>(handle, c);
                     if(HasFatalFailure())
@@ -548,6 +572,19 @@ TEST_F(ExtraSpmm, legacy_csrmm_values_and_errors)
     EXPECT_EQ(call.set<OP_A>(T_).set<LDC>(5)(), rocsparse_status_invalid_size);
     EXPECT_EQ(call.set<OP_A>(T_).set<OP_B>(T_).set<LDB>(3).set<LDC>(6)(),
               rocsparse_status_invalid_size);
+
+    // An empty product (k == 0, or m == 0 with a transposed A) still has to
+    // scale a non-empty C, so a missing C is rejected even though the sparse
+    // matrix is never touched. beta == 1 on purpose: for a library that skips
+    // the check the scale is then a no-op that reports success (a clean wrong
+    // status) instead of a kernel launch on a null C. A null beta with a valid C
+    // is rejected by the same check; a library that skipped it would dereference
+    // the null host scalar.
+    EXPECT_EQ(call.set<K>(0).set<NNZ>(0).set<C>(nullptr).set<BETA>(&one)(),
+              rocsparse_status_invalid_pointer);
+    EXPECT_EQ(call.set<OP_A>(T_).set<M>(0).set<NNZ>(0).set<C>(nullptr).set<BETA>(&one)(),
+              rocsparse_status_invalid_pointer);
+    EXPECT_EQ(call.set<K>(0).set<NNZ>(0).set<BETA>(nullptr)(), rocsparse_status_invalid_pointer);
 }
 
 // ---------------------------------------------------------------------------
@@ -634,4 +671,168 @@ TEST_F(ExtraSpmm, alpha_zero_beta_one_is_a_no_op)
             if(HasFatalFailure())
                 return;
         }
+}
+
+// ---------------------------------------------------------------------------
+// beta == 0 must overwrite C, not scale it: a C that starts as NaN comes out
+// finite. Row-split CSR for both the n <= 32 (shared) and the n > 32 (8 and 1
+// column) NN kernels, host and device scalars.
+// ---------------------------------------------------------------------------
+TEST_F(ExtraSpmm, csr_row_split_beta_zero_overwrites_nan_C)
+{
+    for(int64_t n : {5, 32, 33, 40, 64, 72})
+        for(rocsparse_order oC : all_orders)
+            for(bool device : {false, true})
+            {
+                SpmmCase c;
+                c.alg       = rocsparse_spmm_alg_csr_row_split;
+                c.n         = n;
+                c.m         = 11;
+                c.k         = 9;
+                c.max_nnz   = 5;
+                c.long_rows = true;
+                c.order_C   = oC;
+                c.device    = device;
+                c.beta      = cplx(0.0, 0.0);
+                c.nan_C     = true;
+                run_spmm<float, int32_t, int32_t>(handle, c);
+                if(HasFatalFailure())
+                    return;
+                run_spmm<rocsparse_double_complex, int32_t, int32_t>(handle, c);
+                if(HasFatalFailure())
+                    return;
+            }
+}
+
+// ---------------------------------------------------------------------------
+// One-based indices through the generic API. The stored indices are all
+// shifted by one, so a kernel that keeps the base in a column index reads B
+// one row too far. CSR: the row-split n <= 32 shared kernel and the n > 32
+// main kernels, plus nnz-split and merge-path.
+// ---------------------------------------------------------------------------
+TEST_F(ExtraSpmm, csr_index_base_one)
+{
+    const std::vector<rocsparse_spmm_alg> algs = {rocsparse_spmm_alg_csr_row_split,
+                                                  rocsparse_spmm_alg_csr_nnz_split,
+                                                  rocsparse_spmm_alg_csr_merge_path};
+    for(rocsparse_spmm_alg alg : algs)
+        for(int64_t n : {5, 33, 40, 64, 72})
+            for(rocsparse_operation opB : op_nt)
+                for(rocsparse_order oB : all_orders)
+                {
+                    SpmmCase c;
+                    c.alg       = alg;
+                    c.n         = n;
+                    c.m         = 11;
+                    c.k         = 9;
+                    c.max_nnz   = 5;
+                    c.long_rows = true;
+                    c.opB       = opB;
+                    c.order_B   = oB;
+                    c.base      = rocsparse_index_base_one;
+                    run_spmm<float, int32_t, int32_t>(handle, c);
+                    if(HasFatalFailure())
+                        return;
+                }
+}
+
+// ---------------------------------------------------------------------------
+// One-based COO: atomic (the 64- and 128-column main kernels, which exist for
+// 64, 128, 192 and 256 columns at a time, plus the remainder kernel for n % 64
+// columns), segmented and segmented-atomic. B stays column major, so
+// transpose selects the TRANSB kernels (row-major B with a transpose would be
+// the same bytes and the same kernels as column-major B without).
+// ---------------------------------------------------------------------------
+TEST_F(ExtraSpmm, coo_index_base_one)
+{
+    const std::vector<rocsparse_spmm_alg> algs = {rocsparse_spmm_alg_coo_atomic,
+                                                  rocsparse_spmm_alg_coo_segmented,
+                                                  rocsparse_spmm_alg_coo_segmented_atomic};
+    for(rocsparse_spmm_alg alg : algs)
+        for(int64_t n : {1, 5, 64, 65, 72, 128, 130})
+            for(rocsparse_operation opB : op_nt)
+            {
+                SpmmCase c;
+                c.fmt       = SFmt::coo;
+                c.alg       = alg;
+                c.n         = n;
+                c.m         = 11;
+                c.k         = 9;
+                c.max_nnz   = 5;
+                c.long_rows = true;
+                c.opB       = opB;
+                c.order_B   = rocsparse_order_column; // none -> NN, transpose -> NT kernels
+                c.base      = rocsparse_index_base_one;
+                run_spmm<float, int32_t, int32_t>(handle, c);
+                if(HasFatalFailure())
+                    return;
+            }
+}
+
+// ---------------------------------------------------------------------------
+// One-based BSR: block_dim 2 (small-block kernel) and 3 (large-block kernel),
+// both block directions.
+// ---------------------------------------------------------------------------
+TEST_F(ExtraSpmm, bsr_index_base_one)
+{
+    for(int64_t bd : {2, 3})
+        for(int64_t n : {1, 5, 16})
+            for(rocsparse_direction dir : {rocsparse_direction_row, rocsparse_direction_column})
+            {
+                SpmmCase c;
+                c.fmt     = SFmt::bsr;
+                c.alg     = rocsparse_spmm_alg_bsr;
+                c.bd      = bd;
+                c.dir     = dir;
+                c.n       = n;
+                c.m       = 5;
+                c.k       = 4;
+                c.max_nnz = 3;
+                c.base    = rocsparse_index_base_one;
+                run_spmm<float, int32_t, int32_t>(handle, c);
+                if(HasFatalFailure())
+                    return;
+                run_spmm<double, int32_t, int32_t>(handle, c);
+                if(HasFatalFailure())
+                    return;
+            }
+}
+
+// ---------------------------------------------------------------------------
+// COO segmented: every thread block reduces 1024 non-zeros and hands the
+// partial sum of its last row to a final cross-block reduction, which must add
+// only the last partial of a run of blocks that end in the same row. A row of
+// 1026 * 1024 + 10 non-zeros fills blocks 0 to 1025, so the run covers every
+// thread of the first 1024-block pass of that reduction and spills into the
+// second. A reduction that adds every partial of the run instead of only the
+// last one has several threads store to the same C entry without atomics, and
+// the result is wrong only when the store that lands last comes from a
+// wavefront without the complete prefix. Which store lands last is not defined
+// by the memory model or the ISA. On the GPUs tried so far (gfx1201, wave32),
+// stores from one wavefront to the same address resolve to the highest lane,
+// across wavefronts the last store wins, and that wavefront is reproducibly not
+// the one with the complete prefix, so the defect shows there. On other parts
+// (wave64 in particular) it may give the right value, or show up within a
+// single wavefront. The correct result itself is deterministic: only the last
+// thread of each run writes, and the two passes are separated by a barrier.
+// The run spans all 32 (16 on wave64) wavefronts of the first block-reduce
+// pass so that as many wavefronts as possible compete.
+// ---------------------------------------------------------------------------
+TEST_F(ExtraSpmm, coo_segmented_row_spanning_whole_blocks)
+{
+    const int64_t long_row = 1026 * 1024 + 10;
+    for(rocsparse_order oC : all_orders)
+    {
+        SpmmCase c;
+        c.fmt         = SFmt::coo;
+        c.alg         = rocsparse_spmm_alg_coo_segmented;
+        c.m           = 3;
+        c.k           = long_row; // row 0 touches every column
+        c.n           = 2;
+        c.row_lengths = {long_row, 7, 2};
+        c.order_C     = oC;
+        run_spmm<float, int32_t, int32_t>(handle, c);
+        if(HasFatalFailure())
+            return;
+    }
 }
