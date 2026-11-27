@@ -185,6 +185,18 @@ def test_an_engine_with_no_descriptors_is_trained_against_its_selector_revision(
     assert recorded == {"selector_revision": "miopen-provider/0.2.0/aiter-fwd-1"}
 
 
+def test_extension_members_are_ignored_as_the_loader_ignores_them():
+    """`x-` and `_` members (a re-stamp's proof) are neither validated nor returned."""
+    recorded = validate_provenance(
+        {
+            "selector_revision": "rev",
+            "x-restamps": [{"from": 1, "to": 2, "proof": "unread"}],
+            "_note": "anything",
+        }
+    )
+    assert recorded == {"selector_revision": "rev"}
+
+
 @pytest.mark.parametrize(
     "snapshot,refusal",
     [

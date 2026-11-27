@@ -80,7 +80,9 @@ inline const Tensor* tensor(const Graph& graph, int64_t uid)
     return nullptr;
 }
 
-inline bool floatingPoint(hipdnn_flatbuffers_sdk::data_objects::DataType type)
+/// An element type that holds a number: every floating-point and integer type. A boolean or
+/// an unset type has no multiply-add to count; a type this build predates is not assumed to.
+inline bool numeric(hipdnn_flatbuffers_sdk::data_objects::DataType type)
 {
     using hipdnn_flatbuffers_sdk::data_objects::DataType;
     switch(type)
@@ -97,6 +99,11 @@ inline bool floatingPoint(hipdnn_flatbuffers_sdk::data_objects::DataType type)
     case DataType::FP6_E3M2:
     case DataType::FP8_E4M3_FNUZ:
     case DataType::FP8_E5M2_FNUZ:
+    case DataType::UINT8:
+    case DataType::INT32:
+    case DataType::INT8:
+    case DataType::INT4:
+    case DataType::INT64:
         return true;
     default:
         return false;
@@ -112,11 +119,12 @@ inline bool shaped(const Tensor* value, size_t minimumRank)
               });
 }
 
-/// A shaped floating-point operand: the matrix-product families (Matmul, convolutions,
-/// attention, the MoE grouped matmuls, GDN and KDA) count floating-point multiply-adds only.
+/// A shaped numeric operand: the matrix-product families (Matmul, convolutions, attention, the
+/// MoE grouped matmuls, GDN and KDA) count multiply-adds of numeric elements, floating-point or
+/// integer alike (RFC 0019 section 6.8 rule 2), so an int8 GEMM's `tflops` is its tera-ops.
 inline bool dimensions(const Tensor* value, size_t minimumRank)
 {
-    return value != nullptr && floatingPoint(value->data_type()) && shaped(value, minimumRank);
+    return value != nullptr && numeric(value->data_type()) && shaped(value, minimumRank);
 }
 
 inline double elements(const Tensor& value)
@@ -324,15 +332,26 @@ inline std::optional<KeyExtent>
     return KeyExtent{*keys, tableK.has_value(), tableV.has_value()};
 }
 
-/// Attention's logical work: the QK^T and PV multiply-adds over the score pairs its band keeps,
+/// How many attention matrix products, each over the score pairs the band keeps, run over the
+/// query/key head dimension and over the value head dimension: the forward's QK^T and PV are
+/// one each.
+struct AttentionProducts
+{
+    int64_t qk = 1;
+    int64_t v = 1;
+};
+
+/// Attention's logical work: @p products multiply-adds over the score pairs its band keeps,
 /// for the problem the graph declares (RFC 0019 section 6.8). Where operand contents decide how
 /// much of it runs (sequence lengths, ragged offsets, cu_seq_len, page tables, block masks) this
 /// is the declared extent, which `data_dependent` marks. Elementwise work on the scores (scale,
 /// bias, ALiBi, softmax, dropout, sinks, FP8 scaling) is not counted, as softmax never was.
 /// @p extent gives the keys per sequence and which sides are paged caches.
 template <typename TAttention>
-std::optional<double>
-    attentionFlops(const Graph& graph, const TAttention& op, const std::optional<KeyExtent>& extent)
+std::optional<double> attentionFlops(const Graph& graph,
+                                     const TAttention& op,
+                                     const std::optional<KeyExtent>& extent,
+                                     AttentionProducts products)
 {
     using hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment;
     const auto* q = tensor(graph, op.q_tensor_uid());
@@ -355,9 +374,11 @@ std::optional<double>
     const auto unpagedMatches = [batch, sk](const Tensor& side) {
         return side.dims()->Get(0) == batch && side.dims()->Get(2) == sk;
     };
+    // K and V may each have their own head count, as long as each divides the query heads
+    // (grouped-query attention per side): the work per query head does not depend on either.
     if(sk <= 0 || (!extent->pagedK && !unpagedMatches(*k))
-       || (!extent->pagedV && !unpagedMatches(*v)) || k->dims()->Get(1) != v->dims()->Get(1)
-       || heads % k->dims()->Get(1) != 0 || o->dims()->Get(0) != batch || o->dims()->Get(1) != heads
+       || (!extent->pagedV && !unpagedMatches(*v)) || heads % k->dims()->Get(1) != 0
+       || heads % v->dims()->Get(1) != 0 || o->dims()->Get(0) != batch || o->dims()->Get(1) != heads
        || o->dims()->Get(2) != sq || k->dims()->Get(3) != dq || o->dims()->Get(3) != dv)
     {
         return std::nullopt;
@@ -391,7 +412,9 @@ std::optional<double>
                              || op.diagonal_alignment() == DiagonalAlignment::BOTTOM_RIGHT;
     const auto pairs = bandPairs(sq, sk, bottomRight ? sk - sq : 0, left, right);
     return 2.0 * static_cast<double>(batch) * static_cast<double>(heads)
-           * static_cast<double>(pairs) * (static_cast<double>(dq) + static_cast<double>(dv));
+           * static_cast<double>(pairs)
+           * (static_cast<double>(products.qk) * static_cast<double>(dq)
+              + static_cast<double>(products.v) * static_cast<double>(dv));
 }
 
 // One overload per node type not in NO_COUNTING_CONVENTION, each with a logicalFlops case.
@@ -463,22 +486,19 @@ inline std::optional<double>
 inline std::optional<double>
     nodeFlops(const Graph& graph, const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& op)
 {
-    return attentionFlops(graph, op, keyExtent(graph, op));
+    return attentionFlops(graph, op, keyExtent(graph, op), AttentionProducts{1, 1});
 }
 
-/// FlashAttention's convention: 2.5x the forward, which recomputes QK^T and adds the dV,
-/// dP, dQ and dK products to the forward's two. A bias gradient is a reduction of dP and
+/// Each backward product counted on its own head dimension: the QK^T recompute, dQ = dS K and
+/// dK = dS^T Q run over D_qk; dP = dO V^T and dV = P^T dO over D_v. For equal head
+/// dimensions this is FlashAttention's 2.5x the forward; for unequal ones (MLA's 192/128) a
+/// flat 2.5x would weigh both dimensions alike. A bias gradient is a reduction of dP and
 /// inverse-scaled dropout elementwise, so neither adds to it.
 inline std::optional<double>
     nodeFlops(const Graph& graph,
               const hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributes& op)
 {
-    const auto forward = attentionFlops(graph, op, denseKeys(graph, op));
-    if(!forward)
-    {
-        return std::nullopt;
-    }
-    return 2.5 * *forward;
+    return attentionFlops(graph, op, denseKeys(graph, op), AttentionProducts{3, 2});
 }
 
 inline std::optional<double>
@@ -557,11 +577,20 @@ inline std::optional<double>
     return windowed(tensor(graph, op.y_tensor_uid()), op.window());
 }
 
+/// Average pooling spreads each dy element over its window: `dy.numel * window`. Max pooling
+/// routes each dy element to the one input its forward picked: `dy.numel`, as the reference
+/// scatters by index. Both refuse the window the forward would.
 inline std::optional<double>
     nodeFlops(const Graph& graph,
               const hipdnn_flatbuffers_sdk::data_objects::ResampleBwdAttributes& op)
 {
-    return windowed(tensor(graph, op.dy_tensor_uid()), op.window());
+    const auto* dy = tensor(graph, op.dy_tensor_uid());
+    const auto spread = windowed(dy, op.window());
+    if(spread && op.resample_mode() == hipdnn_flatbuffers_sdk::data_objects::ResampleMode::MAXPOOL)
+    {
+        return perElement(dy, 1.0);
+    }
+    return spread;
 }
 
 inline std::optional<double>
@@ -663,6 +692,21 @@ inline std::optional<double>
     return deltaRuleFlops(graph, op);
 }
 
+/// The work the graph declares for an opaque op: hipDNN cannot read it off the payload, so
+/// the plugin providing the op states it in `declared_flops`. Unknown when it is absent or not
+/// positive (the frontend and backend refuse the latter).
+inline std::optional<double>
+    nodeFlops(const Graph& /*graph*/,
+              const hipdnn_flatbuffers_sdk::data_objects::CustomOpAttributes& op)
+{
+    const auto declared = op.declared_flops();
+    if(!declared || *declared <= 0)
+    {
+        return std::nullopt;
+    }
+    return static_cast<double>(*declared);
+}
+
 template <typename TAttributes>
 std::optional<double> flopsOf(const Graph& graph, const TAttributes* op)
 {
@@ -677,8 +721,6 @@ std::optional<double> flopsOf(const Graph& graph, const TAttributes* op)
 inline constexpr std::array NO_COUNTING_CONVENTION{
     // Not an operation: the node has no attributes.
     NodeAttributes::NONE,
-    // Opaque: the graph does not say what the op computes.
-    NodeAttributes::CustomOpAttributes,
 };
 
 constexpr bool hasCountingConvention(NodeAttributes type)
@@ -755,6 +797,8 @@ inline std::optional<double> logicalFlops(const Graph& graph, const Node& node)
         return flopsOf(graph, node.attributes_as_GdnAttributes());
     case NodeAttributes::KdaAttributes:
         return flopsOf(graph, node.attributes_as_KdaAttributes());
+    case NodeAttributes::CustomOpAttributes:
+        return flopsOf(graph, node.attributes_as_CustomOpAttributes());
     // A type this build predates. A member of this build's NodeAttributes reaching here has
     // neither a case nor a NO_COUNTING_CONVENTION entry, which TestEngineFeatures rejects.
     default:
@@ -798,10 +842,56 @@ inline std::optional<double> elementBits(hipdnn_flatbuffers_sdk::data_objects::D
     }
 }
 
+/// Elements of each paged K or V cache [blocks, heads, block size, D] at the declared problem:
+/// batch x heads x keys x D, the keys being the ones keyExtent infers. The cache's spare blocks
+/// belong to no sequence of the graph, as a ragged tensor's padding belongs to none of its
+/// rows. A cache whose keys cannot be inferred is left out and counts in full.
+inline std::vector<std::pair<int64_t, double>> pagedCacheElements(const Graph& graph)
+{
+    std::vector<std::pair<int64_t, double>> declared;
+    if(graph.nodes() == nullptr)
+    {
+        return declared;
+    }
+    for(const auto* node : *graph.nodes())
+    {
+        const auto* op = node == nullptr ? nullptr : node->attributes_as_SdpaAttributes();
+        if(op == nullptr || (!op->page_table_k_tensor_uid() && !op->page_table_v_tensor_uid()))
+        {
+            continue;
+        }
+        const auto extent = keyExtent(graph, *op);
+        const auto* q = tensor(graph, op->q_tensor_uid());
+        if(!extent || !shaped(q, 4))
+        {
+            continue;
+        }
+        for(const auto& [paged, uid] : {std::pair{extent->pagedK, op->k_tensor_uid()},
+                                        std::pair{extent->pagedV, op->v_tensor_uid()}})
+        {
+            const auto* cache = tensor(graph, uid);
+            if(!paged || !shaped(cache, 4) || cache->dims()->size() != 4
+               || std::any_of(declared.begin(), declared.end(), [uid = uid](const auto& entry) {
+                      return entry.first == uid;
+                  }))
+            {
+                continue;
+            }
+            declared.emplace_back(uid,
+                                  static_cast<double>(q->dims()->Get(0))
+                                      * static_cast<double>(cache->dims()->Get(1))
+                                      * static_cast<double>(extent->keys)
+                                      * static_cast<double>(cache->dims()->Get(3)));
+        }
+    }
+    return declared;
+}
+
 /// The graph's logical footprint: each non-virtual tensor once, numel x element size
 /// (fractional for sub-byte types); not allocation size or memory traffic. A ragged tensor
-/// counts its declared extent, as its work does. Unknown when any tensor's size is: a missing
-/// or negative extent, or an unset type.
+/// counts its declared extent, as its work does, and a paged KV cache the keys the problem
+/// declares (pagedCacheElements), not its spare blocks. Unknown when any tensor's size is: a
+/// missing or negative extent, or an unset type.
 inline std::optional<double> logicalBytes(const Graph& graph)
 {
     double bytes = 0.0;
@@ -809,6 +899,7 @@ inline std::optional<double> logicalBytes(const Graph& graph)
     {
         return bytes;
     }
+    const auto paged = pagedCacheElements(graph);
     for(const auto* value : *graph.tensors())
     {
         if(value->virtual_())
@@ -823,7 +914,10 @@ inline std::optional<double> logicalBytes(const Graph& graph)
         {
             return std::nullopt;
         }
-        bytes += elements(*value) * *bits / 8.0;
+        const auto declared = std::find_if(paged.begin(), paged.end(), [value](const auto& entry) {
+            return entry.first == value->uid();
+        });
+        bytes += (declared == paged.end() ? elements(*value) : declared->second) * *bits / 8.0;
     }
     return bytes;
 }

@@ -113,6 +113,7 @@ UNSET_MEANINGS = {
     "graph.nodes[*].generate_index": 0.0,  # false
     "graph.nodes[*].scale": 1 / math.sqrt(64),  # 1/sqrt(K) with K the node's q.dims[2]
     "graph.nodes[*].gate_lower_bound": -5.0,  # kda_attributes.fbs: "absent: -5.0"
+    "graph.nodes[*].declared_flops": -1.0,  # custom op work not declared: a marker
     "graph.nodes[*].pre_padding[*]": 0.0,  # a dimension the node does not have:
     "graph.nodes[*].post_padding[*]": 0.0,  # neither pads,
     "graph.nodes[*].stride[*]": 1.0,  # strides,

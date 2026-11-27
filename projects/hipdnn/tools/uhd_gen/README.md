@@ -666,6 +666,36 @@ existed — is revision 1, and so is an evaluator whose responses carry none. On
 `features_signature` are subject to it: a
 signature-less ranker reads no published feature.
 
+**Re-stamping across a revision.** A bump expires every model, including those whose inputs
+it did not change. `restamp-semantics` rebinds such a model to the new revision instead of a
+retrain, and refuses unless it can prove the inputs held. `REVISION_CHANGES` in
+`restamp_semantics.py` lists, for each revision of `FeatureSemantics.hpp`, the published
+features whose values it may have changed (revision 2: `graph.flops`, `graph.nodes[i].flops`,
+`graph.flops_by_type.SdpaBackwardAttributes` and `.ResampleBwdAttributes`,
+`graph.logical_bytes`, `graph.arithmetic_intensity`). A model reads such a feature through its
+`features_signature` or its label: a `tflops` label is `graph.flops` over time.
+
+```bash
+python -m uhd_gen restamp-semantics <model .uhd.json> [--to REVISION] \
+    [--rows-before <rows of its graphs at the recorded revision> \
+     --rows-after <the same graphs at the new revision>] [--min-graphs 30] \
+    [--report report.json] --write
+```
+
+The proof is `unread` when the model reads none of them; it needs no rows. Otherwise it is
+`measured-identity`: a published feature is a function of the graph alone, so two corpora of
+the model's graphs (any collection or dataset rows, each with a `features` map or flattened
+columns), collected by a build at each revision, must publish every changed feature the model
+reads identically (relative 1e-12, absent on both sides counting as equal) on at least
+`--min-graphs` shared graphs. An engine whose graphs never hold what the revision changed (an
+RMSNorm or a dense SDPA forward engine under revision 2) passes; one whose values moved is
+refused, naming a graph, and must be retrained. A revision step `REVISION_CHANGES` does not
+describe is refused rather than assumed harmless. A pass sets
+`trained_against.feature_semantics_revision` and appends `{member, from, to, proof, compared,
+identity}` to `trained_against["x-restamps"]`, an extension member the loader, `hkp_pack` and
+uhd_gen's provenance checks ignore. Without `--write` it only judges, and `--report` writes the
+verdict as `uhd_gen.semantics_restamp_report/1`. The runtime rule stays exact equality.
+
 An explicit computed expression using a device field that never varied in the
 training corpus is rejected. Automatic feature proposals omit such expressions
 and retain the raw device field — which training then drops on the same evidence,

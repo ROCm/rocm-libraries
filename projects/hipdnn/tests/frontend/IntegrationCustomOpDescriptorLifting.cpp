@@ -181,6 +181,7 @@ TEST_F(IntegrationCustomOpDescriptorLifting, BasicCustomOpRoundTrip)
     EXPECT_EQ(customOpNode->attributes.get_data(), K_CUSTOM_OP_OPAQUE_DATA);
     EXPECT_EQ(customOpNode->attributes.get_name(), "custom_op_test");
     EXPECT_EQ(customOpNode->attributes.get_compute_data_type(), DataType::FLOAT);
+    EXPECT_FALSE(customOpNode->attributes.get_declared_flops().has_value());
 
     // Verify tensor references
     ASSERT_EQ(customOpNode->attributes.get_inputs().size(), 2u);
@@ -188,6 +189,21 @@ TEST_F(IntegrationCustomOpDescriptorLifting, BasicCustomOpRoundTrip)
     EXPECT_EQ(customOpNode->attributes.get_inputs()[1]->get_uid(), K_CUSTOM_OP_INPUT_UID_1);
     ASSERT_EQ(customOpNode->attributes.get_outputs().size(), 1u);
     EXPECT_EQ(customOpNode->attributes.get_outputs()[0]->get_uid(), K_CUSTOM_OP_OUTPUT_UID_0);
+}
+
+// The declared work survives lowering to the backend descriptor and lifting back.
+TEST_F(IntegrationCustomOpDescriptorLifting, DeclaredFlopsRoundTrip)
+{
+    auto originalGraph = buildCustomOpGraph();
+    auto* original = dynamic_cast<CustomOpNode*>(originalGraph->getSubNodes()[0].get());
+    ASSERT_NE(original, nullptr);
+    original->attributes.set_declared_flops(4096);
+
+    auto liftedGraph = liftGraph(*originalGraph, _handle);
+    ASSERT_NE(liftedGraph, nullptr);
+    auto* lifted = dynamic_cast<CustomOpNode*>(liftedGraph->getSubNodes()[0].get());
+    ASSERT_NE(lifted, nullptr);
+    EXPECT_EQ(lifted->attributes.get_declared_flops(), 4096);
 }
 
 // After lifting, verifies tensor objects in the node attributes are the same

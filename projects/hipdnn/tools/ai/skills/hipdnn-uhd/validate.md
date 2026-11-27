@@ -161,6 +161,7 @@ serves every product of its arch once installed; say which products it was valid
 |---|---|
 | `identity` fails | another document carries the declared id in the tree, or the installed copy differs from the model |
 | `selector_revision` fails | the engine changed since training; collect at the current revision and retrain |
+| promote, evaluate or the loader refuses the feature semantics revision | the build's `FEATURE_SEMANTICS_REVISION` moved since training. `python -m uhd_gen restamp-semantics <model>` re-stamps it with proof the features it reads did not change (see the uhd_gen README, "Re-stamping across a revision"): none read, or `--rows-before`/`--rows-after` of its graphs at both revisions publish them identically. It refuses anything else; then retrain |
 | `available` fails | the engine did not predict for some executed graphs; read `unavailable_sample` for its reasons |
 | L1 opaque model never read | trained without the id its binding declares (`--uhd-id`) |
 | L2 `read` fails | the runtime refused the ranker (a knob axis missing from the UED's knobs or the KMD fields, a features hash from another `hipdnn_uhd_features`); see [triage.md](triage.md) |

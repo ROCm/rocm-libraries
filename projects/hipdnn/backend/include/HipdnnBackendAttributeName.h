@@ -1174,6 +1174,14 @@ typedef enum
     /** @brief Compute data type for custom op */
     HIPDNN_ATTR_CUSTOM_OP_COMP_TYPE_EXT = 3004,
 
+    /**
+     * @brief Logical FLOPs the custom op declares (int64_t, optional, positive)
+     *
+     * Lets UHD heuristics count the work of an opaque op (RFC 0019 section 6.8). Unset, the
+     * node's work is unknown and the graph publishes no `graph.flops`.
+     */
+    HIPDNN_ATTR_OPERATION_CUSTOM_OP_DECLARED_FLOPS_EXT = 3005,
+
     /** @} */
 
     /**

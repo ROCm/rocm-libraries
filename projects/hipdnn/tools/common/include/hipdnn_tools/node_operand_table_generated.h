@@ -36,7 +36,7 @@ struct OperandEntry
 
 /// Every operand of every node type, in schema order. Regenerated with the visitor,
 /// so a field joins it when the schema gains it.
-inline constexpr std::array<OperandEntry, 273> OPERANDS{{
+inline constexpr std::array<OperandEntry, 274> OPERANDS{{
     {"BatchnormInferenceAttributes", "x", OperandKind::TENSOR, false},
     {"BatchnormInferenceAttributes", "mean", OperandKind::TENSOR, false},
     {"BatchnormInferenceAttributes", "inv_variance", OperandKind::TENSOR, false},
@@ -211,6 +211,7 @@ inline constexpr std::array<OperandEntry, 273> OPERANDS{{
     {"SdpaBackwardAttributes", "diagonal_alignment", OperandKind::SCALAR, false},
     {"CustomOpAttributes", "input", OperandKind::TENSORS, true},
     {"CustomOpAttributes", "output", OperandKind::TENSORS, true},
+    {"CustomOpAttributes", "declared_flops", OperandKind::SCALAR, true},
     {"RMSNormBackwardAttributes", "dy", OperandKind::TENSOR, false},
     {"RMSNormBackwardAttributes", "x", OperandKind::TENSOR, false},
     {"RMSNormBackwardAttributes", "scale", OperandKind::TENSOR, false},

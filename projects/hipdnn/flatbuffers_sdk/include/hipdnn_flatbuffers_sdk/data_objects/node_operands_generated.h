@@ -632,6 +632,10 @@ void visit(const CustomOpAttributes& op, V& visitor)
             visitor.tensor(role.view(), static_cast<int64_t>(uids->Get(index)), false);
         }
     }
+    if(const auto value = op.declared_flops(); value.has_value())
+    {
+        visitor.scalar(std::string_view("declared_flops"), static_cast<int64_t>(*value));
+    }
 }
 
 template <typename V>

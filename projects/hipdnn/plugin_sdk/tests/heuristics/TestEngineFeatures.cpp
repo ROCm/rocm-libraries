@@ -771,6 +771,51 @@ TEST(TestEngineFeatures, UnsupportedFusedWorkDoesNotPublishAPartialGraphRate)
                      0.0);
 }
 
+// An opaque op's work is what its graph declares: the plugin providing it states the count,
+// so a fused graph holding it publishes a whole-graph rate. Undeclared or non-positive work
+// stays unknown, never 0.
+TEST(TestEngineFeatures, CustomOpCountsTheWorkItDeclares)
+{
+    const auto fused = [](std::optional<int64_t> declared) {
+        GraphT graph;
+        addTensor(graph, 1, {3, 4});
+        addTensor(graph, 2, {4, 7});
+        addTensor(graph, 3, {3, 7}, {}, true);
+        addTensor(graph, 4, {3, 7});
+        MatmulAttributesT matmul;
+        matmul.a_tensor_uid = 1;
+        matmul.b_tensor_uid = 2;
+        matmul.c_tensor_uid = 3;
+        addNode(graph, matmul);
+        CustomOpAttributesT custom;
+        custom.custom_op_id = "example.rope";
+        custom.input_tensor_uids = {3};
+        custom.output_tensor_uids = {4};
+        custom.declared_flops = declared;
+        addNode(graph, custom);
+        return graph;
+    };
+
+    const auto published = features(fused(int64_t{1000}));
+    EXPECT_DOUBLE_EQ(published.at("graph.nodes[1].flops").get<double>(), 1000.0);
+    EXPECT_DOUBLE_EQ(published.at("graph.flops").get<double>(), 2.0 * 3 * 7 * 4 + 1000.0);
+    EXPECT_DOUBLE_EQ(published.at("graph.flops_by_type.CustomOpAttributes").get<double>(), 1000.0);
+    EXPECT_TRUE(published.contains("graph.arithmetic_intensity"));
+    // The declaration is also an operand feature a model may read.
+    EXPECT_EQ(published.at("graph.nodes[1].declared_flops"), 1000);
+
+    for(const auto declared :
+        {std::optional<int64_t>{}, std::optional<int64_t>{0}, std::optional<int64_t>{-5}})
+    {
+        SCOPED_TRACE(declared ? std::to_string(*declared) : "undeclared");
+        const auto unknown = features(fused(declared));
+        EXPECT_FALSE(unknown.contains("graph.nodes[1].flops"));
+        EXPECT_FALSE(unknown.contains("graph.flops"));
+        EXPECT_FALSE(unknown.contains("graph.flops_by_type.CustomOpAttributes"));
+        EXPECT_DOUBLE_EQ(unknown.at("graph.nodes[0].flops").get<double>(), 2.0 * 3 * 7 * 4);
+    }
+}
+
 // nlohmann compares 1 and 1.0 equal; a model reading a feature can still tell them apart.
 std::string kind(const nlohmann::json& value)
 {
@@ -1372,28 +1417,29 @@ GraphT backwardGraph(void (*vary)(SdpaBackwardAttributesT&))
                   sdpa);
 }
 
-// The backward counts 2.5x the forward over the same band; a bias gradient and inverse-scaled
-// dropout are elementwise, and valid lengths leave the declared extent.
+// The backward counts its five products over the same band, three over D_qk and two over D_v:
+// 2 * B (2) * H (8) * pairs * (3 * 16 + 2 * 32) = 3584 per pair. A bias gradient and
+// inverse-scaled dropout are elementwise, and valid lengths leave the declared extent.
 TEST(TestEngineFeatures, AttentionBackwardCountsItsBandAndNotItsElementwiseOperands)
 {
     using Variation = void (*)(SdpaBackwardAttributesT&);
     const std::vector<std::tuple<const char*, Variation, double, bool>> variations = {
-        {"causal", [](SdpaBackwardAttributesT&) {}, 23040.0, false},
+        {"causal", [](SdpaBackwardAttributesT&) {}, 21504.0, false},
         {"bias gradient and dropout",
          [](SdpaBackwardAttributesT& op) {
              op.dbias_tensor_uid = 10;
              op.dropout_scale_inv_tensor_uid = 11;
          },
-         23040.0,
+         21504.0,
          false},
-        // Rows 0-2 keep keys [0, 0], [0, 1], [1, 2]: 5 pairs, 2.5 x 7680.
-        {"causal window", [](SdpaBackwardAttributesT& op) { op.left_bound = 2; }, 19200.0, false},
+        // Rows 0-2 keep keys [0, 0], [0, 1], [1, 2]: 5 pairs.
+        {"causal window", [](SdpaBackwardAttributesT& op) { op.left_bound = 2; }, 17920.0, false},
         {"valid lengths",
          [](SdpaBackwardAttributesT& op) {
              op.seq_len_q_tensor_uid = 12;
              op.seq_len_kv_tensor_uid = 13;
          },
-         23040.0,
+         21504.0,
          true},
     };
     for(const auto& [name, vary, flops, dataDependent] : variations)
@@ -1403,6 +1449,107 @@ TEST(TestEngineFeatures, AttentionBackwardCountsItsBandAndNotItsElementwiseOpera
         EXPECT_DOUBLE_EQ(published.at("graph.flops").get<double>(), flops);
         EXPECT_EQ(published.at("graph.nodes[0].data_dependent"), dataDependent);
     }
+}
+
+// K and V may each have a head count of their own, each dividing the query heads (the
+// gfx1151 and FlyDSL attention engines serve it): the work per query head is unchanged, so
+// forward and backward count what equal K and V heads count. A V head count that does not
+// divide the query heads is not attention hipDNN describes.
+TEST(TestEngineFeatures, AttentionCountsKAndVWithTheirOwnHeadCounts)
+{
+    // Q has 8 heads, K 2; V (uid 3) and the backward's dV (uid 9) take vHeads.
+    const auto forward = [](int64_t vHeads) {
+        auto graph = attentionGraph(attention());
+        graph.tensors[2]->dims = {2, vHeads, 7, 32};
+        return graph;
+    };
+    const auto backward = [](int64_t vHeads) {
+        auto graph = backwardGraph([](SdpaBackwardAttributesT&) {});
+        graph.tensors[2]->dims = {2, vHeads, 7, 32};
+        graph.tensors[8]->dims = {2, vHeads, 7, 32};
+        return graph;
+    };
+    for(const int64_t vHeads : {int64_t{1}, int64_t{4}, int64_t{8}})
+    {
+        SCOPED_TRACE(vHeads);
+        EXPECT_DOUBLE_EQ(features(forward(vHeads)).at("graph.flops").get<double>(), 32256.0);
+        EXPECT_DOUBLE_EQ(features(backward(vHeads)).at("graph.flops").get<double>(), 21504.0);
+    }
+    // K with more heads than V counts the same.
+    auto moreKeyHeads = forward(2);
+    moreKeyHeads.tensors[1]->dims = {2, 4, 7, 16};
+    EXPECT_DOUBLE_EQ(features(moreKeyHeads).at("graph.flops").get<double>(), 32256.0);
+
+    for(const auto& published : {features(forward(3)), features(backward(3))})
+    {
+        EXPECT_FALSE(published.contains("graph.nodes[0].flops"));
+        EXPECT_FALSE(published.contains("graph.flops"));
+    }
+}
+
+// The conventions feature semantics revision 2 changed (RFC 0019 section 6.8):
+// - SDPA backward weighs each product by its own head dimension: MLA's 192/128 counts
+//   2 * pairs * (3 * 192 + 2 * 128), not 2.5x the forward's 2 * pairs * (192 + 128).
+// - Max-pool backward routes each dy element once; average pooling spreads it over the window.
+// - A paged KV cache's bytes are the keys the graph declares, not the cache's spare blocks.
+TEST(TestEngineFeatures, BackwardConventionsOfRevisionTwo)
+{
+    SdpaBackwardAttributesT sdpa;
+    sdpa.q_tensor_uid = 1;
+    sdpa.k_tensor_uid = 2;
+    sdpa.v_tensor_uid = 3;
+    sdpa.o_tensor_uid = 4;
+    sdpa.do_tensor_uid = 5;
+    sdpa.stats_tensor_uid = 6;
+    sdpa.dq_tensor_uid = 7;
+    sdpa.dk_tensor_uid = 8;
+    sdpa.dv_tensor_uid = 9;
+    // One batch and head, 2 queries against 2 keys: 4 pairs.
+    const auto mla = single({{1, 1, 2, 192},
+                             {1, 1, 2, 192},
+                             {1, 1, 2, 128},
+                             {1, 1, 2, 128},
+                             {1, 1, 2, 128},
+                             {1, 1, 2, 1},
+                             {1, 1, 2, 192},
+                             {1, 1, 2, 192},
+                             {1, 1, 2, 128}},
+                            sdpa);
+    const auto backward = features(mla).at("graph.flops").get<double>();
+    EXPECT_DOUBLE_EQ(backward, 2.0 * 4 * (3 * 192 + 2 * 128));
+    EXPECT_NE(backward, 2.5 * 2.0 * 4 * (192 + 128));
+
+    ResampleBwdAttributesT pool;
+    pool.dy_tensor_uid = 1;
+    pool.dx_tensor_uid = 2;
+    pool.window = {2, 2};
+    pool.stride = {2, 2};
+    pool.resample_mode = ResampleMode::MAXPOOL;
+    // dy [2, 8, 4, 4]: 256 elements, each routed once.
+    EXPECT_DOUBLE_EQ(
+        features(single({{2, 8, 4, 4}, {2, 8, 8, 8}}, pool)).at("graph.flops").get<double>(),
+        256.0);
+    pool.resample_mode = ResampleMode::AVGPOOL_EXCLUDE_PADDING;
+    EXPECT_DOUBLE_EQ(
+        features(single({{2, 8, 4, 4}, {2, 8, 8, 8}}, pool)).at("graph.flops").get<double>(),
+        1024.0);
+    // Max pooling still refuses a window the forward would refuse.
+    pool.resample_mode = ResampleMode::MAXPOOL;
+    pool.window = {2};
+    EXPECT_FALSE(features(single({{2, 8, 4, 4}, {2, 8, 8, 8}}, pool)).contains("graph.flops"));
+
+    // Both sides paged, 3 pages of 4 per sequence: 12 keys. Each cache holds 10 blocks of 4
+    // (40 slots) for the 2 sequences' 24 keys.
+    auto paged = attention();
+    paged.page_table_k_tensor_uid = 5;
+    paged.page_table_v_tensor_uid = 6;
+    const auto published
+        = features(pagedGraph(paged, {10, 2, 4, 16}, {10, 2, 4, 32}, {2, 1, 3, 1}, {2, 1, 3, 1}));
+    EXPECT_DOUBLE_EQ(published.at("graph.flops").get<double>(), 2.0 * 2 * 8 * 3 * 12 * 48);
+    // Q (768), K at B (2) x heads (2) x keys (12) x D (16) = 768 rather than its 1280, V at
+    // 1536 rather than 2560, O (1536), the tables (6 each) and the mask (48), in half precision.
+    EXPECT_DOUBLE_EQ(published.at("graph.logical_bytes").get<double>(),
+                     (768.0 + 768.0 + 1536.0 + 1536.0 + 6.0 + 6.0 + 48.0) * 2.0);
 }
 
 /// The key a reference keeps for query row @p row, as CpuFpReferenceSdpa masks (SEM-001).
@@ -1600,8 +1747,10 @@ TEST(TestEngineFeatures, WorkModelMatchesEveryGoldenCount)
     // FEATURE_SEMANTICS_REVISION. Publishing a value where none was (a band, dropout, a paged
     // cache) does not (RFC 0019 section 6.9). Bands outside hipDNN's domain, which the work
     // model once counted, are no longer counted without a bump: no engine serves them, and
-    // their training rows are re-collected (RFC 0019 section 6.8).
-    EXPECT_EQ(hipdnn_plugin_sdk::heuristics::FEATURE_SEMANTICS_REVISION, 1);
+    // their training rows are re-collected (RFC 0019 section 6.8). Revision 2 changed the SDPA
+    // backward count, max-pool backward and a paged cache's bytes
+    // (BackwardConventionsOfRevisionTwo).
+    EXPECT_EQ(hipdnn_plugin_sdk::heuristics::FEATURE_SEMANTICS_REVISION, 2);
     struct Case
     {
         const char* name;
@@ -1803,7 +1952,8 @@ TEST(TestEngineFeatures, EveryNodeTypeHasDeclaredWorkOrNoCountingConvention)
              return single({{2, 8, 7, 7}, {2, 12, 5, 5}, {12, 4, 3, 3}}, conv);
          },
          43200.0},
-        // 2.5 * the causal top-left forward's 9216.
+        // The causal top-left band's 6 pairs: 3584 per pair (3 products over D_qk 16, 2 over
+        // D_v 32).
         {[] {
              SdpaBackwardAttributesT sdpa;
              sdpa.q_tensor_uid = 1;
@@ -1827,7 +1977,7 @@ TEST(TestEngineFeatures, EveryNodeTypeHasDeclaredWorkOrNoCountingConvention)
                             {2, 2, 7, 32}},
                            sdpa);
          },
-         23040.0},
+         21504.0},
         // One per output element, boolean or not.
         {[] {
              PointwiseAttributesT compare;
@@ -2052,6 +2202,16 @@ TEST(TestEngineFeatures, EveryNodeTypeHasDeclaredWorkOrNoCountingConvention)
                  {{16, 2, 8}, {16, 2, 8}, {16, 4, 6}, {16, 4, 8}, {16, 4}, {3}, {16, 4, 6}}, kda);
          },
          18432.0},
+        // The work the graph declares for an opaque op.
+        {[] {
+             CustomOpAttributesT custom;
+             custom.custom_op_id = "example.rope";
+             custom.input_tensor_uids = {1};
+             custom.output_tensor_uids = {2};
+             custom.declared_flops = 4096;
+             return single({{4, 8}, {4, 8}}, custom);
+         },
+         4096.0},
     };
     std::set<NodeAttributes> counted;
     for(const auto& [make, flops] : cases)
@@ -2140,6 +2300,43 @@ TEST(TestEngineFeatures, UnknownWorkIsAbsentNeverZero)
         EXPECT_FALSE(published.contains("graph.flops_by_type." + type));
         // A type the graph does not contain has no work: 0, not unknown.
         EXPECT_DOUBLE_EQ(published.at("graph.flops_by_type.MatmulAttributes").get<double>(), 0.0);
+    }
+}
+
+// A multiply-add is 2 whatever the element type (RFC 0019 section 6.8 rule 2): an int8 GEMM
+// accumulating into int32, or an int8 convolution, counts as its floating-point twin does, so
+// its `tflops` is its tera-ops. A boolean operand holds no number to multiply.
+TEST(TestEngineFeatures, IntegerMultiplyAddsCountAsFloatingPointOnesDo)
+{
+    auto matmul = matmulBroadcastGraph();
+    matmul.tensors[0]->data_type = DataType::INT8;
+    matmul.tensors[1]->data_type = DataType::INT8;
+    matmul.tensors[2]->data_type = DataType::INT32;
+    EXPECT_DOUBLE_EQ(features(matmul).at("graph.flops").get<double>(), 840.0);
+
+    auto conv = convFwdGraph();
+    for(auto& value : conv.tensors)
+    {
+        value->data_type = DataType::INT8;
+    }
+    EXPECT_DOUBLE_EQ(features(conv).at("graph.flops").get<double>(), 86400.0);
+
+    for(const auto type : {DataType::UINT8, DataType::INT4, DataType::INT64})
+    {
+        SCOPED_TRACE(EnumNameDataType(type));
+        auto widened = matmulBroadcastGraph();
+        widened.tensors[0]->data_type = type;
+        EXPECT_DOUBLE_EQ(features(widened).at("graph.flops").get<double>(), 840.0);
+    }
+
+    for(const auto type : {DataType::BOOLEAN, DataType::UNSET})
+    {
+        SCOPED_TRACE(EnumNameDataType(type));
+        auto refused = matmulBroadcastGraph();
+        refused.tensors[1]->data_type = type;
+        const auto published = features(refused);
+        EXPECT_FALSE(published.contains("graph.nodes[0].flops"));
+        EXPECT_FALSE(published.contains("graph.flops"));
     }
 }
 

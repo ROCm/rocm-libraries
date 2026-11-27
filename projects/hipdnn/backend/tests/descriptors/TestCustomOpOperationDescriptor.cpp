@@ -181,6 +181,20 @@ TEST_F(TestCustomOpOperationDescriptor, FinalizeFailsWithoutComputeType)
     ASSERT_THROW_HIPDNN_STATUS(getDescriptor()->finalize(), HIPDNN_STATUS_BAD_PARAM);
 }
 
+TEST_F(TestCustomOpOperationDescriptor, FinalizeFailsWithNonPositiveDeclaredFlops)
+{
+    for(const int64_t declared : {int64_t{0}, int64_t{-1}})
+    {
+        SCOPED_TRACE(declared);
+        _wrapper = createDescriptor<CustomOpOperationDescriptor>();
+        setAllAttributesExcept();
+        auto desc = getDescriptor();
+        desc->setAttribute(
+            HIPDNN_ATTR_OPERATION_CUSTOM_OP_DECLARED_FLOPS_EXT, HIPDNN_TYPE_INT64, 1, &declared);
+        ASSERT_THROW_HIPDNN_STATUS(desc->finalize(), HIPDNN_STATUS_BAD_PARAM);
+    }
+}
+
 // =============================================================================
 // SetAttribute Tests
 // =============================================================================
@@ -259,6 +273,44 @@ TEST_F(TestCustomOpOperationDescriptor, SetComputeDataType)
         HIPDNN_ATTR_CUSTOM_OP_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType));
 
     ASSERT_EQ(desc->getComputeDataType(), DataType::FLOAT);
+}
+
+TEST_F(TestCustomOpOperationDescriptor, DeclaredFlopsRoundTripAndReachTheNode)
+{
+    setAllAttributesExcept();
+    auto desc = getDescriptor();
+    const int64_t declared = 4096;
+    ASSERT_NO_THROW(desc->setAttribute(
+        HIPDNN_ATTR_OPERATION_CUSTOM_OP_DECLARED_FLOPS_EXT, HIPDNN_TYPE_INT64, 1, &declared));
+    ASSERT_NO_THROW(desc->finalize());
+
+    int64_t count = 0;
+    int64_t retrieved = 0;
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_CUSTOM_OP_DECLARED_FLOPS_EXT,
+                                       HIPDNN_TYPE_INT64,
+                                       1,
+                                       &count,
+                                       &retrieved));
+    EXPECT_EQ(count, 1);
+    EXPECT_EQ(retrieved, declared);
+    EXPECT_NE(desc->toString().find("declared_flops=4096"), std::string::npos);
+
+    const auto node = desc->buildNode();
+    ASSERT_NE(node, nullptr);
+    const auto* customAttrs = node->attributes.AsCustomOpAttributes();
+    ASSERT_NE(customAttrs, nullptr);
+    EXPECT_EQ(customAttrs->declared_flops, declared);
+}
+
+TEST_F(TestCustomOpOperationDescriptor, UndeclaredFlopsReadAsNoElements)
+{
+    makeFinalized();
+    auto desc = getDescriptor();
+    int64_t count = -1;
+    ASSERT_NO_THROW(desc->getAttribute(
+        HIPDNN_ATTR_OPERATION_CUSTOM_OP_DECLARED_FLOPS_EXT, HIPDNN_TYPE_INT64, 0, &count, nullptr));
+    EXPECT_EQ(count, 0);
+    EXPECT_FALSE(desc->buildNode()->attributes.AsCustomOpAttributes()->declared_flops.has_value());
 }
 
 TEST_F(TestCustomOpOperationDescriptor, SetInputTensorFailsNotFinalized)

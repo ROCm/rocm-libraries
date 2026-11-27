@@ -14,4 +14,11 @@ table CustomOpAttributes {
     input_tensor_uids: [long] (cache_uid);
     output_tensor_uids: [long] (cache_uid);
     data: [ubyte];
+    /// The operation's logical FLOPs, as the plugin that provides it counts them under RFC 0019
+    /// section 6.8's conventions (a multiply-add is 2, elementwise work 1 per output element).
+    /// hipDNN cannot read the work off an opaque payload, so the graph declares it; absent,
+    /// the node's work is unknown and a graph holding it publishes no `graph.flops`. Positive
+    /// when present. Part of the cache key: two graphs declaring different work are different
+    /// problems.
+    declared_flops: long = null;
 }

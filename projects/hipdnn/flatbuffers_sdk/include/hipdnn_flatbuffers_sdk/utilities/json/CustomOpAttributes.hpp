@@ -16,6 +16,7 @@ inline void to_json(nlohmann::json& j, const CustomOpAttributes& attr)
     j["input_tensor_uids"] = attr.input_tensor_uids();
     j["output_tensor_uids"] = attr.output_tensor_uids();
     j["data"] = attr.data();
+    j["declared_flops"] = attr.declared_flops();
 }
 
 }
@@ -29,9 +30,15 @@ inline auto to<data_objects::CustomOpAttributes>(flatbuffers::FlatBufferBuilder&
     auto inputUids = entry.at("input_tensor_uids").get<std::vector<int64_t>>();
     auto outputUids = entry.at("output_tensor_uids").get<std::vector<int64_t>>();
     auto data = entry.at("data").get<std::vector<uint8_t>>();
+    // Optional, and absent from graphs serialized before the field existed.
+    std::optional<int64_t> declaredFlops;
+    if(const auto found = entry.find("declared_flops"); found != entry.end())
+    {
+        declaredFlops = found->get<std::optional<int64_t>>();
+    }
 
     return data_objects::CreateCustomOpAttributesDirect(
-        builder, customOpId.c_str(), &inputUids, &outputUids, &data);
+        builder, customOpId.c_str(), &inputUids, &outputUids, &data, declaredFlops);
 }
 
 }

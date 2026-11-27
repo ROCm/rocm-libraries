@@ -560,7 +560,11 @@ void attributesBindings(nb::module_& m)
              nb::rv_policy::reference_internal)
         .def("get_outputs", &graph::CustomOpAttributes::get_outputs)
         .def("set_data", &graph::CustomOpAttributes::set_data, nb::rv_policy::reference_internal)
-        .def("get_data", &graph::CustomOpAttributes::get_data);
+        .def("get_data", &graph::CustomOpAttributes::get_data)
+        .def("set_declared_flops",
+             &graph::CustomOpAttributes::set_declared_flops,
+             nb::rv_policy::reference_internal)
+        .def("get_declared_flops", &graph::CustomOpAttributes::get_declared_flops);
 
     // LayernormAttributes
     nb::class_<graph::LayernormAttributes>(m, "LayernormAttributes")

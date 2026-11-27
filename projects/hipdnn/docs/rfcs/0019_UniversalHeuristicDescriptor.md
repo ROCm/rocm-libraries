@@ -920,7 +920,7 @@ lives beside the policy names in the data SDK, and each entry fixes three things
 
 | Metric | Units | Better | Status |
 |---|---|---|---|
-| `tflops` | TFLOPS (10^12 FLOP/s over the graph's logical FLOPs, `$graph.flops`, [Section 6.8](#68-the-work-model)) | higher | Defined. The default metric. A graph whose work is unknown (an opaque custom op, inconsistent operands) has no `tflops` label. |
+| `tflops` | TFLOPS (10^12 FLOP/s over the graph's logical FLOPs, `$graph.flops`, [Section 6.8](#68-the-work-model)) | higher | Defined. The default metric. A graph whose work is unknown (a custom op that declares no work, inconsistent operands) has no `tflops` label. |
 | `time` | milliseconds of device time for one execution | lower | Defined. Trained on `avgTimeMs` directly, not derived from throughput, so it never depends on a FLOP count. |
 | `accuracy.*` | per definition | per definition | **Reserved.** Each accuracy metric names its definition, e.g. `accuracy.max_rel_error`; none is registered until its reference and tolerance are settled ([Open Question 20](#ranking-metrics)). |
 
@@ -1679,7 +1679,8 @@ the trainer, and the runtime compute the same number.
    be consistent rather than exact: a model absorbs a fixed scale, but not a count that moves between
    engines.
 2. **Counting.** A multiply-add is 2 FLOPs, elementwise work is 1 per output element, and a
-   transcendental is 1.
+   transcendental is 1. The element type does not change the count: an integer multiply-add is 2 as
+   well, so the `tflops` of an int8 GEMM is its tera-operations per second.
 3. **A graph's work is the sum of its nodes', all or nothing.** `$graph.flops` sums every node, virtual
    intermediates included, so a fused convolution + bias + ReLU is the convolution plus two pointwise
    nodes. If any node's work is unknown, `$graph.flops` is **absent**, never a partial sum: divided by
@@ -1726,27 +1727,31 @@ the trainer, and the runtime compute the same number.
    | `LayernormAttributes` / `LayernormBackwardAttributes` | `5·x.numel` / `8·x.numel` | |
    | `RMSNormAttributes` / `RMSNormBackwardAttributes` | `3·x.numel` / `6·x.numel` | |
    | `ResampleFwdAttributes` | `y.numel · Π window[i]` | One positive `window` entry per spatial dim. |
-   | `ResampleBwdAttributes` | `dy.numel · Π window[i]` | |
+   | `ResampleBwdAttributes` | `dy.numel · Π window[i]`; `dy.numel` for `MAXPOOL` | Average pooling spreads each `dy` element over its window; max pooling routes it to the one input the forward picked (revision 2). |
    | `BlockScaleQuantizeAttributes`, `BlockScaleDequantizeAttributes` | `2·x.numel` | |
    | `SdpaAttributes` | `2·B·H·pairs·(Dq + Dv)` | `pairs` sums, per query row, the keys inside its band: causal mask, `left_bound`, `right_bound` and diagonal alignment (cuDNN's band, SEM-001), `Sq·Sk` when unbounded. The deprecated `causal_mask` and `causal_mask_bottom_right` compose as cuDNN's setters do: a flag gives `right_bound` when it is ≥ 0, else 0; `causal_mask_bottom_right` forces bottom-right alignment, `causal_mask` keeps `diagonal_alignment`. `left_bound` of 0, a bound below -1, or both deprecated flags leave the work unknown: the frontend rejects the first two and the references the third. A `left_bound` below -1 and both flags were counted before this rule; they are dropped without a revision bump because no engine serves them and their training rows are re-collected. A paged cache's `Sk` is inferred as cuDNN does: `max_seq_len_kv` when stated, else a non-paged K's (then V's) sequence length, else the `attn_mask` last dim, else the `rng_dump` last dim, else the smaller of the two sides' page-table pages × page size. K or V may be paged alone, each with its own block size; the extent must fit every paged side's capacity and match a dense side's sequence extent, else the work is unknown. Bias, ALiBi, softmax, dropout, sinks and FP8 scaling are elementwise on the scores and not counted. |
-   | `SdpaBackwardAttributes` | `2.5 ×` the forward count on its `q`/`k`/`v`/`o` | The FlashAttention convention. |
+   | `SdpaBackwardAttributes` | `2·B·H·pairs·(3·D_qk + 2·D_v)` over the forward's band | Five products, each on its own head dimension: the `QKᵀ` recompute, `dQ` and `dK` over `D_qk`; `dP` and `dV` over `D_v`. FlashAttention's 2.5 × the forward when `D_qk = D_v`; revision 1 counted 2.5 × the forward for every head dimension. |
    | `MoeGroupedMatmulAttributes` | `2·rows·K·N` | `rows` is the output's when gathering, else the token's: every declared routed row. |
    | `MoeGroupedMatmulBwdAttributes` | `2·rows·K·N` | The weight gradient over the token's declared rows. |
    | `GdnAttributes`, `KdaAttributes` | `6·T·HO·V·K` | Three `V × K` products per token and output head: `S k`, the rank-one update `β (v − S k) kᵀ` (`S (I − β k kᵀ) + β v kᵀ` is `S` plus that one product), and `S q`; decay and gating are elementwise. Token-packed, so the split into sequences does not change it. |
-   | `CustomOpAttributes` | unknown | Opaque to hipDNN. |
+   | `CustomOpAttributes` | `declared_flops` | Opaque to hipDNN, so the graph declares the count: the plugin providing the op states it, under these conventions and the same for every plugin that serves the op. Undeclared, the work is unknown; the frontend and backend refuse a declaration that is not positive. |
 
    The per-element constants for the normalizations, resampling, and SDPA backward are conventions,
    chosen once and held; what matters is that every engine counts the same. A formula refuses — the
    node's work is unknown — when its operands are inconsistent: a missing tensor, a non-positive dim, or
    shapes that do not compose. The convolutions, Matmul, SDPA forward and backward, the MoE grouped
-   matmuls, GDN and KDA also require floating-point operands. So 24 of the 25 node types have a static
-   count; whether a given graph has one is still rule 3's to decide.
+   matmuls, GDN and KDA also require numeric operands: floating-point or integer, not boolean or
+   unset. So 24 of the 25 node types have a static count and the custom op a declared one; whether a
+   given graph has one is still rule 3's to decide.
 6. **Bytes are a declared convention, and three different quantities are kept apart.**
    - **Logical footprint** — `$graph.logical_bytes`, a feature. The sum over the graph's non-virtual
      tensors, each counted once however many nodes read it, of element count × element size. Sub-byte
      types count fractionally (fp4 and int4 as 0.5 byte, fp6 as 0.75); virtual intermediates are
      excluded, since keeping them out of memory is what fusion is for. A ragged tensor counts its
-     declared (padded) dims, as its work does. Absent when any non-virtual tensor's footprint is
+     declared (padded) dims, as its work does, and a paged KV cache `[blocks, heads, block size, D]`
+     counts `B × heads × keys × D` for the keys the graph declares (the work's keys), not its spare
+     blocks, which no sequence of the graph uses (revision 2; a cache whose keys cannot be inferred
+     counts in full). Absent when any non-virtual tensor's footprint is
      unknown — missing or negative dims, or an unset data type. A zero-extent tensor contributes 0.
    - **Allocation size** — strides, alignment, rounding, and workspace, in whole bytes. What corpus
      generation's memory-safety accounting budgets; not a feature, and not derived from the footprint.
@@ -1760,7 +1765,8 @@ the trainer, and the runtime compute the same number.
    (`$graph.flops_by_type.ConvolutionFwdAttributes`), sums the work of that type's nodes. It is **0**
    when the graph has no node of that type and **absent** when any node of that type has unknown work;
    an unknown node of one type does not suppress another type's entry. A mixed-op model can therefore
-   read how much of a graph is convolution even when a custom op elsewhere leaves `$graph.flops` absent.
+   read how much of a graph is convolution even when an undeclared custom op elsewhere leaves
+   `$graph.flops` absent.
 9. **Absent, zero, and unknown are different values.** "No node of this type" aggregates to 0; "this
    work is unknown" is absent and never silently becomes 0. A signature that must tolerate absence says
    so with `present` or `value_or_default` ([Section 6.2](#62-the-features_signature)): the default is the
@@ -1780,7 +1786,7 @@ feature-semantics revision they were computed under ([Section 6.9](#69-feature-s
 
 **A new node type declares its work.** Each `NodeAttributes` member either has a formula (a
 `nodeFlops` overload and a `logicalFlops` case) or is listed in `NO_COUNTING_CONVENTION` with its
-reason, as `NONE` and `CustomOpAttributes` are. A test over every member
+reason, as `NONE` is. A test over every member
 fails for one with neither, so a new op cannot silently leave its graphs without `$graph.flops`.
 [Adding a New Operation: Work Model (FLOPs)](../AddingNewOperations.md#work-model-flops) gives the
 contributor steps.
@@ -1808,14 +1814,17 @@ byte-identical, and a model trained on the old values would score the new ones w
 feature-semantics revision covers that half of the contract.
 
 - **The constant.** `FEATURE_SEMANTICS_REVISION`
-  (`hipdnn_plugin_sdk/heuristics/FeatureSemantics.hpp`) is an integer, 1 in this build, compiled into
+  (`hipdnn_plugin_sdk/heuristics/FeatureSemantics.hpp`) is an integer, 2 in this build, compiled into
   everything built against the plugin SDK, with or without the kernel ingestor. Not yet built: the
   `hipdnn_uhd_features` evaluator. It reports the revision with every response, so the trainer takes
   the value from the build that computed its features rather than from a copy.
 - **The record.** Training stamps it into the UHD as `trained_against.feature_semantics_revision`, an
   integer ≥ 1, beside either provenance form ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)).
   It never satisfies `trained_against` on its own. **Absent means 1**, the revision the field was
-  introduced at, so every model trained before it stays valid without a restamp.
+  introduced at, so a model trained before the field existed reads as revision 1.
+- **The revisions.** 1: the work model as first published. 2: the SDPA backward counts each product
+  on its own head dimension, max-pool backward counts `dy.numel`, and `$graph.logical_bytes` counts a
+  paged KV cache at its declared keys (rules 5 and 6).
 - **The check is exact equality.** There is no additive component: a feature either means what the
   model was trained on or it does not, and a model newer than the build is as wrong as one older. A
   model that declares a `features_signature` and whose recorded revision differs from the build's is
@@ -1830,7 +1839,7 @@ feature-semantics revision covers that half of the contract.
   compiled into the same build) reads no published feature, so no bump refuses it.
 - **The bump rule.** Bump the revision in the same change that alters the value or the meaning of any
   feature already published — a FLOP or byte convention, a refusal that removes a value, a unit, an
-  encoding — and retrain the models that ship with it. Adding a feature name, or publishing a value
+  encoding — and retrain, or re-stamp, the models that ship with it. Adding a feature name, or publishing a value
   where none was published before (a node type gaining a formula), does not bump: no model could have
   read it. The one signature such an addition changes is one that branches on absence (`present`,
   `value_or_default`); that is a coverage change, like an additive descriptor revision
@@ -1838,6 +1847,12 @@ feature-semantics revision covers that half of the contract.
   refusing.
 - **A test enforces it.** The golden FLOP and feature values sit beside an assertion on the revision, so
   changing a golden value fails until the revision and the assertion move together.
+- **A re-stamp is offline and proven.** `uhd_gen restamp-semantics` moves a model's recorded revision
+  forward without retraining only when the features it reads, through its signature or its label (a
+  `tflops` label reads `$graph.flops`), cannot have moved: it reads none of the features the
+  revisions in between changed, or two corpora of its graphs collected at the two revisions publish
+  every one of them identically. The proof is kept in the ignored `trained_against["x-restamps"]`;
+  the runtime check stays exact equality.
 
 ---
 

@@ -65,6 +65,8 @@ ATTRIBUTE_DEFAULTS: dict[str, object] = {
     # KDA's safe-gate lower bound
     "graph.nodes[*].scale": {"rsqrt": ["$graph.nodes[{node}].q.dims[2]"]},
     "graph.nodes[*].gate_lower_bound": -5.0,
+    # Custom op (custom_op_attributes.fbs): undeclared work is unknown, not zero
+    "graph.nodes[*].declared_flops": SENTINEL,
     # Vector attributes: an element past the end is a spatial dimension the node does not
     # have, which neither pads, strides, dilates, windows nor blocks.
     "graph.nodes[*].pre_padding[*]": 0,
