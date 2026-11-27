@@ -50,7 +50,7 @@ Rule3SignalAnchorResult findRule3SignalAnchorByCycleLeadForUnitTest(
     StinkyInstruction* referenceAnchor, BasicBlock::iterator segBegin, IRBase* defaultAnchor,
     const std::unordered_map<const StinkyInstruction*, uint32_t>& cycleMap, int leadCycles,
     int maxLeadCycles, const std::unordered_set<StinkyInstruction*>& priorWaitAnchors, int maxHops,
-    StinkyInstruction* loopHead);
+    StinkyInstruction* loopHead, bool girFramePipeline = false);
 
 }  // namespace test
 }  // namespace cluster_barrier

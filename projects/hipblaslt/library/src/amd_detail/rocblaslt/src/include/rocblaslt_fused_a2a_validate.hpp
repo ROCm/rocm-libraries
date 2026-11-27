@@ -9,7 +9,7 @@
 
 inline rocblaslt_status validate_a2a_gemm(const _rocblaslt_handle*           handle,
                                           const RocblasltContractionProblem& problem,
-                                          const RocblasltFusedEpilogueInfo&  info)
+                                          const RocblasltFusionInfo&         info)
 {
     const int64_t world = handle->device_comm_world;
     if(info.a2aPeerBPtrs == nullptr || info.a2aPeerBCount != (size_t)world
@@ -39,8 +39,8 @@ inline rocblaslt_status validate_a2a_gemm(const _rocblaslt_handle*           han
 inline rocblaslt_status validate_fused_a2a(const _rocblaslt_handle*           handle,
                                            const RocblasltContractionProblem& problem)
 {
-    RocblasltFusedEpilogueInfo info;
-    const bool                 fused = rocblaslt_resolve_fused_a2a(problem, info);
+    RocblasltFusionInfo info;
+    const bool          fused = rocblaslt_resolve_fused_a2a(problem, info);
     if(info.misattached)
         return rocblaslt_status_invalid_value;
     if(!fused)
@@ -55,7 +55,7 @@ inline rocblaslt_status validate_fused_a2a(const _rocblaslt_handle*           ha
     if(info.commChannel >= handle->device_comm_channels)
         return rocblaslt_status_invalid_value;
 
-    if(info.mode == RocblasltFusedEpilogueInfo::Mode::A2AGemm)
+    if(info.mode == RocblasltFusionInfo::Mode::A2AGemm)
         return validate_a2a_gemm(handle, problem, info);
 
     if(info.a2aExtent > int64_t(problem.m)
@@ -68,7 +68,7 @@ inline rocblaslt_status validate_fused_a2a(const _rocblaslt_handle*           ha
 
 inline bool fused_a2a_lacks_sdma_queues(const RocblasltContractionProblem& problem)
 {
-    RocblasltFusedEpilogueInfo info;
+    RocblasltFusionInfo info;
     return rocblaslt_resolve_fused_a2a(problem, info) && info.a2aSdmaQueues == nullptr;
 }
 

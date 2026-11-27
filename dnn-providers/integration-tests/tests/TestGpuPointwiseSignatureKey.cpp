@@ -401,11 +401,6 @@ const std::vector<Gap>& knownGaps()
         {Reference::GPU, ternarySignature(K_FP8_E5M2, K_FP8_E5M2, K_BOOLEAN, K_FP8_E5M2, K_FP32)},
         {Reference::GPU, ternarySignature(K_BOOLEAN, K_BOOLEAN, K_BOOLEAN, K_BOOLEAN, K_FP32)},
 
-        // GPU only: an FP32 operand beside a 16-bit one, computed in FP32 and written in the 16-bit
-        // type.
-        {Reference::CPU, binarySignature(K_FP32, K_FP16, K_FP16, K_FP32)},
-        {Reference::CPU, binarySignature(K_FP32, K_BFP16, K_BFP16, K_FP32)},
-
         // GPU only: the CPU narrows an FP32 input but never widens a 16-bit one, and mixes FP16
         // with BFP16 only in CMP_GT.
         {Reference::CPU, unarySignature(K_FP16, K_FP32, K_FP32)},

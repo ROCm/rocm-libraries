@@ -299,13 +299,13 @@ hiptensorStatus_t hiptensorCreateContraction(const hiptensorHandle_t            
                                       ? hiptensor::ContractionOpId_t::SCALE_COMPLEX
                                       : hiptensor::ContractionOpId_t::SCALE);
 
-    (*desc)->mTag          = 0u;
-    (*desc)->mScalarType   = *hiptensor::convertToHipTensorDataType(descCompute);
-    (*desc)->mFlops        = 0;
-    (*desc)->mMovedBytes   = 0;
-    (*desc)->mPaddingLeft  = 0;
-    (*desc)->mPaddingRighT = 0;
-    (*desc)->mPaddingValue = nullptr;
+    (*desc)->mTag        = 0u;
+    (*desc)->mScalarType = *hiptensor::convertToHipTensorDataType(descCompute);
+    (*desc)->mFlops      = 0;
+    (*desc)->mMovedBytes = 0;
+    (*desc)->mPaddingLeft.assign(descD->mLengths.size(), 0u);
+    (*desc)->mPaddingRight.assign(descD->mLengths.size(), 0u);
+    (*desc)->mPaddingValue.assign(hiptensor::hiptensorDataTypeSize(descD->mType), 0u);
 
     (*desc)->mOperationType   = HIPTENSOR_CONTRACTION;
     (*desc)->mContractionOpId = static_cast<int32_t>(contractionOp);
@@ -1068,13 +1068,13 @@ hiptensorStatus_t hiptensorCreateContractionTrinary(const hiptensorHandle_t     
                                       ? hiptensor::ContractionOpId_t::SCALE_COMPLEX
                                       : hiptensor::ContractionOpId_t::SCALE);
 
-    (*desc)->mTag          = 0u;
-    (*desc)->mScalarType   = *hiptensor::convertToHipTensorDataType(descCompute);
-    (*desc)->mFlops        = 0;
-    (*desc)->mMovedBytes   = 0;
-    (*desc)->mPaddingLeft  = 0;
-    (*desc)->mPaddingRighT = 0;
-    (*desc)->mPaddingValue = nullptr;
+    (*desc)->mTag        = 0u;
+    (*desc)->mScalarType = *hiptensor::convertToHipTensorDataType(descCompute);
+    (*desc)->mFlops      = 0;
+    (*desc)->mMovedBytes = 0;
+    (*desc)->mPaddingLeft.assign(descE->mLengths.size(), 0u);
+    (*desc)->mPaddingRight.assign(descE->mLengths.size(), 0u);
+    (*desc)->mPaddingValue.assign(hiptensor::hiptensorDataTypeSize(descE->mType), 0u);
 
     (*desc)->mOperationType   = HIPTENSOR_CONTRACTION_TRINARY;
     (*desc)->mContractionOpId = static_cast<int32_t>(contractionOp);
