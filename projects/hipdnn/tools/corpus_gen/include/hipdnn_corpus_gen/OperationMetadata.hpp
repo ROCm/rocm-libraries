@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <limits>
 #include <map>
+#include <numeric>
 #include <optional>
 #include <string>
 #include <variant>
@@ -44,6 +45,14 @@ struct Parameter
 
     /// A semantic bound only (e.g. one dim cannot exceed another), never "expected sizes".
     std::optional<std::pair<int64_t, int64_t>> range;
+
+    /// The multiple an `int64` parameter must be by the operation's own definition, derived at
+    /// load from a top-level constraint that makes it a multiple of a constant (detail::
+    /// requiredMultiple; MX's K by its block of 32): random starts, walk steps and neighbourhood
+    /// moves land on multiples of it, so the search does not propose problems the declaration
+    /// refuses. Never declared, so it cannot encode a guess about what kernels prefer. 1 (no such
+    /// constraint) is every integer.
+    int64_t step = 1;
 
     /// Required for ENUM; a BOOL has an implicit [false, true].
     std::vector<std::string> values;
@@ -131,6 +140,7 @@ struct BuilderArgument
         DIRECT, ///< Copy the named `$q.*` value.
         EXPR, ///< Evaluate an expression; arrays yield dims lists.
         STRIDES_OF, ///< Row-major contiguous strides for a previously-named argument.
+        SAME_AS, ///< The value of a previously-named argument (a gradient laid out as its input).
         DTYPE_OF, ///< Map a dtype string to the FlatBuffers DataType enumerator.
         CONSTANT ///< Literal.
     };
@@ -138,6 +148,9 @@ struct BuilderArgument
     std::string name;
     Kind kind = Kind::DIRECT;
     std::string source; ///< DIRECT, DTYPE_OF
+    /// DTYPE_OF: the source's declared values this argument spells as another dtype; a value
+    /// not listed is its own spelling.
+    std::map<std::string, std::string> dtypeMap;
     /// One expression per element, followed by the elements' `when` conditions.
     hipdnn_plugin_sdk::uhd::ExpressionSet expressions;
     /// Scalar EXPR: resolves to an unfloored double (e.g. a softmax scale), not a dim.
@@ -147,7 +160,7 @@ struct BuilderArgument
     /// Per element, the index of its `when` condition; a false condition omits the element,
     /// letting one declaration cover several ranks.
     std::vector<std::optional<size_t>> elementConditions;
-    std::string of; ///< STRIDES_OF
+    std::string of; ///< STRIDES_OF, SAME_AS
     nlohmann::json constant; ///< CONSTANT
 };
 
@@ -156,6 +169,11 @@ struct GraphBuilderSpec
 {
     std::string function;
     std::string source;
+    /// Values derived from the point once and bound as `$let.<name>` before any argument
+    /// resolves: `lets.resolve(i, ...)` binds `letNames[i]`. A let reads `$q.*` and the lets
+    /// declared before it; the arguments read every let.
+    std::vector<std::string> letNames;
+    hipdnn_plugin_sdk::uhd::ExpressionSet lets;
     std::vector<BuilderArgument> arguments;
 };
 
@@ -340,6 +358,62 @@ inline std::string queryReference(const std::string& text)
     return text.rfind(PREFIX, 0) == 0 ? text.substr(PREFIX.size()) : std::string();
 }
 
+/// The `$let.<name>` a reference names, or empty if it is not a graph_builder `let`.
+inline std::string letReference(const std::string& text)
+{
+    constexpr std::string_view PREFIX = "$let.";
+    return text.rfind(PREFIX, 0) == 0 ? text.substr(PREFIX.size()) : std::string();
+}
+
+/// The parameter @p clause requires to be a multiple of a constant, and that constant:
+/// `{"divisible": ["$q.X", c]}` or `{"==": [{"%": ["$q.X", c]}, 0]}`, either side of the `==`,
+/// with c an integer of 2 or more; nullopt for any other clause, including a divisor that is
+/// another parameter (`C % groups`), which is a coupling and not a fixed multiple.
+inline std::optional<std::pair<std::string, int64_t>> requiredMultiple(const nlohmann::json& clause)
+{
+    const auto multiple
+        = [](const nlohmann::json& operands) -> std::optional<std::pair<std::string, int64_t>> {
+        if(!operands.is_array() || operands.size() != 2 || !operands[0].is_string()
+           || !operands[1].is_number_integer() || operands[1].get<int64_t>() < 2)
+        {
+            return std::nullopt;
+        }
+        const auto name = queryReference(operands[0].get<std::string>());
+        if(name.empty())
+        {
+            return std::nullopt;
+        }
+        return std::make_pair(name, operands[1].get<int64_t>());
+    };
+    if(!clause.is_object() || clause.size() != 1)
+    {
+        return std::nullopt;
+    }
+    if(clause.contains("divisible"))
+    {
+        return multiple(clause.at("divisible"));
+    }
+    if(clause.contains("=="))
+    {
+        const auto& sides = clause.at("==");
+        if(!sides.is_array() || sides.size() != 2)
+        {
+            return std::nullopt;
+        }
+        for(const size_t side : {size_t{0}, size_t{1}})
+        {
+            const auto& remainder = sides[side];
+            const auto& zero = sides[1 - side];
+            if(zero.is_number_integer() && zero.get<int64_t>() == 0 && remainder.is_object()
+               && remainder.size() == 1 && remainder.contains("%"))
+            {
+                return multiple(remainder.at("%"));
+            }
+        }
+    }
+    return std::nullopt;
+}
+
 /// @brief @p parameters' indices in an order where each comes after every parameter it reads.
 /// @p reads maps a parameter to those it copies; ties keep declaration order so seeds stay
 /// reproducible. Needed because the JSON parser does not preserve key order.
@@ -475,6 +549,10 @@ inline std::optional<BuilderArgument::Kind> parseArgumentKind(const std::string&
     if(text == "strides_of")
     {
         return BuilderArgument::Kind::STRIDES_OF;
+    }
+    if(text == "same_as")
+    {
+        return BuilderArgument::Kind::SAME_AS;
     }
     if(text == "dtype_of")
     {
@@ -642,6 +720,70 @@ inline std::vector<RegimeAxis> parseLabelAxes(const nlohmann::json& axes,
         parsed.push_back(std::move(axis));
     }
     return parsed;
+}
+
+/// @brief Compiles `graph_builder.let` into @p spec: an array of `{"name", "value"}`, a §6.2
+/// expression each, bound as `$let.<name>` before the arguments resolve.
+///
+/// An array, not an object: a let reads the `$q.*` parameters and only the lets declared
+/// before it, so declaration order is the resolution order and no cycle can be written.
+inline void parseLets(const nlohmann::json& lets,
+                      const OperationMetadata& metadata,
+                      GraphBuilderSpec& spec,
+                      MetadataLoad& load)
+{
+    if(!lets.is_array())
+    {
+        load.errors.emplace_back("graph_builder 'let' is not an array");
+        return;
+    }
+    std::vector<nlohmann::json> program;
+    for(const auto& let : lets)
+    {
+        const auto name = let.is_object() ? let.value("name", "") : std::string();
+        if(name.empty() || !let.contains("value"))
+        {
+            load.errors.emplace_back("graph_builder 'let' holds an entry without a name or value");
+            continue;
+        }
+        if(std::find(spec.letNames.begin(), spec.letNames.end(), name) != spec.letNames.end())
+        {
+            load.errors.push_back("let '" + name + "' is declared twice");
+            continue;
+        }
+        spec.letNames.push_back(name);
+        program.push_back(let.at("value"));
+    }
+    try
+    {
+        spec.lets = hipdnn_plugin_sdk::uhd::ExpressionSet(program);
+    }
+    catch(const std::exception& error)
+    {
+        load.errors.push_back("graph_builder 'let': " + std::string(error.what()));
+        spec.letNames.clear();
+        return;
+    }
+    for(size_t i = 0; i < spec.letNames.size(); ++i)
+    {
+        const auto before = spec.letNames.begin() + static_cast<std::ptrdiff_t>(i);
+        for(const auto& variable : spec.lets.variables(i))
+        {
+            const auto parameter = queryReference(variable);
+            if(!parameter.empty() && metadata.find(parameter) == nullptr)
+            {
+                load.errors.push_back("let '" + spec.letNames[i]
+                                      + "' references undeclared parameter '" + parameter + "'");
+            }
+            const auto let = letReference(variable);
+            if(!let.empty() && std::find(spec.letNames.begin(), before, let) == before)
+            {
+                // Lets resolve in declaration order: a later let, or this one, is not bound yet.
+                load.errors.push_back("let '" + spec.letNames[i] + "' reads '" + variable
+                                      + "', which is not declared before it");
+            }
+        }
+    }
 }
 
 } // namespace detail
@@ -966,6 +1108,10 @@ inline MetadataLoad parseOperationMetadata(const nlohmann::json& root)
         {
             load.errors.emplace_back("graph_builder declares no function");
         }
+        if(builder.contains("let"))
+        {
+            detail::parseLets(builder.at("let"), metadata, metadata.graphBuilder, load);
+        }
 
         std::vector<std::string> declared;
         for(const auto& argument : builder.value("arguments", nlohmann::json::array()))
@@ -982,6 +1128,41 @@ inline MetadataLoad parseOperationMetadata(const nlohmann::json& root)
             resolved.kind = *kind;
             resolved.source = argument.value("source", "");
             resolved.of = argument.value("of", "");
+            if(argument.contains("map"))
+            {
+                // `map` re-spells the source's declared values for this argument alone: a role
+                // whose type differs from the declared one (an fp8 forward's bf16 output).
+                const auto* source = metadata.find(detail::queryReference(resolved.source));
+                if(resolved.kind != BuilderArgument::Kind::DTYPE_OF
+                   || !argument.at("map").is_object())
+                {
+                    load.errors.push_back("argument '" + resolved.name
+                                          + "': 'map' is an object on a dtype_of argument");
+                }
+                else
+                {
+                    for(const auto& [from, to] : argument.at("map").items())
+                    {
+                        if(!to.is_string() || to.get<std::string>().empty())
+                        {
+                            load.errors.push_back("argument '" + resolved.name + "' maps '" + from
+                                                  + "' to something that is not a dtype name");
+                        }
+                        else if(source == nullptr || source->type != ParameterType::ENUM
+                                || std::find(source->values.begin(), source->values.end(), from)
+                                       == source->values.end())
+                        {
+                            load.errors.push_back("argument '" + resolved.name + "' maps '" + from
+                                                  + "', which '" + resolved.source
+                                                  + "' does not declare");
+                        }
+                        else
+                        {
+                            resolved.dtypeMap[from] = to.get<std::string>();
+                        }
+                    }
+                }
+            }
             if(argument.contains("constant"))
             {
                 resolved.constant = argument.at("constant");
@@ -1050,17 +1231,26 @@ inline MetadataLoad parseOperationMetadata(const nlohmann::json& root)
             };
             checkReference(resolved.source);
             // Variables come from the evaluator, so nested expressions are covered too.
+            const auto& lets = metadata.graphBuilder.letNames;
             for(const auto& variable : resolved.expressions.variables())
             {
                 checkReference(variable);
+                const auto let = detail::letReference(variable);
+                if(!let.empty() && std::find(lets.begin(), lets.end(), let) == lets.end())
+                {
+                    load.errors.push_back("argument '" + resolved.name + "' reads '" + variable
+                                          + "', which graph_builder's 'let' does not declare");
+                }
             }
 
-            if(resolved.kind == BuilderArgument::Kind::STRIDES_OF
+            if((resolved.kind == BuilderArgument::Kind::STRIDES_OF
+                || resolved.kind == BuilderArgument::Kind::SAME_AS)
                && std::find(declared.begin(), declared.end(), resolved.of) == declared.end())
             {
                 // Arguments resolve in declaration order; a forward reference cannot resolve.
-                load.errors.push_back("argument '" + resolved.name + "' takes strides_of '"
-                                      + resolved.of + "', which is not declared before it");
+                load.errors.push_back("argument '" + resolved.name + "' takes "
+                                      + argument.value("kind", "") + " '" + resolved.of
+                                      + "', which is not declared before it");
             }
 
             declared.push_back(resolved.name);
@@ -1081,6 +1271,24 @@ inline MetadataLoad parseOperationMetadata(const nlohmann::json& root)
                 {
                     load.errors.push_back("constraint references undeclared parameter '" + name
                                           + "'");
+                }
+            }
+            // A top-level clause that makes a parameter a multiple of a constant is part of
+            // the problem's definition: the search draws and walks that parameter at that
+            // multiple (Parameter::step), the least common multiple when several apply.
+            for(const auto& clause : root.at("constraints"))
+            {
+                const auto required = detail::requiredMultiple(clause);
+                if(!required.has_value())
+                {
+                    continue;
+                }
+                for(auto& parameter : metadata.parameters)
+                {
+                    if(parameter.name == required->first && parameter.type == ParameterType::INT64)
+                    {
+                        parameter.step = std::lcm(parameter.step, required->second);
+                    }
                 }
             }
         }

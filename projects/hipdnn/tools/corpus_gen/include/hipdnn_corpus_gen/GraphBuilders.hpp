@@ -725,17 +725,26 @@ struct SdpaOperands
     /// Dropout's Philox seed and offset.
     std::optional<TensorSpec> seed;
     std::optional<TensorSpec> dropoutOffset;
+
+    /// The offset tensors that the graph's tensors name as their ragged offsets, written as
+    /// graph tensors of their own. The offsets live on the tensors, not on the node, so both
+    /// directions carry them.
+    std::vector<TensorSpec> raggedOffsets;
 };
 
-/// The forward's operands: those both directions take, and the two only it has.
+/// The forward's operands: those both directions take, and the ones only it has.
 struct SdpaForwardOperands : SdpaOperands
 {
     /// The attention-sink logits.
     std::optional<TensorSpec> sink;
 
-    /// The offset tensors that q, k, v, o or stats name as their ragged offsets, written as
-    /// graph tensors of their own.
-    std::vector<TensorSpec> raggedOffsets;
+    /// The per-tensor dequantization scales of an fp8 forward's Q, K and V (cuDNN's sdpa_fp8
+    /// Descale_Q, Descale_K and Descale_V): one FLOAT element each, which the plans that take
+    /// them read through a device pointer. The backward schema has none, so only the forward
+    /// binds them. They are set together or not at all.
+    std::optional<TensorSpec> descaleQ;
+    std::optional<TensorSpec> descaleK;
+    std::optional<TensorSpec> descaleV;
 };
 
 namespace detail
@@ -794,8 +803,9 @@ void bindSdpaOperands(AttributesBuilder& attributes, const SdpaOperands& operand
 
 /// @brief Scaled dot-product attention, forward.
 ///
-/// The schema's other optional tensor uids (paged KV, descale, block mask) stay null; @p operands
-/// binds the rest. Stats are generated only when `generateStats` is set and @p stats is given.
+/// The schema's other optional tensor uids (paged KV, the softmax and output scaling of
+/// cuDNN's sdpa_fp8, block mask) stay null; @p operands binds the rest. Stats are generated
+/// only when `generateStats` is set and @p stats is given.
 inline GraphBytes sdpaForward(const TensorSpec& q,
                               const TensorSpec& k,
                               const TensorSpec& v,
@@ -820,6 +830,13 @@ inline GraphBytes sdpaForward(const TensorSpec& q,
     {
         tensors.push_back(detail::addTensor(builder, *operands.sink));
     }
+    for(const auto* descale : {&operands.descaleQ, &operands.descaleK, &operands.descaleV})
+    {
+        if(descale->has_value())
+        {
+            tensors.push_back(detail::addTensor(builder, **descale));
+        }
+    }
     for(const auto& offsets : operands.raggedOffsets)
     {
         tensors.push_back(detail::addTensor(builder, offsets));
@@ -834,6 +851,18 @@ inline GraphBytes sdpaForward(const TensorSpec& q,
     if(operands.sink.has_value())
     {
         attributes.add_sink_token_tensor_uid(operands.sink->uid);
+    }
+    if(operands.descaleQ.has_value())
+    {
+        attributes.add_descale_q_tensor_uid(operands.descaleQ->uid);
+    }
+    if(operands.descaleK.has_value())
+    {
+        attributes.add_descale_k_tensor_uid(operands.descaleK->uid);
+    }
+    if(operands.descaleV.has_value())
+    {
+        attributes.add_descale_v_tensor_uid(operands.descaleV->uid);
     }
     // Causality is written as bounds (right 0, left unbounded) plus diagonal_alignment. The
     // deprecated causal_mask flag stays false: providers read it as top-left regardless of the
@@ -878,8 +907,7 @@ inline GraphBytes sdpaForward(const TensorSpec& q,
 /// @brief Scaled dot-product attention, backward. Stats from the forward pass are required,
 ///        not optional: the backward pass reads them rather than recomputing the softmax.
 ///
-/// The backward schema has no sink token, and no ragged form is built for it yet (the offsets
-/// live on the tensors, so the schema could carry one), so @p operands is the shared set.
+/// The backward schema has no sink token, so @p operands is the shared set.
 inline GraphBytes sdpaBackward(const TensorSpec& q,
                                const TensorSpec& k,
                                const TensorSpec& v,
@@ -905,6 +933,10 @@ inline GraphBytes sdpaBackward(const TensorSpec& q,
         detail::addTensor(builder, dk),
         detail::addTensor(builder, dv)};
     detail::addSdpaOperandTensors<fb::SdpaBackwardAttributesBuilder>(builder, tensors, operands);
+    for(const auto& offsets : operands.raggedOffsets)
+    {
+        tensors.push_back(detail::addTensor(builder, offsets));
+    }
 
     fb::SdpaBackwardAttributesBuilder attributes(builder);
     attributes.add_q_tensor_uid(q.uid);

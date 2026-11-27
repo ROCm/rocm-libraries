@@ -69,6 +69,13 @@ that combination is exploration only` is not a failure either: the engine served
 operation's named workloads for that combination, which the search still explores. Report it
 when the engine is meant to serve those workloads.
 
+corpus_gen's `WARNING: archetype <name> was never admitted (N drawn): ...` is expected when
+the reason it gives is `--max-bytes`: the archetype's graphs are past the byte limit at every
+declared size (matmul's `gpt3_175b_projection`, `sdpa_bwd`'s `gpt3_175b_prefill` and
+`long_context`, and both SDPA declarations' `video_dit_full_attention` at the default 256 MiB).
+Report it when the reason is the engine declining an archetype it is meant to
+serve.
+
 ## Silent failures: green runs with useless results
 
 | Symptom | Likely cause |

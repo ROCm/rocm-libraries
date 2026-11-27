@@ -10,6 +10,7 @@
 #include <hipdnn_corpus_gen/WorkloadSampling.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <functional>
@@ -17,6 +18,7 @@
 #include <limits>
 #include <map>
 #include <numeric>
+#include <optional>
 #include <random>
 #include <set>
 #include <string>
@@ -97,6 +99,14 @@ struct ExplorationRequest
     /// call.
     size_t maxSkeleton = 512;
 
+    /// Problems other sources already hold: a pack's kernel geometries (`--kdp-root`) and
+    /// recorded workload shapes (`--model-shapes`). Their numeric shapes go to the oracle in every
+    /// combination ahead of the regime skeleton, those recorded under the combination's own
+    /// categorical values first, so the walk starts from where the engine's kernels and real
+    /// workloads are known to sit (RFC 0019.13 §5.3 step 3). At most @ref maxSkeleton per
+    /// combination.
+    std::vector<ProblemPoint> seedPoints;
+
     /// Problems wanted from the whole operation; 0 means just the per-combination pass. Short of
     /// it, combinations that found something are searched again with growing budgets;
     /// combinations that found nothing are not grown.
@@ -128,6 +138,10 @@ struct CombinationResult
     std::vector<ProblemPoint> problems;
     FeasibleSetStats stats;
 
+    /// The declared archetype (an index into OperationMetadata::archetypes) of each of the
+    /// first @ref fromArchetypes problems.
+    std::vector<size_t> archetypeOf;
+
     /// Growth toward @ref ExplorationRequest::corpusTarget stopped because doubling the search
     /// found no new point.
     bool saturated = false;
@@ -142,6 +156,56 @@ struct CombinationResult
     /// seed reproduces them.
     std::vector<ProblemPoint> lowest;
     std::vector<ProblemPoint> highest;
+};
+
+/// What became of one declared archetype's draws over the whole exploration.
+struct ArchetypeTally
+{
+    std::string name;
+
+    /// Draws that fit a combination and were put to the checks, a repeat of a point already
+    /// judged there aside. Each lands in exactly one of the outcomes below.
+    int64_t drawn = 0;
+    int64_t refusedByConstraints = 0;
+
+    /// Refused by the oracle: the engine, the benchmarking size ceiling, or a graph that does
+    /// not build.
+    int64_t refusedByOracle = 0;
+    int64_t admitted = 0;
+
+    /// Admitted by the checks but already held by the caller (another source, such as a
+    /// recorded workload or a kernel pack, supplies the point), so the point is in the corpus
+    /// under that source rather than this archetype's.
+    int64_t held = 0;
+
+    /// The first points the oracle refused, at most @ref MAX_REFUSED_KEPT, so a caller can say
+    /// why: one point does not tell a size ceiling from an engine declining the rest.
+    static constexpr size_t MAX_REFUSED_KEPT = 16;
+    std::vector<ProblemPoint> refused;
+};
+
+/// What each combination's first search found from the seeds it was given, and where its
+/// oracle queries went. Every oracle query over every pass is counted in
+/// ProblemCorpus::constraintAdmissions (the declared constraints put each to the oracle);
+/// memoized answers are not queries.
+struct SearchAccount
+{
+    /// Combinations whose first pass ran a search.
+    int64_t searched = 0;
+
+    /// Over those first searches: the given seeds checked and accepted, log-uniform draws for
+    /// a foothold checked and accepted, and walk steps checked (memoized revisits included).
+    int64_t seedChecks = 0;
+    int64_t seedsAccepted = 0;
+    int64_t drawChecks = 0;
+    int64_t drawsAccepted = 0;
+    int64_t walkChecks = 0;
+
+    /// First searches in which no given seed was accepted; of those, how many a log-uniform
+    /// draw found a foothold for, and how many found none at all.
+    int64_t noSeedAccepted = 0;
+    int64_t recoveredByDraws = 0;
+    int64_t foundNothing = 0;
 };
 
 /// The problem corpus and an account of how it was produced.
@@ -175,6 +239,11 @@ struct ProblemCorpus
     /// Why the corpus holds fewer than @ref ExplorationRequest::corpusTarget problems, one line
     /// per combination. Empty when the target was met or not set.
     std::vector<std::string> shortfall;
+
+    /// Per declared archetype, in declaration order.
+    std::vector<ArchetypeTally> archetypes;
+
+    SearchAccount search;
 
     /// Every problem point found, flattened.
     std::vector<ProblemPoint> problems() const
@@ -227,19 +296,93 @@ struct ProblemCorpus
 namespace detail
 {
 
+/// A reproducible pseudo-random key for part @p index under @p seed (splitmix64): the tie-break
+/// of apportion, so equal remainders are not always settled in favour of the earliest parts,
+/// which the enumeration order would turn into a bias toward the first value of the leading
+/// parameters; also the round function of ScatteredOrder.
+inline uint64_t tieKey(uint64_t seed, size_t index)
+{
+    uint64_t z = seed + 0x9e3779b97f4a7c15ULL * (static_cast<uint64_t>(index) + 1);
+    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
+    z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
+    return z ^ (z >> 31);
+}
+
+/// A bijection of [0, @p total) chosen by @p seed, the order a product too large to take whole
+/// is walked in: a balanced Feistel network over the bits of the smallest even power of two at
+/// least @p total, each round keyed by tieKey of the seed and the round number, cycle-walked
+/// (applied again until the value is in range), which keeps it a bijection of [0, total).
+/// Unlike a stride through the product, it ties no digit of the mixed-radix index to another:
+/// even a stride coprime to the product moves some digits together, and sdpa_fwd's 23040
+/// combinations, before the fp8 dtypes,
+/// walked at a stride of 14239 held 1 scale_unset combination where 56 were due,
+/// because the one scale that form admits was a value of the digit the stride had tied to it.
+/// Keyed by the seed, a given seed revisits the same combinations and another seed reaches
+/// others, so regenerating a corpus under a new seed widens what the sample has covered.
+class ScatteredOrder
+{
+public:
+    ScatteredOrder(size_t total, uint64_t seed)
+        : _total(total)
+    {
+        while(_halfBits < 32 && (uint64_t{1} << (2 * _halfBits)) < total)
+        {
+            ++_halfBits;
+        }
+        _halfMask = (uint64_t{1} << _halfBits) - 1;
+        for(size_t round = 0; round < ROUNDS; ++round)
+        {
+            _roundKeys[round] = tieKey(seed, round);
+        }
+    }
+
+    /// The combination index visited at @p step, for a step below the total.
+    size_t operator()(size_t step) const
+    {
+        uint64_t value = step;
+        do
+        {
+            value = permute(value);
+        } while(value >= _total);
+        return static_cast<size_t>(value);
+    }
+
+private:
+    static constexpr size_t ROUNDS = 4;
+
+    uint64_t permute(uint64_t value) const
+    {
+        uint64_t left = value >> _halfBits;
+        uint64_t right = value & _halfMask;
+        for(const auto key : _roundKeys)
+        {
+            const uint64_t mixed = left ^ (tieKey(key, static_cast<size_t>(right)) & _halfMask);
+            left = right;
+            right = mixed;
+        }
+        return (left << _halfBits) | right;
+    }
+
+    size_t _total;
+    uint64_t _halfBits = 1;
+    uint64_t _halfMask = 1;
+    std::array<uint64_t, ROUNDS> _roundKeys{};
+};
+
 /// The cross product of every categorical parameter's declared values that @p keep admits, at
 /// most @p limit of it plus whatever keeps every admitted value present; @p total receives the
 /// full size of the admitted product, 0 when @p keep admits no value of some parameter.
 ///
 /// Past the limit the product is sampled, not cut to a prefix (a prefix keeps only the first
 /// values of the earliest parameters), and each value the sample missed gets a combination of
-/// its own, so a model trained on the corpus has seen every value (§5.2). The sample steps
-/// through the product by a stride coprime to its size, so it visits distinct combinations in a
-/// fixed, scattered order: an even stride aliases with the mixed-radix index and leaves whole
-/// value triples out (sdpa_fwd's 6912 combinations at a stride of 6.75 have no kv_bhsd, jitter,
-/// local_4096 one). @p live, when given, says which combinations can hold a problem (see
+/// its own, so a model trained on the corpus has seen every value (§5.2). The sample walks the
+/// product in a pseudo-random order @p seed chooses (ScatteredOrder), so it visits distinct
+/// combinations spread over every pair of values rather than along whichever digits a stride
+/// ties together. @p live, when given, says which combinations can hold a problem (see
 /// excludedByCategoricals): only those are sampled, so the limit is spent on combinations that
-/// count. Declaration order keeps the result reproducible.
+/// count. The order is a function of the product and @p seed, so a seed reproduces its sample
+/// and different seeds sample different combinations. Within the limit, @p seed is unused:
+/// the whole product is enumerated in order.
 ///
 /// @p constraintEmpty, when given, receives how many combinations of the admitted product @p
 /// live refuses, counted over the whole product and not only the part the sample walks: past
@@ -251,6 +394,7 @@ namespace detail
 inline std::vector<ProblemPoint>
     categoricalCombinations(const std::vector<Parameter>& parameters,
                             size_t limit,
+                            uint64_t seed,
                             size_t& total,
                             const std::function<bool(const ProblemPoint&)>& live = {},
                             const std::vector<KeepClause>& keep = {},
@@ -313,28 +457,15 @@ inline std::vector<ProblemPoint>
         return combinations;
     }
 
-    // The stride nearest the golden ratio of the product that shares no factor with it, so the
-    // walk index * stride % total is a permutation of the product.
-    size_t stride
-        = std::max<size_t>(1, static_cast<size_t>(static_cast<double>(total) * 0.6180339887));
-    while(std::gcd(stride, total) != 1)
-    {
-        ++stride;
-    }
-    // The walk's product index after @p step strides, by repeated addition modulo the total so
-    // a large product cannot overflow.
-    const auto next = [&](size_t index) {
-        return index >= total - stride ? index - (total - stride) : index + stride;
-    };
+    const ScatteredOrder order(total, seed);
     const auto counts = [&live](const ProblemPoint& point) { return !live || live(point); };
 
     combinations.reserve(limit);
     size_t visited = 0;
-    size_t cursor = 0;
     size_t empty = 0;
-    for(; visited < total && combinations.size() < limit; ++visited, cursor = next(cursor))
+    for(; visited < total && combinations.size() < limit; ++visited)
     {
-        auto point = at(cursor);
+        auto point = at(order(visited));
         if(counts(point))
         {
             combinations.push_back(std::move(point));
@@ -346,10 +477,9 @@ inline std::vector<ProblemPoint>
     }
     if(constraintEmpty != nullptr)
     {
-        auto ahead = cursor;
-        for(size_t step = visited; step < total; ++step, ahead = next(ahead))
+        for(size_t step = visited; step < total; ++step)
         {
-            empty += counts(at(ahead)) ? 0 : 1;
+            empty += counts(at(order(step))) ? 0 : 1;
         }
         *constraintEmpty = empty;
     }
@@ -369,10 +499,9 @@ inline std::vector<ProblemPoint>
                 continue;
             }
             bool found = false;
-            auto ahead = cursor;
-            for(size_t step = visited; step < total && !found; ++step, ahead = next(ahead))
+            for(size_t step = visited; step < total && !found; ++step)
             {
-                auto point = at(ahead);
+                auto point = at(order(step));
                 if(point.at(name) == value && counts(point))
                 {
                     combinations.push_back(std::move(point));
@@ -589,18 +718,6 @@ inline std::vector<double> combinationSizes(const OperationMetadata& metadata,
     return sizes;
 }
 
-/// A reproducible pseudo-random key for part @p index under @p seed (splitmix64): the tie-break
-/// of apportion, so equal remainders are not always settled in favour of the earliest parts,
-/// which the enumeration order would turn into a bias toward the first value of the leading
-/// parameters.
-inline uint64_t tieKey(uint64_t seed, size_t index)
-{
-    uint64_t z = seed + 0x9e3779b97f4a7c15ULL * (static_cast<uint64_t>(index) + 1);
-    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
-    z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
-    return z ^ (z >> 31);
-}
-
 /// Splits @p total into whole parts in proportion to @p sizes. The parts sum to @p total exactly
 /// and each is its ideal share rounded down or up (a per-part ceiling or rounding would not sum,
 /// and over a few points the error is the share).
@@ -691,6 +808,119 @@ inline std::vector<int64_t> apportion(int64_t total,
         ++given;
     }
     return parts;
+}
+
+/// A point another source holds, split into the numeric shape a walk can start from and the
+/// categorical values it was recorded under.
+struct SeedShape
+{
+    ProblemPoint categorical;
+    Shape shape;
+};
+
+/// The shapes of @p points over @p numericParameters; a point missing one of them is skipped.
+inline std::vector<SeedShape> seedShapes(const std::vector<ProblemPoint>& points,
+                                         const std::vector<std::string>& numericParameters)
+{
+    std::vector<SeedShape> seeds;
+    seeds.reserve(points.size());
+    for(const auto& point : points)
+    {
+        SeedShape seed;
+        seed.shape.reserve(numericParameters.size());
+        for(const auto& name : numericParameters)
+        {
+            const auto value = integerAt(point, name);
+            if(!value.has_value())
+            {
+                break;
+            }
+            seed.shape.push_back(*value);
+        }
+        if(seed.shape.size() != numericParameters.size())
+        {
+            continue;
+        }
+        for(const auto& [name, value] : point)
+        {
+            if(std::find(numericParameters.begin(), numericParameters.end(), name)
+               == numericParameters.end())
+            {
+                seed.categorical.emplace(name, value);
+            }
+        }
+        seeds.push_back(std::move(seed));
+    }
+    return seeds;
+}
+
+/// The walk's first seeds under @p categorical: the shapes of @p pooled, those recorded under the
+/// same categorical values first (a value the point does not record counts as the same), each
+/// shape once, at most @p limit. The others still go to the oracle: a pack's geometry is a hint
+/// about where kernels are, whatever layout or form the pack was recorded under.
+inline std::vector<Shape>
+    pooledSeeds(const std::vector<SeedShape>& pooled, const ProblemPoint& categorical, size_t limit)
+{
+    const auto recordedHere = [&categorical](const SeedShape& seed) {
+        return std::all_of(categorical.begin(), categorical.end(), [&seed](const auto& value) {
+            const auto found = seed.categorical.find(value.first);
+            return found == seed.categorical.end() || found->second == value.second;
+        });
+    };
+    std::vector<Shape> seeds;
+    std::set<Shape> seen;
+    for(const bool here : {true, false})
+    {
+        for(const auto& seed : pooled)
+        {
+            if(seeds.size() >= limit)
+            {
+                return seeds;
+            }
+            if(recordedHere(seed) == here && seen.insert(seed.shape).second)
+            {
+                seeds.push_back(seed.shape);
+            }
+        }
+    }
+    return seeds;
+}
+
+/// The shapes of @p sources taking turns: the first of each, then the second of each, and so on,
+/// each source's own order kept. A walk starts from each of the first accepted seeds, so the
+/// turns give every source footholds however many shapes another holds.
+inline std::vector<Shape> takingTurns(const std::vector<std::vector<Shape>>& sources)
+{
+    std::vector<Shape> seeds;
+    size_t longest = 0;
+    for(const auto& source : sources)
+    {
+        longest = std::max(longest, source.size());
+    }
+    for(size_t turn = 0; turn < longest; ++turn)
+    {
+        for(const auto& source : sources)
+        {
+            if(turn < source.size())
+            {
+                seeds.push_back(source[turn]);
+            }
+        }
+    }
+    return seeds;
+}
+
+/// The shape of @p point over @p numericParameters, in that order; a parameter the point does
+/// not hold reads as 1.
+inline Shape shapeOf(const ProblemPoint& point, const std::vector<std::string>& numericParameters)
+{
+    Shape shape;
+    shape.reserve(numericParameters.size());
+    for(const auto& name : numericParameters)
+    {
+        shape.push_back(integerAt(point, name).value_or(1));
+    }
+    return shape;
 }
 
 /// The cross product of declared regime buckets and common values (§4.3.2, §4.3.5), used to
@@ -822,7 +1052,8 @@ inline std::string describe(const ProblemPoint& point)
 }
 
 /// Every numeric parameter's search window: the declared range clipped to the ceiling, or the
-/// ceiling alone. Shared with RegimeFocus.hpp so both walk the same box.
+/// ceiling alone, at the multiple the constraints require (Parameter::step). Shared with
+/// RegimeFocus.hpp so both walk the same box.
 inline std::vector<ShapeDimension> numericWindow(const OperationMetadata& metadata,
                                                  const ExplorationRequest& request)
 {
@@ -840,6 +1071,7 @@ inline std::vector<ShapeDimension> numericWindow(const OperationMetadata& metada
             dimension.low = parameter.range->first;
             dimension.high = std::min(request.numericCeiling, parameter.range->second);
         }
+        dimension.step = parameter.step;
         window.push_back(dimension);
     }
     return window;
@@ -1076,6 +1308,14 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
 {
     ProblemCorpus corpus;
     corpus.operation = metadata.operation;
+    for(const auto& archetype : metadata.archetypes)
+    {
+        ArchetypeTally tally;
+        tally.name = archetype.name;
+        corpus.archetypes.push_back(std::move(tally));
+    }
+    // Explored combinations whose archetype share rounds to no problem.
+    size_t archetypeQuotaZero = 0;
 
     const auto numericWindow = detail::numericWindow(metadata, request);
     for(const auto& dimension : numericWindow)
@@ -1088,6 +1328,7 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
     const auto combinations = detail::categoricalCombinations(
         metadata.parameters,
         request.maxCombinations,
+        request.seed,
         totalCombinations,
         [&metadata](const ProblemPoint& combination) {
             return !detail::excludedByCategoricals(metadata, combination);
@@ -1197,6 +1438,8 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
             std::to_string(skeletonTotal - skeleton.size()) + " of " + std::to_string(skeletonTotal)
             + " declared regime combinations not tried (maxSkeleton bound)");
     }
+    // The numeric shapes of the points other sources already hold, for each walk's first seeds.
+    const auto pooledShapes = detail::seedShapes(request.seedPoints, corpus.numericParameters);
 
     for(size_t index = 0; index < combinations.size(); ++index)
     {
@@ -1228,7 +1471,6 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
         const auto oracle = oracleFor(index);
 
         FeasibleSetRequest search;
-        search.seeds = skeleton;
         search.dimensions = numericWindow;
         search.targetCount = pointsFor(index);
         search.oracleBudget = request.budgetPerCombination;
@@ -1243,27 +1485,35 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
         std::set<std::string> seen;
         std::vector<ProblemPoint> anchored;
 
-        const auto accept = [&](const ProblemPoint& point) {
+        enum class Verdict
+        {
+            REPEATED,
+            CONSTRAINT,
+            ORACLE,
+            HELD,
+            ADMITTED
+        };
+        const auto judge = [&](const ProblemPoint& point) {
             if(!seen.insert(detail::describe(point)).second)
             {
-                return false;
+                return Verdict::REPEATED;
             }
             if(!detail::satisfiesConstraints(metadata, point))
             {
                 ++corpus.constraintRejections;
-                return false;
+                return Verdict::CONSTRAINT;
             }
             ++corpus.constraintAdmissions;
             if(!admits(point))
             {
-                return false;
+                return Verdict::ORACLE;
             }
             if(isHeld(point))
             {
                 ++heldFound[index];
-                return false;
+                return Verdict::HELD;
             }
-            return true;
+            return Verdict::ADMITTED;
         };
 
         size_t archetypeQuota = 0;
@@ -1284,23 +1534,85 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
                 = static_cast<size_t>(std::max(0.0, metadata.mixture.neighbourhood * total));
         }
 
+        // One draw from archetype @p which: false when it does not describe this combination
+        // or a check refused the point.
+        int64_t drawnHere = 0;
+        const auto drawArchetype = [&](size_t which) {
+            const auto drawn
+                = detail::drawFromArchetype(metadata, metadata.archetypes[which], categorical, rng);
+            if(!drawn.has_value())
+            {
+                return false;
+            }
+            ++drawnHere;
+            auto& tally = corpus.archetypes[which];
+            const auto verdict = judge(*drawn);
+            if(verdict != Verdict::REPEATED)
+            {
+                ++tally.drawn;
+            }
+            switch(verdict)
+            {
+            case Verdict::ADMITTED:
+                ++tally.admitted;
+                anchored.push_back(*drawn);
+                result.problems.push_back(*drawn);
+                result.archetypeOf.push_back(which);
+                ++result.fromArchetypes;
+                return true;
+            case Verdict::CONSTRAINT:
+                ++tally.refusedByConstraints;
+                break;
+            case Verdict::ORACLE:
+                ++tally.refusedByOracle;
+                if(tally.refused.size() < ArchetypeTally::MAX_REFUSED_KEPT)
+                {
+                    tally.refused.push_back(*drawn);
+                }
+                break;
+            case Verdict::HELD:
+                ++tally.held;
+                break;
+            case Verdict::REPEATED:
+            default:
+                break;
+            }
+            return false;
+        };
+
+        if(!metadata.mixture.isExplorationOnly() && pointsFor(index) > 0)
+        {
+            // Every archetype is drawn until a point of it is admitted somewhere, whatever the
+            // quotas, as every declared categorical value is: an archetype is a workload the
+            // declaration names. A few tries per combination it fits that the first pass gives
+            // points, within a bound per archetype, so one the engine or the size ceiling
+            // refuses costs little.
+            constexpr size_t FLOOR_TRIES_PER_COMBINATION = 4;
+            constexpr int64_t FLOOR_DRAWS_PER_ARCHETYPE = 64;
+            for(size_t which = 0; which < metadata.archetypes.size(); ++which)
+            {
+                const auto& tally = corpus.archetypes[which];
+                for(size_t attempt = 0; attempt < FLOOR_TRIES_PER_COMBINATION && tally.admitted == 0
+                                        && tally.drawn < FLOOR_DRAWS_PER_ARCHETYPE;
+                    ++attempt)
+                {
+                    drawArchetype(which);
+                }
+            }
+        }
+
+        // The cycle starts at an archetype the seed picks per combination: from the first
+        // declared every time, a quota of one would always go to the first that fits.
         // Capped so archetypes the engine declines cannot consume the whole budget.
+        const size_t firstArchetype = metadata.archetypes.empty()
+                                          ? 0
+                                          : static_cast<size_t>(detail::tieKey(request.seed, index)
+                                                                % metadata.archetypes.size());
         const size_t archetypeAttempts = archetypeQuota * 20;
         for(size_t attempt = 0; attempt < archetypeAttempts && anchored.size() < archetypeQuota;
             ++attempt)
         {
-            const auto& archetype = metadata.archetypes[attempt % metadata.archetypes.size()];
-            const auto drawn = detail::drawFromArchetype(metadata, archetype, categorical, rng);
-            if(!drawn.has_value())
-            {
-                continue;
-            }
-            if(accept(*drawn))
-            {
-                anchored.push_back(*drawn);
-                result.problems.push_back(*drawn);
-                ++result.fromArchetypes;
-            }
+            drawArchetype((firstArchetype + attempt) % metadata.archetypes.size());
         }
 
         // Perturb only admitted anchors; with none, the budget goes to exploration.
@@ -1311,7 +1623,7 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
         {
             const auto& anchor = anchored[attempt % anchored.size()];
             const auto moved = detail::perturbWithinNeighbourhood(metadata, anchor, rng);
-            if(accept(moved))
+            if(judge(moved) == Verdict::ADMITTED)
             {
                 result.problems.push_back(moved);
                 ++result.fromNeighbourhood;
@@ -1319,28 +1631,64 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
             }
         }
 
-        if(!metadata.archetypes.empty() && anchored.empty() && pointsFor(index) > 0)
+        // Reported so it is not mistaken for an operation with no declared workloads.
+        if(!metadata.archetypes.empty() && anchored.empty() && pointsFor(index) > 0
+           && !metadata.mixture.isExplorationOnly())
         {
-            // Reported so it is not mistaken for an operation with no declared workloads.
-            corpus.skippedCombinations.push_back("no declared archetype was admitted for "
-                                                 + detail::describe(categorical)
-                                                 + "; that combination is exploration only");
+            if(archetypeQuota == 0)
+            {
+                ++archetypeQuotaZero;
+            }
+            else if(drawnHere > 0)
+            {
+                corpus.skippedCombinations.push_back(
+                    "no declared archetype was admitted for " + detail::describe(categorical) + " ("
+                    + std::to_string(drawnHere)
+                    + " drawn, all refused); that combination is exploration only");
+            }
+            else
+            {
+                corpus.skippedCombinations.push_back("no declared archetype describes "
+                                                     + detail::describe(categorical)
+                                                     + "; that combination is exploration only");
+            }
         }
 
         // The search fills whatever the anchored draws did not.
         search.targetCount
             = std::max<int64_t>(0, pointsFor(index) - static_cast<int64_t>(result.problems.size()));
 
-        // Admitted points seed the walk inside the served region.
-        for(const auto& point : result.problems)
+        // The walks start from the first `restarts` accepted seeds, so the sources take turns: a
+        // shape another source holds (a pack's geometry or a recorded workload), an admitted
+        // archetype point, a regime skeleton shape. Each may sit on part of the served region
+        // the others never reach, and a part is explored only from a foothold on it (RFC 0019.13
+        // §5.3 step 4). The skeleton goes in a scattered order under the search's seed: in grid
+        // order its first shapes all hold the leading parameters' smallest values, so every walk
+        // it started would begin in one corner. Neighbourhood points sit beside the archetypes;
+        // they go last, still put to the oracle as points the search reached.
+        const auto shapeOf = [&corpus](const ProblemPoint& point) {
+            return detail::shapeOf(point, corpus.numericParameters);
+        };
+        std::vector<Shape> archetypeShapes;
+        archetypeShapes.reserve(anchored.size());
+        for(const auto& point : anchored)
         {
-            Shape shape;
-            shape.reserve(corpus.numericParameters.size());
-            for(const auto& name : corpus.numericParameters)
-            {
-                shape.push_back(detail::integerAt(point, name).value_or(1));
-            }
-            search.seeds.push_back(std::move(shape));
+            archetypeShapes.push_back(shapeOf(point));
+        }
+        std::vector<Shape> scatteredSkeleton;
+        scatteredSkeleton.reserve(skeleton.size());
+        const detail::ScatteredOrder skeletonOrder(skeleton.size(), search.seed);
+        for(size_t step = 0; step < skeleton.size(); ++step)
+        {
+            scatteredSkeleton.push_back(skeleton[skeletonOrder(step)]);
+        }
+        search.seeds = detail::takingTurns(
+            {detail::pooledSeeds(pooledShapes, categorical, request.maxSkeleton),
+             std::move(archetypeShapes),
+             std::move(scatteredSkeleton)});
+        for(size_t i = anchored.size(); i < result.problems.size(); ++i)
+        {
+            search.seeds.push_back(shapeOf(result.problems[i]));
         }
         searches[index] = search;
         anchoredCounts[index] = result.problems.size();
@@ -1360,6 +1708,28 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
                 return probed.stats.distinct == 0 ? probed : buildFeasibleShapeSet(oracle, search);
             }();
             result.stats = found.stats;
+            {
+                const auto& stats = found.stats;
+                auto& account = corpus.search;
+                ++account.searched;
+                account.seedChecks += stats.callerSeedAttempts;
+                account.seedsAccepted += stats.callerSeedsFound;
+                account.drawChecks += stats.seedAttempts - stats.callerSeedAttempts;
+                account.drawsAccepted += stats.seedsFound - stats.callerSeedsFound;
+                account.walkChecks += stats.oracleCalls - stats.seedAttempts;
+                if(stats.callerSeedsFound == 0)
+                {
+                    ++account.noSeedAccepted;
+                    if(stats.seedsFound > 0)
+                    {
+                        ++account.recoveredByDraws;
+                    }
+                    else
+                    {
+                        ++account.foundNothing;
+                    }
+                }
+            }
             for(const auto& shape : found.shapes)
             {
                 auto point = categorical;
@@ -1381,6 +1751,14 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
         }
 
         corpus.combinations.push_back(std::move(result));
+    }
+    if(archetypeQuotaZero > 0)
+    {
+        corpus.skippedCombinations.push_back(
+            std::to_string(archetypeQuotaZero)
+            + " explored combinations drew no archetype: the mixture's archetype share of their "
+              "points rounds to none (ExplorationRequest::anchorScaling, --anchor-scaling, "
+              "scales it toward the corpus target)");
     }
 
     // Growth toward corpusTarget: the first pass gave each combination a modest fixed target
@@ -1580,13 +1958,7 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
         anchoredShapes.reserve(result.problems.size());
         for(const auto& point : result.problems)
         {
-            Shape shape;
-            shape.reserve(dimensions);
-            for(const auto& name : corpus.numericParameters)
-            {
-                shape.push_back(detail::integerAt(point, name).value_or(1));
-            }
-            anchoredShapes.push_back(std::move(shape));
+            anchoredShapes.push_back(detail::shapeOf(point, corpus.numericParameters));
         }
         const auto consider = [&](const Shape& shape) {
             for(size_t d = 0; d < dimensions; ++d)
