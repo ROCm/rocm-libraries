@@ -700,12 +700,17 @@ through the required `Component CI Summary`.
 Three observations follow from that table, and they are the ones that most often get stated
 backwards in review:
 
-**The tests gate, and so does the coverage floor.** All three required checks (`Math CI Summary`
-through `preliminary`, `Multi-Arch CI Summary` through the TensileLite job, and
-`Component CI Summary` through the coverage and unit lanes) execute the unit and characterization suites, so
-a broken test blocks a merge. The coverage lane also runs the whole-project floor and the per-file
-ratchet, so a coverage regression in a pull request that touches `tensilelite/` blocks a merge too.
-What stays advisory is the characterization-versus-unit split card and the codecov numbers.
+**The tests gate, and so does the coverage floor.** On a pull request, every host-only unit and
+characterization test runs under two required checks: `Math CI Summary` through `preliminary`, and
+`Component CI Summary` through the coverage and unit lanes. The third, `Multi-Arch CI Summary`,
+runs only the `gpu`-marked unit tests, through TheRock's `standard` tier; TheRock's nightly
+`comprehensive` and `full` tiers run the whole tree. So a broken host-only test blocks a merge, and
+so does a broken `gpu` test for an arch that a required lane has: `preliminary` runs them on gfx12,
+gfx90a, gfx942 and gfx950, and `standard` on gfx94X. No required lane has a gfx1250 or gfx908 GPU,
+so a broken `gpu` test for those archs does not block a merge. The coverage lane also runs the
+whole-project floor and the per-file ratchet, so a coverage regression in a pull request that
+touches `tensilelite/` blocks a merge too. What stays advisory is the characterization-versus-unit
+split card and the codecov numbers.
 
 **Three of the five lanes hold a GPU, and only one of them needs it for these tests.** TheRock's lane
 is validating a real install, so its GPU is the point. `preliminary` needs hardware for its
@@ -721,13 +726,18 @@ tox `commands`, `preliminary` through an explicit exit-code guard between its tw
 through plain sequential ordering. One early failure means you get no information at all from the
 stages behind it, which is why a red run so often says less than it appears to.
 
-**The goldens are asserted in all five lanes.** Every tox environment involved inherits syrupy from
-the base `[testenv]` dependency list, and TheRock's installed-artifact lane installs it from
+**The goldens are asserted on every pull request that changes TensileLite, but not in
+TheRock's pull-request tier.** Every tox environment involved inherits syrupy from the base
+`[testenv]` dependency list, and TheRock's installed-artifact lane installs it from
 [`requirements-test.txt`](requirements-test.txt)
 ([PR #11396](https://github.com/ROCm/rocm-libraries/pull/11396),
-[TheRock#8492](https://github.com/ROCm/TheRock/pull/8492)). Four of those lanes gate, so a stale
-golden fails a required check. The CPU-only GitHub Actions lanes (TensileLite unit and TensileLite
-coverage) are fast enough that they are usually where a stale golden surfaces first.
+[TheRock#8492](https://github.com/ROCm/TheRock/pull/8492)). The goldens live in the
+characterization tests, which carry no `gpu` mark. So on a pull request they run in Component CI's
+coverage and unit lanes and in Math CI's `preliminary` and `tensilelite-unit-codecov`, and TheRock's
+`standard` tier does not select them; TheRock asserts them nightly in `comprehensive` and `full`.
+Of the pull-request lanes, all but `tensilelite-unit-codecov` gate, so a stale golden fails a
+required check. The CPU-only GitHub Actions lanes (TensileLite unit and TensileLite coverage) are
+fast enough that they are usually where a stale golden surfaces first.
 
 The installed-artifact lane used to skip the snapshot tests, because it had no syrupy. The suite's
 `conftest.py` still detects a missing plugin and skips those tests cleanly rather than erroring the
@@ -901,7 +911,7 @@ testing there (AIHPBLAS-3354) rather than at changes to Math CI itself.
 | A change only to the library logic YAML runs nothing in Math CI's `preliminary`, since the logic lives outside `tensilelite/`, and Math CI is configured outside this repository | Low | Medium | The logic-corpus component lane runs `TensileLogic --check-all` on the changed architectures and every `@needs_logic_corpus` test on any change under `Tensile/Logic/`, and gates through `Component CI Summary` | [ROCM-33834](https://amd-hub.atlassian.net/browse/ROCM-33834) |
 | The `@needs_logic_corpus` tests (see [Logic-corpus consistency regression tests](#logic-corpus-consistency-regression-tests)) always skip in TheRock CI, because the installed tree does not ship the corpus | Low | Low | Every run prints `needs_logic_corpus: N ran, M skipped`, so the skip is visible; the cross-file checks run in `TensileLogic --check-all` and the chip-ID-arch lock walks the architecture registry, so neither depends on the corpus being present | [#14887](https://github.com/ROCm/rocm-libraries/issues/14887) |
 | gfx1250 gets no TheRock Test stage at all: the CI configuration overlay leaves its runner empty, and the `tensilelite` and `hipblaslt` test jobs exclude gfx125X because of hangs. That includes pytest coverage for corpus-dependent checks; the logic-corpus lane still checks changed gfx1250 logic, and `TensileLogic --check-all` runs as a build step | Medium | Medium | `TensileLogic --check-all` runs as a build step, unaffected by the missing runner | [#7481](https://github.com/ROCm/rocm-libraries/issues/7481) |
-| TheRock's `Test tensilelite` job runs the whole unit tree in every tier: `quick` runs the host-only tests in [`test_categories.yaml`](test_categories.yaml) on eight pytest-xdist workers with `--dist=worksteal`, under a 15-minute step cap. `standard` runs only the GPU unit tests (marker `gpu`), and it, `comprehensive` and `full` stay on one worker, because those tests take no per-GPU lock. Several unit tests read the embedded metadata of every shipped custom kernel, some at collection time, so the job's wall time grows with each custom kernel added. The gfx950 rocRoller kernels carry about 13k lines of metadata each, and adding 69 of them took the job from 11 to 14 minutes to 17 to 21 minutes | Medium | Medium | Metadata is parsed with libyaml (`CSafeLoader`). `readCustomKernelConfig` parses only the `custom.config` entry, and `getCustomKernelConfig` parses the whole block (for `amdhsa.kernels`) only for a kernel without an explicit `CustomKernel` block. `standard` runs under a 30-minute cap. With the in-process `ParallelMap` calls, shared toolchain objects and eight `worksteal` workers, one run of the unit tests on a gfx942 host pinned to 25 CPUs took 126 s, against 653 s serial on the commit before that work | [#14049](https://github.com/ROCm/rocm-libraries/issues/14049) |
+| TheRock's `Test tensilelite` job runs a different part of the unit tree in each tier (the whole tree only in `comprehensive` and `full`): `quick` runs the host-only tests in [`test_categories.yaml`](test_categories.yaml) on eight pytest-xdist workers with `--dist=worksteal`, under a 15-minute step cap. `standard` runs only the GPU unit tests (marker `gpu`), and it, `comprehensive` and `full` stay on one worker, because those tests take no per-GPU lock. Several unit tests read the embedded metadata of every shipped custom kernel, some at collection time, so the job's wall time grows with each custom kernel added. The gfx950 rocRoller kernels carry about 13k lines of metadata each, and adding 69 of them took the job from 11 to 14 minutes to 17 to 21 minutes | Medium | Medium | Metadata is parsed with libyaml (`CSafeLoader`). `readCustomKernelConfig` parses only the `custom.config` entry, and `getCustomKernelConfig` parses the whole block (for `amdhsa.kernels`) only for a kernel without an explicit `CustomKernel` block. `standard` runs under a 30-minute cap. With the in-process `ParallelMap` calls, shared toolchain objects and eight `worksteal` workers, one run of the unit tests on a gfx942 host pinned to 25 CPUs took 126 s, against 653 s serial on the commit before that work | [#14049](https://github.com/ROCm/rocm-libraries/issues/14049) |
 
 ### Known bugs and flaky tests
 
