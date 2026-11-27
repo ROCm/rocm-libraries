@@ -11,7 +11,12 @@
 // compared bit for bit, never with a tolerance, and a case only claims the
 // guarantee for an algorithm shown, in that same run, to produce differing rows
 // with the mode off; otherwise it skips with a
-// diagnostic rather than reporting a green result it did not earn.
+// diagnostic rather than reporting a green result it did not earn. A case with
+// uniformColumns makes every column of B identical instead and compares the
+// columns of D. The split dynamic StreamK cases are the exception: the mode
+// leaves their split and its part order unchanged, so there is no mode-off
+// control, and each instead confirms from the launch arguments that its run
+// split the tiles.
 //
 // The suite name carries the "pre_checkin" token on purpose:
 // clients/tests/test_categories.yaml selects by loose substring on the category
@@ -128,6 +133,8 @@ namespace
     // than refused by the launch gate.
     constexpr size_t kMaxHeuristicCandidates = 4;
     constexpr size_t kMaxSweepCandidates     = 30;
+    // Split dynamic StreamK solutions run per case.
+    constexpr size_t kMaxDynamicSplitCandidates = 8;
 
     bool gpuAvailable()
     {
@@ -301,6 +308,83 @@ namespace
         return solution;
     }
 
+    // The dynamic StreamK split the GEMM kernel of this launch is passed, read
+    // from the kernel arguments solve() packs: SKTiles with the Hybrid slot bits
+    // masked off, and SKSplit.
+    struct LaunchedSplit
+    {
+        uint32_t tiles = 0;
+        uint32_t split = 0;
+    };
+
+    bool launchedDynamicSplit(TensileLite::ContractionSolution&          solution,
+                              const TensileLite::ContractionProblemGemm& tensile,
+                              const TensileLite::Hardware&               hardware,
+                              LaunchedSplit&                             out,
+                              std::string&                               reason)
+    {
+        // Name the arguments for this solve() alone; the library's solution is
+        // not copyable, so restore its flag afterwards.
+        struct NamedArguments
+        {
+            TensileLite::ContractionSolution& solution;
+            const bool                        previous = solution.kernelArgsLog;
+            ~NamedArguments()
+            {
+                solution.kernelArgsLog = previous;
+            }
+        } named{solution};
+        solution.kernelArgsLog = true;
+
+        // Dummy addresses: solve() only stores pointers into the kernel argument
+        // block, it never dereferences them.
+        void* const                    fake = reinterpret_cast<void*>(0x1000);
+        TensileLite::ContractionInputs inputs;
+        inputs.a             = fake;
+        inputs.b             = fake;
+        inputs.c             = fake;
+        inputs.d             = fake;
+        inputs.ws            = fake;
+        inputs.Synchronizer  = fake;
+        inputs.alpha         = static_cast<float>(1);
+        inputs.beta          = static_cast<float>(0);
+        inputs.workspaceSize = tensile.workspaceSize();
+
+        std::vector<TensileLite::KernelInvocation> invocations;
+        try
+        {
+            invocations = solution.solve(tensile, inputs, hardware);
+        }
+        catch(const std::exception& e)
+        {
+            reason = std::string("solve() threw: ") + e.what();
+            return false;
+        }
+        if(invocations.empty())
+        {
+            reason = "solve() returned no kernel";
+            return false;
+        }
+
+        const auto& args = invocations.front().args;
+        auto        word = [&args](const char* name, uint32_t& value) {
+            TensileLite::KernelArguments::const_iterator it(args, name);
+            if(it == args.end() || it->second != sizeof(value))
+                return false;
+            std::memcpy(&value, it->first, sizeof(value));
+            return true;
+        };
+        uint32_t packed = 0;
+        if(!(word("SKTiles|ModeBit", packed) || word("SKTiles", packed))
+           || !word("SKSplit", out.split))
+        {
+            reason = "the launch carries no dynamic StreamK split arguments";
+            return false;
+        }
+        out.tiles = packed & ~TensileLite::StreamK::Slot2Bits::TileReservedMask;
+        return true;
+    }
+
     bool staggerMetadata(const hipblasLtMatmulHeuristicResult_t& candidate,
                          SolutionStagger&                        out,
                          std::string&                            reason)
@@ -368,6 +452,13 @@ namespace
         // in A's type. HIP_R_8F_E4M3 for abType runs an MXFP8 GEMM with
         // pre-swizzled E8M0 block scales and takes a 16-bit dType.
         hipDataType dType = HIP_R_32F;
+        // HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT; -1 leaves the
+        // attribute unset.
+        int32_t streamKTileScheduling = -1;
+        // Check columns rather than rows: every column of B holds the
+        // identical K-vector and the rows of op(A) differ, so D is
+        // mathematically column-invariant.
+        bool uniformColumns = false;
     };
 
     size_t elementSizeOf(hipDataType type)
@@ -539,6 +630,17 @@ namespace
                       != HIPBLAS_STATUS_SUCCESS)
             {
                 ADD_FAILURE() << "Setting SM_COUNT_TARGET must succeed";
+                return false;
+            }
+
+            if(m_problem.streamKTileScheduling >= 0
+               && hipblasLtMatmulDescSetAttribute(m_desc,
+                                                  HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
+                                                  &m_problem.streamKTileScheduling,
+                                                  sizeof(m_problem.streamKTileScheduling))
+                      != HIPBLAS_STATUS_SUCCESS)
+            {
+                ADD_FAILURE() << "Setting STREAMK_TILE_SCHEDULING_EXT must succeed";
                 return false;
             }
 
@@ -759,6 +861,57 @@ namespace
             return -1;
         }
 
+        // Index of the first column of the last run that differs bitwise from
+        // column 0, or -1 when every column is identical.
+        int64_t firstNonUniformColumnOfLastRun() const
+        {
+            const size_t bytes = static_cast<size_t>(m_problem.m) * elementSizeOf(m_problem.dType);
+            for(int64_t col = 1; col < m_problem.n; ++col)
+                if(std::memcmp(m_hostD.data() + static_cast<size_t>(col) * bytes,
+                               m_hostD.data(),
+                               bytes)
+                   != 0)
+                    return col;
+            return -1;
+        }
+
+        // The first non-uniform row, or column with uniformColumns, or -1.
+        int64_t firstNonUniformLineOfLastRun() const
+        {
+            return m_problem.uniformColumns ? firstNonUniformColumnOfLastRun()
+                                            : firstNonUniformRowOfLastRun();
+        }
+
+        // The runnable algorithms of the whole enumeration that keep accepts,
+        // at most budget of them, in solution-index order.
+        std::vector<hipblasLtMatmulHeuristicResult_t> enumeratedAlgos(
+            const std::function<bool(const hipblasLtMatmulHeuristicResult_t&)>& keep,
+            size_t                                                             budget)
+        {
+            std::vector<hipblasLtMatmulHeuristicResult_t> enumerated;
+            hipblaslt_ext::getAllAlgos(m_handle,
+                                       hipblaslt_ext::GemmType::HIPBLASLT_GEMM,
+                                       m_problem.transA,
+                                       HIPBLAS_OP_N,
+                                       m_problem.abType,
+                                       m_problem.abType,
+                                       m_problem.dType,
+                                       m_problem.dType,
+                                       HIPBLAS_COMPUTE_32F,
+                                       enumerated);
+
+            std::vector<hipblasLtMatmulHeuristicResult_t> kept;
+            std::string                                   unused;
+            for(auto& result : enumerated)
+            {
+                if(kept.size() >= budget)
+                    break;
+                if(keep(result) && runnable(result, unused))
+                    kept.push_back(result);
+            }
+            return kept;
+        }
+
     private:
         // Records the workspace this algorithm needs, or says why the library
         // cannot run it on this problem.
@@ -858,6 +1011,48 @@ namespace
             return true;
         }
 
+        // uniformColumns: every column of B is the K-vector and row r of op(A)
+        // is m_hostB[r * k, (r + 1) * k).
+        bool uploadColumnOperands(std::string& skipReason)
+        {
+            const int64_t m       = m_problem.m;
+            const int64_t n       = m_problem.n;
+            const int64_t k       = m_problem.k;
+            const size_t  abBytes = elementSizeOf(m_problem.abType);
+
+            // encodeOperand rounds in place, so the reference data picks up the
+            // values the device will hold.
+            const std::vector<uint8_t> bColumn = encodeOperand(m_aVector, m_problem.abType);
+            std::vector<uint8_t>       bBytes(bColumn.size() * static_cast<size_t>(n));
+            for(int64_t col = 0; col < n; ++col)
+                std::memcpy(bBytes.data() + static_cast<size_t>(col) * bColumn.size(),
+                            bColumn.data(),
+                            bColumn.size());
+
+            // The rows back to back are a k x m A as is (transA = T); an m x k A
+            // is their transpose.
+            const std::vector<uint8_t> rows = encodeOperand(m_hostB, m_problem.abType);
+            std::vector<uint8_t>       aBytes(rows.size());
+            if(m_problem.transA == HIPBLAS_OP_T)
+                aBytes = rows;
+            else
+                for(int64_t row = 0; row < m; ++row)
+                    for(int64_t idx = 0; idx < k; ++idx)
+                        std::memcpy(aBytes.data() + static_cast<size_t>(idx * m + row) * abBytes,
+                                    rows.data() + static_cast<size_t>(row * k + idx) * abBytes,
+                                    abBytes);
+
+            if(hipMemcpy(m_deviceB, bBytes.data(), bBytes.size(), hipMemcpyHostToDevice)
+                   != hipSuccess
+               || hipMemcpy(m_deviceA, aBytes.data(), aBytes.size(), hipMemcpyHostToDevice)
+                      != hipSuccess)
+            {
+                skipReason = "hipMemcpy of A or B failed";
+                return false;
+            }
+            return true;
+        }
+
         bool uploadOperands(std::string& skipReason)
         {
             const int64_t m = m_problem.m;
@@ -866,10 +1061,13 @@ namespace
 
             std::mt19937 rng(0x52755f31u ^ static_cast<uint32_t>(m * 31 + n * 17 + k));
 
+            // The lines the K-vector is dotted with: the columns of B, or with
+            // uniformColumns the rows of op(A), each k long in m_hostB.
+            const int64_t lines = m_problem.uniformColumns ? m : n;
             m_aVector.resize(static_cast<size_t>(k));
-            m_hostB.resize(static_cast<size_t>(k * n));
+            m_hostB.resize(static_cast<size_t>(k * lines));
             if(m_problem.abType == HIP_R_8F_E4M3)
-                fillCancellingE4m3(rng, k, n, m_aVector, m_hostB);
+                fillCancellingE4m3(rng, k, lines, m_aVector, m_hostB);
             else if(m_problem.dType == HIP_R_32F)
             {
                 for(auto& value : m_aVector)
@@ -892,13 +1090,16 @@ namespace
                 std::uniform_real_distribution<float> mantissaOf{1.0f, 2.0f};
                 m_aVector[0] = m_aVector[static_cast<size_t>(k / 2)]
                     = std::ldexp(mantissaOf(rng), 12);
-                for(int64_t col = 0; col < n; ++col)
+                for(int64_t col = 0; col < lines; ++col)
                 {
                     const float large                             = std::ldexp(mantissaOf(rng), 12);
                     m_hostB[static_cast<size_t>(col * k)]         = large;
                     m_hostB[static_cast<size_t>(col * k + k / 2)] = -large;
                 }
             }
+
+            if(m_problem.uniformColumns)
+                return uploadColumnOperands(skipReason);
 
             const std::vector<uint8_t> bBytes = encodeOperand(m_hostB, m_problem.abType);
             if(hipMemcpy(m_deviceB, bBytes.data(), bBytes.size(), hipMemcpyHostToDevice)
@@ -970,6 +1171,9 @@ namespace
         std::vector<float>      m_hostB;
         std::vector<uint8_t>    m_hostD;
     };
+
+    TensileLite::ContractionProblemGemm tensileProblemFor(const Problem& problem,
+                                                         size_t         workspaceBytes);
 
     // A fixture rather than bare TEST() only so the shared drivers can reach
     // RecordProperty, which gtest exposes to Test subclasses alone.
@@ -1238,6 +1442,125 @@ namespace
                     << " and smCountTarget=" << problem.smCountTarget;
             }
         }
+
+        // Whether the launch of candidate split its tiles; adds a failure saying
+        // how it did not.
+        bool launchSplit(const hipblasLtMatmulHeuristicResult_t&    candidate,
+                         const std::string&                         name,
+                         const TensileLite::ContractionProblemGemm& tensile,
+                         const TensileLite::Hardware&               hardware,
+                         size_t                                     queriedWorkspace)
+        {
+            std::string   reason;
+            LaunchedSplit launched;
+            auto          solution = solutionForAlgo(candidate, reason);
+            if(!solution || !launchedDynamicSplit(*solution, tensile, hardware, launched, reason))
+            {
+                ADD_FAILURE() << name << ": " << reason;
+                return false;
+            }
+            const size_t parts = size_t{launched.tiles} * launched.split;
+            if(launched.tiles == 0 || launched.split < 2)
+            {
+                ADD_FAILURE() << name << " launched " << launched.tiles << " tiles in "
+                              << launched.split << " parts, not the split predicted for it";
+                return false;
+            }
+            if(queriedWorkspace != solution->partialTileSize(parts))
+            {
+                ADD_FAILURE() << "hipBLASLt asked " << queriedWorkspace << " workspace bytes for "
+                              << name << ", not the " << solution->partialTileSize(parts)
+                              << " its " << parts << " launched parts need";
+                return false;
+            }
+            return true;
+        }
+
+        // Runs, with the mode on, the enumerated solutions whose dynamic StreamK
+        // decomposition (StreamK::Dynamic::computeSplit, as the library resolves
+        // it for this problem) splits tiles, and requires D uniform along the
+        // problem's line. Each runs with the whole workspace, so the launch
+        // resolves the split predicted here; a run counts as honored only once
+        // its kernel arguments carry a split and the workspace hipBLASLt asked
+        // for holds exactly its parts. A clean refusal is allowed, but on a
+        // 256-CU gfx950 at least one split solution must be honored; elsewhere
+        // none is a skip.
+        void checkDynamicSplitUniform(const Problem& problem)
+        {
+            RowUniformityHarness harness(problem);
+            prepare(harness);
+            if(IsSkipped() || HasFailure())
+                return;
+
+            std::string libraryReason;
+            if(!masterLibrary(libraryReason))
+                GTEST_SKIP() << libraryReason;
+            auto hardware = currentHardware();
+            if(!hardware)
+                GTEST_SKIP() << "could not describe the current device to TensileLite";
+
+            auto tensile = tensileProblemFor(problem, kWorkspaceBytes);
+            if(problem.streamKTileScheduling >= 0)
+                tensile.setParams().setStreamKTileSchedulingMode(problem.streamKTileScheduling);
+
+            auto splitsTiles = [&](const hipblasLtMatmulHeuristicResult_t& candidate) {
+                std::string unused;
+                auto        solution = solutionForAlgo(candidate, unused);
+                if(!solution || !solution->sizeMapping.isStreamK())
+                    return false;
+                const auto& sizeMapping = solution->sizeMapping;
+                const bool  dynamicQueue
+                    = sizeMapping.hasDynamicAssignment()
+                      || (sizeMapping.hasHybridAssignment()
+                          && solution->streamK5EffectiveDynamic(tensile, *hardware));
+                if(!dynamicQueue)
+                    return false;
+                const size_t tiles = tensile.getNumTiles(sizeMapping, 1);
+                return solution->streamKDynamicDecomposition(tensile, *hardware, tiles).tiles > 0;
+            };
+            const auto candidates
+                = harness.enumeratedAlgos(splitsTiles, kMaxDynamicSplitCandidates);
+
+            const char* line    = problem.uniformColumns ? "Column " : "Row ";
+            int         honored = 0;
+            for(auto candidate : candidates)
+            {
+                // What hipBLASLt's own workspace query asked for this algorithm.
+                const size_t queriedWorkspace = candidate.workspaceSize;
+                candidate.workspaceSize       = kWorkspaceBytes;
+                const std::string name        = harness.solutionName(candidate);
+                const auto        status      = harness.run(candidate, /*uniformMode=*/true);
+                if(status == HIPBLAS_STATUS_INVALID_VALUE)
+                    continue;
+                ASSERT_EQ(status, HIPBLAS_STATUS_SUCCESS)
+                    << "Uniform summation order must either honor " << name
+                    << " or reject it with HIPBLAS_STATUS_INVALID_VALUE";
+
+                const int64_t bad = harness.firstNonUniformLineOfLastRun();
+                EXPECT_EQ(bad, -1) << line << bad << " of D differs bitwise from " << line
+                                   << "0 for " << name
+                                   << ", a split dynamic StreamK launch, with uniform "
+                                      "summation order enabled";
+                if(bad < 0 && launchSplit(candidate, name, tensile, *hardware, queriedWorkspace))
+                    ++honored;
+            }
+
+            RecordProperty("split_candidates", static_cast<int>(candidates.size()));
+            RecordProperty("honored", honored);
+
+            if(honored == 0)
+            {
+                const bool gfx950 = gpuArchName().rfind("gfx950", 0) == 0;
+                if(gfx950 && currentCUCount() == 256)
+                    ADD_FAILURE() << "No split dynamic StreamK solution was honored for "
+                                  << problem.m << "x" << problem.n << "x" << problem.k
+                                  << " (split_candidates=" << candidates.size()
+                                  << "), so this case no longer covers the split";
+                else
+                    GTEST_SKIP() << "No split dynamic StreamK solution was honored on "
+                                 << gpuArchName();
+            }
+        }
     };
 
     // A CU budget makes the heuristic pick the dynamic work-queue sub-mode of
@@ -1250,6 +1573,21 @@ namespace
     TEST_F(RowUniformity_pre_checkin, HybridDynamicMultiTile_1536x1536x2048_SmCount160)
     {
         checkDefaultPicksUniform({1536, 1536, 2048, HIP_R_32F, 160});
+    }
+
+    // Few tiles and a long K with Hybrid's dynamic sub-mode requested: the host
+    // cuts every tile into the same parts and the last part to arrive folds
+    // them in part order. gfx950: MT128x128 kernels give 81 tiles in 3 parts.
+    TEST_F(RowUniformity_pre_checkin, HybridDynamicSplit_1152x1152x16384)
+    {
+        checkDynamicSplitUniform(
+            {1152, 1152, 16384, HIP_R_32F, 0, false, HIPBLAS_OP_N, HIP_R_32F, 1});
+    }
+
+    TEST_F(RowUniformity_pre_checkin, HybridDynamicSplitColumns_1152x1152x16384)
+    {
+        checkDynamicSplitUniform(
+            {1152, 1152, 16384, HIP_R_32F, 0, false, HIPBLAS_OP_N, HIP_R_32F, 1, true});
     }
 
     // The gfx950 skinny TN custom kernels declare uniformSummationOrder in their
