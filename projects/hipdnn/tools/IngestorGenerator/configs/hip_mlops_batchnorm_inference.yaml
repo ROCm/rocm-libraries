@@ -10,6 +10,10 @@ engine:
   name: hipkernel:BatchnormInference
   sdk_version: "1.4.0"
   behavior_notes: [runtime_compilation, supports_graph_capture]
+  # No kernel uses atomics, and each cross-workgroup reduction is a later launch in a
+  # fixed order, so a (graph, configuration, device) gives the same bits every run:
+  # TestHipMlopsDeterminism.cpp proves it for every kernel the engine ships.
+  numerical_notes: []
   # Each vector width is a kernel of its own, addressed by this knob. The native scorer ranks
   # the width the inference plans choose first.
   knobs: [vector_size]

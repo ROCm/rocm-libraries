@@ -38,6 +38,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/rmsnorm_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/rmsnorm_backward_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_plugin_sdk/NumericalNote.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
@@ -1769,6 +1770,67 @@ TEST(TestHipMlopsDeterminismCases, EveryCaseIsServedByItsEngineAlone)
             EXPECT_THAT(acceptingEngines(buildGraph(testCase)),
                         ::testing::ElementsAre(entry.engine->name));
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Host: every engine that claims determinism has the evidence for it
+// ---------------------------------------------------------------------------
+
+/// Whether @p engine's loaded UED claims determinism (RFC 0025): it states numerical_notes,
+/// and the list does not name nondeterministic.
+bool claimsDeterminism(const MlopsEngine& engine)
+{
+    const auto& notes = loadedSet(engine.name).engine.numericalNotes;
+    return notes.has_value()
+           && std::find(notes->begin(),
+                        notes->end(),
+                        static_cast<int32_t>(HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC))
+                  == notes->end();
+}
+
+// The shipped claim: each engine's UED states numerical_notes: [], so the backend reports no
+// note for it rather than NONDETERMINISTIC.
+TEST(TestHipMlopsDeterminismClaim, EveryEngineDeclaresNoNumericalNote)
+{
+    for(const auto& engine : ENGINES)
+    {
+        SCOPED_TRACE(std::string(engine.name));
+        const auto& notes = loadedSet(engine.name).engine.numericalNotes;
+        ASSERT_TRUE(notes.has_value()) << "the UED states no numerical_notes";
+        EXPECT_TRUE(notes->empty());
+    }
+}
+
+// Without this, deleting an engine's cases, or shipping a kernel no case's graph admits, would
+// leave the claim standing and every other test green. Read on the fixed host device the pack
+// tests' knob cases use; the device cases check it again on the device they run on.
+TEST(TestHipMlopsDeterminismClaim, EveryClaimingEngineHasCasesThatPinEveryKernelItShips)
+{
+    for(const auto& engine : ENGINES)
+    {
+        SCOPED_TRACE(std::string(engine.name));
+        if(!claimsDeterminism(engine))
+        {
+            continue;
+        }
+        const auto cases = casesOf(engine);
+        ASSERT_FALSE(cases.empty()) << "the engine claims determinism and has no case proving it";
+        std::set<std::string> pinned;
+        for(const auto& testCase : cases)
+        {
+            for(const auto& kernel :
+                admittedKernels(engine, buildGraph(testCase), testDeviceProperties()))
+            {
+                pinned.insert(kernel.name);
+            }
+        }
+        std::set<std::string> shipped;
+        for(const auto& kernel : loadedKernels(engine))
+        {
+            shipped.insert(kernel.name);
+        }
+        EXPECT_EQ(pinned, shipped) << "a kernel the engine ships is pinned by no case";
     }
 }
 

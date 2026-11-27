@@ -18,5 +18,6 @@
   "behavior_notes": [
     "runtime_compilation",
     "supports_graph_capture"
-  ]
+  ],
+  "numerical_notes": []
 }

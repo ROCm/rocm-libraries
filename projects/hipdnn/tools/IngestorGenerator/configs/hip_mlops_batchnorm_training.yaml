@@ -9,6 +9,10 @@ engine:
   name: hipkernel:BatchnormTraining
   sdk_version: "1.4.0"
   behavior_notes: [runtime_compilation, supports_graph_capture]
+  # No kernel uses atomics, and each cross-workgroup reduction is a later launch in a
+  # fixed order, so a (graph, configuration, device) gives the same bits every run:
+  # TestHipMlopsDeterminism.cpp proves it for every kernel the engine ships.
+  numerical_notes: []
   # Each performance configuration is a kernel of its own, addressed by these knobs. The
   # native scorer ranks the configuration the launch heuristics choose first.
   knobs: [variant, block_size, vector_size]
