@@ -490,6 +490,7 @@ repos:
           - rocke-gemm-spec-dict-binding-parity
           - rocke-emitter-pair-parity
           - rocke-emitter-pair-files
+          - rocke-native-unit-tests
           - rocke-hook-checks
         language: python
         additional_dependencies: *rocke_dependencies
@@ -619,6 +620,38 @@ repos:
         language: python
         additional_dependencies: *rocke_dependencies
         files: *rocke_emitter_pair_files
+        pass_filenames: false
+
+      # The platform's native C++ unit programs: the entries labelled unit,
+      # plain programs that need a C++ compiler and no ROCm, HIP or LLVM, and
+      # rocke_arch_data_mirror by name, which holds the engine's generic-target
+      # table to arch_specs.json and runs from the build tree only. The runner
+      # builds every program of the platform-only tree, in the build tree
+      # rocke-emitter-pair-parity keeps, so a repeated run rebuilds only what
+      # changed. Needs cmake, ctest and a C++ compiler on PATH.
+      # The pattern takes what can change the entries' outcome: the CMake files
+      # the configure reads and the platform's cmake/ helpers, the engine's and
+      # the test programs' C++ sources, the build steps' generators and their
+      # inputs, the arch data the programs read at run time, and the runner
+      # with the modules it imports beyond what import rocke loads.
+      # test_emitter_pair_hook_files.py holds it to what the configure reads,
+      # what the programs compile and what the runner imports.
+      - id: rocke-native-unit-tests
+        name: rocKE native C++ unit programs pass
+        entry: python -B dnn-providers/hip-kernel-provider/rocke/platform/tools/run_build_tree_ctest.py --label ^unit$ --test rocke_arch_data_mirror
+        language: python
+        additional_dependencies: *rocke_dependencies
+        files: |
+          (?x)^dnn-providers/hip-kernel-provider/rocke/platform/(
+            CMakeLists\.txt|cmake/[^/]+|tests/CMakeLists\.txt|tests/cmake/[^/]+|
+            tests/golden/attention_dense(_gfx950)?_spec_vectors\.json|
+            cpp/(?!bindings/).+(?<!\.md)|
+            tests/.+\.(c|cc|cpp|h|hpp|inc)|
+            tools/(gen_arch_domain_cpp|gen_cxx_keywords_cpp|run_build_tree_ctest)\.py|
+            python/rocke/core/(cxx_keywords|arch/domain)\.py|
+            python/rocke/core/arch/data/[^/]+|
+            python/rocke/tests/(__init__|ctest_listing|host_cpus|platform_build)\.py
+          )$
         pass_filenames: false
 
       # The checks of the rocKE hooks themselves: the tools that read this
