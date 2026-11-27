@@ -1240,7 +1240,7 @@ ROCBLAS_KERNEL_ILF void
     if(!alpha)
     {
         if(ty == 0)
-            y[incy * tx] *= beta;
+            y[incy * tx] = beta ? beta * y[incy * tx] : T(0);
         return;
     }
 
@@ -1510,7 +1510,7 @@ ROCBLAS_KERNEL_ILF void
     if(!alpha)
     {
         if(ty == 0 && (tx < n_mod_DIM_X || bx < gridDim.x - 1))
-            y[tx * incy] *= beta;
+            y[tx * incy] = beta ? beta * y[tx * incy] : T(0);
 
         return;
     }
@@ -1877,7 +1877,7 @@ ROCBLAS_KERNEL_ILF void
     if(!alpha)
     {
         if(ty == 0)
-            y[tx * incy] *= beta;
+            y[tx * incy] = beta ? beta * y[tx * incy] : T(0);
         return;
     }
 
@@ -2155,7 +2155,7 @@ ROCBLAS_KERNEL_ILF void
     if(!alpha)
     {
         if(ty == 0 && (tx < n_mod_DIM_X || bx < gridDim.x - 1))
-            y[tx * incy] *= beta;
+            y[tx * incy] = beta ? beta * y[tx * incy] : T(0);
 
         return;
     }
