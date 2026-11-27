@@ -197,6 +197,8 @@ _ZGEMM_STATE = {"DestDataType": DataType("z"), "ComputeDataType": DataType("z"),
   (dict(_STREAMK, StreamKAtomic=1),
    "TDMStoreInst does not support StreamKAtomic: the kernel adds its tiles to D atomically instead of storing them"),
   ({"TileProcessingStrategy": "DataParallel", "GlobalSplitU": 0, "PrefetchAcrossPersistent": 1}, _PAP_REASON),
+  pytest.param({"TileProcessingStrategy": "DataParallel", "GlobalSplitU": 0, "PrefetchAcrossPersistent": 1,
+                "TDMInst": 0}, _PAP_REASON, id="pap_with_buffer_loads"),
   ({"PackedC0IndicesX": [0, 2]}, "TDMStoreInst requires one free index per operand, not packed free indices"),
   ({"PackedC1IndicesX": [1, 3]}, "TDMStoreInst requires one free index per operand, not packed free indices"),
   ({"MacroTile0": TDM_TILE_DIM_MAX + 1}, _TILE),
@@ -1181,12 +1183,17 @@ _PAP = dict(_DATA_PARALLEL, PrefetchAcrossPersistent=1)
 
 
 def test_pap_rejects_tdm_store(gp_gfx1250, gfx1250_iim, assembler, capsys):
-  """A PrefetchAcrossPersistent kernel is rejected with TDMStoreInst and generates without it."""
-  sol, _ = _emit_asm(gfx1250_iim, assembler, mi=[16, 16, 32, 1, 1, 4, 4, 2, 2], TDMStoreInst=True, **_PAP)
-  out = capsys.readouterr().out
-  assert not sol.get("Valid") and "does not support PrefetchAcrossPersistent" in out, out
-  sol, _ = _emit_asm(gfx1250_iim, assembler, mi=[16, 16, 32, 1, 1, 4, 4, 2, 2], TDMStoreInst=False, **_PAP)
-  assert sol.get("Valid"), capsys.readouterr().out
+  """A PrefetchAcrossPersistent kernel is rejected with TDMStoreInst whichever instructions load A and B, TDM loads
+  (TDMInst 3) or buffer loads (TDMInst 0), and generates without it."""
+  for tdmInst in (3, 0):
+    sol, _ = _emit_asm(gfx1250_iim, assembler, mi=[16, 16, 32, 1, 1, 4, 4, 2, 2], TDMStoreInst=True, TDMInst=tdmInst,
+                       **_PAP)
+    out = capsys.readouterr().out
+    assert not sol.get("Valid") and "does not support PrefetchAcrossPersistent" in out, (tdmInst, out)
+    sol, _ = _emit_asm(gfx1250_iim, assembler, mi=[16, 16, 32, 1, 1, 4, 4, 2, 2], TDMStoreInst=False, TDMInst=tdmInst,
+                       **_PAP)
+    out = capsys.readouterr().out
+    assert sol.get("Valid"), (tdmInst, out)
 
 
 _RAP = dict(_DATA_PARALLEL, ReuseAcrossPersistent=1, DepthU=256, AssertSummationElementMultiple=256, SourceSwap=True)
@@ -1796,3 +1803,131 @@ def test_staging_adds_each_fold_once_per_batch(gp_gfx1250, gfx1250_iim):
   loads = [emitTDMStoreLoadCElement(gwb, SimpleNamespace(coordOffset0=row, coordOffset1=column), 20, 0)
            for _, row, column in elements]
   assert [str(load).count(_FOLD) for load in loads] == [int(address > DS_OFFSET_MAX) for address in expected]
+
+
+def _sgprWrites(module, words):
+  """Run the scalar moves, ORs and shifts of an emitted module on `words`, {SGPR index: value}, and return the SGPRs
+  it writes; any other instruction fails. Of the two sources of a shift, the literal is the shift amount."""
+  index = lambda operand: int(re.fullmatch(r"s\[?(\d+)\]?", operand).group(1))
+  value = lambda operand: words[index(operand)] if operand.startswith("s") else int(operand, 0)
+  written = set()
+  for code in _instructions(module):
+    op, operands = code.split(None, 1)
+    dst, *srcs = [operand.strip() for operand in operands.split(",")]
+    if op == "s_mov_b32":
+      result = value(srcs[0])
+    elif op == "s_or_b32":
+      result = value(srcs[0]) | value(srcs[1])
+    elif op in ("s_lshl_b32", "s_lshr_b32"):
+      (src,), (amount,) = [s for s in srcs if s.startswith("s")], [s for s in srcs if not s.startswith("s")]
+      result = value(src) << int(amount, 0) if op == "s_lshl_b32" else value(src) >> int(amount, 0)
+    else:
+      raise AssertionError("not a scalar move, OR or shift: %s" % code)
+    words[index(dst)] = result & 0xFFFFFFFF
+    written.add(index(dst))
+  return written
+
+
+@pytest.mark.parametrize("numBytes, dataSize", [(1, 0), (2, 1), (8, 3)])
+def test_store_descriptor_writes_only_its_live_words(gp_gfx1250, gfx1250_iim, numBytes, dataSize):
+  """The descriptor of a tile of numBytes-byte elements, built over SGPRs that still hold stale bits: initOperands
+  writes group0+0 and clears group1+0..4 and +7, once each, and no other word, since the caller writes group0+1..3 and
+  setTensorStride0 writes group1+5..6. Every setter ORs its field, unmasked, into a cleared word, and data_size, log2
+  of the element size, is set only when it is not 0, which the cleared word already holds."""
+  from toolchain_test_helpers import use_isa
+  from tensilelite.Components.TensorDataMover import TensorDataMoverStore
+
+  use_isa((12, 5, 0), 32)
+  g0, g1, tmp, sDim0, sDim1, sStride = 4, 8, 20, 21, 22, 23
+  # Both dims exceed 16 bits, so each of them lands in two words.
+  dim0, dim1, stride, tile0, tile1 = 0x12345, 0x6789A, 0xBCDEF, 256, 64
+  words = {i: 0xFFFFFFFF for i in [*range(g0, g0 + 4), *range(g1, g1 + 8), tmp]}
+  words.update({sDim0: dim0, sDim1: dim1, sStride: stride})
+  tdm = TensorDataMoverStore([0])
+  init = tdm.initOperands(g0, g1)
+  cleared = {g1 + i for i in (0, 1, 2, 3, 4, 7)}
+  assert _sgprWrites(init, words) == {g0} | cleared and len(_instructions(init)) == 1 + len(cleared)
+  assert words[g0] == 1 and all(words[i] == 0 for i in cleared)
+  setSize = tdm.setDataSize(numBytes, g1)
+  assert len(_instructions(setSize)) == int(dataSize > 0)
+  for module in (setSize, tdm.setTensorDim0(g1, sDim0, tmp), tdm.setTensorDim1(g1, sDim1, tmp),
+                 tdm.setTensorTile0(g1, tile0), tdm.setTensorTile1(g1, tile1), tdm.setTensorStride0(g1, sStride)):
+    _sgprWrites(module, words)
+  low, high = lambda v: v & 0xFFFF, lambda v: v >> 16
+  assert [words[g1 + i] for i in range(8)] == [dataSize << 16, low(dim0) << 16, high(dim0) | low(dim1) << 16,
+                                                high(dim1) | tile0 << 16, tile1, stride, 0, 0]
+
+
+_FP8_D = {"DataType": "F8", "MacDataTypeA": "F8", "MacDataTypeB": "F8", "DestDataType": "F8", "ComputeDataType": "S"}
+
+
+@pytest.mark.parametrize("dest", ["fp8", "bf16"])
+def test_one_byte_d_has_no_size_terms(gp_gfx1250, gfx1250_iim, assembler, capsys, dest):
+  """With 1-byte D a byte offset is the element offset and data_size is 0, the value initOperands leaves, so no
+  descriptor of D or C sets data_size or shifts its offset from the SRD to bytes, and no thread scales its address in
+  the staged tile by bpe. bf16 D, the control, has each of them."""
+  if dest == "fp8":
+    sol, asm = _emit_asm(gfx1250_iim, assembler, mi=[16, 16, 64, 1, 1, 2, 2, 2, 2], TDMStoreInst=True,
+                         StoreVectorWidth=1, ProblemType=_FP8_D)
+  else:
+    sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=True)
+  assert sol.get("Valid"), capsys.readouterr().out
+  lines = asm.splitlines()
+  # The TDM loads of A and B set data_size too, so only the lines that open each descriptor of the block are read.
+  heads = ["\n".join(lines[max(0, i - 9):i]) for i, line in enumerate(lines) if "first thread id" in line]
+  setups = sum("tile column = coord1 - wg1*MT1" in line for line in lines)
+  wide = dest == "bf16"
+  assert heads and setups, "no TDM block"
+  sizes = [re.findall(r"Set data_size to (\d+)", head) for head in heads]
+  assert (any(sizes) and all(s in ([], ["1"]) for s in sizes)) if wide else not any(sizes), sizes
+  assert ("64-bit byte offset from Srd" in asm) == wide
+  assert any(line.partition("//")[2].strip() == "* bpe" for line in lines) == wide
+
+
+_D_ADDRESS = {
+  "pure_gemm": ({}, False),
+  "aux_e": (dict(_AUX_E_SOLUTION, ProblemType=_AUX_E), True),
+  "gate_residual": ({"ProblemType": _SIDE_EFFECTS["gate_residual"]}, True),
+}
+
+
+@pytest.mark.parametrize("problem", sorted(_D_ADDRESS))
+def test_tdm_block_computes_the_d_address_only_with_side_effects(gp_gfx1250, gfx1250_iim, assembler, capsys, problem):
+  """A TDM block stages D in LDS and its tensor_store_from_lds takes the address of D from the descriptor, so its
+  elements compute the buffer address of D only in a kernel with a per-element output beyond C and D, which may read
+  it: no GlobalSplitU 1 edge TDM block of a pure GEMM kernel clips the D address to the out-of-bounds offset, and
+  every one of the E and gate residual kernels does."""
+  overrides, sideEffects = _D_ADDRESS[problem]
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=True, **overrides)
+  assert sol.get("Valid"), capsys.readouterr().out
+  edges = {k: v for k, v in _storeBlocks(asm).items()
+           if k.endswith("_GSU1_Then") and any(line.startswith("tensor_store_from_lds ") for line in v)}
+  clipped = {k for k, v in edges.items() if any("LDD clip if OOB" in line for line in v)}
+  assert edges and clipped == (set(edges) if sideEffects else set()), (sorted(edges), sorted(clipped))
+
+
+_ONE_WAVE = [16, 16, 32, 1, 1, 4, 4, 1, 1]
+
+
+@pytest.mark.parametrize("streamk", [3, 5], ids=["sk3", "sk5"])
+def test_one_wave_flush_adds_no_barrier(gp_gfx1250, gfx1250_iim, assembler, capsys, streamk):
+  """A one-wave kernel without a cluster barrier has no workgroup barrier for syncThreads to emit, so when the tile
+  handoff of a one-wave persistent kernel has no barrier, as with DebugPersistentKernelLoopForever or on the static
+  arm of a StreamK 5 Hybrid kernel, the TDM flush adds none either, not even a skipped one."""
+  sol, asm = _emit_asm(gfx1250_iim, assembler, mi=_ONE_WAVE, TDMStoreInst=True, TDMInst=3, StreamK=streamk,
+                       DebugPersistentKernelLoopForever=streamk == 3)
+  assert sol.get("Valid"), capsys.readouterr().out
+  assert sol["NumThreads"] == sol["WavefrontSize"] and not sol["ClusterBarrier"] and "tensor_store_from_lds " in asm
+  assert _FLUSH_BARRIER not in asm and "TDMStoreFlushDynamicArm" not in asm
+
+
+def test_one_wave_cluster_kernel_keeps_the_flush_barrier(gp_gfx1250, gfx1250_iim, assembler, capsys):
+  """A one-wave kernel with a cluster barrier keeps its workgroup barriers, on which the cluster handshake is
+  anchored, so when its tile handoff has no barrier, as with DebugPersistentKernelLoopForever, the TDM flush ends
+  with one."""
+  sol, asm = _emit_asm(gfx1250_iim, assembler, mi=_ONE_WAVE, TDMStoreInst=True, TDMInst=3, StreamK=3,
+                       ClusterDim=[2, 1], DebugPersistentKernelLoopForever=True)
+  assert sol.get("Valid"), capsys.readouterr().out
+  assert sol["NumThreads"] == sol["WavefrontSize"] and sol["ClusterBarrier"]
+  flushes = [line for line in asm.splitlines() if _FLUSH_BARRIER in line]
+  assert flushes and all(_code(line).startswith("s_barrier") for line in flushes), flushes
