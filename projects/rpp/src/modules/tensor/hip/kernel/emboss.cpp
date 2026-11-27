@@ -2103,8 +2103,9 @@ __global__ void create_emboss_kernel_9x9(float* filterTensor, float* strengthTen
 }
 
 static RppStatus hip_exec_create_emboss_kernel(Rpp32f* filterTensor, Rpp32s kernelSize,
-                                               Rpp32f* strength, rpp::Handle& handle) {
-    int globalThreads_x = handle.GetBatchSize();
+                                               Rpp32f* strength, Rpp32u batchSize,
+                                               rpp::Handle& handle) {
+    int globalThreads_x = batchSize;
     int globalThreads_y = 1;
     int globalThreads_z = 1;
 
@@ -2114,7 +2115,7 @@ static RppStatus hip_exec_create_emboss_kernel(Rpp32f* filterTensor, Rpp32s kern
                                 ceil((float)globalThreads_y / LOCAL_THREADS_Y_1DIM),
                                 ceil((float)globalThreads_z / LOCAL_THREADS_Z_1DIM)),
                            dim3(LOCAL_THREADS_X_1DIM, LOCAL_THREADS_Y_1DIM, LOCAL_THREADS_Z_1DIM),
-                           0, handle.GetStream(), filterTensor, strength, handle.GetBatchSize());
+                           0, handle.GetStream(), filterTensor, strength, batchSize);
         HIP_CHECK_LAUNCH_RETURN();
     } else if (kernelSize == 5) {
         hipLaunchKernelGGL(create_emboss_kernel_5x5,
@@ -2122,7 +2123,7 @@ static RppStatus hip_exec_create_emboss_kernel(Rpp32f* filterTensor, Rpp32s kern
                                 ceil((float)globalThreads_y / LOCAL_THREADS_Y_1DIM),
                                 ceil((float)globalThreads_z / LOCAL_THREADS_Z_1DIM)),
                            dim3(LOCAL_THREADS_X_1DIM, LOCAL_THREADS_Y_1DIM, LOCAL_THREADS_Z_1DIM),
-                           0, handle.GetStream(), filterTensor, strength, handle.GetBatchSize());
+                           0, handle.GetStream(), filterTensor, strength, batchSize);
         HIP_CHECK_LAUNCH_RETURN();
     } else if (kernelSize == 7) {
         hipLaunchKernelGGL(create_emboss_kernel_7x7,
@@ -2130,7 +2131,7 @@ static RppStatus hip_exec_create_emboss_kernel(Rpp32f* filterTensor, Rpp32s kern
                                 ceil((float)globalThreads_y / LOCAL_THREADS_Y_1DIM),
                                 ceil((float)globalThreads_z / LOCAL_THREADS_Z_1DIM)),
                            dim3(LOCAL_THREADS_X_1DIM, LOCAL_THREADS_Y_1DIM, LOCAL_THREADS_Z_1DIM),
-                           0, handle.GetStream(), filterTensor, strength, handle.GetBatchSize());
+                           0, handle.GetStream(), filterTensor, strength, batchSize);
         HIP_CHECK_LAUNCH_RETURN();
     } else if (kernelSize == 9) {
         hipLaunchKernelGGL(create_emboss_kernel_9x9,
@@ -2138,7 +2139,7 @@ static RppStatus hip_exec_create_emboss_kernel(Rpp32f* filterTensor, Rpp32s kern
                                 ceil((float)globalThreads_y / LOCAL_THREADS_Y_1DIM),
                                 ceil((float)globalThreads_z / LOCAL_THREADS_Z_1DIM)),
                            dim3(LOCAL_THREADS_X_1DIM, LOCAL_THREADS_Y_1DIM, LOCAL_THREADS_Z_1DIM),
-                           0, handle.GetStream(), filterTensor, strength, handle.GetBatchSize());
+                           0, handle.GetStream(), filterTensor, strength, batchSize);
         HIP_CHECK_LAUNCH_RETURN();
     }
 
@@ -2157,7 +2158,7 @@ RppStatus hip_exec_emboss_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
 
     int globalThreads_x = (dstDescPtr->strides.hStride + 7) >> 3;
     int globalThreads_y = dstDescPtr->h;
-    int globalThreads_z = handle.GetBatchSize();
+    int globalThreads_z = batchSize;
 
     uint padLength = kernelSize / 2;
     uint padLengthTwice = padLength * 2;
@@ -2167,7 +2168,8 @@ RppStatus hip_exec_emboss_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr,
 
     // Create a filter of size (kernel size x kernel size)
     float* filterTensor = handle.GetInitHandle()->mem.mgpu.scratchBufferHip.floatmem;
-    RPP_RETURN_IF_ERROR(hip_exec_create_emboss_kernel(filterTensor, kernelSize, strength, handle));
+    RPP_RETURN_IF_ERROR(
+        hip_exec_create_emboss_kernel(filterTensor, kernelSize, strength, dstDescPtr->n, handle));
 
     if ((srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NHWC)) {
         globalThreads_x = (dstDescPtr->strides.hStride / 3 + 7) >> 3;
