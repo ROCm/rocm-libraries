@@ -4,6 +4,7 @@
 """The splice fragments' structural contracts against each other. A fragment's
 agreement with the provider's own headers is caught by the compiler at the splice;
 parsing those headers here would couple this suite to source it does not own."""
+import dataclasses
 import re
 from pathlib import Path
 
@@ -251,9 +252,10 @@ class TestCensusSuiteRunsOnTheCensusBinary:
 
 @pytest.fixture
 def packaged_opposite_shape_config():
-    """A packaged engine taking the OTHER arm of all three suite conditionals;
-    ``configs/gfx950_attention_dense.yaml`` renders one fixed arm of each, against which
-    a transcribed case list is indistinguishable from a derived one."""
+    """A packaged engine taking the OTHER arm of the heuristic, pack-count and
+    numerical-notes suite conditionals; ``configs/gfx950_attention_dense.yaml`` renders
+    one fixed arm of each, against which a transcribed case list is indistinguishable
+    from a derived one."""
     return make_minimal_config(
         dialect="packaged",
         kernel_source_kind="rocke",
@@ -451,14 +453,15 @@ class TestCensusCasePinIsDerivedFromTheSuite:
     def test_the_pin_follows_the_suites_conditional_arms(
         self, generator, packaged_opposite_shape_config
     ):
-        """This config takes the opposite arm of all three gates in
-        ``test_packs.cpp.j2``, so a pin agreeing with it cannot also be the shipped
-        fixture's list. The gated names are stated because set equality alone is
-        satisfied by a pin from an empty scrape."""
+        """This config takes the opposite arm of the heuristic, pack-count and
+        numerical-notes gates in ``test_packs.cpp.j2``, so a pin agreeing with it
+        cannot also be the shipped fixture's list. The gated names are stated because
+        set equality alone is satisfied by a pin from an empty scrape."""
         config = packaged_opposite_shape_config
         assert not config.engine.has_heuristic
         assert config.is_multi_pack
         assert config.engine.behavior_notes
+        assert config.engine.numerical_notes is None
         pin, cases = self._pin_and_suite(generator, config)
         assert set(pin) == set(cases), (
             f"pinned-but-unregistered {sorted(set(pin) - set(cases))}, "
@@ -469,6 +472,26 @@ class TestCensusCasePinIsDerivedFromTheSuite:
         assert "CarriesOneGraphScopedMatcherPerPack" in pin, pin
         assert "CarriesNoGraphScopedMatcher" not in pin, pin
         assert "DeclaresItsConfiguredBehaviorNotes" in pin, pin
+        assert "DeclaresItsNumericalNotes" not in pin, pin
+
+    @pytest.mark.parametrize(
+        "notes", [None, [], ["nondeterministic"]], ids=["absent", "empty", "listed"]
+    )
+    def test_the_pin_follows_the_numerical_notes_gate(
+        self, generator, packaged_opposite_shape_config, notes
+    ):
+        """The numerical-notes case is gated on the field being stated, not on it
+        being non-empty: ``[]`` is a claim, so it gets its case and the pin names it."""
+        config = packaged_opposite_shape_config
+        config = dataclasses.replace(
+            config, engine=dataclasses.replace(config.engine, numerical_notes=notes)
+        )
+        pin, cases = self._pin_and_suite(generator, config)
+        assert set(pin) == set(cases), (
+            f"pinned-but-unregistered {sorted(set(pin) - set(cases))}, "
+            f"registered-but-unpinned {sorted(set(cases) - set(pin))}"
+        )
+        assert ("DeclaresItsNumericalNotes" in pin) == (notes is not None), pin
 
     def test_every_pinned_case_survives_the_wire_to_the_binary(
         self, generator, gfx950_attention_dense_config

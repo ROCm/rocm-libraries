@@ -97,6 +97,11 @@ class CompositeInstructionLoweringPassImpl : public Pass {
                             bb.insertIR(it, static_cast<IRBase*>(expandedInst));
                         }
 
+                        // removeIR/safeErase bypass the erase observer, so a group endpoint
+                        // on the composite would dangle; hand it to its expansion.
+                        if (Function* parent = bb.getParent(); parent && parent->eraseObserver())
+                            parent->eraseObserver()(logicalInst, expanded.front(), expanded.back());
+
                         // Remove the composite instruction from the block
                         auto toRemove = it;
                         ++it;  // Move to next before removing

@@ -1041,6 +1041,10 @@ validParameters = { # we need to make sure this matches develop
     # Used as a co-tenant load kernel for contended-perf benchmarking.
     # Termination is via process death. Requires StreamK = 3.
     "DebugPersistentKernelLoopForever": [False, True],
+    # Timing-only debug: comment out instruction classes (results are wrong).
+    #   1 = matrix (v_wmma/v_mfma), 2 = global loads, 4 = global stores,
+    #   8 = LDS loads, 16 = LDS stores. Bits combine.
+    "DebugDisableInstrMask": list(range(32)),
     # Controls desired width (#elements) for loads from global memory -> LDS.
     # and eliminates the pointer unshift logic
     # -1 : Set GlobalReadVectorWidth =  VectorWidth

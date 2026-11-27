@@ -29,5 +29,6 @@
     "use_cfvst",
     "use_exp2_fast",
     "lds_k_group_pad"
-  ]
+  ],
+  "numerical_notes": []
 }

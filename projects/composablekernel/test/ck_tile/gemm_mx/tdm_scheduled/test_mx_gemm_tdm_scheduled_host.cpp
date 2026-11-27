@@ -12,6 +12,7 @@
 #include <gtest/gtest.h>
 
 #include "ck_tile/core.hpp"
+#include "ck_tile/ops/epilogue.hpp"
 #include "ck_tile/ops/gemm.hpp"
 
 namespace {
@@ -222,6 +223,48 @@ TEST(MxGemmTdmScheduledHost, IterateIncrementIsSixtyFourBit)
     static_assert(Pipe::GetIterateGlobalIncrement<true>(K) == uint64_t{1} << 32);
 }
 
+// Wide A and B do not imply a wide E. E's element offset is still below the i32 limit here:
+// 33024 x 33024 FP16 has 1.09e9 elements, although its byte size exceeds 2 GiB.
+TEST(MxGemmTdmScheduledHost, MixedWideInputsNarrowOutputIsSupported)
+{
+    using ck_tile::MxGemmHostArgs;
+    using ck_tile::pk_fp4_t;
+    using Traits = ck_tile::MxTdmScheduledGemmTraits<false, false, true, true, false, 0>;
+    using P      = ProblemOf<pk_fp4_t, ck_tile::half_t, 256, 256, 512, 2, 2, 32, 1, 1, Traits>;
+    using Policy = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<>;
+    using Pipe   = PipelineOf<P, Policy>;
+    using K =
+        ck_tile::MxGemmKernel<ck_tile::GemmTile2DNMajorPartitioner<typename Pipe::BlockGemmShape>,
+                              Pipe,
+                              ck_tile::MxTdmStoreEpilogue<Pipe>>;
+
+    constexpr index_t M    = 33024;
+    constexpr index_t N    = 33024;
+    constexpr index_t Kdim = 131072;
+    static_assert(Traits::kWideA && Traits::kWideB && !Traits::kWideD);
+
+    const auto args = K::MakeKernelArgs(MxGemmHostArgs<>{{nullptr},
+                                                         {nullptr},
+                                                         {nullptr},
+                                                         {nullptr},
+                                                         {},
+                                                         nullptr,
+                                                         1,
+                                                         M,
+                                                         N,
+                                                         Kdim,
+                                                         {Kdim},
+                                                         {Kdim},
+                                                         {},
+                                                         N});
+    const char* why = K::GetUnsupportedReason(args);
+    EXPECT_EQ(why, nullptr) << (why ? why : "");
+    if(ck_tile::is_gfx125_supported())
+    {
+        EXPECT_TRUE(K::IsSupportedArgument(args));
+    }
+}
+
 // The host picks the kernel of a whole-tile count's parity: TailNumber::One for odd counts, Two
 // for even ones, with the K tail excluded; each variant rejects the other parity, Full none.
 TEST(MxGemmTdmScheduledHost, TailHandlerPicksTheVariantOfTheTileCount)
@@ -235,7 +278,7 @@ TEST(MxGemmTdmScheduledHost, TailHandlerPicksTheVariantOfTheTileCount)
     static_assert(Full::GetTailNumber(1024) == TailNumber::Two);
     static_assert(Full::GetTailNumber(1536 + 128) == TailNumber::One);
     const auto picked = [](index_t K) {
-        const index_t tiles = K / 512;
+        const index_t tiles = Full::GetFullTiles(K);
         return Full::TailHandler([](auto, auto tail_num) { return decltype(tail_num)::value; },
                                  Full::BlockHasHotloop(tiles),
                                  Full::GetBlockLoopTailNum(tiles));
@@ -306,22 +349,38 @@ TEST(MxGemmTdmScheduledHost, KLimit)
     EXPECT_STREQ(Pipe::GetUnsupportedReason(32, 32, 2147482368), k_long);
 }
 
-// An instance's K tail has at most tile_k / 128 - 1 K steps, so no instance runs a K whose
-// remainder mod tile_k is above tile_k - 128.
-TEST(MxGemmTdmScheduledHost, KTailFull)
+// A K tail has at most tile_k / 128 - 1 K steps: a partial tile of every K step (K mod tile_k
+// above tile_k - 128) runs in the loop as one more tile, on an instance without a K tail.
+TEST(MxGemmTdmScheduledHost, LongKTailRunsInTheLoop)
 {
-    using Policy       = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<4, true, false>;
-    const auto* full   = ck_tile::mx_tdm_scheduled_reason_message(MxTdmScheduledReason::KTailFull);
-    const auto is_full = [&](const char* why) { return why && std::string(why) == full; };
-    using Tile256 =
-        PipelineOf<ProblemOf<ck_tile::fp8_t, ck_tile::fp8_t, 128, 128, 256, 2, 2, 16>, Policy>;
-    EXPECT_TRUE(is_full(Tile256::GetUnsupportedReason(1024, 1024, 2048 + 160)));
-    EXPECT_TRUE(is_full(Tile256::GetUnsupportedReason(1024, 1024, 2048 + 224)));
-    EXPECT_FALSE(is_full(Tile256::GetUnsupportedReason(1024, 1024, 2048 + 96)));
-    EXPECT_EQ(Tile256::GetUnsupportedReason(1024, 1024, 2048), nullptr);
-    using Tile128 =
-        PipelineOf<ProblemOf<ck_tile::fp8_t, ck_tile::fp8_t, 128, 128, 128, 2, 2, 16>, Policy>;
-    EXPECT_TRUE(is_full(Tile128::GetUnsupportedReason(1024, 1024, 1024 + 32)));
+    using ck_tile::TailNumber;
+    using Policy      = ck_tile::MxGemmPipelineAgBgCrCompTDMScheduledPolicy<4, true, false>;
+    using P256        = ProblemOf<ck_tile::fp8_t, ck_tile::fp8_t, 128, 128, 256, 2, 2, 16>;
+    using P128        = ProblemOf<ck_tile::fp8_t, ck_tile::fp8_t, 128, 128, 128, 2, 2, 16>;
+    using Tile256     = PipelineOf<P256, Policy>;
+    using Tile128     = PipelineOf<P128, Policy>;
+    using Tail1Traits = ck_tile::MxTdmScheduledGemmTraits<false, false, false, false, false, 1>;
+    using Tail1       = PipelineOf<
+              ProblemOf<ck_tile::fp8_t, ck_tile::fp8_t, 128, 128, 256, 2, 2, 16, 4, 4, Tail1Traits>,
+              Policy>;
+    const auto tail_steps = [](auto problem, index_t K) {
+        return ck_tile::MxTdmScheduledSelectTraits<decltype(problem)>(1024, 1024, K).tail_steps;
+    };
+    EXPECT_EQ(tail_steps(P256{}, 2048 + 96), 1);
+    EXPECT_EQ(tail_steps(P256{}, 2048 + 128), 1);
+    EXPECT_EQ(tail_steps(P256{}, 2048 + 160), 0);
+    EXPECT_EQ(tail_steps(P256{}, 2048 + 224), 0);
+    EXPECT_EQ(tail_steps(P128{}, 1024 + 32), 0);
+    static_assert(Tile256::GetFullTiles(2048 + 128) == 8);
+    static_assert(Tile256::GetFullTiles(2048 + 160) == 9);
+    static_assert(Tile256::GetTailNumber(2048 + 160) == TailNumber::One);
+    static_assert(Tile256::GetTailNumber(1792 + 160) == TailNumber::Two);
+    static_assert(Tile128::GetFullTiles(1024 + 32) == 9);
+    for(index_t K : {2048, 2048 + 160, 2048 + 224})
+        EXPECT_EQ(Tile256::GetUnsupportedReason(1024, 1024, K), nullptr) << K;
+    EXPECT_EQ(Tile128::GetUnsupportedReason(1024, 1024, 1024 + 32), nullptr);
+    EXPECT_NE(Tail1::GetUnsupportedReason(1024, 1024, 2048 + 160), nullptr);
+    EXPECT_EQ(Tail1::GetUnsupportedReason(1024, 1024, 2048 + 96), nullptr);
 }
 
 } // namespace

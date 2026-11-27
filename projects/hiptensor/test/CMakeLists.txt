@@ -482,10 +482,12 @@ endif()
 # category parser from test_categories.yaml.
 
 set(_HIPTENSOR_HOST_TESTS
+  api_attribute_test
   batched_contraction_test
   concurrency_test
   contraction_mode_test
   elementwise_cpu_test
+  elementwise_instance_selection_test
   elementwise_mode_test
   elementwise_op_test
   hiptensor_options_test
@@ -530,8 +532,10 @@ set(_HIPTENSOR_DEVICE_TESTS
   "plan_lifetime_test|NONE"
   "trinary_bilinear_contraction_test|NONE"
   "trinary_scale_contraction_test|NONE"
+  "trinary_contraction_workspace_test|NONE"
   "bilinear_contraction_with_unary_ops_test|NONE"
   "scale_contraction_with_unary_ops_test|NONE"
+  "contraction_padded_strides_test|NONE"
   "elementwise_output_strides_test|NONE"
   "elementwise_trinary_op_order_test|NONE"
   "rank2_elementwise_permute_test|02_elementwise/permutation/rank2_test_params.yaml"

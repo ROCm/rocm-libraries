@@ -1,0 +1,41 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --NumWaves=2 --GirFencePlacementPass --print-output 2>&1
+# XFAIL
+#
+# Error case: the skippable seam moves memory BEFORE the fence's deadline, so hoisting the fence
+# ahead of the branch would move it across that movement -- a different cut, not the same one
+# placed earlier. There is nowhere legal to put it, and leaving it in `^seam` would hand the
+# bypassing waves one signal fewer per trip, which hangs. The pass aborts naming the block.
+#
+# Nothing the emitter produces today reaches this: the sparse wave-parity seam is exactly one
+# tensor_load, so the prefix is always empty.
+#
+# CHECK: UNREACHABLE executed: GirFencePlacementPass: skippable seam 'seam' moves memory before the fence
+
+st.metadata "gir.frame_contract" {
+gir-frame-contract
+
+gen 0  ring=2 entry=0
+incoming  dst=4 src=0 gen=0 value=0
+incoming  dst=4 src=4 gen=0 value=1 relative=1
+}
+
+st.func @gir_fence_rendezvous_memory_prefix() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { mod.gir_action = { action = 0, anchor = 0, kind = tensor, access0_write = 1, access0_operand = 0, access0_ring = 2, access0_abs = 0, access0_cross = 1 } }
+  "st.tensor_load_to_lds"(s[8:11], s[10:17]) { mod.gir_action = { action = 2, anchor = 0, kind = tensor, access0_write = 1, access0_operand = 0, access0_ring = 2, access0_abs = 1, access0_cross = 1 } }
+  "st.s_branch"("loop")
+  Successors: ^loop
+^loop:
+  v[0:1] = "st.ds_load_b64"(v10) { mod.ds = { na = 1, offset = 0, gds = false }, mod.gir_action = { action = 4, anchor = 4, kind = ds, access0_write = 0, access0_operand = 0, access0_ring = 2, access0_gen = 0, access0_gdelta = 1, access0_cross = 1 } }
+  v[4:5] = "st.ds_load_b64"(v12) { mod.ds = { na = 1, offset = 0, gds = false }, mod.gir_action = { action = 5, anchor = 4, kind = ds, access0_write = 0, access0_operand = 0, access0_ring = 2, access0_gen = 0, access0_gdelta = 0, access0_cross = 1 } }
+  "st.s_cbranch_scc1"("join", SCC0)
+  Successors: ^seam, ^join
+^seam:
+  v[6:7] = "st.ds_load_b64"(v14) { mod.ds = { na = 1, offset = 0, gds = false }, mod.gir_action = { action = 7, anchor = 4, kind = ds, access0_write = 0, access0_operand = 0, access0_ring = 2, access0_gen = 0, access0_cross = 1 } }
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { mod.gir_action = { action = 6, anchor = 4, kind = tensor, access0_write = 1, access0_operand = 0, access0_ring = 2, access0_gen = 0, access0_gdelta = 1, access0_cross = 1 } }
+  Successors: ^join
+^join:
+  "st.s_cbranch_scc1"("loop", SCC0)
+  Successors: ^loop, ^exit
+^exit:
+}
