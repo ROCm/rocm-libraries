@@ -1194,6 +1194,17 @@ namespace
             : std::to_string(0.0f);
     }
 
+    // Transpose flag as hipblaslt-bench spells it: C for a conjugated (complex) operand.
+    inline const char* benchTransString(bool transposed, const TensileLite::TensorOps& ops)
+    {
+        if(!transposed)
+            return "N";
+        return std::find(ops.begin(), ops.end(), TensileLite::TensorOp::ComplexConjugate())
+                       != ops.end()
+                   ? "C"
+                   : "T";
+    }
+
     // Maps one operand's scale configuration onto the hipblaslt-bench --scaleA/--scaleB
     // option values (hipblaslt_scaling_format). Block scaling is carried by the MX scale
     // tensor: useScaleAB() is deliberately left empty for MX problems so that they match
@@ -1365,9 +1376,9 @@ namespace
             "--betai",
             getBetaImagAsString(inputs, isComplexInput),
             "--transA",
-            problem.transA() ? "T" : "N",
+            benchTransString(problem.transA(), problem.aOps()),
             "--transB",
-            problem.transB() ? "T" : "N",
+            benchTransString(problem.transB(), problem.bOps()),
             "--batch_count",
             problem.batchSize(0),
 			"--batch_mode",
@@ -1488,9 +1499,9 @@ namespace
                     "betai",
                     getBetaImagAsString(inputs, isComplexInput),
                     "transA",
-                    problem.transA() ? "T" : "N",
+                    benchTransString(problem.transA(), problem.aOps()),
                     "transB",
-                    problem.transB() ? "T" : "N",
+                    benchTransString(problem.transB(), problem.bOps()),
                     "batch_count",
                     problem.batchSize(0),
 					"batch_mode",
@@ -1607,9 +1618,9 @@ namespace
                     "betai",
                     getBetaImagAsString(inputs, isComplexInput),
                     "transA",
-                    problem.transA() ? "T" : "N",
+                    benchTransString(problem.transA(), problem.aOps()),
                     "transB",
-                    problem.transB() ? "T" : "N",
+                    benchTransString(problem.transB(), problem.bOps()),
                     "batch_count",
                     problem.batchSize(0),
 					"batch_mode",
@@ -1738,9 +1749,9 @@ namespace
             "--beta",
             ToString(inputs.grouped[0].beta),
             "--transA",
-            problem.gemms[0].transA() ? "T" : "N",
+            benchTransString(problem.gemms[0].transA(), problem.gemms[0].aOps()),
             "--transB",
-            problem.gemms[0].transB() ? "T" : "N",
+            benchTransString(problem.gemms[0].transB(), problem.gemms[0].bOps()),
             "--batch_count",
             problem.gemms[0].batchSize(0),
             "--scaleA",
@@ -1895,9 +1906,9 @@ namespace
             "beta",
             ToString(inputs.grouped[0].beta),
             "transA",
-            problem.gemms[0].transA() ? "T" : "N",
+            benchTransString(problem.gemms[0].transA(), problem.gemms[0].aOps()),
             "transB",
-            problem.gemms[0].transB() ? "T" : "N",
+            benchTransString(problem.gemms[0].transB(), problem.gemms[0].bOps()),
             "batch_count",
             problem.gemms[0].batchSize(0),
             "scaleA",
@@ -2043,9 +2054,9 @@ namespace
             "beta",
             ToString(inputs.grouped[0].beta),
             "transA",
-            problem.gemms[0].transA() ? "T" : "N",
+            benchTransString(problem.gemms[0].transA(), problem.gemms[0].aOps()),
             "transB",
-            problem.gemms[0].transB() ? "T" : "N",
+            benchTransString(problem.gemms[0].transB(), problem.gemms[0].bOps()),
             "batch_count",
             problem.gemms[0].batchSize(0),
             "scaleA",

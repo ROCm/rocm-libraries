@@ -1681,6 +1681,185 @@ Tests:
   gpu_arch: '1250'
 
 
+# Overlapping B batches (ldb <= stride_b < ldb * (N - 1) + K): the buffers must cover what the
+# GEMM reads, and the initializers must not widen the stride to a full matrix per batch.
+- name: matmul_overlapping_b_batches
+  category: pre_checkin
+  function:
+    matmul: *hpa_half_precision
+  M: 16
+  N: 16
+  K: 1024
+  lda: 16
+  ldb: 1024
+  ldc: 16
+  ldd: 16
+  stride_a: 16384
+  stride_b: 1024
+  stride_c: 256
+  stride_d: 256
+  batch_count: 2
+  transA: N
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  unit_check: 1
+
+- name: matmul_overlapping_b_batches_complex
+  category: pre_checkin
+  gpu_arch: '9(42|50)|1250'
+  function: matmul
+  a_type: f32_c
+  b_type: f32_c
+  c_type: f32_c
+  d_type: f32_c
+  compute_type: c_f32_r
+  scale_type: f32_c
+  M: 16
+  N: 16
+  K: 64
+  lda: 16
+  ldb: 64
+  ldc: 16
+  ldd: 16
+  stride_a: 1024
+  stride_b: 64
+  stride_c: 256
+  stride_d: 256
+  batch_count: 2
+  transA: N
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  unit_check: 1
+
+# A batch stride below lda: the last batch reads past the first lda * K elements of A.
+- name: matmul_overlapping_a_batches_stride_lt_ld
+  category: pre_checkin
+  function: matmul
+  a_type: f32_r
+  b_type: f32_r
+  c_type: f32_r
+  d_type: f32_r
+  compute_type: c_f32_r
+  scale_type: f32_r
+  M: 16
+  N: 16
+  K: 16
+  lda: 32
+  ldb: 16
+  ldc: 16
+  ldd: 16
+  stride_a: 16
+  stride_b: 256
+  stride_c: 256
+  stride_d: 256
+  batch_count: 4
+  transA: N
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  unit_check: 1
+
+# Overlapping A and B batches with both operands transposed: A is stored lda x M and B ldb x K,
+# so the buffers are sized from A_col = M and B_col = K. M > K > N, so sizing either operand by
+# its NN column count (K for A, N for B) would be too small.
+- name: matmul_overlapping_ab_batches_tt
+  category: pre_checkin
+  function:
+    matmul: *single_precision
+  M: 64
+  N: 16
+  K: 32
+  lda: 32
+  ldb: 16
+  ldc: 64
+  ldd: 64
+  stride_a: 32
+  stride_b: 16
+  stride_c: 1024
+  stride_d: 1024
+  batch_count: 4
+  transA: T
+  transB: T
+  alpha: 1.0
+  beta: 0.0
+  initialization: [ rand_int, integer_exact, norm_dist_one_special ]
+  unit_check: 1
+
+# trig_float values are not exact in f32, so the GEMM result is checked by norm, not bit for bit.
+- name: matmul_overlapping_ab_batches_tt_trig
+  category: pre_checkin
+  function:
+    matmul: *single_precision
+  M: 64
+  N: 16
+  K: 32
+  lda: 32
+  ldb: 16
+  ldc: 64
+  ldd: 64
+  stride_a: 32
+  stride_b: 16
+  stride_c: 1024
+  stride_d: 1024
+  batch_count: 4
+  transA: T
+  transB: T
+  alpha: 1.0
+  beta: 0.0
+  initialization: trig_float
+  unit_check: 0
+  norm_check: 1
+
+# The same with conjugate-transposed complex operands (A stored K x M, B stored N x K).
+- name: matmul_overlapping_ab_batches_conjugate
+  category: pre_checkin
+  gpu_arch: '9(42|50)|1250'
+  function:
+    matmul: *complex_float_precision
+  M: 32
+  N: 16
+  K: 24
+  lda: 32
+  ldb: 24
+  ldc: 32
+  ldd: 32
+  stride_a: 32
+  stride_b: 8
+  stride_c: 512
+  stride_d: 512
+  batch_count: 3
+  transA: C
+  transB: C
+  alpha: 1.0
+  beta: 0.0
+  unit_check: 1
+
+# Overlapping C batches read with beta != 0 (ldc <= stride_c < ldc * (N - 1) + M): C must be
+# sized for ldc * N + (batch_count - 1) * stride_c elements.
+- name: matmul_overlapping_c_batches
+  category: pre_checkin
+  function:
+    matmul: *single_precision
+  M: 16
+  N: 16
+  K: 16
+  lda: 16
+  ldb: 16
+  ldc: 32
+  ldd: 16
+  stride_a: 256
+  stride_b: 256
+  stride_c: 32
+  stride_d: 256
+  batch_count: 4
+  transA: N
+  transB: N
+  alpha: 1.0
+  beta: 2.0
+  unit_check: 1
+
 - name: matmul_stride_lt_ld
   category: pre_checkin
   function:

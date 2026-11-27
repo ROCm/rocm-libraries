@@ -3109,6 +3109,9 @@ rocblaslt_status rocblaslt_matmul_is_algo_supported(rocblaslt_handle        hand
     auto alphaTypeStatus = validateDeviceScalarAlphaType(matmul_descr);
     if(alphaTypeStatus != rocblaslt_status_continue)
         return alphaTypeStatus;
+    auto scaleTypeStatus = validateComplexScaleType(matmul_descr, matA->type);
+    if(scaleTypeStatus != rocblaslt_status_continue)
+        return scaleTypeStatus;
 
     rocblaslt_status status = rocblaslt_status_success;
     try
@@ -3194,6 +3197,9 @@ rocblaslt_status
                                                            requestedAlgoCount,
                                                            heuristicResultsArray,
                                                            returnAlgoCount);
+    auto scaleTypeStatus = validateComplexScaleType(matmul_desc, matA->type);
+    if(scaleTypeStatus != rocblaslt_status_continue)
+        return scaleTypeStatus;
     // No algorithm can take these sizes or strides; report none rather than search at all.
     if(!problemFitsKernelArgs(matD->m,
                               matD->n,
@@ -3896,7 +3902,8 @@ extern "C" int rocblaslt_matmul_is_tuned(rocblaslt_handle        handle,
         return -1;
     }
 
-    if(validateDeviceScalarAlphaType(matmul_descr) != rocblaslt_status_continue)
+    if(validateDeviceScalarAlphaType(matmul_descr) != rocblaslt_status_continue
+       || validateComplexScaleType(matmul_descr, matA->type) != rocblaslt_status_continue)
         return -1;
 
     hipDataType            a_type              = matA->type;

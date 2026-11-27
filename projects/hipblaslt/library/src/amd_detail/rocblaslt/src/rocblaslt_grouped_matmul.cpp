@@ -228,6 +228,11 @@ namespace
             log_error(__func__, "C and D types differ");
             return rocblaslt_status_type_mismatch;
         }
+        if(rocblaslt_is_complex_datatype(matA->type))
+        {
+            log_error(__func__, "grouped GEMM does not support complex types");
+            return rocblaslt_status_invalid_value;
+        }
         if(desc->scale_type != HIP_R_32F)
         {
             log_error(__func__, "grouped GEMM supports only a 32-bit float scale type");

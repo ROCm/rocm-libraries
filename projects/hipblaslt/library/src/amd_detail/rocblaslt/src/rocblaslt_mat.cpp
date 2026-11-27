@@ -538,11 +538,15 @@ rocblaslt_status
     std::vector<bool> gradient_vec;
 
     const bool deviceScalarAlpha = isDeviceScalarAlphaPointerMode(matmul_descr[0]->pointermode);
-    for(const auto& descriptor : matmul_descr)
+    for(size_t i = 0; i < matmul_descr.size(); i++)
     {
-        auto alphaTypeStatus = validateDeviceScalarAlphaType(descriptor);
+        const auto& descriptor      = matmul_descr[i];
+        auto        alphaTypeStatus = validateDeviceScalarAlphaType(descriptor);
         if(alphaTypeStatus != rocblaslt_status_continue)
             return alphaTypeStatus;
+        auto scaleTypeStatus = validateComplexScaleType(descriptor, matA[i]->type);
+        if(scaleTypeStatus != rocblaslt_status_continue)
+            return scaleTypeStatus;
         if(isDeviceScalarAlphaPointerMode(descriptor->pointermode) != deviceScalarAlpha)
             return rocblaslt_status_invalid_value;
     }

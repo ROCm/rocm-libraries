@@ -482,6 +482,189 @@ TEST(pre_checkin_device_scalar_alpha_ext, DescriptorRejectsNonFp32Scale)
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 }
 
+TEST(pre_checkin_complex_scale_type, DescriptorRejectsMismatchedScale)
+{
+    // Complex GEMMs read alpha and beta as complex scalars of the matrix precision, so any other
+    // scale type is rejected before kernel selection, regardless of the GPU architecture.
+    constexpr int n = 64;
+    struct Case
+    {
+        hipDataType              matrix;
+        hipblasComputeType_t     compute;
+        hipDataType              valid;
+        std::vector<hipDataType> invalid;
+    };
+    for(const auto& tc : {Case{HIP_C_32F, HIPBLAS_COMPUTE_32F, HIP_C_32F, {HIP_R_32F, HIP_C_64F}},
+                          Case{HIP_C_64F, HIPBLAS_COMPUTE_64F, HIP_C_64F, {HIP_R_64F, HIP_C_32F}}})
+    {
+        hipblaslt_local_handle        handle;
+        hipblaslt_local_matrix_layout layout(n, n, n, tc.matrix);
+        // Room for a complex double, so a missed rejection cannot read past the buffers.
+        device_vector<double> a(2 * n * n), b(2 * n * n), c(2 * n * n), d(2 * n * n);
+        ASSERT_EQ(a.memcheck(), hipSuccess);
+        ASSERT_EQ(b.memcheck(), hipSuccess);
+        ASSERT_EQ(c.memcheck(), hipSuccess);
+        ASSERT_EQ(d.memcheck(), hipSuccess);
+        double alpha[2] = {1, 0}, beta[2] = {0, 0};
+
+        {
+            SCOPED_TRACE(::testing::Message() << "matrix=" << tc.matrix << " valid scale");
+            hipblaslt_local_matmul_descr     desc(HIPBLAS_OP_N, HIPBLAS_OP_N, tc.compute, tc.valid);
+            hipblaslt_local_preference       preference;
+            hipblasLtMatmulHeuristicResult_t result{};
+            int                              returned = -1;
+            EXPECT_NE(hipblasLtMatmulAlgoGetHeuristic(handle,
+                                                      desc,
+                                                      layout,
+                                                      layout,
+                                                      layout,
+                                                      layout,
+                                                      preference,
+                                                      1,
+                                                      &result,
+                                                      &returned),
+                      HIPBLAS_STATUS_INVALID_VALUE);
+        }
+
+        // Grouped layouts do not support complex types, whatever the scale type.
+        for(hipDataType scale : {tc.valid, HIP_R_32F})
+        {
+            SCOPED_TRACE(::testing::Message()
+                         << "matrix=" << tc.matrix << " grouped scale=" << scale);
+            hipblasLtMatrixLayout_t grouped = nullptr;
+            ASSERT_EQ(hipblasLtGroupedMatrixLayoutCreate(
+                          &grouped, tc.matrix, 2, nullptr, nullptr, nullptr),
+                      HIPBLAS_STATUS_SUCCESS);
+            // A fixed group shape, so the placeholder bound does not reject the layout first.
+            // With the f32 scale only the complex type rejects it; a complex scale is also
+            // rejected by the grouped f32-scale rule.
+            const uint64_t extent = n;
+            const int64_t  ld     = n;
+            for(auto attr : {HIPBLASLT_MATRIX_LAYOUT_ROWS, HIPBLASLT_MATRIX_LAYOUT_COLS})
+                ASSERT_EQ(hipblasLtMatrixLayoutSetAttribute(grouped, attr, &extent, sizeof(extent)),
+                          HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(hipblasLtMatrixLayoutSetAttribute(
+                          grouped, HIPBLASLT_MATRIX_LAYOUT_LD, &ld, sizeof(ld)),
+                      HIPBLAS_STATUS_SUCCESS);
+            hipblaslt_local_matmul_descr     desc(HIPBLAS_OP_N, HIPBLAS_OP_N, tc.compute, scale);
+            hipblaslt_local_preference       preference;
+            hipblasLtMatmulHeuristicResult_t result{};
+            int                              returned = -1;
+            EXPECT_EQ(hipblasLtMatmulAlgoGetHeuristic(handle,
+                                                      desc,
+                                                      grouped,
+                                                      grouped,
+                                                      grouped,
+                                                      grouped,
+                                                      preference,
+                                                      1,
+                                                      &result,
+                                                      &returned),
+                      HIPBLAS_STATUS_INVALID_VALUE);
+            EXPECT_EQ(returned, 0);
+            EXPECT_EQ(hipblasLtMatrixLayoutDestroy(grouped), HIPBLAS_STATUS_SUCCESS);
+        }
+
+        for(hipDataType scale : tc.invalid)
+        {
+            SCOPED_TRACE(::testing::Message() << "matrix=" << tc.matrix << " scale=" << scale);
+            hipblaslt_local_matmul_descr     desc(HIPBLAS_OP_N, HIPBLAS_OP_N, tc.compute, scale);
+            hipblaslt_local_preference       preference;
+            hipblasLtMatmulHeuristicResult_t result{};
+            int                              returned = -1;
+            EXPECT_EQ(hipblasLtMatmulAlgoGetHeuristic(handle,
+                                                      desc,
+                                                      layout,
+                                                      layout,
+                                                      layout,
+                                                      layout,
+                                                      preference,
+                                                      1,
+                                                      &result,
+                                                      &returned),
+                      HIPBLAS_STATUS_INVALID_VALUE);
+            EXPECT_EQ(returned, 0);
+            size_t workspaceBytes = 0;
+            EXPECT_EQ(hipblaslt_ext::matmulIsAlgoSupported(handle,
+                                                           desc,
+                                                           alpha,
+                                                           layout,
+                                                           layout,
+                                                           beta,
+                                                           layout,
+                                                           layout,
+                                                           result.algo,
+                                                           workspaceBytes),
+                      HIPBLAS_STATUS_INVALID_VALUE);
+            EXPECT_EQ(hipblaslt_ext::matmulIsTuned(handle, desc, layout, layout, layout, layout),
+                      -1);
+            EXPECT_EQ(hipblasLtMatmul(handle,
+                                      desc,
+                                      alpha,
+                                      a,
+                                      layout,
+                                      b,
+                                      layout,
+                                      beta,
+                                      c,
+                                      layout,
+                                      d,
+                                      layout,
+                                      nullptr,
+                                      nullptr,
+                                      0,
+                                      nullptr),
+                      HIPBLAS_STATUS_INVALID_VALUE);
+
+            hipblaslt_ext::Gemm gemm(handle,
+                                     HIPBLAS_OP_N,
+                                     HIPBLAS_OP_N,
+                                     tc.matrix,
+                                     tc.matrix,
+                                     tc.matrix,
+                                     tc.matrix,
+                                     tc.compute);
+            EXPECT_EQ(
+                gemm.setProblem(desc, alpha, a, layout, b, layout, beta, c, layout, d, layout),
+                HIPBLAS_STATUS_INVALID_VALUE);
+
+            hipblaslt_local_matmul_descr validDesc(
+                HIPBLAS_OP_N, HIPBLAS_OP_N, tc.compute, tc.valid);
+            for(int invalidIndex : {0, 1})
+            {
+                SCOPED_TRACE(::testing::Message() << "invalid grouped descriptor=" << invalidIndex);
+                hipblaslt_ext::GroupedGemm           grouped(handle,
+                                                   HIPBLAS_OP_N,
+                                                   HIPBLAS_OP_N,
+                                                   tc.matrix,
+                                                   tc.matrix,
+                                                   tc.matrix,
+                                                   tc.matrix,
+                                                   tc.compute);
+                std::vector<hipblasLtMatmulDesc_t>   descriptors(2, validDesc);
+                std::vector<hipblasLtMatrixLayout_t> layouts(2, layout);
+                std::vector<void*>                   alphas(2, alpha), betas(2, beta);
+                std::vector<void*> as(2, static_cast<double*>(a)), bs(2, static_cast<double*>(b));
+                std::vector<void*> cs(2, static_cast<double*>(c)), ds(2, static_cast<double*>(d));
+                descriptors[invalidIndex] = desc;
+                EXPECT_EQ(grouped.setProblem(descriptors,
+                                             alphas,
+                                             as,
+                                             layouts,
+                                             bs,
+                                             layouts,
+                                             betas,
+                                             cs,
+                                             layouts,
+                                             ds,
+                                             layouts),
+                          HIPBLAS_STATUS_INVALID_VALUE);
+            }
+        }
+    }
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+}
+
 TEST(pre_checkin_device_scalar_alpha_ext, GroupedDescriptorMixedModesRejected)
 {
     checkExtensionAlpha(AlphaPath::GroupedDescriptor);

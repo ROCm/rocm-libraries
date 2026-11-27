@@ -1208,6 +1208,10 @@ try
     if(arg.compute_type == HIPBLASLT_COMPUTE_TYPE_INVALID)
         throw std::invalid_argument("Invalid value for --compute_type " + compute_type);
 
+    // Complex GEMMs read alpha and beta as complex scalars of the matrix precision.
+    if(arg.a_type == HIP_C_32F || arg.a_type == HIP_C_64F)
+        arg.scale_type = arg.a_type;
+
     // The value HIPBLASLT_DATATYPE_INVALID indicates that the compute_input_typeA has no effect.
     arg.compute_input_typeA = (compute_input_typeA != "")
                                   ? string_to_hip_datatype(compute_input_typeA)

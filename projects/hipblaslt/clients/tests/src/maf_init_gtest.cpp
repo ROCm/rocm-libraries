@@ -83,21 +83,33 @@ namespace
         }
     }
 
-    // An interleaved layout gets a single lda * N buffer from testing_matmul, though its batches
-    // reach past it: M = lda = N = 8, stride = 4, batch_count = 2 spans 68 elements. The fills
-    // stop at 64, so the cells after the buffer stay NaN.
-    TEST(MafInitDevice_pre_checkin, interleaved_batches_stay_in_the_buffer)
+    // Batches closer than a full matrix (0 < stride < lda * N) get an
+    // lda * N + (batch_count - 1) * stride buffer from testing_matmul (strided_tensor_elements).
+    // The fills must write the M + lda * (N - 1) + (batch_count - 1) * stride elements the
+    // batches reach, which fit inside it, and nothing after them. Two layouts: a stride below lda
+    // (the batches interleave), and lda <= stride < lda * N (each batch starts inside the
+    // previous one).
+    TEST(MafInitDevice_pre_checkin, close_batches_fill_their_whole_span)
     {
-        const size_t M = 8, N = 8, lda = 8, stride = 4, batches = 2, allocated = lda * N;
-        const size_t total = M + lda * (N - 1) + (batches - 1) * stride;
-        for(auto init : {hipblaslt_initialization::maf1_0,
-                         hipblaslt_initialization::maf2_0,
-                         hipblaslt_initialization::maf2_0_unit_scale})
+        struct Layout
         {
-            const auto h = fillFloat(ABC_dims::A, init, M, N, lda, stride, batches, total);
-            for(size_t k = 0; k < total; k++)
-                EXPECT_EQ(std::isnan(h[k]), k >= allocated)
-                    << hipblaslt_initialization2string(init) << " offset " << k;
+            size_t M, N, lda, stride, batches;
+        };
+        for(const auto& l : {Layout{8, 8, 8, 4, 2}, Layout{4, 8, 4, 4, 2}})
+        {
+            const size_t span  = l.M + l.lda * (l.N - 1) + (l.batches - 1) * l.stride;
+            const size_t total = span + 16; // NaN guard after the span
+            for(auto init : {hipblaslt_initialization::maf1_0,
+                             hipblaslt_initialization::maf2_0,
+                             hipblaslt_initialization::maf2_0_unit_scale})
+            {
+                const auto h
+                    = fillFloat(ABC_dims::A, init, l.M, l.N, l.lda, l.stride, l.batches, total);
+                for(size_t k = 0; k < total; k++)
+                    EXPECT_EQ(std::isnan(h[k]), k >= span)
+                        << hipblaslt_initialization2string(init) << " lda " << l.lda << " stride "
+                        << l.stride << " offset " << k;
+            }
         }
     }
 

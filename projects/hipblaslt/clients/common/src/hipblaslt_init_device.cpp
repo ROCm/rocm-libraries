@@ -125,7 +125,7 @@ __global__ void fill_kernel(T* A, size_t size, size_t offset, F f)
 template <typename T, typename F>
 void fill_batch(T* A, size_t M, size_t N, size_t lda, size_t stride, size_t batch_count, const F& f)
 {
-    size_t           size_64   = stride >= lda ? lda * N + size_t(batch_count - 1) * stride : lda * N;
+    size_t           size_64   = stride ? lda * N + size_t(batch_count - 1) * stride : lda * N;
     if constexpr(
         false
 #if defined(HIPBLASLT_USE_FP4)
@@ -189,11 +189,10 @@ static T maf_round(double v)
 }
 
 // The elements a MAF fill may copy: its extent, capped at what testing_matmul allocates for the
-// layout (rotating_tensor_elements). A batch stride below lda gets a single lda * N buffer, which
-// is shorter than the extent once the interleaved batches reach past column N - 1.
+// layout (strided_tensor_elements), which covers every element a strided GEMM reads.
 static size_t maf_copy_elements(size_t extent, size_t lda, size_t N, size_t batches, size_t stride)
 {
-    const int64_t allocated = hipblaslt_bench::rotating_tensor_elements(
+    const int64_t allocated = hipblaslt_bench::strided_tensor_elements(
         int64_t(lda), int64_t(N), int64_t(batches), int64_t(stride));
     return std::min(extent, size_t(allocated));
 }
@@ -919,7 +918,6 @@ void hipblaslt_init_device(ABC_dims                 abc,
                 {
                 if(stride >= lda)
                 {
-                    stride = std::max(lda * N, stride);
                     fill_batch(A, M, N, lda, stride, batch_count, [stride, lda, make_std_complex](size_t idx) -> T {
                         auto b     = idx / stride;
                         auto j     = (idx - b * stride) / lda;
@@ -946,7 +944,6 @@ void hipblaslt_init_device(ABC_dims                 abc,
                 else{
                 if(stride >= lda)
                 {
-                    stride = std::max(lda * N, stride);
                     fill_batch(A, M, N, lda, stride, batch_count, [stride, lda] __host__ __device__ (size_t idx) -> T {
                         auto b     = idx / stride;
                         auto j     = (idx - b * stride) / lda;
@@ -973,7 +970,6 @@ void hipblaslt_init_device(ABC_dims                 abc,
             {
                 if(stride >= lda)
             {
-                stride = std::max(lda * N, stride);
                     fill_batch(
                         A, M, N, lda, stride, batch_count, [M, N, stride, lda, make_std_complex, positive_only] __host__ __device__ (size_t idx) -> T {
                             auto b = idx / stride;
@@ -1015,7 +1011,6 @@ void hipblaslt_init_device(ABC_dims                 abc,
             {
                 if(stride >= lda)
             {
-                stride = std::max(lda * N, stride);
                     fill_batch(
                         A, M, N, lda, stride, batch_count, [M, N, stride, abc, lda, positive_only] __host__ __device__ (size_t idx) -> T {
                             auto b = idx / stride;
@@ -1112,13 +1107,11 @@ void hipblaslt_init_device(ABC_dims                 abc,
                          || std::is_same_v<T, hip_bfloat16>)
             {
                 constexpr unsigned int kNormDistOneSpecialSeed = 12345u;
-                // Match integer_exact B / fp16_accumulator_probe B: stride==0 means packed batches;
-                // fill_batch must see a non-zero stride spanning each slab so special_idx and the
-                // Gaussian fill cover the full strided buffer (see testing_matmul.hpp size_*).
-                size_t effective_stride = stride ? std::max(stride, lda * N) : lda * N;
-                size_t size_64            = effective_stride >= lda
-                                 ? lda * N + size_t(batch_count - 1) * effective_stride
-                                 : lda * N;
+                // Match integer_exact B / fp16_accumulator_probe B: stride==0 means packed batches,
+                // so fill_batch must see a non-zero stride to cover every batch slab. A nonzero
+                // stride is kept as is, so batches closer than lda * N stay inside the buffer.
+                size_t effective_stride = stride ? stride : lda * N;
+                size_t size_64            = lda * N + size_t(batch_count - 1) * effective_stride;
                 if(size_64 == 0)
                 {
                     break;
@@ -1244,15 +1237,16 @@ void hipblaslt_init_device(ABC_dims                 abc,
             else if(abc == ABC_dims::B)
             {
                 // Checkerboard ±: (i^j)&1 so first element of each row and column alternates
-                // Use an effective stride that is never zero and at least large enough
-                // to contain one full matrix, to avoid division by a potentially zero stride.
-                // Offset PRNG index for B so {0,1,2} magnitudes differ from A (same idx would
-                // correlate via pseudo_random_device).
+                // A stride of 0 means packed batches. Any other stride is the allocation's layout,
+                // which must not be widened (as for sparse_k above); the pattern is indexed per
+                // full matrix. Offset PRNG index for B so {0,1,2} magnitudes differ from A (same
+                // idx would correlate via pseudo_random_device).
                 constexpr size_t kBSeedOffset = 1000003; // large prime
-                size_t effective_stride = stride ? std::max(stride, lda * N) : lda * N;
-                fill_batch(A, M, N, lda, effective_stride, batch_count, [effective_stride, lda] __host__ __device__ (size_t idx) -> T {
-                    auto b        = idx / effective_stride;
-                    auto in_batch = idx - b * effective_stride;
+                size_t effective_stride = stride ? stride : lda * N;
+                size_t index_stride     = std::max(effective_stride, lda * N);
+                fill_batch(A, M, N, lda, effective_stride, batch_count, [index_stride, lda] __host__ __device__ (size_t idx) -> T {
+                    auto b        = idx / index_stride;
+                    auto in_batch = idx - b * index_stride;
                     auto j        = in_batch / lda;
                     auto i        = in_batch - j * lda;
                     auto value    = small_int_positive<T>(idx + kBSeedOffset);
@@ -1275,10 +1269,11 @@ void hipblaslt_init_device(ABC_dims                 abc,
                 {
                     // Match integer_exact B: use effective_stride in fill_batch so batch_count>1 with
                     // stride==0 still covers every batch slab (stride_b defaults to 0 in Arguments).
-                    size_t effective_stride = stride ? std::max(stride, lda * N) : lda * N;
-                    fill_batch(A, M, N, lda, effective_stride, batch_count, [effective_stride, lda] __host__ __device__ (size_t idx) -> T {
-                        auto b        = idx / effective_stride;
-                        auto in_batch = idx - b * effective_stride;
+                    size_t effective_stride = stride ? stride : lda * N;
+                    size_t index_stride     = std::max(effective_stride, lda * N);
+                    fill_batch(A, M, N, lda, effective_stride, batch_count, [index_stride, lda] __host__ __device__ (size_t idx) -> T {
+                        auto b        = idx / index_stride;
+                        auto in_batch = idx - b * index_stride;
                         auto n        = in_batch / lda;
                         auto k        = in_batch - n * lda;
                         (void)n;
