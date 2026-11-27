@@ -2,8 +2,8 @@
 
 - Contributors: Brian Harrison, Garby Gilbert
 - **Status**: Implemented
-- **Status notes**: Shipped in #15493: the backend attribute, `Graph::get_numerical_notes_for_engine()`, the Python binding, the UED `numerical_notes` vocabulary, the MIOpen determinism claims, and note filtering in the cuDNN v9 and v8 layers. #15792 added note filtering on the native and Python `Graph`. Only MIOpen reports notes, and only `NONDETERMINISTIC`; no provider reports any other note (§5).
-- **Last verified**: 2026-11-18 against `develop` (02433ce8085)
+- **Status notes**: Shipped in #15493: the backend attribute, `Graph::get_numerical_notes_for_engine()`, the Python binding, the UED `numerical_notes` vocabulary, the MIOpen determinism claims, and note filtering in the cuDNN v9 and v8 layers. #15792 added note filtering on the native and Python `Graph`. MIOpen engines report `NONDETERMINISTIC` or an explicit empty list; the hip-kernel-provider SDPA engines in the claims table of §5 report an explicit empty list; no provider reports any other note (§5).
+- **Last verified**: 2026-11-23 against `develop` (7f30ff27a59)
 - **Follows**: [RFC 0010: Per-engine behavior notes](./0010_BehaviorNotes.md)
 
 ## Table of Contents
@@ -90,9 +90,15 @@ Compatibility-layer divergences from cuDNN are in [KNOWN_DIVERGENCES.md](../KNOW
 |---|---|
 | `MIOPEN_ENGINE_DETERMINISTIC` | Explicit `[]` |
 | `MIOPEN_ENGINE` | Explicit `[NONDETERMINISTIC]` |
+| hip-kernel-provider SDPA forward: `hipkernel:Gfx942AttentionDense`, `Gfx942AttentionUnified2D`, `Gfx942AttentionUnified3d`, `Gfx950AttentionDense`, `Gfx950AttentionUnified2D`, `Gfx950AttentionUnified3D`, `Gfx1151WmmaAttention`, `Gfx1151WmmaAttentionDecode`, `flydsl_sdpa_cdna_decode`, `flydsl_sdpa_cdna_dualwave`, `flydsl_sdpa_rdna_decode` | Explicit `[]`, authored in the engine's UED |
+| hip-kernel-provider SDPA backward: `hipkernel:flydsl_sdpa_bwd_merged`, `flydsl_sdpa_bwd_split` | Explicit `[]`, authored in the engine's UED |
+| hip-kernel-provider SDPA forward (head-pad): `hipkernel:flydsl_sdpa_cdna`, `flydsl_sdpa_rdna`, `flydsl_sdpa_aiw` | No claim: field absent, reported `{NONDETERMINISTIC}`; the head-pad copy can write past a packed operand's region when per-batch origins run past `B*S` tokens |
+| `ASM_SDPA_ENGINE` (forward and backward), `HIP_FLASH2_ENGINE` | No claim: field absent, reported `{NONDETERMINISTIC}` |
 | Every other engine | No tested claim: field absent, reported `{NONDETERMINISTIC}` |
 
 `MIOPEN_ENGINE_DETERMINISTIC` claims determinism for every graph it accepts; the claim is about the engine ID, not per-solver evidence. No in-tree provider reports a precision note. Precision claims, such as MIOpen's `FP16_ALT_IMPL` on gfx90a and hipBLASLt compute types, are future work.
+
+Each SDPA claim rests on a source trace, on the engine declining output and stats tensors whose strides map two logical elements to one address, and on a device repeat test of every launch structure on one device per code-object target the engine ships; the target's other devices run the same code objects and have no device run of their own. A claim is run-to-run on one device and runtime: byte equality across devices is not part of it, and on devices and compute-unit counts other than those run it is source-traced, not device-tested. The `ASM_SDPA_ENGINE` backward accumulates dQ with fp32 atomics and is never claimed. The `ASM_SDPA_ENGINE` forward declines an O or stats tensor whose strides map two logical elements to one address (`checkFwdIoLayouts`, `isNonOverlappingView`, `checkStatsTensor` in `SdpaFwdPlanBuilder.cpp`) but is not claimed: not every forward object class it ships has a passing device repeat test (the MI308X objects have not run). `HIP_FLASH2_ENGINE` passes the repeat tests that ran but reports no claim: it accepts an O layout whose strides map two logical elements to one address, and its variant objects (`HIP_FLASH2_BUILD_VARIANTS`) have not all run. [KNOWN_DIVERGENCES](../KNOWN_DIVERGENCES.md#determinism) lists the devices each claim was proven on and the properties the test does not cover.
 
 ## 6. Compatibility layers
 

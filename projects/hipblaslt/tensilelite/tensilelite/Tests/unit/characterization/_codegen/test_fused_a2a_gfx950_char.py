@@ -3,17 +3,18 @@
 """gfx950 fused GEMM+A2A (FusedA2A: GemmA2A) codegen characterization.
 
 Checks that a FusedA2A: GemmA2A solution emits the SDMA ring and packet
-instructions, that no instruction reads an SGPR written by v_readfirstlane or
-v_readlane fewer wait states later than gfx950 requires, and that the result
-assembles for gfx950. The store path replaces the ordinary global-write batch,
-so a solution that silently fell back to it still satisfies every assertion
-except the SDMA markers.
+instructions, that its DRAIN polls each flag slot against 1, that no instruction
+reads an SGPR written by v_readfirstlane or v_readlane fewer wait states later
+than gfx950 requires, and that the result assembles for gfx950. The store path
+replaces the ordinary global-write batch, so a solution that silently fell back
+to it still satisfies every assertion except the SDMA markers.
 
 Covers tensilelite/Components/SdmaRingEmitter.py, SdmaPacketEmitter.py, and the
 FusedA2A: GemmA2A store path in GlobalWriteBatch.py.
 """
 
 import os
+import re
 
 import pytest
 
@@ -62,6 +63,9 @@ def test_fused_a2a_gfx950_emits_assembly():
         assert "gfx950" in src, f"Kernel {base!r} missing gfx950 arch marker"
         missing = [m for m in _A2A_MARKERS + _A2A_RESETS if m not in src]
         assert not missing, f"Kernel {base!r}: missing SDMA instructions {missing}"
+        assert re.search(r"^v_cmp_ne_u32 vcc, 1, v", src, re.M), (
+            f"Kernel {base!r}: no DRAIN poll against 1"
+        )
 
 
 def test_fused_a2a_gfx950_golden(snapshot):

@@ -29,6 +29,14 @@ hipDNN operations are implemented through plugins. Each plugin provides its own 
 
 - **[HIP Kernel Provider Plugin](../../../dnn-providers/hip-kernel-provider/README.md)** - Custom HIP kernels compiled at run time with HIPRTC, plus assembly SDPA kernels. This provider has no separate operation support document.
   - HIP MLops engine: Batchnorm, Layernorm and RMSNorm (forward and backward), Resample (forward and backward)
+    - Layernorm and RMSNorm need an input `x` of rank 4 or 5. The engine declines lower-rank graphs, such as the `[B, S, D]` transformer form.
+    - Layernorm declines a graph whose scale, bias, mean, inverse variance, dscale or dbias tensor:
+      - is passed by value;
+      - is padded, overlaps itself, or orders its strides differently from `x`;
+      - has dims other than `x`'s extents on the normalized dims and 1 elsewhere (scale, bias, dscale, dbias), or `x`'s extents on the other dims and 1 on the normalized dims (mean, inverse variance).
+    - Layernorm backward needs `dx` to have the same data type as `x`.
+    - Layernorm supports at most 2^22 - 1 rows and RMSNorm at most 2^24 - 1 rows, forward and backward. Rows are the product of `x`'s dims outside the normalized dims.
+    - Resample declines graphs where an input extent plus its pre- and post-padding, or the product of the window extents, overflows int64. Its output (`y` forward, `dx` backward) may hold at most 2^32 - 256 elements.
   - ASM SDPA engine: SDPA forward and backward
   - Optional engines, off by default: HIP Flash2 SDPA forward (`ENABLE_HIP_FLASH2_ENGINE`) and the kernel ingestor engine (`HIPDNN_ENABLE_KERNEL_INGESTOR`, RFC 0017)
 

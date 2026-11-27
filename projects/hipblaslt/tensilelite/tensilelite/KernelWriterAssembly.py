@@ -106,6 +106,7 @@ from .Activation import ActivationType
 from .CustomKernels import isCustomKernelConfig, getCustomKernelFilepath, getCustomKernelSource, supportsUserSgprKernargPreload
 from .Common import roundUp, log2, ceilDivide, choose_multiplier, wmmaV3InputVgprLayout, clusterEnabled, isPow2, persistentSpatialCluster, plsinBlockSchedTile
 from .OccupancyMeasure import compute_occupancy_from_asm_source, _arch_caps_for_kernel
+from .Common.DebugInstrMask import applyDebugDisableInstrMask
 from .ir import ECvtF16toF32, ECvtF32toF16, ECvtPkFP8toF32
 from .Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection, isSubtileMultiDU, plsinBlockSchedTile, isMxf4SubtilePath, isSubtileSwizzledTensor
 from .Components.NonTemporal import decodeNonTemporal, forceCoherentNonTemporal, tdmCacheModifiers
@@ -113,7 +114,7 @@ from .Common.DataType import DataType
 from .Common.ScaleAlphaVec import scaleAlphaSupportsDeviceScalar
 from .Common.LdsReadPlan import fp32_lds_read_bytes, validate_gfx1250_fp32_lds_read_width
 from .Common.MatrixInstructionNaming import dataTypeNameAbbrevToInstType, matrixInstructionTypes
-from .Common.RegisterPool import RegisterPool, allocTmpGpr, allocTmpGprList
+from .Common.RegisterPool import RegisterPool, allocTmpGpr, allocTmpGprList, tmpGprStart
 from .Components.WorkGroupMappingAlgos import DefaultWGM, wgmXCC, SpaceFillingCurveWalk, \
   FusedA2AWgRemap
 
@@ -219,6 +220,7 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import List, Mapping, NamedTuple, Optional, Tuple, Union
 
+import contextlib
 import os
 
 # The states.overflowedResources codes judgeRegisterBudget reaches, and so the
@@ -330,6 +332,7 @@ class KernelWriterAssembly(KernelWriter):
             kernel["CUOccupancy"] = occ
       else:
         code = self._getKernelSource(kernel)
+      code = applyDebugDisableInstrMask(code, kernel.get("DebugDisableInstrMask", 0))
       errcode = 0
     except RuntimeError as e:
       printWarning(f"Failed to generate assembly source code for {kernel}: {e}")
@@ -549,7 +552,7 @@ class KernelWriterAssembly(KernelWriter):
       return False
     return (numComp - 1) * (numMxKGroups // numComp) > 1
 
-  def tailFoldingShrinkTdmKDim(self, kernel, tPA, tPB) -> Module:
+  def tailFoldingShrinkTdmKDim(self, kernel, tPA, tPB, kStep=None) -> Module:
     """Shrink a descriptor set's K dim by the k-tile its address just advanced.
 
     TDM clamps the partial last k-tile at K only if the K dim, measured from the
@@ -559,9 +562,11 @@ class KernelWriterAssembly(KernelWriter):
     """
     tcA, tcB = tPA["tensorChar"], tPB["tensorChar"]
     module = Module("Tail folding: shrink TDM K dim (%s/%s)" % (tcA, tcB))
-    fields = [tdmKDimField(kernel, tc) for tc in (tcA, tcB)]
+    fields = [tdmKDimField(kernel, tc, allowIterate=not kernel["ReuseAcrossPersistent"]) for tc in (tcA, tcB)]
     assert None not in fields and fields[0][0] == fields[1][0], \
       "%s/%s do not keep K in one field: %s" % (tcA, tcB, fields)
+    if not kernel["ReuseAcrossPersistent"]:
+      return self._tailFoldingShrinkTdmKDim32(kernel, tPA, tPB, fields, module, kStep)
     assert self.rapResidentKTiles(kernel) * kernel["DepthU"] < (1 << 16), \
       "the TDM K dim's high half is not zero"
     dword = fields[0][0]
@@ -585,6 +590,80 @@ class KernelWriterAssembly(KernelWriter):
                                comment="RAP: a borrow means this wave's K ran out"))
         module.add(SAndB32(dst=sgpr(group1), src0=sgpr(group1), src1=sgpr(tmpSgprRes.idx),
                            comment="RAP: clamp the K dim at zero"))
+    return module
+
+  def tailFoldGsu(self, kernel) -> bool:
+    """The kernel carries runtime GSU (GSUSumIdx / GSU args): GlobalSplitU > 0 or -1."""
+    return kernel["GlobalSplitU"] > 0 or kernel["GlobalSplitU"] == -1
+
+  def tailFoldStepShift(self, kernel):
+    """Shift that turns the per-wave TDM address increment tdmABIncs (bytes along K) into the K dim step in
+    the field's position (bit 16 of the low dword), or None when the step cannot be derived from it.
+
+    A and B must keep K contiguous at unit stride with K dim fields that step DU elements per k-tile (not
+    packed sub-byte F6/F4), unmirrored and unswizzled, with the same power-of-2 element size, so one
+    increment * 2^shift is the step of whichever tensor this wave carries: << 16 for 1-byte types (their
+    K dim counts bytes = elements), << 15 for 2-byte, << 14 for 4-byte."""
+    if not (kernel["NumWaves"] > 1 and not tdmPairOnEveryWave(kernel, "A", "B")) or self.states.globalReadIncsUseVgpr:
+      return None
+    pt = kernel["ProblemType"]
+    unrollDim = pt["IndicesSummation"][self.states.unrollIdx]
+    unitBytes = set()
+    for tc in ("A", "B"):
+      field = tdmKDimField(kernel, tc, allowIterate=True)
+      if field is None or field[1] != kernel["DepthU"] or pt.get("SwizzleTensor%s" % tc) or unrollDim in pt["MirrorDims%s" % tc] \
+         or not self.isConstUnitStride(self.strideRef(tc, unrollDim)):
+        return None
+      incBytes = kernel["_DepthU%s" % tc] * pt["DataType%s" % tc].numBytes()
+      if incBytes != int(incBytes) or int(incBytes) % field[1]:
+        return None
+      unitBytes.add(int(incBytes) // field[1])
+    if len(unitBytes) != 1 or not isPow2(next(iter(unitBytes))):
+      return None
+    return 16 - int(log2(next(iter(unitBytes))))
+
+  def tailFoldInit(self, kernel, kSgpr, loopCounter, tmp) -> Module:
+    """Tail folding (fixed at codegen): the partial last k-tile is one more unroll iteration, the kernel has no
+    tail loop. loop count = ceil(K / DU) (+0 when K % DU == 0), before the zero-iteration test (K < DU runs one
+    iteration) and before GSU distributes the count."""
+    # Solution folds only non-persistent kernels (runtime GSU) whose K dim step derives from the TDM address
+    # increment; a gap between its gate and the writer is an error, never a silent fold
+    if not self.tailFoldGsu(kernel) or self.tailFoldStepShift(kernel) is None:
+      raise RuntimeError("tail folding: the K dim step cannot be derived from the TDM increment")
+    du = kernel["DepthU"]
+    mod = Module("TailFoldInit")
+    mod.add(SAndB32(dst=sgpr(tmp), src0=sgpr(kSgpr), src1=du - 1, comment="TailFolding: SCC = (K %% DU(%u) != 0)" % du))
+    mod.add(SAddCU32(dst=sgpr(loopCounter), src0=sgpr(loopCounter), src1=0, comment="TailFolding: loop count = ceil(K / DU)"))
+    return mod
+
+  def _tailFoldingShrinkTdmKDim32(self, kernel, tPA, tPB, fields, module, kStep=None) -> Module:
+    """TailFolding: K dim -= the k-tile the address just advanced, as a 32-bit field (low half in
+    the dword's high half, high half in the next dword's low half). It only goes below zero after
+    the last k-tile has been issued, when no TDM load reads the descriptor any more."""
+    tcA, tcB = tPA["tensorChar"], tPB["tensorChar"]
+    dword = fields[0][0]
+    group1 = "tdm%sGroup1" % self._tdmPairedParityOrder(kernel, tPA, tPB)[0]["tensorChar"]
+    lo, hi = sgpr("%s+%u" % (group1, dword)), sgpr("%s+%u" % (group1, dword + 1))
+    if fields[0][1] != fields[1][1]:
+      raise RuntimeError("tail folding: %s/%s step K differently" % (tcA, tcB))
+    step = fields[0][1]
+    if kStep is not None:
+      what = "wrapIter ? -(splitIters-1)*step : step"
+      module.add(SSubU32(dst=lo, src0=lo, src1=kStep[0], comment="TailFolding: K dim -= %s (low half)" % what))
+      module.add(SSubBU32(dst=hi, src0=hi, src1=kStep[1], comment="TailFolding: K dim -= %s (high half)" % what))
+      return module
+    # the step is this wave's address increment ((GSUC ? 1 : GSU) * DU * bytes) in K dim units, moved to
+    # the field's position; its high half (GSU * DU >= 2^16) goes to the next dword
+    shift = self.tailFoldStepShift(kernel)
+    inc = sgpr("tdm%s%sIncs" % (tcA, tcB))
+    what = "(GSUC ? 1 : GSU) * %u" % step
+    with self.allocTmpSgpr(2, tag="tailFoldStepFromInc") as t:
+      module.add(SLShiftLeftB32(dst=sgpr(t.idx), shiftHex=hex(shift), src=inc,
+                                comment="TailFolding: K dim step = address increment << %u (low half)" % shift))
+      module.add(SLShiftRightB32(dst=sgpr(t.idx + 1), shiftHex=hex(32 - shift), src=inc,
+                                 comment="TailFolding: K dim step = address increment << %u (high half)" % shift))
+      module.add(SSubU32(dst=lo, src0=lo, src1=sgpr(t.idx), comment="TailFolding: K dim -= %s (low half)" % what))
+      module.add(SSubBU32(dst=hi, src0=hi, src1=sgpr(t.idx + 1), comment="TailFolding: K dim -= %s (high half)" % what))
     return module
 
   def rapNullTdmDescriptorForEvenWaves(self, kernel, groupSgprName) -> Module:
@@ -1103,6 +1182,10 @@ class KernelWriterAssembly(KernelWriter):
 
     tmpSgpr = allocTmpGpr(self.sgprPool, num, self.states.regCaps["MaxSgpr"], alignment, tag, overflowListener)
     return tmpSgpr
+
+  def tmpSgprFits(self, num: int, alignment=None) -> bool:
+    """True when allocTmpSgpr(num, alignment) would stay under MaxSgpr."""
+    return tmpGprStart(self.sgprPool, num, alignment) + num <= self.states.regCaps["MaxSgpr"]
 
   def allocTmpSgprList(self, nums: List[int], alignments: Optional[List[int]]=None, tag=None):
     def overflowListener(e):
@@ -8172,6 +8255,21 @@ class KernelWriterAssembly(KernelWriter):
               src1=sgpr(offsetSgpr), comment=f"TDM addr += {commentTag} offset (lo)"))
     imod.add(SAddCU32(dst=sgpr(f"{tdmGroup0}+3"), src0=sgpr(f"{tdmGroup0}+3"), \
               src1=sgpr(offsetSgpr+1), comment=f"TDM addr += {commentTag} offset (hi)"))
+    if tdmGroupName is None and tc in ("A", "B") and commentTag == "stagger" \
+        and kernel.get("_TailFolding", False) and not kernel["ReuseAcrossPersistent"]:
+      # the split starts StaggerUIter steps into its k-tiles: its K dim starts that much shorter
+      field = tdmKDimField(kernel, tc, allowIterate=True)
+      if field is None:
+        raise RuntimeError("tail folding: %s keeps K in no single descriptor field" % tc)
+      lo, hi = sgpr("tdm%sGroup1+%u" % (tc, field[0])), sgpr("tdm%sGroup1+%u" % (tc, field[0] + 1))
+      # offsetSgpr = StaggerUIter * the address increment (64-bit): in K dim units it is the stagger start
+      shift = self.tailFoldStepShift(kernel)
+      assert offsetSgpr % 2 == 0, "s_lshl_b64 needs an even SGPR pair"
+      with self.allocTmpSgpr(2, 2, tag="tailFoldStaggerStart") as t:
+        imod.add(SLShiftLeftB64(dst=sgpr(t.idx, 2), shiftHex=hex(shift), src=sgpr(offsetSgpr, 2),
+                                comment="TailFolding: stagger start = stagger offset << %u" % shift))
+        imod.add(SSubU32(dst=lo, src0=lo, src1=sgpr(t.idx), comment="TailFolding: K dim -= stagger start (low half)"))
+        imod.add(SSubBU32(dst=hi, src0=hi, src1=sgpr(t.idx + 1), comment="TailFolding: K dim -= stagger start (high half)"))
 
     if skipLabel is not None:
       imod.add(skipLabel)
@@ -9266,6 +9364,9 @@ class KernelWriterAssembly(KernelWriter):
       divisor = kernel["DepthU"]
 
       module.add(scalarStaticDivideAndRemainder(qReg=quotient, rReg=-1, dReg=dividend, divisor=divisor, tmpSgprRes=tmpSgprInfo, doRemainder=False))
+      if kernel.get("_TailFolding", False) and not kernel["ReuseAcrossPersistent"]:
+          # before the loop count's zero test (K < DU runs one iteration) and before GSU splits the count
+          module.add(self.tailFoldInit(kernel, dividend, quotient, tmpSgprInfo.idx))
       if self.states.tailloopInNll:
           maxUnit = self.states.tailloopInNllmaxUnit
           sgprSizesSum = sgpr("SizesSum+%u" % self.states.unrollIdx)
@@ -17243,10 +17344,20 @@ class KernelWriterAssembly(KernelWriter):
 
     # Keep tmp SGPR usage lean for the common path.
     requiredNumSgpr = 4 if self.states.archCaps["EnableXnackReplay"] else 3
-    with self.allocTmpSgpr(requiredNumSgpr, tag="computeStoreSrdStart_tmpSgprInfo") as tmpSgprInfo:
-      tmpS0 = tmpSgprInfo.idx
+    # [tmpS0, tmpS1] and [wgMT1, wgMT1+1] are two separate groups. When one block misses the
+    # SGPR limit while free slots remain lower in the pool, each group takes its own slot.
+    if self.tmpSgprFits(requiredNumSgpr):
+      tmpSgprCtx = self.allocTmpSgpr(requiredNumSgpr, tag="computeStoreSrdStart_tmpSgprInfo")
+    else:
+      tmpSgprCtx = self.allocTmpSgprList(nums=[2, requiredNumSgpr - 2], tag="computeStoreSrdStart_tmpSgprInfo")
+    with tmpSgprCtx as tmpSgprInfo:
+      if isinstance(tmpSgprInfo, list):
+        tmpS0 = tmpSgprInfo[0].idx
+        wgMT1 = tmpSgprInfo[1].idx
+      else:
+        tmpS0 = tmpSgprInfo.idx
+        wgMT1 = tmpS0+2
       tmpS1 = tmpS0+1
-      wgMT1 = tmpS0+2
 
       assert kernel["BufferStore"]
       module.addSpaceLine()
@@ -18128,7 +18239,7 @@ class KernelWriterAssembly(KernelWriter):
           break
     self.codes.accVgprRead = mapAcctoArchRegs(kernel, self.states.maxLimitAgprs, write=False, spilledVgprBase=spilledVgprBase)
 
-    # ValuC base marker (serialized subtile store reads accs into a small window)
+    # ValuC base marker (serialized subtile store reads accs into a small window).
     fusedStartVgprValu = self.vgprPool.checkOutAligned(1, 4, tag="fusedStore_startVgprValu")
     self.states.c.startVgprValu = fusedStartVgprValu
     module.add(RegSet("v", "vgprValuC", fusedStartVgprValu))
@@ -18302,7 +18413,10 @@ class KernelWriterAssembly(KernelWriter):
       self.vgprs.coord1InMT     = _hoistedIdx["coord1InMT"]
       self.vgprs.coutRowPtrE    = _hoistedIdx["coutRowPtrE"]
       self.vgprs.coutRowPtrBias = _hoistedIdx["coutRowPtrBias"]
-      self.states.subtileHoistedWriteIndices = None
+      # A planning emit that a second emit will replace keeps the hoisted indices
+      # (and, below, their registers) for that second emit.
+      if not self.states.subtileKeepHoistedWriteIndices:
+        self.states.subtileHoistedWriteIndices = None
       # PLSIN numIter<PGR (the fused-store gate sits at 1, below PGR): the PGR>=2
       # preloop takes SkipToNLL for numIter<PGR (e.g. K==DepthU), so
       # the NGLL init-hoist never ran and the hoisted coord VGPRs hold garbage -> the
@@ -18342,6 +18456,9 @@ class KernelWriterAssembly(KernelWriter):
     self.states.subtileStoreStageHighWater = 0
     self.states.subtilePairPackSlot = 0
     self.states.subtileStagedHold = None   # staged store cacheline align: pair held for its line partner
+    self.states.subtilePendingPhase2b = None     # staggered store: buffer_store deferred across batches
+    self.states.subtileCachelineAlignVoffHoisted = None    # woven cacheline align: (arm, addrDVgpr) whose blended voffsets are live
+    self.states.subtileDeferredSrdDIncs = []     # SrdD row advances held behind that store
     self.states.subtileHoistedAddrArm = -1
     self.states.subtileHoistedAddrDVgpr = -1
     self.states.subtileHoistedAddrBlockN = -1
@@ -18442,7 +18559,10 @@ class KernelWriterAssembly(KernelWriter):
     self.states.subtileStoreTt1PerStage = 0
     self.states.subtileStoreTt0PerStage = 0
     module.add(storeModule)
-    self.cleanupGlobalWrite(kernel)
+    if _hoistedIdx and self.states.subtileKeepHoistedWriteIndices:
+      self.states.subtileHoistedCleanupDeferred = True
+    else:
+      self.cleanupGlobalWrite(kernel)
     self.states.bpeCexternal = savedBpeCext
 
     # --- release NLL-local transient SrdD + guard SGPRs, restore PLAIN store state ---
@@ -20405,6 +20525,9 @@ class KernelWriterAssembly(KernelWriter):
     vgprPairPackRing: int = -1    # base of the paired-store pack ring (numPairPackQuads 4-vgpr quads)
     numPairPackQuads: int = 1     # quads in that ring; 1 puts every paired store on vgprBf16Temp
     vgprCachelineAlignTmp: int = -1         # one scratch vgpr for the store cacheline align's blend (storeCachelineAlignEnabled)
+    vgprPairAddrRing: int = -1    # second address register for the woven store cacheline align: a deferred
+                                  # buffer_store reads its pair's address after the next pair's
+                                  # Phase1 has written its own. -1 => every store uses vgprAddrScratch.
 
   class FP8CVTVgprStruct(NamedTuple):
     vgprFp8NanInf: int = -1
@@ -21195,6 +21318,7 @@ class KernelWriterAssembly(KernelWriter):
       cvtVgprStruct  = None
       cvtVgpr        = None
       pairRing       = -1
+      pairAddrRing   = -1
       cachelineAlignTmp        = -1
       # No hoisted lane math until emitSubtileStoreLaneMath below says otherwise; a
       # stale True would make batches skip a computation that never ran.
@@ -21247,6 +21371,10 @@ class KernelWriterAssembly(KernelWriter):
         # off numElementsPerBatch, which has a hard floor at MIWaveTile[0] (see _pairPackQuad).
         pairRing = self.vgprPool.checkOutAligned(4 * (pairQuads - 1), 2, tag="subtilePairPackRing") \
                    if pairQuads > 1 else -1
+        # The woven store cacheline align defers a pair's buffer_store past the next pair's prep, so
+        # that pair's address has to outlive the next Phase1: one more address register.
+        pairAddrRing = self.vgprPool.checkOut(1, tag="subtilePairAddrRing") \
+                       if (permForRing and storeCachelineAlignEnabled(kernel)) else -1
         # The store cacheline align blends in place and needs one temp. Nothing more: any further
         # register here comes off the store batch and can drop it to single elements.
         cachelineAlignTmp = self.vgprPool.checkOut(1, tag="subtileCachelineAlignTmp") \
@@ -21258,6 +21386,7 @@ class KernelWriterAssembly(KernelWriter):
                                                vgprAddrScratch=(cvtVgpr+6) if kernel.get("UseSubtileImpl") else -1, \
                                                vgprPairPackRing=pairRing, \
                                                numPairPackQuads=pairQuads, \
+                                               vgprPairAddrRing=pairAddrRing, \
                                                vgprCachelineAlignTmp=cachelineAlignTmp)
         module.add(self.emitSubtileStoreLaneMath(kernel, cvtVgprStruct))
       elif kernel["ProblemType"]["DestDataType"].isAnyFloat8() and kernel["ProblemType"]["HighPrecisionAccumulate"]:
@@ -21583,6 +21712,8 @@ class KernelWriterAssembly(KernelWriter):
         self.vgprPool.checkIn(cvtVgpr)
         if pairRing >= 0:
           self.vgprPool.checkIn(pairRing)
+        if pairAddrRing >= 0:
+          self.vgprPool.checkIn(pairAddrRing)
         if cachelineAlignTmp >= 0:
           self.vgprPool.checkIn(cachelineAlignTmp)
       # The hoisted values die with the cvtVgpr block.
@@ -22002,6 +22133,9 @@ class KernelWriterAssembly(KernelWriter):
           self.states.subtileWeaveMfmaGroups = deepcopy(_weaveMaster)
           self.states.subtileWeaveEmitted = set()
           self.states.subtileWeavePairCounter = 0
+          self.states.subtilePendingPhase2b = None
+          self.states.subtileCachelineAlignVoffHoisted = None
+          self.states.subtileDeferredSrdDIncs = []
         mulAlpha = self.codes.mulAlphaMultipleBuffer if (kernel["_GlobalAccumulation"] == 'MultipleBuffer' or kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel') else self.codes.mulAlphaOther
         codeMulAlpha = deepcopy(mulAlpha) if self.states.serializedStore else None
 
@@ -25773,6 +25907,28 @@ class KernelWriterAssembly(KernelWriter):
     # Multi-wave TDMSplit recomputes the LDS/global split increments transiently at
     # point of use (see _tdmSplitMultiWaveInc); nothing is initialized here.
 
+    if kernel.get("_TailFolding", False) and not kernel["ReuseAcrossPersistent"] and self.tailFoldGsu(kernel) \
+        and tc in ("A", "B") and tc not in tdmStashedMembers(kernel):
+      # tail folding with GSU: this split starts at k-tile S (GSUC == 0: GSUSumIdx, interleaved; GSUC == 1: the
+      # k-tiles of the lower splits, contiguous, from the folded count ceil(K/DU)), so its K dim starts at
+      # K - S * DU. The split owning the partial last k-tile reaches K dim = r there. K % DU == 0: unchanged
+      # (the K dim then only stays >= what the split still reads).
+      field = tdmKDimField(kernel, tc, allowIterate=True)
+      if field is None:
+        raise RuntimeError("tail folding: %s keeps K in no single descriptor field" % tc)
+      lo, hi = sgpr("%s+%u" % (descSgprName(1), field[0])), sgpr("%s+%u" % (descSgprName(1), field[0] + 1))
+      splitDone = Label(self.labels.getNameInc("TailFoldSplitKDone"), "")
+      with self.allocTmpSgpr(2, 2, tag="tailFoldSplitKDim") as t:
+        mod.add(SAndB32(dst=sgpr(t.idx), src0=sgpr("SizesSum+%u" % self.states.unrollIdx), src1=du - 1, comment="TailFolding: r = K & (DU-1)"))
+        mod.add(SCBranchSCC0(labelName=splitDone.getLabelName(), comment="TailFolding: r == 0, K dim unchanged"))
+        mod.add(comp.gsuIterOffset(self, kernel, tc, t.idx))
+        mod.add(SMovB32(dst=sgpr(t.idx + 1), src=0, comment="TailFolding: (high)"))
+        mod.add(SLShiftLeftB64(dst=sgpr(t.idx, 2), shiftHex=hex(16 + int(log2(du))), src=sgpr(t.idx, 2),
+                               comment="TailFolding: split start = start k-tile * DU, in the K dim field"))
+        mod.add(SSubU32(dst=lo, src0=lo, src1=sgpr(t.idx), comment="TailFolding: K dim = K - split start (low half)"))
+        mod.add(SSubBU32(dst=hi, src0=hi, src1=sgpr(t.idx + 1), comment="TailFolding: K dim = K - split start (high half)"))
+      mod.add(splitDone)
+
     return mod
 
   def _tdmMulticastMask(self, kernel, tc):
@@ -26895,7 +27051,9 @@ class KernelWriterAssembly(KernelWriter):
       return mod
 
     elif loopIdx is not None and loopIdx == self.states.unrollIdx and self.states.staggerUCode:
-      with self.allocTmpSgpr(2 if hoistedWrapUSel else 4, tag="tdmIncrementABWaveSperated_tmpSgprInfo") as tmpSgprInfo:
+      tfStagger = kernel.get("_TailFolding", False) and not kernel["ReuseAcrossPersistent"]
+      with self.allocTmpSgpr(2 if hoistedWrapUSel else 4, tag="tdmIncrementABWaveSperated_tmpSgprInfo") as tmpSgprInfo, \
+           (self.allocTmpSgpr(2, 2, tag="tailFoldStaggerStep") if tfStagger else contextlib.nullcontext()) as kStep:
         incTmpLo = tmpSgprInfo.idx
         incTmpHi = tmpSgprInfo.idx + 1
 
@@ -26928,13 +27086,22 @@ class KernelWriterAssembly(KernelWriter):
                 comment="select WrapU or normal inc (lo)"))
         mod.add(SCSelectB32(dst=sgpr(incTmpHi), src0=wrapHi, src1=0, \
                 comment="select WrapU or normal inc (hi)"))
+        if tfStagger:
+          # the selected increment (WrapU = -(splitIters-1)*inc on the wrapIter) in K dim units is the K dim step
+          shift = self.tailFoldStepShift(kernel)
+          mod.add(SLShiftLeftB64(dst=sgpr(kStep.idx, 2), shiftHex=hex(shift), src=sgpr(incTmpLo, 2),
+                                 comment="TailFolding: K dim step = (wrapIter ? WrapU : inc) << %u" % shift))
 
         mod.add(SAddU64(dst=sgpr(f"{tdmGroup0}+2", 2), src0=sgpr(f"{tdmGroup0}+2", 2), \
                 src1=sgpr(incTmpLo, 2), comment="TDM addr += inc (with wrap, 64-bit)"))
+        if tfStagger:
+          mod.add(self.tailFoldingShrinkTdmKDim(kernel, tPA, tPB, (sgpr(kStep.idx), sgpr(kStep.idx + 1))))
     else:
       mod.add(comp.incrementGlobalAddr(self, tdmGroup0, incSgprName))
 
-    if kernel.get("_TailFolding", False):
+    # (tail folding with StaggerU shrinks the K dim in the stagger step above)
+    if kernel.get("_TailFolding", False) and not (loopIdx is not None and loopIdx == self.states.unrollIdx and self.states.staggerUCode
+                                                  and not kernel["ReuseAcrossPersistent"]):
       mod.add(self.tailFoldingShrinkTdmKDim(kernel, tPA, tPB))
 
     if kernel["TDMSplit"] and not (("MXS" in tcA) or ("MXS" in tcB)):
