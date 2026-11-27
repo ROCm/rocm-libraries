@@ -94,6 +94,7 @@
 #include <hipdnn_frontend/attributes/LayernormAttributes.hpp>
 #include <hipdnn_frontend/attributes/LayernormBackwardAttributes.hpp>
 #include <hipdnn_frontend/attributes/MatmulAttributes.hpp>
+#include <hipdnn_frontend/attributes/MegakernelDecodeAttributes.hpp>
 #include <hipdnn_frontend/attributes/MoeGroupedMatmulAttributes.hpp>
 #include <hipdnn_frontend/attributes/MoeGroupedMatmulBwdAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
@@ -6986,6 +6987,66 @@ public:
 
         return outputTensors;
     }
+
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
+    /** @brief Add a precompiled megakernel decode as a custom operation
+     *
+     * Add `megakernel.<model>` with a schema 1 payload and no graph outputs.
+     * The caller supplies the device buffers and their contents at execution.
+     *
+     * @param tab Non-null INT64 tensor for the kernel's table buffer
+     * @param glob Non-null INT64 tensor for the kernel's global buffer
+     * @param attributes Binary selection and layer count
+     * @return Success, or an error without adding a node
+     *
+     * @note Set the graph's compute data type before adding the operation.
+     *       Execution requires an engine with a matching code object.
+     *
+     * @see MegakernelDecodeAttributes
+     * @see Graph::custom_op()
+     */
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    [[nodiscard]] Error megakernel_decode(const std::shared_ptr<TensorAttributes>& tab,
+                                          const std::shared_ptr<TensorAttributes>& glob,
+                                          const MegakernelDecodeAttributes& attributes)
+    {
+        if(!tab || !glob || tab->get_data_type() != DataType::INT64
+           || glob->get_data_type() != DataType::INT64)
+        {
+            return {ErrorCode::INVALID_VALUE,
+                    "Megakernel decode requires non-null INT64 tensors for tab and glob"};
+        }
+        HIPDNN_CHECK_ERROR(attributes.validate());
+
+        const nlohmann::json payload{{"schema", 1},
+                                     {"model", attributes.get_model()},
+                                     {"src", attributes.get_src()},
+                                     {"arch", attributes.get_arch()},
+                                     {"cus", attributes.get_cus()},
+                                     {"kv", attributes.get_kv()},
+                                     {"block", attributes.get_block()},
+                                     {"M", attributes.get_m()},
+                                     {"tp", attributes.get_tp()},
+                                     {"rt", attributes.get_rt().value()},
+                                     {"lm_head", attributes.get_lm_head().value()},
+                                     {"nlayers", attributes.get_nlayers()}};
+        std::string data;
+        try
+        {
+            data = payload.dump();
+        }
+        catch(const nlohmann::json::type_error& error)
+        {
+            return {ErrorCode::INVALID_VALUE, error.what()};
+        }
+
+        CustomOpAttributes customOp;
+        customOp.set_custom_op_id("megakernel." + attributes.get_model())
+            .set_data(std::vector<uint8_t>(data.begin(), data.end()));
+        custom_op({tab, glob}, 0, std::move(customOp));
+        return {};
+    }
+#endif // HIPDNN_FRONTEND_SKIP_JSON_LIB
 
 #ifdef HIPDNN_ENABLE_SDPA
     /** @brief Scaled dot-product attention forward pass

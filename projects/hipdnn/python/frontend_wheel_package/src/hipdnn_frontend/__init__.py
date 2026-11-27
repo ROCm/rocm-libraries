@@ -129,6 +129,7 @@ __all__ = [
     "BatchnormBackwardAttributes",
     "PoolingForwardAttributes",
     "MatmulAttributes",
+    "MegakernelDecodeAttributes",
     "DataType",
     "TensorLayout",
     "ConvolutionMode",

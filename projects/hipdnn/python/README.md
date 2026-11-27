@@ -144,6 +144,20 @@ python -m pytest -q projects/hipdnn/python/frontend_wheel_package/tests
 The wheel package uses a `src/` layout, so running pytest from
 `frontend_wheel_package/` does not accidentally import the source package.
 
+## Megakernel decode
+
+Use `graph.megakernel_decode(tab, glob, attributes)` to add a precompiled decode
+operation. Set the graph's compute data type first. `tab` and `glob` must be
+`DataType.INT64` tensors backed by device buffers at execution.
+
+Create a `hipdnn.MegakernelDecodeAttributes()` and copy the selected engine
+manifest entry's `model`, `src`, `arch`, `cus`, `kv`, `block`, `M`, `tp`, `rt`,
+and `lm_head` fields with the corresponding `set_*` methods (`set_m` for `M`).
+Call `set_nlayers` with the number of layers to run. The method raises
+`ValueError` for missing or invalid arguments and returns `None` on success.
+The operation has no graph outputs. The engine uses the caller's buffers for
+its inputs and results; it needs a code object that matches the attributes.
+
 ## DLPack Interoperability
 
 `Graph.execute()`, `Graph.execute_timed_ext()`,
