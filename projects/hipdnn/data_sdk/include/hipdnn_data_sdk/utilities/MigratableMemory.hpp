@@ -53,8 +53,6 @@ public:
     virtual const T* hostDataAsync() const = 0;
 };
 
-// NOLINTEND(portability-template-virtual-member-function)
-
 template <class T, class HostAlloc = HostAllocator<T>, class DeviceAlloc = DeviceAllocator<T>>
 class MigratableMemory : public MigratableMemoryBase<T>
 {
@@ -366,5 +364,7 @@ private:
     HostAlloc _hostAllocator;
     DeviceAlloc _deviceAllocator;
 };
+
+// NOLINTEND(portability-template-virtual-member-function)
 
 } // namespace hipdnn_data_sdk::utilities
