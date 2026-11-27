@@ -1,0 +1,46 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# Integration test configuration for hipkernel:LayernormBwd, the kernel ingestor's engine
+# for layernorm backward (HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR=ON).
+# Filters use GTest-style globs: * matches any sequence of characters
+# The entries are HIP_MLOPS_ENGINE.toml's layernorm backward entries, which the
+# default build's hand-written engine keeps; change both together.
+# Later entries take precedence over earlier ones when multiple filters match.
+
+[meta]
+version = 1
+
+# Layernorm backward's dscale/dbias are reductions over the batch axes:
+#   dscale_j = sum_i dy*xhat, dbias_j = sum_i dy
+# over up to ~9e5 zero-mean terms. The GPU's reduction order differs from the CPU
+# reference's, and the resulting absolute error tracks the *tensor's* scale, not each
+# element's. Elements that land near zero through cancellation then blow past
+# atol + rtol*|ref| while the tensor as a whole is accurate to ~1e-6 relative.
+# Measured on gfx1151: 22 of 132 fp32/upcast Smoke cases fail under allclose; the atol
+# that would rescue them ranges 0.9x-52x the default depending on reduction length and
+# swings ~2x with the input seed, and applies to dx as well, whose real error is 4-5
+# decades smaller. Relative RMS stays 1e-6..8e-6 across the whole set.
+[[validator_overrides]]
+filters = ["*LayernormBackward*"]
+tensors = ["*::DSCALE", "*::DBIAS"]
+validator = "rms"
+rms_threshold = 1e-4
+
+# dscale/dbias tolerance for reduced-precision cases, matching
+# layernorm::getTolerance<T>() in TestTolerances.hpp. Filters match the dtype
+# tag in the bundle case id, which is the input dtype, so cases that keep
+# dscale/dbias in FP32 (Mixed/Upcast) also get this looser threshold.
+# "*fp16_*" also matches "bfp16_", so the bf16 entry must come after it
+# (later matches win).
+[[validator_overrides]]
+filters = ["*LayernormBackward*fp16_*"]
+tensors = ["*::DSCALE", "*::DBIAS"]
+validator = "rms"
+rms_threshold = 1e-3
+
+[[validator_overrides]]
+filters = ["*LayernormBackward*bfp16_*"]
+tensors = ["*::DSCALE", "*::DBIAS"]
+validator = "rms"
+rms_threshold = 1e-2

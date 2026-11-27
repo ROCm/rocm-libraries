@@ -75,6 +75,44 @@
           ]
         }
       }
+    ],
+    "hipkernel:BatchnormInference": [
+      {
+        "cases": [
+          "nchw_fp32_n1_c3_h14_w14",
+          "small_bfp16_nchw",
+          "small_fp16_nchw",
+          "small_fp32_ncdhw",
+          "small_fp32_nchw"
+        ],
+        "support": {
+          "gfx1100": [
+            "linux"
+          ],
+          "gfx1101": [
+            "windows"
+          ],
+          "gfx1150": [
+            "linux"
+          ],
+          "gfx1151": [
+            "linux",
+            "windows"
+          ],
+          "gfx1200": [
+            "linux"
+          ],
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
     ]
   },
   "version": 1

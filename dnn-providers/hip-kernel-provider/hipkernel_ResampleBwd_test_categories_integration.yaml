@@ -1,0 +1,86 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# hip-kernel-provider external integration test categories: the resample backward bundles.
+#
+# Pinned to hipkernel:ResampleBwd via --test-engine, the engine that serves them when
+# HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR is ON, in place of HIP_MLOPS_ENGINE
+# (HIP_MLOPS_ENGINE_test_categories_integration.yaml). Selects the shared
+# integration-test-bundles/<tier>/ suites of the graphs it serves by suite name:
+#   ResampleBwd.
+# Keep the folders in step with the engine's row in HKP_MLOPS_INGESTOR_ENGINES
+# (src/CMakeLists.txt), whose filter the legacy-label build passes instead of this file;
+# descriptor-packaging/tests/test_mlops_bundle_filters.py fails on a mismatch.
+# Engine pinning and support claims do the rest: a claimed case the engine declines fails
+# its lane, an unclaimed one it declines skips.
+#
+# The tiers mirror HIP_MLOPS_ENGINE's lane, narrowed to these folders: they cascade, and
+# only "full" runs the full-tier bundles.
+
+_common_excludes: &common_excludes
+  - "*DISABLED*"
+
+test_categories:
+  quick:
+    description: "Quick-tier resample backward bundles"
+    test_patterns:
+      - "quick_ResampleBwd_*.*"
+    exclude: *common_excludes
+    labels:
+      - "quick"
+      - "pre-commit"
+      - "smoke"
+
+  standard:
+    description: "Standard resample backward coverage: quick + standard-tier bundles"
+    test_patterns:
+      - "quick_ResampleBwd_*.*"
+      - "standard_ResampleBwd_*.*"
+    exclude: *common_excludes
+    labels:
+      - "standard"
+      - "pr"
+      - "precheckin"
+
+  comprehensive:
+    description: "Comprehensive resample backward coverage: quick + standard + comprehensive-tier bundles"
+    test_patterns:
+      - "quick_ResampleBwd_*.*"
+      - "standard_ResampleBwd_*.*"
+      - "comprehensive_ResampleBwd_*.*"
+    exclude: *common_excludes
+    labels:
+      - "comprehensive"
+      - "nightly"
+      - "extended"
+
+  full:
+    description: "All resample backward bundles"
+    test_patterns:
+      - "*_ResampleBwd_*.*"
+    exclude: *common_excludes
+    labels:
+      - "full"
+      - "all"
+
+  ffm-quick:
+    description: "Fast-feedback mechanism (FFM) quick tier: quick-tier resample backward bundles"
+    test_patterns:
+      - "quick_ResampleBwd_*.*"
+    exclude: *common_excludes
+    labels:
+      - "ffm-quick"
+      - "ffm-full"
+
+# category_timeouts are CTest kill limits, as in HIP_MLOPS_ENGINE's lane: 2x the tier's
+# runtime budget (quick ~5 min, standard ~30 min incl. quick, comprehensive <= 60 min incl.
+# quick+standard; full has no budget).
+execution_settings:
+  default_timeout: 300
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 1200
+    standard: 3600
+    comprehensive: 7200
+    full: 28800
+    ffm-quick: 7200  # 2 hours

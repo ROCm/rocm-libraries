@@ -21,6 +21,28 @@
           ]
         }
       }
+    ],
+    "hipkernel:RmsNormFwd": [
+      {
+        "cases": [
+          "16_3_8_14_14_bfp16_ncdhw",
+          "16_3_8_14_14_fp16_ndhwc"
+        ],
+        "support": {
+          "gfx1151": [
+            "windows"
+          ],
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
     ]
   },
   "version": 1

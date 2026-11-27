@@ -22,6 +22,28 @@
         }
       }
     ],
+    "hipkernel:RmsNormBwd": [
+      {
+        "cases": [
+          "16_3_8_14_14_bfp16_ncdhw",
+          "16_3_8_14_14_bfp16_ndhwc",
+          "4096_128_1_1_bfp16_nchw",
+          "5_256_14_14_bfp16_nchw",
+          "5_256_14_14_bfp16_nhwc"
+        ],
+        "support": {
+          "gfx1151": [
+            "windows"
+          ],
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ]
+        }
+      }
+    ],
     "hipkernel:flydsl_rmsnorm_bwd": [
       {
         "cases": [

@@ -346,15 +346,23 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
     endfunction()
 
     if(TARGET hipdnn_integration_tests)
-        add_external_integration_test_target(
-            TARGET_NAME    ${PROJECT_NAME}-external-integration-check
-            PLUGIN_TARGET  hip_kernel_provider
-            ENGINE_NAME    HIP_MLOPS_ENGINE
-            INSTALL_SUBDIR hip_kernel_provider
-            TEST_CONFIG    ${CMAKE_CURRENT_SOURCE_DIR}/../config/HIP_MLOPS_ENGINE.toml
-            ${_external_category_args}
-        )
-        message(STATUS "Created ${PROJECT_NAME}-external-integration-check target")
+        # HIP_MLOPS_ENGINE's lanes. A build that serves the HIP MLOps operations from the
+        # kernel ingestor instead (HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR) has no such engine;
+        # its per-operation engines get their lanes from HKP_MLOPS_INGESTOR_ENGINES below. The
+        # provider-wide staging and labelling in between runs either way.
+        if(ENABLE_HIP_MLOPS_ENGINE)
+            add_external_integration_test_target(
+                TARGET_NAME    ${PROJECT_NAME}-external-integration-check
+                PLUGIN_TARGET  hip_kernel_provider
+                ENGINE_NAME    HIP_MLOPS_ENGINE
+                INSTALL_SUBDIR hip_kernel_provider
+                TEST_CONFIG    ${CMAKE_CURRENT_SOURCE_DIR}/../config/HIP_MLOPS_ENGINE.toml
+                ${_external_category_args}
+            )
+            message(STATUS "Created ${PROJECT_NAME}-external-integration-check target")
+        else()
+            message(STATUS "HIP_MLOPS_ENGINE not built - skipping external-integration-check")
+        endif()
 
         # This is a pre-registered CTest test (not a GTest binary), so it is
         # labeled via apply_ctest_category_labels()/HIP_MLOPS_ENGINE_test_categories_external.yaml.
@@ -395,17 +403,21 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
                 )
             endif()
             # Build tree.
-            apply_ctest_category_labels(
-                "${HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML}"
-                EXPLICIT_TESTS ${PROJECT_NAME}-external-integration-check
-            )
+            if(ENABLE_HIP_MLOPS_ENGINE)
+                apply_ctest_category_labels(
+                    "${HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML}"
+                    EXPLICIT_TESTS ${PROJECT_NAME}-external-integration-check
+                )
+            endif()
         endif()
 
-        _hkp_add_graph_capture_lane(${PROJECT_NAME} "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
-            ENGINE_NAME    HIP_MLOPS_ENGINE
-            INSTALL_SUBDIR hip_kernel_provider
-            TEST_CONFIG    ${CMAKE_CURRENT_SOURCE_DIR}/../config/HIP_MLOPS_ENGINE.toml
-        )
+        if(ENABLE_HIP_MLOPS_ENGINE)
+            _hkp_add_graph_capture_lane(${PROJECT_NAME} "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
+                ENGINE_NAME    HIP_MLOPS_ENGINE
+                INSTALL_SUBDIR hip_kernel_provider
+                TEST_CONFIG    ${CMAKE_CURRENT_SOURCE_DIR}/../config/HIP_MLOPS_ENGINE.toml
+            )
+        endif()
     else()
         message(STATUS "hipdnn_integration_tests not found - skipping external-integration-check")
     endif()
@@ -436,6 +448,96 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
     elseif(HIPDNN_ENABLE_KERNEL_INGESTOR AND NOT _pointwise_available)
         message(STATUS
             "hipkernel:StandalonePointwise is not shipped by this descriptor configuration - skipping standalone-pointwise-external-integration-check")
+    endif()
+
+    # The HIP MLOps operations on the kernel ingestor (HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR),
+    # which serve HIP_MLOPS_ENGINE's bundles in its place, one engine per primary operation.
+    # Each gets an external integration lane pinned to it, over the bundle folders of the
+    # graphs it serves, with ../config/hipkernel_<engine>.toml and, under YAML
+    # categorization, ../hipkernel_<engine>_test_categories_integration.yaml, whose patterns
+    # name the same folders; ../descriptor-packaging/tests/test_mlops_bundle_filters.py fails
+    # on a mismatch. Three fields per engine: its HipMlops descriptor folder, its engine local
+    # name and its bundle folders, comma-separated.
+    #
+    # Gated, like the standalone pointwise lane above, on the `product` root offering the
+    # engine, so a build whose root ships other descriptors reads as absent rather than
+    # failing on a missing engine. The kernels compile at run time for any architecture, so
+    # the entries go to the common arch-neutral file, as that lane's does.
+    #
+    # GTEST_FILTER, ENVIRONMENT and ENVIRONMENT_MODIFICATION belong in the call for the
+    # reason the attention entries below give: a legacy-label build would otherwise run the
+    # whole bundle tree pinned to the engine, without TEST_ENVIRONMENT.
+    #
+    # Every one of these engines reports supports_graph_capture, but the shared graph-capture
+    # suites (HKP_GRAPH_CAPTURE_GTEST_FILTER) name quick bundle suites only those in
+    # _hkp_mlops_graph_capture_engines serve: the HIP_MLOPS_ENGINE graph-capture lane's
+    # coverage. A lane for another would select nothing.
+    set(HKP_MLOPS_INGESTOR_ENGINES
+        resample_fwd        ResampleFwd        ResampleFwd
+        resample_bwd        ResampleBwd        ResampleBwd
+        layernorm_fwd       LayernormFwd       Layernorm
+        layernorm_bwd       LayernormBwd       LayernormBackward
+        rms_norm_fwd        RmsNormFwd         RMSNorm,RMSNormPointwise
+        rms_norm_bwd        RmsNormBwd         RMSNormBackward,PointwiseRMSNormBackward
+        batchnorm_inference BatchnormInference BatchnormInference,BatchnormFwdInference,BatchnormInferenceAttributesVarianceExt,BatchnormInferenceAttributesVarianceExtPointwise,BatchnormInferencePointwise
+        batchnorm_training  BatchnormTraining  Batchnorm,BatchnormPointwise
+        batchnorm_backward  BatchnormBackward  BatchnormBackward,BatchnormInferencePointwiseBatchnormBackward
+    )
+    set(_hkp_mlops_graph_capture_engines
+        LayernormFwd RmsNormFwd RmsNormBwd BatchnormTraining BatchnormBackward)
+    if(HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR AND TARGET hipdnn_integration_tests)
+        set(_engines ${HKP_MLOPS_INGESTOR_ENGINES})
+        while(_engines)
+            list(POP_FRONT _engines _snake _local _folders)
+            string(REPLACE "_" "-" _dash "${_snake}")
+            set(_stem ${PROJECT_NAME}-mlops-${_dash})
+
+            set(_available FALSE)
+            hkp_product_offers_engine(_available "hipkernel:${_local}")
+            if(NOT _available)
+                message(STATUS "hipkernel:${_local} is not shipped by this descriptor "
+                               "configuration - skipping ${_stem}-external-integration-check")
+                continue()
+            endif()
+
+            string(REPLACE "," ";" _folders "${_folders}")
+            set(_filter "")
+            foreach(_tier IN ITEMS quick standard comprehensive full)
+                foreach(_folder IN LISTS _folders)
+                    list(APPEND _filter "${_tier}_${_folder}_*.*")
+                endforeach()
+            endforeach()
+            list(JOIN _filter ":" _filter)
+
+            set(_config "${CMAKE_CURRENT_SOURCE_DIR}/../config/hipkernel_${_local}.toml")
+            set(_category_args "")
+            if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED)
+                list(APPEND _category_args
+                    TEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../hipkernel_${_local}_test_categories_integration.yaml"
+                    INSTALL_TEST_FILE "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
+                    TEST_NAME_PREFIX ${_stem}-external-integration
+                )
+            endif()
+            add_external_integration_test_target(
+                TARGET_NAME    ${_stem}-external-integration-check
+                PLUGIN_TARGET  hip_kernel_provider
+                ENGINE_NAME    "hipkernel:${_local}"
+                INSTALL_SUBDIR hip_kernel_provider
+                TEST_CONFIG    ${_config}
+                GTEST_FILTER   "${_filter}"
+                ENVIRONMENT    ${TEST_ENVIRONMENT}
+                ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+                ${_category_args}
+            )
+            message(STATUS "Created ${_stem}-external-integration-check target")
+            if(_local IN_LIST _hkp_mlops_graph_capture_engines)
+                _hkp_add_graph_capture_lane(${_stem} "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
+                    ENGINE_NAME    "hipkernel:${_local}"
+                    INSTALL_SUBDIR hip_kernel_provider
+                    TEST_CONFIG    ${_config}
+                )
+            endif()
+        endwhile()
     endif()
 
     set(_asm_sdpa_external_category_args "")

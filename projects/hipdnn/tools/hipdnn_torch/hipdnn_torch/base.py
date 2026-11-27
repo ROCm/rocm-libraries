@@ -48,6 +48,17 @@ _KNOWN_ENGINES = (
     "HIP_MLOPS_ENGINE",
     "MIOPEN_ENGINE",
     "MIOPEN_ENGINE_DETERMINISTIC",
+    # The HIP MLOps operations on the kernel ingestor
+    # (HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR=ON), which replace HIP_MLOPS_ENGINE.
+    "hipkernel:BatchnormBackward",
+    "hipkernel:BatchnormInference",
+    "hipkernel:BatchnormTraining",
+    "hipkernel:LayernormBwd",
+    "hipkernel:LayernormFwd",
+    "hipkernel:ResampleBwd",
+    "hipkernel:ResampleFwd",
+    "hipkernel:RmsNormBwd",
+    "hipkernel:RmsNormFwd",
 )
 _ID_TO_NAME = {_bootstrap._fnv1a64(n): n for n in _KNOWN_ENGINES}
 

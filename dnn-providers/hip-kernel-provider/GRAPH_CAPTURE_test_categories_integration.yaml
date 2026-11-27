@@ -9,7 +9,9 @@
 # captured into a HIP graph, replayed, and checked again with the same oracle.
 #
 # The patterns name a few quick bundle suites that each claiming engine serves: the
-# HIP_MLOPS_ENGINE batchnorm, layernorm and RMSNorm suites, the FlyDSL RMSNorm forward
+# HIP_MLOPS_ENGINE batchnorm, layernorm and RMSNorm suites (served instead by
+# hipkernel:BatchnormTraining, BatchnormBackward, LayernormFwd, RmsNormFwd and RmsNormBwd
+# when HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR is ON), the FlyDSL RMSNorm forward
 # and backward suites, and the SDPA forward and backward suites of the attention
 # engines. A pinned engine declines the suites it does not serve, and an unclaimed
 # decline skips, so one list serves every lane.

@@ -1,0 +1,12 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# Integration test configuration for hipkernel:LayernormFwd, the kernel ingestor's engine
+# for layernorm forward (HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR=ON).
+# Filters use GTest-style globs: * matches any sequence of characters
+
+[meta]
+version = 1
+
+# No skips or overrides: HIP_MLOPS_ENGINE.toml, the default build's config for the
+# same kernels, has none for this operation, so the harness's standard tolerances apply.
