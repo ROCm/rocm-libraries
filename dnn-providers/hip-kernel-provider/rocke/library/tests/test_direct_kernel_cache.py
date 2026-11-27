@@ -453,8 +453,12 @@ def test_windowed_depthwise_dgrad_cached_scope(jobs):
     assert win
     mfma = [j for j in win if j.spec_kwargs.get("mfma")]
     valu = [j for j in win if not j.spec_kwargs.get("mfma")]
+    # 3x3 is the wave32 WMMA form's: the wave64 MFMA targets cache 5x5..9x9.
+    from rocke.core.arch import ArchTarget
+
+    wave32 = ArchTarget.from_gfx(_ARCH).wave_size == 32
     assert {(j.identity.filter_h, j.identity.pad_h) for j in mfma} == {
-        (k, (k - 1) // 2) for k in dks.DW_WIN_MFMA_FILTERS
+        (k, (k - 1) // 2) for k in dks.DW_WIN_MFMA_FILTERS if k != 3 or wave32
     }
     for j in valu:
         kw, knobs = j.identity.filter_w, j.spec_kwargs

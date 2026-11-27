@@ -12785,6 +12785,23 @@ _DW_TILED_DGRAD_MAX_K = 64
 _DW_TILED_UNROLL_MAX_FMAS = 6144
 
 
+def _emit_dgrad_as_forward_params(b: IRBuilder, io_type) -> Dict[str, Value]:
+    """The dgrad kernarg block bound for a dgrad run as a forward pass.
+
+    A depthwise dgrad is the forward correlation of dY with the rotated
+    filter, so the kernel reads dY and writes dX: the forward roles of the
+    extents swap (``Hi``/``Ho``, ``Wi``/``Wo``) and the A strides become the
+    dY strides. The D slot already is dX.
+    """
+    params = dict(emit_direct_params(b, direction="dgrad", io_type=io_type))
+    params["p_Hi"], params["p_Ho"] = params["p_Ho"], params["p_Hi"]
+    params["p_Wi"], params["p_Wo"] = params["p_Wo"], params["p_Wi"]
+    params["p_A_stride_n"] = params["p_dY_stride_n"]
+    params["p_A_stride_hi"] = params["p_dY_stride_ho"]
+    params["p_A_stride_wi"] = params["p_dY_stride_wo"]
+    return params
+
+
 @dataclass(frozen=True)
 class DirectDepthwiseTiledSpec:
     """Output-stationary depthwise convolution for ``cpg = kpg = 1``.
@@ -13025,13 +13042,7 @@ def build_direct_depthwise_tiled(
 
     if DG:
         # Read dY, write dX: the forward roles of the extents and strides swap.
-        params = emit_direct_params(b, direction="dgrad", io_type=_io_type(p.dtype))
-        params = dict(params)
-        params["p_Hi"], params["p_Ho"] = params["p_Ho"], params["p_Hi"]
-        params["p_Wi"], params["p_Wo"] = params["p_Wo"], params["p_Wi"]
-        params["p_A_stride_n"] = params["p_dY_stride_n"]
-        params["p_A_stride_hi"] = params["p_dY_stride_ho"]
-        params["p_A_stride_wi"] = params["p_dY_stride_wo"]
+        params = _emit_dgrad_as_forward_params(b, _io_type(p.dtype))
         PAD, PAD_W = KH - 1 - PAD, KW - 1 - p.PAD_W
     else:
         params = emit_direct_params(b, io_type=_io_type(p.dtype))
@@ -13969,6 +13980,11 @@ class DirectDepthwiseSpatialSpec:
             raise ValueError(
                 f"DirectDepthwiseSpatialSpec(dgrad=True) needs stride 1 (got {p.stride})"
             )
+        if self.dgrad and p.KH != p.KW:
+            raise ValueError(
+                f"DirectDepthwiseSpatialSpec(dgrad=True) needs a square filter "
+                f"(got {p.KH}x{p.KW})"
+            )
         if self.block_h < 0:
             raise ValueError(f"block_h must be >= 0 (got {self.block_h})")
 
@@ -13994,6 +14010,11 @@ def is_valid_depthwise_spatial_spec(
     why = forward_padding_reason(p)
     if why is not None:
         return False, why
+    # The row stream offsets columns by PAD alone, so a column padding of its
+    # own would read and write wrong columns.
+    why = one_padding_reason(p)
+    if why is not None:
+        return False, why
     if p.cpg != 1 or p.kpg != 1:
         return False, f"cpg and kpg must both be 1 (got cpg={p.cpg}, kpg={p.kpg})"
     why = _depthwise_filter_reason(p)
@@ -14005,6 +14026,8 @@ def is_valid_depthwise_spatial_spec(
         return False, f"groups={p.groups} == wave_size: no W positions per wave"
     if spec.dgrad and p.stride != 1:
         return False, f"the dgrad mode needs stride 1 (got {p.stride})"
+    if spec.dgrad and p.KH != p.KW:
+        return False, f"the dgrad mode needs a square filter (got {p.KH}x{p.KW})"
     if spec.block_h < 0:
         return False, f"block_h must be >= 0 (got {spec.block_h})"
     return True, "ok"
@@ -14046,13 +14069,7 @@ def build_direct_depthwise_spatial(
 
     if DG:
         # Read dY, write dX: the forward roles of the extents and strides swap.
-        params = emit_direct_params(b, direction="dgrad", io_type=io_type)
-        params = dict(params)
-        params["p_Hi"], params["p_Ho"] = params["p_Ho"], params["p_Hi"]
-        params["p_Wi"], params["p_Wo"] = params["p_Wo"], params["p_Wi"]
-        params["p_A_stride_n"] = params["p_dY_stride_n"]
-        params["p_A_stride_hi"] = params["p_dY_stride_ho"]
-        params["p_A_stride_wi"] = params["p_dY_stride_wo"]
+        params = _emit_dgrad_as_forward_params(b, io_type)
     else:
         params = emit_direct_params(b, io_type=io_type)
     A = params["A"]

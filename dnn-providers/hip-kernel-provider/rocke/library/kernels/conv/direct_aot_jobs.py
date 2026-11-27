@@ -2214,10 +2214,17 @@ def _knob_grid(
             for bh, bw, waves in itertools.product(*DW_FWD_ROWBLOCK_GRID):
                 yield dict(block_w=bw, block_waves=waves, cpl=2, block_h=bh, **ss)
     elif variant in ("direct_depthwise_spatial", _DW_SPATIAL_DGRAD):
+        # The spatial dgrad and the row blocks are measured on the wave32
+        # (gfx1250-class) targets only; the packaged forward spatial variant
+        # takes no block_h knob on the wave64 ones.
+        wave32 = _dw_fwd_cpl_arch(arch)
+        if variant == _DW_SPATIAL_DGRAD and not wave32:
+            return
         for waves in DW_BLOCK_WAVES:
             yield dict(block_waves=waves)
-        for bh, waves in itertools.product(DW_SPATIAL_BLOCK_H, DW_BLOCK_WAVES):
-            yield dict(block_waves=waves, block_h=bh)
+        if wave32:
+            for bh, waves in itertools.product(DW_SPATIAL_BLOCK_H, DW_BLOCK_WAVES):
+                yield dict(block_waves=waves, block_h=bh)
     elif variant == "direct_depthwise_tiled":
         for bw, bh, waves, unroll in itertools.product(
             DW_TILED_BLOCK_W, DW_TILED_BLOCK_H, DW_TILED_BLOCK_WAVES, DW_TILED_UNROLL
@@ -2802,6 +2809,8 @@ def _dw_win_policy_reason(caps: DirectCaps, knobs: dict, arch: str) -> Optional[
     if knobs.get("mfma"):
         if caps.KH not in DW_WIN_MFMA_FILTERS or caps.PAD != _same_pad(caps.KH):
             return "the MFMA form is cached for 'same'-padded 3x3..9x9 only"
+        if caps.KH == 3 and not _dw_fwd_cpl_arch(arch):
+            return "the 3x3 Toeplitz form is cached for the wave32 WMMA targets only"
         return None
     want_dot2 = caps.KW >= 5 and arch in DW_DGRAD_WIN_DOT2_ARCHES
     if knobs["dot2"] != want_dot2:

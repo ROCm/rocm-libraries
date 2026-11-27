@@ -124,6 +124,90 @@ class TestDepthwiseFwdCplSpecs(unittest.TestCase):
             self.assertTrue(any("cpl" not in k for k in knobs), variant)
 
 
+def _spatial(p, **kn):
+    return dc.DirectDepthwiseSpatialSpec(problem=p, wave_size=32, **kn)
+
+
+class TestDepthwiseSpatialSpecs(unittest.TestCase):
+    """Row blocks and the rotated-filter dgrad of the small-group spatial kernel."""
+
+    def test_refusals(self):
+        ok = dc.is_valid_depthwise_spatial_spec
+        p = _problem(C=3, KH=3, PAD=1)
+        self.assertTrue(ok(_spatial(p, block_h=4), "gfx1250")[0])
+        # block_h is non-negative: validate() raises, the validator reports.
+        with self.assertRaisesRegex(ValueError, "block_h must be >= 0"):
+            _spatial(p, block_h=-1).validate()
+        self.assertIn("block_h", ok(_spatial(p, block_h=-1), "gfx1250")[1])
+        # The dgrad mode is a stride-1 pass: validate() raises, the validator reports.
+        s2 = _problem(C=3, KH=3, PAD=1, stride=2)
+        with self.assertRaisesRegex(ValueError, "needs stride 1"):
+            _spatial(s2, dgrad=True).validate()
+        self.assertIn("stride 1", ok(_spatial(s2, dgrad=True), "gfx1250")[1])
+        # ... and needs a square filter ("same" padding keeps the rotation in place).
+        wide = dc.DirectConvProblem(
+            N=2, H=13, W=21, groups=3, cpg=1, kpg=1, KH=3, KW=5, PAD=1, dtype="bf16"
+        )
+        with self.assertRaisesRegex(ValueError, "square filter"):
+            _spatial(wide, dgrad=True).validate()
+        self.assertIn("square filter", ok(_spatial(wide, dgrad=True), "gfx1250")[1])
+        # A column padding of its own is not one the row stream offsets by PAD.
+        padw = dc.DirectConvProblem(
+            N=2, H=13, W=21, groups=3, cpg=1, kpg=1, KH=3, KW=3, PAD=1, pad_w=0
+        )
+        self.assertFalse(ok(_spatial(padw), "gfx1250")[0])
+        self.assertFalse(ok(_spatial(padw, dgrad=True), "gfx1250")[0])
+        self.assertIn("one padding", ok(_spatial(padw), "gfx1250")[1])
+
+    def test_names(self):
+        p = _problem(C=3)
+        self.assertNotIn("bh", _spatial(p).kernel_name().replace("bh0", ""))
+        self.assertIn("bh4", _spatial(p, block_h=4).kernel_name())
+        self.assertIn("dg", _spatial(p, dgrad=True).kernel_name())
+
+    def test_ir_builds(self):
+        # Row-block, dgrad and dgrad row-block bodies lower to IR on a wave32 arch.
+        for kn in (dict(block_h=4), dict(dgrad=True), dict(dgrad=True, block_h=4)):
+            spec = _spatial(_problem(C=3, KH=5, PAD=2), **kn)
+            kernel = dc.build_direct_depthwise_spatial(spec, arch="gfx1250")
+            self.assertTrue(kernel.name, kn)
+            self.assertEqual("bh4" in kernel.name, bool(kn.get("block_h")), kn)
+
+    def test_stride_skip_5x5_ir_builds(self):
+        spec = _stream(
+            _problem(KH=5, PAD=2, stride=2), block_w=4, cpl=2, stride_skip=True
+        )
+        self.assertTrue(dc.build_direct_depthwise(spec, arch="gfx1250").name)
+
+    def test_aot_rows_stay_on_wave32(self):
+        from rocke.core.arch import ArchTarget
+
+        from kernels.conv.direct_aot_jobs import DIRECT_CAPABILITIES, _caps_jobs
+
+        for variant, direction in (
+            ("direct_depthwise_spatial", "fwd"),
+            ("direct_depthwise_spatial_dgrad", "dgrad"),
+        ):
+            _, caps_list = DIRECT_CAPABILITIES[variant]
+            caps = next(c for c in caps_list if c.KH == 3)
+            seen = {}
+            for arch in ("gfx950", "gfx1250"):
+                wave = ArchTarget.from_gfx(arch).wave_size
+                _, jobs = _caps_jobs(arch, wave, variant, direction, caps, "bf16")
+                seen[arch] = [json.loads(j.identity.knobs) for _, j in jobs]
+            # The wave64 packaged spatial variant takes no block_h knob.
+            self.assertFalse(any("block_h" in k for k in seen["gfx950"]), variant)
+            self.assertTrue(any("block_h" in k for k in seen["gfx1250"]), variant)
+            self.assertTrue(seen["gfx1250"], variant)
+        # The 3x3 Toeplitz dgrad form is cached for the wave32 WMMA targets only.
+        from kernels.conv.direct_aot_jobs import _dw_win_policy_reason
+
+        win_caps = DIRECT_CAPABILITIES["direct_depthwise_dgrad_win"][1]
+        caps = next(c for c in win_caps if c.KH == 3 and c.PAD == 1)
+        self.assertIn("wave32", _dw_win_policy_reason(caps, {"mfma": True}, "gfx950"))
+        self.assertIsNone(_dw_win_policy_reason(caps, {"mfma": True}, "gfx1250"))
+
+
 def _gpu_skip() -> str:
     if GPU_ARCH != "gfx1250":
         return arch_skip_reason(("gfx1250",), f"needs gfx1250 (got {GPU_ARCH!r})")
