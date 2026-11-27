@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "GpuReductionRefTestFixture.hpp"
+#include "QuickCases.hpp"
 
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_test_sdk::utilities;
@@ -352,11 +353,6 @@ TEST_P(TestGpuReductionRef5DBfp16, MatchesCpuRef)
 // 4D tests
 // ============================================================================
 
-INSTANTIATE_TEST_SUITE_P(Quick,
-                         TestGpuReductionRef4DFp32,
-                         ::testing::ValuesIn(makeReductionTestCases(getReductionSmall4DShapes(),
-                                                                    getReduction4DLayouts(),
-                                                                    getReductionModes())));
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuReductionRef4DFp16,
                          ::testing::ValuesIn(makeReductionTestCases(getReductionSmall4DShapes(),
@@ -368,12 +364,17 @@ INSTANTIATE_TEST_SUITE_P(Standard,
                                                                     getReduction4DLayouts(),
                                                                     getReductionModes())));
 // Medium shapes are fp32-only: dtype enters only via per-element load/store conversion (P1);
-// Fp16/Bfp16 are covered by the standard tier's small-shape run.
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuReductionRef4DFp32,
-                         ::testing::ValuesIn(makeReductionTestCases(getReductionMedium4DShapes(),
-                                                                    getReduction4DLayouts(),
-                                                                    getReductionModes())));
+// Fp16/Bfp16 are covered by the standard tier's small-shape run. The fp32 fixture runs the small
+// cases followed by the medium cases in one instantiation.
+INSTANTIATE_TEST_SUITE_P(
+    Standard,
+    TestGpuReductionRef4DFp32,
+    ::testing::ValuesIn(concatCases(makeReductionTestCases(getReductionSmall4DShapes(),
+                                                           getReduction4DLayouts(),
+                                                           getReductionModes()),
+                                    makeReductionTestCases(getReductionMedium4DShapes(),
+                                                           getReduction4DLayouts(),
+                                                           getReductionModes()))));
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          TestGpuReductionRef4DFp32,
                          ::testing::ValuesIn(makeReductionTestCases(getReductionLarge4DShapes(),
@@ -384,11 +385,6 @@ INSTANTIATE_TEST_SUITE_P(Comprehensive,
 // 5D tests
 // ============================================================================
 
-INSTANTIATE_TEST_SUITE_P(Quick,
-                         TestGpuReductionRef5DFp32,
-                         ::testing::ValuesIn(makeReductionTestCases(getReductionSmall5DShapes(),
-                                                                    getReduction5DLayouts(),
-                                                                    getReductionModes())));
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuReductionRef5DFp16,
                          ::testing::ValuesIn(makeReductionTestCases(getReductionSmall5DShapes(),
@@ -400,12 +396,17 @@ INSTANTIATE_TEST_SUITE_P(Standard,
                                                                     getReduction5DLayouts(),
                                                                     getReductionModes())));
 // Medium shapes are fp32-only: dtype enters only via per-element load/store conversion (P1);
-// Fp16/Bfp16 are covered by the standard tier's small-shape run.
-INSTANTIATE_TEST_SUITE_P(Standard,
-                         TestGpuReductionRef5DFp32,
-                         ::testing::ValuesIn(makeReductionTestCases(getReductionMedium5DShapes(),
-                                                                    getReduction5DLayouts(),
-                                                                    getReductionModes())));
+// Fp16/Bfp16 are covered by the standard tier's small-shape run. The fp32 fixture runs the small
+// cases followed by the medium cases in one instantiation.
+INSTANTIATE_TEST_SUITE_P(
+    Standard,
+    TestGpuReductionRef5DFp32,
+    ::testing::ValuesIn(concatCases(makeReductionTestCases(getReductionSmall5DShapes(),
+                                                           getReduction5DLayouts(),
+                                                           getReductionModes()),
+                                    makeReductionTestCases(getReductionMedium5DShapes(),
+                                                           getReduction5DLayouts(),
+                                                           getReductionModes()))));
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          TestGpuReductionRef5DFp32,
                          ::testing::ValuesIn(makeReductionTestCases(getReductionLarge5DShapes(),

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "GpuRMSNormBwdRefTestFixture.hpp"
+#include "QuickCases.hpp"
 
 // --- Valid configurations ---
 
@@ -791,11 +792,8 @@ TEST_P(TestGpuRMSNormBwdRef5DBfp16, MatchesCpuRef)
 // 4D (NCHW/NHWC) tests
 // ============================================================================
 
-// --- Quick tests (fp32) + Standard small-shape reduced precision ---
+// --- Standard: fp32 small + medium shapes, reduced precision on small shapes ---
 
-INSTANTIATE_TEST_SUITE_P(Quick,
-                         TestGpuRMSNormBwdRef4DFp32,
-                         ::testing::ValuesIn(getRMSnormSmall4DTestCases()));
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuRMSNormBwdRef4DFp16,
                          ::testing::ValuesIn(getRMSnormSmall4DTestCases()));
@@ -803,11 +801,12 @@ INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuRMSNormBwdRef4DBfp16,
                          ::testing::ValuesIn(getRMSnormSmall4DTestCases()));
 
-// P1 (dtype orthogonality): medium shapes are fp32-only; reduced precision is covered by the
-// standard tier's small-shape run.
+// P1 (dtype orthogonality): fp32 runs the small catalog followed by the medium catalog; reduced
+// precision is covered by the small-shape run.
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuRMSNormBwdRef4DFp32,
-                         ::testing::ValuesIn(getRMSnormMedium4DTestCases()));
+                         ::testing::ValuesIn(concatCases(getRMSnormSmall4DTestCases(),
+                                                         getRMSnormMedium4DTestCases())));
 
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          TestGpuRMSNormBwdRef4DFp32,
@@ -819,7 +818,7 @@ INSTANTIATE_TEST_SUITE_P(Comprehensive,
 
 INSTANTIATE_TEST_SUITE_P(Quick,
                          TestGpuRMSNormBwdRef5DFp32,
-                         ::testing::ValuesIn(getRMSnormSmall5DTestCases()));
+                         ::testing::ValuesIn(quickCase(getRMSnormSmall5DTestCases())));
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuRMSNormBwdRef5DFp16,
                          ::testing::ValuesIn(getRMSnormSmall5DTestCases()));
@@ -827,11 +826,12 @@ INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuRMSNormBwdRef5DBfp16,
                          ::testing::ValuesIn(getRMSnormSmall5DTestCases()));
 
-// P1 (dtype orthogonality): medium shapes are fp32-only; reduced precision is covered by the
-// standard tier's small-shape run.
+// P1 (dtype orthogonality): fp32 runs the small catalog followed by the medium catalog; reduced
+// precision is covered by the small-shape run.
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuRMSNormBwdRef5DFp32,
-                         ::testing::ValuesIn(getRMSnormMedium5DTestCases()));
+                         ::testing::ValuesIn(concatCases(getRMSnormSmall5DTestCases(),
+                                                         getRMSnormMedium5DTestCases())));
 
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          TestGpuRMSNormBwdRef5DFp32,
