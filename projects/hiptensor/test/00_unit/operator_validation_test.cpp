@@ -263,7 +263,9 @@ TEST_F(OperatorValidationTest, ElementwiseTrinary)
     auto const add = HIPTENSOR_OP_ADD;
     EXPECT_EQ(createTrinary(id, id, id, HIPTENSOR_OP_MUL, HIPTENSOR_OP_MIN),
               HIPTENSOR_STATUS_SUCCESS);
+    EXPECT_EQ(createTrinary(HIPTENSOR_OP_ADD, id, id, add, add), HIPTENSOR_STATUS_INVALID_VALUE);
     EXPECT_EQ(createTrinary(id, HIPTENSOR_OP_MAX, id, add, add), HIPTENSOR_STATUS_INVALID_VALUE);
+    EXPECT_EQ(createTrinary(id, id, outOfRangeOp, add, add), HIPTENSOR_STATUS_INVALID_VALUE);
     EXPECT_EQ(createTrinary(id, id, id, HIPTENSOR_OP_RELU, add), HIPTENSOR_STATUS_INVALID_VALUE);
     EXPECT_EQ(createTrinary(id, id, id, add, outOfRangeOp), HIPTENSOR_STATUS_INVALID_VALUE);
 }
@@ -273,6 +275,8 @@ TEST_F(OperatorValidationTest, Reduction)
     auto const id = HIPTENSOR_OP_IDENTITY;
     EXPECT_EQ(createReduction(HIPTENSOR_OP_NEG, id, HIPTENSOR_OP_MAX), HIPTENSOR_STATUS_SUCCESS);
     EXPECT_EQ(createReduction(HIPTENSOR_OP_MIN, id, HIPTENSOR_OP_ADD),
+              HIPTENSOR_STATUS_INVALID_VALUE);
+    EXPECT_EQ(createReduction(id, HIPTENSOR_OP_MUL, HIPTENSOR_OP_ADD),
               HIPTENSOR_STATUS_INVALID_VALUE);
     EXPECT_EQ(createReduction(id, id, HIPTENSOR_OP_IDENTITY), HIPTENSOR_STATUS_INVALID_VALUE);
     EXPECT_EQ(createReduction(id, id, outOfRangeOp), HIPTENSOR_STATUS_INVALID_VALUE);
@@ -287,6 +291,7 @@ TEST_F(OperatorValidationTest, Contraction)
         GTEST_SKIP() << "HIPTENSOR_STATUS_ARCH_MISMATCH: no contraction support on this device";
     }
     EXPECT_EQ(ok, HIPTENSOR_STATUS_SUCCESS);
+    EXPECT_EQ(createContraction(HIPTENSOR_OP_MAX, id, id), HIPTENSOR_STATUS_INVALID_VALUE);
     EXPECT_EQ(createContraction(id, HIPTENSOR_OP_ADD, id), HIPTENSOR_STATUS_INVALID_VALUE);
     EXPECT_EQ(createContraction(id, id, outOfRangeOp), HIPTENSOR_STATUS_INVALID_VALUE);
     // Without C, opC is unused and any value is accepted.
@@ -303,6 +308,9 @@ TEST_F(OperatorValidationTest, ContractionTrinary)
     }
     EXPECT_EQ(ok, HIPTENSOR_STATUS_SUCCESS);
     EXPECT_EQ(createContractionTrinary(HIPTENSOR_OP_MUL, id, id, id),
+              HIPTENSOR_STATUS_INVALID_VALUE);
+    EXPECT_EQ(createContractionTrinary(id, outOfRangeOp, id, id), HIPTENSOR_STATUS_INVALID_VALUE);
+    EXPECT_EQ(createContractionTrinary(id, id, HIPTENSOR_OP_MIN, id),
               HIPTENSOR_STATUS_INVALID_VALUE);
     EXPECT_EQ(createContractionTrinary(id, id, id, outOfRangeOp), HIPTENSOR_STATUS_INVALID_VALUE);
     // Without D, opD is unused and any value is accepted.

@@ -160,7 +160,7 @@ int elementwiseBinarySample(const void*                        alpha,
                                          /* unary operator C  */ HIPTENSOR_OP_IDENTITY,
                                          descD,
                                          modeD,
-                                         /* unary operator AC */ HIPTENSOR_OP_ADD,
+                                         /* binary operator AC */ HIPTENSOR_OP_ADD,
                                          typeCompute));
 
     /***************************
