@@ -12,6 +12,9 @@ One wave issues a single ``mfma_f32_4x4x4_{f16,bf16}``. The test pins the
 
 The IR / lowering checks run everywhere; the on-device numeric check runs only
 where a gfx942 / gfx950 GPU is visible (numpy only, torch is not required).
+
+It also pins, for these atoms and the f64 4x4x4 atom, that the MMA catalog
+lists each atom exactly on the targets whose compiler selects its intrinsic.
 """
 
 from __future__ import annotations
@@ -41,34 +44,45 @@ _BUILTIN = {
     "bf16": "__builtin_amdgcn_mfma_f32_4x4x4bf16_1k(",
 }
 
-# The targets whose MMA catalog lists each atom: gfx908 has the f16 atom but
-# none of the bf16 _1k forms, and no RDNA target has an MFMA.
+# The targets whose MMA catalog lists each batched 4x4x4 atom: gfx908 has the
+# f16 atom but neither the bf16 _1k nor the f64 form, and no RDNA target has an
+# MFMA.
 _LISTED_ON = {
-    "f16": ["gfx908", "gfx90a", "gfx942", "gfx950"],
-    "bf16": ["gfx90a", "gfx942", "gfx950"],
+    "mfma_f32_4x4x4_f16": ["gfx908", "gfx90a", "gfx942", "gfx950"],
+    "mfma_f32_4x4x4_bf16": ["gfx90a", "gfx942", "gfx950"],
+    "mfma_f64_4x4x4_f64": ["gfx90a", "gfx942", "gfx950"],
 }
 
 # Each atom's intrinsic, as the declaration table and the arch domain key it.
-_INTRINSIC_KEY = {"f16": "mfma.f32.4x4x4f16", "bf16": "mfma.f32.4x4x4bf16.1k"}
+_INTRINSIC_KEY = {
+    "mfma_f32_4x4x4_f16": "mfma.f32.4x4x4f16",
+    "mfma_f32_4x4x4_bf16": "mfma.f32.4x4x4bf16.1k",
+    "mfma_f64_4x4x4_f64": "mfma.f64.4x4x4f64",
+}
 
 
-def _listing_targets(dtype: str) -> list[str]:
-    """The targets whose MMA catalog lists the 4x4x4 atom of ``dtype``."""
-    op_id = f"mfma_f32_4x4x4_{dtype}"
+def _op_id(dtype: str) -> str:
+    """The op_id of the f32-accumulating 4x4x4 atom of ``dtype``."""
+    return f"mfma_f32_4x4x4_{dtype}"
+
+
+def _listing_targets(op_id: str) -> list[str]:
+    """The targets whose MMA catalog lists the atom ``op_id``."""
     return [
         arch for arch in known_arches() if ArchTarget.from_gfx(arch).mma.by_op_id(op_id)
     ]
 
 
-def _selecting_targets(dtype: str) -> list[str]:
+def _selecting_targets(op_id: str) -> list[str]:
     """The targets on which the compiler of every committed LLVM flavor links and
-    selects the atom's intrinsic, as the measured arch domain records it."""
+    selects the intrinsic of the atom ``op_id``, as the measured arch domain
+    records it."""
     columns = [arch_domain.load(flavor) for flavor in arch_domain.committed_flavors()]
     return [
         arch
         for arch in known_arches()
         if all(
-            (cell := column.lookup(_INTRINSIC_KEY[dtype], arch)) is not None
+            (cell := column.lookup(_INTRINSIC_KEY[op_id], arch)) is not None
             and cell.status == "ok"
             for column in columns
         )
@@ -87,7 +101,7 @@ def _named_for_its_atom(kernel):
 
 def _catalog_refusal(dtype: str, arch: str) -> str:
     return (
-        f"tile.mfma_f32_4x4x4_{dtype} is not available on {arch}: "
+        f"tile.{_op_id(dtype)} is not available on {arch}: "
         "its MMA catalog does not list it"
     )
 
@@ -140,6 +154,11 @@ def _reference(a_lanes: np.ndarray, b_lanes: np.ndarray) -> np.ndarray:
     return out
 
 
+@pytest.mark.parametrize("op_id", sorted(_LISTED_ON))
+def test_catalog_lists_the_atom_exactly_where_the_compiler_selects_it(op_id):
+    assert _listing_targets(op_id) == _LISTED_ON[op_id] == _selecting_targets(op_id)
+
+
 @pytest.mark.parametrize("dtype", ["f16", "bf16"])
 def test_lowering_emits_expected_intrinsic(dtype):
     ll = lower_kernel_to_llvm(_build(dtype), arch="gfx950")
@@ -147,13 +166,12 @@ def test_lowering_emits_expected_intrinsic(dtype):
     if dtype == "bf16":
         assert "bitcast <4 x bfloat>" in ll
         assert "declare <4 x float> @llvm.amdgcn.mfma.f32.4x4x4bf16.1k(<4 x i16>" in ll
-    # The catalog lists the atom exactly where the compiler selects it. Each
-    # engine lowers it there, and refuses it with the catalog gate's text on
-    # every other target, under either name.
-    assert _listing_targets(dtype) == _LISTED_ON[dtype] == _selecting_targets(dtype)
+    # Each engine lowers the atom where the catalog lists it, and refuses it
+    # with the catalog gate's text on every other target, under either name.
+    listed_on = _LISTED_ON[_op_id(dtype)]
     for arch in known_arches():
         for engine in available_engines():
-            if arch in _LISTED_ON[dtype]:
+            if arch in listed_on:
                 text = lower_with_engine(
                     _build(dtype), arch, engine=engine, llvm_flavor="llvm22"
                 )
@@ -167,7 +185,7 @@ def test_lowering_emits_expected_intrinsic(dtype):
                     message=_catalog_refusal(dtype, arch),
                     llvm_flavor="llvm22",
                 )
-        if arch not in _LISTED_ON[dtype]:
+        if arch not in listed_on:
             assert_engine_rejects(
                 _named_for_its_atom(_build(dtype)),
                 arch,
@@ -187,7 +205,7 @@ def test_hip_lowering_emits_expected_builtin(dtype):
     # engines' HIP text for the listing targets is pinned by
     # test_mma_operand_register_type.py (test_hip_batched_4x4x4_mfma_lowers_in_both_engines).
     for arch in known_arches():
-        if arch in _LISTED_ON[dtype]:
+        if arch in _LISTED_ON[_op_id(dtype)]:
             assert _BUILTIN[dtype] in lower_kernel_to_hip(_build(dtype), arch=arch)
             continue
         for engine in available_engines():

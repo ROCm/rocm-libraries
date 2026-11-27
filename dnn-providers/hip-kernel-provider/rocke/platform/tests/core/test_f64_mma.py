@@ -16,13 +16,30 @@ from rocke.instances.gfx942.f64_mma_probe import (
     F64MmaProbeSpec,
     build_f64_mma_probe,
 )
+from rocke.tests.engines import (
+    assert_engine_rejects,
+    assert_engine_rejects_hip,
+    available_engines,
+    lower_hip_with_engine,
+    lower_with_engine,
+)
 from rocke.tests.lanes import BUILD_VARIANT, import_or_skip_until
 
-# m -> (op_id, c_frag_len, A/B/C shapes) for the gfx942 f64 atoms.
+# m -> (op_id, c_frag_len, A/B/C shapes) for the f64 atoms.
 _ATOMS = {
     16: ("mfma_f64_16x16x4_f64", 4, ((16, 4), (4, 16), (16, 16))),
     4: ("mfma_f64_4x4x4_f64", 1, ((16, 4), (16, 4), (16, 4))),
 }
+
+# m -> the LLVM call each f64 atom lowers to.
+_LLVM_CALL = {
+    16: "call <4 x double> @llvm.amdgcn.mfma.f64.16x16x4f64(",
+    4: "call double @llvm.amdgcn.mfma.f64.4x4x4f64(",
+}
+
+# The targets whose MMA catalog lists both f64 atoms; no other target lists
+# either.
+_LISTED_ON = ("gfx90a", "gfx942", "gfx950")
 
 
 class _Integers:
@@ -51,12 +68,41 @@ def test_catalog_isolation(m):
         family="mma", a_dtype="fp32", b_dtype="fp32", c_dtype="fp32", m=16, n=16, k=4
     )
     assert fp32.op_id == "mfma_f32_16x16x4_f32"
-    # gfx90a and gfx950 list the 16x16x4 atom too; the four-block atom is
-    # gfx942's alone, and no other target lists either.
-    listed_on = {"gfx942"} if m == 4 else {"gfx90a", "gfx942", "gfx950"}
     for gfx in known_arches():
         lists = any(op.op_id == op_id for op in ArchTarget.from_gfx(gfx).mma.ops)
-        assert lists == (gfx in listed_on), gfx
+        assert lists == (gfx in _LISTED_ON), gfx
+
+
+@pytest.mark.parametrize("m", [16, 4])
+def test_lowered_exactly_where_the_catalog_lists_the_atom(m):
+    # Each engine lowers the atom, to LLVM IR and to HIP, on the targets whose
+    # catalog lists it, and refuses it with the catalog gate's text elsewhere.
+    op_id = _ATOMS[m][0]
+    kernel = build_f64_mma_probe(F64MmaProbeSpec(m))
+    builtin = f"__builtin_amdgcn_mfma_f64_{m}x{m}x4f64("
+    for arch in known_arches():
+        refusal = (
+            f"tile.{op_id} is not available on {arch}: its MMA catalog does not list it"
+        )
+        for engine in available_engines():
+            if arch in _LISTED_ON:
+                assert _LLVM_CALL[m] in lower_with_engine(kernel, arch, engine=engine)
+                assert builtin in lower_hip_with_engine(kernel, arch, engine=engine)
+                continue
+            assert_engine_rejects(
+                kernel,
+                arch,
+                engine=engine,
+                error_type=NotImplementedError,
+                message=refusal,
+            )
+            assert_engine_rejects_hip(
+                kernel,
+                arch,
+                engine=engine,
+                error_type=NotImplementedError,
+                message=refusal,
+            )
 
 
 @pytest.mark.parametrize("m", [16, 4])
@@ -131,14 +177,9 @@ def test_python_builder_and_lowerers(m, k):
     assert serialize(parse(ir)) == ir
     hip = lower_kernel_to_hip(kernel, arch="gfx942")
     assert f"__builtin_amdgcn_mfma_f64_{m}x{m}x4f64(" in hip
-    call = (
-        "call <4 x double> @llvm.amdgcn.mfma.f64.16x16x4f64("
-        if m == 16
-        else "call double @llvm.amdgcn.mfma.f64.4x4x4f64("
-    )
     for flavor in LLVM_FLAVORS:
         ll = _lower_kernel_to_llvm_python(kernel, arch="gfx942", llvm_flavor=flavor)
-        assert ll.count(call) == k // 4
+        assert ll.count(_LLVM_CALL[m]) == k // 4
         assert ll.count("store double ") == _ATOMS[m][1]
 
 
