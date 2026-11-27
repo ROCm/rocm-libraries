@@ -69,9 +69,9 @@ for x in sys.stdin.read().splitlines(): print("[skip]" if skip(x) else "[ci]  ",
 
 ## 2. Which jobs, families and tier?
 
-**Jobs.** PR CI selects test jobs from the changed subtrees, not from labels. Pass the changed subtrees (for a pushed PR, `Matched
-projects:` in the configure job log; otherwise the `projects/`, `dnn-providers/` or `shared/` subtree of each non-skipped file); the
-output names the job keys in `fetch_test_configurations.py` (`miopen`, `miopen-dbsync`, and consumers such as `miopenprovider`):
+**Jobs.** Start with the default jobs for the changed subtrees (for a pushed PR, use `Matched projects:` from the configure job
+log; otherwise use each non-skipped `projects/`, `dnn-providers/` or `shared/` subtree). The resolver returns candidate keys in
+`fetch_test_configurations.py` (`miopen`, `miopen-dbsync`, and consumers such as `miopenprovider`):
 
 ```bash
 . ./env.sh; T=$(cat "$SCRATCH/ROCK/T")
@@ -81,8 +81,11 @@ python3 "$T/test_tools/determine_rocm_test_dependencies.py" --changed-projects "
 - `miopen-dbsync` has `test_types` without `quick` and an `include_family` list: a find-db change for another architecture, or one
   tested only at `quick`, gets no DBSync run in CI. Read both at the pin.
 - Read each job's `exclude_family` at the pin: a family excluded from `miopen` runs no MIOpen test whatever the PR changes.
-- A change to the public C API or the split can break `miopenprovider`; record whether the resolver selects it.
-- On a dispatch, a `test:<job>` label matches one job key exactly: `test:miopen` runs neither `miopen-dbsync` nor `miopenprovider`.
+- When labels narrow the jobs, record the default candidates and the actual jobs selected by the run's configure logs;
+  for example, `test:miopen` requests only the `miopen` component, not `miopen-dbsync` or `miopenprovider`.
+- For each job removed by labels, trace whether it exercises a changed path, including behavior changes behind unchanged
+  APIs. Record why the job is out of scope, point to equivalent executed coverage, or file a coverage finding and name
+  the job to restore. Hand unresolved gaps to `ORCH` and `AUTH`; a passing native suite does not establish provider coverage.
 
 **Families.** Covered families = the caller's families ∩ families whose `tests_on_trigger` contains the current trigger − the job's
 `exclude_family`. Triggers: `pull_request` → `presubmit`, `push` → `postsubmit`, `schedule` → `nightly`. `workflow_dispatch` tests
