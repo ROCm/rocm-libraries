@@ -94,7 +94,6 @@ To run a subset of GoogleTest cases in any hipTensor test binary, pass `--gtest_
 ./bin/concurrency_test --gtest_filter='AllOps/ConcurrencyTest.*/Permute_*'
 ```
 
-
 **What is NOT covered by unit tests:**
 
 - Kernel selection logic (`contraction_selection.cpp`, ActorCritic/DefaultPatient paths) — selection requires a live device to call `hipGetDeviceProperties`.
@@ -165,10 +164,6 @@ Integration tests are device tests. They require a physical AMD GPU matching the
 | Reduction — CPU impl | `reduction_cpu_impl_test` | CPU reference validation (host test) |
 
 All device tests compare GPU results against a CPU reference implementation using a per-type tolerance.
-
-**GPU-required tests:** All `bilinear_contraction_test_*`, `scale_contraction_test_*`, `complex_*`, `trinary_*`, `*_unary_ops_test`, `contraction_padded_strides_test`, `rank*_elementwise_*`, `rank*_reduction_test`, `plan_cache_test`, `plan_cache_lru_test`, `plan_lifetime_test`, `create_plan_args_test`, `concurrency_test`, `elementwise_broadcast_test`, `elementwise_output_strides_test`, `elementwise_trinary_op_order_test`.
-
-**CPU-only (host) tests:** `contraction_mode_test`, `elementwise_cpu_test`, `reduction_cpu_impl_test`, and the `00_unit/` binaries (`logger_test`, `yaml_test`, `elementwise_op_test`, `util_test`, `hiptensor_options_test`, `elementwise_instance_selection_test`). `api_attribute_test`, `batched_contraction_test`, `elementwise_mode_test`, and `reduction_mode_test` launch no kernels but create a hipTensor handle and descriptors (`elementwise_mode_test` also allocates small device buffers).
 
 **Test tiers (CTest labels):**
 
