@@ -31,7 +31,11 @@ set(HKP_PACK_STAMP_NAME ".hkp-packed.stamp" CACHE INTERNAL
 # every root is packed with that folder excluded. A new family is one entry here.
 set(HKP_DESCRIPTOR_FAMILIES
     "rocKE=HIPKERNELPROVIDER_ENABLE_ROCKE"
-    "FlyDSL=HIPKERNELPROVIDER_ENABLE_FLYDSL")
+    "FlyDSL=HIPKERNELPROVIDER_ENABLE_FLYDSL"
+    "megakernel=ENABLE_MEGAKERNEL_ENGINE")
+
+# Checks a megakernel bundle's code objects against its committed lock (manifest.json).
+set(HKP_MEGAKERNEL_LOCK_TOOL "${HKP_PKG_DIR}/tools/hkp_megakernel_lock.py")
 
 include(KpackPython)
 
@@ -484,13 +488,13 @@ function(hkp_wire_pack_target)
             "the pack step has nowhere to write.")
     endif()
     _hkp_pack_producer()
-    set(_exclude_args "")
-    foreach(_folder IN LISTS ARG_EXCLUDE_FOLDERS)
-        list(APPEND _exclude_args --exclude-folder "${_folder}")
-    endforeach()
+    _hkp_pack_exclusion_args(_exclude_args "${ARG_EXCLUDE_FOLDERS}")
     _hkp_require_dvc_arg(_require_dvc_arg)
     _hkp_resolve_stage_files(_stage_sources _stage_commands _stage_manifest
                              "${ARG_NAME}" "${ARG_OUT_ROOT}" ${ARG_STAGE_FILES})
+
+    _hkp_megakernel_lock_commands(_lock_commands _lock_deps "${_interp}"
+                                 "${ARG_SOURCE_ROOT}" "${ARG_EXCLUDE_FOLDERS}")
 
     set(_inter_root "${CMAKE_CURRENT_BINARY_DIR}/hkp-${ARG_NAME}-intermediate")
     # Inside the output root, so the stamp shares the fate of the tree it vouches for.
@@ -578,6 +582,7 @@ function(hkp_wire_pack_target)
         OUTPUT "${_stamp}"
         COMMAND "${CMAKE_COMMAND}" -E rm -rf "${ARG_OUT_ROOT}"
         COMMAND "${CMAKE_COMMAND}" -E rm -rf "${_inter_root}"
+        ${_lock_commands}
         COMMAND ${_tool_cmd}
                 --source-root "${ARG_SOURCE_ROOT}"
                 --out-root "${ARG_OUT_ROOT}"
@@ -597,7 +602,7 @@ function(hkp_wire_pack_target)
         COMMAND "${CMAKE_COMMAND}" -E touch "${_stamp}"
         DEPENDS "${HKP_TOOL}" ${_source_inputs} ${_tool_sources}
                 "${_input_manifest}" "${HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON}"
-                ${_producer_deps} ${_stage_sources}
+                ${_producer_deps} ${_stage_sources} ${_lock_deps}
         COMMENT "hkp: packing root '${ARG_NAME}' for ${ARG_ARCHES}"
         VERBATIM)
 
@@ -622,6 +627,32 @@ function(hkp_wire_pack_target)
     set_property(GLOBAL PROPERTY HKP_PACK_ARCHES_${ARG_NAME} "${ARG_ARCHES}")
 
     set_property(GLOBAL APPEND PROPERTY HKP_PACK_LABELS "${ARG_NAME}")
+endfunction()
+
+# Convert each excluded folder to a separate packer argument.
+function(_hkp_pack_exclusion_args out_args exclude_folders)
+    set(_exclude_args "")
+    foreach(_folder IN LISTS exclude_folders)
+        list(APPEND _exclude_args --exclude-folder "${_folder}")
+    endforeach()
+    set(${out_args} "${_exclude_args}" PARENT_SCOPE)
+endfunction()
+
+# Before packing an included megakernel bundle, check the prebuilt code objects
+# and the generated KDP against the committed lock.
+function(_hkp_megakernel_lock_commands out_commands out_deps interp source_root exclude_folders)
+    set(_lock_commands "")
+    set(_lock_deps "")
+    if(NOT "megakernel" IN_LIST exclude_folders)
+        file(GLOB_RECURSE _locks "${source_root}/megakernel/manifest.json")
+        foreach(_lock IN LISTS _locks)
+            list(APPEND _lock_commands COMMAND "${interp}" "${HKP_MEGAKERNEL_LOCK_TOOL}"
+                 verify --lock "${_lock}")
+            set(_lock_deps "${HKP_MEGAKERNEL_LOCK_TOOL}")
+        endforeach()
+    endif()
+    set(${out_commands} "${_lock_commands}" PARENT_SCOPE)
+    set(${out_deps} "${_lock_deps}" PARENT_SCOPE)
 endfunction()
 
 # ---------------------------------------------------------------------------
