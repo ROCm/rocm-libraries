@@ -1,9 +1,9 @@
 # RFC 0025: Per-engine numerical notes
 
-- Contributors: TBD
+- Contributors: Brian Harrison, Garby Gilbert
 - **Status**: Implemented
-- **Status notes**: Backend `HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE`, `EngineDetails.numerical_notes`, `Graph::get_numerical_notes_for_engine()`, the Python binding, the UED `numerical_notes` vocabulary, the MIOpen determinism claims, and real-note filtering in the cuDNN v9 and v8 compatibility layers ship together. No in-tree provider reports a precision note.
-- **Last verified**: 2026-11-10 against `develop` (1c63e26254a)
+- **Status notes**: Shipped in #15493: the backend attribute, `Graph::get_numerical_notes_for_engine()`, the Python binding, the UED `numerical_notes` vocabulary, the MIOpen determinism claims, and note filtering in the cuDNN v9 and v8 layers. #15792 added note filtering on the native and Python `Graph`. MIOpen engines report `NONDETERMINISTIC` or an explicit empty list; the hip-kernel-provider SDPA engines in the claims table of §5 report an explicit empty list; no provider reports any other note (§5).
+- **Last verified**: 2026-11-23 against `develop` (7f30ff27a59)
 - **Follows**: [RFC 0010: Per-engine behavior notes](./0010_BehaviorNotes.md)
 
 ## Table of Contents
@@ -18,7 +18,7 @@
 
 ## 1. Summary
 
-A numerical note is metadata an engine reports about the numerics of its results, such as `NONDETERMINISTIC`. hipDNN reports numerical notes the way [RFC 0010](./0010_BehaviorNotes.md) reports behavior notes: a plugin writes them into `EngineDetails` for the finalized graph, the backend serves them through `HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE`, and the frontend returns them from `Graph::get_numerical_notes_for_engine()`. The cuDNN compatibility layers read the same attribute to filter engines.
+A numerical note is metadata an engine reports about the numerics of its results, such as `NONDETERMINISTIC`. hipDNN reports numerical notes the way [RFC 0010](./0010_BehaviorNotes.md) reports behavior notes: a plugin writes them into `EngineDetails` for the finalized graph, the backend serves them through `HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE`, and the frontend returns them from `Graph::get_numerical_notes_for_engine()`. The native and Python `Graph` and the cuDNN compatibility layers read the same attribute to filter engines.
 
 Where this RFC is silent, RFC 0010 applies with "numerical" for "behavior". This RFC records the differences.
 
@@ -28,7 +28,8 @@ Where this RFC is silent, RFC 0010 applies with "numerical" for "behavior". This
 - **Metadata.** `engine_details.fbs` carries `numerical_notes: [int32]`. `EngineDetailsWrapper::numericalNotes()` returns `std::nullopt` when the field is absent. Plugins write the field with `CreateEngineDetails` or `CreateEngineDetailsDirect`; `EngineDetailsT::Pack` drops an empty vector and cannot express an explicit empty list.
 - **Backend.** `EngineDescriptor` loads and caches the notes with the other engine details and serves `HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE` as `HIPDNN_TYPE_NUMERICAL_NOTE`, get-only. A negative value fails with `BAD_PARAM`; an unknown non-negative value is passed through. Set returns `NOT_SUPPORTED`.
 - **Frontend.** `Graph::get_numerical_notes_for_engine(int64_t, std::vector<NumericalNote>&) const` follows the contract of RFC 0010 §5. Values the frontend does not know are dropped. `fromHipdnnNumericalNote` and `isKnownNumericalNote` in `Types.hpp` convert between the backend and frontend numberings.
-- **Python.** `hipdnn_frontend.NumericalNote`, also spelled `numerical_note` as in cuDNN's Python frontend, and `Graph.get_numerical_notes_for_engine(engine_id)`, which raises `RuntimeError` on error.
+- **Python.** `hipdnn_frontend.NumericalNote`, also spelled `numerical_note` as in cuDNN's Python frontend, and `Graph.get_numerical_notes_for_engine(engine_id)`, which raises `RuntimeError` on error. `Graph.select_numeric_notes`, `deselect_numeric_notes`, `select_behavior_notes` and `deselect_behavior_notes` return the graph.
+- **Filtering.** `Graph::select_numeric_notes`, `deselect_numeric_notes`, `select_behavior_notes` and `deselect_behavior_notes` append to four lists and return the graph; an empty argument is a no-op. An engine passes when it reports every selected note and none of the deselected ones, in each family, and it must pass both families. A plan whose engine fails is filtered, like one removed by `deselect_engines` or `deselect_workspace_greater_than` ([RFC 0013](./0013_Autotune.md)): `check_support()` answers "is this supported with these filters?", and `build_plans`, `build_plan_at_index` and `autotune` skip it. An engine's notes are read only when a note filter is set, only for the engines a call evaluates, and once per filter state; a failed read returns the getter's error from the evaluating call. Filters persist until the `Graph` is destroyed, and they apply to plans created later, including plans from `add_engine_*()`.
 - **Scope of a note.** Notes describe an engine for the finalized graph passed to `GetEngineDetails(engineId, opGraph)`. There are no plan-, configuration- or knob-level notes. The plugin API version does not change with the note field.
 
 ## 3. Deltas from RFC 0010
@@ -39,11 +40,11 @@ Where this RFC is silent, RFC 0010 applies with "numerical" for "behavior". This
 | Explicit empty list | Same as absent | The provider's claim that no numerical note applies, that is, that the engine is deterministic; a test must prove it |
 | Enum | hipDNN values 0-4 | cuDNN's ten values |
 | UED vocabulary | `runtime_compilation`, `supports_graph_capture` | The ten cuDNN note names, lowercase; an unknown name or a repeat is a load error |
-| Native select and deselect | Not provided | Not provided |
+| Native and Python select and deselect | `select_behavior_notes`, `deselect_behavior_notes` | `select_numeric_notes`, `deselect_numeric_notes` |
 
 `NONDETERMINISTIC` means the results are not guaranteed bitwise reproducible. Every engine defaults to it, so an absent field is accurate for an engine nobody has proven otherwise, and it needs no plugin API bump. A provider claims determinism with an explicit empty list only when a test proves bitwise-reproducible results across repeated runs, as `IntegrationGpuDeterministic` does for `MIOPEN_ENGINE_DETERMINISTIC`. The default matches cuDNN's meaning of the note and is not a parity divergence.
 
-A UED may declare any of the ten cuDNN numerical notes by lowercase name. The UED loader and the hip-kernel packer map each name to its `HIPDNN_NUMERICAL_NOTE_*` value and reject an unknown or repeated name. hipDNN acts only on `NONDETERMINISTIC` today. A UED without a `numerical_notes` key leaves the field absent; an authored list, `[]` or one without `nondeterministic`, claims determinism, so an engine not proven deterministic lists `nondeterministic` beside its other notes. See [RFC 0020](./0020_UniversalEngineDescriptor.md) §9.
+A UED may declare any of the ten cuDNN numerical notes by lowercase name. The UED loader and the hip-kernel packer map each name to its `HIPDNN_NUMERICAL_NOTE_*` value and reject an unknown or repeated name. The native and Python filters act on every note an engine reports; the v9 layer acts only on `NONDETERMINISTIC`. A UED without a `numerical_notes` key leaves the field absent; an authored list, `[]` or one without `nondeterministic`, claims determinism, so an engine not proven deterministic lists `nondeterministic` beside its other notes. See [RFC 0020](./0020_UniversalEngineDescriptor.md) §9.
 
 ## 4. cuDNN parity
 
@@ -54,10 +55,32 @@ A UED may declare any of the ten cuDNN numerical notes by lowercase name. The UE
 | `hipdnn_frontend.NumericalNote` | `cudnn.numerical_note` | Match: the same ten members under both `NumericalNote` and cuDNN's `numerical_note` |
 | v9 `select_numeric_notes` and `deselect_numeric_notes` for `NONDETERMINISTIC` | Same functions | Parity of the filter |
 | v8 `hasNumericalNote`, `ExecutionPlan::getNumericNotes`, `ExecutionPlan::getAllNumericNotes` | Same functions | Parity: same read path; an engine without a proven claim reports `{NONDETERMINISTIC}` |
-| Native and Python frontends: select and deselect of numerical notes | Python `Graph.select_numeric_notes` and `deselect_numeric_notes` | Not provided (§7); only the v9 compatibility layer filters by note |
+| Native and Python frontends: select and deselect of numerical notes | Python `Graph.select_numeric_notes` and `deselect_numeric_notes` | Parity of the match rule: an engine passes when it reports every selected note and none of the deselected ones (cuDNN accumulates the same rule). The differences are listed below |
 | `Graph::get_numerical_notes_for_engine` | None: cuDNN's frontend has no per-engine numerical-note getter in its graph API | hipDNN extension |
 | UED `numerical_notes` | None: cuDNN has no descriptor files | A closed vocabulary of the ten cuDNN note names. A descriptor that names an unknown tag fails to load |
 | Compatibility-layer plan JSON | The layer's own format, not cuDNN's | Format `version` `1` with `engine.numericalNotes`; a reader without that key rejects the plan as an unknown engine key, so plans saved with notes do not load in builds without notes |
+
+### Differences from cuDNN filtering
+
+Every engine filter (`deselect_engines`, the note filters, `deselect_workspace_greater_than`) persists until changed. `check_support` answers "is this supported with these filters?", and `build_plans` builds the best engine that passes them, keeping its fallback and logging. The differences:
+
+- A failed note read fails the evaluating call, and only when a note filter is set. cuDNN fails `create_execution_plans` with `HEURISTIC_QUERY_FAILED` on every call.
+- Note filters set before plans exist apply to the plans created later; cuDNN ignores them.
+- `add_engine_*()` autotune candidates are filtered. Compiled-plan `autotune` applies filters set after `build_plans(ALL)`; cuDNN times every built plan.
+- A plan the call finalizes over the workspace limit despite its engine config is rejected after it finalizes. cuDNN 9.2+ trusts the config value. The plugin contract makes the engine-config workspace an upper bound on the workspace of any plan finalized from it, so the rejection is a safety net.
+- Python filter methods return the graph; cuDNN returns `None`.
+- `build_plan_at_index` on a plan whose engine-config workspace cannot be read returns `GRAPH_EXECUTION_PLAN_CREATION_FAILED`; cuDNN returns the read error. `check_support` and the build walks skip such a plan, as cuDNN does.
+- A note filter cannot be removed from a `Graph`: the note lists only grow, creating plans does not reset them, and an empty argument is a no-op. `deselect_engines` replaces its list and an empty list clears it, as in cuDNN. Use a new `Graph` to drop a note filter.
+- `check_support()` marks no plan. cuDNN's `check_support` marks the plans it removes, so clearing a filter re-admits a plan in hipDNN but not in cuDNN.
+- After plans are recreated, a repeated `build_plans` builds one of the new plans; cuDNN keeps its earlier candidate.
+- A failed note read fails a repeated shim `build_plans` and shim `autotune`; cuDNN's repeated `build_plans` returns OK without reading notes.
+- A plan an earlier evaluation barred stays barred when a filter is relaxed or cleared, until the plans are recreated (`create_execution_plans()`, `create_execution_plan_ext()`, rebuilding the operation graph, deserialization or plan-spec `autotune()`).
+- A deserialized plan is never filtered: `check_support()` treats it as passing and `build_plans(ALL)` skips it. `build_plan_at_index()` on it returns `INVALID_VALUE`, because it has no engine config.
+- `build_plans(ALL)` with no filter set and no plan built returns `HIPDNN_BACKEND_ERROR`; with a filter set it returns `GRAPH_EXECUTION_PLAN_CREATION_FAILED`. Both apply only when no plan is active after the call: once a plan is built, later filter changes do not undo it, so `build_plans(ALL)` returns OK even when a new filter removes the active plan, which stays active and executable (cuDNN `plans.h`). `build_plan_at_index` on a filtered index, the active one included, still returns the no-survivor code and leaves the active plan untouched.
+- `deselect_engines` matches exact engine IDs; cuDNN matches name substrings.
+- A negative workspace limit means no limit; in cuDNN it bars every config.
+- `hipdnn.Graph.check_support` and `build_plans` return `Error`; `pygraph` raises, as cuDNN does.
+- Behavior-note members are hipDNN's in C++ and Python.
 
 Compatibility-layer divergences from cuDNN are in [KNOWN_DIVERGENCES.md](../KNOWN_DIVERGENCES.md#numerical-notes).
 
@@ -67,19 +90,24 @@ Compatibility-layer divergences from cuDNN are in [KNOWN_DIVERGENCES.md](../KNOW
 |---|---|
 | `MIOPEN_ENGINE_DETERMINISTIC` | Explicit `[]` |
 | `MIOPEN_ENGINE` | Explicit `[NONDETERMINISTIC]` |
+| hip-kernel-provider SDPA forward: `hipkernel:Gfx942AttentionDense`, `Gfx942AttentionUnified2D`, `Gfx942AttentionUnified3d`, `Gfx950AttentionDense`, `Gfx950AttentionUnified2D`, `Gfx950AttentionUnified3D`, `Gfx1151WmmaAttention`, `Gfx1151WmmaAttentionDecode`, `flydsl_sdpa_cdna_decode`, `flydsl_sdpa_cdna_dualwave`, `flydsl_sdpa_rdna_decode` | Explicit `[]`, authored in the engine's UED |
+| hip-kernel-provider SDPA backward: `hipkernel:flydsl_sdpa_bwd_merged`, `flydsl_sdpa_bwd_split` | Explicit `[]`, authored in the engine's UED |
+| hip-kernel-provider SDPA forward (head-pad): `hipkernel:flydsl_sdpa_cdna`, `flydsl_sdpa_rdna`, `flydsl_sdpa_aiw` | No claim: field absent, reported `{NONDETERMINISTIC}`; the head-pad copy can write past a packed operand's region when per-batch origins run past `B*S` tokens |
+| `ASM_SDPA_ENGINE` (forward and backward), `HIP_FLASH2_ENGINE` | No claim: field absent, reported `{NONDETERMINISTIC}` |
 | Every other engine | No tested claim: field absent, reported `{NONDETERMINISTIC}` |
 
 `MIOPEN_ENGINE_DETERMINISTIC` claims determinism for every graph it accepts; the claim is about the engine ID, not per-solver evidence. No in-tree provider reports a precision note. Precision claims, such as MIOpen's `FP16_ALT_IMPL` on gfx90a and hipBLASLt compute types, are future work.
 
+Each SDPA claim rests on a source trace, on the engine declining output and stats tensors whose strides map two logical elements to one address, and on a device repeat test of every launch structure on one device per code-object target the engine ships; the target's other devices run the same code objects and have no device run of their own. A claim is run-to-run on one device and runtime: byte equality across devices is not part of it, and on devices and compute-unit counts other than those run it is source-traced, not device-tested. The `ASM_SDPA_ENGINE` backward accumulates dQ with fp32 atomics and is never claimed. The `ASM_SDPA_ENGINE` forward declines an O or stats tensor whose strides map two logical elements to one address (`checkFwdIoLayouts`, `isNonOverlappingView`, `checkStatsTensor` in `SdpaFwdPlanBuilder.cpp`) but is not claimed: not every forward object class it ships has a passing device repeat test (the MI308X objects have not run). `HIP_FLASH2_ENGINE` passes the repeat tests that ran but reports no claim: it accepts an O layout whose strides map two logical elements to one address, and its variant objects (`HIP_FLASH2_BUILD_VARIANTS`) have not all run. [KNOWN_DIVERGENCES](../KNOWN_DIVERGENCES.md#determinism) lists the devices each claim was proven on and the properties the test does not cover.
+
 ## 6. Compatibility layers
 
-- **v9 graph API.** `select_numeric_notes` and `deselect_numeric_notes` of `NONDETERMINISTIC` map to filtering engines by `get_numerical_notes_for_engine()`, and a failed query propagates as an error. If no engine survives, the shim returns `GRAPH_NOT_SUPPORTED`. The shim filters on `NONDETERMINISTIC` only; every other numerical-note value follows the disposition table in [KNOWN_DIVERGENCES](../KNOWN_DIVERGENCES.md).
+- **v9 graph API.** `select_numeric_notes` and `deselect_numeric_notes` of `NONDETERMINISTIC` map to filtering engines by `get_numerical_notes_for_engine()`, and a failed query propagates as an error. If no engine survives, the shim returns `GRAPH_NOT_SUPPORTED`. The shim filters on `NONDETERMINISTIC` only; every other numerical-note value follows the disposition table in [KNOWN_DIVERGENCES](../KNOWN_DIVERGENCES.md). The shim's engine filters reach the native `Graph` as `deselect_engines`, and `build_plans` calls the native `build_plans`, which builds the next plan the filters leave. The workspace limit applies to that walk, to `check_support` and to `build_plan_at_index`.
 - **v8 builders.** `hasNumericalNote`, `ExecutionPlan::getNumericNotes` and `getAllNumericNotes` read `HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE`. Only `hasNumericalNote` answers false when the query fails; a failed query fails `ExecutionPlanBuilder::build()`, as upstream, except that `NOT_SUPPORTED` (the status of an older same-major backend that lacks the attribute) reads as `{NONDETERMINISTIC}`. The native `Graph::get_numerical_notes_for_engine`, and so the v9 filters and the Python binding, read `NOT_SUPPORTED` the same way: an older same-major backend yields `{NONDETERMINISTIC}`, and every other failure is an error. The plan JSON always writes `engine.numericalNotes` next to `behaviorNotes`, as the compatibility layer's own `cudnnBackendNumericalNote_t` values (mapped to hipDNN's by name, not NVIDIA's numbering), range-checked on load. JSON without the field loads as `{NONDETERMINISTIC}`. The JSON `version` is `1`; a reader without `numericalNotes` rejects it (see the plan-JSON row of §4).
 
 See [RFC 0024](./0024_CuDNN_V8_Compatibility.md) and [RFC 0012](./0012_CuDNN_Shim.md).
 
 ## 7. Out of scope
 
-- Native `Graph` select and deselect by numerical note.
 - Precision notes from any in-tree provider.
-- A plugin API version bump.
+- A plugin API version bump. The engine-config workspace query MUST return at least the workspace of any plan finalized from that config, and benchmarking-config coverage is also a MUST; both change documentation only. The ABI is unchanged and the in-tree plugins already comply. When a limit is set, the frontend's safety net rejects a plan the call finalizes over it, so a non-compliant plugin degrades gracefully. Otherwise the frontend rejects nothing, and the violation shows up as a WARN when WARN logging is enabled.

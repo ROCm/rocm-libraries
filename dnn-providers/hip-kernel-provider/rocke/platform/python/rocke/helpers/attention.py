@@ -824,11 +824,11 @@ def dequant_fp8x8_to_dtype(
     preserves correctness for arbitrary (non-pow2) ``k_scale``/``v_scale``.
 
     This is the promotion of the byte-identical dequant chain that the 2D
-    tiled QK path (``_read_k8_mfma_operand`` and the inline 16x16 K_FP8_MFMA
-    branch) and the 3D segment loader (``_issue_fp8_dequant_loads``) each
-    emitted independently. ``b.vec_pack`` / ``b.cvt_pk_f32_fp8x4`` /
-    ``b.fmul`` / ``b.cast_f32_to`` are emitted in the same order the inline
-    sites used, so the lowered IR is unchanged.
+    tiled QK path (``_read_k8_mfma_operand``) and the 3D segment loader
+    (``_issue_fp8_dequant_loads``) each emitted independently.
+    ``b.vec_pack`` / ``b.cvt_pk_f32_fp8x4`` / ``b.fmul`` / ``b.cast_f32_to``
+    are emitted in the same order the inline sites used, so the lowered IR is
+    unchanged.
     """
     lo_fp8 = b.vec_pack([b.vec_extract(fp8_vec, i) for i in range(4)], FP8E4M3)
     hi_fp8 = b.vec_pack([b.vec_extract(fp8_vec, i) for i in range(4, 8)], FP8E4M3)

@@ -7,6 +7,7 @@
 
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/detail/AutotuneConfigNames.hpp>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/detail/GraphMatchKey.hpp>
 #include <hipdnn_test_sdk/utilities/SelectorUnitGraph.hpp>
 
@@ -44,6 +45,16 @@ void expectTensorIdOrder(const detail::AutotuneConfigMatchKey& key,
     {
         EXPECT_EQ(key.tensors[i].tensorId, tensorIds[i]);
     }
+}
+
+std::shared_ptr<graph::TensorAttributes> makeUidTensor(const std::string& name, int64_t uid)
+{
+    const std::vector<int64_t> dims = {2, 3, 4, 5};
+    const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+    auto tensor = std::make_shared<graph::TensorAttributes>(
+        graph::makeTensorAttributes(name, dims, strides));
+    tensor->set_uid(uid);
+    return tensor;
 }
 
 } // namespace
@@ -294,3 +305,161 @@ TEST_F(TestGraphMatchKey, PointwiseBinaryIncludesPointwiseModeCriterion)
     expectTensorUidOrder(*key, {unitGraph.byName("x"), unitGraph.byName("y")});
     expectTensorIdOrder(*key, {config_tensor::IN_0, config_tensor::IN_1});
 }
+
+// Inputs beyond the mode's operand count are left out of the lowered operation, so the key
+// carries only the operands the mode reads, as the backend key built from that operation does.
+TEST_F(TestGraphMatchKey, PointwiseUnaryKeyOmitsSurplusInput)
+{
+    graph::Graph graphObj;
+    const auto x = makeUidTensor("x", 1);
+    const auto surplus = makeUidTensor("surplus", 2);
+    graph::PointwiseAttributes attrs;
+    attrs.set_mode(PointwiseMode::IDENTITY);
+    graphObj.pointwise(x, surplus, attrs);
+
+    const auto key = detail::getAutotuneConfigMatchKey(graphObj);
+    ASSERT_TRUE(key.has_value());
+    EXPECT_EQ(key->criteria,
+              (detail::AutotuneConfigCriteria{
+                  {config_criterion::POINTWISE_MODE, HIPDNN_POINTWISE_IDENTITY}}));
+    expectTensorIdOrder(*key, {config_tensor::IN_0});
+    expectTensorUidOrder(*key, {x});
+}
+
+TEST_F(TestGraphMatchKey, PointwiseBinaryKeyOmitsSurplusInput)
+{
+    graph::Graph graphObj;
+    const auto x = makeUidTensor("x", 1);
+    const auto y = makeUidTensor("y", 2);
+    const auto surplus = makeUidTensor("surplus", 3);
+    graph::PointwiseAttributes attrs;
+    attrs.set_mode(PointwiseMode::ADD);
+    graphObj.pointwise(x, y, surplus, attrs);
+
+    const auto key = detail::getAutotuneConfigMatchKey(graphObj);
+    ASSERT_TRUE(key.has_value());
+    EXPECT_EQ(
+        key->criteria,
+        (detail::AutotuneConfigCriteria{{config_criterion::POINTWISE_MODE, HIPDNN_POINTWISE_ADD}}));
+    expectTensorIdOrder(*key, {config_tensor::IN_0, config_tensor::IN_1});
+    expectTensorUidOrder(*key, {x, y});
+}
+
+// cuDNN parity (B3): momentum alone, without the previous running mean and variance, has
+// nothing to weight, so the key leaves it out, same as the lowered operation (GraphMatchKey.hpp).
+TEST_F(TestGraphMatchKey, BatchnormKeyOmitsMomentumWithoutRunningStats)
+{
+    const auto x = makeUidTensor("x", 1);
+    const auto scale = makeUidTensor("scale", 2);
+    const auto bias = makeUidTensor("bias", 3);
+    const auto epsilon = makeUidTensor("epsilon", 4);
+
+    graph::Graph graphWithoutMomentum;
+    graph::BatchnormAttributes attrsWithoutMomentum;
+    attrsWithoutMomentum.set_epsilon(epsilon);
+    graphWithoutMomentum.batchnorm(x, scale, bias, attrsWithoutMomentum);
+
+    graph::Graph graphWithMomentum;
+    graph::BatchnormAttributes attrsWithMomentum;
+    attrsWithMomentum.set_epsilon(epsilon);
+    attrsWithMomentum.set_momentum(makeUidTensor("momentum", 5));
+    graphWithMomentum.batchnorm(x, scale, bias, attrsWithMomentum);
+
+    const auto keyWithoutMomentum = detail::getAutotuneConfigMatchKey(graphWithoutMomentum);
+    const auto keyWithMomentum = detail::getAutotuneConfigMatchKey(graphWithMomentum);
+    ASSERT_TRUE(keyWithoutMomentum.has_value());
+    ASSERT_TRUE(keyWithMomentum.has_value());
+
+    const std::vector<std::string_view> expectedIds{
+        config_tensor::X, config_tensor::SCALE, config_tensor::BIAS, config_tensor::EPSILON};
+    expectTensorIdOrder(*keyWithoutMomentum, expectedIds);
+    expectTensorIdOrder(*keyWithMomentum, expectedIds);
+}
+
+// cuDNN parity (B3): momentum joins the key, after the running-stats tensors, once both the
+// previous running mean and variance are present (the same condition the packer uses).
+TEST_F(TestGraphMatchKey, BatchnormKeyIncludesMomentumWithRunningStats)
+{
+    const auto x = makeUidTensor("x", 1);
+    const auto scale = makeUidTensor("scale", 2);
+    const auto bias = makeUidTensor("bias", 3);
+    const auto epsilon = makeUidTensor("epsilon", 4);
+    const auto prevMean = makeUidTensor("prevMean", 5);
+    const auto prevVar = makeUidTensor("prevVar", 6);
+    const auto momentum = makeUidTensor("momentum", 7);
+
+    graph::Graph graphObj;
+    graph::BatchnormAttributes attrs;
+    attrs.set_epsilon(epsilon);
+    attrs.set_prev_running_mean(prevMean);
+    attrs.set_prev_running_variance(prevVar);
+    attrs.set_momentum(momentum);
+    graphObj.batchnorm(x, scale, bias, attrs);
+
+    const auto key = detail::getAutotuneConfigMatchKey(graphObj);
+    ASSERT_TRUE(key.has_value());
+    expectTensorIdOrder(*key,
+                        {config_tensor::X,
+                         config_tensor::SCALE,
+                         config_tensor::BIAS,
+                         config_tensor::EPSILON,
+                         config_tensor::PREV_RUNNING_MEAN,
+                         config_tensor::PREV_RUNNING_VARIANCE,
+                         config_tensor::MOMENTUM});
+
+    // Differs from the momentum-without-running-stats key above: seven tensors instead of four.
+    graph::Graph graphWithoutStats;
+    graph::BatchnormAttributes attrsWithoutStats;
+    attrsWithoutStats.set_epsilon(epsilon);
+    attrsWithoutStats.set_momentum(makeUidTensor("momentumOnly", 8));
+    graphWithoutStats.batchnorm(x, scale, bias, attrsWithoutStats);
+    const auto keyWithoutStats = detail::getAutotuneConfigMatchKey(graphWithoutStats);
+    ASSERT_TRUE(keyWithoutStats.has_value());
+    EXPECT_NE(key->tensors.size(), keyWithoutStats->tensors.size());
+}
+
+#ifdef HIPDNN_ENABLE_SDPA
+// The cumulative sequence length tensors are part of an SDPA forward match key, after the other
+// optional tensors, so a rule can name them and graphs differing only in them stay distinct.
+TEST_F(TestGraphMatchKey, SdpaFwdIncludesCuSeqLenTensors)
+{
+    const std::vector<int64_t> qkvDims = {2, 8, 32, 64};
+    const std::vector<int64_t> cuDims = {3, 1, 1, 1};
+    const auto makeTensor = [](const char* name, const std::vector<int64_t>& dims) {
+        return std::make_shared<graph::TensorAttributes>(graph::makeTensorAttributes(
+            name, dims, hipdnn_data_sdk::utilities::generateStrides(dims)));
+    };
+
+    graph::Graph graphObj;
+    graphObj.set_intermediate_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_io_data_type(DataType::FLOAT);
+    const auto q = makeTensor("Q", qkvDims);
+    const auto k = makeTensor("K", qkvDims);
+    const auto v = makeTensor("V", qkvDims);
+    const auto cuQ = makeTensor("cu_seq_len_q", cuDims);
+    const auto cuKv = makeTensor("cu_seq_len_kv", cuDims);
+
+    graph::SdpaAttributes attrs;
+    attrs.set_padding_mask(true).set_cu_seq_len_q(cuQ).set_cu_seq_len_kv(cuKv);
+    auto [o, stats] = graphObj.sdpa(q, k, v, attrs);
+    o->set_output(true);
+
+    int64_t uid = 1;
+    for(const auto& tensor : {q, k, v, cuQ, cuKv})
+    {
+        tensor->set_uid(uid++);
+    }
+
+    const auto key = detail::getAutotuneConfigMatchKey(graphObj);
+    ASSERT_TRUE(key.has_value());
+    EXPECT_EQ(key->opName, config_op::SDPA_FWD);
+    expectTensorIdOrder(*key,
+                        {config_tensor::Q,
+                         config_tensor::K,
+                         config_tensor::V,
+                         config_tensor::CU_SEQ_LEN_Q,
+                         config_tensor::CU_SEQ_LEN_KV});
+    expectTensorUidOrder(*key, {q, k, v, cuQ, cuKv});
+}
+#endif

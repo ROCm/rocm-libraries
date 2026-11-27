@@ -125,6 +125,8 @@ TEST(TestBackendEnumStringUtils, GetBackendAttributeName)
                  "HIPDNN_ATTR_ENGINEHEUR_SM_COUNT_TARGET");
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_ENGINEHEUR_DEVICEPROP),
                  "HIPDNN_ATTR_ENGINEHEUR_DEVICEPROP");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT),
+                 "HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT");
 
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_ENGINECFG_ENGINE),
                  "HIPDNN_ATTR_ENGINECFG_ENGINE");
@@ -295,6 +297,8 @@ TEST(TestBackendEnumStringUtils, GetBackendAttributeName)
                  "HIPDNN_ATTR_TENSOR_VALUE_EXT");
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_TENSOR_IS_BY_VALUE),
                  "HIPDNN_ATTR_TENSOR_IS_BY_VALUE");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT),
+                 "HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT");
 
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_W),
                  "HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_W");
@@ -533,6 +537,10 @@ TEST(TestBackendEnumStringUtils, GetBackendAttributeName)
                  "HIPDNN_ATTR_SDPA_FWD_IMPLEMENTATION_EXT");
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_SDPA_FWD_COMP_TYPE_EXT),
                  "HIPDNN_ATTR_SDPA_FWD_COMP_TYPE_EXT");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_SDPA_FWD_CU_SEQ_LEN_QDESC),
+                 "HIPDNN_ATTR_OPERATION_SDPA_FWD_CU_SEQ_LEN_QDESC");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_SDPA_FWD_CU_SEQ_LEN_KVDESC),
+                 "HIPDNN_ATTR_OPERATION_SDPA_FWD_CU_SEQ_LEN_KVDESC");
 
     // SDPA bwd operation attributes
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_SDPA_BWD_Q_EXT),
@@ -991,6 +999,8 @@ TEST(TestBackendEnumStringUtils, GetAttributeTypeString)
                  "HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT");
     EXPECT_STREQ(hipdnnGetAttributeTypeString(HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT),
                  "HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT");
+    EXPECT_STREQ(hipdnnGetAttributeTypeString(HIPDNN_TYPE_OPERATION_TYPE_EXT),
+                 "HIPDNN_TYPE_OPERATION_TYPE_EXT");
     EXPECT_STREQ(hipdnnGetAttributeTypeString(HIPDNN_TYPE_REDUCTION_OPERATOR_TYPE),
                  "HIPDNN_TYPE_REDUCTION_OPERATOR_TYPE");
 

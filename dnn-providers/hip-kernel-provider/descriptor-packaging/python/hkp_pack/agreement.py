@@ -667,6 +667,10 @@ def _verify_launch(
     # whose bytes this descriptor names.
     if observations.get("code_object_sha256") != payload_sha:
         fail("effective_spec code-object binding mismatch")
+    # The packed `identity` (what the selector revision reads) is the one the compile
+    # observed; both are absent for a code object the packer did not compile from IR.
+    if observations.get("code_object_identity") != source.get("identity"):
+        fail("effective_spec code-object identity binding mismatch")
     # A launch naming a companion binds to that role's symbol, not the primary's.
     expected = (
         observations.get("symbol")

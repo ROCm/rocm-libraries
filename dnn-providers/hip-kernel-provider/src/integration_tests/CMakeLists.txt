@@ -7,6 +7,7 @@ find_package(Threads REQUIRED)
 # otherwise find installed packages (true standalone)
 if(NOT TARGET hipdnn_test_sdk)
     find_package(hipdnn_test_sdk CONFIG REQUIRED)
+    find_package(hipdnn_frontend CONFIG QUIET OPTIONAL_COMPONENTS cudnn_compatibility)
 endif()
 if(NOT TARGET hipdnn_plugin_sdk)
     find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
@@ -69,6 +70,7 @@ endif()
 if(ENABLE_HIP_MLOPS_ENGINE)
     target_sources(hip_kernel_provider_integration_tests PRIVATE
         hip_mlops_engine/IntegrationGpuPassByValue.cpp
+        hip_mlops_engine/IntegrationGpuLayernormBackwardPrecision.cpp
     )
 endif()
 
@@ -81,6 +83,7 @@ if(ENABLE_HIP_FLASH2_ENGINE)
         add_subdirectory(hip_flash2_engine)
     endif()
 endif()
+add_subdirectory(determinism)
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # The attention knob suites: each a source and the comma-separated engines it pins. A
     # suite is compiled whenever the product root carries all of them, on any build arch,
@@ -92,6 +95,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         IntegrationGpuGfx950AttentionUnifiedKnobs.cpp
             Gfx950AttentionUnified2D,Gfx950AttentionUnified3D
         IntegrationGpuGfx942AttentionUnified3dKnobs.cpp Gfx942AttentionUnified3d
+        IntegrationGpuGfx942AttentionUnified2DKnobs.cpp Gfx942AttentionUnified2D
         IntegrationGpuGfx942AttentionDenseKnobs.cpp Gfx942AttentionDense
     )
     while(_knob_suites)
@@ -115,6 +119,25 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             )
         endif()
     endwhile()
+    # The packaged convolution suites follow the same rule as the knobs suite above, one
+    # define per engine: the AOT-instance engine is its own product bundle. The AOT seed
+    # is test content of this build's own integration root, so its gate is arch-aware
+    # instead.
+    hkp_product_offers_engine(_hkp_conv_fwd_aot_bundle "hipkernel:Gfx950ConvFwdAot")
+    hkp_gfx950_conv_fwd_aot_seed_available(_hkp_conv_fwd_aot_seed_bundle)
+    if(_hkp_conv_fwd_aot_bundle OR _hkp_conv_fwd_aot_seed_bundle)
+        target_sources(hip_kernel_provider_integration_tests PRIVATE
+            kernel_ingestor_engine/IntegrationGpuGfx950ConvFwd.cpp
+        )
+    endif()
+    foreach(_hkp_conv_suite IN ITEMS conv_fwd_aot conv_fwd_aot_seed)
+        if(_hkp_${_hkp_conv_suite}_bundle)
+            string(TOUPPER "HKP_TEST_GFX950_${_hkp_conv_suite}" _hkp_conv_define)
+            target_compile_definitions(hip_kernel_provider_integration_tests
+                PRIVATE ${_hkp_conv_define}=1
+            )
+        endif()
+    endforeach()
     # The dgrad AOT-instance engine is a product bundle of its own, gated like the knob
     # suites; it needs no SDPA.
     hkp_product_offers_engine(_hkp_conv_dgrad_aot_bundle "hipkernel:Gfx950ConvDgradAot")
@@ -157,6 +180,19 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     target_compile_definitions(hip_kernel_provider_integration_tests
         PRIVATE HIPKERNELPROVIDER_FLYDSL_SDPA_ARCHS="${_flydsl_sdpa_archs}"
     )
+    # The paged-K/V suite of the RDNA prefill engine, gated like the knob suites; it
+    # GTEST_SKIPs on devices the engine's objects are not built for.
+    hkp_product_offers_engine(_hkp_rdna_attention_bundle "hipkernel:Gfx1151WmmaAttention")
+    if(_hkp_rdna_attention_bundle AND NOT HIPDNN_ENABLE_SDPA)
+        message(WARNING
+                "HIPDNN_ENABLE_KERNEL_INGESTOR is ON but hipDNN was built with "
+                "HIPDNN_ENABLE_SDPA=OFF. Skipping IntegrationGpuGfx1151WmmaAttentionPaged.cpp. "
+                "Rebuild hipDNN with -DHIPDNN_ENABLE_SDPA=ON to enable it.")
+    elseif(_hkp_rdna_attention_bundle)
+        target_sources(hip_kernel_provider_integration_tests PRIVATE
+            kernel_ingestor_engine/IntegrationGpuGfx1151WmmaAttentionPaged.cpp
+        )
+    endif()
     target_sources(hip_kernel_provider_integration_tests PRIVATE
         kernel_ingestor_engine/IntegrationGpuKernelIngestor.cpp
         kernel_ingestor_engine/IntegrationGpuKernelIngestorKpack.cpp
@@ -216,6 +252,136 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         TARGET hip_kernel_provider_integration_tests
         STAGED_DESCRIPTOR_ROOTS ${HIPKERNELPROVIDER_INTEGRATION_BUILD_DIR}
         PACK_NAMES integration integration_shared archive_fixture
+    )
+endif()
+
+# The SDPA note-selection suites: with deselect_numeric_notes({NONDETERMINISTIC}) set, which
+# engines survive each row is computed at run time from the engines' reported notes, not from a
+# claim list in sdpa_selection/SdpaProvenEngines.hpp (SelectionRow::unclaimedRanked names the
+# engines expected to report NONDETERMINISTIC for that row).
+# A row exists only for an architecture some engine of this build serves its graph on, as the
+# determinism device cases gate theirs (determinism/CMakeLists.txt). This binary's row lists are
+# host code shared by every shard of a multi-arch build, so FlyDSL's contribution below reads
+# HIPKERNELPROVIDER_FLYDSL_PULLED_ARCHS_<op> (objects pulled into this build's descriptor root),
+# never the GPU_TARGETS-and-packaging-filtered HIPKERNELPROVIDER_FLYDSL_ARCHS_<op>: the row
+# lists must not depend on which targets this particular shard was configured for.
+# The lists are passed into the code as comma-separated architectures: HKP_SDPA_SELECTION_FWD_ARCHS
+# for the forward graph (bf16, head size 64, causal: an offered rocKE engine on its target
+# architecture, the WMMA engines on gfx1100 and gfx1201, FlyDSL forward content; neither ASM
+# forward nor Flash2 serves it) and HKP_SDPA_SELECTION_BWD_ARCHS for the backward graph (ASM on
+# gfx942 and gfx950, FlyDSL content: merged and the split engine, which needs prep, dkdv and dq).
+# HKP_SDPA_SELECTION_FWD_CLAIMED_ARCHS is the subset of HKP_SDPA_SELECTION_FWD_ARCHS that ships a
+# claimed forward engine (rocKE and WMMA only: hipkernel:flydsl_sdpa_cdna, _rdna and _aiw rank
+# the same bf16/hd64/causal graph through their generic unsplit prefill kernel but are never
+# claimed, so an architecture only one of them serves gets no survivor).
+# HKP_SDPA_SELECTION_BWD_CLAIMED_ARCHS is the subset of HKP_SDPA_SELECTION_BWD_ARCHS that ships a
+# claimed backward engine (the FlyDSL part only: ASM_SDPA_ENGINE's backward is never claimed, so
+# it is excluded even on the archs it serves).
+# HKP_SDPA_SELECTION_FLYDSL_CDNA_ARCHS, _RDNA_ARCHS and _AIW_ARCHS are the architectures each of
+# those three unclaimed engines ships forward content for, so SdpaProvenEngines.hpp can name the
+# one(s) of them that rank the forward graph on a given architecture.
+# HKP_SDPA_SELECTION_ASM_ONLY enables the graph only ASM_SDPA_ENGINE serves.
+set(_hkp_selection_fwd_archs "")
+set(_hkp_selection_fwd_claimed_archs "")
+set(_hkp_selection_bwd_archs "")
+set(_hkp_selection_bwd_claimed_archs "")
+set(_hkp_selection_flydsl_cdna_archs "")
+set(_hkp_selection_flydsl_rdna_archs "")
+set(_hkp_selection_flydsl_aiw_archs "")
+if(ENABLE_ASM_SDPA_ENGINE)
+    list(APPEND _hkp_selection_bwd_archs gfx942 gfx950)
+    target_compile_definitions(hip_kernel_provider_integration_tests
+        PRIVATE HKP_SDPA_SELECTION_ASM_ONLY=1
+    )
+endif()
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    set(_hkp_selection_rocke
+        Gfx950AttentionDense gfx950
+        Gfx942AttentionDense gfx942
+        Gfx942AttentionUnified2D gfx942
+        Gfx942AttentionUnified3d gfx942
+        Gfx950AttentionUnified2D gfx950
+        Gfx950AttentionUnified3D gfx950
+        Gfx1151WmmaAttention "gfx1100,gfx1201"
+        Gfx1151WmmaAttentionDecode "gfx1100,gfx1201"
+    )
+    while(_hkp_selection_rocke)
+        list(POP_FRONT _hkp_selection_rocke _hkp_selection_engine _hkp_selection_engine_archs)
+        string(REPLACE "," ";" _hkp_selection_engine_archs "${_hkp_selection_engine_archs}")
+        hkp_product_offers_engine(_hkp_selection_offered "hipkernel:${_hkp_selection_engine}")
+        if(_hkp_selection_offered)
+            list(APPEND _hkp_selection_fwd_archs ${_hkp_selection_engine_archs})
+            # Every rocKE and WMMA forward engine is claimed, so its architectures count toward
+            # whether this row's graph has a surviving engine.
+            list(APPEND _hkp_selection_fwd_claimed_archs ${_hkp_selection_engine_archs})
+        endif()
+    endwhile()
+    if(HIPKERNELPROVIDER_ENABLE_FLYDSL AND HIPKERNELPROVIDER_FLYDSL_ACTIVE)
+        foreach(_hkp_selection_op IN ITEMS sdpa_rdna sdpa_rdna_decode sdpa_aiw sdpa_cdna
+                                           sdpa_cdna_decode sdpa_cdna_dualwave)
+            list(APPEND _hkp_selection_fwd_archs
+                 ${HIPKERNELPROVIDER_FLYDSL_PULLED_ARCHS_${_hkp_selection_op}})
+        endforeach()
+        # hipkernel:flydsl_sdpa_cdna, _rdna and _aiw are never claimed (the head-pad copy they
+        # wrap is unproven), so their architectures are tracked separately: a row's forward graph
+        # is theirs alone, not a claimed engine's, wherever only they serve it.
+        list(APPEND _hkp_selection_flydsl_cdna_archs
+             ${HIPKERNELPROVIDER_FLYDSL_PULLED_ARCHS_sdpa_cdna})
+        list(APPEND _hkp_selection_flydsl_rdna_archs
+             ${HIPKERNELPROVIDER_FLYDSL_PULLED_ARCHS_sdpa_rdna})
+        list(APPEND _hkp_selection_flydsl_aiw_archs
+             ${HIPKERNELPROVIDER_FLYDSL_PULLED_ARCHS_sdpa_aiw})
+        list(APPEND _hkp_selection_bwd_claimed_archs
+             ${HIPKERNELPROVIDER_FLYDSL_PULLED_ARCHS_sdpa_bwd_merged})
+        foreach(_hkp_selection_arch IN LISTS HIPKERNELPROVIDER_FLYDSL_PULLED_ARCHS_sdpa_bwd_prep)
+            if(_hkp_selection_arch IN_LIST HIPKERNELPROVIDER_FLYDSL_PULLED_ARCHS_sdpa_bwd_dkdv
+               AND _hkp_selection_arch IN_LIST HIPKERNELPROVIDER_FLYDSL_PULLED_ARCHS_sdpa_bwd_dq)
+                list(APPEND _hkp_selection_bwd_claimed_archs ${_hkp_selection_arch})
+            endif()
+        endforeach()
+        list(APPEND _hkp_selection_bwd_archs ${_hkp_selection_bwd_claimed_archs})
+    endif()
+endif()
+list(REMOVE_DUPLICATES _hkp_selection_fwd_archs)
+list(REMOVE_DUPLICATES _hkp_selection_fwd_claimed_archs)
+list(REMOVE_DUPLICATES _hkp_selection_bwd_archs)
+list(REMOVE_DUPLICATES _hkp_selection_bwd_claimed_archs)
+list(REMOVE_DUPLICATES _hkp_selection_flydsl_cdna_archs)
+list(REMOVE_DUPLICATES _hkp_selection_flydsl_rdna_archs)
+list(REMOVE_DUPLICATES _hkp_selection_flydsl_aiw_archs)
+string(REPLACE ";" "," _hkp_selection_fwd_archs "${_hkp_selection_fwd_archs}")
+string(REPLACE ";" "," _hkp_selection_fwd_claimed_archs "${_hkp_selection_fwd_claimed_archs}")
+string(REPLACE ";" "," _hkp_selection_bwd_archs "${_hkp_selection_bwd_archs}")
+string(REPLACE ";" "," _hkp_selection_bwd_claimed_archs "${_hkp_selection_bwd_claimed_archs}")
+string(REPLACE ";" "," _hkp_selection_flydsl_cdna_archs "${_hkp_selection_flydsl_cdna_archs}")
+string(REPLACE ";" "," _hkp_selection_flydsl_rdna_archs "${_hkp_selection_flydsl_rdna_archs}")
+string(REPLACE ";" "," _hkp_selection_flydsl_aiw_archs "${_hkp_selection_flydsl_aiw_archs}")
+target_compile_definitions(hip_kernel_provider_integration_tests
+    PRIVATE
+        HKP_SDPA_SELECTION_FWD_ARCHS="${_hkp_selection_fwd_archs}"
+        HKP_SDPA_SELECTION_FWD_CLAIMED_ARCHS="${_hkp_selection_fwd_claimed_archs}"
+        HKP_SDPA_SELECTION_BWD_ARCHS="${_hkp_selection_bwd_archs}"
+        HKP_SDPA_SELECTION_BWD_CLAIMED_ARCHS="${_hkp_selection_bwd_claimed_archs}"
+        HKP_SDPA_SELECTION_FLYDSL_CDNA_ARCHS="${_hkp_selection_flydsl_cdna_archs}"
+        HKP_SDPA_SELECTION_FLYDSL_RDNA_ARCHS="${_hkp_selection_flydsl_rdna_archs}"
+        HKP_SDPA_SELECTION_FLYDSL_AIW_ARCHS="${_hkp_selection_flydsl_aiw_archs}"
+)
+# The native suite drives the frontend graph builders of the ingestor lane, so it follows their
+# gate (the one of the determinism device cases in determinism/CMakeLists.txt).
+if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA)
+    target_sources(hip_kernel_provider_integration_tests PRIVATE
+        sdpa_selection/IntegrationGpuSdpaNativeNoteFilter.cpp
+    )
+endif()
+# The v9 shim suite needs the shim headers: the hipDNN option in a superbuild, the installed
+# frontend's cudnn_compatibility component standalone (the pattern of
+# miopen-provider/integration_tests/CMakeLists.txt). Graph::sdpa needs HIPDNN_ENABLE_SDPA.
+if((HIPDNN_ENABLE_CUDNN_COMPATIBILITY OR hipdnn_frontend_cudnn_compatibility_FOUND) AND HIPDNN_ENABLE_SDPA)
+    target_sources(hip_kernel_provider_integration_tests PRIVATE
+        cudnn_shim/IntegrationGpuCudnnShimSdpaDeterministic.cpp
+    )
+    target_compile_definitions(hip_kernel_provider_integration_tests
+        PRIVATE HKP_CUDNN_SHIM_SDPA_TESTS=1
     )
 endif()
 
@@ -314,6 +480,51 @@ while(_engines)
     endif()
 endwhile()
 
+# The FlyDSL SDPA backward engines, one gpu-reference target per (engine, architecture)
+# the product ships. Split ships gfx950, gfx90a, gfx942 and gfx11-generic content, which the pack
+# expands to every gfx11 member this build targets; merged ships gfx950 only. Gated and
+# routed per architecture exactly as the pinned attention targets above: the predicate is
+# the one the census uses, and the entry installs into that architecture's shard so a
+# package without the architecture carries no entry for an engine it no longer ships. The
+# backward bundles include bf16 cases, so the target takes the engine's tolerance config,
+# as its tiered checks do.
+foreach(_hkp_bwd_engine IN ITEMS split merged)
+    foreach(_hkp_bwd_arch IN LISTS HKP_FLYDSL_SDPA_BWD_ARCHS)
+        set(_hkp_bwd_ships FALSE)
+        if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+            hkp_product_ships_engine_for_arch(_hkp_bwd_ships
+                "hipkernel:flydsl_sdpa_bwd_${_hkp_bwd_engine}" ${_hkp_bwd_arch})
+        endif()
+        if(NOT (HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPDNN_ENABLE_KERNEL_INGESTOR
+                AND HIPDNN_ENABLE_SDPA AND _hkp_bwd_ships
+                AND TARGET hipdnn_integration_tests AND COMMAND add_external_integration_test_target))
+            continue()
+        endif()
+
+        # The shard names this TOML, so it is reserved with the shard as well as passed as
+        # TEST_CONFIG; hkp_reserve_census_shard() says why. It is the per-architecture file
+        # the external-integration registration shares.
+        hkp_flydsl_sdpa_bwd_arch_toml(_hkp_bwd_toml ${_hkp_bwd_engine} ${_hkp_bwd_arch})
+        hkp_reserve_census_shard(_hkp_bwd_shard_dest ${_hkp_bwd_arch} FILES "${_hkp_bwd_toml}")
+        add_external_integration_test_target(
+            TARGET_NAME hip_kernel_provider_flydsl_sdpa_bwd_${_hkp_bwd_engine}_${_hkp_bwd_arch}_gpu_ref_integration_tests
+            PLUGIN_TARGET hip_kernel_provider
+            ENGINE_NAME   "hipkernel:flydsl_sdpa_bwd_${_hkp_bwd_engine}"
+            INSTALL_SUBDIR hip_kernel_provider
+            INSTALL_DESTINATION "${_hkp_bwd_shard_dest}"
+            INSTALL_STAGING_KEY hkp_census_${_hkp_bwd_arch}
+            REFERENCE_EXECUTOR gpu
+            TEST_CONFIG "${_hkp_bwd_toml}"
+            GTEST_FILTER "quick_SdpaBackward_*:standard_SdpaBackward_*:comprehensive_SdpaBackward_*:full_SdpaBackward_*:-*_fwd_pair*"
+            ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+        )
+    endforeach()
+endforeach()
+
+# The ASM SDPA forward engine against the GPU reference, on the quick forward bundles. The
+# C++ suite this once named (Smoke/IntegrationGpuSdpaFwdBfp16) no longer builds by default
+# (BUILD_CPP_GRAPH_TESTS), so a filter on it ran zero tests and failed; the bundle suites
+# are always registered, and are named after their folder (quick_SdpaFwd_<layout>).
 if(ENABLE_ASM_SDPA_ENGINE AND HIPDNN_ENABLE_SDPA
    AND TARGET hipdnn_integration_tests AND COMMAND add_external_integration_test_target)
     add_external_integration_test_target(
@@ -323,7 +534,7 @@ if(ENABLE_ASM_SDPA_ENGINE AND HIPDNN_ENABLE_SDPA
         INSTALL_SUBDIR hip_kernel_provider
         REFERENCE_EXECUTOR gpu
         GTEST_FILTER
-            Smoke/IntegrationGpuSdpaFwdBfp16.Correctness/*
+            quick_SdpaFwd_*
         ENVIRONMENT_MODIFICATION
             ${TEST_ENVIRONMENT_MODIFICATION}
     )

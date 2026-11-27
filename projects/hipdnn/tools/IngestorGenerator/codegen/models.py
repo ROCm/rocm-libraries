@@ -95,6 +95,23 @@ AUTHORED_TEST_SETS: tuple[str, ...] = (
 #: RFC 0020 §4.2's closed vocabulary for UED ``behavior_notes``.
 BEHAVIOR_NOTES: tuple[str, ...] = ("runtime_compilation", "supports_graph_capture")
 
+#: ``DescriptorLoader.hpp``'s ``numericalNoteFromString`` vocabulary for UED
+#: ``numerical_notes``: the ten cuDNN numerical-note names, lowercase, in
+#: ``NumericalNote.h`` enum order. ``hkp_pack.descriptors._NUMERICAL_NOTES`` is the
+#: packer's copy; a test pins the two.
+NUMERICAL_NOTES: tuple[str, ...] = (
+    "tensor_core",
+    "down_convert_inputs",
+    "reduced_precision_reduction",
+    "fft",
+    "nondeterministic",
+    "winograd",
+    "winograd_tile_4x4",
+    "winograd_tile_6x6",
+    "winograd_tile_13x13",
+    "strict_nan_prop",
+)
+
 #: RFC 0021 §4: a slot name is a lowercase identifier, unique within the engine.
 #: ``global`` is reserved, since RFC 0004 owns ``global.`` knobs.
 SLOT_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -400,6 +417,12 @@ class PackSpec:
     #: "hipkernel.<engine>.add_match". Emitted only when the engine has >1 pack
     #: (for a slotted engine: when the pack's slot has >1 pack).
     discriminator: str = ""
+    #: The dispatch handler this pack's kernels launch through. Empty is the
+    #: engine's own, ``hipkernel.<engine>.dispatch``; a name, e.g. "split_c",
+    #: is ``hipkernel.<engine>.split_c_dispatch``, with its own UDD. A handler
+    #: declares one set of launch names, so packs whose kernels carry another
+    #: launch set (a multi-launch kernel beside single-launch ones) name one.
+    dispatch: str = ""
     #: RFC 0021 §4: the slot this pack's kernels serve. Required of every pack
     #: of a slotted engine and forbidden otherwise.
     slot: str = ""
@@ -432,11 +455,18 @@ class EngineSpec:
     name: str
     sdk_version: str = "1.0.0"
     behavior_notes: list[str] = field(default_factory=list)
+    #: ``None`` is an absent key: the engine states nothing. ``[]`` is a claim ("no
+    #: note applies") and is emitted, so every reader tests ``is not None``.
+    numerical_notes: list[str] | None = None
     knobs: list[str] = field(default_factory=list)
     #: "native" emits a UHD scoring on a symbol; "none" omits the UHD, which is
     #: legal for an engine with no ranking model. A slotted engine's rankers
     #: are per slot (`SlotSpec.ranker`), so its engine-level value is "none".
     heuristic: str = "native"
+    #: Another engine whose native symbols this engine's descriptors name, e.g. a
+    #: test-only engine serving a subset of a shipped engine's catalog through the
+    #: shipped engine's registered code. Empty names this engine's own symbols.
+    native_symbols_from: str = ""
     #: Optional IngestorPacks.hpp engine-name constant used by the generated
     #: census test; the descriptor still carries ``name`` above.
     census_name_symbol: str | None = None
@@ -693,6 +723,23 @@ class IngestorConfig:
     @property
     def dispatch_symbol(self) -> str:
         return f"{self.native_symbol_namespace}.dispatch"
+
+    def pack_dispatch_symbol(self, pack: PackSpec) -> str:
+        """The dispatch symbol of ``pack``: the engine's own, or the one its
+        ``dispatch`` names."""
+        if not pack.dispatch:
+            return self.dispatch_symbol
+        return f"{self.native_symbol_namespace}.{pack.dispatch}_dispatch"
+
+    @property
+    def pack_dispatches(self) -> list[str]:
+        """The ``dispatch`` names the packs use, the engine's own ("") first,
+        each once, in pack order: one UDD each."""
+        names = [""]
+        for pack in self.packs:
+            if pack.dispatch not in names:
+                names.append(pack.dispatch)
+        return names
 
     def slot_dispatch_symbol(self, slot: SlotSpec) -> str:
         """The dispatch symbol of one slot: ``<namespace>.<slot>_dispatch``."""

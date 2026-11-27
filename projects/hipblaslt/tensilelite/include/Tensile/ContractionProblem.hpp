@@ -34,6 +34,7 @@
 
 #include <Tensile/ContractionProblem_fwd.hpp>
 #include <Tensile/ContractionSolution_fwd.hpp>
+#include <Tensile/FusedA2A.hpp>
 #include <Tensile/FusedA2AKernArg.hpp>
 
 #include <Tensile/TensorDescriptor.hpp>
@@ -487,6 +488,16 @@ namespace TensileLite
         virtual std::string description() const;
 
         /**
+         * Create a single, non-transposed 1-by-k times k-by-1 GEMM with packed
+         * operands and scalar C/D. A/B and their compute-input types use
+         * inputType; C/D use outputType. Alpha/beta types are set separately.
+         */
+        static ContractionProblemGemm GEMM_InnerProduct(rocisa::DataType inputType,
+                                                        rocisa::DataType outputType,
+                                                        size_t           k,
+                                                        double           beta);
+
+        /**
         * Create a ContractionProblemGemm representing a batched GEMM, specifying
         * strides between matrices.
         */
@@ -836,6 +847,11 @@ namespace TensileLite
             m_outputAmaxD = outputAmaxD;
         }
 
+        void setOutputPeerD(bool outputPeerD)
+        {
+            m_outputPeerD = outputPeerD;
+        }
+
         void setUseBias(int useBias)
         {
             m_useBias = useBias;
@@ -936,6 +952,11 @@ namespace TensileLite
         bool outputAmaxD() const
         {
             return m_outputAmaxD;
+        }
+
+        bool outputPeerD() const
+        {
+            return m_outputPeerD;
         }
 
         int useBias() const
@@ -1381,14 +1402,14 @@ namespace TensileLite
             m_mxScaleFormat = format;
         }
 
-        bool fusedGemmA2A() const
+        FusedA2A fusedA2A() const
         {
-            return m_fusedGemmA2A;
+            return m_fusedA2A;
         }
 
-        void setFusedGemmA2A(bool fusedGemmA2A)
+        void setFusedA2A(FusedA2A mode)
         {
-            m_fusedGemmA2A = fusedGemmA2A;
+            m_fusedA2A = mode;
         }
 
         int64_t fusedA2AExtent() const
@@ -1401,17 +1422,20 @@ namespace TensileLite
             m_fusedA2AExtent = extent;
         }
 
-        // recv[W][N][AM/W] in D's type.
+        // [W][N][extent/W]: recv in D's type for GemmA2A, gathered in B's type for A2AGemm.
         void setA2ABuf()
         {
             const size_t world  = m_world;
-            const size_t nShard = m_fusedA2AExtent / world;
             const size_t tokens = freeSizeB(0);
+            const bool   gather = m_fusedA2A == FusedA2A::A2AGemm;
+            const size_t shard  = m_fusedA2AExtent / world;
             m_tensors[ContractionProblemGemm::TENSOR::A2A_BUF]
                 = {"a2aBuf",
-                   m_tensors[ContractionProblemGemm::TENSOR::D].dataType(),
-                   {nShard, tokens, world},
-                   {1, nShard, nShard * tokens}};
+                   m_tensors[gather ? ContractionProblemGemm::TENSOR::B
+                                    : ContractionProblemGemm::TENSOR::D]
+                       .dataType(),
+                   {shard, tokens, world},
+                   {1, shard, shard * tokens}};
         }
 
         size_t mxBlockA() const
@@ -1732,10 +1756,11 @@ namespace TensileLite
         bool             m_useE                    = false;
         rocisa::DataType m_auxType                 = rocisa::DataType::None;
         bool             m_outputAmaxD             = false;
+        bool             m_outputPeerD             = false;
         bool             m_swizzleTensorA          = false;
         bool             m_swizzleTensorB          = false;
         int              m_mxScaleFormat           = 0;
-        bool             m_fusedGemmA2A            = false;
+        FusedA2A         m_fusedA2A                = FusedA2A::Disabled;
         int64_t          m_fusedA2AExtent          = 0;
         int              m_useBias                 = 0;
         bool             m_useGateResidual         = false;
@@ -1880,6 +1905,9 @@ namespace TensileLite
         void*       d     = nullptr;
         void*       e     = nullptr;
         void*       amaxD = nullptr;
+        // Second D buffer (OutputPeerD). `d` and `peerD` are the two buffers' batch 0, with or
+        // without batch pointer arrays: the kernel gets the distance between them.
+        void*       peerD = nullptr;
 
         void const* const* batchA    = nullptr;
         void const* const* batchB    = nullptr;
@@ -1912,11 +1940,11 @@ namespace TensileLite
         ConstantVariant              beta  = static_cast<float>(0);
         std::vector<ConstantVariant> activationArgs;
 
-        std::vector<FusedA2APeerFields> fusedA2APeers;
-        void*                           fusedA2ACounter = nullptr;
-        uint32_t                        fusedA2AMyRank  = 0;
-        uint32_t                        fusedA2ADrain   = 0;
-        void*                           a2aBuf          = nullptr;
+        FusedA2APeerTable fusedA2APeers   = {};
+        void*             fusedA2ACounter = nullptr;
+        uint32_t          fusedA2AMyRank  = 0;
+        uint32_t          fusedA2ADrain   = 0;
+        void*             a2aBuf          = nullptr;
 
         // Workspace
         void* ws = nullptr;

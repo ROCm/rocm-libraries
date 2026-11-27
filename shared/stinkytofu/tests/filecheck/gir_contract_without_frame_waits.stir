@@ -1,0 +1,36 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output
+#
+# The contract half of the same rule as gir_war_dscnt_without_frame_waits.stir: a loaded
+# `GirFrameContract` only means the frame MAP was imported. The backend imports it on
+# EnableGirFramePipeline alone, while deriving waits from it also needs
+# EnableGirFrameWaitCntInsertion, so `girOwnsOrdering` must ask for both.
+#
+# The `tensor_load_to_lds` here is UNTAGGED -- no memtoken, no gir_action -- so neither the token
+# scan nor the frame map can prove it disjoint from the `ds_load`s still in flight. Keying only on
+# "a contract is loaded" dropped the fallback and nothing replaced it.
+#
+# CHECK-LABEL: @gir_contract_without_frame_waits
+# CHECK: ^loop:
+# CHECK-NEXT: "st.ds_load_b64"(v10, LDS0)
+# CHECK-NEXT: "st.ds_load_b64"(v11, LDS1)
+# CHECK-NEXT: "st.s_wait_dscnt"(0)
+# CHECK-NEXT: "st.tensor_load_to_lds"
+
+st.metadata "gir.frame_contract" {
+gir-frame-contract
+
+gen 0  ring=2 entry=0
+}
+
+st.func @gir_contract_without_frame_waits() {
+^entry:
+  "st.s_branch"("loop")
+  Successors: ^loop
+^loop:
+  v[0:1] = "st.ds_load_b64"(v10) { mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[2:3] = "st.ds_load_b64"(v11) { mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [1] } }
+  "st.tensor_load_to_lds"(s[0:3], s[10:17])
+  "st.s_cbranch_scc1"("loop", SCC0)
+  Successors: ^loop, ^exit
+^exit:
+}

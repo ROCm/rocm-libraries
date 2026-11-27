@@ -262,9 +262,17 @@ public:
     {
         if constexpr(IsHostSide)
         {
+            // The host-side tables may still be written by a pending host function
+            // (e.g. the Poisson table update). Synchronize like host_system::free does.
+            const hipError_t error = hipDeviceSynchronize();
             delete[] distribution.probability;
             delete[] distribution.alias;
             delete[] distribution.cdf;
+            if(error != hipSuccess)
+            {
+                distribution = {};
+                return ROCRAND_STATUS_INTERNAL_ERROR;
+            }
         }
         else
         {

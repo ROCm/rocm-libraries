@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -44,7 +45,9 @@
 #include <Tensile/ContractionProblem_fwd.hpp>
 #include <Tensile/DataTypes.hpp>
 #include <Tensile/MXScaleFormat.hpp>
+#include <Tensile/StreamK.hpp>
 #include <Tensile/Predicates.hpp>
+#include <Tensile/ReadMostlyMap.hpp>
 #include <Tensile/Task.hpp>
 #include <Tensile/Utils.hpp>
 
@@ -141,9 +144,10 @@ namespace TensileLite
         X_MACRO(SKItersPerWG) \
         X_MACRO(SKGrid) \
         X_MACRO(SKTilesAndSplit) \
-        /* Packed batch dimension divisors */ \
-        X_MACRO(MagicNumberSize) \
-        X_MACRO(MagicShiftSize) \
+        X_MACRO(MagicNumberSizeAlg1) \
+        X_MACRO(MagicShiftSizeAlg1) \
+        X_MACRO(MagicNumberSizeAlg2) \
+        X_MACRO(MagicShiftSizeAlg2) \
         /* Epilogue control args */ \
         X_MACRO(BiasType) \
         X_MACRO(StrideBias) \
@@ -185,7 +189,8 @@ namespace TensileLite
         X_MACRO(RR_MagicShiftAndSignWgmMainBlock) \
         X_MACRO(AddressScaleZeroA) \
         X_MACRO(ScaleBlockSizeA) \
-        X_MACRO(ESMRuntimeSupported)
+        X_MACRO(ESMRuntimeSupported) \
+        X_MACRO(DeltaPeerD)
 
     enum class CustomArgSemantic
     {
@@ -433,6 +438,7 @@ namespace TensileLite
 
     struct SizeMapping
     {
+        int                    a2aSubRounds     = 1;
         bool                   activationFused  = true;
         int                    adaptiveGemm     = 0;
         int                    adaptiveGemmGSUA = 0;
@@ -465,7 +471,7 @@ namespace TensileLite
         dim3                   macroTile;
         int                    magicDivAlg            = 1;
         int                    MathClocksUnrolledLoop = 0;
-        std::array<int, 4>     matrixInstruction;
+        std::array<int, 4>     matrixInstruction{};
         int                    Multicast                  = 0;
         int                    nonTemporalA               = 0;
         int                    nonTemporalB               = 0;
@@ -492,7 +498,7 @@ namespace TensileLite
         int                    temporalHintA              = 0;
         int                    temporalHintB              = 0;
         int                    temporalHintD              = 0;
-        dim3                   threadTile;
+        dim3                   threadTile{0, 0, 0};
         TileProcessingStrategy tileProcessingStrategy        = TileProcessingStrategy::None;
         int                    UnrollLoopSwapGlobalReadOrder = 0;
         int                    UnrollMajorLDSA               = -1;
@@ -501,7 +507,7 @@ namespace TensileLite
         int                    VectorWidthA                  = 1;
         int                    VectorWidthB                  = 1;
         int                    WavefrontSize                 = 0;
-        std::array<int, 2>     waveGroup;
+        std::array<int, 2>     waveGroup{};
         size_t                 waveNum                  = 0;
         int                    WaveSeparateGlobalReadA  = 0;
         int                    WaveSeparateGlobalReadB  = 0;
@@ -578,39 +584,6 @@ namespace TensileLite
         }
     };
 
-    struct StreamKStaticSplit
-    {
-        uint32_t skTiles      = 0;
-        uint32_t skItersPerWG = 0;
-        uint32_t extraIters   = 0;
-    };
-
-    // Scheduling ABI 2: a logical worker is a hardware cluster and a scheduling
-    // tile is a spatial block. Partial/flag slot q*C+peer retains the peer identity.
-    // This resolved value is shared by workspace queries, argument packing, launch
-    // geometry and diagnostics; legacy scheduling ABIs keep their original units.
-    struct StreamKClusterSchedule
-    {
-        bool enabled = false;
-        size_t clusterSize = 1;
-        size_t blocksM = 0;
-        size_t blocksN = 0;
-        size_t blocks = 0;
-        size_t physicalGrid = 0;
-        size_t gridBeforeFallback = 0;
-        size_t partialSlots = 0;
-        size_t flagEntries = 0;
-        size_t idealWorkspaceBytes = 0;
-        uint32_t itersPerTile = 1;
-        uint32_t parallelSplits = 1;
-        StreamKStaticSplit split;
-        bool wholeBlocksOnly = false;
-        bool workspaceFallback = false;
-        bool treeBoundsFallback = false;
-        bool fixedGridUsed = false;
-        std::string fallbackReason;
-    };
-
     struct PersistentLaunchSettings
     {
         TileProcessingStrategy tileProcessingStrategy = TileProcessingStrategy::None;
@@ -619,7 +592,7 @@ namespace TensileLite
         size_t selectedGrid = 0;
         size_t totalTiles = 0;
         size_t workspaceBytes = 0;
-        StreamKClusterSchedule clusterSchedule;
+        StreamK::ClusterSchedule clusterSchedule;
         bool clusterGridClamp = false;
         int argsVersion = 0;
         origami::reduction_t reduction = origami::reduction_t::none;
@@ -638,159 +611,6 @@ namespace TensileLite
     };
 
     /**
-     * The three numbers the static two-tile StreamK ABI packs, plus the
-     * leftover the kernel recomputes from them.
-     *
-     * StreamK=3 and the static sub-mode of StreamK=5 both pack SKItersPerWG,
-     * skGrid and skTiles, and the device derives everything else from those:
-     * a flat iteration space of tiles*itersPerTile, a data-parallel prefix of
-     * (tiles - skTiles) whole tiles, and a StreamK region cut into skGrid
-     * chunks. extraIters is the leftover skTiles*itersPerTile -
-     * SKItersPerWG*skGrid under the historical global first-E mapping;
-     * kernels with InternalArgsSupport::perTileExtraIters may redistribute
-     * those extras within each tile when skGrid % skTiles == 0
-     * (StreamK.py skAssignIters).
-     */
-    /**
-     * The tile's iteration count rounded up to a whole number of K units.
-     *
-     * Stream-K cuts K out of a flat space of tiles*itersPerTile iterations, so
-     * tile t begins at flat index t*itersPerTile. With a unit wider than one
-     * iteration that start is only on a unit boundary when itersPerTile is a
-     * multiple of the unit; otherwise a cut that is unit-aligned in flat space
-     * still lands mid-unit inside the odd tiles, which is what the unit
-     * forbids. Quantising the stride alone does not fix it, and dropping the
-     * unit back to one iteration -- what this used to do -- makes every cut
-     * free to land anywhere, which on the MX scale path silently applies the
-     * wrong scales.
-     *
-     * Measuring the flat space in padded tiles restores the property for every
-     * tile at once: tile starts and the cuts between them are all multiples of
-     * the unit, so every workgroup begins on a unit boundary whatever
-     * itersPerTile is. The padding is not work -- skTileIndex() clamps each
-     * workgroup's local range to the real itersPerTile, so the up-to-(unit-1)
-     * padded iterations at the end of a tile belong to no workgroup and are
-     * never run. The matching device-side rounding is skPaddedItersPerTile()
-     * in Components/StreamK.py.
-     *
-     * Row uniformity is preserved: every tile pads to the same length, so the
-     * ordered list of chunk lengths folded into one tile is the list folded
-     * into every other.
-     *
-     * A unit of one pads nothing, so every non-MX kernel keeps the exact flat
-     * space, split and argument values it had before the unit existed.
-     */
-    inline size_t skPaddedItersPerTile(size_t itersPerTile, size_t kGranularity)
-    {
-        if(kGranularity <= 1 || itersPerTile == 0)
-            return itersPerTile;
-        return ((itersPerTile + kGranularity - 1) / kGranularity) * kGranularity;
-    }
-
-    /**
-     * Compute the static two-tile StreamK split.
-     *
-     * Single source of truth for arithmetic that used to be written out twice
-     * in ContractionSolution.cpp (the StreamK=3 packer and the StreamK=5 static
-     * packer) and is now also read by checkUniformSummationOrder(), which
-     * proves a property of exactly this split. A third copy would let the gate
-     * silently start proving a property of a split the kernel does not perform.
-     *
-     * @param tiles        Batch-inclusive tile count, getNumTiles(sizeMapping, 1).
-     * @param itersPerTile getItersPerTile(sizeMapping), clamped to at least 1.
-     * @param skGrid       Resolved StreamK grid. 0 yields an all-zero split.
-     * @param skFullTiles  AMDGPU::skFullTiles (TENSILE_STREAMK_FULL_TILES).
-     * @param forceDPOnly  SizeMapping::streamKForceDPOnly != 0.
-     * @param kGranularity Iterations per indivisible K unit, skKGranularity().
-     */
-    TENSILELITEHOST_EXPORT StreamKStaticSplit streamKStaticSplit(size_t tiles,
-                                                                 size_t itersPerTile,
-                                                                 size_t skGrid,
-                                                                 int    skFullTiles,
-                                                                 bool   forceDPOnly,
-                                                                 size_t kGranularity = 1);
-
-    /**
-     * Whether every output tile of a static two-tile StreamK split is folded
-     * from the same ordered list of chunk lengths, and so is bitwise equal to
-     * every other tile fed identical inputs.
-     *
-     * This is the row-uniformity condition
-     * ContractionSolution::checkUniformSummationOrder() enforces for StreamK=3
-     * and StreamK=5-static. It is a property of the packed split alone, so it
-     * is insensitive to how tile indices map to (m-tile, n-tile) -- WGM,
-     * SpaceFillingAlgo and XCC swizzling do not enter into it.
-     *
-     * @param split             The split streamKStaticSplit() produced.
-     * @param tiles             The same batch-inclusive tile count fed to it.
-     * @param itersPerTile      The same clamped iterations per tile fed to it.
-     * @param skGrid            The resolved StreamK grid packed into the split.
-     * @param perTileCapable    True when the selected kernel CAN redistribute
-     *                          Stream-K extras within each tile
-     *                          (InternalArgsSupport::perTileExtraIters). Capability
-     *                          only; the kernel branches on it at runtime.
-     * @param uniformSummationOrder
-     *                          ContractionProblemParameters::uniformSummationOrder(),
-     *                          the host-side bit the packer forwards to the device in
-     *                          MagicShiftItersPerTile bit 29. The per-tile mapping runs
-     *                          only when this AND perTileCapable hold; otherwise the
-     *                          kernel runs the historical global first-E mapping.
-     */
-    TENSILELITEHOST_EXPORT bool
-        streamKStaticSplitRowUniform(StreamKStaticSplit const& split,
-                                     size_t                    tiles,
-                                     size_t                    itersPerTile,
-                                     size_t                    skGrid                = 0,
-                                     bool                      perTileCapable        = false,
-                                     bool                      uniformSummationOrder = false,
-                                     size_t                    kGranularity          = 1);
-
-    /**
-     * Whether a resolved Stream-K launch may use parallel reduction under
-     * uniform summation order.
-     *
-     * True when reduction is parallel, streamKAtomic is 0, the ABI is static
-     * two-tile packing (StreamK=3, or StreamK=5 with dynamic sub-mode off),
-     * and the grid is an exact multiple of the tile count with split factor
-     * F = grid/tiles >= 2. Callers must already have cleared the static
-     * Stream-K obstacles (the launch gate checks those first). Does not
-     * consult StaggerU: the device clears it for F >= 2.
-     *
-     * Parallel extras are per PartialIdx and tile-symmetric, so I % F == 0 is
-     * not required (unlike the tree all-partial model without per-tile extras).
-     */
-    TENSILELITEHOST_EXPORT bool streamKParallelReductionRowUniform(PersistentLaunchSettings const& launch,
-                                                                   int  streamKAtomic,
-                                                                   bool staticTwoTilePacking,
-                                                                   size_t tiles);
-
-    /**
-     * Iteration range [start, end) assigned to workgroup w under the static
-     * two-tile StreamK mapping. Extras are distributed within each tile when
-     * skGrid % tiles == 0 and both perTileCapable (InternalArgsSupport::perTileExtraIters)
-     * and uniformSummationOrder hold -- the pair the kernel branches on at runtime;
-     * otherwise the historical global first-E mapping is used.
-     *
-     * kGranularity is ContractionSolution::skKGranularity(): both mappings hand
-     * out their leftover in units of that many iterations, so every range starts
-     * on a multiple of it.
-     */
-    struct StreamKWorkgroupIterRange
-    {
-        size_t start = 0;
-        size_t end   = 0;
-    };
-
-    TENSILELITEHOST_EXPORT StreamKWorkgroupIterRange streamKWorkgroupIterRange(
-        size_t w,
-        size_t tiles,
-        size_t itersPerTile,
-        size_t skGrid,
-        bool   perTileCapable,
-        bool   uniformSummationOrder,
-        size_t kGranularity = 1);
-
-    /**
      * Thrown when a launch requests uniform summation order but the resolved
      * kernel configuration is not row-uniform. A distinct type so the rocblaslt
      * host layer can map it to rocblaslt_status_invalid_value; a generic
@@ -803,156 +623,6 @@ namespace TensileLite
             : std::runtime_error(what)
         {
         }
-    };
-
-    // Snapshot of the StreamK launch-parameter DECISIONS for one
-    // (solution, problem, hardware) triple. Populated by
-    // ContractionSolution::computeStreamKDecisions() and consumed by solve().
-    // Each field's provenance is annotated inline as one of:
-    //   available  = read from the value the launch uses, or from the same real
-    //                helper/param solve() uses, so it reflects the launch exactly.
-    //   recomputed = re-derived here rather than read back from a launched value:
-    //                either by mirroring the kernel-arg packing in makeArgs()
-    //                (skTiles/skSplit/totalItems) or by deriving from other fields.
-    //                Mirrors can drift silently if makeArgs() changes; each such
-    //                field names what it mirrors.
-    // This snapshot is not purely observational: reduction, skGrid and isDynamic are
-    // launch INPUTS -- solve() copies them into StreamKSettings and uses isDynamic as
-    // its dynamic-queue predicate. Only the PRINTING is optional; see
-    // Debug::printStreamKLaunchSummary() (TENSILE_DB bit 0x200000).
-    struct StreamKDecisions
-    {
-        StreamKClusterSchedule clusterSchedule;
-        // --- Mode ---
-        // available: streamK5EffectiveDynamic(), the same helper solve()'s grid path uses
-        // (SK5 resolved to the dynamic SK4 sub-path). Only meaningful for SK5: it stays
-        // false for SK4 even though SK4 is unconditionally dynamic, so ask isDynamic
-        // (below) -- not this -- whether a launch takes the dynamic path.
-        bool effectiveDynamic = false;
-        // recomputed: DynamicWorkQueue assignment, or Hybrid resolved dynamic.
-        // Launch-relevant rather than merely reported: solve() consumes this as the
-        // dynamicQueuePath predicate guarding the work-stealing rejection.
-        bool isDynamic        = false;
-
-        // --- Reduction ---
-        // available: solve() wires this exact value into sk.reduction -- it is the final
-        // (post workspace-DP fallback) reduction the launch uses.
-        origami::reduction_t reduction = origami::reduction_t::none;
-
-        // --- Grid / tiles / split ---
-        // available: problem.getNumTiles(sizeMapping, 1), the same call solve() makes.
-        size_t tiles            = 0;
-        // available: getSKGridImpl out-param -- grid selected by its config/CU/override
-        // logic BEFORE the "reset to tiles" clamps (tree-fixup bounds / ForceDPOnly
-        // cluster multicast / workspace-DP).
-        size_t selectedGrid       = 0;
-        // available: getSKGridImpl return -- AFTER the tree-fixup-bounds fallback and
-        // the ForceDPOnly cluster-multicast clamp, but BEFORE the workspace-DP
-        // fallback in computeStreamKDecisions(). Diagnostic intermediate.
-        size_t skGridPreFallback  = 0;
-        // available: wired from sk.grid, the FINAL grid solve() launches with (after all
-        // fallbacks, in the order they are applied: fixedGrid, treeBounds,
-        // clusterDPMulticast, workspaceDP -- the same four names the report's
-        // "changedBy" ladder uses, which lists them latest-clamp-wins).
-        size_t finalGrid          = 0;
-        // available: the grid solve() initialises sk.grid from. finalGrid and skGrid
-        // always hold the same value -- computeStreamKDecisions() sets both to its final
-        // grid, and solve() writes the launched sk.grid back into both. Both exist
-        // because they are read for different reasons: skGrid is the launch INPUT
-        // solve() consumes, finalGrid is the reported outcome printed against
-        // selectedGrid.
-        size_t skGrid             = 0;
-        // The next three mirror the kernel-arg packing in makeArgs() (search for
-        // "SKTiles"/"skTiles"), evaluated on the FINAL post-fallback grid and
-        // reduction. They are hand-written mirrors: any change to the packing in
-        // makeArgs() must be reflected in computeStreamKDecisions() or the report
-        // silently drifts from the launch.
-        //
-        // recomputed: dynamic path  -> the SKTiles arg (debug override, else 0);
-        //             parallel path -> the split factor, which is what makeArgs packs
-        //                              into the skTiles slot on that path;
-        //             static SK3    -> streamKStaticSplit().skTiles, the stream-k
-        //                              (partial) tile count.
-        size_t skTiles          = 0;
-        // recomputed: dynamic path -> the SKSplit arg after the CeilDivide round-trip;
-        //             parallel path -> grid / tiles;
-        //             static SK3   -> 1 (no k-split; SK3 packs SKItersPerWG instead).
-        size_t skSplit          = 0;
-        // recomputed: work-item count. Dynamic path mirrors the packed TotalItems arg,
-        //             (tiles - skTiles) + skTiles*skSplit. The SK3 ABI has no TotalItems
-        //             arg, so on the parallel and static paths this is reported as
-        //             'tiles' (one work item per output tile) rather than mirroring a
-        //             packed value.
-        size_t totalItems       = 0;
-
-        // --- DP-only ---
-        // The three flags below distinguish the source of a data-parallel-only launch:
-        //   forceDPOnly              -> sizeMapping.isPersistentDataParallel() compile-time param
-        //   streamKDP                -> TENSILE_STREAMK_DATA_PARALLEL debug override
-        //   workspaceDPFallbackFired -> runtime workspace-insufficient (below)
-        // recomputed: OR of the three DP triggers above.
-        bool dpOnly      = false;
-        // available: sizeMapping.isPersistentDataParallel() param.
-        bool forceDPOnly = false;
-        // available: Debug::useStreamKDataParrallel() (TENSILE_STREAMK_DATA_PARALLEL).
-        bool streamKDP   = false;
-
-        // --- Workspace / partials ---
-        // recomputed: skTiles > 0.
-        bool   partialsPresent        = false;
-        // recomputed: requiredWorkspaceBytes > 0.
-        bool   workspaceAllocated     = false;
-        // recomputed: partials(+work-queue) bytes this launch reserves; 0 when no
-        // partials are needed or the workspace-DP fallback fired.
-        //
-        // WARNING: this is NOT ContractionSolution::requiredWorkspaceSize()'s return
-        // value, even though the names are close. requiredWorkspaceSize() is the
-        // separate, caller-facing implementation of the reserve-or-not rule -- it is
-        // what the allocator sizes the workspace buffer from. For generated
-        // kernels, both paths size parallel partial-result storage from the grid,
-        // after streamKReconcileReduction() demotes parallel to tree for split
-        // factors below two. At grid == tiles, the tree path needs no partials
-        // workspace. The parallel query additionally preserves the split-reduction
-        // sizing rules for bias-gradient and amaxD; this snapshot reports the
-        // partials buffer only.
-        //
-        // Reduction selection still differs: this snapshot and
-        // resolveStreamKSettings() force tree for SK4 and SK5-dynamic, while
-        // requiredWorkspaceSize() always asks getSKReduction(). A fixed-grid
-        // override can preserve that difference; see requiredWorkspaceSize().
-        // Sharing the byte formula does not imply identical decisions in every
-        // mode. Changes to any of these three paths must be checked against the
-        // other two, including the allocate-then-launch flow where the queried
-        // size becomes problem.workspaceSize().
-        size_t requiredWorkspaceBytes = 0;
-        // recomputed: partials(+work-queue) bytes wanted, before the fit check against
-        // givenWorkspaceBytes. Non-zero even when the fallback fires, which is what
-        // makes the "wanted vs given" comparison legible in the report.
-        size_t idealWorkspaceBytes    = 0;
-        // available: problem.workspaceSize().
-        size_t givenWorkspaceBytes    = 0;
-        // recomputed: skTiles*skSplit slot count for the dynamic path (informational; does
-        // NOT feed the allocation guard, which is sized by grid).
-        size_t dynamicPartialsSlots   = 0;
-        // available: streamKBakedQueueCount() -- baked per-XCD work-queue count (NUM_XCD),
-        // 0 if unknown.
-        size_t numQueues              = 0;
-
-        // --- Fallbacks that fired (each can change selectedGrid -> finalGrid) ---
-        // recomputed: the workspace-insufficient fallback (idealWorkspaceBytes >
-        // givenWorkspaceBytes -> reduction=tree, grid=tiles). computeStreamKDecisions()
-        // is the sole implementation of this fallback; solve() consumes the result.
-        // Keep the reserve-or-not condition in sync with
-        // ContractionSolution::requiredWorkspaceSize().
-        bool workspaceDPFallbackFired = false;
-        // available: getSKGridImpl out-param (24-bit tree-fixup bounds -> grid=tiles).
-        bool treeBoundsFallbackFired  = false;
-        // DataParallel cluster prefetch clamp: PrefetchAcrossPersistent uses one
-        // cluster per padded tile block so prefetch cannot overwrite a peer's LDS.
-        // Ordinary persistent clusters keep the selected grid in whole clusters.
-        bool clusterDPGridClamped     = false;
-        // available: getSKGridImpl out-param (AMDGPU persistentFixedGrid override applied).
-        bool fixedGridUsed            = false;
     };
 
     /**
@@ -999,8 +669,9 @@ namespace TensileLite
         using Problem             = ContractionProblemGemm;
         using Inputs              = ContractionInputs;
         using GroupedInputs       = ContractionGroupedInputs;
-        using WGMParamsCache      = CacheMap<std::tuple<int32_t, size_t, size_t, size_t>, Problem>;
-        using StaggerUParamsCache = CacheMap<std::tuple<size_t, size_t, size_t>, Problem>;
+        using WGMParamsCache
+            = InsertOnceCache<std::tuple<int32_t, size_t, size_t, size_t>, Problem>;
+        using StaggerUParamsCache = InsertOnceCache<std::tuple<size_t, size_t, size_t>, Problem>;
 
         /**
          * Indicate a solution's matching type
@@ -1011,6 +682,7 @@ namespace TensileLite
             Range, // RangeMatching
             FreeSize, // FreeSizeMatching
             GridBased, // GridBasedMatching
+            MeshBased, // MeshBasedMatching
             Prediction, // PredictionMatching
             Experimental, // ExperimentalStreamK or ExperimentalMLP
             Others, // Default
@@ -1214,7 +886,7 @@ namespace TensileLite
         // unit tests. Existing helpers are reused where
         // possible (streamK5EffectiveDynamic, getSKReduction, getSKGridImpl,
         // partialTileSize); the makeArgs packing quantities are re-derived. Each
-        // StreamKDecisions field documents its own provenance (available vs
+        // Decisions field documents its own provenance (available vs
         // recomputed). Has no effect on the launch beyond producing these values, and
         // never mutates solution or problem state. For a non-StreamK solution
         // (!sizeMapping.isStreamK()) it returns immediately with a default-initialised
@@ -1239,15 +911,15 @@ namespace TensileLite
         void printPersistentLaunchSummary(std::ostream& os, Problem const& problem,
                                           PersistentLaunchSettings const& launch) const;
 
-        StreamKDecisions computeStreamKDecisions(Problem const&  problem,
-                                                 Hardware const& hardware) const;
+        StreamK::Decisions computeStreamKDecisions(Problem const&  problem,
+                                                   Hardware const& hardware) const;
 
         // Print a one-line StreamK launch summary of the given decisions. Called
         // from solve() only when Debug::printStreamKLaunchSummary() is set;
         // exposed for tests.
-        void printStreamKLaunchSummary(std::ostream&           os,
-                                       Problem const&          problem,
-                                       StreamKDecisions const& decisions) const;
+        void printStreamKLaunchSummary(std::ostream&              os,
+                                       Problem const&             problem,
+                                       StreamK::Decisions const&  decisions) const;
 
         static float computeGranularity(float x);
 
@@ -1342,6 +1014,13 @@ namespace TensileLite
                             KA&                      args,
                             PersistentLaunchSettings const&   launch,
                             size_t                   resolvedGlobalAccumulation) const;
+
+        // calculateInternalArgs() shifts the stagger group (StaggerU in bits [7:0], the stride
+        // shift in [12:8], the mapping in [15:13]) into internalArg0 bits [31:16], so StaggerU is
+        // internalArg0 bits [23:16]. The kernel decodes the same bits in
+        // tensilelite/tensilelite/KernelWriterAssembly.py.
+        static constexpr uint32_t kInternalArg0StaggerUShift = 16;
+        static constexpr uint32_t kInternalArg0StaggerUMask  = 0xFF;
 
         template <bool T_Debug>
         void calculateInternalArgs(uint32_t&                           internalArg0,
@@ -1519,6 +1198,7 @@ namespace TensileLite
             bool             useInitialStridesCD       = false;
             bool             stridedBatched            = true;
             bool             outputAmaxD               = false;
+            bool             outputPeerD               = false;
             bool             groupedGemm               = false;
             ActivationType   activationType            = ActivationType::None;
             int              activationArgLength       = 0;
@@ -1533,7 +1213,7 @@ namespace TensileLite
             bool supportDeviceUserArguments = false;
             bool swizzleTensorA             = false;
             bool swizzleTensorB             = false;
-            bool fusedGemmA2A               = false;
+            FusedA2A fusedA2A                   = FusedA2A::Disabled;
             int  metadataLayout             = 0;
             // w4a16 group size, zero-point and encoding come from predicates and the problem;
             // a runtime-group kernel matches several group sizes.
@@ -1622,11 +1302,6 @@ namespace TensileLite
             return scaleSwizzleK / sizeMapping.depthU;
         }
 
-        uint32_t magicNumberAlg1(uint32_t x, uint32_t* magicShift) const;
-        uint32_t magicNumberAlg2(uint32_t x, uint32_t* magicShift) const;
-        uint32_t magicNumber(int magicDivAlg, uint32_t x, uint32_t* magicShift) const;
-        uint32_t smallMagicNumber(uint32_t x) const;
-
         std::tuple<int32_t, size_t, size_t, size_t> calculateAutoWGM(Problem const&  problem,
                                                                      Hardware const* hardware,
                                                                      uint32_t        skgrid) const;
@@ -1634,6 +1309,12 @@ namespace TensileLite
                                                                   Hardware const* hardware,
                                                                   uint32_t        skgrid,
                                                                   int32_t         autoWGM) const;
+        // The one StaggerU a grouped launch packs. A group with any problem under
+        // uniform summation order packs StaggerU off.
+        std::tuple<size_t, size_t, size_t>
+            calculateGroupedAutoStaggerU(std::vector<Problem> const& problems,
+                                         Hardware const*             hardware,
+                                         int32_t                     autoWGM) const;
         uint32_t calculateAutoGSU(Problem const& problem, Hardware const* hardware) const;
 
         double calculateDimensionM(Problem const&  problem) const;

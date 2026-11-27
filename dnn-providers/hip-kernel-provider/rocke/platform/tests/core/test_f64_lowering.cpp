@@ -6,7 +6,8 @@
  * tests/core/test_amdgpu_lowering_ops.py, and the C++ builder side of
  * tests/core/test_f64_conversions.py (the explicit f32 <-> f64 conversions)
  * and tests/core/test_zero_vec_and_lds_element_types.py (zero_vec of f64,
- * i16 and u8, LDS loads of i16).
+ * i16 and u8, LDS loads of i16, LDS loads of the 8-bit floats at their byte
+ * width, and the refusal of an LDS tile with no whole-byte width).
  */
 
 #include "rocke/error.hpp"
@@ -287,6 +288,89 @@ static int test_zero_vec_and_lds_load_admit_f64_i16_and_u8()
     return 0;
 }
 
+/* An <n x i8> LDS load of fp8 or bf8 claims only n bytes of alignment: a claim
+ * of 2n (the 16-bit width) is more than an address at an odd multiple of n
+ * guarantees, which LLVM treats as undefined behaviour. Mirrors
+ * test_lds_loads_of_8_bit_floats_claim_their_byte_width. */
+static int test_lds_loads_of_8_bit_floats_claim_their_byte_width()
+{
+    const rocke_type_t* const byte_floats[] = {rocke_fp8e4m3(), rocke_bf8e5m2()};
+    const int widths[] = {1, 2, 4, 8, 16};
+    for(const rocke_type_t* dtype : byte_floats)
+    {
+        for(int n : widths)
+        {
+            rocke_ir_builder_t b;
+            CHECK(rocke_ir_builder_init(&b, "lds_load_byte_float") == ROCKE_OK);
+            rocke_value_t* dst
+                = rocke_b_param(&b, "DST", rocke_ptr_type(&b, dtype, "global"), NULL);
+            rocke_value_t* tid = rocke_b_thread_id_x(&b);
+            const int shape[] = {64 * n};
+            rocke_value_t* smem = rocke_b_smem_alloc(&b, dtype, shape, 1, "bytes");
+            rocke_value_t* const at[] = {rocke_b_mul(&b, tid, rocke_b_const_i32(&b, n))};
+            rocke_value_t* loaded = rocke_b_smem_load_vN(&b, smem, at, 1, dtype, n);
+            rocke_b_global_store(&b, dst, tid, rocke_b_vec_extract(&b, loaded, 0), 1);
+            rocke_b_ret(&b);
+            CHECK(rocke_ir_builder_ok(&b));
+
+            char* llvm_text = NULL;
+            CHECK(
+                rocke_lower_kernel_to_llvm(b.kernel, ROCKE_LLVM_FLAVOR_LLVM20, "gfx950", &llvm_text)
+                == ROCKE_OK);
+            const std::string claim = ", align " + std::to_string(n);
+            const std::string text(llvm_text);
+            int lds_loads = 0;
+            for(size_t start = 0; start < text.size();)
+            {
+                size_t end = text.find('\n', start);
+                if(end == std::string::npos)
+                    end = text.size();
+                const std::string line = text.substr(start, end - start);
+                if(line.find(" = load ") != std::string::npos
+                   && line.find("ptr addrspace(3)") != std::string::npos)
+                {
+                    ++lds_loads;
+                    CHECK(line.size() > claim.size()
+                          && line.compare(line.size() - claim.size(), claim.size(), claim) == 0);
+                }
+                start = end + 1;
+            }
+            CHECK(lds_loads > 0);
+            std::free(llvm_text);
+            rocke_ir_builder_free(&b);
+        }
+    }
+    return 0;
+}
+
+/* An i1 element has no whole-byte width, so neither the tile's LDS segment
+ * size nor the store's alignment exists; the lowering refuses rather than
+ * assume a width. Mirrors test_an_lds_tile_without_a_byte_width_is_refused. */
+static int test_lds_tile_without_a_byte_width_is_refused()
+{
+    rocke_ir_builder_t b;
+    CHECK(rocke_ir_builder_init(&b, "lds_i1") == ROCKE_OK);
+    rocke_value_t* tid = rocke_b_thread_id_x(&b);
+    const int shape[] = {64};
+    rocke_value_t* smem = rocke_b_smem_alloc(&b, rocke_i1(), shape, 1, "flags");
+    rocke_value_t* const at_tid[] = {tid};
+    rocke_b_smem_store_vN(
+        &b, smem, at_tid, 1, rocke_b_cmp_lt(&b, tid, rocke_b_const_i32(&b, 3)), 1);
+    rocke_b_ret(&b);
+    CHECK(rocke_ir_builder_ok(&b));
+
+    char err[ROCKE_ERR_MSG_CAP];
+    char* llvm_text = NULL;
+    CHECK(rocke_lower_kernel_to_llvm_ex(
+              b.kernel, ROCKE_LLVM_FLAVOR_LLVM20, "gfx942", &llvm_text, err, ROCKE_ERR_MSG_CAP)
+          == ROCKE_ERR_VALUE);
+    CHECK(llvm_text == NULL);
+    CHECK(std::strcmp(err, "type_bytes failed - type=i1 (1 bits), expected a whole number of bytes")
+          == 0);
+    rocke_ir_builder_free(&b);
+    return 0;
+}
+
 /* Number of scalar f64 global loads and stores in `ll`, or -1 if any of them
  * claims less than the 8-byte element alignment. */
 static int count_aligned_scalar_f64_global_accesses(const char* ll)
@@ -429,6 +513,8 @@ int main()
        || test_conversions_lower_to_one_instruction_each()
        || test_conversions_reject_the_wrong_source_type()
        || test_zero_vec_and_lds_load_admit_f64_i16_and_u8()
+       || test_lds_loads_of_8_bit_floats_claim_their_byte_width()
+       || test_lds_tile_without_a_byte_width_is_refused()
        || test_scalar_global_accesses_are_8_byte_aligned() || test_mean_divides_by_n()
        || test_lds_allocation_is_8_byte_aligned())
     {

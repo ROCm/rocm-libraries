@@ -168,6 +168,13 @@ struct Arguments
     // bytes
     uint8_t devices;
     uint8_t a2a_world;
+    // Run one GEMM as slices on this many devices (hipblaslt_experimental::PartitionedGemm); 1 = off.
+    uint8_t partitions;
+    // Dimension the slices split: M, N or B (the batch).
+    char split_dim;
+    // Placement of A, B, C, D with --partitions, one letter each: S = shared (one copy in the
+    // device 0 buffers), R = replicated (a copy per partition device).
+    char part_place[8];
 
     int8_t norm_check;
     int8_t allclose_check;
@@ -239,6 +246,10 @@ struct Arguments
     float   skip_slow_solution_ratio;
     // Uniform-order request for the client handle: -1=unspecified, 0=off, 1=on.
     int32_t uniform_summation_order;
+    // Directions in which the inputs are made uniform and D is checked to be bitwise uniform.
+    hipblaslt_uniform_check uniform_check;
+    // Self-test of uniform_check: flips one bit of one element of D for the check, which must fail
+    int8_t uniform_check_inject;
     // tuning
     int32_t gsu_vector[MAX_SUPPORTED_NUM_PROBLEMS]; // This is for client
     int32_t wgm_vector[MAX_SUPPORTED_NUM_PROBLEMS]; // This is for client
@@ -324,6 +335,9 @@ struct Arguments
     OPER(streams) SEP                \
     OPER(devices) SEP                \
     OPER(a2a_world) SEP              \
+    OPER(partitions) SEP             \
+    OPER(split_dim) SEP              \
+    OPER(part_place) SEP             \
     OPER(norm_check) SEP             \
     OPER(allclose_check) SEP         \
     OPER(unit_check) SEP             \
@@ -377,6 +391,8 @@ struct Arguments
     OPER(use_gpu_timer) SEP          \
     OPER(skip_slow_solution_ratio) SEP\
     OPER(uniform_summation_order) SEP\
+    OPER(uniform_check) SEP          \
+    OPER(uniform_check_inject) SEP   \
     OPER(gsu_vector) SEP             \
     OPER(wgm_vector) SEP             \
     OPER(print_solution_found) SEP   \
@@ -1070,3 +1086,7 @@ namespace ArgumentsHelper
 
 // Validate explicit operand compute types and derive unset ones from compute_type.
 std::tuple<hipDataType, hipDataType> derive_unset_compute_input_type(const Arguments& arg);
+
+// Derive an unset bias type using the client defaults. Validate the resulting
+// type only when bias_vector is enabled.
+hipDataType derive_unset_bias_type(const Arguments& arg);

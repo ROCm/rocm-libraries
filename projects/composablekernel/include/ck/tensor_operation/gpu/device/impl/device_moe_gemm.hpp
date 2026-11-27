@@ -109,6 +109,7 @@ struct DeviceMoeGemm : public DeviceGemmMultipleDSplitKBPreShuffle<ALayout,
     static constexpr auto NXdlPerWave64    = WarpTileConfig64.At(3);
     static constexpr auto NXdlPerWave32    = WarpTileConfig32.At(3);
     static constexpr index_t NumDTensor    = DsDataType::Size();
+    static constexpr bool IsGateUp         = (ActivationOP != Activation::relu2);
     template <typename WarpTileConfig>
     using GridwiseGemmBase =
         GridwiseMoeGemm<ALayout,
@@ -160,6 +161,7 @@ struct DeviceMoeGemm : public DeviceGemmMultipleDSplitKBPreShuffle<ALayout,
                         ActivationOP,
                         NSwizzle,
                         IsInputGemm,
+                        IsGateUp,
                         MulRoutedWeight,
                         PerTokenQuant,
                         IndexType,
@@ -459,15 +461,6 @@ struct DeviceMoeGemm : public DeviceGemmMultipleDSplitKBPreShuffle<ALayout,
            (arg.K % KPerBlock != 0 && !GridwiseGemm64::PadK))
         {
             return false;
-        }
-        if constexpr(GridwiseGemm64::PadN && PerTokenQuant && NumDTensor > 1)
-        {
-            // Per-channel B scales are indexed with the logical N; padded columns would read
-            // past them.
-            if(arg.N % NPerBlock != 0 && arg.p_ds_grid[Number<1>{}] != nullptr)
-            {
-                return false;
-            }
         }
         if constexpr(GridwiseGemm64::PadN || GridwiseGemm64::PadK)
         {

@@ -297,6 +297,7 @@ try
     std::string scale_type;
     std::string bias_type;
     std::string bias_source;
+    std::string uniform_check;
     std::string initialization;
     std::string filter;
     std::string activation_type;
@@ -316,6 +317,10 @@ try
     int         api_method      = 0;
     std::string api_method_str  = "";
     std::string algo_method_str = "";
+
+    int         partitions_opt = 1;
+    std::string split_dim_str  = "N";
+    std::string part_place_str[4] = {"shared", "shared", "shared", "shared"};
 
     bool verify = 0;
     bool ulp    = 0;
@@ -454,7 +459,7 @@ try
          value<std::string>(&initialization)->default_value("hpl"),
          "Initialize matrix data."
          "Options: rand_int, trig_float, hpl(floating), special, zero, norm_dist, uniform_01, integer_exact, "
-         "fp16_accumulator_probe")
+         "fp16_accumulator_probe, maf1_0, maf2_0, maf2_0_unit_scale")
 
         ("transA",
          value<char>(&arg.transA)->default_value('N'),
@@ -506,6 +511,21 @@ try
         ("ulp",
          value<bool>(&ulp)->default_value(false),
          "Report ULP (unit in the last place) error vs CPU; reports max and average. Implies --verify.")
+
+        ("uniform_check",
+         value<std::string>(&uniform_check)->default_value("none"),
+         "none, row or column. row makes the inputs uniform along M (every row of op(A), "
+         "C, E, and the bias and scale vectors along M, equal to row 0) and checks after timing "
+         "that every row of D is bitwise equal to row 0, adding the row_uniform (pass, FAIL or "
+         "skip), row_uniform_bad_cols and row_uniform_first_row result columns. column does the "
+         "same along N (every column of op(B), C and E equal to column 0 and the scaleB vector "
+         "constant; every column of D equal to column 0) and adds col_uniform, "
+         "col_uniform_bad_rows and col_uniform_first_col; a row-major PyTorch X@W reaches "
+         "hipBLASLt as W^T X^T, so equal rows of X are equal columns of op(B) and its output rows "
+         "are columns of D. Check row and column in separate runs. A failure is reported on stderr "
+         "and does not stop the run. With uniform summation order on, it counts as a failed check "
+         "for --verify_strict. Inputs that sum exactly in any order (rand_int, integer_exact, "
+         "integer types, ...) get a warning, since a pass shows little. Also a YAML key.")
 
         ("iters,i",
          value<int32_t>(&arg.iters)->default_value(tuningEnv? 1000 : 10),
@@ -708,6 +728,41 @@ try
          "grouped_gemm_c: with --grouped_gemm, grouped matrix layouts and hipblasLtMatmul instead of the C++ GroupedGemm class. "
          "Options: c, mix, cpp, grouped_gemm_c.")
 
+        ("partitions",
+         value<int>(&partitions_opt)->default_value(1),
+         "Run each GEMM as slices on this many partitions, one stream each, with "
+         "hipblaslt_experimental::PartitionedGemm. The devices are the DPX group of the current "
+         "device when it is in one (the current device is partition 0), otherwise the current device "
+         "once per partition (SPX: correct results, only for checking them, not for speed). The time "
+         "is the full span, first launch to last partition done. Data placement follows "
+         "--part_place_a/b/c/d: shared (one copy in the first partition's buffers, which the other "
+         "partitions read over peer access) or replicated (a copy per partition). Needs plain GEMM "
+         "and the heuristic solution selection; 1 = off.")
+
+        ("split_dim",
+         value<std::string>(&split_dim_str)->default_value("N"),
+         "With --partitions: the dimension to split, M, N or B (the batch). The first partitions take "
+         "size/partitions and the last takes the rest.")
+
+        ("part_place_a",
+         value<std::string>(&part_place_str[0])->default_value("shared"),
+         "With --partitions: shared (one copy of A in the first partition's buffer, read by every "
+         "partition over peer access) or replicated (a copy on each partition device).")
+
+        ("part_place_b",
+         value<std::string>(&part_place_str[1])->default_value("shared"),
+         "With --partitions: shared or replicated B, as --part_place_a.")
+
+        ("part_place_c",
+         value<std::string>(&part_place_str[2])->default_value("shared"),
+         "With --partitions: shared or replicated C, as --part_place_a.")
+
+        ("part_place_d",
+         value<std::string>(&part_place_str[3])->default_value("shared"),
+         "With --partitions: shared (every partition writes its slice into the device 0 D) or "
+         "replicated (a D on each partition device; the slices are gathered into the device 0 D "
+         "after a verified run, outside the timing).")
+
         ("print_kernel_info",
          value<bool>(&arg.print_kernel_info)->default_value(false),
          "Print solution, kernel name and solution index.")
@@ -880,6 +935,31 @@ try
         hipblaslt_cerr << "Invalid api method: " << api_method_str << std::endl;
         return 1;
     }
+
+    if(partitions_opt < 1 || partitions_opt > 255)
+    {
+        hipblaslt_cerr << "Invalid --partitions: " << partitions_opt << std::endl;
+        return 1;
+    }
+    if(split_dim_str.size() != 1
+       || std::string("MNBmnb").find(split_dim_str[0]) == std::string::npos)
+    {
+        hipblaslt_cerr << "Invalid --split_dim: " << split_dim_str << " (M, N or B)" << std::endl;
+        return 1;
+    }
+    for(int t = 0; t < 4; t++)
+    {
+        if(part_place_str[t] != "shared" && part_place_str[t] != "replicated")
+        {
+            hipblaslt_cerr << "Invalid --part_place_" << char('a' + t) << ": " << part_place_str[t]
+                           << " (shared or replicated)" << std::endl;
+            return 1;
+        }
+        arg.part_place[t] = part_place_str[t] == "replicated" ? 'R' : 'S';
+    }
+    arg.part_place[4] = 0;
+    arg.partitions = static_cast<uint8_t>(partitions_opt);
+    arg.split_dim     = char(std::toupper(static_cast<unsigned char>(split_dim_str[0])));
 
     if(algo_method_str.compare("heuristic") == 0)
     {
@@ -1172,6 +1252,10 @@ try
         throw std::invalid_argument("Invalid value for --activation_type " + activation_type);
 
     arg.bias_source = string_to_hipblaslt_bias_source(bias_source);
+
+    arg.uniform_check = string_to_hipblaslt_uniform_check(uniform_check);
+    if(arg.uniform_check == static_cast<hipblaslt_uniform_check>(-1))
+        throw std::invalid_argument("Invalid value for --uniform_check " + uniform_check);
 
     if(arg.bias_source == hipblaslt_bias_source::a && arg.bias_stride < arg.M[0] && arg.batch_mode == 0)
         throw std::invalid_argument("Invalid value for --bias_stride. Bias stride should be >= M when bias source is A and batch_mode is 0.");

@@ -83,6 +83,7 @@ def getRequiredParametersMin() -> set:
         'LdsPadMXSB',
         'LDSSegmentBRotate',
         'LDSSegmentInterleave',
+        'WaveTileContiguousA',
         'LDSTrInst',
         'LocalReadVectorWidth',
         'LocalWritePerMfma',
@@ -184,6 +185,7 @@ def getRequiredParametersMin() -> set:
         'MinGRIncPerMfma',
         'UsePLRPack',
         'UseSubtileImpl',
+        'StoreCachelineAlign',
         'ClusterDim',
         'ClusterAIDMapping',
     })

@@ -4,10 +4,26 @@
 #include <hipdnn-gpu-ref/detail/GpuRefKernelCompiler.hpp>
 
 #include "GpuRefKernelSources.hpp"
+#include <algorithm>
+#include <cstdlib>
+#include <filesystem>
 #include <hip/hiprtc.h>
 #include <hipdnn-gpu-ref/detail/GpuRefHipError.hpp>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
+
+#if defined(_WIN32)
+#include <system_error>
+#include <windows.h>
+
+// Tool Help declarations require the types defined by windows.h.
+#include <tlhelp32.h>
+#else
+#include <dlfcn.h>
+#endif
 
 namespace hipdnn_gpu_ref::detail
 {
@@ -21,6 +37,125 @@ void throwOnRtcError(hiprtcResult err, const char* call)
     {
         throw std::runtime_error(std::string(call) + " failed: " + hiprtcGetErrorString(err));
     }
+}
+
+bool hasLowPrecisionHeaders(const std::filesystem::path& includeDir)
+{
+    return std::filesystem::exists(includeDir / "hip" / "hip_fp4.h")
+           && std::filesystem::exists(includeDir / "hip" / "hip_fp6.h")
+           && std::filesystem::exists(includeDir / "hip" / "hip_fp8.h");
+}
+
+std::optional<std::filesystem::path> environmentPath(const char* variable)
+{
+#if defined(_WIN32)
+    const auto value = hipdnn_data_sdk::utilities::getEnv(variable);
+    if(value.empty())
+    {
+        return std::nullopt;
+    }
+    return std::filesystem::path(value);
+#else
+    if(const char* value = std::getenv(variable))
+    {
+        return std::filesystem::path(value);
+    }
+    return std::nullopt;
+#endif
+}
+
+std::filesystem::path hipIncludeDir()
+{
+    for(const char* variable : {"HIP_PATH", "ROCM_PATH"})
+    {
+        if(const auto prefix = environmentPath(variable))
+        {
+            auto includeDir = *prefix / "include";
+            if(hasLowPrecisionHeaders(includeDir))
+            {
+                return includeDir;
+            }
+        }
+    }
+
+#if defined(_WIN32)
+    std::unique_ptr<void, decltype(&CloseHandle)> snapshot(nullptr, &CloseHandle);
+    constexpr int MAX_SNAPSHOT_ATTEMPTS = 10;
+    for(int attempt = 0; attempt < MAX_SNAPSHOT_ATTEMPTS; ++attempt)
+    {
+        const auto snapshotHandle = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, 0);
+        if(snapshotHandle != INVALID_HANDLE_VALUE)
+        {
+            snapshot.reset(snapshotHandle);
+            break;
+        }
+        const auto error = GetLastError();
+        // The module list can change while the snapshot is being captured.
+        if(error == ERROR_BAD_LENGTH && attempt + 1 < MAX_SNAPSHOT_ATTEMPTS)
+        {
+            continue;
+        }
+        throw std::system_error(static_cast<int>(error),
+                                std::system_category(),
+                                "Failed to enumerate loaded modules for hiprtc");
+    }
+    MODULEENTRY32W entry{};
+    entry.dwSize = static_cast<DWORD>(sizeof(entry));
+    if(Module32FirstW(snapshot.get(), &entry) == 0)
+    {
+        throw std::system_error(static_cast<int>(GetLastError()),
+                                std::system_category(),
+                                "Failed to read loaded modules for hiprtc");
+    }
+
+    // hiprtc.h does not use dllimport, so &hiprtcCompileProgram can point at an
+    // import thunk in this executable rather than into the hiprtc DLL.
+    HMODULE module = nullptr;
+    do
+    {
+        if(GetProcAddress(entry.hModule, "hiprtcCompileProgram") != nullptr)
+        {
+            if(module != nullptr)
+            {
+                throw std::runtime_error("Multiple loaded modules export hiprtcCompileProgram; "
+                                         "unable to locate HIP headers.");
+            }
+            module = entry.hModule;
+        }
+    } while(Module32NextW(snapshot.get(), &entry) != 0);
+    if(const auto error = GetLastError(); error != ERROR_NO_MORE_FILES)
+    {
+        throw std::system_error(static_cast<int>(error),
+                                std::system_category(),
+                                "Failed to finish enumerating loaded modules for hiprtc");
+    }
+    if(module == nullptr)
+    {
+        throw std::runtime_error("No loaded module exports hiprtcCompileProgram.");
+    }
+
+    auto includeDir
+        = hipdnn_data_sdk::utilities::getLoadedLibraryOrigin(module).parent_path() / "include";
+    if(hasLowPrecisionHeaders(includeDir))
+    {
+        return includeDir;
+    }
+#else
+    Dl_info libraryInfo{};
+    if(dladdr(reinterpret_cast<const void*>(&hiprtcCompileProgram), &libraryInfo) != 0
+       && libraryInfo.dli_fname != nullptr)
+    {
+        auto includeDir
+            = std::filesystem::path(libraryInfo.dli_fname).parent_path().parent_path() / "include";
+        if(hasLowPrecisionHeaders(includeDir))
+        {
+            return includeDir;
+        }
+    }
+#endif
+
+    throw std::runtime_error(
+        "Unable to locate HIP FP4/FP6/FP8 headers next to hiprtc or via HIP_PATH/ROCM_PATH.");
 }
 
 } // namespace
@@ -53,6 +188,12 @@ CompiledKernel::CompiledKernel(const std::string& sourceName,
         headersData.emplace_back(includeStrings.back().c_str());
     }
 
+    const auto includeOption
+        = std::find(compileDefines.begin(), compileDefines.end(), "-DGPU_REF_USE_HIP_MX")
+                  != compileDefines.end()
+              ? std::make_optional(std::string("-I") + hipIncludeDir().string())
+              : std::nullopt;
+
     // Create program
     hiprtcProgram prog;
     GPU_REF_RTC_CHECK(hiprtcCreateProgram(&prog,
@@ -62,12 +203,15 @@ CompiledKernel::CompiledKernel(const std::string& sourceName,
                                           headersData.data(),
                                           includeNames.data()));
 
-    // Build compile options from defines vector
     std::vector<const char*> optPtrs;
-    optPtrs.reserve(compileDefines.size());
-    for(const auto& def : compileDefines)
+    optPtrs.reserve(compileDefines.size() + 1);
+    for(const auto& define : compileDefines)
     {
-        optPtrs.push_back(def.c_str());
+        optPtrs.push_back(define.c_str());
+    }
+    if(includeOption)
+    {
+        optPtrs.push_back(includeOption->c_str());
     }
 
     auto result = hiprtcCompileProgram(prog, static_cast<int>(optPtrs.size()), optPtrs.data());

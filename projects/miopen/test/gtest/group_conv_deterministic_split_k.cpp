@@ -448,62 +448,62 @@ TEST_P(GPU_GroupConv3D_Deterministic_WRW_FP16, DeterministicTest) { this->RunTes
 TEST_P(GPU_GroupConv3D_Deterministic_WRW_BFP16, DeterministicTest) { this->RunTest(); };
 
 // Test instantiations
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_GroupConv2D_Deterministic_FWD_FP32,
                          testing::ValuesIn(GetDeterministicFwdTestConfigs2D()));
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_GroupConv2D_Deterministic_FWD_FP16,
                          testing::ValuesIn(GetDeterministicFwdTestConfigs2D()));
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_GroupConv2D_Deterministic_FWD_BFP16,
                          testing::ValuesIn(GetDeterministicFwdTestConfigs2D()));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_GroupConv3D_Deterministic_FWD_FP32,
                          testing::ValuesIn(GetDeterministicTestConfigs3D()));
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_GroupConv3D_Deterministic_FWD_FP16,
                          testing::ValuesIn(GetDeterministicTestConfigs3D()));
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_GroupConv3D_Deterministic_FWD_BFP16,
                          testing::ValuesIn(GetDeterministicTestConfigs3D()));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_GroupConv3D_Deterministic_BWD_FP32,
                          testing::ValuesIn(GetDeterministicTestConfigs3D()));
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_GroupConv3D_Deterministic_BWD_FP16,
                          testing::ValuesIn(GetDeterministicTestConfigs3D()));
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_GroupConv3D_Deterministic_BWD_BFP16,
                          testing::ValuesIn(GetDeterministicTestConfigs3D()));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_GroupConv2D_Deterministic_BWD_FP32,
                          testing::ValuesIn(GetDeterministicTestConfigs2D()));
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_GroupConv2D_Deterministic_BWD_FP16,
                          testing::ValuesIn(GetDeterministicTestConfigs2D()));
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_GroupConv2D_Deterministic_BWD_BFP16,
                          testing::ValuesIn(GetDeterministicTestConfigs2D()));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_GroupConv2D_Deterministic_WRW_FP32,
                          testing::ValuesIn(GetDeterministicTestConfigs2D()));
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_GroupConv2D_Deterministic_WRW_FP16,
                          testing::ValuesIn(GetDeterministicTestConfigs2D()));
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_GroupConv2D_Deterministic_WRW_BFP16,
                          testing::ValuesIn(GetDeterministicTestConfigs2D()));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_GroupConv3D_Deterministic_WRW_FP32,
                          testing::ValuesIn(GetDeterministicTestConfigs3D()));
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_GroupConv3D_Deterministic_WRW_FP16,
                          testing::ValuesIn(GetDeterministicTestConfigs3D()));
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_GroupConv3D_Deterministic_WRW_BFP16,
                          testing::ValuesIn(GetDeterministicTestConfigs3D()));

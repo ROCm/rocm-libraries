@@ -11,6 +11,7 @@ add_executable(
     main.cpp
     IntegrationBackendDescriptor.cpp
     IntegrationBackendExecuteApi.cpp
+    IntegrationConvDgradHugeStride.cpp
     IntegrationConvOperationDescriptorApi.cpp
     IntegrationGraphDescriptorApi.cpp
     IntegrationEngineApi.cpp
@@ -18,11 +19,13 @@ add_executable(
     IntegrationEngineHeuristicApi.cpp
     IntegrationExecutionPlanApi.cpp
     IntegrationGetLastErrorString.cpp
+    IntegrationGlobalDescriptorDestroyedAtExit.cpp
     IntegrationHandleApi.cpp
     IntegrationKnobsApi.cpp
     IntegrationLoggingPipeline.cpp
     IntegrationPluginLoading.cpp
     IntegrationPluginLogLevel.cpp
+    IntegrationPluginReloadHandleDestroyedAtExit.cpp
     IntegrationSetPluginPathsExt.cpp
     IntegrationSetPluginUnloadingModeExt.cpp
     IntegrationTensorDescriptorApi.cpp

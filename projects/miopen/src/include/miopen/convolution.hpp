@@ -94,12 +94,10 @@ struct ConvolutionAttribute
 
     struct FP8RoundingMode
     {
-        inline uint32_t InitSeed()
+        static uint32_t InitSeed()
         {
-            std::random_device rd;
-            std::mt19937 gen(rd());
-            std::uniform_int_distribution<uint32_t> distribution(0, 0xFFFFFFFF);
-            return distribution(gen);
+            thread_local std::mt19937 gen{std::random_device{}()};
+            return std::uniform_int_distribution<uint32_t>{}(gen);
         }
         miopenF8RoundingMode_t rounding_mode = miopenF8RoundingModeStochastic;
         uint32_t seed                        = InitSeed();

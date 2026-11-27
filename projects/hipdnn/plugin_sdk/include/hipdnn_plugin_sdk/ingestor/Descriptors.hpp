@@ -199,7 +199,7 @@ inline bool operator!=(const MetadataField& lhs, const MetadataField& rhs)
 /// read fields as `$kernel.<field>`.
 struct MetadataSchema
 {
-    DescriptorId id;
+    DescriptorId id{};
     std::string name;
     std::vector<MetadataField> fields;
     /// Authored semantics; independent of the JSON file-format version.
@@ -238,6 +238,7 @@ enum class UhdAdapter
     TABLE, ///< Bucketed lookup table shipped as a data artifact.
     CUSTOM_LIBRARY, ///< An author-supplied shared library, loaded and called by symbol (§7.3).
     LINEAR_DATA, ///< Per-config linear ranker (log slowdown vs the best), a data artifact.
+    MLP_DATA, ///< Per-engine MLP ensemble estimating log(metric), a data artifact.
 };
 
 /// What a UHD's score measures, and whether it is comparable across engines (RFC 0019
@@ -266,7 +267,7 @@ inline bool operator!=(const UhdScore& lhs, const UhdScore& rhs)
 /// A semantic dependency, independent of the descriptor file-format version.
 struct DescriptorDependency
 {
-    DescriptorId id;
+    DescriptorId id{};
     hipdnn_data_sdk::utilities::Version revision{1, 0, 0};
 };
 
@@ -330,7 +331,7 @@ inline bool operator!=(const HeuristicProvenance& lhs, const HeuristicProvenance
 /// compare equal.
 struct HeuristicDescriptor
 {
-    DescriptorId id;
+    DescriptorId id{};
     std::string name;
     UhdAdapter adapter = UhdAdapter::STATIC_ORDER;
 
@@ -354,7 +355,7 @@ struct HeuristicDescriptor
 
     /// NATIVE: the symbol the engine registered its scorer under.
     std::string nativeSymbol;
-    /// TREE_DATA / TABLE / LINEAR_DATA / CUSTOM_LIBRARY: the artifact path the adapter opens.
+    /// TREE_DATA / TABLE / LINEAR_DATA / MLP_DATA / CUSTOM_LIBRARY: the artifact path it opens.
     /// The loader stores it resolved and absolute; a descriptor built in memory may give it
     /// relative to @ref baseDir. Derived from the file's location; not part of operator==.
     std::string modelArtifactPath;
@@ -384,6 +385,13 @@ struct HeuristicDescriptor
     /// measured on, for engines with no UED. Empty unless authored. A mismatch is refused, not
     /// warned about, because a stale L1 estimate changes which engine is selected.
     std::string trainedAgainstSelectorRevision;
+    /// RFC 0019 §4.1 `trained_against.codegen_revision` (UHD 1.2): the code objects this model
+    /// was measured on. Empty unless recorded. A mismatch is warned about, not refused: it moves
+    /// when only the compiler changes, which within one LLVM flavor leaves the selector revision
+    /// alone for a code object that carries a packer `identity` (rocKE). A prebuilt (FlyDSL) or HIP-compiled code
+    /// object enters the selector revision by its `sha256`: regenerating a prebuilt one moves
+    /// both, and a HIP-compiled one moves both on every compiler change.
+    std::string trainedAgainstCodegenRevision;
     /// The role-map entry that resolved this model: backfilled by
     /// DescriptorLoader::resolveRole from the owning UED, never authored in the UHD
     /// (RFC 0019 §3.1). Empty for a model no role map has resolved yet.
@@ -411,6 +419,7 @@ inline bool operator==(const HeuristicDescriptor& lhs, const HeuristicDescriptor
                     lhs.customLibrarySymbol,
                     lhs.trainedAgainst,
                     lhs.trainedAgainstSelectorRevision,
+                    lhs.trainedAgainstCodegenRevision,
                     lhs.trainedAgainstJson)
            == std::tie(rhs.id,
                        rhs.name,
@@ -426,6 +435,7 @@ inline bool operator==(const HeuristicDescriptor& lhs, const HeuristicDescriptor
                        rhs.customLibrarySymbol,
                        rhs.trainedAgainst,
                        rhs.trainedAgainstSelectorRevision,
+                       rhs.trainedAgainstCodegenRevision,
                        rhs.trainedAgainstJson);
 }
 
@@ -440,7 +450,7 @@ struct SlotDescriptor
 {
     /// `^[a-z][a-z0-9_]*$`, unique within the engine, never `global`.
     std::string name;
-    DescriptorId metadataSchemaId;
+    DescriptorId metadataSchemaId{};
     /// The slot's ranker by arch key. Metric-less (RFC 0021 §7).
     std::map<std::string, std::vector<DescriptorId>> sortKernelCatalog;
     std::vector<std::string> knobs;
@@ -464,7 +474,7 @@ inline bool operator!=(const SlotDescriptor& lhs, const SlotDescriptor& rhs)
 /// fills after parsing.
 struct EngineDescriptor
 {
-    DescriptorId id;
+    DescriptorId id{};
     std::string name;
     /// The default catalog ranker for the `default` arch key (see DescriptorSet::heuristic).
     /// nullopt when the engine ships no UHD; selection then falls back to the
@@ -480,7 +490,7 @@ struct EngineDescriptor
     std::map<std::string, std::vector<DescriptorId>> sortKernelCatalog;
     std::map<std::string, std::vector<DescriptorId>> predictEngine;
     std::map<std::string, std::vector<DescriptorId>> predictApplicableKernels;
-    DescriptorId metadataSchemaId;
+    DescriptorId metadataSchemaId{};
     std::vector<std::string> knobs;
     /// `hipdnnBackendBehaviorNote_t` values; int32 so a newer note isn't truncated.
     std::vector<int32_t> behaviorNotes;
@@ -551,7 +561,7 @@ enum class MatchScope
 /// UMD: one applicability check, shared by id across packs.
 struct MatchDescriptor
 {
-    DescriptorId id;
+    DescriptorId id{};
     std::string name;
     MatchScope scope = MatchScope::GRAPH;
     std::string matchSymbol; ///< Resolved through NativeRegistry.
@@ -572,7 +582,7 @@ inline bool operator!=(const MatchDescriptor& lhs, const MatchDescriptor& rhs)
 /// UDD: how to invoke a kernel, shared by every kernel in a pack.
 struct DispatchDescriptor
 {
-    DescriptorId id;
+    DescriptorId id{};
     std::string name;
     std::string dispatchSymbol; ///< Resolved through NativeRegistry.
 };
@@ -707,6 +717,11 @@ struct KernelSource
     /// Empty is a kernel that takes no arguments, which is why the parser rejects the key
     /// being absent rather than reading absence as empty.
     std::vector<KernelArgument> signature;
+    /// KPACK, optional (UKD 1.2): a compiler-independent digest of what the packager handed the
+    /// compiler, for a code object it compiled from rocKE IR. It moves when the kernel's code
+    /// changes but not on a compiler bump within one LLVM flavor, so the selector revision
+    /// hashes it in place of @ref sha256 (RFC 0019 §8.1). Empty for a prebuilt or HIP-compiled code object.
+    std::string identity;
 };
 
 inline bool operator==(const KernelSource& lhs, const KernelSource& rhs)
@@ -718,7 +733,8 @@ inline bool operator==(const KernelSource& lhs, const KernelSource& rhs)
                     lhs.tocKey,
                     lhs.symbol,
                     lhs.sha256,
-                    lhs.signature)
+                    lhs.signature,
+                    lhs.identity)
            == std::tie(rhs.kind,
                        rhs.sourceFile,
                        rhs.entryPoint,
@@ -726,7 +742,8 @@ inline bool operator==(const KernelSource& lhs, const KernelSource& rhs)
                        rhs.tocKey,
                        rhs.symbol,
                        rhs.sha256,
-                       rhs.signature);
+                       rhs.signature,
+                       rhs.identity);
 }
 
 inline bool operator!=(const KernelSource& lhs, const KernelSource& rhs)
@@ -756,7 +773,7 @@ inline constexpr bool IS_BRACE_INITIALIZABLE_V = IsBraceInitializable<T, void, A
 
 } // namespace detail
 
-// KernelSource's field count is pinned here: accepting exactly eight initializers and no
+// KernelSource's field count is pinned here: accepting exactly nine initializers and no
 // more makes an inserted field ill-formed at this assertion, rather than silently
 // rebinding every value after it at a positional initialization site. Only the count --
 // two same-typed members swapped past each other still brace-initialize.
@@ -768,7 +785,8 @@ static_assert(detail::IS_BRACE_INITIALIZABLE_V<KernelSource,
                                                std::string,
                                                std::string,
                                                std::string,
-                                               std::vector<KernelArgument>>
+                                               std::vector<KernelArgument>,
+                                               std::string>
                   && !detail::IS_BRACE_INITIALIZABLE_V<KernelSource,
                                                        KernelSourceKind,
                                                        std::string,
@@ -778,6 +796,7 @@ static_assert(detail::IS_BRACE_INITIALIZABLE_V<KernelSource,
                                                        std::string,
                                                        std::string,
                                                        std::vector<KernelArgument>,
+                                                       std::string,
                                                        std::string>,
               "KernelSource gained or lost a field; append only, then extend this "
               "assertion.");
@@ -790,7 +809,7 @@ static_assert(detail::IS_BRACE_INITIALIZABLE_V<KernelSource,
 /// numerically across the integer and floating-point alternatives (`1` equals `1.0`).
 struct KernelDescriptor
 {
-    DescriptorId id;
+    DescriptorId id{};
     std::string name;
     KernelSource source;
     /// RFC 0017 §15.1: the launches of a multi-launch kernel, keyed by launch name, in place
@@ -894,11 +913,11 @@ bool allLaunchSources(const Kernel& kernel, Predicate predicate)
 /// a vector of child kernels.
 struct KernelDescriptorPack
 {
-    DescriptorId id;
+    DescriptorId id{};
     std::string name;
     std::vector<DescriptorId> matcherIds;
-    DescriptorId engineId;
-    DescriptorId dispatchId;
+    DescriptorId engineId{};
+    DescriptorId dispatchId{};
     /// GFX targets, e.g. `{"gfx942", "gfx950"}`; empty means arch-independent. A concrete
     /// entry is matched exactly against the device's base target id; a generic entry
     /// matches by membership in the generic target table. Part of the pack's catalog identity

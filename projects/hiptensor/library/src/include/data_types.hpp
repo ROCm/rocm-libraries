@@ -28,6 +28,7 @@
 
 // clang-format off
 // Include order needs to be preserved
+#include <atomic>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -60,9 +61,11 @@ struct hiptensorOperationDescriptor
     hiptensorDataType_t mScalarType;
     float               mFlops;
     float               mMovedBytes;
-    uint32_t            mPaddingLeft;
-    uint32_t            mPaddingRighT;
-    void*               mPaddingValue;
+    //! One entry per mode of the output tensor.
+    std::vector<uint32_t> mPaddingLeft;
+    std::vector<uint32_t> mPaddingRight;
+    //! One element of the output tensor's data type.
+    std::vector<uint8_t> mPaddingValue;
 
     hiptensorOperationType_t    mOperationType;
     int32_t                     mContractionOpId;
@@ -98,6 +101,10 @@ struct hiptensorHandle
     {
         return mDevice;
     }
+    hipError_t initDevice(hipDevice_t deviceId)
+    {
+        return mDevice.initialize(deviceId);
+    }
     hiptensor::PlanCache* getPlanCache()
     {
         return planCache.get();
@@ -131,6 +138,23 @@ struct hiptensorPlan
 
 struct hiptensorPlanPreference
 {
+    hiptensorPlanPreference() = default;
+
+    // Each plan owns a copy of the preference it was created from.
+    hiptensorPlanPreference(hiptensorPlanPreference const& other)
+        : mAutotuneMode(other.mAutotuneMode)
+        , mCacheMode(other.mCacheMode)
+        , mIncrementalCount(other.mIncrementalCount)
+        , mKernelRank(other.mKernelRank)
+        , mJit(other.mJit)
+        , mSelectionAlgorithm(other.mSelectionAlgorithm)
+        , mCandidates(other.mCandidates)
+        , mSolution(other.mSolution.load())
+    {
+    }
+
+    hiptensorPlanPreference& operator=(hiptensorPlanPreference const&) = delete;
+
     hiptensorAutotuneMode_t mAutotuneMode;
     hiptensorCacheMode_t    mCacheMode;
     int32_t                 mIncrementalCount;
@@ -140,7 +164,9 @@ struct hiptensorPlanPreference
     hiptensorAlgo_t mSelectionAlgorithm;
     //! A vector of the solver candidates
     std::vector<void*> mCandidates;
-    void*              mSolution;
+    //! The selected solution. Atomic because execution (and plan cache autotuning)
+    //! may update it while other threads execute the same plan.
+    std::atomic<void*> mSolution{nullptr};
 };
 
 //! @brief Structure representing a tensor descriptor

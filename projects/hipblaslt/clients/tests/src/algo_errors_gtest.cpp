@@ -9,6 +9,7 @@
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstdlib>
@@ -53,8 +54,7 @@ namespace
         return algo;
     }
 
-    // One FP16 NN problem. The buffers are never read: every call under test
-    // returns before a kernel is launched.
+    // One FP16 NN problem. Tests that launch a kernel fill the buffers it reads.
     class AlgoErrors : public ::testing::Test
     {
     protected:
@@ -150,6 +150,136 @@ namespace
         ASSERT_EQ(gemm.setProblem(size, size, size, batch, epilogue, in), HIPBLAS_STATUS_SUCCESS);
 
         EXPECT_EQ(gemm.initialize(algoWithUnknownIndex(), nullptr), HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
+    // An algo index can name a grouped or a non-grouped solution, and their kernels take
+    // different arguments, so each launch refuses an algo of the other kind. Uniform
+    // summation order refuses some of these launches on its own, so both modes run.
+    TEST_F(AlgoErrors, smoke_GroupedAndNonGroupedAlgosAreRefusedByTheOtherKind)
+    {
+        constexpr size_t kWorkspace = size_t(32) << 20;
+        void*            workspace  = nullptr;
+        ASSERT_EQ(hipMalloc(&workspace, kWorkspace), hipSuccess);
+        auto freeBuffer = [](void* p) { static_cast<void>(hipFree(p)); };
+        const std::unique_ptr<void, decltype(freeBuffer)> workspaceOwner(workspace, freeBuffer);
+
+        // The grouped problems run concurrently, so the second writes its own D. Its
+        // alpha differs, so a D shared with the first problem fails the check.
+        void* secondD = nullptr;
+        ASSERT_EQ(hipMalloc(&secondD, kSize * kSize * sizeof(uint16_t)), hipSuccess);
+        const std::unique_ptr<void, decltype(freeBuffer)> secondDOwner(secondD, freeBuffer);
+        float                                             secondAlpha = 2.0f;
+
+        // FP16 bit patterns. With A and B all ones, each element of D is alpha * kSize.
+        constexpr uint16_t kOne = 0x3c00, k128 = 0x5800, k256 = 0x5c00;
+        for(void* buffer : {a, b, c})
+            ASSERT_EQ(hipMemsetD16(buffer, kOne, kSize * kSize), hipSuccess);
+        auto allEqual = [](const void* buffer, uint16_t value) {
+            std::vector<uint16_t> host(kSize * kSize);
+            EXPECT_EQ(hipMemcpy(host.data(),
+                                buffer,
+                                host.size() * sizeof(uint16_t),
+                                hipMemcpyDeviceToHost),
+                      hipSuccess);
+            return std::all_of(
+                host.begin(), host.end(), [value](uint16_t x) { return x == value; });
+        };
+
+        for(const int32_t uniformOrder : {1, 0})
+        {
+            SCOPED_TRACE("uniform summation order " + std::to_string(uniformOrder));
+            ASSERT_EQ(hipblasLtMatmulDescSetAttribute(desc,
+                                                      HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT,
+                                                      &uniformOrder,
+                                                      sizeof(uniformOrder)),
+                      HIPBLAS_STATUS_SUCCESS);
+            hipblaslt_ext::GemmPreference gemmPref;
+            gemmPref.setMaxWorkspaceBytes(kWorkspace);
+            gemmPref.setUniformSummationOrder(uniformOrder);
+
+            hipblaslt_ext::Gemm gemm(handle,
+                                     HIPBLAS_OP_N,
+                                     HIPBLAS_OP_N,
+                                     kType,
+                                     kType,
+                                     kType,
+                                     kType,
+                                     HIPBLAS_COMPUTE_32F);
+            hipblaslt_ext::GemmEpilogue epilogue;
+            hipblaslt_ext::GemmInputs   in = inputs();
+            ASSERT_EQ(gemm.setProblem(kSize, kSize, kSize, 1, epilogue, in),
+                      HIPBLAS_STATUS_SUCCESS);
+            gemm.setMaxWorkspaceBytes(kWorkspace);
+
+            hipblaslt_ext::GroupedGemm grouped(handle,
+                                               HIPBLAS_OP_N,
+                                               HIPBLAS_OP_N,
+                                               kType,
+                                               kType,
+                                               kType,
+                                               kType,
+                                               HIPBLAS_COMPUTE_32F);
+            std::vector<int64_t>                     size(2, kSize), batch(2, 1);
+            std::vector<hipblaslt_ext::GemmEpilogue> epilogues(2);
+            std::vector<hipblaslt_ext::GemmInputs>   ins(2, inputs());
+            ins[1].setD(secondD);
+            ins[1].setAlpha(&secondAlpha);
+            ASSERT_EQ(grouped.setProblem(size, size, size, batch, epilogues, ins),
+                      HIPBLAS_STATUS_SUCCESS);
+            grouped.setMaxWorkspaceBytes(kWorkspace);
+
+            std::vector<hipblasLtMatmulHeuristicResult_t> plainResults, groupedResults;
+            ASSERT_EQ(gemm.algoGetHeuristic(1, gemmPref, plainResults), HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(grouped.algoGetHeuristic(1, gemmPref, groupedResults),
+                      HIPBLAS_STATUS_SUCCESS);
+            ASSERT_FALSE(plainResults.empty());
+            if(groupedResults.empty())
+                GTEST_SKIP() << "the loaded library has no grouped solution for this problem";
+            hipblasLtMatmulAlgo_t plainAlgo   = plainResults[0].algo;
+            hipblasLtMatmulAlgo_t groupedAlgo = groupedResults[0].algo;
+
+            auto matmul = [&](const hipblasLtMatmulAlgo_t& algo) {
+                return hipblasLtMatmul(handle,
+                                       desc,
+                                       &alpha,
+                                       a,
+                                       layout,
+                                       b,
+                                       layout,
+                                       &beta,
+                                       c,
+                                       layout,
+                                       d,
+                                       layout,
+                                       &algo,
+                                       workspace,
+                                       kWorkspace,
+                                       nullptr);
+            };
+
+            // Each algo still runs on its own kind of problem.
+            EXPECT_EQ(matmul(plainAlgo), HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(gemm.initialize(plainAlgo, workspace, false), HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(gemm.run(nullptr), HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(grouped.initialize(groupedAlgo, workspace, false), HIPBLAS_STATUS_SUCCESS);
+            for(void* buffer : {d, secondD})
+                ASSERT_EQ(hipMemset(buffer, 0, kSize * kSize * sizeof(uint16_t)), hipSuccess);
+            EXPECT_EQ(grouped.run(nullptr), HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+            EXPECT_TRUE(allEqual(d, k128));
+            EXPECT_TRUE(allEqual(secondD, k256));
+
+            EXPECT_EQ(matmul(groupedAlgo), HIPBLAS_STATUS_INVALID_VALUE);
+            EXPECT_EQ(gemm.initialize(groupedAlgo, workspace, false),
+                      HIPBLAS_STATUS_INVALID_VALUE);
+            EXPECT_EQ(grouped.initialize(plainAlgo, workspace, false),
+                      HIPBLAS_STATUS_INVALID_VALUE);
+            EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+            size_t required = 0;
+            EXPECT_EQ(gemm.isAlgoSupported(groupedAlgo, required), HIPBLAS_STATUS_INVALID_VALUE);
+            EXPECT_EQ(grouped.isAlgoSupported(plainAlgo, required), HIPBLAS_STATUS_INVALID_VALUE);
+        }
     }
 
     TEST_F(AlgoErrors, smoke_HeuristicReportsZeroAlgosWhenRequestIsRejected)
@@ -358,6 +488,184 @@ namespace
         ASSERT_GE(index, 0);
         EXPECT_EQ(isSupported(tensile.algo), HIPBLAS_STATUS_INVALID_VALUE);
     }
+
+    // rocRoller's Stream-K kernels split K across workgroups, so an algo naming one is
+    // refused once uniform summation order is on, even when it was chosen with it off.
+    TEST_F(AlgoErrors, smoke_RocRollerStreamKAlgoIsRefusedUnderUniformSummationOrder)
+    {
+        int             device = 0;
+        hipDeviceProp_t props{};
+        ASSERT_EQ(hipGetDevice(&device), hipSuccess);
+        ASSERT_EQ(hipGetDeviceProperties(&props, device), hipSuccess);
+        if(std::string(props.gcnArchName).find("gfx1250") != std::string::npos)
+            GTEST_SKIP() << "gfx1250 handles never use rocRoller";
+
+        hipblasLtHandle_t rocroller = nullptr;
+        {
+            ScopedEnv use("HIPBLASLT_USE_ROCROLLER", "1");
+            ASSERT_EQ(hipblasLtCreate(&rocroller), HIPBLAS_STATUS_SUCCESS);
+        }
+        const std::unique_ptr<void, decltype(&hipblasLtDestroy)> owner(rocroller,
+                                                                       &hipblasLtDestroy);
+
+        // One output tile with a long K, which rocRoller runs as Stream-K.
+        constexpr int64_t       m = 128, n = 256, k = 4096;
+        hipblasLtMatrixLayout_t lA = nullptr, lB = nullptr, lCD = nullptr;
+        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&lA, kType, m, k, m), HIPBLAS_STATUS_SUCCESS);
+        const LayoutPtr ownA(lA, &hipblasLtMatrixLayoutDestroy);
+        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&lB, kType, k, n, k), HIPBLAS_STATUS_SUCCESS);
+        const LayoutPtr ownB(lB, &hipblasLtMatrixLayoutDestroy);
+        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&lCD, kType, m, n, m), HIPBLAS_STATUS_SUCCESS);
+        const LayoutPtr ownCD(lCD, &hipblasLtMatrixLayoutDestroy);
+
+        auto setUniformOrder = [&](int32_t value) {
+            return hipblasLtMatmulDescSetAttribute(
+                desc, HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT, &value, sizeof(value));
+        };
+        // The heuristic and matmulIsAlgoSupported both cap the workspace at this, and rocRoller
+        // drops a Stream-K kernel whose workspace does not fit.
+        constexpr size_t kMaxWorkspace = size_t(64) << 20;
+        ASSERT_EQ(hipblasLtMatmulPreferenceSetAttribute(pref,
+                                                        HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
+                                                        &kMaxWorkspace,
+                                                        sizeof(kMaxWorkspace)),
+                  HIPBLAS_STATUS_SUCCESS);
+        auto isSupported = [&](hipblasLtMatmulAlgo_t algo, size_t& workspace) {
+            workspace = kMaxWorkspace;
+            return hipblaslt_ext::matmulIsAlgoSupported(
+                rocroller, desc, &alpha, lA, lB, &beta, lCD, lCD, algo, workspace);
+        };
+
+        ASSERT_EQ(setUniformOrder(0), HIPBLAS_STATUS_SUCCESS);
+        hipblasLtMatmulHeuristicResult_t result{};
+        int                              count = 0;
+        ASSERT_EQ(hipblasLtMatmulAlgoGetHeuristic(
+                      rocroller, desc, lA, lB, lCD, lCD, pref, 1, &result, &count),
+                  HIPBLAS_STATUS_SUCCESS);
+        if(count == 0
+           || hipblaslt_ext::getKernelNameFromAlgo(rocroller, result.algo).find("_sk")
+                  == std::string::npos)
+            GTEST_SKIP() << "rocRoller chose no Stream-K kernel for this problem on "
+                         << props.gcnArchName;
+        size_t workspaceSize = 0;
+        ASSERT_EQ(isSupported(result.algo, workspaceSize), HIPBLAS_STATUS_SUCCESS);
+
+        // Sized for the Stream-K kernel, so only uniform summation order can refuse it.
+        auto  freeBuffer = [](void* p) { static_cast<void>(hipFree(p)); };
+        void *bigA = nullptr, *bigB = nullptr, *bigCD = nullptr, *workspace = nullptr;
+        ASSERT_EQ(hipMalloc(&bigA, m * k * sizeof(uint16_t)), hipSuccess);
+        const std::unique_ptr<void, decltype(freeBuffer)> ownBigA(bigA, freeBuffer);
+        ASSERT_EQ(hipMalloc(&bigB, k * n * sizeof(uint16_t)), hipSuccess);
+        const std::unique_ptr<void, decltype(freeBuffer)> ownBigB(bigB, freeBuffer);
+        ASSERT_EQ(hipMalloc(&bigCD, m * n * sizeof(uint16_t)), hipSuccess);
+        const std::unique_ptr<void, decltype(freeBuffer)> ownBigCD(bigCD, freeBuffer);
+        ASSERT_EQ(hipMalloc(&workspace, std::max<size_t>(workspaceSize, 1)), hipSuccess);
+        const std::unique_ptr<void, decltype(freeBuffer)> ownWorkspace(workspace, freeBuffer);
+
+        auto matmul = [&]() {
+            return hipblasLtMatmul(rocroller,
+                                   desc,
+                                   &alpha,
+                                   bigA,
+                                   lA,
+                                   bigB,
+                                   lB,
+                                   &beta,
+                                   bigCD,
+                                   lCD,
+                                   bigCD,
+                                   lCD,
+                                   &result.algo,
+                                   workspace,
+                                   workspaceSize,
+                                   nullptr);
+        };
+        ASSERT_EQ(matmul(), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+        ASSERT_EQ(setUniformOrder(1), HIPBLAS_STATUS_SUCCESS);
+        size_t unused = 0;
+        EXPECT_EQ(isSupported(result.algo, unused), HIPBLAS_STATUS_INVALID_VALUE);
+        EXPECT_EQ(matmul(), HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
+    // Under uniform summation order, a tile rocRoller would run as Stream-K is kept with
+    // Stream-K off, so the problem still gets kernels.
+    TEST_F(AlgoErrors, smoke_RocRollerKeepsStreamKTilesWithoutStreamKUnderUniformSummationOrder)
+    {
+        int             device = 0;
+        hipDeviceProp_t props{};
+        ASSERT_EQ(hipGetDevice(&device), hipSuccess);
+        ASSERT_EQ(hipGetDeviceProperties(&props, device), hipSuccess);
+        if(std::string(props.gcnArchName).find("gfx1250") != std::string::npos)
+            GTEST_SKIP() << "gfx1250 handles never use rocRoller";
+
+        hipblasLtHandle_t rocroller = nullptr;
+        {
+            ScopedEnv use("HIPBLASLT_USE_ROCROLLER", "1");
+            ASSERT_EQ(hipblasLtCreate(&rocroller), HIPBLAS_STATUS_SUCCESS);
+        }
+        const std::unique_ptr<void, decltype(&hipblasLtDestroy)> owner(rocroller,
+                                                                       &hipblasLtDestroy);
+
+        // One output tile with a long K, which rocRoller runs as Stream-K.
+        constexpr int64_t       m = 128, n = 256, k = 4096;
+        hipblasLtMatrixLayout_t lA = nullptr, lB = nullptr, lCD = nullptr;
+        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&lA, kType, m, k, m), HIPBLAS_STATUS_SUCCESS);
+        const LayoutPtr ownA(lA, &hipblasLtMatrixLayoutDestroy);
+        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&lB, kType, k, n, k), HIPBLAS_STATUS_SUCCESS);
+        const LayoutPtr ownB(lB, &hipblasLtMatrixLayoutDestroy);
+        ASSERT_EQ(hipblasLtMatrixLayoutCreate(&lCD, kType, m, n, m), HIPBLAS_STATUS_SUCCESS);
+        const LayoutPtr ownCD(lCD, &hipblasLtMatrixLayoutDestroy);
+
+        constexpr size_t kMaxWorkspace = size_t(64) << 20;
+        ASSERT_EQ(hipblasLtMatmulPreferenceSetAttribute(pref,
+                                                        HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
+                                                        &kMaxWorkspace,
+                                                        sizeof(kMaxWorkspace)),
+                  HIPBLAS_STATUS_SUCCESS);
+
+        // Each candidate is a JIT-compiled kernel, so only a few are requested.
+        std::array<hipblasLtMatmulHeuristicResult_t, 2> results{};
+        auto heuristicWithUniformOrder = [&](int32_t value, int& count) {
+            count = 0;
+            ASSERT_EQ(
+                hipblasLtMatmulDescSetAttribute(
+                    desc, HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT, &value, sizeof(value)),
+                HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(hipblasLtMatmulAlgoGetHeuristic(rocroller,
+                                                      desc,
+                                                      lA,
+                                                      lB,
+                                                      lCD,
+                                                      lCD,
+                                                      pref,
+                                                      results.size(),
+                                                      results.data(),
+                                                      &count),
+                      HIPBLAS_STATUS_SUCCESS);
+        };
+        auto nameOf = [&](hipblasLtMatmulAlgo_t algo) {
+            return hipblaslt_ext::getKernelNameFromAlgo(rocroller, algo);
+        };
+
+        int count = 0;
+        ASSERT_NO_FATAL_FAILURE(heuristicWithUniformOrder(0, count));
+        if(count == 0 || nameOf(results[0].algo).find("_sk") == std::string::npos)
+            GTEST_SKIP() << "rocRoller chose no Stream-K kernel for this problem on "
+                         << props.gcnArchName;
+
+        ASSERT_NO_FATAL_FAILURE(heuristicWithUniformOrder(1, count));
+        ASSERT_GT(count, 0);
+        for(int i = 0; i < count; ++i)
+            EXPECT_EQ(nameOf(results[i].algo).find("_sk"), std::string::npos)
+                << nameOf(results[i].algo);
+        size_t workspaceSize = kMaxWorkspace;
+        EXPECT_EQ(
+            hipblaslt_ext::matmulIsAlgoSupported(
+                rocroller, desc, &alpha, lA, lB, &beta, lCD, lCD, results[0].algo, workspaceSize),
+            HIPBLAS_STATUS_SUCCESS);
+    }
 #endif
 
     // No kernel applies an aux scale, so both APIs refuse a non-null one.
@@ -393,9 +701,11 @@ namespace
                   HIPBLAS_STATUS_NOT_SUPPORTED);
     }
 
-    // Matmul computes every layout as column-major, so a row-major A, B, C or D is refused
-    // rather than multiplied as if it were column-major (ROCM-29960). ORDER_COL set
-    // explicitly on all four is the control: it must still get algorithms and pass every call.
+    // The extension API computes every layout as column-major, so a row-major A, B, C or D is
+    // refused rather than multiplied as if it were column-major (ROCM-29960). The C API
+    // rewrites a row-major A or B as its column-major transpose, but still refuses C and D
+    // with different orders. ORDER_COL set explicitly on all four is the control: it must
+    // still get algorithms and pass every call.
     TEST_F(AlgoErrors, smoke_RowOrderIsRefused)
     {
         const LayoutPtr         colOwner = layoutWithOrder(HIPBLASLT_ORDER_COL);
@@ -418,36 +728,37 @@ namespace
             const hipblasStatus_t expected
                 = rowIndex < 0 ? HIPBLAS_STATUS_SUCCESS : HIPBLAS_STATUS_NOT_SUPPORTED;
             const std::string which = rowIndex < 0 ? "control" : std::string(1, "ABCD"[rowIndex]);
+            const bool        cApiRewrites = rowIndex == 0 || rowIndex == 1;
 
             hipblasLtMatmulHeuristicResult_t result{};
             int                              returned = -1;
             EXPECT_EQ(
                 hipblasLtMatmulAlgoGetHeuristic(
                     handle, desc, mats[0], mats[1], mats[2], mats[3], pref, 1, &result, &returned),
-                expected)
+                cApiRewrites ? HIPBLAS_STATUS_SUCCESS : expected)
                 << which;
-            if(rowIndex >= 0)
+            if(cApiRewrites)
+                EXPECT_GT(returned, 0) << which;
+            else if(rowIndex >= 0)
                 EXPECT_EQ(returned, 0) << which;
-            {
-                EXPECT_EQ(hipblasLtMatmul(handle,
-                                          desc,
-                                          &alpha,
-                                          a,
-                                          mats[0],
-                                          b,
-                                          mats[1],
-                                          &beta,
-                                          c,
-                                          mats[2],
-                                          d,
-                                          mats[3],
-                                          nullptr,
-                                          nullptr,
-                                          0,
-                                          nullptr),
-                          expected)
-                    << which;
-            }
+            EXPECT_EQ(hipblasLtMatmul(handle,
+                                      desc,
+                                      &alpha,
+                                      a,
+                                      mats[0],
+                                      b,
+                                      mats[1],
+                                      &beta,
+                                      c,
+                                      mats[2],
+                                      d,
+                                      mats[3],
+                                      nullptr,
+                                      nullptr,
+                                      0,
+                                      nullptr),
+                      cApiRewrites ? HIPBLAS_STATUS_SUCCESS : expected)
+                << which;
 
             hipblaslt_ext::Gemm gemm(handle,
                                      HIPBLAS_OP_N,
