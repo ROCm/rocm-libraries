@@ -1,0 +1,82 @@
+<!-- Copyright (c) Advanced Micro Devices, Inc., or its affiliates. SPDX-License-Identifier: MIT -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 408" width="860" height="408" role="img" aria-label="GemmEPermuteKernel splits the GEMM coordinates m and n into four sub-dimensions with their own strides, so C[t*B+b, h*D+d] is stored straight to Y[h,b,t,d]; rows past M are masked">
+<style>text{font-family:system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.h{font-size:15px;font-weight:600}.b{font-size:13px;font-weight:600}.n{font-size:12px}.s{font-size:11px}.x{font-size:10px}.w{fill:#ffffff}.halo{paint-order:stroke;stroke-width:4px;stroke-linejoin:round}line{stroke-width:1}.ar{stroke-width:1.5}.bg{fill:#fcfcfb;stroke:#e1e0d9}.t1{fill:#0b0b0b}.t2{fill:#52514e}.t3{fill:#898781}.grid{stroke:#e1e0d9}.axis{stroke:#c3c2b7}.track{fill:#e1e0d9}.cell{fill:#fcfcfb;stroke:#c3c2b7}.halo{stroke:#fcfcfb}.ref{stroke:#898781}.plate{fill:#fcfcfb}.ar{stroke:#898781}.ah{fill:#898781}.s1{fill:#2a78d6}.o1{stroke:#2a78d6;fill:none}.s2{fill:#eb6834}.o2{stroke:#eb6834;fill:none}.s3{fill:#1baf7a}.o3{stroke:#1baf7a;fill:none}@media (prefers-color-scheme:dark){.bg{fill:#1a1a19;stroke:#2c2c2a}.t1{fill:#f0efec}.t2{fill:#c3c2b7}.t3{fill:#898781}.grid{stroke:#2c2c2a}.axis{stroke:#383835}.track{fill:#2c2c2a}.cell{fill:#1a1a19;stroke:#383835}.halo{stroke:#1a1a19}.ref{stroke:#898781}.plate{fill:#1a1a19}.ar{stroke:#898781}.ah{fill:#898781}.s1{fill:#3987e5}.o1{stroke:#3987e5;fill:none}.s2{fill:#d95926}.o2{stroke:#d95926;fill:none}.s3{fill:#199e70}.o3{stroke:#199e70;fill:none}}</style>
+<rect class="bg" x="0.5" y="0.5" width="859" height="407" rx="8"/>
+<text x="24" y="34" class="t1 h">GemmEPermuteKernel stores E through a 4-D view</text>
+<text x="24" y="54" class="t2 n">m = m0*M1 + m1 and n = n0*N1 + n1, each sub-dimension with its own stride. Trace shape: M0=T, M1=B, N0=H, N1=D</text>
+<text x="24" y="88" class="t1 b">GEMM view of E [M, N]</text>
+<text x="24" y="104" class="t3 s">row band = one t (B rows); column block = one h (D columns)</text>
+<text x="240" y="124" class="t2 b mono" text-anchor="middle">n = h*D + d</text>
+<text x="112" y="140" class="t2 b mono" text-anchor="end">m = t*B + b</text>
+<text x="135" y="140" class="t3 x" text-anchor="middle">h=0</text>
+<text x="165" y="140" class="t3 x" text-anchor="middle">h=1</text>
+<text x="195" y="140" class="t3 x" text-anchor="middle">h=2</text>
+<text x="225" y="140" class="t3 x" text-anchor="middle">h=3</text>
+<text x="255" y="140" class="t3 x" text-anchor="middle">h=4</text>
+<text x="285" y="140" class="t3 x" text-anchor="middle">h=5</text>
+<text x="315" y="140" class="t3 x" text-anchor="middle">h=6</text>
+<text x="345" y="140" class="t3 x" text-anchor="middle">h=7</text>
+<rect x="120" y="146" width="240" height="160" class="cell"/>
+<line x1="150" y1="146" x2="150" y2="306" class="axis"/>
+<line x1="180" y1="146" x2="180" y2="306" class="axis"/>
+<line x1="210" y1="146" x2="210" y2="306" class="axis"/>
+<line x1="240" y1="146" x2="240" y2="306" class="axis"/>
+<line x1="270" y1="146" x2="270" y2="306" class="axis"/>
+<line x1="300" y1="146" x2="300" y2="306" class="axis"/>
+<line x1="330" y1="146" x2="330" y2="306" class="axis"/>
+<line x1="120" y1="166" x2="360" y2="166" class="axis"/>
+<line x1="120" y1="186" x2="360" y2="186" class="axis"/>
+<line x1="120" y1="206" x2="360" y2="206" class="axis"/>
+<line x1="120" y1="226" x2="360" y2="226" class="axis"/>
+<line x1="120" y1="246" x2="360" y2="246" class="axis"/>
+<line x1="120" y1="266" x2="360" y2="266" class="axis"/>
+<line x1="120" y1="286" x2="360" y2="286" class="axis"/>
+<rect x="180" y="166" width="30" height="20" class="s1"/>
+<text x="216" y="181" class="t1 s mono halo">-&gt; Y[h, :, t, :]</text>
+<text x="112" y="160" class="t3 s mono" text-anchor="end">t=0</text>
+<text x="112" y="180" class="t3 s mono" text-anchor="end">t=1</text>
+<text x="112" y="240" class="t3 s" text-anchor="end">...</text>
+<text x="112" y="300" class="t3 s mono" text-anchor="end">t=T-1</text>
+<rect x="120.5" y="307" width="239" height="14" class="o2" stroke-dasharray="4 3"/>
+<text x="112" y="318" class="t3 s mono" text-anchor="end">m &gt;= M</text>
+<text x="240" y="338" class="t2 s" text-anchor="middle">tile rows past M (ragged M): masked</text>
+<text x="392" y="88" class="t1 b">Sub-dimensions of E</text>
+<text x="392" y="124" class="t3 s">dim</text>
+<text x="456" y="124" class="t3 s">index</text>
+<text x="536" y="124" class="t3 s" text-anchor="end">length</text>
+<text x="556" y="124" class="t3 s">stride</text>
+<line x1="392" y1="132" x2="616" y2="132" class="grid"/>
+<text x="392" y="152" class="t1 n mono">M0 = T</text>
+<text x="456" y="152" class="t2 n mono">t</text>
+<text x="536" y="152" class="t1 n" text-anchor="end">768</text>
+<text x="556" y="152" class="t1 n mono">D</text>
+<text x="392" y="176" class="t1 n mono">M1 = B</text>
+<text x="456" y="176" class="t2 n mono">b</text>
+<text x="536" y="176" class="t1 n" text-anchor="end">512</text>
+<text x="556" y="176" class="t1 n mono">T*D</text>
+<text x="392" y="200" class="t1 n mono">N0 = H</text>
+<text x="456" y="200" class="t2 n mono">h</text>
+<text x="536" y="200" class="t1 n" text-anchor="end">8</text>
+<text x="556" y="200" class="t1 n mono">B*T*D</text>
+<text x="392" y="224" class="t1 n mono">N1 = D</text>
+<text x="456" y="224" class="t2 n mono">d</text>
+<text x="536" y="224" class="t1 n" text-anchor="end">256</text>
+<text x="556" y="224" class="t1 n mono">1</text>
+<line x1="392" y1="234" x2="616" y2="234" class="grid"/>
+<text x="392" y="252" class="t3 s">strides in elements</text>
+<text x="392" y="284" class="t2 s">the example passes</text>
+<text x="392" y="302" class="t1 s mono">{T, B, H, D, D, T*D, B*T*D}</text>
+<text x="640" y="88" class="t1 b">Element offset in Y</text>
+<text x="640" y="124" class="t1 n mono">t*D + b*T*D</text>
+<text x="652" y="144" class="t1 n mono">+ h*B*T*D + d</text>
+<text x="640" y="176" class="t1 n mono">= ((h*B + b)*T + t)*D + d</text>
+<text x="640" y="208" class="t1 b mono">= Y[h, b, t, d]</text>
+<text x="640" y="240" class="t2 s">the permute is a change of address</text>
+<text x="640" y="256" class="t2 s">in the store: no dense C in memory</text>
+<text x="640" y="288" class="t3 s">checked on the host: E must not</text>
+<text x="640" y="304" class="t3 s">overlap itself; span below 2 GB</text>
+<line x1="24" y1="352" x2="836" y2="352" class="grid"/>
+<text x="24" y="374" class="t1 b">M tail</text>
+<text x="92" y="374" class="t2 n">A row at m = M would fold back into valid E through the merge (m0 = M0, m1 = 0).</text>
+<text x="92" y="392" class="t2 n">So M is right-padded and masked; stores of rows past M are dropped. N needs no mask.</text>
+</svg>

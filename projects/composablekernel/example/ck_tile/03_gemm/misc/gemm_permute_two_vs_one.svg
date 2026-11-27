@@ -1,0 +1,83 @@
+<!-- Copyright (c) Advanced Micro Devices, Inc., or its affiliates. SPDX-License-Identifier: MIT -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 376" width="860" height="376" role="img" aria-label="Two kernels write C, about 1.61 GB, to HBM and read it back; the fused launch keeps each C tile on chip and stores it permuted into Y">
+<style>text{font-family:system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.h{font-size:15px;font-weight:600}.b{font-size:13px;font-weight:600}.n{font-size:12px}.s{font-size:11px}.x{font-size:10px}.w{fill:#ffffff}.halo{paint-order:stroke;stroke-width:4px;stroke-linejoin:round}line{stroke-width:1}.ar{stroke-width:1.5}.bg{fill:#fcfcfb;stroke:#e1e0d9}.t1{fill:#0b0b0b}.t2{fill:#52514e}.t3{fill:#898781}.grid{stroke:#e1e0d9}.axis{stroke:#c3c2b7}.track{fill:#e1e0d9}.cell{fill:#fcfcfb;stroke:#c3c2b7}.halo{stroke:#fcfcfb}.ref{stroke:#898781}.plate{fill:#fcfcfb}.ar{stroke:#898781}.ah{fill:#898781}.s1{fill:#2a78d6}.o1{stroke:#2a78d6;fill:none}.s2{fill:#eb6834}.o2{stroke:#eb6834;fill:none}.s3{fill:#1baf7a}.o3{stroke:#1baf7a;fill:none}@media (prefers-color-scheme:dark){.bg{fill:#1a1a19;stroke:#2c2c2a}.t1{fill:#f0efec}.t2{fill:#c3c2b7}.t3{fill:#898781}.grid{stroke:#2c2c2a}.axis{stroke:#383835}.track{fill:#2c2c2a}.cell{fill:#1a1a19;stroke:#383835}.halo{stroke:#1a1a19}.ref{stroke:#898781}.plate{fill:#1a1a19}.ar{stroke:#898781}.ah{fill:#898781}.s1{fill:#3987e5}.o1{stroke:#3987e5;fill:none}.s2{fill:#d95926}.o2{stroke:#d95926;fill:none}.s3{fill:#199e70}.o3{stroke:#199e70;fill:none}}</style>
+<rect class="bg" x="0.5" y="0.5" width="859" height="375" rx="8"/>
+<text x="24" y="34" class="t1 h" text-anchor="start">Two kernels against one fused launch</text>
+<text x="24" y="54" class="t2 n" text-anchor="start">Trace shape T=768, B=512, K=384, D=256, H=8 (M = 393,216, N = 2,048), BF16; bytes per call, about</text>
+<text x="24" y="92" class="t1 b" text-anchor="start">Two kernels</text>
+<text x="122" y="92" class="t2 n" text-anchor="start">GemmKernel writes C to HBM, ElementWiseKernel reads it back and writes Y (2 launches)</text>
+<rect x="24" y="106" width="72" height="64" rx="6" class="cell"/>
+<text x="60" y="134" class="t1 b" text-anchor="middle">A, W</text>
+<text x="60" y="152" class="t2 s" text-anchor="middle">in HBM</text>
+<line x1="102" y1="138" x2="158" y2="138" class="ar"/>
+<polygon points="158,138 151,134 151,142" class="ah"/>
+<text x="130" y="130" class="t2 s" text-anchor="middle">read</text>
+<text x="130" y="153" class="t2 s" text-anchor="middle">0.30 GB</text>
+<rect x="164" y="106" width="150" height="64" rx="6" class="cell"/>
+<rect x="164" y="106" width="6" height="64" rx="3" class="s2"/>
+<text x="180" y="128" class="t1 b" text-anchor="start">GemmKernel</text>
+<text x="180" y="146" class="t2 s" text-anchor="start">mainloop + epilogue</text>
+<text x="180" y="161" class="t2 s" text-anchor="start">stores dense C</text>
+<line x1="320" y1="138" x2="376" y2="138" class="ar o2"/>
+<polygon points="376,138 369,134 369,142" class="s2"/>
+<text x="348" y="130" class="t2 s" text-anchor="middle">write</text>
+<text x="348" y="153" class="t2 s" text-anchor="middle">1.61 GB</text>
+<rect x="382" y="106" width="96" height="64" rx="6" class="cell"/>
+<rect x="382.5" y="106.5" width="95" height="63" rx="6" class="o2"/>
+<text x="430" y="128" class="t1 b" text-anchor="middle">C in HBM</text>
+<text x="430" y="146" class="t2 s mono" text-anchor="middle">[M, N]</text>
+<text x="430" y="161" class="t2 s" text-anchor="middle">1.61 GB</text>
+<line x1="484" y1="138" x2="540" y2="138" class="ar o2"/>
+<polygon points="540,138 533,134 533,142" class="s2"/>
+<text x="512" y="130" class="t2 s" text-anchor="middle">read</text>
+<text x="512" y="153" class="t2 s" text-anchor="middle">1.61 GB</text>
+<rect x="546" y="106" width="150" height="64" rx="6" class="cell"/>
+<rect x="546" y="106" width="6" height="64" rx="3" class="s2"/>
+<text x="562" y="128" class="t1 b" text-anchor="start">ElementWise</text>
+<text x="562" y="146" class="t2 s" text-anchor="start">strided copy, no math</text>
+<text x="562" y="161" class="t2 s" text-anchor="start">C -&gt; Y order</text>
+<line x1="702" y1="138" x2="758" y2="138" class="ar"/>
+<polygon points="758,138 751,134 751,142" class="ah"/>
+<text x="730" y="130" class="t2 s" text-anchor="middle">write</text>
+<text x="730" y="153" class="t2 s" text-anchor="middle">1.61 GB</text>
+<rect x="764" y="106" width="72" height="64" rx="6" class="cell"/>
+<text x="800" y="128" class="t1 b" text-anchor="middle">Y</text>
+<text x="800" y="146" class="t2 s mono" text-anchor="middle">[H,B,T,D]</text>
+<text x="800" y="161" class="t2 s" text-anchor="middle">in HBM</text>
+<text x="24" y="210" class="t1 b" text-anchor="start">One fused launch</text>
+<text x="164" y="210" class="t2 n" text-anchor="start">GemmEPermuteKernel (library) or the A-stationary kernel (example): C never goes to HBM</text>
+<rect x="24" y="228" width="72" height="64" rx="6" class="cell"/>
+<text x="60" y="256" class="t1 b" text-anchor="middle">A, W</text>
+<text x="60" y="274" class="t2 s" text-anchor="middle">in HBM</text>
+<line x1="102" y1="260" x2="158" y2="260" class="ar"/>
+<polygon points="158,260 151,256 151,264" class="ah"/>
+<text x="130" y="252" class="t2 s" text-anchor="middle">read</text>
+<text x="130" y="275" class="t2 s" text-anchor="middle">0.30 GB</text>
+<rect x="164" y="220" width="532" height="80" rx="6" class="cell"/>
+<rect x="164" y="220" width="6" height="80" rx="3" class="s1"/>
+<text x="180" y="246" class="t1 b" text-anchor="start">Mainloop</text>
+<text x="180" y="264" class="t2 s" text-anchor="start">A x W on MFMA,</text>
+<text x="180" y="279" class="t2 s" text-anchor="start">FP32 accumulators</text>
+<line x1="300" y1="260" x2="376" y2="260" class="ar"/>
+<polygon points="376,260 369,256 369,264" class="ah"/>
+<rect x="382" y="236" width="96" height="48" rx="6" class="s3"/>
+<text x="430" y="256" class="w b" text-anchor="middle">C tile</text>
+<text x="430" y="273" class="w s" text-anchor="middle">on chip</text>
+<line x1="484" y1="260" x2="540" y2="260" class="ar"/>
+<polygon points="540,260 533,256 533,264" class="ah"/>
+<text x="552" y="246" class="t1 b" text-anchor="start">Store = permute</text>
+<text x="552" y="264" class="t2 s mono" text-anchor="start">C[t*B+b, h*D+d]</text>
+<text x="566" y="279" class="t2 s mono" text-anchor="start">-&gt; Y[h,b,t,d]</text>
+<line x1="702" y1="260" x2="758" y2="260" class="ar"/>
+<polygon points="758,260 751,256 751,264" class="ah"/>
+<text x="730" y="252" class="t2 s" text-anchor="middle">write</text>
+<text x="730" y="275" class="t2 s" text-anchor="middle">1.61 GB</text>
+<rect x="764" y="228" width="72" height="64" rx="6" class="cell"/>
+<text x="800" y="250" class="t1 b" text-anchor="middle">Y</text>
+<text x="800" y="268" class="t2 s mono" text-anchor="middle">[H,B,T,D]</text>
+<text x="800" y="283" class="t2 s" text-anchor="middle">in HBM</text>
+<text x="430" y="320" class="t2 s" text-anchor="middle">C write + C read removed: 3.2 GB. W is first reordered by a small kernel (about 3 us library, about 5.7 us A-stationary), timed in every call.</text>
+<line x1="24" y1="334" x2="836" y2="334" class="grid"/>
+<text x="24" y="357" class="t1 b" text-anchor="start">Traffic</text>
+<text x="92" y="357" class="t2 n" text-anchor="start">two kernels 5.13 GB, fused 1.91 GB (W, 1.5 MiB, left out): about 2.7x fewer bytes; the ElementWise launch is gone</text>
+</svg>

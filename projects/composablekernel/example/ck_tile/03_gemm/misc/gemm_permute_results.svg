@@ -1,0 +1,48 @@
+<!-- Copyright (c) Advanced Micro Devices, Inc., or its affiliates. SPDX-License-Identifier: MIT -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 384" width="860" height="384" role="img" aria-label="Time per call on gfx950: A-stationary fused 687 to 689 us and library fused 993 to 995 us against 1707 to 1892 us for the two-kernel pairs">
+<style>text{font-family:system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.h{font-size:15px;font-weight:600}.b{font-size:13px;font-weight:600}.n{font-size:12px}.s{font-size:11px}.x{font-size:10px}.w{fill:#ffffff}.halo{paint-order:stroke;stroke-width:4px;stroke-linejoin:round}line{stroke-width:1}.ar{stroke-width:1.5}.bg{fill:#fcfcfb;stroke:#e1e0d9}.t1{fill:#0b0b0b}.t2{fill:#52514e}.t3{fill:#898781}.grid{stroke:#e1e0d9}.axis{stroke:#c3c2b7}.track{fill:#e1e0d9}.cell{fill:#fcfcfb;stroke:#c3c2b7}.halo{stroke:#fcfcfb}.ref{stroke:#898781}.plate{fill:#fcfcfb}.ar{stroke:#898781}.ah{fill:#898781}.s1{fill:#2a78d6}.o1{stroke:#2a78d6;fill:none}.s2{fill:#eb6834}.o2{stroke:#eb6834;fill:none}.s3{fill:#1baf7a}.o3{stroke:#1baf7a;fill:none}@media (prefers-color-scheme:dark){.bg{fill:#1a1a19;stroke:#2c2c2a}.t1{fill:#f0efec}.t2{fill:#c3c2b7}.t3{fill:#898781}.grid{stroke:#2c2c2a}.axis{stroke:#383835}.track{fill:#2c2c2a}.cell{fill:#1a1a19;stroke:#383835}.halo{stroke:#1a1a19}.ref{stroke:#898781}.plate{fill:#1a1a19}.ar{stroke:#898781}.ah{fill:#898781}.s1{fill:#3987e5}.o1{stroke:#3987e5;fill:none}.s2{fill:#d95926}.o2{stroke:#d95926;fill:none}.s3{fill:#199e70}.o3{stroke:#199e70;fill:none}}</style>
+<rect class="bg" x="0.5" y="0.5" width="859" height="383" rx="8"/>
+<text x="24" y="34" class="t1 h" text-anchor="start">Time per call: fused kernel against two kernels</text>
+<text x="24" y="54" class="t2 n" text-anchor="start">gfx950 (MI350X, 1000 W cap, ROCm 7.1.1), trace shape T=768 B=512 K=384 D=256 H=8, BF16</text>
+<rect x="24" y="74" width="12" height="12" rx="2" class="s1"/>
+<text x="42" y="84" class="t2 s" text-anchor="start">fused: one kernel, A in, Y out</text>
+<rect x="234" y="74" width="12" height="12" rx="2" class="s2"/>
+<text x="252" y="84" class="t2 s" text-anchor="start">two kernels: GEMM writes C, ElementWise writes Y</text>
+<rect x="552.75" y="74.75" width="11.5" height="11.5" rx="2" class="o2" stroke-width="1.5"/>
+<text x="570" y="84" class="t2 s" text-anchor="start">GEMM alone: writes C, no permute</text>
+<text x="262" y="320" class="t3 s" text-anchor="middle">0</text>
+<line x1="367" y1="102" x2="367" y2="304" class="grid"/>
+<text x="367" y="320" class="t3 s" text-anchor="middle">500</text>
+<line x1="472" y1="102" x2="472" y2="304" class="grid"/>
+<text x="472" y="320" class="t3 s" text-anchor="middle">1000</text>
+<line x1="577" y1="102" x2="577" y2="304" class="grid"/>
+<text x="577" y="320" class="t3 s" text-anchor="middle">1500</text>
+<line x1="682" y1="102" x2="682" y2="304" class="grid"/>
+<text x="682" y="320" class="t3 s" text-anchor="middle">2000</text>
+<text x="682" y="336" class="t3 s" text-anchor="end">us per call, lower is better</text>
+<text x="250" y="125" class="t1 n" text-anchor="end">A-stationary fused</text>
+<path class="s1" d="M262 112h140.7a4 4 0 0 1 4 4v10a4 4 0 0 1 -4 4h-140.7z"/>
+<text x="414.69" y="125" class="t1 n halo" text-anchor="start">687 to 689 us</text>
+<text x="510.49" y="125" class="t2 n halo" text-anchor="start">2.48x</text>
+<text x="250" y="153" class="t1 n" text-anchor="end">Library fused (GemmEPermuteKernel)</text>
+<path class="s1" d="M262 140h204.9a4 4 0 0 1 4 4v10a4 4 0 0 1 -4 4h-204.9z"/>
+<text x="478.95" y="153" class="t1 n halo" text-anchor="start">993 to 995 us</text>
+<text x="574.75" y="153" class="t2 n halo" text-anchor="start">1.72x</text>
+<text x="250" y="193" class="t1 n" text-anchor="end">Weight-preshuffle GEMM + ElementWise</text>
+<path class="s2" d="M262 180h354.7a4 4 0 0 1 4 4v10a4 4 0 0 1 -4 4h-354.7z"/>
+<text x="628.68" y="193" class="t1 n halo" text-anchor="start">1707 to 1708 us</text>
+<text x="737.68" y="193" class="t2 n halo" text-anchor="start">1.00x</text>
+<text x="250" y="221" class="t1 n" text-anchor="end">CompV3 GEMM + ElementWise</text>
+<path class="s2" d="M262 208h393.3a4 4 0 0 1 4 4v10a4 4 0 0 1 -4 4h-393.3z"/>
+<text x="667.32" y="221" class="t1 n halo" text-anchor="start">1890 to 1892 us</text>
+<text x="776.32" y="221" class="t2 n halo" text-anchor="start">0.90x</text>
+<text x="250" y="261" class="t1 n" text-anchor="end">Weight-preshuffle GEMM alone</text>
+<path class="o2" stroke-width="1.5" d="M262.75 248.75h158.7a4 4 0 0 1 4 4v8.5a4 4 0 0 1 -4 4h-158.7z"/>
+<text x="434.22" y="261" class="t1 n halo" text-anchor="start">782 us</text>
+<text x="250" y="289" class="t1 n" text-anchor="end">CompV3 GEMM alone</text>
+<path class="o2" stroke-width="1.5" d="M262.75 276.75h202.0a4 4 0 0 1 4 4v8.5a4 4 0 0 1 -4 4h-202.0z"/>
+<text x="477.48" y="289" class="t1 n halo" text-anchor="start">988 us</text>
+<line x1="262" y1="102" x2="262" y2="304" class="axis"/>
+<text x="24" y="354" class="t3 s" text-anchor="start">Two runs, each the median of 11 interleaved, rotated samples of 20 launches; weight reorder inside every fused call.</text>
+<text x="24" y="370" class="t3 s" text-anchor="start">Speedup vs the best two-kernel pair. On N(0,1) data instead of the exactly representable test data, A-stationary is 2.27x to 2.29x.</text>
+</svg>

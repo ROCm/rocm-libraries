@@ -1,0 +1,50 @@
+<!-- Copyright (c) Advanced Micro Devices, Inc., or its affiliates. SPDX-License-Identifier: MIT -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 306" width="860" height="306" role="img" aria-label="HBM traffic per call: about 5.13 GB for two kernels, split into A read, C write, C read and Y write, against about 1.91 GB fused, A read and Y write only">
+<style>text{font-family:system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.h{font-size:15px;font-weight:600}.b{font-size:13px;font-weight:600}.n{font-size:12px}.s{font-size:11px}.x{font-size:10px}.w{fill:#ffffff}.halo{paint-order:stroke;stroke-width:4px;stroke-linejoin:round}line{stroke-width:1}.ar{stroke-width:1.5}.bg{fill:#fcfcfb;stroke:#e1e0d9}.t1{fill:#0b0b0b}.t2{fill:#52514e}.t3{fill:#898781}.grid{stroke:#e1e0d9}.axis{stroke:#c3c2b7}.track{fill:#e1e0d9}.cell{fill:#fcfcfb;stroke:#c3c2b7}.halo{stroke:#fcfcfb}.ref{stroke:#898781}.plate{fill:#fcfcfb}.ar{stroke:#898781}.ah{fill:#898781}.s1{fill:#2a78d6}.o1{stroke:#2a78d6;fill:none}.s2{fill:#eb6834}.o2{stroke:#eb6834;fill:none}.s3{fill:#1baf7a}.o3{stroke:#1baf7a;fill:none}@media (prefers-color-scheme:dark){.bg{fill:#1a1a19;stroke:#2c2c2a}.t1{fill:#f0efec}.t2{fill:#c3c2b7}.t3{fill:#898781}.grid{stroke:#2c2c2a}.axis{stroke:#383835}.track{fill:#2c2c2a}.cell{fill:#1a1a19;stroke:#383835}.halo{stroke:#1a1a19}.ref{stroke:#898781}.plate{fill:#1a1a19}.ar{stroke:#898781}.ah{fill:#898781}.s1{fill:#3987e5}.o1{stroke:#3987e5;fill:none}.s2{fill:#d95926}.o2{stroke:#d95926;fill:none}.s3{fill:#199e70}.o3{stroke:#199e70;fill:none}}</style>
+<rect class="bg" x="0.5" y="0.5" width="859" height="305" rx="8"/>
+<text x="24" y="34" class="t1 h" text-anchor="start">HBM traffic per call: what fusing removes</text>
+<text x="24" y="54" class="t2 n" text-anchor="start">Trace shape, BF16, GB per call (about; 1 GB = 10^9 B); W (1.5 MiB) left out</text>
+<rect x="220" y="76" width="12" height="12" rx="2" class="s1"/>
+<text x="238" y="86" class="t2 s" text-anchor="start">read A (0.30), write Y (1.61): both paths</text>
+<rect x="500" y="76" width="12" height="12" rx="2" class="s2"/>
+<text x="518" y="86" class="t2 s" text-anchor="start">write C, read C: two kernels only</text>
+<line x1="320" y1="126" x2="320" y2="214" class="grid"/>
+<line x1="420" y1="126" x2="420" y2="214" class="grid"/>
+<line x1="520" y1="126" x2="520" y2="214" class="grid"/>
+<line x1="620" y1="126" x2="620" y2="214" class="grid"/>
+<line x1="720" y1="126" x2="720" y2="214" class="grid"/>
+<line x1="820" y1="126" x2="820" y2="214" class="grid"/>
+<text x="220" y="230" class="t3 s" text-anchor="middle">0</text>
+<text x="320" y="230" class="t3 s" text-anchor="middle">1</text>
+<text x="420" y="230" class="t3 s" text-anchor="middle">2</text>
+<text x="520" y="230" class="t3 s" text-anchor="middle">3</text>
+<text x="620" y="230" class="t3 s" text-anchor="middle">4</text>
+<text x="720" y="230" class="t3 s" text-anchor="middle">5</text>
+<text x="820" y="230" class="t3 s" text-anchor="middle">6 GB</text>
+<text x="411" y="112" class="t1 s" text-anchor="middle">removed by fusion: 3.2 GB</text>
+<path d="M251 124v-5h320v5" class="o2"/>
+<text x="208" y="142" class="t1 b" text-anchor="end">Two kernels</text>
+<text x="208" y="156" class="t2 s" text-anchor="end">GemmKernel + ElementWise</text>
+<rect x="220" y="130" width="29" height="28" rx="2" class="s1"/>
+<text x="234.5" y="148" class="w s" text-anchor="middle">A</text>
+<rect x="251" y="130" width="159" height="28" rx="2" class="s2"/>
+<text x="330.5" y="148" class="w s" text-anchor="middle">write C 1.61</text>
+<rect x="412" y="130" width="159" height="28" rx="2" class="s2"/>
+<text x="491.5" y="148" class="w s" text-anchor="middle">read C 1.61</text>
+<rect x="573" y="130" width="160" height="28" rx="2" class="s1"/>
+<text x="653" y="148" class="w s" text-anchor="middle">write Y 1.61</text>
+<text x="741" y="149" class="t1 b" text-anchor="start">5.13 GB</text>
+<text x="208" y="192" class="t1 b" text-anchor="end">Fused</text>
+<text x="208" y="206" class="t2 s" text-anchor="end">one launch</text>
+<rect x="220" y="180" width="29" height="28" rx="2" class="s1"/>
+<text x="234.5" y="198" class="w s" text-anchor="middle">A</text>
+<rect x="251" y="180" width="160" height="28" rx="2" class="s1"/>
+<text x="331" y="198" class="w s" text-anchor="middle">write Y 1.61</text>
+<text x="419" y="199" class="t1 b" text-anchor="start">1.91 GB</text>
+<text x="482" y="199" class="t2 n" text-anchor="start">about 2.7x fewer bytes</text>
+<line x1="220" y1="126" x2="220" y2="214" class="axis"/>
+<line x1="24" y1="246" x2="836" y2="246" class="grid"/>
+<text x="24" y="269" class="t1 b" text-anchor="start">Measured</text>
+<text x="100" y="269" class="t2 n" text-anchor="start">gfx950, 1000 W cap: at the measured copy rate of 4.59 TB/s the 1.91 GB of the fused path take 416 us.</text>
+<text x="100" y="288" class="t2 n" text-anchor="start">Fused 687 to 689 us (A-stationary), 993 to 995 us (library kernel); best two kernels 1707 to 1708 us.</text>
+</svg>

@@ -527,10 +527,11 @@ struct UniversalGemmKernel
 
     template <typename T>
     using has_gemm_kernel_only = decltype(T::kGemmKernelOnly);
-    /// True for a pipeline validated only in this kernel itself, persistent or not (comp_tdm_ra).
-    /// Every kernel that derives from or wraps UniversalGemmKernel static_asserts against it:
-    /// through kIsPlainGemmOnlyPipeline, which it implies, and directly in the batched, Stream-K
-    /// and MX kernels, which accept plain-GEMM-only pipelines.
+    /// True for a pipeline validated only in this kernel itself, persistent or not, and in
+    /// GemmEPermuteKernel (comp_tdm_ra). Every other kernel that derives from or wraps
+    /// UniversalGemmKernel static_asserts against it: through kIsPlainGemmOnlyPipeline, which it
+    /// implies, and directly in the batched, Stream-K and MX kernels, which accept
+    /// plain-GEMM-only pipelines.
     static constexpr bool kIsGemmKernelOnlyPipeline = []() {
         if constexpr(is_detected<has_gemm_kernel_only, GemmPipeline>{})
             return static_cast<bool>(GemmPipeline::kGemmKernelOnly);
@@ -540,9 +541,9 @@ struct UniversalGemmKernel
 
     template <typename T>
     using has_plain_gemm_only = decltype(T::kPlainGemmOnly);
-    /// True for a pipeline tested only in the plain, batched, Stream-K and MX GEMM kernels
-    /// (comp_tdm_v3), and for every kIsGemmKernelOnlyPipeline. The multi-D, grouped, multi-ABD
-    /// and batched-contraction kernels static_assert against it.
+    /// True for a pipeline tested only in the plain, batched, Stream-K, MX and E-permute GEMM
+    /// kernels (comp_tdm_v3), and for every kIsGemmKernelOnlyPipeline. The multi-D, grouped,
+    /// multi-ABD and batched-contraction kernels static_assert against it.
     static constexpr bool kIsPlainGemmOnlyPipeline = []() {
         if constexpr(is_detected<has_plain_gemm_only, GemmPipeline>{})
             return static_cast<bool>(GemmPipeline::kPlainGemmOnly) || kIsGemmKernelOnlyPipeline;
@@ -1640,13 +1641,13 @@ struct UniversalGemmKernel
      * @param barriers The token from InitBarriers(); may be omitted without named barriers.
      *
      */
-    template <typename BarrierToken = NoBarriers>
+    template <typename BarrierToken = NoBarriers, typename KArgs = KernelArgs>
     CK_TILE_DEVICE static void RunGemm(const std::array<const ADataType*, NumATensor>& as_ptr,
                                        const std::array<const BDataType*, NumBTensor>& bs_ptr,
                                        const std::array<const void*, NumDTensor>& ds_ptr,
                                        EDataType* e_ptr,
                                        void* smem_ptr,
-                                       const KernelArgs& kargs,
+                                       const KArgs& kargs,
                                        const SplitKBatchOffset& splitk_batch_offset,
                                        const index_t block_idx_m,
                                        const index_t block_idx_n,
@@ -1686,8 +1687,10 @@ struct UniversalGemmKernel
         if(k_batch == 1)
         {
             RunWaveletAwareEpilogue<GemmPipeline, EpiloguePipeline>([&]() {
-                auto c_block_window = MakeCBlockWindows<memory_operation_enum::set>(
-                    e_ptr, kargs, block_idx_m, block_idx_n);
+                // A derived kernel may hide MakeCBlockWindows to store E through another layout.
+                auto c_block_window =
+                    SelfType::template MakeCBlockWindows<memory_operation_enum::set>(
+                        e_ptr, kargs, block_idx_m, block_idx_n);
                 EpiloguePipeline{}(c_block_window, c_block_tile, ds_block_window, smem_ptr);
             });
         }
@@ -1702,8 +1705,9 @@ struct UniversalGemmKernel
             if constexpr(EpilogueSupportsSplitK)
             {
                 RunWaveletAwareEpilogue<GemmPipeline, EpiloguePipeline>([&]() {
-                    auto c_block_window = MakeCBlockWindows<memory_operation_enum::atomic_add>(
-                        e_ptr, kargs, block_idx_m, block_idx_n);
+                    auto c_block_window =
+                        SelfType::template MakeCBlockWindows<memory_operation_enum::atomic_add>(
+                            e_ptr, kargs, block_idx_m, block_idx_n);
                     EpiloguePipeline{}(c_block_window, c_block_tile, ds_block_window, smem_ptr);
                 });
             }

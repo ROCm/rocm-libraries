@@ -1,0 +1,141 @@
+<!-- Copyright (c) Advanced Micro Devices, Inc., or its affiliates. SPDX-License-Identifier: MIT -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 472" width="860" height="472" role="img" aria-label="One A-stationary workgroup loads its 128 by 384 A tile into LDS once, then each of 4 waves computes 8 output tiles of 128 by 64 while the weight streams from global memory straight into the MFMA registers; the stock pipeline instead loads the same A rows in 8 workgroups and stages A and B in LDS every K step">
+<rect class="bg" x="0.5" y="0.5" width="859" height="471" rx="8"/>
+<style>text{font-family:system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.h{font-size:15px;font-weight:600}.b{font-size:13px;font-weight:600}.n{font-size:12px}.s{font-size:11px}.x{font-size:10px}.w{fill:#ffffff}.halo{paint-order:stroke;stroke-width:4px;stroke-linejoin:round}line{stroke-width:1}.ar{stroke-width:1.5}.bg{fill:#fcfcfb;stroke:#e1e0d9}.t1{fill:#0b0b0b}.t2{fill:#52514e}.t3{fill:#898781}.grid{stroke:#e1e0d9}.axis{stroke:#c3c2b7}.track{fill:#e1e0d9}.cell{fill:#fcfcfb;stroke:#c3c2b7}.halo{stroke:#fcfcfb}.ref{stroke:#898781}.plate{fill:#fcfcfb}.ar{stroke:#898781}.ah{fill:#898781}.s1{fill:#2a78d6}.o1{stroke:#2a78d6;fill:none}.s2{fill:#eb6834}.o2{stroke:#eb6834;fill:none}.s3{fill:#1baf7a}.o3{stroke:#1baf7a;fill:none}@media (prefers-color-scheme:dark){.bg{fill:#1a1a19;stroke:#2c2c2a}.t1{fill:#f0efec}.t2{fill:#c3c2b7}.t3{fill:#898781}.grid{stroke:#2c2c2a}.axis{stroke:#383835}.track{fill:#2c2c2a}.cell{fill:#1a1a19;stroke:#383835}.halo{stroke:#1a1a19}.ref{stroke:#898781}.plate{fill:#1a1a19}.ar{stroke:#898781}.ah{fill:#898781}.s1{fill:#3987e5}.o1{stroke:#3987e5;fill:none}.s2{fill:#d95926}.o2{stroke:#d95926;fill:none}.s3{fill:#199e70}.o3{stroke:#199e70;fill:none}}</style>
+<text x="24" y="34" class="t1 h" text-anchor="start">One workgroup of the A-stationary kernel</text>
+<text x="24" y="54" class="t2 n" text-anchor="start">One workgroup per (b, 128 rows of t): 3072 workgroups, 4 waves, 96 KiB of LDS, one barrier</text>
+<rect x="540" y="24" width="12" height="12" rx="3" class="s1"/>
+<text x="558" y="34" class="t2 n" text-anchor="start">A-stationary</text>
+<rect x="644" y="24" width="12" height="12" rx="3" class="s3"/>
+<text x="662" y="34" class="t2 n" text-anchor="start">A in LDS</text>
+<rect x="728" y="24" width="12" height="12" rx="3" class="s2"/>
+<text x="746" y="34" class="t2 n" text-anchor="start">stock CompV3</text>
+<rect x="24" y="96" width="160" height="66" rx="6" class="cell"/>
+<rect x="24" y="96" width="6" height="66" rx="3" class="s1"/>
+<text x="40" y="118" class="t1 b" text-anchor="start">A rows of one b</text>
+<text x="40" y="135" class="t2 s" text-anchor="start">[128, 384] BF16, 96 KiB</text>
+<text x="40" y="152" class="t2 s" text-anchor="start">t = t0 .. t0+127</text>
+<rect x="24" y="180" width="160" height="66" rx="6" class="cell"/>
+<rect x="24" y="180" width="6" height="66" rx="3" class="s1"/>
+<text x="40" y="202" class="t1 b" text-anchor="start">Weight, repacked</text>
+<text x="40" y="219" class="t2 s" text-anchor="start">1.5 MiB, L2-resident</text>
+<text x="40" y="236" class="t2 s" text-anchor="start">repack 5.7 us per call</text>
+<rect x="244" y="88" width="168" height="82" rx="6" class="cell"/>
+<rect x="244" y="88" width="6" height="82" rx="3" class="s3"/>
+<text x="260" y="108" class="t1 b" text-anchor="start">LDS: A only</text>
+<rect x="260" y="118" width="10" height="28" rx="2" class="s3"/>
+<rect x="272" y="118" width="10" height="28" rx="2" class="s3"/>
+<rect x="284" y="118" width="10" height="28" rx="2" class="s3"/>
+<rect x="296" y="118" width="10" height="28" rx="2" class="s3"/>
+<rect x="308" y="118" width="10" height="28" rx="2" class="s3"/>
+<rect x="320" y="118" width="10" height="28" rx="2" class="s3"/>
+<rect x="332" y="118" width="10" height="28" rx="2" class="s3"/>
+<rect x="344" y="118" width="10" height="28" rx="2" class="s3"/>
+<rect x="356" y="118" width="10" height="28" rx="2" class="s3"/>
+<rect x="368" y="118" width="10" height="28" rx="2" class="s3"/>
+<rect x="380" y="118" width="10" height="28" rx="2" class="s3"/>
+<rect x="392" y="118" width="10" height="28" rx="2" class="s3"/>
+<text x="260" y="162" class="t2 x" text-anchor="start">12 x [128, 32], 8 KiB each</text>
+<line x1="188" y1="129" x2="236" y2="129" class="ar"/>
+<polygon points="242,129 235,125 235,133" class="ah"/>
+<text x="214" y="121" class="t2 x" text-anchor="middle">once</text>
+<text x="214" y="146" class="t2 x" text-anchor="middle">1 barrier</text>
+<text x="260" y="186" class="t2 x" text-anchor="start">every wave reads it, 1 K step ahead</text>
+<line x1="416" y1="129" x2="460" y2="129" class="ar"/>
+<polygon points="466,129 459,125 459,133" class="ah"/>
+<line x1="188" y1="213" x2="460" y2="213" class="ar"/>
+<polygon points="466,213 459,209 459,217" class="ah"/>
+<text x="200" y="205" class="t2 s" text-anchor="start">16 B per lane, 4 loads per K step</text>
+<text x="200" y="230" class="t2 s" text-anchor="start">no LDS, issued 2 K steps ahead</text>
+<line x1="469" y1="108" x2="469" y2="224" class="ar"/>
+<line x1="469" y1="108" x2="473" y2="108" class="ar"/>
+<line x1="469" y1="224" x2="473" y2="224" class="ar"/>
+<text x="548" y="82" class="t1 b" text-anchor="start">Output: 4 waves x 8 tiles of [128, 64]</text>
+<text x="565" y="101" class="t2 s" text-anchor="middle">h0</text>
+<text x="601" y="101" class="t2 s" text-anchor="middle">h1</text>
+<text x="637" y="101" class="t2 s" text-anchor="middle">h2</text>
+<text x="673" y="101" class="t2 s" text-anchor="middle">h3</text>
+<text x="709" y="101" class="t2 s" text-anchor="middle">h4</text>
+<text x="745" y="101" class="t2 s" text-anchor="middle">h5</text>
+<text x="781" y="101" class="t2 s" text-anchor="middle">h6</text>
+<text x="817" y="101" class="t2 s" text-anchor="middle">h7</text>
+<text x="478" y="125" class="t2 s" text-anchor="start">wave 0</text>
+<rect x="548" y="108" width="34" height="26" rx="3" class="s1"/>
+<rect x="584" y="108" width="34" height="26" rx="3" class="s1"/>
+<rect x="620" y="108" width="34" height="26" rx="3" class="s1"/>
+<rect x="656" y="108" width="34" height="26" rx="3" class="s1"/>
+<rect x="692" y="108" width="34" height="26" rx="3" class="s1"/>
+<rect x="728" y="108" width="34" height="26" rx="3" class="s1"/>
+<rect x="764" y="108" width="34" height="26" rx="3" class="s1"/>
+<rect x="800" y="108" width="34" height="26" rx="3" class="s1"/>
+<text x="478" y="155" class="t2 s" text-anchor="start">wave 1</text>
+<rect x="548" y="138" width="34" height="26" rx="3" class="s1"/>
+<rect x="584" y="138" width="34" height="26" rx="3" class="s1"/>
+<rect x="620" y="138" width="34" height="26" rx="3" class="s1"/>
+<rect x="656" y="138" width="34" height="26" rx="3" class="s1"/>
+<rect x="692" y="138" width="34" height="26" rx="3" class="s1"/>
+<rect x="728" y="138" width="34" height="26" rx="3" class="s1"/>
+<rect x="764" y="138" width="34" height="26" rx="3" class="s1"/>
+<rect x="800" y="138" width="34" height="26" rx="3" class="s1"/>
+<text x="478" y="185" class="t2 s" text-anchor="start">wave 2</text>
+<rect x="548" y="168" width="34" height="26" rx="3" class="s1"/>
+<rect x="584" y="168" width="34" height="26" rx="3" class="s1"/>
+<rect x="620" y="168" width="34" height="26" rx="3" class="s1"/>
+<rect x="656" y="168" width="34" height="26" rx="3" class="s1"/>
+<rect x="692" y="168" width="34" height="26" rx="3" class="s1"/>
+<rect x="728" y="168" width="34" height="26" rx="3" class="s1"/>
+<rect x="764" y="168" width="34" height="26" rx="3" class="s1"/>
+<rect x="800" y="168" width="34" height="26" rx="3" class="s1"/>
+<text x="478" y="215" class="t2 s" text-anchor="start">wave 3</text>
+<rect x="548" y="198" width="34" height="26" rx="3" class="s1"/>
+<rect x="584" y="198" width="34" height="26" rx="3" class="s1"/>
+<rect x="620" y="198" width="34" height="26" rx="3" class="s1"/>
+<rect x="656" y="198" width="34" height="26" rx="3" class="s1"/>
+<rect x="692" y="198" width="34" height="26" rx="3" class="s1"/>
+<rect x="728" y="198" width="34" height="26" rx="3" class="s1"/>
+<rect x="764" y="198" width="34" height="26" rx="3" class="s1"/>
+<rect x="800" y="198" width="34" height="26" rx="3" class="s1"/>
+<text x="478" y="246" class="t2 s" text-anchor="start">Wave w, tile i: head i, d = 64w .. 64w+63</text>
+<text x="478" y="262" class="t2 s" text-anchor="start">Column h: Y[h, b, t0..t0+127, :], one 64 KiB block</text>
+<text x="478" y="278" class="t2 s" text-anchor="start">Per tile: 12 K steps x 32 MFMAs 16x16x32</text>
+<line x1="24" y1="298" x2="836" y2="298" class="grid"/>
+<text x="24" y="322" class="t1 b" text-anchor="start">For comparison: the stock CompV3 pipeline of the library kernel, tile 128 x 256 x 32</text>
+<text x="24" y="352" class="t2 n" text-anchor="start">Library kernel</text>
+<rect x="140" y="336" width="90" height="24" rx="4" class="cell"/>
+<text x="185" y="352" class="t1 s" text-anchor="middle">A [128, 384]</text>
+<line x1="236" y1="348" x2="286" y2="348" class="ar"/>
+<polygon points="292,348 285,344 285,352" class="ah"/>
+<text x="262" y="343" class="t2 x" text-anchor="middle">8x</text>
+<text x="24" y="390" class="t2 n" text-anchor="start">A-stationary</text>
+<rect x="140" y="374" width="90" height="24" rx="4" class="cell"/>
+<text x="185" y="390" class="t1 s" text-anchor="middle">A [128, 384]</text>
+<line x1="236" y1="386" x2="286" y2="386" class="ar"/>
+<polygon points="292,386 285,382 285,390" class="ah"/>
+<text x="262" y="381" class="t2 x" text-anchor="middle">1x</text>
+<rect x="296" y="336" width="40" height="24" rx="3" class="s2"/>
+<rect x="340" y="336" width="40" height="24" rx="3" class="s2"/>
+<rect x="384" y="336" width="40" height="24" rx="3" class="s2"/>
+<rect x="428" y="336" width="40" height="24" rx="3" class="s2"/>
+<rect x="472" y="336" width="40" height="24" rx="3" class="s2"/>
+<rect x="516" y="336" width="40" height="24" rx="3" class="s2"/>
+<rect x="560" y="336" width="40" height="24" rx="3" class="s2"/>
+<rect x="604" y="336" width="40" height="24" rx="3" class="s2"/>
+<text x="316" y="352" class="w s" text-anchor="middle">n0</text>
+<text x="360" y="352" class="w s" text-anchor="middle">n1</text>
+<text x="404" y="352" class="w s" text-anchor="middle">n2</text>
+<text x="448" y="352" class="w s" text-anchor="middle">n3</text>
+<text x="492" y="352" class="w s" text-anchor="middle">n4</text>
+<text x="536" y="352" class="w s" text-anchor="middle">n5</text>
+<text x="580" y="352" class="w s" text-anchor="middle">n6</text>
+<text x="624" y="352" class="w s" text-anchor="middle">n7</text>
+<text x="660" y="345" class="t2 x" text-anchor="start">8 workgroups x 256 columns,</text>
+<text x="660" y="358" class="t2 x" text-anchor="start">A and B via LDS every K step</text>
+<rect x="296" y="374" width="348" height="24" rx="3" class="s1"/>
+<text x="470" y="390" class="w s" text-anchor="middle">1 workgroup: 8 heads x 256 d = 2048 columns</text>
+<text x="660" y="383" class="t2 x" text-anchor="start">A via LDS once (1 barrier),</text>
+<text x="660" y="396" class="t2 x" text-anchor="start">weight straight to registers</text>
+<text x="24" y="420" class="t2 s" text-anchor="start">Grid on the trace shape: 3072 x 8 = 24,576 workgroups for the library kernel, 3072 for A-stationary</text>
+<line x1="24" y1="432" x2="836" y2="432" class="grid"/>
+<text x="24" y="455" class="t1 b" text-anchor="start">Measured</text>
+<text x="100" y="455" class="t2 n" text-anchor="start">Trace shape, gfx950, whole kernels: library kernel 993 to 995 us, A-stationary 687 to 689 us per call</text>
+</svg>
