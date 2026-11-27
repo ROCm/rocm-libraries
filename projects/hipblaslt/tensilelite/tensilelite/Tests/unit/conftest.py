@@ -16,7 +16,7 @@ _TESTS_DIR = os.path.dirname(os.path.dirname(__file__))
 if _TESTS_DIR not in sys.path:
     sys.path.insert(0, _TESTS_DIR)
 
-_UNIT_DIR = os.path.dirname(__file__)
+_UNIT_DIR = os.path.dirname(os.path.abspath(__file__))
 if _UNIT_DIR not in sys.path:
     sys.path.insert(0, _UNIT_DIR)
 
@@ -35,7 +35,8 @@ from toolchain_test_helpers import (
     shared_isa_info_map_or_skip,
 )
 
-_UNIT_DIR = os.path.dirname(os.path.abspath(__file__))
+# Why the GPU probe failed, stored on each gpu test so pytest_runtest_setup fails it.
+_GPU_PROBE_ERROR = pytest.StashKey[str]()
 
 
 @pytest.hookimpl(trylast=True)
@@ -44,40 +45,56 @@ def pytest_collection_modifyitems(config, items):
 
     ``gpu`` = any GPU; ``gpu("gfx950", ...)`` = one of those (``gfx1250`` covers
     ``gfx1250-strict``). One ``gpu`` mark per test, on the param, function, class
-    or module, with positional arch strings only; anything else is a usage error
-    (``check_gpu_marks``).
+    or module, with positional arch strings only (``check_gpu_marks``). A malformed
+    mark, or a HIP error while reading the device, fails the test in
+    ``pytest_runtest_setup`` below instead of skipping it.
     Runs after ``-m`` deselection, so ``-m "not gpu"`` never probes the GPU.
     """
+    probe = None  # (arch or None, error or None), read once for the first gpu test
     for item in items:
         if not str(item.path).startswith(_UNIT_DIR + os.sep):
             continue
         mark = item.get_closest_marker("gpu")
         if mark is None:
             continue
-        check_gpu_marks(item)
+        try:
+            check_gpu_marks(item)
+        except pytest.UsageError:
+            # Not skipped: pytest_runtest_setup below reports it as this test's error.
+            continue
         if not hip_available():
             item.add_marker(pytest.mark.skip(reason="needs hip-python"))
             continue
-        found = detect_gpu_target()
-        if found is None:
+        if probe is None:
+            try:
+                probe = (detect_gpu_target(), None)
+            except RuntimeError as error:
+                probe = (None, str(error))
+        found, error = probe
+        if error is not None:
+            item.stash[_GPU_PROBE_ERROR] = error
+        elif found is None:
             item.add_marker(pytest.mark.skip(reason="needs a GPU (none visible to HIP)"))
         elif mark.args and not any(arch_matches(found, a) for a in mark.args):
             item.add_marker(pytest.mark.skip(reason=f"needs {'/'.join(mark.args)}, found {found}"))
 
 
-def pytest_configure(config):
-    """``--require-gpu``: fail the run up front when hip-python or a GPU is missing.
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_setup(item):
+    """Report a malformed ``gpu`` mark, or a failed GPU probe, as an error of the test.
 
-    Checked here rather than per test so that under pytest-xdist the controller
-    reports it as a usage error; raised on a worker it becomes an INTERNALERROR
-    that hides the message.
+    If the collection hook raised them instead, pytest-xdist would turn them into an
+    INTERNALERROR that hides the message and the test's id.
     """
-    if not config.getoption("--require-gpu", default=False):
+    if not str(item.path).startswith(_UNIT_DIR + os.sep) or item.get_closest_marker("gpu") is None:
         return
-    if not hip_available():
-        raise pytest.UsageError("--require-gpu: hip-python is not importable")
-    if detect_gpu_target() is None:
-        raise pytest.UsageError("--require-gpu: HIP reports no GPU, or a HIP error")
+    try:
+        check_gpu_marks(item)
+    except pytest.UsageError as error:
+        pytest.fail(str(error), pytrace=False)
+    error = item.stash.get(_GPU_PROBE_ERROR, None)
+    if error is not None:
+        pytest.fail(f"cannot read the GPU: {error}", pytrace=False)
 
 
 @pytest.fixture(autouse=True)
@@ -170,11 +187,6 @@ def skip_parametrized_if_cli(request):
 
 
 def pytest_addoption(parser):
-    parser.addoption(
-        "--require-gpu", action="store_true", default=False,
-        help="Fail, instead of skip, when gpu-marked tests are selected but hip-python or a "
-             "GPU is missing (TheRock's standard tier sets it)",
-    )
     parser.addoption(
         "--mn", nargs="+", metavar="M,N",
         help="List of M,N pairs to test, e.g. --mn 23,17 32,32 16,16",

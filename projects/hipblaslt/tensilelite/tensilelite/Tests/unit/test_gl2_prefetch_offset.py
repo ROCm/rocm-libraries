@@ -131,6 +131,7 @@ from gpu_test_helpers import (  # noqa: E402
 # ---------------------------------------------------------------------------
 TARGET = "gfx1250"
 WAVESIZE = 32
+HOST_PAD_K_BYTES = 64   # host K padding of a swizzled-TDM operand (SwizzledTdmGeometry.PAD_K_BYTES)
 GLOBAL_PREFETCH_SIZE = 256
 
 
@@ -147,6 +148,7 @@ class TensorSpec:
     sparse_side: str = None  # for is_m: "A" or "B" -- which sparse data tensor this
                              # metadata mirrors (Sparse==1 -> A, Sparse==2 -> B); tc
                              # itself is always literally "Metadata"
+    swizzled_tdm: bool = False  # gfx1250 global pre-swizzle consumed through TDM
 
     @property
     def subtc(self):
@@ -176,8 +178,11 @@ class GL2Config:
                               # (WorkGroup0); B-type is the mirror image. So a 2D
                               # cluster exercises A and B cooperatively at once.
     matrix_inst_k: int = 128
+    matrix_inst_m: int = 16
+    matrix_inst_n: int = 16
     mx_block: int = 32
     mx_block_free: int = 1
+    size_l: int = 2048       # runtime K used to derive swizzled-TDM paddedK row stride
     size_i: int = None        # free-dim size (M) override for A-type; None => clean M*MT
     size_j: int = None        # free-dim size (N) override for B-type; None => clean N*MT
     pgr: int = 2              # PrefetchGlobalRead: skipPGR advances the start
@@ -221,6 +226,9 @@ class GL2Config:
     sizes_sum_zero: bool = False  # K == 0 (SizesSum = 0): the pointer-array dereference is skipped
     inc64: bool = False       # PrefetchGL2Inc64Bit: 64-bit (sgpr pair) addr increment.
     saddr: bool = False       # PrefetchGL2SAddr: sgpr pair base + 32-bit vgpr offset.
+    k_start: int = None       # StreamKLocalStart: a StreamK work item's first unroll
+                              # iteration within its tile; None leaves the K-start
+                              # path off, as for non-StreamK kernels.
 
     @property
     def lc(self):
@@ -291,6 +299,11 @@ def tensor_dims(spec, cfg):
         mx_unit = cfg.matrix_inst_k // cfg.mx_block
         coal = ((spec.mt * M + cfg.mx_block_free - 1) // cfg.mx_block_free) * mx_unit
         perp = cfg.depth_u // cfg.matrix_inst_k
+    elif spec.swizzled_tdm:
+        mi = cfg.matrix_inst_m if spec.subtc == "A" else cfg.matrix_inst_n
+        assert spec.mt % mi == 0
+        coal = mi * data_depth_u(spec, cfg)
+        perp = spec.mt * M // mi
     else:
         du = data_depth_u(spec, cfg)
         coal, perp = (spec.mt * M, du) if spec.tlu else (du, spec.mt * M)
@@ -347,8 +360,14 @@ def mt_tiles(spec, cfg):
     return cfg.cluster[0] if spec.subtc == "A" else cfg.cluster[1]
 
 
-def _A(tlu, mt, bpe=1):   return TensorSpec("A", tlu, mt, bpe)
-def _B(tlu, mt, bpe=1):   return TensorSpec("B", tlu, mt, bpe)
+def _A(tlu, mt, bpe=1, swizzled_tdm=False):
+    return TensorSpec("A", tlu, mt, bpe, swizzled_tdm=swizzled_tdm)
+
+
+def _B(tlu, mt, bpe=1, swizzled_tdm=False):
+    return TensorSpec("B", tlu, mt, bpe, swizzled_tdm=swizzled_tdm)
+
+
 def _MXSA(mt):            return TensorSpec("MXSA", True, mt, 1)
 def _MXSB(mt):            return TensorSpec("MXSB", True, mt, 1)
 def _M(side, tlu, mt):    return TensorSpec("Metadata", tlu, mt, 1, is_m=True, sparse_side=side)
@@ -370,6 +389,35 @@ CONFIGS = [
     # footprint is covered by this single WG's threads. Guards the degenerate
     # single-workgroup path. ----
     GL2Config("ab_fp8_tlu_nocluster", [_A(True, 256), _B(True, 256)], cluster=(1, 1)),
+    # ---- gfx1250 global pre-swizzle through TDM. Exercise the per-tensor gate
+    # independently first, then A+B together with whole-cluster cooperation. ----
+    GL2Config("a_swizzled_tdm", [_A(True, 64, swizzled_tdm=True), _B(False, 64)],
+              depth_u=128, cluster=(2, 1)),
+    GL2Config("b_swizzled_tdm", [_A(True, 64), _B(False, 64, swizzled_tdm=True)],
+              depth_u=128, cluster=(1, 2)),
+    GL2Config("ab_swizzled_tdm", [_A(True, 64, swizzled_tdm=True),
+                                   _B(False, 64, swizzled_tdm=True)],
+              depth_u=256, cluster=(2, 2)),
+    # Degenerate non-cooperative path: a single workgroup must cover the complete
+    # swizzled A/B footprint without cluster-local tile/share indices.
+    GL2Config("ab_swizzled_tdm_nocluster", [_A(True, 64, swizzled_tdm=True),
+                                             _B(False, 64, swizzled_tdm=True)],
+              depth_u=128, cluster=(1, 1)),
+    # More cache-line addresses than cooperative threads forces two address VGPRs
+    # per thread and exercises the swizzled per-instruction stride-add path.
+    GL2Config("ab_swizzled_tdm_nl2", [_A(True, 64, swizzled_tdm=True),
+                                       _B(False, 64, swizzled_tdm=True)],
+              depth_u=256, num_threads=32, cluster=(1, 1)),
+    # Runtime K is not padK-aligned. The physical row stride must use the
+    # host-padded K extent (alignUp(2033, 64) == 2048), not raw SizeL.
+    GL2Config("ab_swizzled_tdm_padded_k", [_A(True, 64, swizzled_tdm=True),
+                                            _B(False, 64, swizzled_tdm=True)],
+              depth_u=128, cluster=(2, 2), size_l=2033),
+    # Last cluster is partial in both free dimensions. The host-padded final MI row
+    # remains addressable; excess cooperative rows clamp to that row.
+    GL2Config("ab_swizzled_tdm_edge", [_A(True, 64, swizzled_tdm=True),
+                                        _B(False, 64, swizzled_tdm=True)],
+              depth_u=128, cluster=(2, 2), size_i=91, size_j=77),
     # ---- 384-byte coalesced range with two 256-byte prefetch chunks. ----
     GL2Config("ab_fp8_ncc_partial",    [_A(True, 384), _B(True, 384)],
               depth_u=128, cluster=(1, 1)),
@@ -557,6 +605,14 @@ CONFIGS = [
     GL2Config("pgr2_guard_taken", [_A(True, 256), _B(False, 256)], cluster=(2, 2),
               loop_counter=2),
 
+    # ---- StreamK. A work item starts StreamKLocalStart unroll iterations into its
+    # tile, so the start address gains kStart*inc before skipPGR, the same shift
+    # its TDM loads take. Mixed layouts so the shift is checked on both K axes,
+    # and MX scales so each tensor scales kStart by its own increment. ----
+    GL2Config("streamk_kstart", [_A(True, 256), _B(False, 256)], cluster=(2, 2), k_start=3),
+    GL2Config("streamk_kstart_mx", [_A(True, 192), _B(True, 192), _MXSA(192), _MXSB(192)],
+              depth_u=256, mx_block=32, cluster=(2, 2), k_start=5),
+
     # ---- SupportUserArgs (see the coverage note at the top). ----
     # Strided launch of a UserArgs kernel (ArgType 0 + TDM wave id in bits 8+):
     # the batch stride still applies.
@@ -614,7 +670,8 @@ CONFIGS = [
 _INC64_CONFIGS = {
     "ab_fp8_mixed_layout", "abmx_fp8", "a_sparse_tlu_mlayout1",
     "gsu4_interleaved", "gsu4_contiguous_rem", "gsu2_mx_cluster",
-    "pgr1_nl2", "pgr3_ntlu", "pgr2_guard_taken",
+    "pgr1_nl2", "pgr3_ntlu", "pgr2_guard_taken", "streamk_kstart", "streamk_kstart_mx",
+    "ab_swizzled_tdm",  # the swizzled-TDM increment is MI*DepthU*bpe, widened to a pair
 }
 CONFIGS += [replace(c, name=f"{c.name}_inc64", inc64=True)
             for c in CONFIGS if c.name in _INC64_CONFIGS]
@@ -630,6 +687,7 @@ _SADDR_CONFIGS = {
     "abmx_fp8_inc64", "gsu4_contiguous_rem_inc64", "pgr1_nl2_inc64", "pgr3_ntlu_inc64",
     "userargs_strided", "userargs_ptr_array", "userargs_ptr_k0",
     "userargs_ptr_array_gsu4_interleaved", "userargs_ptr_array_gsu2_mx",
+    "streamk_kstart", "streamk_kstart_inc64",
 }
 CONFIGS += [replace(c, name=f"{c.name}_saddr", saddr=True)
             for c in CONFIGS if c.name in _SADDR_CONFIGS]
@@ -716,6 +774,8 @@ def _make_kernel(cfg):
         "_DepthUA": depth_u_side("A", cfg),
         "_DepthUB": depth_u_side("B", cfg),
         "MatrixInstK": cfg.matrix_inst_k,
+        "MatrixInstM": cfg.matrix_inst_m,
+        "MatrixInstN": cfg.matrix_inst_n,
         "ClusterDim": list(cfg.cluster),
         "NumThreads": cfg.num_threads,
         "DepthU": cfg.depth_u,
@@ -827,6 +887,8 @@ def build_kernel(cfg, with_prefetch=False, target=TARGET):
         shared += ["StrideAI", "StrideAL", "SizeI"]
     if "B" in subtcs:
         shared += ["StrideBJ", "StrideBL", "SizeJ"]
+    if any(t.swizzled_tdm for t in cfg.tensors):
+        shared += ["SizeL"]
     for t in cfg.tensors:
         if t.is_m:                        # StrideMetadata{I,J} + StrideMetadataL
             idxChar = "I" if t.idx == 0 else "J"
@@ -835,6 +897,9 @@ def build_kernel(cfg, with_prefetch=False, target=TARGET):
         # GSU packs the group count and the GSUC bit; SizesSum feeds numIter in the
         # contiguous branch.
         shared += ["GSU", "SizesSum"]
+    if cfg.k_start is not None:
+        assert not cfg.gsu_on, f"{cfg.name}: StreamK forces GlobalSplitU=0"
+        shared += ["StreamKLocalStart"]
     if cfg.user_args:
         assert cfg.batched, f"{cfg.name}: SupportUserArgs needs a batched config"
         assert not (cfg.gsu_on and cfg.sizes_sum_zero), \
@@ -878,7 +943,13 @@ def build_kernel(cfg, with_prefetch=False, target=TARGET):
     vgpr_sets = {}
     for t in cfg.tensors:
         ia = t.ia + [2] if cfg.batched else t.ia   # batch index 2 must be in ia
-        tp = {"tensorChar": t.tc, "idx": t.idx, "tlu": t.tlu, "bpeGR": t.bpe, "ia": ia, "isM": t.is_m}
+        tp = {"tensorChar": t.tc, "idx": t.idx, "tlu": t.tlu, "bpeGR": t.bpe,
+              "ia": ia, "isM": t.is_m, "isSwizzledTDM": t.swizzled_tdm}
+        if t.swizzled_tdm:
+            mi = cfg.matrix_inst_m if t.subtc == "A" else cfg.matrix_inst_n
+            inner_k = round(16 / t.bpe)
+            tp["swizzleK"] = inner_k * (WAVESIZE // mi)
+            tp["swizzlePadK"] = round(HOST_PAD_K_BYTES / t.bpe)
         comp.init(w, kernel, tp)
         assert tp["gl2nc"] == tensor_dims(t, cfg)[3], \
             f"{t.tc}: gl2nc {tp['gl2nc']} != expected {tensor_dims(t, cfg)[3]}"
@@ -912,9 +983,10 @@ def build_kernel(cfg, with_prefetch=False, target=TARGET):
                 body.add(comp.setIncrement(w, kernel, tp))
                 body.add(comp.calculateStartAddr(w, kernel, tp, gsu_iter_sgpr))
     else:
+        k_start_sgpr = None if cfg.k_start is None else "StreamKLocalStart"
         for t, tp in tps:
             body.add(comp.setIncrement(w, kernel, tp))
-            body.add(comp.calculateStartAddr(w, kernel, tp))
+            body.add(comp.calculateStartAddr(w, kernel, tp, kStartSgprName=k_start_sgpr))
 
     # Same guard as the pre-loop GL2 issue in KernelWriter: with LoopCounterL <=
     # PGR there is nothing left to prefetch, so the skip is branched over. It runs
@@ -947,6 +1019,8 @@ def build_kernel(cfg, with_prefetch=False, target=TARGET):
         coal_b = _data_coal(cfg, "B")
         consts += [("StrideBJ", coal_b), ("StrideBL", coal_b),
                    ("SizeJ", free_dim_size(cfg, "B"))]
+    if any(t.swizzled_tdm for t in cfg.tensors):
+        consts += [("SizeL", cfg.size_l)]
     for t in cfg.tensors:
         if t.is_m:
             # StrideMetadata{I,J}/StrideMetadataL are both programmed to the
@@ -956,6 +1030,8 @@ def build_kernel(cfg, with_prefetch=False, target=TARGET):
             idxChar = "I" if t.idx == 0 else "J"
             consts += [(f"StrideMetadata{idxChar}", coal_m), ("StrideMetadataL", coal_m)]
     consts += [("WorkGroup0", 0), ("WorkGroup1", 0), ("WorkGroup2", 0), ("LoopCounterL", cfg.lc)]
+    if cfg.k_start is not None:
+        consts += [("StreamKLocalStart", cfg.k_start)]
     if cfg.batched:                              # programmed batch stride Stride{tc}K
         consts += [(f"Stride{t.tc}K", batch_stride_elems(t, cfg)) for t in cfg.tensors]
     if cfg.gsu_on:
@@ -1190,6 +1266,9 @@ def inc_bytes(spec, cfg):
     if spec.is_m:
         coal, _, _, _ = tensor_dims(spec, cfg)
         return round(coal * cfg.depth_u_metadata) if spec.tlu else round(cfg.depth_u_metadata)
+    if spec.swizzled_tdm:
+        mi = cfg.matrix_inst_m if spec.subtc == "A" else cfg.matrix_inst_n
+        return round(mi * data_depth_u(spec, cfg) * bpe)
     if spec.tlu:
         return _data_coal(cfg, spec.subtc) * round(data_depth_u(spec, cfg) * bpe)
     return round(data_depth_u(spec, cfg) * bpe)
@@ -1225,6 +1304,12 @@ def expected_offsets(spec, cfg, stage=0, batch=0, group=0):
     implementation detail. Any allocation that yields the same footprint passes;
     only a coverage bug (a missing/extra/out-of-bounds address) fails."""
     g = _footprint_geometry(spec, cfg, stage, batch, group)
+    if g.swizzled:
+        return {
+            min(row, g.last_valid_row) * g.row_stride_bytes + line * GLOBAL_PREFETCH_SIZE + g.shift
+            for row in range(g.perp)
+            for line in range(tensor_dims(spec, cfg)[2])
+        }
     bpe, edge, perp_stride, shift = g.bpe, g.edge, g.perp_stride, g.shift
     ncc = tensor_dims(spec, cfg)[2]
     gps_elems = round(GLOBAL_PREFETCH_SIZE / bpe)
@@ -1260,15 +1345,25 @@ def _footprint_geometry(spec, cfg, stage, batch, group):
         perp_stride = coal
         edge = size_free - 1
     k_iter = gsu_start_iter(cfg, group) + (cfg.skip_iters + stage) * gsu_iter_stride(cfg)
+    k_iter += cfg.k_start or 0
     shift = k_iter * inc_bytes(spec, cfg)
     # a pointer-array base already selects the batch (run_config strips it)
     if cfg.batched and not derefs_ptr_array(spec, cfg):
         shift += batch * round(batch_stride_elems(spec, cfg) * spec.bpe)
-    return SimpleNamespace(
+    g = SimpleNamespace(
         bpe=spec.bpe, coal=coal, perp=perp, size_free=size_free, unit=unit,
         perp_stride=perp_stride, edge=edge,
         coal_to_mt=spec.is_mx or spec.tlu,   # MT offset & clamp land in coal (else perp)
-        shift=shift)
+        shift=shift, swizzled=spec.swizzled_tdm)
+    if spec.swizzled_tdm:
+        # Swizzled-TDM rows are outer MI rows `MI * alignUp(SizeL, padK)`
+        # elements apart; each row's DepthU slice (coal elements) is contiguous.
+        mi = cfg.matrix_inst_m if spec.subtc == "A" else cfg.matrix_inst_n
+        pad_k = round(HOST_PAD_K_BYTES / spec.bpe)
+        padded_k = (cfg.size_l + pad_k - 1) // pad_k * pad_k
+        g.row_stride_bytes = round(mi * padded_k * spec.bpe)
+        g.last_valid_row = (size_free - 1) // mi
+    return g
 
 
 def uncovered_bytes(offsets, spec, cfg, stage=0, batch=0, group=0):
@@ -1282,11 +1377,17 @@ def uncovered_bytes(offsets, spec, cfg, stage=0, batch=0, group=0):
     is perpendicular (non-TLU). Rows are measured from their own start, so this
     does not model cache-line alignment of a row that starts mid-line."""
     g = _footprint_geometry(spec, cfg, stage, batch, group)
-    if g.coal_to_mt:
+    if g.swizzled:
+        row_bytes = round(g.coal * g.bpe)
+        row_starts = [r * g.row_stride_bytes + g.shift
+                      for r in range(min(g.perp, g.last_valid_row + 1))]
+    elif g.coal_to_mt:
         rows, row_elems = g.perp, min(g.coal, g.edge + g.unit)
     else:
         rows, row_elems = min(g.perp, g.size_free), g.coal
-    row_bytes = round(row_elems * g.bpe)
+    if not g.swizzled:
+        row_bytes = round(row_elems * g.bpe)
+        row_starts = [round(p * g.perp_stride * g.bpe) + g.shift for p in range(rows)]
 
     merged = []
     for o in sorted(set(offsets)):
@@ -1297,8 +1398,7 @@ def uncovered_bytes(offsets, spec, cfg, stage=0, batch=0, group=0):
     starts = [m[0] for m in merged]
 
     gaps = []
-    for p in range(rows):
-        lo = round(p * g.perp_stride * g.bpe) + g.shift
+    for lo in row_starts:
         hi = lo + row_bytes
         i = bisect_right(starts, lo) - 1
         if i < 0 or merged[i][1] < hi:
@@ -1411,7 +1511,8 @@ class TestGL2PrefetchOffset:
 
 def _assemble_for_target(asm, obj_path):
     """Assemble for TARGET without a device present. assemble_kernel targets the
-    detected GPU, which a CPU-only runner does not have."""
+    detected GPU, which a CPU-only runner does not have. The caller builds with
+    build_kernel's default target, TARGET, so the directive and -mcpu agree."""
     clang = shutil.which("amdclang++")
     if clang is None:
         pytest.skip("amdclang++ not found")
@@ -1525,6 +1626,41 @@ def test_gl2_prefetch_codegen(cfg, tmp_path):
     asm, _, _ = build_kernel(cfg, with_prefetch=True)
     _assemble_for_target(asm, str(tmp_path / f"gl2_{cfg.name}.o"))
     _cover_kwa_gl2_hooks(cfg)
+
+
+class _StopBeforeLaunch(Exception):
+    """Raised in place of the assembler call, so run_config stops before the launch."""
+
+
+@pytest.mark.parametrize("arch", ["gfx1250", "gfx1250-strict"])
+def test_gpu_path_builds_for_the_device_it_runs_on(arch, monkeypatch, tmp_path):
+    """run_config's ``.amdgcn_target`` directive matches the ``-mcpu`` assemble_kernel passes.
+
+    Runs on CPU: the assembler command is captured at ``subprocess.check_call``, and the
+    test stops there. The GPU path itself only runs on gfx1250 hardware, so without this
+    a directive hard-coded back to ``gfx1250`` would go unnoticed until a gfx1250-strict
+    runner, where clang rejects a gfx1250 directive under ``-mcpu=gfx1250-strict``.
+    """
+    import gpu_detection
+
+    monkeypatch.setenv("TENSILE_GPU_TARGET", arch)
+    gpu_detection.detect_gpu_target.cache_clear()
+    captured = {}
+
+    def capture_and_stop(cmd, *args, **kwargs):
+        captured["mcpu"] = next(a for a in cmd if a.startswith("-mcpu="))[len("-mcpu="):]
+        with open(cmd[-1]) as source:  # the .s file; assemble_kernel deletes it afterwards
+            captured["asm"] = source.read()
+        raise _StopBeforeLaunch
+
+    monkeypatch.setattr(subprocess, "check_call", capture_and_stop)
+    try:
+        with pytest.raises(_StopBeforeLaunch):
+            run_config(CONFIGS[0], str(tmp_path))
+    finally:
+        gpu_detection.detect_gpu_target.cache_clear()
+    assert captured["mcpu"] == arch
+    assert f'.amdgcn_target "amdgcn-amd-amdhsa--{arch}"' in captured["asm"]
 
 
 # ---------------------------------------------------------------------------

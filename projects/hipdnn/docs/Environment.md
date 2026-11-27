@@ -77,7 +77,7 @@ export HIPDNN_PLUGIN_DIR=/opt/rocm/lib/hipdnn/plugins/engines
 **Notes:**
 - Engine plugins must implement the Engine Plugin API (see `EnginePluginApi.h`)
 - Plugin libraries are typically named `libhipdnn_provider_*.so` (Linux) or `hipdnn_provider_*.dll` (Windows)
-- Only plugins whose API version major matches `HIPDNN_ENGINE_API_VERSION_MAJOR` (declared in `hipdnn_plugin_sdk/engine_api_version.h`) will be loaded
+- Only plugins whose API version major matches `HIPDNN_ENGINE_API_VERSION_MAJOR` (declared in `hipdnn_plugin_sdk/engine_api_version.h`) are loaded. A transitional exception also loads engine plugins that report major 0 (an info message is logged); it is removed at the next engine API major version.
 - See the [Plugin Development Guide](PluginDevelopment.md) for details on creating engine plugins
 - On Linux, ignored in a secure execution environment (a set-user-ID or set-group-ID process, or one that gained capabilities across `execve`), since it replaces the default search set and every shared library in the named directory is then loaded. Windows has no equivalent execution mode, so this variable is always honored there.
 
@@ -162,6 +162,8 @@ Overrides the heuristic policy order for the outer loop. Read by every `EngineHe
 
 This variable has the **highest priority**: it overrides both the descriptor attribute and the list the heuristic mode selects.
 
+The list **replaces** the defaults: nothing is appended, so `SelectionHeuristic::StaticOrdering` runs only if it is listed. When the graph has applicable engines and no listed policy succeeds (each one declines, throws or is not loaded), `finalize()` fails with `HIPDNN_STATUS_INTERNAL_ERROR` ("No heuristic policy succeeded"). A value with no usable token (for example `,`) is an empty list and fails the same way. The default list is used only when the variable is unset or empty and the descriptor attribute is not set.
+
 **Example:**
 ```bash
 # By name
@@ -217,7 +219,7 @@ Replaces the built-in ordering used by `SelectionHeuristic::StaticOrdering`, `Se
 
 Each entry accepts any spelling `hipdnn_list_engines` prints an engine under: the name it declares, or — for an engine that declares none — its ID in `0x`-prefixed hexadecimal. A decimal ID is also accepted. A registered name is resolved as a name even if it reads as a number.
 
-Entries that are not among the current candidates are silently skipped. If no listed engine matches any candidate, the policy declines so the outer loop can try the next policy.
+Entries that are not among the current candidates are silently skipped. If multiple entries identify the same engine, only the first entry is used. If no listed engine matches any candidate, the policy declines so the outer loop can try the next policy.
 
 **Example:**
 ```bash
@@ -380,8 +382,8 @@ The root directory hipDNN writes its on-disk caches to. Two features share it to
 | (unset)    | A per-user default is used: `~/.cache/hipdnn/` on Linux, `%USERPROFILE%\.hipdnn\cache\` on Windows (the default) |
 | `<path>`   | Use the given directory as the cache root instead       |
 
-A leading `~` (and, on Windows, a leading `%USERPROFILE%`) is expanded;
-every other character is left alone, so an embedded `~` is never substituted. If the relevant home variable is unset or empty, the value is used verbatim rather than being redirected somewhere unexpected. Relative paths resolve against the current working directory. The directory is created if it does not exist.
+A leading `~` alone or followed by a path separator (and, on Windows, a leading `%USERPROFILE%`) is expanded to the home directory (`HOME`, or `USERPROFILE` on Windows);
+every other character is left alone, so an embedded `~` is never substituted and a `~user` form is not expanded. If the value still starts with `~` or `%USERPROFILE%` after expansion, because the home variable is unset or empty or because the value uses a `~user` form, hipDNN logs a warning once and disables on-disk caching instead of creating a directory with that literal name. Relative paths resolve against the current working directory. The directory is created if it does not exist.
 
 Each feature owns a child directory beneath the root, so caches never collide: the ingestor's winner cache lives under `ingestor-winners/`, further split per hipDNN version, per engine, and per GPU architecture; the autotune exact-match ranking cache lives under `autotune-rankings/`, further split per `data_sdk` library version (see below).
 
@@ -521,6 +523,8 @@ messages at that level and all higher severities.
 
 Specifies the file path where logs will be **appended**. If not set, logs are written to `stderr`.
 
+hipDNN reads this variable and opens the file the first time logging is enabled, by `HIPDNN_LOG_LEVEL` or by `setGlobalLogLevel()`; while the level is `off`, no file is created. The destination then stays fixed for the process. If the file cannot be opened (for example, the path is a directory or its parent cannot be created), hipDNN prints one warning naming `HIPDNN_LOG_FILE` on `stderr` and writes the logs to `stderr` instead.
+
 **Example:**
 ```bash
 export HIPDNN_LOG_FILE=/path/to/hipdnn.log
@@ -536,6 +540,8 @@ Controls graph structure logging. When set to a non-empty directory path, graphs
 | `<path>`   | Write graph structures as JSON files to the given directory |
 
 Graph JSON files are written to the directory specified by `HIPDNN_LOG_GRAPH_DIR`. If the directory does not exist, it is created automatically. Relative paths are resolved against the current working directory. Files are named `graph_<id>.json` after the graph's own ID, so finalizing a graph again, or replaying a serialized one, reuses a single file. A graph rebuilt from scratch is a new graph with a new ID and is written separately; point the variable at a per-process directory if many processes share one output location.
+
+Names that are not valid UTF-8 are written with the invalid bytes replaced by U+FFFD. A graph that cannot be written is reported as a warning in the log; finalization succeeds regardless.
 
 This variable is independent of `HIPDNN_LOG_LEVEL` and `HIPDNN_LOG_FILE`.
 
@@ -576,11 +582,13 @@ Controls the random number generator seed used across hipDNN tests. This allows 
 | Value        | Description                                                |
 |--------------|------------------------------------------------------------|
 | (not set)    | Uses default seed value of `1` (default behavior)         |
-| `<number>`   | Uses the specified numeric seed (e.g., `42`, `12345`)     |
+| `<number>`   | Uses the specified decimal seed, from `0` to `4294967295` (e.g., `42`, `12345`) |
 | `RANDOM`     | Generates a random seed using `std::random_device`        |
 
 > [!NOTE]
 > The `RANDOM` value is case-insensitive (`random`, `Random`, `RANDOM` all work).
+>
+> Any other value that is not a plain decimal number in the accepted range uses the default seed `1`. This includes an empty value, a sign (`-1`, `+42`), surrounding whitespace, trailing characters (`12abc`) and values above `4294967295`.
 
 **Examples:**
 ```bash

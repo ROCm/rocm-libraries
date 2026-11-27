@@ -54,13 +54,39 @@ question that this section returns to below. It matters more than the headline c
 
 **Arch gating.** Unit tests: `@pytest.mark.gpu` (any GPU) or `@pytest.mark.gpu("gfx950")`; the
 [conftest](tensilelite/Tests/unit/conftest.py) skips what HIP's device can't run (`TENSILE_GPU_TARGET`
-overrides; `gfx1250` covers `gfx1250-strict`, not the reverse). One `gpu` mark per test, counting
-its param, function, class and module, with positional arch strings only; anything else is a usage
-error. `--require-gpu` (set by TheRock's `standard` tier) fails the run up front when hip-python or
-a GPU is missing, instead of skipping every `gpu` test. The gate covers `Tests/unit` only: elsewhere (e.g.
-`rocisa/test`) `gpu` just selects, and its arch arguments do nothing. No arch/hip `skipif`
-or in-body skip; `test_gpu_marker_guard.py` enforces it. Non-gate code uses `gpu_is(...)`.
-`Tests/common` configs use `skip-gfxNNNN`.
+overrides; `gfx1250` covers `gfx1250-strict`, not the reverse). This covers `Tests/unit` only:
+elsewhere (e.g. `rocisa/test`) `gpu` just selects, and its arch arguments do nothing. The device is
+read in a short-lived child process: HIP ignores `HIP_VISIBLE_DEVICES` once a process has
+initialised it, and [`Tests/conftest.py`](tensilelite/Tests/conftest.py) sets that variable later
+to give each pytest-xdist worker its own GPU. When HIP reports no device (`hipErrorNoDevice`), the
+`gpu` tests skip; any other HIP error fails each of them with the error's name. One `gpu` mark per
+test, counting its param, function, class and module, with positional arch strings only; anything
+else fails that test with its node id.
+
+`--require-gpu` fails the run up front when hip-python or a GPU is missing, instead of skipping
+every `gpu` test. With `TENSILE_GPU_TARGET` set it does not ask HIP, so it passes without a GPU. TheRock's `standard`, `comprehensive` and `full` tiers set it, and any run under
+`Tests` accepts it. It is also the only check that catches a GPU that cannot be opened (a broken
+`/dev/kfd`, for example), because HIP reports that as `hipErrorNoDevice` too. It checks that a GPU
+is there, not that any `gpu` test ran: a tier whose GPU matches none of the selected tests' arches
+still ends green.
+
+[`test_gpu_marker_guard.py`](tensilelite/Tests/unit/test_gpu_marker_guard.py) runs on the CPU lanes
+too and checks the unit tree statically. No test may decide from which GPU or HIP is present
+whether it runs: a `skipif`, an `xfail(run=False)`, an `if` that skips or returns early, or a `try`
+that imports `hip` and skips in its `except` is an error when it reads `hip`, `gpu_is`,
+`detect_gpu_target`, `GFX_TARGET`, `/dev/kfd` or a similar value, and so is `importorskip("hip")`.
+Names are followed through every assignment and function in the file. Each test has at most one
+well-formed `gpu` mark. A test without one may not call `run_on_gpu` or the HIP runtime, or branch
+on those values: on a pull request the CPU lanes run it without a GPU and TheRock's `standard` tier
+does not select it, so its GPU branch would run only in Math CI's `preliminary` and the nightly
+tiers. A launch inside a helper is not followed, but an unmarked test that launches through one fails
+on the CPU lane, where HIP has no device. The guard also does not follow names imported from other
+modules, a skip inside a function of a module outside `Tests/unit`, a return or branch inside a
+function defined in a test, or `getattr` and `eval`. A test that skips itself
+in one of those ways still runs wherever the whole unit tree runs on GPUs: Math CI's `preliminary`
+(gfx12, gfx90a, gfx942 and gfx950) and TheRock's nightly tiers. Code that needs the arch, for
+example a marked test picking its expected value, calls `gpu_is(...)`. `Tests/common` configs use
+`skip-gfxNNNN`.
 
 **Worker pools are not exercised here.** The unit suite pins `CpuThreads` to 1 (a session fixture in
 [`Tests/unit/conftest.py`](tensilelite/Tests/unit/conftest.py)), so its `ParallelMap` and `ParallelMap2`
@@ -206,7 +232,7 @@ guidance documents that followed it.
 
 **Suite size.** The characterization half and the pure-unit half are roughly comparable in size, and
 together they run into the thousands of tests; a small minority are GPU-guarded and skip on a
-CPU-only runner. All of them run in four separate CI lanes (see
+CPU-only runner. All of them run in five separate CI lanes (see
 [Where these tests actually run](#where-these-tests-actually-run)).
 
 **Coverage expectation.** The enforced whole-project floor is `fail_under = 82` in
@@ -568,6 +594,14 @@ since the TheRock pin of 2026-10-02 both gfx942 and gfx950 run it per PR. gfx90a
 only in TheRock's own postsubmit and nightly runs. Measured in `preliminary`, the suite takes about
 an hour on gfx942 and about two on gfx950, and TheRock runs it unsharded.
 
+Selected common configs enable both CPU reference-reuse and GPU upload-skip verification:
+`reuse_verification.yaml` on gfx942 and gfx950, and `streamk/sk_mx32f4_quick.yaml` plus
+`ductile/gfx950/f8_tn_mx_subtile.yaml` on gfx950. Their `TestParameters` set
+`verify_reference_reuse: true` and `verify_upload_skip: true`; the artifact runner scopes
+both environment flags to each config and requires positive reference, input-upload, and
+batched-pointer verification counts. A successful client exit with no verified reuse fails
+these configs. The same checks run in local build/run and shared cached-artifact lanes.
+
 gfx1250 still gets no `Tests/common` coverage in TheRock. TheRock's own family matrix now names a
 gfx1250 runner, but the CI configuration overlay this repository uses leaves it empty, and both the
 `tensilelite` and `hipblaslt` test jobs exclude gfx125X because of hangs. So its whole Test stage is
@@ -581,6 +615,14 @@ one, a Python coverage run and a C++ coverage run sharing a single script, which
 gfx950 and why it takes hours rather than minutes. It reports a check, but that check is not
 required, and a failure anywhere in it skips the codecov uploads, so a codecov number can be older
 than the commit you are looking at.
+
+**The C++ gtest suite has a CPU-only lane.** `Component CI: TensileLite gtest`
+([`component-ci-tensilelite-gtest.yml`](../../../.github/workflows/component-ci-tensilelite-gtest.yml))
+builds `tensilelite-tests` ([`tests/`](tests/)) and runs `ctest --no-tests=error`, gating through the
+required `Component CI Summary`. Tests that need a HIP device call `SKIP_IF_NO_DEVICE()`
+([`tests/include/DeviceTestUtils.hpp`](tests/include/DeviceTestUtils.hpp)): they skip in this lane,
+which sets `TENSILE_SKIP_IF_NO_DEVICE=1`, and fail anywhere else that has no device, so a
+broken driver on a GPU runner is not reported as skips. They run on a GPU in TheRock's `standard` tier.
 
 ### How Multi-Arch CI decides whether TensileLite runs at all
 
@@ -654,9 +696,11 @@ Each ordinary driver case has one registration, with an OpenMP thread limit of
 8. Each AMAX-D case has three configurations: the original name uses limit 8,
 and `_Threads1` and `_Threads3` select limits 1 and 3. CTest sets both
 `OMP_THREAD_LIMIT` and `OMP_NUM_THREADS`, disables dynamic teams, and accounts
-for the requested processors when scheduling tests. Limits constrain the
-reference's explicit request for 64 threads; they are numerical test settings,
-not measurements of the team used by every reference call.
+for the requested processors when scheduling tests. The reference uses the
+OpenMP runtime's thread setting. These are numerical test settings, not
+measurements of the team used by every reference call. Both requested paths
+validate D and AMAX-D; direct-reference gtests also check the maximum's
+epilogue stage and output-narrowing behavior against independent expected values.
 
 The Int8 option-rejection cases require exit code 1 and their expected diagnostic
 through [`CheckCpuGemmFailure.cmake`](tests/cmake/CheckCpuGemmFailure.cmake).
@@ -672,53 +716,64 @@ do not cause repeated execution within one CTest invocation.
 ### Where these tests actually run
 
 The TensileLite Python tree under `tensilelite/Tests/unit` (characterization *and* unit, about six
-thousand tests) executes in four separate CI lanes. They are easy to confuse with each other, and
+thousand tests) executes in five separate CI lanes. They are easy to confuse with each other, and
 with three adjacent lanes that sound like them but run none of these tests, so the whole set is worth
 laying out once.
 
 | Lane | Where defined | Hardware | Gates? |
 | --- | --- | --- | --- |
 | `Component CI: TensileLite coverage` | [`component-ci-tensilelite-coverage.yml`](../../../.github/workflows/component-ci-tensilelite-coverage.yml) | CPU only | **Yes**, via the required `Component CI Summary` |
+| `Component CI: TensileLite unit` | [`component-ci-tensilelite-unit.yml`](../../../.github/workflows/component-ci-tensilelite-unit.yml) (`tox -e unit-host`: tests not marked `gpu`) | CPU only | **Yes**, via the required `Component CI Summary` |
 | `preliminary` | Math CI (internal) | gfx12, gfx90a, gfx942, gfx950 | **Yes**, via the required `Math CI Summary` |
 | TheRock `Test tensilelite` | [`pytest_runner.py`](https://github.com/ROCm/TheRock/blob/main/build_tools/github_actions/test_executable_scripts/pytest_runner.py) in TheRock, driven by [`test_categories.yaml`](test_categories.yaml) | GPU runner, Linux; on rocm-libraries PRs (`standard`) `gpu`-marked tests only, the host-only rest runs in `Component CI: TensileLite unit` | **Yes**, via the required `Multi-Arch CI Summary` |
 | `tensilelite-unit-codecov` | Math CI (internal) | gfx950 | No |
 
-A fifth lane, `Component CI: hipBLASLt Logic Corpus`, runs only the `@needs_logic_corpus` subset, on
-logic-only changes that trigger none of the four above (see
+A sixth lane, `Component CI: hipBLASLt Logic Corpus`, runs only the `@needs_logic_corpus` subset, on
+logic-only changes that trigger none of the five above (see
 [Logic-corpus consistency regression tests](#logic-corpus-consistency-regression-tests)). It gates
 through the required `Component CI Summary`.
 
 Three observations follow from that table, and they are the ones that most often get stated
 backwards in review:
 
-**The tests gate, and so does the coverage floor.** All three required checks (`Math CI Summary`
-through `preliminary`, `Multi-Arch CI Summary` through the TensileLite job, and
-`Component CI Summary` through the coverage lane) execute the unit and characterization suites, so
-a broken test blocks a merge. The coverage lane also runs the whole-project floor and the per-file
-ratchet, so a coverage regression in a pull request that touches `tensilelite/` blocks a merge too.
-What stays advisory is the characterization-versus-unit split card and the codecov numbers.
+**The tests gate, and so does the coverage floor.** On a pull request, every host-only unit and
+characterization test runs under two required checks: `Math CI Summary` through `preliminary`, and
+`Component CI Summary` through the coverage and unit lanes. The third, `Multi-Arch CI Summary`,
+runs only the `gpu`-marked unit tests, through TheRock's `standard` tier; TheRock's nightly
+`comprehensive` and `full` tiers run the whole tree. So a broken host-only test blocks a merge, and
+so does a broken `gpu` test for an arch that a required lane has: `preliminary` runs them on gfx12,
+gfx90a, gfx942 and gfx950, and `standard` on gfx94X. No required lane has a gfx1250 or gfx908 GPU,
+so a broken `gpu` test for those archs does not block a merge. The coverage lane also runs the
+whole-project floor and the per-file ratchet, so a coverage regression in a pull request that
+touches `tensilelite/` blocks a merge too. What stays advisory is the characterization-versus-unit
+split card and the codecov numbers.
 
-**Three of the four lanes hold a GPU, and only one of them needs it for these tests.** TheRock's lane
+**Three of the five lanes hold a GPU, and only one of them needs it for these tests.** TheRock's lane
 is validating a real install, so its GPU is the point. `preliminary` needs hardware for its
 `-m common` GEMM stage and the unit tests share the node because they run in the same job.
 `tensilelite-unit-codecov` needs gfx950 for its C++ half only; the Python coverage run is along for
 the ride, which is most of why that job takes about two and a half hours where the CPU-only GitHub
 Actions lane takes seven minutes.
 
-**Every one of these lanes is fail-fast, and that erases signal.** In each case one stage runs first
+**Every multi-stage lane here is fail-fast, and that erases signal.** In each case one stage runs first
 and everything after it is conditional on it passing: the two coverage lanes through the ordering of
 tox `commands`, `preliminary` through an explicit exit-code guard between its two stages (see
 [Pre-submit / CI Gates](#pre-submit--ci-gates) above for which stage now runs first), TheRock's
 through plain sequential ordering. One early failure means you get no information at all from the
 stages behind it, which is why a red run so often says less than it appears to.
 
-**The goldens are asserted in all four lanes.** Every tox environment involved inherits syrupy from
-the base `[testenv]` dependency list, and TheRock's installed-artifact lane installs it from
+**The goldens are asserted on every pull request that changes TensileLite, but not in
+TheRock's pull-request tier.** Every tox environment involved inherits syrupy from the base
+`[testenv]` dependency list, and TheRock's installed-artifact lane installs it from
 [`requirements-test.txt`](requirements-test.txt)
 ([PR #11396](https://github.com/ROCm/rocm-libraries/pull/11396),
-[TheRock#8492](https://github.com/ROCm/TheRock/pull/8492)). Three of those lanes gate, so a stale
-golden fails a required check. The CPU-only GitHub Actions lane is fast enough that it is usually
-where a stale golden surfaces first.
+[TheRock#8492](https://github.com/ROCm/TheRock/pull/8492)). The goldens live in the
+characterization tests, which carry no `gpu` mark. So on a pull request they run in Component CI's
+coverage and unit lanes and in Math CI's `preliminary` and `tensilelite-unit-codecov`, and TheRock's
+`standard` tier does not select them; TheRock asserts them nightly in `comprehensive` and `full`.
+Of the pull-request lanes, all but `tensilelite-unit-codecov` gate, so a stale golden fails a
+required check. The CPU-only GitHub Actions lanes (TensileLite unit and TensileLite coverage) are
+fast enough that they are usually where a stale golden surfaces first.
 
 The installed-artifact lane used to skip the snapshot tests, because it had no syrupy. The suite's
 `conftest.py` still detects a missing plugin and skips those tests cleanly rather than erroring the
@@ -888,11 +943,11 @@ testing there (AIHPBLAS-3354) rather than at changes to Math CI itself.
 | `preliminary` is dropped from hipBLASLt's gating list whenever a PR also touches rocroller, and a rocroller-only PR gets no hipBLASLt Math CI jobs at all, so a rocroller change gets no TensileLite functional testing from Math CI | High | High if hit | Multi-Arch CI's native selector selects hipBLASLt's own client suite for a rocroller-only change, exercising rocRoller-backed dispatch at runtime (see [How Multi-Arch CI decides whether TensileLite runs at all](#how-multi-arch-ci-decides-whether-tensilelite-runs-at-all)), but it does not select the `tensilelite` job. TensileLite's own Python unit/characterization suite has no coverage for this path | AIHPBLAS-3354 |
 | As of the Aug-26 2026 reorder, `unit` runs before `common` in `preliminary`, so an unrelated unit-test failure on one architecture prevents `common` from running at all that PR. This already let a StreamK register-pool bug ([#11335](https://github.com/ROCm/rocm-libraries/pull/11335), fixed in [#11471](https://github.com/ROCm/rocm-libraries/pull/11471)) merge with no `common`-stage signal, two days after the reorder landed | High | High if hit | On gfx942 and gfx950, TheRock's `tensilelite-common` runs `common` as its own job on every pull request, so a unit failure there no longer hides it; gfx90a and gfx12 still depend on `preliminary`'s ordering | AIHPBLAS-3354 |
 | `Tests/common` (real codegen, build, execution) runs in TheRock only on gfx90a/gfx942/gfx950/gfx120X, and only gfx942 and gfx950 on the pull-request path. gfx1250 and any family whose configs declare no `skip-gfxNNNN` for it (gfx1103, gfx115X) get none (see [Pre-submit / CI Gates](#pre-submit--ci-gates)) | Medium | High if hit | Math CI's `preliminary` runs it per PR on `gfx90a`/`gfx942`/`gfx950`/`gfx12`; TheRock's `tensilelite-common` adds installed-artifact coverage on the same families | [#12491](https://github.com/ROCm/rocm-libraries/issues/12491) |
-| The same TensileLite test suite runs in four lanes, three holding a GPU only one of them needs | Low | Low | Expensive in runner capacity; the redundancy does buy independent confirmation | AIHPBLAS-3354 |
+| The same TensileLite test suite runs in five lanes, three holding a GPU only one of them needs | Low | Low | Expensive in runner capacity; the redundancy does buy independent confirmation | AIHPBLAS-3354 |
 | A change only to the library logic YAML runs nothing in Math CI's `preliminary`, since the logic lives outside `tensilelite/`, and Math CI is configured outside this repository | Low | Medium | The logic-corpus component lane runs `TensileLogic --check-all` on the changed architectures and every `@needs_logic_corpus` test on any change under `Tensile/Logic/`, and gates through `Component CI Summary` | [ROCM-33834](https://amd-hub.atlassian.net/browse/ROCM-33834) |
 | The `@needs_logic_corpus` tests (see [Logic-corpus consistency regression tests](#logic-corpus-consistency-regression-tests)) always skip in TheRock CI, because the installed tree does not ship the corpus | Low | Low | Every run prints `needs_logic_corpus: N ran, M skipped`, so the skip is visible; the cross-file checks run in `TensileLogic --check-all` and the chip-ID-arch lock walks the architecture registry, so neither depends on the corpus being present | [#14887](https://github.com/ROCm/rocm-libraries/issues/14887) |
 | gfx1250 gets no TheRock Test stage at all: the CI configuration overlay leaves its runner empty, and the `tensilelite` and `hipblaslt` test jobs exclude gfx125X because of hangs. That includes pytest coverage for corpus-dependent checks; the logic-corpus lane still checks changed gfx1250 logic, and `TensileLogic --check-all` runs as a build step | Medium | Medium | `TensileLogic --check-all` runs as a build step, unaffected by the missing runner | [#7481](https://github.com/ROCm/rocm-libraries/issues/7481) |
-| TheRock's `Test tensilelite` job runs the whole unit tree in every tier: `quick` runs the host-only tests in [`test_categories.yaml`](test_categories.yaml) on eight pytest-xdist workers with `--dist=worksteal`, under a 15-minute step cap. `standard` runs only the GPU unit tests (marker `gpu`), and it, `comprehensive` and `full` stay on one worker, because those tests take no per-GPU lock. Several unit tests read the embedded metadata of every shipped custom kernel, some at collection time, so the job's wall time grows with each custom kernel added. The gfx950 rocRoller kernels carry about 13k lines of metadata each, and adding 69 of them took the job from 11 to 14 minutes to 17 to 21 minutes | Medium | Medium | Metadata is parsed with libyaml (`CSafeLoader`). `readCustomKernelConfig` parses only the `custom.config` entry, and `getCustomKernelConfig` parses the whole block (for `amdhsa.kernels`) only for a kernel without an explicit `CustomKernel` block. `standard` runs under a 30-minute cap. With the in-process `ParallelMap` calls, shared toolchain objects and eight `worksteal` workers, one run of the unit tests on a gfx942 host pinned to 25 CPUs took 126 s, against 653 s serial on the commit before that work | [#14049](https://github.com/ROCm/rocm-libraries/issues/14049) |
+| TheRock's `Test tensilelite` job runs a different part of the unit tree in each tier (the whole tree only in `comprehensive` and `full`): `quick` runs the host-only tests in [`test_categories.yaml`](test_categories.yaml) on eight pytest-xdist workers with `--dist=worksteal`, under a 15-minute step cap. `standard` runs only the GPU unit tests (marker `gpu`), and it, `comprehensive` and `full` stay on one worker, because those tests take no per-GPU lock. Several unit tests read the embedded metadata of every shipped custom kernel, some at collection time, so the job's wall time grows with each custom kernel added. The gfx950 rocRoller kernels carry about 13k lines of metadata each, and adding 69 of them took the job from 11 to 14 minutes to 17 to 21 minutes | Medium | Medium | Metadata is parsed with libyaml (`CSafeLoader`). `readCustomKernelConfig` parses only the `custom.config` entry, and `getCustomKernelConfig` parses the whole block (for `amdhsa.kernels`) only for a kernel without an explicit `CustomKernel` block. `standard` runs under a 30-minute cap. With the in-process `ParallelMap` calls, shared toolchain objects and eight `worksteal` workers, one run of the unit tests on a gfx942 host pinned to 25 CPUs took 126 s, against 653 s serial on the commit before that work | [#14049](https://github.com/ROCm/rocm-libraries/issues/14049) |
 
 ### Known bugs and flaky tests
 

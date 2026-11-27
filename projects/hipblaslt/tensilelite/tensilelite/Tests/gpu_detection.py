@@ -33,6 +33,8 @@ import contextlib
 import functools
 import os
 import re
+import subprocess
+import sys
 
 from tensilelite.GpuArch import (
     _ROCMINFO_RELPATHS,
@@ -123,45 +125,67 @@ def hip_available() -> bool:
     return _hip() is not None
 
 
-def _check(result):
-    """Unwrap a hip-python ``(err, value)`` result; raise on a HIP error."""
-    err, *rest = result if isinstance(result, tuple) else (result,)
-    if int(err) != 0:
-        raise RuntimeError(f"HIP error {int(err)}")
+# Runs in a child process. Tests/unit/conftest.py calls detect_gpu_target() at collection,
+# before the autouse assign_gpu_to_worker fixture (Tests/conftest.py) sets
+# HIP_VISIBLE_DEVICES, and HIP ignores that variable once it is initialised, so an
+# in-process probe put every pytest-xdist worker on GPU 0. Prints device 0's arch, or
+# nothing when HIP reports no device; any other HIP error exits non-zero with its name.
+_PROBE = """
+import sys
+
+from hip import hip
+
+
+def check(result):
+    error, *rest = result if isinstance(result, tuple) else (result,)
+    if int(error) == int(hip.hipError_t.hipErrorNoDevice):
+        raise SystemExit(0)  # no device: print nothing, so the tests skip
+    if int(error) != 0:
+        sys.exit(f"HIP error {int(error)} ({getattr(error, 'name', error)})")
     return rest[0] if len(rest) == 1 else rest
+
+
+if int(check(hip.hipGetDeviceCount())) > 0:
+    try:
+        # hip-python 10 (a wrapper over rocm-bindings) returns the struct.
+        props = check(hip.hipGetDeviceProperties(0))
+    except TypeError:
+        # Earlier releases fill a caller-owned struct instead.
+        props = hip.hipDeviceProp_t()
+        check(hip.hipGetDeviceProperties(props, 0))
+    name = props.gcnArchName
+    print(name.decode() if isinstance(name, bytes) else name)
+"""
 
 
 @functools.cache
 def detect_gpu_target() -> str | None:
-    """Arch of HIP device 0 (e.g. ``gfx1250-strict``), or None.
+    """Arch of HIP device 0 (e.g. ``gfx1250-strict``), or None without hip-python or a device.
 
     ``TENSILE_GPU_TARGET`` overrides. HIP, unlike rocm_agent_enumerator, honours
     ROCR_VISIBLE_DEVICES, sees only devices this process can open, and keeps
-    the stepping.
+    the stepping. HIP is queried in a child process (see ``_PROBE``). RuntimeError for any
+    other HIP error, or if that process crashes or hangs: a machine whose GPU is broken
+    fails its ``gpu`` tests rather than skipping them. HIP also reports ``hipErrorNoDevice``
+    when the driver cannot open the GPU, so only ``--require-gpu`` catches that case.
     """
     override = os.environ.get("TENSILE_GPU_TARGET")
     if override:
         return override
-    hip = _hip()
-    if hip is None:
+    if _hip() is None:
         return None
+    # The probe takes under a second on a multi-GPU gfx942 node; the timeout only stops a hung
+    # driver from stalling collection.
     try:
-        if int(_check(hip.hipGetDeviceCount())) == 0:
-            return None
-        try:
-            # hip-python 10 (a wrapper over rocm-bindings) returns the struct.
-            props = _check(hip.hipGetDeviceProperties(0))
-        except TypeError:
-            # Earlier releases fill a caller-owned struct instead.
-            props = hip.hipDeviceProp_t()
-            _check(hip.hipGetDeviceProperties(props, 0))
-    except RuntimeError:
-        return None
-    name = props.gcnArchName
-    if isinstance(name, bytes):
-        name = name.decode()
+        probe = subprocess.run([sys.executable, "-c", _PROBE], capture_output=True, text=True,
+                               timeout=120, check=False)
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"GPU probe ({sys.executable}) did not finish in 120 s") from None
+    if probe.returncode != 0:
+        raise RuntimeError(
+            f"GPU probe ({sys.executable}) exited with {probe.returncode}: {probe.stderr.strip()[-500:]}")
     # gcnArchName carries target features (gfx942:sramecc+:xnack-).
-    return name.split(":")[0] or None
+    return probe.stdout.strip().split(":")[0] or None
 
 
 def arch_matches(found: str, wanted: str) -> bool:
