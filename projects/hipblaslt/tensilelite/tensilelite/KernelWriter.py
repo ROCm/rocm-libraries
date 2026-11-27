@@ -10683,7 +10683,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       # n_shard = FusedAM / FusedW, divided once in the prologue (W is not a
       # power of two, so this is a real u32 divide, not a shift).
       self.defineSgpr("FusedNShard", 1)
-      # ceil(N / MT1), needed by both the counter3 address and the handshake's
+      # ceil(N / (MT1 * tiles per band)), needed by both the counter3 address and the handshake's
       # counter index; latched so the two do not each recompute it.
       self.defineSgpr("FusedTokenTiles", 1)
       # Offset of this WG's peer group within the kernarg segment. Every pointer

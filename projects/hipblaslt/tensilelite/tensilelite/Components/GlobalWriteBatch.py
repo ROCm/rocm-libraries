@@ -183,21 +183,29 @@ def emitFusedA2ANShardLatch(module, kw, sgprName):
   kw.sgprPool.checkIn(wSgpr)
   kw.sgprPool.checkIn(amSgpr)
 
+def fusedA2ATilesPerBand(kernel):
+  """Token-tiles per SDMA packet: ClusterDim[1] when it is a power of two, else 1."""
+  ck = kernel["ClusterDim"][1]
+  return 1 if ck & (ck - 1) else ck
+
 def emitFusedA2ACounterPtrLatch(module, kw, sgprName, tokenTilesName):
-  """Latch the counter-block base and ceil(N/MT1) in the PROLOGUE instead of
-  once per work-group at the tally.
+  """Latch the counter-block base and the band count ceil(N / (MT1 * tiles per
+  band)) in the PROLOGUE instead of once per work-group at the tally.
   """
   from .Signature import fusedA2AKernArgLayout
   layout    = fusedA2AKernArgLayout()
   fusedBase = kw.states.fusedA2AKernArgBase
   mt1       = kw.states.kernel["MacroTile1"]
-  log2mt1   = int(log2(mt1))
+  ck        = fusedA2ATilesPerBand(kw.states.kernel)
+  band      = mt1 * ck
+  log2band  = int(log2(band))
   module.add(kw.argLoader.loadKernArg(sgprName, "KernArgAddress",
     sgprOffset=hex(fusedBase + layout["counter_ptr"]), dword=2))
-  module.add(SAddU32(dst=sgpr(tokenTilesName), src0=sgpr("SizesFree+1"), src1=mt1 - 1,
-                     comment=f"tokenTiles = ceil(N / MT1={mt1}): N + MT1-1"))
-  module.add(SLShiftRightB32(dst=sgpr(tokenTilesName), shiftHex=log2mt1, src=sgpr(tokenTilesName),
-                             comment=f">> log2(MT1={mt1})"))
+  module.add(SAddU32(dst=sgpr(tokenTilesName), src0=sgpr("SizesFree+1"), src1=band - 1,
+                     comment=f"tokenTiles = ceil(N / MT1={mt1}): N + MT1-1" if ck == 1
+                             else f"bands = ceil(N / (MT1*{ck}={band})): N + band-1"))
+  module.add(SLShiftRightB32(dst=sgpr(tokenTilesName), shiftHex=log2band, src=sgpr(tokenTilesName),
+                             comment=f">> log2(MT1={mt1})" if ck == 1 else f">> log2(band={band})"))
   module.add(SWaitCnt(kmcnt=0, comment="wait counter_ptr"))
 
 class GlobalWriteBatchComponent(GlobalWriteComponents):
@@ -3057,9 +3065,11 @@ class GlobalWriteBatchWriter:
                                  addressDS, srcPitchS, recvBaseS,
                                  outSrcBaseS, outSrcPitchS,
                                  outNShardPkS, outDstSliceS, outRectYS,
-                                 tmpS, tokenRowS, tmp64S):
+                                 tmpS, tokenRowS, tmp64S, bandRows):
     """Turn the all-to-all geometry into SdmaPacketEmitter's COPY_SUBWIN field
-    inputs, per (peer p, token-tile j) with this card == myRank.
+    inputs, per (peer p, token-tile j) with this card == myRank.  Below, MT1
+    stands for bandRows and j for the band when a band spans several
+    token-tiles.
 
     This lives here rather than in the emitter because it is the A2A layout,
     not the packet format: everything below names D, peer_bufPtr and
@@ -3098,7 +3108,7 @@ class GlobalWriteBatchWriter:
     NOT be (j*MT1 stays live across the whole body), and tmp64S is a 2-ALIGNED
     pair.
     """
-    mt1 = self.kernel["MacroTile1"]
+    mt1 = bandRows
     # The fused-A2A path is bf16-only; D_ELEMENT_LOG2 is sizeof(bf16) in bytes.
     D_ELEMENT_LOG2 = 1
     pkShift = packetElementLog2 - D_ELEMENT_LOG2
@@ -3172,9 +3182,9 @@ class GlobalWriteBatchWriter:
                         comment="flag addr hi (carry)"))
 
   def _emitFusedA2ASdmaIssue(self, module, dstRankSgpr, myRankSgpr, nShardSgpr,
-                             flagBaseSgpr, tmpSgpr):
-    """Build and submit this (peer, token-tile)'s SDMA COPY, from the single
-    elected lane of the elected WG.
+                             flagBaseSgpr, tmpSgpr, bandSgpr, bandRows):
+    """Build and submit this (peer, band)'s SDMA COPY, from the single elected
+    lane of the elected WG.
 
     The SDMA engine reads the completed band from HBM, which is why every A2A
     store carries sc1.
@@ -3204,6 +3214,9 @@ class GlobalWriteBatchWriter:
       flagBaseSgpr: 4 SGPRs, peer_flagPtr[dst_rank] then peer_bufPtr[dst_rank];
                     peer_bufPtr is folded in place, peer_flagPtr is left intact.
       tmpSgpr:      2 scratch SGPRs.
+      bandSgpr:     1 SGPR, or the name of one, the band index (WorkGroup1 at one
+                    token-tile per band).
+      bandRows:     token rows per band, MT1 * token-tiles per band.
     """
     from .Signature import fusedA2AKernArgLayout
     from .SdmaPacketEmitter import SdmaPacketEmitter, COPY_PACKET_DWORDS
@@ -3259,12 +3272,12 @@ class GlobalWriteBatchWriter:
     srcBaseSgpr = kw.sgprPool.checkOutAligned(2, 2, tag="fusedA2A_sdmaSrcBase", preventOverflow=False)
     tmp64Sgpr   = kw.sgprPool.checkOutAligned(2, 2, tag="fusedA2A_sdmaOffset64", preventOverflow=False)
     self._fusedA2AComputeCopyFields(module, pkt.packetElementLog2,
-                                    dstRankSgpr, "WorkGroup1", myRankSgpr,
+                                    dstRankSgpr, bandSgpr, myRankSgpr,
                                     "SizesFree+1", nShardSgpr,
                                     kw.sgprs["AddressD"], srcPitchName, recvBaseSgpr,
                                     srcBaseSgpr, srcPitchPkS,
                                     nShardPkS, sliceS, rectYS,
-                                    tmpSgpr, tokenRowS, tmp64Sgpr)
+                                    tmpSgpr, tokenRowS, tmp64Sgpr, bandRows)
     kw.sgprPool.checkIn(tmp64Sgpr)  # dead once the two bases are folded
 
     # --- packet dwords: SGPRs because the ring stores are scalar. ---
@@ -3546,8 +3559,30 @@ class GlobalWriteBatchWriter:
     # the S_ATOMIC_INC wrap limit.
     argModule.add(SLShiftRightB32(dst=sgpr(targetSgpr), shiftHex=log2mt0, src=sgpr(nShardSgpr),
                                   comment=f"tilesPerRank = FusedNShard >> log2(MT0={mt0})"))
+    ck = fusedA2ATilesPerBand(self.kernel)
+    bandSgpr = "WorkGroup1"
+    if ck > 1:
+      band = mt1 * ck
+      bandSgpr = kw.sgprPool.checkOut(1, tag="fusedA2A_hsBand", preventOverflow=False)
+      bandTilesSgpr = kw.sgprPool.checkOut(1, tag="fusedA2A_hsBandTiles", preventOverflow=False)
+      argModule.add(SLShiftRightB32(dst=sgpr(bandSgpr), shiftHex=int(log2(ck)), src=sgpr("WorkGroup1"),
+                                    comment=f"band = WorkGroup1 >> log2({ck})"))
+      argModule.add(SLShiftLeftB32(dst=sgpr(bandTilesSgpr), shiftHex=int(log2(band)), src=sgpr(bandSgpr),
+                                   comment=f"band row = band * {band}"))
+      argModule.add(SSubU32(dst=sgpr(bandTilesSgpr), src0=sgpr("SizesFree+1"), src1=sgpr(bandTilesSgpr),
+                            comment="N - band row"))
+      argModule.add(SMinU32(dst=sgpr(bandTilesSgpr), src0=sgpr(bandTilesSgpr), src1=band,
+                            comment=f"rows in this band = min({band}, N - band row)"))
+      argModule.add(SAddU32(dst=sgpr(bandTilesSgpr), src0=sgpr(bandTilesSgpr), src1=mt1 - 1,
+                            comment="token-tiles in this band = ceil(rows / MT1)"))
+      argModule.add(SLShiftRightB32(dst=sgpr(bandTilesSgpr), shiftHex=log2mt1, src=sgpr(bandTilesSgpr),
+                                    comment=f">> log2(MT1={mt1})"))
+      argModule.add(SMulI32(dst=sgpr(targetSgpr), src0=sgpr(targetSgpr), src1=sgpr(bandTilesSgpr),
+                            comment="tilesPerRank * token-tiles in this band"))
+      kw.sgprPool.checkIn(bandTilesSgpr)
     argModule.add(SSubU32(dst=sgpr(targetSgpr), src0=sgpr(targetSgpr), src1=1,
-                          comment="wrap limit = tilesPerRank - 1"))
+                          comment="wrap limit = tilesPerRank - 1" if ck == 1
+                                  else "wrap limit = WGs in (dst_rank, band) - 1"))
 
     # --- switch-load peer flag/recv bases for dst_rank + numeric dst_rank. ---
     flagBaseSgpr = kw.sgprPool.checkOutAligned(4, 4, tag="fusedA2A_hsFlagBase", preventOverflow=False)
@@ -3591,8 +3626,9 @@ class GlobalWriteBatchWriter:
     # (p,j) completes early instead of only at grid drain as the per-peer counter did.
     module.add(SMulI32(dst=sgpr(tmpSgpr2), src0=sgpr(dstRankSgpr), src1=sgpr(tokenTilesSgpr),
                        comment="dst_rank * tokenTiles"))
-    module.add(SAddU32(dst=sgpr(tmpSgpr2), src0=sgpr(tmpSgpr2), src1=sgpr("WorkGroup1"),
-                       comment="counter index = dst_rank*tokenTiles + j (j = WorkGroup1)"))
+    module.add(SAddU32(dst=sgpr(tmpSgpr2), src0=sgpr(tmpSgpr2), src1=sgpr(bandSgpr),
+                       comment="counter index = dst_rank*tokenTiles + j (j = WorkGroup1)" if ck == 1
+                               else "counter index = dst_rank*bands + band"))
     module.add(SLShiftLeftB32(dst=sgpr(tmpSgpr2), src=sgpr(tmpSgpr2), shiftHex=2,
                               comment="* 4 (u32 counter byte offset)"))
     module.add(SAddU32(dst=sgpr(counterPtrSgpr), src0=sgpr(counterPtrSgpr), src1=sgpr(tmpSgpr2),
@@ -3612,7 +3648,9 @@ class GlobalWriteBatchWriter:
 
     # (5) elected last WG for (dst_rank, j): hand the band to the SDMA engine.
     self._emitFusedA2ASdmaIssue(module, dstRankSgpr, myRankSgpr, nShardSgpr,
-                                flagBaseSgpr, tmpSgpr2)
+                                flagBaseSgpr, tmpSgpr2, bandSgpr, mt1 * ck)
+    if ck > 1:
+      kw.sgprPool.checkIn(bandSgpr)
 
     # (6) per-peer counter: elects the work-group that puts the queue-tail ATOMICs on this
     # card's queue to dst_rank, the one whose increment reads back tokenTiles-1. counter2 is a
