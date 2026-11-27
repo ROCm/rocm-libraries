@@ -127,7 +127,7 @@ Source: `tests/instances/test_rocke_multiarch.py`, `tests/golden/rocke_represent
    - A scheduling region is a basic block after the LLVM middle end, so count the LDS reads there, not in the source loop: a loop body with 3 LDS reads is safe once the loop is fully unrolled into a block with more, and unsafe while it stays a loop.
    - The attention backward and fp8 fused-MoE kernels compile in a memory-capped fresh process when they emit `iglp_opt(1)`, so on a compiler without the fix they fail fast with `ComgrOutOfMemory` instead of taking the host's memory ([Compiling In A Fresh Process](../runtime/comgr_and_hipmodule.md#compiling-in-a-fresh-process)). Other kernels that emit it compile in-process, without the cap.
 
-8. **gfx950 conv dgrad: an LLVM 24 register-allocator defect (LCOMPILER-3317)**. Built by some
+9. **gfx950 conv dgrad: an LLVM 24 register-allocator defect (LCOMPILER-3317)**. Built by some
    LLVM 24 compiler builds, some gfx950 dgrad kernels fault with an illegal memory access or return
    wrong results; rocKE's IR is the same for every LLVM 24 build, and LLVM 20 builds these kernels
    correctly. Dispatch does not refuse them, so a caller on an affected compiler can get them;
