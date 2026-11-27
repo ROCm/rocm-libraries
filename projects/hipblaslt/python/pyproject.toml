@@ -8,7 +8,8 @@ description = "Low-level Python bindings for the hipBLASLt GEMM API (a developme
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
-dependencies = ["numpy>=1.23"]
+# ml_dtypes 0.5.0 is the oldest with bfloat16 and all four fp8 types the bindings map.
+dependencies = ["numpy>=1.23", "ml_dtypes>=0.5.0"]
 
 [project.optional-dependencies]
 test = ["pytest>=8"]
