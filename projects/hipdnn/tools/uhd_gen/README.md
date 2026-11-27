@@ -304,7 +304,9 @@ It validates everything before writing anything, and refuses rather than half-su
   [Optional features are read through a default](#optional-features-are-read-through-a-default));
 - a `predict_engine` model for a descriptor-backed engine must record
   `trained_against.selector_revision`, which the runtime compares with the engine's
-  current selector revision. Every binding `hipdnn_bench` records carries it.
+  current selector revision. Every binding `hipdnn_bench` records carries it. A binding may
+  also carry `trained_against.codegen_revision`, a digest of the engine's code objects; the
+  model records it only when every measurement it trains on reports the same one.
 
 ## `evaluate`: regret against the best kernel that was measured
 
@@ -670,6 +672,29 @@ and retain the raw device field — which training then drops on the same eviden
 by the variance rule above, naming it with its value. `device_coverage` in
 `train_manifest.json` records the observed values of every device field either way.
 
+Automatic feature proposals never read a tensor identifier's value. A published name ending
+in `.uid`, such as the `<engine>.bias.uid` a matcher binds so dispatch finds the tensor's
+buffer, labels the tensor and says nothing about the problem, and a corpus fixes it, so a
+model reading the number would score the corpus's label. The proposal reads it as a presence
+flag instead, `{"!=": ["$<engine>.bias.uid", -1]}`. The attention packs of the
+hip-kernel-provider (Flydsl SDPA, the gfx942 and gfx950 dense and unified attention) bind an
+absent optional tensor's uid as -1, so the flag is the matcher's own test and any other
+value, 0 included, is a bound tensor. Not every matcher does: `gfx1151_wmma_attention` binds
+`lse.uid` as the output's uid when stats are off (its `write_lse` says whether they are on)
+and leaves `scale.uid`, `bias.uid`, `sink.uid`, `q_offset.uid`, `page_table.uid` and
+`seq_len_*.uid` unbound when the tensor is absent, and `flydsl_rmsnorm` leaves `inv_rms.uid`
+unbound outside a training graph. A column some rows leave unbound enters a proposal only if
+it is one of hipDNN's optional features, which an engine's namespace never is, so such a
+column is left out of the proposal without an `omitted_proposals` entry. The uid of an
+optional operand of a graph node (`graph.nodes[<i>].<operand>.uid`) is one of those features,
+and the flag reads it through its default,
+`{"!=": [{"value_or_default": ["$graph.nodes[0].bias.uid", -1]}, -1]}`, which is 0 on a row
+that leaves it unbound; it is still the presence flag and never a read of the uid's value.
+`generation_manifest.json` lists each identifier read as a flag under `omitted_proposals`
+with `reason: tensor_identifier` and the flag read instead; with `--feature-search` the entry
+names the flag only when the recipe the search chose reads it. An authored recipe is taken
+as written.
+
 A value a row does not publish is **absent**, never zero and never NaN: a conv-fwd row
 has no `dy`, and pandas fills that hole with NaN, which `evaluate_feature_rows` turns back
 into JSON `null` before the evaluator sees it (a column no row publishes goes over as
@@ -703,6 +728,8 @@ each node is taken to be any type having every operand the signature reads at it
   the table does not cover.
 - `generate`'s automatic selection keeps a column some rows leave unbound when it is one of
   those features; any other gap (a rank some rows' tensor lacks) still leaves the column out.
+  `--feature-search` (below) reads each such column through `value_or_default` itself, with
+  the same default.
 - In a `tflops` model the work features may stay bare: where the work is unknown, throughput
   is too, and reporting nothing there is the right answer.
 - `promote` refuses a model that reads one unguarded, and `hipdnn_validate_descriptors`
@@ -730,6 +757,10 @@ reference of the old and the rewritten signature and that a row lacking each wra
 now scorable. The artifact and then the descriptor are written through temporary files and
 `os.replace`, after the staged artifact passes the loader's checks. An adapter whose artifact
 embeds the hash but that has no rule (`table`) is refused: retrain it.
+A recipe found by `--feature-search` before its optional reads were guarded is rewritten the
+same way, into the form the search writes now: a bare optional column becomes
+`value_or_default` of it wherever it appears in an expression, and a bare uid presence flag
+becomes the guarded flag; a recipe the search wrote now is `already_safe`.
 
 The proof covers only graphs the old model could already score. Graphs that become scorable
 (those lacking a wrapped feature) are outside what the old model trained on: they reach it
@@ -745,6 +776,113 @@ the old one are unavailable until they are restamped or retrained. The report's
 `selector_revision` says whether the rewrite changes it (`changes`) and names the
 `predict_engine` models installed beside the ranker
 (`l1_models_to_restamp_or_retrain`).
+
+### Feature exclusions, `feature-search`, and overriding
+
+**Exclusions.** A proposal (and a search) never reads these published columns, because a model
+that does learns the corpus rather than the cost; each is listed in `omitted_proposals` with its
+`reason`:
+
+| Reason | Columns |
+|---|---|
+| `positional_tensor` | `graph.tensors[<i>].*`: positional copies of a node's tensor roles, which are role-ambiguous (the node-role columns stay) |
+| `derived_numel` | names ending `.numel`: the product of the published dims |
+| `caller_value` | `graph.nodes[<i>].attn_scale_value` and a matcher's `<namespace>.scale`, `.sm_scale` or `.softmax_scale`, each also with a `_bits` or `_value` suffix (not `scale_source`, a mode, nor a tensor of the scale such as `scale.uid`): caller-chosen multipliers, often `1/sqrt(head_dim)`, so a second head_dim to a model |
+| `board_identity` | `device.total_global_mem`: varies only between the pooled boards |
+
+Strides, `dropout_p`/`dropout_probability` and `virtual` are kept. An authored recipe
+(`--features`, `--feature-signature`) is never filtered.
+
+**Search.** `generate --feature-search` replaces the proposal with a search on the training
+rows (never the evaluation slice). It is scored for one metric's label and for the `--adapter`
+model, and every metric of the run shares the recipe it finds, so it takes one `--metric` and
+`--adapter tree_data` or `mlp_data` (not `linear_data`, which fits a per-problem slowdown the
+search does not score). `generate` and `feature-search` take the same `--adapter` spellings,
+`--max-candidates` and `--adapter-pass-budget` (a negative budget is refused), and `--seed`
+means the same in both: the first of three validation seeds, `--seed`, `--seed + 1` and
+`--seed + 2`. The search replaces the proposal's dimension-to-tile pairs with its own grid and
+tier templates, so `--dim-tile` is refused with it. The same search runs on any rows, to read
+what it chooses:
+
+```bash
+python -m uhd_gen feature-search --input train.csv --target tflops \
+    --descriptor-tree ./descriptors --engine hipkernel:my_engine --output-dir ./search
+```
+
+The candidates are the published columns every row binds, and the optional features (see
+"Optional features are read through a default") some rows leave unbound (constant columns drop
+out, and an expression offered twice is one candidate; columns that merely have equal values on
+the rows, as the query and key head counts do on a corpus of equal-head attention, are all kept
+and listed under `candidates.equal_candidates` in the report, because the rows cannot say they
+are one quantity: the backward elimination removes the redundant one), and
+`jsonexpr` expressions over them. The rows that leave an optional column unbound stay in the
+search's rows and take the column's default: every candidate over it, the base column and each
+padding, ratio, stride-order, grid and tier expression, reads it as
+`{"value_or_default": ["$<name>", <default>]}`, so the recipe passes the optional-read lint
+that `train` and `promote` apply (which optional names need the guard follows the run's
+metric, as `hipdnn_uhd_features --lint` decides: a `tflops` model keeps the work features
+bare; `uhd_gen feature-search`, which names no metric, guards them too). The fill
+`d / (ceil_div(d, m) * m)` of an optional dim is read as 1 where the dim is unbound: its default
+pads to 0, which the evaluator's `/` declines on. An optional column
+that holds strings cannot take a default and is left out (`omitted_proposals` reason
+`optional_categorical`). The expressions are: padding (`ceil_div(d, m) * m`, `d / (ceil_div(d, m) * m)`, `d % m`, for
+m in 8..128), ratios of dims of different tensor roles, stride order
+(`{">": ["$q.strides[1]", "$q.strides[2]"]}`: head-major or token-major, for each adjacent pair
+before a tensor's innermost stride; raw strides stay candidates), grid counts
+(`ceil_div(d, t)` of one non-innermost axis of a tensor times the extents of its other
+non-innermost axes, `t` one of the catalog's tile-like integer fields (`block_*`, `tile_*`;
+64 and 128 when it has none), also divided by `$device.cu_count` when that field varies;
+the innermost axis is the one with stride 1, else the last) and, given catalog values, `d` rounded up to each catalog field's tiers
+(`--catalog-values file.json` with `{"field": [values...]}`, or the metadata of the engine's KDP
+kernels in `--descriptor-tree`, which `generate` always reads). More than `--max-candidates`
+(2000, also a `generate` flag) candidates are refused, not sampled. The search is backward elimination scored by
+LightGBM on the log target with 5-fold validation by problem, repeated over three seeds (each seed
+deals the folds anew): each round
+drops the least important 15% (permutation importance; near-duplicate clusters, |corr| > 0.999,
+leave together), it stops after two rounds worse than the best by more than
+`max(spread, 0.002)` or at 8 features, and keeps the smallest round within that tolerance of the
+best. A prune then refits without each feature, weakest first, and removes it unless the score
+rises by more than `max(spread, 0.002)`, until every feature left costs more than that.
+
+Folds hold whole graphs: by default a graph is its `benchmark`, so one measured on two boards is
+never on both sides of a split. `feature-search --group-by` names the columns that together
+identify a graph, in any order; `--group-by benchmark device` makes each board's measurements of
+a benchmark a graph of its own.
+
+With `--adapter mlp_data` (`generate` passes its own adapter and `--mlp-hidden/--mlp-epochs/
+--mlp-max-rows`; `feature-search` takes the adapter but no `--mlp-*` option, so its pass fits
+the defaults; `--adapter` is `tree_data` by default, which runs no MLP pass) a forward pass
+follows, scored by the MLP trainer the model
+will be fitted with (one ensemble member, early stopping on whole graphs) on paired per-fold
+differences. Its folds are one layout of the graphs for every seed (a seed varies the MLP, not
+which graphs are held out), so folds 0-1 (discovery), 2-3 (confirm) and 4 (removal) are disjoint
+sets of graphs. The seeds of a fold score the same graphs, so they are averaged and the standard
+error is taken over the folds. Up to `--adapter-pass-budget` (60, also a `generate` flag) tier,
+grid, pad and ratio features the prune did not keep, best LightGBM gain first (on the rows outside
+the discovery folds) and dealt out across those templates, are tried one at a time: a feature is
+picked if the held-out error on folds 0-1 falls by more than `max(2 standard errors, 0.002)`,
+added only if folds 2-3 agree by more than one standard error (and 0.002), and removed again if
+fold 4, one fold with no spread to estimate, finds it costs no more than 0.002. The LightGBM prune
+can remove what the MLP uses, so the set before the prune (plus the added features) is scored
+too, on folds 2-4, and replaces the pruned set only if it wins by the pick's margin; the report
+records both scores and the choice, and the removal-cost guarantee holds for the pruned set. The report lists every
+candidate's MLP delta and standard error.
+Every recipe entry is checked against `hipdnn_uhd_features` on every row, the rows with unbound
+optional columns included, before it is written. The
+same rows and seeds give the same recipe.
+
+The output directory (`feature_search/` beside the model for `generate`, whose
+`generation_manifest.json` records the report path and a summary under `feature_search`)
+holds `recipe.json`, a features-signature array; `feature_search_report.json`, with the
+candidate counts per template, the candidates whose values are equal on the rows, the
+exclusions, every round (features kept, score and spread),
+the prune's steps, the adapter pass, the final features with each one's removal cost (the MLP's
+for a feature the adapter pass added), and what was dropped and why; and a Markdown summary.
+
+**Overriding.** `--features` or `--feature-signature` is taken as written and skips the
+search. To choose a subset of what the search found, edit `recipe.json` and pass it back as
+`--feature-signature recipe.json`. `--feature-search` together with either, or with
+`--dim-tile`, is an error.
 
 ### Reproducible generation
 
@@ -1024,6 +1162,24 @@ refused -- the engine stays applicable and reports UNAVAILABLE naming both revis
 Start a fresh consumer process after installing a model: a compiled model is cached
 for the lifetime of the engine that owns it.
 
+`trained_against.codegen_revision` is published by the generic (descriptor) engine and is
+recorded, never a compatibility key. It digests the bytes of the engine's code objects. A code
+object that carries a packer `identity` (one the packer compiled from rocKE IR) enters the
+selector revision by that compiler-independent identity instead, so a compiler bump within one
+LLVM flavor moves only the codegen revision (an LLVM-major bump that changes the IR flavor
+rocKE emits moves both). A prebuilt code object (FlyDSL) or a HIP-compiled one still enters
+by its `sha256`: a prebuilt one moves both only when it is regenerated, and a HIP-compiled one
+moves both on every compiler change. The runtime binds a model whose `codegen_revision` differs from the engine's and
+logs one warning. `uhd_gen` does the same where it checks a model against the bindings
+measurements or runtime predictions carry (`evaluate`), and never refuses measurements that
+differ only in it (collections, datasets, repeats of one shape). A model
+records the `codegen_revision` only when every measurement it trains on reports the same
+one; measurements from different compilers train together, the model records none, and the
+evaluation report's `warnings` says so. A `--provenance` or `--descriptor-tree` snapshot
+names the contract only: a `codegen_revision` it records that differs from the
+measurements' is warned about, and the model records the measurements'. A model that records
+a `codegen_revision` is written as UHD 1.2, the first version that carries the key.
+
 Install the intended catalog-ranking model before collecting L1 measurements.
 Changing that model changes the descriptor engine's immediate selector and can
 invalidate an existing L1 model. Collect and train L1 against the final selector;
@@ -1199,7 +1355,7 @@ holds for an unslotted engine, and for each slot of a slotted one unless stated 
 | Sweep kernel columns | `kernel.<field>` | `kernel.<slot>.<field>`, plus `kernel` (the composite id) and `slot_reference` |
 | Catalog ranker | one `sort_kernel_catalog` | one per slot, metric-less |
 | Engine estimate | `predict_engine` | `predict_engine`, engine-level; its `trained_against` names every slot's KMD in `kmds` |
-| Descriptor `version` | `1.0` | `1.1` for the UED, KDPs and slot-aware UHDs (`uhd.schema.json` accepts `1.0` and `1.1`) |
+| Descriptor `version` | `1.0` (a UHD that records `codegen_revision`: `1.2`) | `1.1` for the UED, KDPs and slot-aware UHDs, `1.2` for a UHD that also records `codegen_revision` (`uhd.schema.json` accepts `1.0`, `1.1` and `1.2`) |
 
 **Training data.** `hipdnn_bench --sweep` times every composite candidate: the product of the
 slot catalogs. `slot_reference` names the slots whose training rows a row is, joined by `|`:
@@ -1231,9 +1387,10 @@ slot's kernel id, `kernel.<slot>.<field>` becomes `kernel.<field>` (the ranker's
 `$kernel.<field>` signature), and the other slots' columns, `slot_reference` and `ws.*` are
 dropped. `generate --slot` also records the slot's provenance (`trained_against` with `slot`
 and that slot's KMD, from `--descriptor-tree` and `--engine`), and `train` writes a model whose
-`trained_against` carries `slot` or `kmds` as a `1.1` UHD (`1.0` otherwise). The dataset is a
-published one, so `generate` needs `--no-promote` and `--features` (or `--feature-signature`),
-needs at least five training problems plus held-out ones, and leaves installing to `promote`.
+`trained_against` carries `slot` or `kmds` as a `1.1` UHD (`1.0` otherwise; an L1 model that
+also records `codegen_revision` is `1.2`). The dataset is a published one, so `generate`
+needs `--no-promote` and `--features` (or `--feature-signature`), needs at least five
+training problems plus held-out ones, and leaves installing to `promote`.
 
 `dataset export`, `generate` and `knobs` accept `--slot`, and each refuses a corpus that is
 not a slotted sweep; `generate` also needs `--dataset`. `generate` refuses to collect
@@ -1249,7 +1406,7 @@ must be metric-less): `generate --adapter mlp_data --slot` is refused before any
 and `promote` and the packer refuse such a model bound to a slot. Use `tree_data` or
 `linear_data` for slot rankers. A slotted engine's own L1 estimate is another matter: its
 `predict_engine` model names a metric and records every slot's KMD in `trained_against.kmds`
-(a `1.1` UHD), and it may be `mlp_data`.
+(a `1.1` UHD, `1.2` with a `codegen_revision`), and it may be `mlp_data`.
 
 **Installing.** A slot ranker records its slot in `trained_against.slot` and installs under
 `heuristics/<ued-id>/<slot>/sort_kernel_catalog/<arch>/`; `predict_engine` installs at the
@@ -1418,7 +1575,7 @@ what `train` needs, and refuses a run that cannot meet it before it measures or 
   `tflops`.
 
 A slotted engine's L1 estimate may be `mlp_data` (its `trained_against` carries `kmds`, a `1.1`
-UHD); its slot rankers may not.
+UHD, or `1.2` with a `codegen_revision`); its slot rankers may not.
 
 ## Output
 

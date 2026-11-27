@@ -14,6 +14,7 @@ from hkp_pack.descriptors import load_flat_input
 from hkp_pack.errors import HkpPackError
 from hkp_pack.rocke_compile import (
     build_spec,
+    code_object_identity,
     compile_rocke_variant,
     rocke_variant_key,
 )
@@ -32,14 +33,24 @@ def _copy_fixture(tmp_path, fixture):
     return dst
 
 
-def _run(source_root, tmp_path, hipcc, rocm_kpack_dir, arches=(ARCH,)):
+def _run(
+    source_root,
+    tmp_path,
+    hip_compiler,
+    rocm_kpack_dir,
+    arches=(ARCH,),
+    hip_path=None,
+    device_lib_path=None,
+):
     return run_pipeline(
         source_root=source_root,
         arches=list(arches),
         out_root=tmp_path / "out",
-        hipcc=hipcc,
+        hip_compiler=hip_compiler,
         rocm_kpack_dir=rocm_kpack_dir,
         inter_root=tmp_path / "inter",
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
     )
 
 
@@ -161,9 +172,12 @@ def _write_stub_pkg(tmp_path, body, pkg="stubpkg", sub="sub", mod="mod"):
 
 
 class _FakeArtifact:
-    def __init__(self, name, data):
+    def __init__(self, name, data, llvm_text, isa, options):
         self.kernel_name = name
         self.hsaco = data
+        self.llvm_text = llvm_text
+        self.isa = isa
+        self.options = options
 
 
 class _FakeComgrError(Exception):
@@ -177,7 +191,19 @@ STUB_ARGUMENTS = [
 ]
 
 
-def _patch_compiler(monkeypatch, name="stub_symbol", data=None):
+_STUB_IR = "; stub IR"
+_STUB_ISA = f"amdgcn-amd-amdhsa--{ARCH}"
+_STUB_OPTIONS = ("-O3",)
+
+
+def _patch_compiler(
+    monkeypatch,
+    name="stub_symbol",
+    data=None,
+    llvm_text=_STUB_IR,
+    isa=_STUB_ISA,
+    options=_STUB_OPTIONS,
+):
     """Stub the comgr entry, recording the backend and arch the producer requested.
 
     The recorder exists so a test can assert the producer PINS the backend
@@ -190,6 +216,9 @@ def _patch_compiler(monkeypatch, name="stub_symbol", data=None):
     before any guard under test is reached. Synthesising that note needs
     msgpack, so the default -- and only the default -- is gated on it; a caller
     supplying its own bytes needs nothing.
+
+    `llvm_text`, `isa` and `options` are what the stub artifact reports COMGR
+    compiled.
     """
     if data is None:
         requires_msgpack()
@@ -201,7 +230,7 @@ def _patch_compiler(monkeypatch, name="stub_symbol", data=None):
     def _fake_compile(kernel, *, arch, capture_ir_text=False, backend=None):
         seen["backend"] = backend
         seen.setdefault("arches", []).append(arch)
-        return _FakeArtifact(name, data)
+        return _FakeArtifact(name, data, llvm_text, isa, tuple(options))
 
     monkeypatch.setattr(
         rocke_compile, "_load_compiler", lambda: (_fake_compile, _FakeComgrError)
@@ -239,6 +268,42 @@ def test_adapter_import_build_capture(tmp_path, monkeypatch):
     # default: the wheel has no C++ engine, so an unpinned request degrades to
     # Python via a fallback and the artifact misreports which engine built it.
     assert seen["backend"] == "python"
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    "changed, value, moves",
+    [
+        ("data", b"\x7fELF-rebuilt", False),
+        ("llvm_text", "; other IR", True),
+        ("isa", f"amdgcn-amd-amdhsa--{ARCH}:xnack-", True),
+        ("options", ("-O3", "-mllvm", "-amdgpu-mfma-vgpr-form"), True),
+    ],
+)
+def test_identity_follows_what_comgr_compiled_not_the_code_object(
+    tmp_path, monkeypatch, changed, value, moves
+):
+    """`code_object_identity` digests the IR, ISA name and options COMGR compiled, so
+    a compiler that only rebuilds the bytes keeps it while the sha256 moves."""
+    src = _write_stub_pkg(tmp_path, _GOOD_STUB, pkg=f"stubpkg_identity_{changed}")
+    base = {"data": b"\x7fELF-stub"}
+
+    def _observations(**inputs):
+        _patch_compiler(monkeypatch, **inputs)
+        _co, _symbol, observations = compile_rocke_variant(
+            src, "build_stub", {"n": 1}, ARCH, tmp_path / "co"
+        )
+        return observations
+
+    before = _observations(**base)
+    after = _observations(**{**base, changed: value})
+    assert before["code_object_identity"] == code_object_identity(
+        [_STUB_IR], _STUB_ISA, list(_STUB_OPTIONS)
+    )
+    assert (before["code_object_identity"] != after["code_object_identity"]) is moves
+    assert (before["code_object_sha256"] != after["code_object_sha256"]) is (
+        changed == "data"
+    )
 
 
 @pytest.mark.quick
@@ -558,9 +623,23 @@ def test_rocke_compile_variant_real(tmp_path, rocke_available, rocke_ukd):
 
 
 def test_rocke_compiles_and_packs(
-    tmp_path, rocke_fixture, hipcc, rocm_kpack_dir, rocke_available, rocke_ukd
+    tmp_path,
+    rocke_fixture,
+    hip_compiler,
+    hip_path,
+    device_lib_path,
+    rocm_kpack_dir,
+    rocke_available,
+    rocke_ukd,
 ):
-    _run(rocke_fixture, tmp_path, hipcc, rocm_kpack_dir)
+    _run(
+        rocke_fixture,
+        tmp_path,
+        hip_compiler,
+        rocm_kpack_dir,
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
+    )
     shipped = read_shipped(tmp_path / "out" / ARCH / "attention.kdp.json")
     ukd = shipped["kernelDescriptors"][0]
     ks = ukd["kernel_source"]
@@ -612,14 +691,28 @@ def test_rocke_compiles_and_packs(
 
 
 def test_rocke_symbol_capture_differs_from_builder(
-    tmp_path, rocke_fixture, hipcc, rocm_kpack_dir, rocke_available, rocke_ukd
+    tmp_path,
+    rocke_fixture,
+    hip_compiler,
+    hip_path,
+    device_lib_path,
+    rocm_kpack_dir,
+    rocke_available,
+    rocke_ukd,
 ):
     from kernels.gfx950.attention_dense import (
         AttentionDenseSpec,
         build_attention_dense,
     )
 
-    _run(rocke_fixture, tmp_path, hipcc, rocm_kpack_dir)
+    _run(
+        rocke_fixture,
+        tmp_path,
+        hip_compiler,
+        rocm_kpack_dir,
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
+    )
     ukd = _read(tmp_path / "out" / ARCH / "attention.kdp.json")["kernelDescriptors"][0]
     symbol = ukd["kernel_source"]["symbol"]
     expected = build_attention_dense(
@@ -630,12 +723,26 @@ def test_rocke_symbol_capture_differs_from_builder(
 
 
 def test_rocke_arch_scoping(
-    tmp_path, rocke_fixture, hipcc, rocm_kpack_dir, rocke_available
+    tmp_path,
+    rocke_fixture,
+    hip_compiler,
+    hip_path,
+    device_lib_path,
+    rocm_kpack_dir,
+    rocke_available,
 ):
     """A gfx950-scoped rocke UKD under a gfx942+gfx950 KDP packs only for gfx950;
     targeting gfx942 excludes the UKD before compile, so the gfx950-only builder
     is never invoked and no gfx942 shard is produced."""
-    _run(rocke_fixture, tmp_path, hipcc, rocm_kpack_dir, arches=["gfx942", ARCH])
+    _run(
+        rocke_fixture,
+        tmp_path,
+        hip_compiler,
+        rocm_kpack_dir,
+        arches=["gfx942", ARCH],
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
+    )
     # gfx950 shard has the packed rocke UKD.
     assert (tmp_path / "out" / ARCH / "attention.kdp.json").exists()
     shipped = read_shipped(tmp_path / "out" / ARCH / "attention.kdp.json")
@@ -781,7 +888,7 @@ def test_rocke_toc_key_collision_is_detected(tmp_path, monkeypatch, rocm_kpack_d
             source_root=root,
             arches=[ARCH],
             out_root=tmp_path / "out",
-            hipcc="hipcc-not-invoked",
+            hip_compiler="compiler-not-invoked",
             rocm_kpack_dir=rocm_kpack_dir,
             inter_root=tmp_path / "inter",
         )
@@ -958,7 +1065,7 @@ def test_generic_target_records_compile_target_per_shard(
     }
     for shard, (generic, ids) in expected.items():
         inter = pipeline.compile_intermediate(
-            flat, root, shard, "hipcc-not-invoked", tmp_path / "inter" / shard
+            flat, root, shard, "compiler-not-invoked", tmp_path / "inter" / shard
         )
         records = [u for k in inter.kdps for u in k.ukds]
         assert {u.id for u in records} == ids
@@ -993,7 +1100,7 @@ def test_generic_target_provenance_names_the_compile_target(
         source_root=root,
         arches=["gfx1151", "gfx1201"],
         out_root=tmp_path / "out",
-        hipcc="hipcc-not-invoked",
+        hip_compiler="compiler-not-invoked",
         rocm_kpack_dir=rocm_kpack_dir,
         inter_root=tmp_path / "inter",
     )

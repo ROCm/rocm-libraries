@@ -49,6 +49,7 @@ engine:
   name: hipkernel:Gfx942AttentionUnified3d
   census_name_symbol: GFX942_ATTENTION_UNIFIED_3D_ENGINE_NAME
   sdk_version: 1.0.0
+  numerical_notes: []
   # A dense graph carries no KV block size or split count, so the engine chooses
   # both. tile_size_override is not a knob: (head_size, block_size) determine it.
   # The cache policy is pinned to stream (see the header), so it is no knob.

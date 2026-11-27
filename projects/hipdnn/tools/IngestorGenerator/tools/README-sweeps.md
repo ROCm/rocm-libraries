@@ -171,6 +171,21 @@ resolved, it names the arm's `lib/hipdnn_plugins/engines`
 directory itself or a plugin directly inside it; a sibling tree or a deeper descendant
 makes that graph ambiguous. Failures stay in the outcome ledger.
 
+The driver reads dnn-benchmark result schema 1 (no `schema_version`; top-level
+`metadata`) and schemas 2 and 3 (see dnn-benchmarking `docs/results-schema.md`).
+It rejects any other version. Schemas 2 and 3 use the same fields for these checks:
+`runtime` is `provider`. `engine.name` and `engine.id` are `engine_name` and `engine_id`;
+`engine.id` is the unsigned ID in hex,
+and a row labelled with that hex ID because the bindings cannot name the engine reads as
+`engine_0x<hex>`. A hipDNN row's `plugin_path` is the one entry of
+`run.config.plugin_paths` when the run has exactly one. The timing is
+`ootb.kernel.median_ms` (the ledger's `mean_ms`; neither schema stores a mean).
+The comparison is `ootb.correctness` with `match` as `tolerance_match`.
+`verdict == "passed"` is `passed`, and `message` is `skip_reason` or `error_message`.
+The gates judge the default plan only, not `oracle`. The metadata gate takes
+`environment.gpu_arch` and its counts from `summary`: `failed`, and `errors` plus
+`graph_errors` plus `no_engine_graphs`, all three of which schema 1 wrote as error rows.
+
 Each graph's identity (`graph_name` in the ledger, and the `name` the driver writes into
 its staged copy, which the benchmark reports back) is the graph JSON `name`, or the file
 stem when there is none. When several files in one corpus share that name, for example
@@ -178,6 +193,7 @@ two sources shipping the same shape, each of them is keyed by its corpus-relativ
 (`hipkittens/a.json`) instead; `source_name` keeps the original name. A corpus where a
 graph name equals another graph's relative path cannot be told apart and is refused as
 invalid configuration.
+The driver does not use `graph_id`, which is a geometry hash in schema 3.
 
 With correctness enabled, every claimed served graph needs a real comparison against the
 declared independent reference with `passed: true`, `execution_success: true` and

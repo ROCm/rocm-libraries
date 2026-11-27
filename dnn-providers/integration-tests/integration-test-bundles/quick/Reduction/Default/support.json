@@ -1,0 +1,30 @@
+{
+  "claims": {
+    "MIOPEN_ENGINE": [
+      {
+        "cases": [
+          "1_16_8_8_fp16_nchw_modeamax",
+          "1_16_8_8_fp16_nhwc_modemul",
+          "1_16_8_8_fp16_nhwc_modenorm2",
+          "1_16_8_8_fp32_nchw_modemin",
+          "1_16_8_8_fp32_nhwc_modeavg"
+        ],
+        "support": {
+          "gfx1201": [
+            "linux"
+          ],
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

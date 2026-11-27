@@ -16,6 +16,9 @@ const std::vector<IngestorPack>& ingestorPacks()
     // in a way that matters before main().
     static const std::vector<IngestorPack> s_packs = {
         {"hipkernel:Pointwise", &registerPointwiseSymbols, &resetPointwiseModuleCache},
+        {"hipkernel:StandalonePointwise",
+         &registerStandalonePointwiseSymbols,
+         &resetStandalonePointwiseModuleCache},
         {"hipkernel:ConvFwd", &registerConvFwdSymbols, &resetConvFwdModuleCache},
 #ifdef HIPDNN_ENGINE_FLYDSL
         // Compiled only when FlyDSL staged a shard; see the gate in this directory's

@@ -39,6 +39,7 @@
 
 #include "compilation/KpackKernelLoader.hpp"
 #include "compilation/KpackModuleCache.hpp"
+#include "compilation/LaunchLimits.hpp"
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
@@ -402,6 +403,18 @@ bool hasAlignedRows(const data_objects::TensorAttributes& tensor)
         }
     }
     return true;
+}
+
+/// The prefill kernel masks tail rows (seq index >= the operand's own Sq) of its
+/// 16-row wave tile only by binding the O/LSE buffer resource to
+/// (rows - 1) * stride + width elements: with rows == 1 that bound collapses to
+/// width elements, so a row (sequence) stride below the row's own width lets a
+/// tail-row store land in range instead of being dropped. isWellFormedOperand's
+/// overlap check skips extent-1 axes and so never catches this.
+bool hasRowRoomForTailStores(const data_objects::TensorAttributes& tensor)
+{
+    return tensor.dims()->Get(SEQ_AXIS) > 1
+           || tensor.strides()->Get(SEQ_AXIS) >= tensor.dims()->Get(HEAD_SIZE_AXIS);
 }
 
 bool addressFitsI32(const data_objects::TensorAttributes& tensor, int64_t elementBytes)
@@ -964,8 +977,11 @@ bool hasServedStatsAlignment(std::string_view engine,
 }
 
 /// The stats (LSE) operand: (write, uid), the uid being O's when stats are off; nullopt
-/// for malformed stats. LSE is FP32 [B, Hq, Sq, 1] with dense strides.
-std::optional<std::pair<bool, int64_t>> lseFor(const MatchContext& context,
+/// for malformed stats. LSE is FP32 [B, Hq, Sq, 1] with dense strides. hasRowRoomForTailStores
+/// applies only when @p engine is the prefill engine: the decode kernel predicates its LSE
+/// store on row_ok instead of relying on the buffer resource bound.
+std::optional<std::pair<bool, int64_t>> lseFor(std::string_view engine,
+                                               const MatchContext& context,
                                                const data_objects::SdpaAttributes& attributes,
                                                const Problem& p)
 {
@@ -983,6 +999,7 @@ std::optional<std::pair<bool, int64_t>> lseFor(const MatchContext& context,
     const int64_t lseUid = attributes.stats_tensor_uid().value();
     const auto* lse = findTensor(context, lseUid);
     if(lse == nullptr || !isWellFormedOperand(*lse)
+       || (engine == PREFILL_ENGINE_NAME && !hasRowRoomForTailStores(*lse))
        || lse->data_type() != data_objects::DataType::FLOAT
        || lse->dims()->Get(BATCH_AXIS) != p.batch || lse->dims()->Get(HEAD_AXIS) != p.queryHeads
        || lse->dims()->Get(SEQ_AXIS) != p.seqLenQ || lse->dims()->Get(HEAD_SIZE_AXIS) != 1
@@ -1194,8 +1211,9 @@ std::optional<BoundTokens>
             return std::nullopt;
         }
     }
-    else if(!isWellFormedOperand(*q) || !isWellFormedOperand(*o) || !addressFitsI32(*q, 2)
-            || !addressFitsI32(*o, 2) || !hasAlignedRows(*q) || !hasAlignedRows(*o))
+    else if(!isWellFormedOperand(*q) || !isWellFormedOperand(*o) || !hasRowRoomForTailStores(*o)
+            || !addressFitsI32(*q, 2) || !addressFitsI32(*o, 2) || !hasAlignedRows(*q)
+            || !hasAlignedRows(*o))
     {
         return std::nullopt;
     }
@@ -1352,7 +1370,7 @@ std::optional<BoundTokens>
         logDecline(engine, "stats", "the paged kernels write no stats for a ragged Q");
         return std::nullopt;
     }
-    const auto lse = lseFor(context, attributes, p);
+    const auto lse = lseFor(engine, context, attributes, p);
     BoundTokens bound;
     if(!lse.has_value() || !hasServedStatsAlignment(engine, context, *lse))
     {
@@ -1419,7 +1437,8 @@ std::optional<BoundTokens> graphMatchesFor(std::string_view engine, const MatchC
     const auto* v = findTensor(context, attributes.v_tensor_uid());
     const auto* o = findTensor(context, attributes.o_tensor_uid());
     if(q == nullptr || k == nullptr || v == nullptr || o == nullptr || !isWellFormedOperand(*q)
-       || !isWellFormedOperand(*k) || !isWellFormedOperand(*v) || !isWellFormedOperand(*o))
+       || !isWellFormedOperand(*k) || !isWellFormedOperand(*v) || !isWellFormedOperand(*o)
+       || (engine == PREFILL_ENGINE_NAME && !hasRowRoomForTailStores(*o)))
     {
         return std::nullopt;
     }
@@ -1475,7 +1494,7 @@ std::optional<BoundTokens> graphMatchesFor(std::string_view engine, const MatchC
         logDecline(engine, "sinks", "only the paged prefill objects take attention sinks");
         return std::nullopt;
     }
-    const auto lse = lseFor(context, attributes, p);
+    const auto lse = lseFor(engine, context, attributes, p);
     const auto bias = biasFor(context, attributes, p);
     BoundTokens bound;
     if(!lse.has_value() || !bias.has_value()
@@ -1789,7 +1808,8 @@ struct DecodePlan
 
 /// The decode launch of @p problem on @p device, or nullopt when the decode kernel cannot
 /// take it: head counts that do not pack (one of Hkv / Hv must divide the other) or a
-/// grid / workspace past the kernels' I32 arithmetic.
+/// grid / workspace past the kernels' I32 arithmetic, or a grid past one launch axis's
+/// work-item limit.
 std::optional<DecodePlan> decodePlanFor(const Problem& problem,
                                         const MaskParameters& mask,
                                         const ObjectTraits& traits,
@@ -1826,7 +1846,9 @@ std::optional<DecodePlan> decodePlanFor(const Problem& problem,
     // wmma_fmha_decode_grid / _merge_grid
     plan.grid = problem.batch * plan.numSplits * groups * traits.dvSplit * rowTiles;
     plan.mergeGrid = problem.batch * hq * problem.seqLenQ;
-    if(plan.grid <= 0 || plan.grid > I32_MAX || plan.mergeGrid <= 0 || plan.mergeGrid > I32_MAX)
+    if(plan.grid <= 0 || plan.grid > I32_MAX || plan.mergeGrid <= 0 || plan.mergeGrid > I32_MAX
+       || !compilation::launchAxisFits(plan.grid, traits.blockSize)
+       || !compilation::launchAxisFits(plan.mergeGrid, MERGE_THREADS))
     {
         return std::nullopt;
     }
@@ -1884,6 +1906,16 @@ std::optional<DecodePlan> catalogDecodePlan(const Problem& problem,
     return decodePlanFor(problem, mask, traits, device);
 }
 
+/// The prefill kernel's x extent, one workgroup per (batch, query tile, query head)
+/// (wmma_fmha_fwd_v2_grid: heads fastest, then query tile and batch). A plain product: a
+/// dense or non-ragged Q keeps batch * heads * seqLenQ under 2^27, and a ragged slice keeps
+/// heads * seqLenQ under 2^27 with batch at most 2^31 - 1, so it stays under 2^58.
+int64_t prefillGrid(const Problem& problem, const ObjectTraits& traits)
+{
+    const int64_t queryTiles = (problem.seqLenQ + traits.blockM - 1) / traits.blockM;
+    return problem.batch * queryTiles * problem.queryHeads;
+}
+
 /// The kernel matcher of one engine: @p decodeEngine selects which of the two kernels
 /// it admits.
 bool kernelMatchesFor(bool decodeEngine,
@@ -1939,9 +1971,9 @@ bool kernelMatchesFor(bool decodeEngine,
         return false;
     }
     // A prefill object serves any widths up to its buckets.
-    const int64_t queryTiles = (problem->seqLenQ + traits->blockM - 1) / traits->blockM;
+    const int64_t grid = prefillGrid(*problem, *traits);
     return problem->headDimQ <= traits->headSize && problem->headDimV <= traits->headSizeV
-           && problem->batch * queryTiles * problem->queryHeads <= I32_MAX;
+           && grid <= I32_MAX && compilation::launchAxisFits(grid, traits->blockSize);
 }
 
 bool prefillKernelMatches(const MatchContext& context,
@@ -2369,10 +2401,16 @@ public:
         {
             auto code
                 = buildIngestorKernelCode(_kpackLoader, context, kernel, prefillSignature(traits));
-            // wmma_fmha_fwd_v2_grid: heads fastest, then query tile and batch.
-            const int64_t queryTiles = (problem.seqLenQ + traits.blockM - 1) / traits.blockM;
-            const int64_t grid = problem.batch * queryTiles * problem.queryHeads;
+            const int64_t grid = prefillGrid(problem, traits);
             requireLaunchRange(grid, I32_MAX, "prefill grid");
+            if(!compilation::launchAxisFits(grid, traits.blockSize))
+            {
+                throw hipdnn_plugin_sdk::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                    "gfx1151 WMMA attention prefill grid of " + std::to_string(grid)
+                        + " workgroups x " + std::to_string(traits.blockSize) + " threads exceeds "
+                        + std::to_string(compilation::LAUNCH_AXIS_ITEM_LIMIT) + " work-items");
+            }
             code.setBlockSize(static_cast<uint32_t>(traits.blockSize), 1, 1);
             code.setGridSize(static_cast<uint32_t>(grid), 1, 1);
             return std::make_unique<PreparedGfx1151WmmaAttention>(

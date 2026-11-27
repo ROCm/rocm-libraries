@@ -1082,19 +1082,22 @@ class TestStdoutEncoding:
 # --------------------------------------------------------------------------
 
 
-def _bhsd_strides(dims: list[int]) -> list[int]:
-    b, h, s, d = dims
-    return [h * s * d, s * d, d, 1]
+def _strides_for_order(dims: list[int], order) -> list[int]:
+    """Packed strides for ``dims`` laid out in ``order``, the largest stride first."""
+    result, step = [0] * len(dims), 1
+    for dim in reversed(order):
+        result[dim] = step
+        step *= dims[dim]
+    return result
 
 
-def _bshd_strides(dims: list[int]) -> list[int]:
-    b, h, s, d = dims
-    return [s * h * d, d, h * d, 1]
+def _packed_strides(order: tuple[int, ...]):
+    return lambda dims: _strides_for_order(dims, order)
 
 
-def _sbhd_strides(dims: list[int]) -> list[int]:
-    b, h, s, d = dims
-    return [h * d, d, b * h * d, 1]
+_bhsd_strides = _packed_strides((0, 1, 2, 3))
+_bshd_strides = _packed_strides((0, 2, 1, 3))
+_sbhd_strides = _packed_strides((2, 0, 1, 3))
 
 
 def _padded_token_strides(dims: list[int]) -> list[int]:
@@ -1226,6 +1229,20 @@ class TestSdpaExtract:
         layout = self._group("layout", q_dims=(2, 8, q_seq, 128), strides=_bshd_strides)
         assert layout == "layout:bshd"
 
+    @pytest.mark.parametrize(
+        "order, expected",
+        [
+            ((0, 1, 2, 3), "layout:bhsd"),
+            ((0, 2, 1, 3), "layout:bshd"),
+            ((0, 2, 3, 1), "layout:bsdh"),
+            ((2, 0, 1, 3), "layout:sbhd"),
+        ],
+    )
+    def test_layout_names_dims_by_decreasing_stride(
+        self, order: tuple[int, ...], expected: str
+    ) -> None:
+        assert self._group("layout", strides=_packed_strides(order)) == expected
+
     def test_unknown_layout_raises(self) -> None:
         with pytest.raises(FeatureError, match="stride order"):
             self._extract(strides=lambda dims: [1, 2, 3, 4])
@@ -1269,14 +1286,13 @@ class TestSdpaExtract:
         assert layout == f"layout:{expected}"
 
     @pytest.mark.parametrize(
-        "strides, match",
+        "strides, expected",
         [
             # Rows overlap: the token stride is below the heads it holds.
             (
                 lambda dims: [dims[2] * dims[1] * dims[3], dims[3], dims[3], 1],
-                "overlap",
+                "layout:overlapping",
             ),
-            # A padded sbhd has no name.
             (
                 lambda dims: [
                     dims[1] * dims[3] + 64,
@@ -1284,24 +1300,111 @@ class TestSdpaExtract:
                     2 * _sbhd_strides(dims)[2],
                     1,
                 ],
-                "pad",
+                "layout:sbhd_padded",
+            ),
+            # A head-dim stride of 2 pads each row.
+            (
+                lambda dims: [2 * s for s in _packed_strides((0, 2, 3, 1))(dims)],
+                "layout:bsdh_padded",
             ),
         ],
     )
-    def test_layouts_the_catalog_does_not_name_raise(self, strides, match) -> None:
-        with pytest.raises(FeatureError, match=match):
-            self._extract(strides=strides)
+    def test_overlapping_and_padded_layouts_of_every_order(
+        self, strides, expected: str
+    ) -> None:
+        assert self._group("layout", strides=strides) == expected
 
     def test_catalog_lists_the_new_layouts(self) -> None:
         ids = {f.id for f in sdpa.FEATURES}
         assert {
             "layout:bhsd",
             "layout:bshd",
+            "layout:bsdh",
             "layout:sbhd",
             "layout:bhsd_padded",
             "layout:bshd_padded",
+            "layout:bsdh_padded",
+            "layout:sbhd_padded",
+            "layout:overlapping",
             "layout:ragged",
         } <= ids
+
+    @pytest.mark.parametrize("order", list(sdpa.LAYOUTS))
+    @pytest.mark.parametrize(
+        "q_dims, zero_dim", [((2, 8, 64, 128), 2), ((2, 8, 1, 128), 1)]
+    )
+    def test_broadcast_q_keeps_its_layout(
+        self, order: tuple[int, ...], q_dims: tuple[int, ...], zero_dim: int
+    ) -> None:
+        node, tensors = _sdpa(q_dims=q_dims, strides=_packed_strides(order))
+        tensors[1]["strides"][zero_dim] = 0
+        features = sdpa.extract(node, tensors)
+        assert f"layout:{sdpa.LAYOUTS[order]}" in features
+        assert "broadcast:q" in features
+
+    @pytest.mark.parametrize(
+        "strides, expected",
+        [
+            ([64 * 128, 0, 128, 1], "layout:bhsd"),
+            ([8 * 128, 128, 0, 1], "layout:sbhd"),
+        ],
+    )
+    def test_expanded_size_one_dim_gets_a_catalogued_layout(
+        self, strides: list[int], expected: str
+    ) -> None:
+        node, tensors = _sdpa(q_dims=(2, 8, 64, 128))
+        tensors[1]["strides"] = strides
+        features = sdpa.extract(node, tensors)
+        assert expected in features
+        assert "broadcast:q" in features
+
+    def test_expanded_dim_takes_its_bhsd_place_in_a_smaller_catalogue(self) -> None:
+        bhsd_only = {(0, 1, 2, 3): "bhsd"}
+        order = sdpa.stride_order([2, 8, 64, 128], [8 * 128, 128, 0, 1], bhsd_only)
+        assert order == (0, 1, 2, 3)
+
+    @pytest.mark.parametrize("uid, port", [(1, "q"), (2, "k"), (8, "v")])
+    def test_broadcast_names_the_tensor(self, uid: int, port: str) -> None:
+        node, tensors = _sdpa()
+        tensors[uid]["strides"][2] = 0
+        broadcasts = {
+            f for f in sdpa.extract(node, tensors) if f.startswith("broadcast:")
+        }
+        assert broadcasts == {f"broadcast:{port}"}
+
+    @pytest.mark.parametrize(
+        "order, expected",
+        [
+            ((0, 1, 2, 3), "layout:bhsd"),
+            ((0, 2, 1, 3), "layout:bhsd"),
+            ((0, 2, 3, 1), "layout:bsdh"),
+            ((2, 0, 1, 3), "layout:bhsd"),
+        ],
+    )
+    def test_zero_stride_on_a_size_one_dim_is_not_broadcast(
+        self, order: tuple[int, ...], expected: str
+    ) -> None:
+        node, tensors = _sdpa(q_dims=(2, 8, 1, 128), strides=_packed_strides(order))
+        tensors[1]["strides"][2] = 0
+        features = sdpa.extract(node, tensors)
+        assert expected in features
+        assert not any(f.startswith("broadcast:") for f in features)
+
+    @pytest.mark.parametrize(
+        "strides, expected",
+        [
+            (_batch_slice_strides, "layout:bhsd_padded"),
+            (_packed_qkv_strides, "layout:bshd_padded"),
+            (_padded_token_strides, "layout:bshd_padded"),
+        ],
+    )
+    def test_broadcast_q_keeps_its_padded_layout(self, strides, expected: str) -> None:
+        # The zeroed s fills its gap: the padding is in the other strides.
+        node, tensors = _sdpa(strides=strides)
+        tensors[1]["strides"][2] = 0
+        features = sdpa.extract(node, tensors)
+        assert expected in features
+        assert "broadcast:q" in features
 
     @pytest.mark.parametrize(
         "strides", [_bshd_strides, _bhsd_strides, lambda dims: [1, 2, 3, 4]]
@@ -1315,10 +1418,14 @@ class TestSdpaExtract:
             (64, 64, "head_dim:64"),
             (192, 192, "head_dim:192"),
             (256, 256, "head_dim:256"),
+            (1, 1, "head_dim:1"),
             # A narrower v is its own kernel, not a 192.
             (192, 128, "head_dim:192x128"),
             (128, 64, "head_dim:128x64"),
             (256, 64, "head_dim:256x64"),
+            (128, 576, "head_dim:128x576"),
+            (576, 128, "head_dim:576x128"),
+            (129, 128, "head_dim:129x128"),
         ],
     )
     def test_head_dim_reads_q_and_v(self, qk: int, v: int, expected: str) -> None:
@@ -1333,10 +1440,17 @@ class TestSdpaExtract:
     @pytest.mark.parametrize(
         "kwargs, match",
         [
-            ({"q_dims": (2, 8, 128, 96)}, "head dim 96 x 128"),
+            ({"q_dims": (2, 8, 128, 100)}, "head dim 100 x 128"),
             # Each head dim is catalogued, the pair is not.
-            ({"v_dims": (2, 8, 128, 96)}, "head dim 128 x 96"),
-            ({"dtype": "float"}, "dtype 'float'"),
+            (
+                {
+                    "q_dims": (2, 8, 128, 63),
+                    "k_dims": (2, 8, 128, 63),
+                    "v_dims": (2, 8, 128, 64),
+                },
+                "head dim 63 x 64",
+            ),
+            ({"dtype": "double"}, "dtype 'double'"),
             # The MX scale type, never an attention input.
             ({"dtype": "fp8_e8m0"}, "dtype 'fp8_e8m0'"),
             ({"dtype": ["bfloat16"]}, r"dtype \['bfloat16'\]"),
@@ -1367,12 +1481,33 @@ class TestSdpaExtract:
     def test_fp8_dtype(self, dtype: str, expected: str) -> None:
         assert self._group("dtype", dtype=dtype) == expected
 
+    def test_fp32_dtype(self) -> None:
+        assert self._group("dtype", dtype="float") == "dtype:fp32"
+
     @pytest.mark.parametrize(
-        "o_dtype, mixed", [("bfloat16", True), ("fp8_e4m3", False)]
+        "dtype, o_dtype, mixed",
+        [
+            ("fp8_e4m3", "bfloat16", True),
+            ("fp8_e4m3", "fp8_e4m3", False),
+            ("bfloat16", "float", True),
+            ("float", "float", False),
+        ],
     )
-    def test_mixed_output(self, o_dtype: str, mixed: bool) -> None:
-        features = self._extract(dtype="fp8_e4m3", o_dtype=o_dtype)
+    def test_mixed_output(self, dtype: str, o_dtype: str, mixed: bool) -> None:
+        features = self._extract(dtype=dtype, o_dtype=o_dtype)
         assert ("precision:mixed_output" in features) == mixed
+
+    @pytest.mark.parametrize(
+        "uid, kv_dtype, mixed",
+        [(2, "fp8_e4m3", True), (8, "fp8_e4m3", True), (2, "bfloat16", False)],
+    )
+    def test_mixed_input(self, uid: int, kv_dtype: str, mixed: bool) -> None:
+        node, tensors = _sdpa()
+        tensors[uid]["data_type"] = kv_dtype
+        features = sdpa.extract(node, tensors)
+        assert ("precision:mixed_input" in features) == mixed
+        # dtype stays q's.
+        assert "dtype:bf16" in features
 
     @pytest.mark.parametrize("uid", [1, 3])
     def test_virtual_q_or_o_is_not_mixed(self, uid: int) -> None:
@@ -1383,9 +1518,9 @@ class TestSdpaExtract:
     @pytest.mark.parametrize(
         "uid, dtype, match",
         [
-            (2, "half", "k / v dtype 'half' / 'bfloat16' is not q's"),
-            (8, "half", "k / v dtype 'bfloat16' / 'half' is not q's"),
-            (3, "float", "o dtype 'float'"),
+            (2, "double", "k / v dtype 'double' is not catalogued"),
+            (8, ["half"], r"k / v dtype \['half'\] is not catalogued"),
+            (3, "double", "o dtype 'double'"),
             (3, ["bfloat16"], r"o dtype \['bfloat16'\]"),
         ],
     )
@@ -1517,6 +1652,26 @@ class TestSdpaExtract:
             },
         ):
             reached |= self._extract(**kwargs)
+        reached |= self._extract(dtype="float")
+        node, tensors = _sdpa()
+        tensors[8]["data_type"] = "half"
+        reached |= sdpa.extract(node, tensors)
+        for order in sdpa.LAYOUTS:
+            reached |= self._extract(strides=_packed_strides(order))
+            reached |= self._extract(
+                strides=lambda dims, order=order: [
+                    2 * s for s in _strides_for_order(dims, order)
+                ]
+            )
+        reached |= self._extract(strides=lambda dims: [1, 1, 1, 1])
+        node, tensors = _sdpa()
+        for uid in (1, 2, 8):
+            tensors[uid]["strides"][2] = 0
+        reached |= sdpa.extract(node, tensors)
+        for qk, v in sdpa.HEAD_DIMS:
+            reached |= self._extract(
+                q_dims=(2, 8, 128, qk), k_dims=(2, 8, 128, qk), v_dims=(2, 8, 128, v)
+            )
         assert reached == {feature.id for feature in sdpa.FEATURES}
 
 
@@ -1615,6 +1770,25 @@ class TestSdpaBackwardExtract:
         tensors[8]["data_type"] = "half"
         with pytest.raises(FeatureError, match="is not q's"):
             sdpa_backward.extract(node, tensors)
+
+    @pytest.mark.parametrize(
+        "kwargs, match",
+        [
+            (
+                {
+                    "q_dims": (2, 8, 128, 128),
+                    "k_dims": (2, 8, 128, 128),
+                    "v_dims": (2, 8, 128, 576),
+                },
+                "head dim 128 x 576",
+            ),
+            ({"strides": _packed_strides((2, 0, 1, 3))}, "stride order"),
+            ({"dtype": "float"}, "dtype 'float'"),
+        ],
+    )
+    def test_forward_only_value_raises(self, kwargs: dict, match: str) -> None:
+        with pytest.raises(FeatureError, match=match):
+            self._extract(**kwargs)
 
     def test_ragged_layout_ignores_strides(self) -> None:
         # Not counted as its bshd stride order.
@@ -1885,12 +2059,7 @@ def _layout_strides(dims: list[int], layout: str) -> list[int]:
     """Packed strides for ``dims`` in channels-first or channels-last order."""
     rank = len(dims)
     order = list(range(rank)) if layout == "nchw" else [0, *range(2, rank), 1]
-    strides = [0] * rank
-    step = 1
-    for dim in reversed(order):
-        strides[dim] = step
-        step *= dims[dim]
-    return strides
+    return _strides_for_order(dims, order)
 
 
 # Op module -> its ports, and the shape role its serializer writes under
@@ -7598,11 +7767,13 @@ class TestRealBundleTree:
     def test_dense_sdpa_graphs_keep_their_plain_layout(
         self, units: list[ClaimUnit]
     ) -> None:
-        """Adding the sbhd and padded names moved no committed bundle.
+        """Adding the padded and overlapping names moved no dense committed bundle.
 
-        A q whose strides are the dense strides of its order is bhsd or bshd
-        in both catalogs, as before; a backward q is never given a forward-only
-        name, padded or not.
+        A q whose strides are the dense strides of its order keeps its plain
+        name in both catalogs, as before; the forward catalog names a larger
+        stride ``_padded`` and a smaller one ``overlapping``; a backward q is
+        never given a forward-only name. A broadcast q's stride-0 dims have no
+        dense stride to compare, so only its name's order is checked here.
         """
         checked = {"SdpaAttributes": 0, "SdpaBackwardAttributes": 0}
         for unit in units:
@@ -7615,33 +7786,33 @@ class TestRealBundleTree:
                 if q.get("ragged_offset_tensor_uid") is not None:
                     continue
                 dims, strides = q["dims"], q["strides"]
-                order = tuple(sorted(range(4), key=lambda dim: -strides[dim]))
                 module = sdpa if node_type == "SdpaAttributes" else sdpa_backward
+                order = sdpa.stride_order(dims, strides, module.LAYOUTS)
                 layouts = {
                     f for f in module.extract(node, tensors) if f.startswith("layout:")
                 }
-                if order == sdpa.SBHD_ORDER:
-                    # Only the forward catalog names it (and the backward one raises).
-                    assert node_type == "SdpaAttributes", unit.bundle
-                    assert layouts == {"layout:sbhd"}, unit.bundle
-                    checked[node_type] += 1
-                    continue
-                plain = sdpa.LAYOUTS.get(order)
+                plain = module.LAYOUTS.get(order)
                 assert plain, f"{unit.bundle}: q stride order {order}"
+                checked[node_type] += 1
+                if node_type == "SdpaBackwardAttributes":
+                    assert layouts == {f"layout:{plain}"}, unit.bundle
+                    continue
+                if sdpa.broadcast(q):
+                    names = {f"layout:{plain}", f"layout:{plain}_padded"}
+                    assert len(layouts) == 1 and layouts <= names, unit.bundle
+                    continue
                 inner = [
                     math.prod(dims[dim] for dim in order[i + 1 :]) for i in range(4)
                 ]
-                dense = all(
-                    strides[dim] == inner[i]
-                    for i, dim in enumerate(order)
-                    if dims[dim] != 1
-                )
-                if dense or node_type == "SdpaBackwardAttributes":
+                real = [(i, dim) for i, dim in enumerate(order) if dims[dim] != 1]
+                if any(strides[dim] < inner[i] for i, dim in real):
+                    assert layouts == {"layout:overlapping"}, unit.bundle
+                elif all(strides[dim] == inner[i] for i, dim in real):
                     assert layouts == {f"layout:{plain}"}, unit.bundle
                 else:
                     assert layouts == {f"layout:{plain}_padded"}, unit.bundle
-                checked[node_type] += 1
         assert all(checked.values()), checked
+
 
     def test_feature_matrix_knows_every_claimed_arch(
         self, units: list[ClaimUnit]

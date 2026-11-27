@@ -5,6 +5,8 @@
 
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 
+#include <limits>
+
 namespace miopen_plugin::miopen_utils
 {
 
@@ -154,9 +156,13 @@ ActivationParams mapPointwiseModeToMiopenActivation(
         }
         if(lowerClip && *lowerClip != 0.f)
         {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "Standard relu with a non-zero lower_clip is not supported");
+            // CLAMP with no upper bound
+            // act(x) = max(\alpha, min(FLT_MAX, x)), which is what the hipDNN reference
+            // computes for an unset upper clip.
+            return ActivationParams{miopenActivationCLAMP,
+                                    static_cast<double>(*lowerClip),
+                                    static_cast<double>(std::numeric_limits<float>::max()),
+                                    0.0};
         }
 
         // Standard ReLU

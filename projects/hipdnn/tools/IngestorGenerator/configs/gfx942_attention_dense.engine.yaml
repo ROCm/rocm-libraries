@@ -48,6 +48,7 @@ engine:
   name: hipkernel:Gfx942AttentionDense
   census_name_symbol: GFX942_ATTENTION_DENSE_ENGINE_NAME
   sdk_version: 1.0.0
+  numerical_notes: []
   knobs:
   - block_m
   - block_n
