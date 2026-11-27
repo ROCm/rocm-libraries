@@ -79,4 +79,5 @@ NB_MODULE(_core, m)
         "installed header has.");
 
     init_enums(m);
+    init_descriptors(m);
 }

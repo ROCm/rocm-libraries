@@ -232,6 +232,33 @@ def test_windows_companions_have_no_rocroller():
         )
 
 
+# --- check 4: a different build than the one the bindings were built against -------------------
+
+
+def test_same_build_is_quiet():
+    assert (
+        L.version_mismatch_warning((100500, "25f28906"), (100500, "25f28906"), "/p")
+        is None
+    )
+
+
+def test_no_device_means_no_check():
+    assert L.version_mismatch_warning((100500, "25f28906"), None, "/p") is None
+
+
+def test_same_version_different_revision_warns():
+    # Two builds can share a version; only the revision tells them apart.
+    msg = L.version_mismatch_warning((100500, "25f28906"), (100500, "565c4c74"), "/p")
+    assert (
+        msg and "1.5.0 (565c4c74)" in msg and "1.5.0 (25f28906)" in msg and "/p" in msg
+    )
+
+
+def test_different_version_warns():
+    msg = L.version_mismatch_warning((100500, "a"), (100401, "a"), "/p")
+    assert msg and "1.4.1" in msg
+
+
 # --- which already-loaded library _core can bind to ------------------------------------------------
 
 
@@ -455,6 +482,59 @@ def test_no_hip_runtime_preload_otherwise(candidate, loaded, platform):
         )
         is None
     )
+
+
+def test_the_loaded_version_is_checked_once(monkeypatch, recwarn):
+    monkeypatch.setattr(
+        L, "_library", L.LoadInfo("/p/libhipblaslt.so.1", "rocm-sdk", True)
+    )
+    monkeypatch.setattr(L, "_built_version", (100500, "25f28906"))
+    monkeypatch.setattr(L, "_version_checked", False)
+    monkeypatch.delenv(L.LIBRARY_ENV, raising=False)
+    L.check_loaded_version((100500, "565c4c74"))
+    L.check_loaded_version((100500, "565c4c74"))
+    found = [w for w in recwarn if issubclass(w.category, L.HipblasLtLoadWarning)]
+    assert len(found) == 1 and "565c4c74" in str(found[0].message)
+
+
+def test_no_version_warning_with_an_override(monkeypatch, recwarn):
+    # The override already warned at import; a different build is what the caller asked for.
+    monkeypatch.setattr(
+        L, "_library", L.LoadInfo("/o/libhipblaslt.so.1", L.LIBRARY_ENV, True)
+    )
+    monkeypatch.setattr(L, "_built_version", (100500, "25f28906"))
+    monkeypatch.setattr(L, "_version_checked", False)
+    monkeypatch.delenv(L.LIBRARY_ENV, raising=False)
+    L.check_loaded_version((100500, "565c4c74"))
+    assert not [w for w in recwarn if issubclass(w.category, L.HipblasLtLoadWarning)]
+
+
+def test_setting_the_override_after_import_doesnt_silence_the_warning(
+    monkeypatch, recwarn
+):
+    # Setting it later (say, for a child process) doesn't change the library already loaded.
+    monkeypatch.setattr(
+        L, "_library", L.LoadInfo("/sdk/libhipblaslt.so.1", "rocm-sdk", True)
+    )
+    monkeypatch.setattr(L, "_built_version", (100500, "25f28906"))
+    monkeypatch.setattr(L, "_version_checked", False)
+    monkeypatch.setenv(L.LIBRARY_ENV, "/elsewhere/libhipblaslt.so.1")
+    L.check_loaded_version((100500, "565c4c74"))
+    assert [w for w in recwarn if issubclass(w.category, L.HipblasLtLoadWarning)]
+
+
+def test_import_does_not_check_the_loaded_version():
+    # The check needs a handle, and creating one at import allocates GPU memory (and exits the
+    # process if that fails), so import leaves it for the first Handle(). A fresh process, since
+    # other tests here create handles.
+    import subprocess
+
+    code = "import warnings; warnings.simplefilter('ignore'); import hipblaslt; print(hipblaslt._loader._version_checked)"
+    r = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, timeout=300
+    )
+    assert r.returncode == 0, r.stderr[-2000:]
+    assert r.stdout.strip().splitlines()[-1] == "False"
 
 
 # --- the loaded-library scan --------------------------------------------------------------------

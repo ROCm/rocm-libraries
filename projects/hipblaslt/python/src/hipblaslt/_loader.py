@@ -45,6 +45,7 @@ __all__ = [
     "matches_lib_name",
     "not_the_build_warning",
     "override_warning",
+    "version_mismatch_warning",
     "windows_dirs_to_register",
     "windows_dll_dirs",
 ]
@@ -391,6 +392,27 @@ def override_warning(override: str, runtimes: Sequence[str] = ()) -> str:
     )
 
 
+def _version_text(version: int, rev: str) -> str:
+    major, rest = divmod(version, 100000)
+    minor, patch = divmod(rest, 100)
+    return f"{major}.{minor}.{patch} ({rev})"
+
+
+def version_mismatch_warning(
+    built: tuple[int, str], loaded: tuple[int, str] | None, path: str
+) -> str | None:
+    """A warning when the loaded build isn't the one the bindings were compiled against.
+
+    Both the version and the git revision count: two nightlies can both report 1.5.0.
+    """
+    if loaded is None or (loaded[0], loaded[1].strip()) == (built[0], built[1].strip()):
+        return None
+    return (
+        f"hipBLASLt {_version_text(*loaded)} is loaded from {path}, but these bindings were built "
+        f"against {_version_text(*built)}. Solution indices and behavior can differ between builds."
+    )
+
+
 def windows_dll_dirs(
     library_path: str,
     environ: Mapping[str, str],
@@ -712,10 +734,37 @@ def load(
     return LoadInfo(chosen.path, chosen.source, preloaded=True)
 
 
-def check_after_import(info: LoadInfo) -> None:
+def check_after_import(info: LoadInfo, core) -> None:
     """The checks that need _core loaded: one hipBLASLt and one HIP runtime, with companions
     from hipBLASLt's build."""
+    global _library, _built_version
+    _library, _built_version = info, core._built_library_version()
     loaded = loaded_libraries()
     check_single_hipblaslt(info.path, loaded, sys.platform)
     check_single_hip_runtime(loaded, sys.platform)
     check_companions(info.path, loaded, sys.platform)
+
+
+_library: LoadInfo | None = None
+_built_version: tuple[int, str] | None = None
+_version_checked = False
+
+
+def check_loaded_version(loaded: tuple[int, str]) -> None:
+    """Warn, once per process, if the loaded hipBLASLt isn't the build the bindings expect.
+
+    Called with the version and git revision the first Handle() reads. hipblasLtGetVersion and
+    hipblasLtGetGitRevision need a handle, and creating one at import would allocate GPU memory
+    in every process that imports the package; hipblasLtCreate also exits the process when that
+    allocation fails.
+    """
+    global _version_checked
+    if _version_checked or _library is None or _built_version is None:
+        return
+    _version_checked = True
+    # An override already warned at import, and a different build is what the caller asked for.
+    if _library.source == LIBRARY_ENV:
+        return
+    msg = version_mismatch_warning(_built_version, loaded, _library.path)
+    if msg:
+        warnings.warn(msg, HipblasLtLoadWarning, stacklevel=2)
