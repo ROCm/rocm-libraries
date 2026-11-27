@@ -27,7 +27,7 @@ SOFTWARE.
 
 __device__ void water_roi_and_srclocs_hip_compute(int id_x, int id_y, float4* amplX_f4,
                                                   float4* amplY_f4, float freqX, float freqY,
-                                                  float phaseX, float phaseY,
+                                                  float phaseX, float phaseY, int4* srcRoiPtr_i4,
                                                   d_float16* locSrc_f16) {
     d_float8 increment_f8, locDst_f8x, locDst_f8y;
     increment_f8.f4[0] = make_float4(0.0f, 1.0f, 2.0f, 3.0f);
@@ -50,19 +50,19 @@ __device__ void water_roi_and_srclocs_hip_compute(int id_x, int id_y, float4* am
     cosFactor_f8.f1[7] = cosf(fmaf(freqY, locDst_f8x.f1[7], phaseY));
 
     locSrc_f16->f4[0] =
-        locDst_f8x.f4[0] +
+        locDst_f8x.f4[0] + MAKE_FLOAT4(srcRoiPtr_i4->x) +
         (*amplX_f4 *
          sinFactor_f8.f4[0]);  // Compute src x locations in float for dst x locations [0-3]
     locSrc_f16->f4[1] =
-        locDst_f8x.f4[1] +
+        locDst_f8x.f4[1] + MAKE_FLOAT4(srcRoiPtr_i4->x) +
         (*amplX_f4 *
          sinFactor_f8.f4[1]);  // Compute src x locations in float for dst x locations [4-7]
     locSrc_f16->f4[2] =
-        locDst_f8y.f4[0] +
+        locDst_f8y.f4[0] + MAKE_FLOAT4(srcRoiPtr_i4->y) +
         (*amplY_f4 *
          cosFactor_f8.f4[0]);  // Compute src y locations in float for dst y locations [0-3]
     locSrc_f16->f4[3] =
-        locDst_f8y.f4[1] +
+        locDst_f8y.f4[1] + MAKE_FLOAT4(srcRoiPtr_i4->y) +
         (*amplY_f4 *
          cosFactor_f8.f4[1]);  // Compute src y locations in float for dst y locations [4-7]
 }
@@ -76,8 +76,8 @@ __global__ void water_pkd_tensor(T* srcPtr, uint2 srcStridesNH, T* dstPtr, uint2
     int id_y = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
     int id_z = hipBlockIdx_z * hipBlockDim_z + hipThreadIdx_z;
 
-    if ((id_y > roiTensorPtrSrc[id_z].ltrbROI.rb.y) ||
-        (id_x > roiTensorPtrSrc[id_z].ltrbROI.rb.x)) {
+    if ((id_y > roiTensorPtrSrc[id_z].ltrbROI.rb.y - roiTensorPtrSrc[id_z].ltrbROI.lt.y) ||
+        (id_x > roiTensorPtrSrc[id_z].ltrbROI.rb.x - roiTensorPtrSrc[id_z].ltrbROI.lt.x)) {
         return;
     }
 
@@ -94,7 +94,7 @@ __global__ void water_pkd_tensor(T* srcPtr, uint2 srcStridesNH, T* dstPtr, uint2
     int4 srcRoi_i4 = *(reinterpret_cast<int4*>(&roiTensorPtrSrc[id_z]));
     d_float16 locSrc_f16;
     water_roi_and_srclocs_hip_compute(id_x, id_y, &amplX_f4, &amplY_f4, freqX, freqY, phaseX,
-                                      phaseY, &locSrc_f16);
+                                      phaseY, &srcRoi_i4, &locSrc_f16);
 
     d_float24 dst_f24;
     rpp_hip_interpolate24_nearest_neighbor_pkd3(srcPtr + srcIdx, srcStridesNH.y, &locSrc_f16,
@@ -111,8 +111,8 @@ __global__ void water_pln_tensor(T* srcPtr, uint3 srcStridesNCH, T* dstPtr, uint
     int id_y = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
     int id_z = hipBlockIdx_z * hipBlockDim_z + hipThreadIdx_z;
 
-    if ((id_y > roiTensorPtrSrc[id_z].ltrbROI.rb.y) ||
-        (id_x > roiTensorPtrSrc[id_z].ltrbROI.rb.x)) {
+    if ((id_y > roiTensorPtrSrc[id_z].ltrbROI.rb.y - roiTensorPtrSrc[id_z].ltrbROI.lt.y) ||
+        (id_x > roiTensorPtrSrc[id_z].ltrbROI.rb.x - roiTensorPtrSrc[id_z].ltrbROI.lt.x)) {
         return;
     }
 
@@ -129,7 +129,7 @@ __global__ void water_pln_tensor(T* srcPtr, uint3 srcStridesNCH, T* dstPtr, uint
     int4 srcRoi_i4 = *(reinterpret_cast<int4*>(&roiTensorPtrSrc[id_z]));
     d_float16 locSrc_f16;
     water_roi_and_srclocs_hip_compute(id_x, id_y, &amplX_f4, &amplY_f4, freqX, freqY, phaseX,
-                                      phaseY, &locSrc_f16);
+                                      phaseY, &srcRoi_i4, &locSrc_f16);
 
     d_float8 dst_f8;
     rpp_hip_interpolate8_nearest_neighbor_pln1(srcPtr + srcIdx, srcStridesNCH.z, &locSrc_f16,
@@ -162,8 +162,8 @@ __global__ void water_pkd3_pln3_tensor(T* srcPtr, uint2 srcStridesNH, T* dstPtr,
     int id_y = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
     int id_z = hipBlockIdx_z * hipBlockDim_z + hipThreadIdx_z;
 
-    if ((id_y > roiTensorPtrSrc[id_z].ltrbROI.rb.y) ||
-        (id_x > roiTensorPtrSrc[id_z].ltrbROI.rb.x)) {
+    if ((id_y > roiTensorPtrSrc[id_z].ltrbROI.rb.y - roiTensorPtrSrc[id_z].ltrbROI.lt.y) ||
+        (id_x > roiTensorPtrSrc[id_z].ltrbROI.rb.x - roiTensorPtrSrc[id_z].ltrbROI.lt.x)) {
         return;
     }
 
@@ -180,7 +180,7 @@ __global__ void water_pkd3_pln3_tensor(T* srcPtr, uint2 srcStridesNH, T* dstPtr,
     int4 srcRoi_i4 = *(reinterpret_cast<int4*>(&roiTensorPtrSrc[id_z]));
     d_float16 locSrc_f16;
     water_roi_and_srclocs_hip_compute(id_x, id_y, &amplX_f4, &amplY_f4, freqX, freqY, phaseX,
-                                      phaseY, &locSrc_f16);
+                                      phaseY, &srcRoi_i4, &locSrc_f16);
 
     d_float24 dst_f24;
     rpp_hip_interpolate24_nearest_neighbor_pkd3(srcPtr + srcIdx, srcStridesNH.y, &locSrc_f16,
@@ -197,8 +197,8 @@ __global__ void water_pln3_pkd3_tensor(T* srcPtr, uint3 srcStridesNCH, T* dstPtr
     int id_y = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
     int id_z = hipBlockIdx_z * hipBlockDim_z + hipThreadIdx_z;
 
-    if ((id_y > roiTensorPtrSrc[id_z].ltrbROI.rb.y) ||
-        (id_x > roiTensorPtrSrc[id_z].ltrbROI.rb.x)) {
+    if ((id_y > roiTensorPtrSrc[id_z].ltrbROI.rb.y - roiTensorPtrSrc[id_z].ltrbROI.lt.y) ||
+        (id_x > roiTensorPtrSrc[id_z].ltrbROI.rb.x - roiTensorPtrSrc[id_z].ltrbROI.lt.x)) {
         return;
     }
 
@@ -215,7 +215,7 @@ __global__ void water_pln3_pkd3_tensor(T* srcPtr, uint3 srcStridesNCH, T* dstPtr
     int4 srcRoi_i4 = *(reinterpret_cast<int4*>(&roiTensorPtrSrc[id_z]));
     d_float16 locSrc_f16;
     water_roi_and_srclocs_hip_compute(id_x, id_y, &amplX_f4, &amplY_f4, freqX, freqY, phaseX,
-                                      phaseY, &locSrc_f16);
+                                      phaseY, &srcRoi_i4, &locSrc_f16);
 
     d_float24 dst_f24;
     rpp_hip_interpolate24_nearest_neighbor_pln3(srcPtr + srcIdx, &srcStridesNCH, &locSrc_f16,

@@ -182,6 +182,15 @@ inline void compute_ltrb_from_xywh_host(RpptROIPtr roiPtrInput, RpptROIPtr roiPt
     roiPtrImage->ltrbROI.rb.y = roiPtrInput->xywhROI.xy.y + roiPtrInput->xywhROI.roiHeight - 1;
 }
 
+// LTRB bounds of the ROI in its own frame, for kernels whose source coordinates are ROI-local
+// (srcPtrChannel already advanced to the ROI origin).
+inline void compute_local_ltrb_from_xywh_host(RpptROIPtr roiPtrInput, RpptROIPtr roiPtrImage) {
+    roiPtrImage->ltrbROI.lt.x = 0;
+    roiPtrImage->ltrbROI.lt.y = 0;
+    roiPtrImage->ltrbROI.rb.x = roiPtrInput->xywhROI.roiWidth - 1;
+    roiPtrImage->ltrbROI.rb.y = roiPtrInput->xywhROI.roiHeight - 1;
+}
+
 // Makes a full-tensor default ROI with explicit member assignment.
 inline RpptROI rpp_make_roi_xywh_full(Rpp32s roiWidth, Rpp32s roiHeight) {
     RpptROI roi{};
