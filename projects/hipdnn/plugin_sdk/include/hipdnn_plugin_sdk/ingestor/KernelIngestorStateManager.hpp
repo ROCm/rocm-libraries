@@ -27,6 +27,7 @@
 
 #include <hipdnn_data_sdk/utilities/LineStore.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphContentKey.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Catalog.hpp>
 #include <hipdnn_plugin_sdk/ingestor/CompiledCriteria.hpp>
@@ -399,6 +400,7 @@ public:
     }
 
     /// True when any UMD is declarative, so a catalog build resolves `$device.*` for it.
+    /// Introduced in hipdnn_plugin_sdk 1.2.0.
     bool readsCriteria() const
     {
         return _readsCriteria;
@@ -691,8 +693,12 @@ private:
                 // A declarative launch runs precompiled code only: its formulas carry no
                 // compile options, so source compiled at plan-build time has nothing to read.
                 // And it marshals the arguments its args_signature lists, so a kernel whose
-                // packaged signature disagrees in count, kind or size could never launch. An
-                // empty packaged signature is a kernel that takes no arguments.
+                // packaged signature disagrees in count, kind or size could never launch. A
+                // packaged signature that records argument names must also carry the
+                // authored names in order, or the launch would pass operands to the wrong
+                // parameters; clang records none for an `extern "C"` kernel, and those
+                // arguments match on kind and size alone. An empty packaged signature is a
+                // kernel that takes no arguments.
                 if(packLaunch != nullptr)
                 {
                     if(kernel.source.kind == KernelSourceKind::EMBEDDED_SOURCE)
@@ -713,7 +719,8 @@ private:
                                      declared.begin(),
                                      declared.end(),
                                      [](const KernelArgument& lhs, const KernelArgument& rhs) {
-                                         return lhs.kind == rhs.kind && lhs.size == rhs.size;
+                                         return lhs.kind == rhs.kind && lhs.size == rhs.size
+                                                && (lhs.name.empty() || lhs.name == rhs.name);
                                      });
                     if(!agrees)
                     {
@@ -789,11 +796,11 @@ private:
                                                            kernel.name,
                                                            kernel.treeRoot,
                                                            kernel.sources,
-                                                           packLaunch,
                                                            // prepareDefinitions() fills these
                                                            // in once every slot is indexed.
                                                            nullptr,
-                                                           nullptr});
+                                                           nullptr,
+                                                           packLaunch});
             }
 
             if(!refusal.empty())
@@ -2627,7 +2634,8 @@ private:
 
                 // Referenced, not rebuilt or copied: every field was settled at
                 // construction, and `definitions` never changes after it.
-                if(kernelLevelMatchersPass(pack, inputs, precomputed))
+                if(kernelLevelMatchersPass(pack, inputs, precomputed)
+                   && declarativeLaunchResolves(inputs, precomputed))
                 {
                     catalog.entries.push_back(&precomputed);
                     ++admitted;
@@ -2636,10 +2644,11 @@ private:
 
             if(admitted == 0)
             {
-                HIPDNN_PLUGIN_LOG_INFO(_logPrefix
-                                       << "pack " << toString(pack.id) << " admitted no kernel of "
-                                       << pack.kernels.size()
-                                       << " at the arch gate or a kernel-scoped matcher");
+                HIPDNN_PLUGIN_LOG_INFO(_logPrefix << "pack " << toString(pack.id)
+                                                  << " admitted no kernel of "
+                                                  << pack.kernels.size()
+                                                  << " at the arch gate, a kernel-scoped matcher"
+                                                     " or its declarative launch");
                 continue;
             }
 
@@ -2862,6 +2871,38 @@ private:
             }
         }
         return true;
+    }
+
+    /// False when @p kernel's declarative launch does not resolve for this graph and device:
+    /// a formula breaks its rule, a pointer's tensor has no uid, or the launch passes a
+    /// device limit (CompiledLaunch::resolve() throws BAD_PARAM). RFC 0017 §8.6 allows no
+    /// failure after the engine accepted a graph, so the kernel declines here, as a matcher
+    /// would, rather than at plan build. A kernel without a declarative launch passes. Any
+    /// other failure propagates.
+    bool declarativeLaunchResolves(const MatcherInputs& inputs,
+                                   const KernelDefinition& kernel) const
+    {
+        if(kernel.launch == nullptr)
+        {
+            return true;
+        }
+        try
+        {
+            static_cast<void>(kernel.launch->resolve(inputs.context, inputs.bound, kernel));
+            return true;
+        }
+        catch(const HipdnnPluginException& error)
+        {
+            if(error.getStatus() != HIPDNN_PLUGIN_STATUS_BAD_PARAM)
+            {
+                throw;
+            }
+            HIPDNN_PLUGIN_LOG_INFO(_logPrefix << "kernel " << toString(kernel.kernelId)
+                                              << " declined: its declarative launch does not "
+                                                 "resolve for this graph: "
+                                              << error.getMessage());
+            return false;
+        }
     }
 
     /// Opens the shard of @p gcnArchName, or logs the failure once and returns empty.

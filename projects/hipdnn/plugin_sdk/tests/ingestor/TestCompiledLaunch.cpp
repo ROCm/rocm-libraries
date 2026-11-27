@@ -3,6 +3,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -273,18 +274,21 @@ TEST(TestCompiledLaunch, ReportsEveryReferenceIncludingTheSourceSugar)
 TEST(TestCompiledLaunch, DerivesTheKernargSignatureFromTheArgumentKinds)
 {
     const auto launch = compile(nlohmann::json::parse(CONV_UDD));
-    const KernelArgument buffer{"global_buffer", 8, 0, ""};
+    // The authored names ride along, so a packaged signature that records names is checked
+    // against them.
+    const auto buffer
+        = [](const char* name) { return KernelArgument{"global_buffer", 8, 0, name}; };
 
     EXPECT_EQ(launch->signature(),
-              (std::vector<KernelArgument>{buffer,
-                                           buffer,
-                                           buffer,
-                                           buffer,
-                                           {"by_value", 4, 0, ""},
-                                           {"by_value", 4, 0, ""},
-                                           {"by_value", 8, 0, ""},
-                                           {"by_value", 4, 0, ""},
-                                           {"by_value", 4, 0, ""}}));
+              (std::vector<KernelArgument>{buffer("x"),
+                                           buffer("w"),
+                                           buffer("y"),
+                                           buffer("ws"),
+                                           {"by_value", 4, 0, "n"},
+                                           {"by_value", 4, 0, "k"},
+                                           {"by_value", 8, 0, "x_stride_c"},
+                                           {"by_value", 4, 0, "out_h_last"},
+                                           {"by_value", 4, 0, "half_c"}}));
 }
 
 struct CompileRefusalCase
@@ -557,7 +561,7 @@ INSTANTIATE_TEST_SUITE_P(
 TEST(TestCompiledLaunch, AcceptsEveryValueOnTheEdgeOfItsRule)
 {
     const auto launch = compile(patchedUdd(R"({
-        "grid": {"x": "$grid"}, "block": {"y": "$one"},
+        "grid": {"x": "$grid"}, "block": {"x": "$one", "y": "$one"},
         "shared_mem_bytes": "$grid", "workspace_bytes": "$workspace",
         "args_signature": [
             {"name": "a", "kind": "scalar", "type": "i32", "source": {"from": "expr", "expr": "$i32"}},
@@ -588,6 +592,93 @@ TEST(TestCompiledLaunch, AcceptsEveryValueOnTheEdgeOfItsRule)
     EXPECT_EQ(resolved.arguments[2], scalar(LaunchScalarType::I64, -TWO_POW_53));
     EXPECT_EQ(resolved.arguments[3], scalar(LaunchScalarType::F32, 0.1F));
     EXPECT_EQ(resolved.arguments[4], scalar(LaunchScalarType::I32, int32_t{7}));
+}
+
+/// A launch past a device limit cannot run, whatever its formulas allow: launchLimitError()
+/// accepts each limit exactly and refuses one past it, on every axis.
+TEST(TestCompiledLaunch, LaunchLimitErrorAcceptsEachLimitAndRefusesOnePast)
+{
+    constexpr size_t LDS = 65536;
+    const auto errorOf = [](const std::array<uint32_t, 3>& grid,
+                            const std::array<uint32_t, 3>& block,
+                            uint32_t sharedMemBytes,
+                            size_t sharedMemPerBlock) {
+        ResolvedLaunch launch;
+        launch.grid = grid;
+        launch.block = block;
+        launch.sharedMemBytes = sharedMemBytes;
+        return launchLimitError(launch, sharedMemPerBlock);
+    };
+
+    for(size_t axis = 0; axis < 3; ++axis)
+    {
+        SCOPED_TRACE("axis " + std::to_string(axis));
+        std::array<uint32_t, 3> grid{1, 1, 1};
+        std::array<uint32_t, 3> block{1, 1, 1};
+        block[axis] = 64;
+        // 67108863 x 64 = 4294967232 fits; 67108864 x 64 = 2^32 does not.
+        grid[axis] = 67108863;
+        EXPECT_EQ(errorOf(grid, block, 0, LDS), "");
+        grid[axis] = 67108864;
+        const auto error = errorOf(grid, block, 0, LDS);
+        EXPECT_NE(error.find(std::string("grid.") + "xyz"[axis] + " 67108864 times block."
+                             + "xyz"[axis] + " 64"),
+                  std::string::npos)
+            << error;
+    }
+    EXPECT_EQ(errorOf({std::numeric_limits<uint32_t>::max(), 1, 1}, {1, 1, 1}, 0, LDS), "");
+    EXPECT_NE(errorOf({std::numeric_limits<uint32_t>::max(), 1, 1}, {2, 1, 1}, 0, LDS), "");
+
+    // The workgroup limit counts every axis of the block.
+    EXPECT_EQ(errorOf({1, 1, 1}, {1024, 1, 1}, 0, LDS), "");
+    EXPECT_EQ(errorOf({1, 1, 1}, {32, 32, 1}, 0, LDS), "");
+    EXPECT_EQ(errorOf({1, 1, 1}, {1, 2, 512}, 0, LDS), "");
+    EXPECT_NE(errorOf({1, 1, 1}, {1025, 1, 1}, 0, LDS).find("work-items one workgroup holds"),
+              std::string::npos);
+    EXPECT_NE(errorOf({1, 1, 1}, {32, 32, 2}, 0, LDS), "");
+    EXPECT_NE(errorOf({1, 1, 1}, {1, 2, 513}, 0, LDS), "");
+    // 2^31 x 2^31 x 4 is 2^64, which wraps to 0 in a 64-bit product.
+    EXPECT_NE(errorOf({1, 1, 1}, {2147483648U, 2147483648U, 4}, 0, LDS), "");
+
+    EXPECT_EQ(errorOf({1, 1, 1}, {64, 1, 1}, 65536, LDS), "");
+    EXPECT_NE(errorOf({1, 1, 1}, {64, 1, 1}, 65537, LDS).find("shared_mem_bytes 65537"),
+              std::string::npos);
+    // A device that did not report its LDS skips that check.
+    EXPECT_EQ(errorOf({1, 1, 1}, {64, 1, 1}, std::numeric_limits<uint32_t>::max(), 0), "");
+}
+
+/// resolve() applies launchLimitError() with the queried device's LDS, so a launch past a
+/// limit throws BAD_PARAM, which the catalog reads as "this kernel declines the graph".
+TEST(TestCompiledLaunch, ResolveRefusesALaunchPastADeviceLimitWithBadParam)
+{
+    const auto launch
+        = compile(patchedUdd(R"({"grid": {"x": "$grid"}, "shared_mem_bytes": "$lds"})"));
+    auto device = reportedDevice();
+    device.sharedMemPerBlock = 65536;
+
+    const BoundTokens atLimits{{"grid", int64_t{67108863}}, {"lds", int64_t{65536}}};
+    const auto resolved = resolveOn(*launch, atLimits, convKernel(), device);
+    EXPECT_EQ(resolved.grid[0], 67108863U);
+    EXPECT_EQ(resolved.sharedMemBytes, 65536U);
+
+    const std::vector<std::pair<BoundTokens, const char*>> pastALimit{
+        {{{"grid", int64_t{67108864}}, {"lds", int64_t{0}}}, "grid.x 67108864 times block.x 64"},
+        {{{"grid", int64_t{1}}, {"lds", int64_t{65537}}}, "shared_mem_bytes 65537"}};
+    for(const auto& [bound, expected] : pastALimit)
+    {
+        SCOPED_TRACE(expected);
+        try
+        {
+            resolveOn(*launch, bound, convKernel(), device);
+            ADD_FAILURE() << "resolve accepted a launch past a device limit";
+        }
+        catch(const HipdnnPluginException& error)
+        {
+            EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_BAD_PARAM);
+            EXPECT_EQ(std::string(error.what()).rfind("test.launch: ", 0), 0U) << error.what();
+            EXPECT_NE(std::string(error.what()).find(expected), std::string::npos) << error.what();
+        }
+    }
 }
 
 TEST(TestCompiledLaunch, ADeviceFactTheDeviceDidNotReportThrowsBadParam)
@@ -735,6 +826,14 @@ TEST(TestCompiledLaunch, ASavedLaunchRestoresToTheSameLaunch)
                        scalar(LaunchScalarType::I64, -TWO_POW_53),
                        scalar(LaunchScalarType::F32, -0.1F)};
     EXPECT_EQ(restoreResolvedLaunch(saveResolvedLaunch(edges)), edges);
+
+    // On every device-independent limit: a full launch axis and a full workgroup. The LDS
+    // limit is the device's, so a saved launch holds any shared_mem_bytes.
+    ResolvedLaunch atLimits;
+    atLimits.grid = {67108863, 1, 1};
+    atLimits.block = {64, 16, 1};
+    atLimits.sharedMemBytes = std::numeric_limits<uint32_t>::max();
+    EXPECT_EQ(restoreResolvedLaunch(saveResolvedLaunch(atLimits)), atLimits);
 }
 
 struct MalformedPayloadCase
@@ -817,7 +916,13 @@ INSTANTIATE_TEST_SUITE_P(
         MalformedPayloadCase{"U32Negative", "argument_values", convList("argument_values", 7, -1)},
         // 0x7fc00000 is a quiet NaN.
         MalformedPayloadCase{
-            "F32NotFinite", "argument_values", convList("argument_values", 8, 0x7fc00000)}),
+            "F32NotFinite", "argument_values", convList("argument_values", 8, 0x7fc00000)},
+        // 67108864 x 64 = 2^32 work-items, one past what a launch axis holds.
+        MalformedPayloadCase{"GridTimesBlockPastTheAxisLimit",
+                             "grid",
+                             MetadataValue{std::vector<int64_t>{67108864, 1, 1}}},
+        MalformedPayloadCase{
+            "BlockPastTheWorkgroupLimit", "block", MetadataValue{std::vector<int64_t>{32, 32, 2}}}),
     [](const ::testing::TestParamInfo<MalformedPayloadCase>& info) { return info.param.name; });
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

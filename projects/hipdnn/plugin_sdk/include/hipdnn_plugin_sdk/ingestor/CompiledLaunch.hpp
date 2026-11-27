@@ -39,9 +39,9 @@
 ///    a literal that breaks its value rule.
 ///  - launchReferenceError() runs when a pack pairs the UDD with an engine: every
 ///    reference resolves in what that engine publishes.
-///  - CompiledLaunch::resolve() runs per plan and turns the formulas into a plain-data
-///    ResolvedLaunch. A shape-dependent failure throws BAD_PARAM, so the plan walks skip
-///    the kernel.
+///  - CompiledLaunch::resolve() runs when a catalog admits a kernel and again per plan, and
+///    turns the formulas into a plain-data ResolvedLaunch. A shape-dependent failure, or a
+///    launch past a device limit, throws BAD_PARAM, so the catalog drops the kernel.
 ///  - saveResolvedLaunch() / restoreResolvedLaunch() store a resolved launch with a saved
 ///    plan.
 
@@ -142,6 +142,56 @@ inline bool operator==(const ResolvedLaunch& lhs, const ResolvedLaunch& rhs)
 inline bool operator!=(const ResolvedLaunch& lhs, const ResolvedLaunch& rhs)
 {
     return !(lhs == rhs);
+}
+
+/// The most work-items one launch axis holds: HIP refuses a launch whose grid times block on
+/// any axis passes the dispatch packet's 32-bit grid size.
+inline constexpr uint64_t MAX_LAUNCH_AXIS_ITEMS = 4294967295ULL;
+
+/// The most work-items one workgroup holds on every AMD GPU HIP supports.
+inline constexpr uint64_t MAX_LAUNCH_BLOCK_THREADS = 1024;
+
+/// Why @p launch cannot run on a device whose workgroup has @p sharedMemPerBlock bytes of
+/// LDS, or empty when it can. It cannot when grid times block on some axis passes
+/// MAX_LAUNCH_AXIS_ITEMS, when the block holds more than MAX_LAUNCH_BLOCK_THREADS
+/// work-items, or when its dynamic LDS passes @p sharedMemPerBlock. A @p sharedMemPerBlock
+/// of 0 is a device that did not report it, and skips the LDS check.
+inline std::string launchLimitError(const ResolvedLaunch& launch, size_t sharedMemPerBlock)
+{
+    static constexpr std::array<char, 3> AXES{'x', 'y', 'z'};
+    for(size_t axis = 0; axis < AXES.size(); ++axis)
+    {
+        const uint64_t items = uint64_t{launch.grid[axis]} * launch.block[axis];
+        if(items > MAX_LAUNCH_AXIS_ITEMS)
+        {
+            return std::string("grid.") + AXES[axis] + " " + std::to_string(launch.grid[axis])
+                   + " times block." + AXES[axis] + " " + std::to_string(launch.block[axis])
+                   + " is " + std::to_string(items) + " work-items, past the "
+                   + std::to_string(MAX_LAUNCH_AXIS_ITEMS) + " one launch axis holds";
+        }
+    }
+
+    // Stops once past the limit, so the product of three 32-bit extents never overflows.
+    uint64_t threads = 1;
+    for(const uint32_t extent : launch.block)
+    {
+        threads *= extent;
+        if(threads > MAX_LAUNCH_BLOCK_THREADS)
+        {
+            return "block " + std::to_string(launch.block[0]) + " x "
+                   + std::to_string(launch.block[1]) + " x " + std::to_string(launch.block[2])
+                   + " holds more than the " + std::to_string(MAX_LAUNCH_BLOCK_THREADS)
+                   + " work-items one workgroup holds";
+        }
+    }
+
+    if(sharedMemPerBlock != 0 && launch.sharedMemBytes > sharedMemPerBlock)
+    {
+        return "shared_mem_bytes " + std::to_string(launch.sharedMemBytes) + " passes the "
+               + std::to_string(sharedMemPerBlock)
+               + " bytes of LDS one workgroup of this device has";
+    }
+    return {};
 }
 
 namespace detail
@@ -402,8 +452,9 @@ public:
     }
 
     /// One entry per `args_signature` element: kind `global_buffer` and size 8 for a
-    /// pointer or the workspace, kind `by_value` and size 4 or 8 for a scalar. Offset 0
-    /// and name "", which a signature check does not compare.
+    /// pointer or the workspace, kind `by_value` and size 4 or 8 for a scalar. Offset 0,
+    /// and the authored argument name, which a signature check compares wherever the
+    /// packaged signature also records a name.
     const std::vector<KernelArgument>& signature() const noexcept
     {
         return _signature;
@@ -423,7 +474,8 @@ public:
 
     /// Evaluates every formula and resolves every pointer to its tensor uid.
     /// @throws HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM) when a value breaks
-    ///         its rule or a pointer's tensor has no bound uid.
+    ///         its rule, the launch does not fit the device (launchLimitError()), or a
+    ///         pointer's tensor has no bound uid.
     ResolvedLaunch resolve(const MatchContext& ctx,
                            const BoundTokens& bound,
                            const KernelDefinition& kernel) const
@@ -439,6 +491,11 @@ public:
         }
         launch.sharedMemBytes = static_cast<uint32_t>(evaluate(_sharedMemBytes, symbols).integer);
         launch.workspaceBytes = static_cast<size_t>(evaluate(_workspace, symbols).integer);
+        if(const auto error = launchLimitError(launch, ctx.deviceProperties.sharedMemPerBlock);
+           !error.empty())
+        {
+            throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM, _name + ": " + error);
+        }
 
         launch.arguments.reserve(_arguments.size());
         for(const auto& compiled : _arguments)
@@ -773,7 +830,7 @@ inline KernelArgument launchSignatureEntry(const CompiledLaunchArgument& argumen
     return {argument.kind == LaunchArgumentKind::SCALAR ? "by_value" : "global_buffer",
             sized.size(),
             0,
-            ""};
+            argument.name};
 }
 
 /// @p object without its extension keys.
@@ -1019,9 +1076,11 @@ inline MetadataValues saveResolvedLaunch(const ResolvedLaunch& launch)
 }
 
 /// The launch saveResolvedLaunch() stored in @p values. Every value is checked against the
-/// rule resolve() applies, so a restored launch is one resolve() could have produced.
+/// rule resolve() applies, and the geometry against the device-independent limits of
+/// launchLimitError(), so a restored launch is one resolve() could have produced.
 /// @throws HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INVALID_VALUE) on a missing, unknown
-///         or mistyped key, list lengths that disagree, or a value outside its rule.
+///         or mistyped key, list lengths that disagree, a value outside its rule, or a
+///         geometry no device launches.
 inline ResolvedLaunch restoreResolvedLaunch(const MetadataValues& values)
 {
     for(const auto& [key, value] : values)
@@ -1087,6 +1146,11 @@ inline ResolvedLaunch restoreResolvedLaunch(const MetadataValues& values)
         scalar(detail::SAVED_LAUNCH_SHARED_MEM_BYTES, detail::LaunchValueRule::SHARED_MEM_BYTES));
     launch.workspaceBytes = static_cast<size_t>(
         scalar(detail::SAVED_LAUNCH_WORKSPACE_BYTES, detail::LaunchValueRule::WORKSPACE_BYTES));
+    // The device's LDS is the restoring provider's to check: these values name no device.
+    if(const auto error = launchLimitError(launch, 0); !error.empty())
+    {
+        detail::failRestoredLaunch(error);
+    }
 
     const auto& kinds = list(detail::SAVED_LAUNCH_ARGUMENT_KINDS);
     const auto& types = list(detail::SAVED_LAUNCH_ARGUMENT_SCALAR_TYPES);

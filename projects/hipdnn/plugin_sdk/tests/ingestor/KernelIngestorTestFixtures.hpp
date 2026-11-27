@@ -651,8 +651,8 @@ inline std::vector<DispatchDescriptor> makeTestDispatches()
 }
 
 /// Stands in for the provider's handler under DECLARATIVE_LAUNCH_SYMBOL: workspaceBytes and
-/// prepare evaluate the kernel's compiled launch, so a formula's BAD_PARAM reaches the plan
-/// walks as it does from a provider. Launches nothing.
+/// prepare evaluate the kernel's compiled launch, as the provider's do, so a kernel the
+/// catalog admitted with a launch that fails would fail its plan build. Launches nothing.
 template <typename THandle>
 class DeclarativeTestDispatchHandler : public NoopDispatchHandler<THandle>
 {
@@ -1400,12 +1400,19 @@ public:
         return _launches;
     }
 
-    /// Scratch only, as RFC 0021 §6 requires of a slotted kernel.
+    /// Scratch only, as RFC 0021 §6 requires of a slotted kernel. A negative scratch models
+    /// a handler that refuses the kernel's workspace with BAD_PARAM.
     size_t workspaceBytes(const MatchContext& /*context*/,
                           const BoundTokens& /*bound*/,
                           const KernelDefinition& kernel) const override
     {
-        return static_cast<size_t>(kernel.getIntMetadata(SCRATCH));
+        const auto scratch = kernel.getIntMetadata(SCRATCH);
+        if(scratch < 0)
+        {
+            throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                        "kernel '" + kernel.name + "' refuses its workspace");
+        }
+        return static_cast<size_t>(scratch);
     }
 
     std::unique_ptr<PreparedDispatch> prepare(const MatchContext& /*context*/,

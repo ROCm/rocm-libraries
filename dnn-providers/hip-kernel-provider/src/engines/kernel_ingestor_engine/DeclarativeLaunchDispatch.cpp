@@ -25,6 +25,7 @@
 #include "compilation/IRunnableKernel.hpp"
 #include "compilation/KpackKernelLoader.hpp"
 #include "compilation/KpackModuleCache.hpp"
+#include "compilation/LaunchLimits.hpp"
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/IngestorLaunchRestore.hpp"
@@ -47,6 +48,10 @@ namespace hip_kernel_provider::kernel_ingestor_engine
 {
 
 using namespace hipdnn_plugin_sdk::ingestor;
+
+// The provider's launch refuses what the SDK's catalog declines, so the two limits must agree.
+static_assert(compilation::LAUNCH_AXIS_ITEM_LIMIT == static_cast<int64_t>(MAX_LAUNCH_AXIS_ITEMS),
+              "the provider's launch-axis limit and the SDK's declarative launch limit differ");
 
 namespace
 {
@@ -71,7 +76,9 @@ const CompiledLaunch& requireLaunch(const KernelDefinition& kernel)
 
 /// The argument list @p launch passes, as a kernel signature: what a saved kernel's
 /// recorded signature is checked against at restore. Matches CompiledLaunch::signature()
-/// for the launch that resolved it.
+/// for the launch that resolved it, except that it carries no argument names: a saved
+/// launch does not record them, and the recorded signature was already checked against
+/// them when the plan was built.
 std::vector<KernelArgument> signatureOf(const ResolvedLaunch& launch)
 {
     std::vector<KernelArgument> signature;
@@ -131,13 +138,34 @@ std::unique_ptr<PreparedDispatch> makePreparedDeclarativeLaunch(IngestorKernelCo
     return std::make_unique<PreparedDeclarativeLaunch>(std::move(code), std::move(launch));
 }
 
+/// LDS bytes one workgroup of device @p deviceOrdinal has.
+///
+/// @throws HipdnnPluginException with INTERNAL_ERROR when HIP cannot report it, as
+///         HandleDeviceResolver does for the properties a catalog build reads.
+size_t sharedMemPerBlockOf(int deviceOrdinal)
+{
+    int bytes = 0;
+    const auto status
+        = hipDeviceGetAttribute(&bytes, hipDeviceAttributeMaxSharedMemoryPerBlock, deviceOrdinal);
+    if(status != hipSuccess)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "hipDeviceGetAttribute(hipDeviceAttributeMaxSharedMemoryPerBlock) failed for device "
+                + std::to_string(deviceOrdinal) + ": " + hipGetErrorString(status));
+    }
+    return static_cast<size_t>(bytes);
+}
+
 /**
  * @brief Launches a kernel from its pack's declarative UDD.
  *
  * Every formula is evaluated once, at prepare(). execute() only maps tensor uids to
  * buffers and launches, so nothing mutates once prepared and concurrent execution is
- * safe. A formula that fails for a shape throws BAD_PARAM, which plan building treats as
- * "this kernel does not serve this graph".
+ * safe. The catalog already dropped any kernel whose formulas fail for the graph or whose
+ * launch passes a device limit, so prepare() resolves the same launch; resolve() still
+ * refuses one with BAD_PARAM, which plan building treats as "this kernel does not serve
+ * this graph".
  */
 class DeclarativeLaunchDispatchHandler : public IKernelDispatchHandler<Handle>
 {
@@ -245,12 +273,25 @@ public:
                     + "' do not form a declarative launch: " + error.getMessage());
         }
 
+        // restoreResolvedLaunch() checked the geometry. The LDS limit is the device's, so the
+        // reader checks it after the signature and before the code object loads.
         const auto signature = signatureOf(launch);
         auto restored = restoreIngestorLaunch<ResolvedLaunch>(
             inputs,
             std::move(code),
             signature,
-            [&launch](const SavedLaunchInputs& /*inputs*/) { return std::move(launch); },
+            [&launch, deviceOrdinal](const SavedLaunchInputs& savedInputs) {
+                if(const auto error = launchLimitError(launch, sharedMemPerBlockOf(deviceOrdinal));
+                   !error.empty())
+                {
+                    serialization::refuseIngestorPlan(
+                        serialization::IngestorPlanRefusal::INCOMPATIBLE,
+                        "the saved launch of dispatch '" + savedInputs.dispatchSymbol
+                            + "' does not fit device " + std::to_string(deviceOrdinal) + ": "
+                            + error);
+                }
+                return std::move(launch);
+            },
             deviceOrdinal);
         return makePreparedDeclarativeLaunch(std::move(restored.code), std::move(restored.launch));
     }

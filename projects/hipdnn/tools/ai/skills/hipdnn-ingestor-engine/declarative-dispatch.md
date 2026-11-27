@@ -31,7 +31,8 @@ launches. A UDD carries exactly one of the two arms.
 3. Write the UDD: `grid` and `block` (all three axes), `args_signature` in the kernel's
    parameter order, and `shared_mem_bytes` / `workspace_bytes` when they are not 0.
 4. Author the kernels as `hip`, `rocke` or `hsaco`, so `hkp_pack` packs them to `kpack`.
-   The packed `signature` must agree with `args_signature` in count, kind and size.
+   The packed `signature` must agree with `args_signature` in count, kind and size, and in
+   name wherever the packed signature records parameter names.
 5. Run `hkp_pack`, which applies the loader's shape checks (an expression object is
    compiled, and its references resolved, only by the loader), then the structural
    validator and the host checks (RUNBOOK stage 4). The provider registers the one handler
@@ -113,7 +114,13 @@ the binding, `$graph.*`, `$kernel.*` (and `name[i]` of an `int_list` field) and
 | `workspace` | none | none |
 
 `ref` is `$` plus an identifier, `axis` a non-negative integer, and argument names are
-non-empty and unique. Keys starting `x-` or `_` are ignored at every level.
+non-empty and unique. Where the packed signature records parameter names, each argument
+name must equal the parameter name in the same position; clang records none for an
+`extern "C"` kernel. Keys starting `x-` or `_` are ignored at every level.
+
+The resolved launch must also fit the device: grid times block on each axis at most
+2^32 - 1 work-items, at most 1024 work-items per block, and `shared_mem_bytes` at most the
+device's LDS per workgroup (not checked when the device does not report it).
 
 ## What is refused
 
@@ -125,9 +132,9 @@ non-empty and unique. Keys starting `x-` or `_` are ignored at every level.
 | `launches`, `intermediates`, `offset`, source `scalar` or `attribute` ("not supported yet") | load | UDD file skipped |
 | A number literal outside its rule; a string, bool, null or array literal | load | UDD file skipped |
 | A reference the engine does not publish, or a tensor argument that names no pattern variable | pairing UDD with engine | pack dropped |
-| An `embedded_source` kernel, or a packed signature that disagrees | catalog build | kernel dropped |
+| An `embedded_source` kernel, or a packed signature that disagrees (count, kind, size, or a recorded parameter name) | catalog build | kernel dropped |
 | A multi-launch kernel (`sources`) | catalog build | kernel dropped |
-| A formula that yields null or breaks its rule for one graph | workspace query / plan build | kernel declines that graph |
+| A formula that yields null or breaks its rule for one graph, or a launch past a device limit | catalog build, per graph and device | kernel declines that graph |
 
 ## Triage
 
@@ -143,13 +150,18 @@ validator, and search for these messages:
   Bind the tensor in the pattern, declare the KMD field, or fix the reference.
 - `is EMBEDDED_SOURCE, but pack ... launches it through a declarative UDD` or
   `takes the arguments ..., but the declarative UDD of pack ... passes ...`: author the
-  kernel as a packed kind, or fix `args_signature` order, kind or type.
+  kernel as a packed kind, or fix `args_signature` order, kind, type or name.
 - `names unregistered dispatch symbol 'hipdnn.declarative_launch'`: the provider does not
   register the declarative handler; the set is dropped.
-- `<udd name>: <field> evaluated to <value>, but it must be ...`: a formula that fails for
-  this shape. A plan build logs it in a WARN (`could not build a plan for ... trying the
-  next candidate`); a failing `workspace_bytes` logs it at INFO (`kernel ... declined the
-  graph:`) and removes the kernel from the workspace query and the workspace-limit filter.
+- `kernel <id> declined: its declarative launch does not resolve for this graph:` (INFO),
+  followed by the reason: `<udd name>: <field> evaluated to <value>, but it must be ...`
+  for a formula that fails for this shape, or `<udd name>: grid.<axis> ... work-items`,
+  `block ... work-items one workgroup holds` or `shared_mem_bytes ... bytes of LDS` for a
+  launch past a device limit. The catalog drops that kernel. When it drops every kernel of a
+  pack, the pack logs `admitted no kernel of ... or its declarative launch`, and an engine
+  with no kernel left declines the graph.
 
 A plan built from a declarative UDD saves its resolved launch under
-`hipdnn.declarative_launch.v1`; a restored plan does not re-evaluate the formulas.
+`hipdnn.declarative_launch.v1`. A restored plan does not re-evaluate the formulas. It
+checks the saved geometry against the work-item limits and `shared_mem_bytes` against the
+restoring device's LDS, and refuses the plan (`does not fit device <n>`) when either fails.

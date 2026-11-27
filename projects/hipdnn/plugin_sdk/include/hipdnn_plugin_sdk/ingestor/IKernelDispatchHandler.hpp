@@ -54,6 +54,15 @@ public:
 
     /// Global scratch this kernel requires, in bytes. Lives on this interface
     /// because the query arrives before a kernel is chosen.
+    ///
+    /// Called only for a kernel the catalog admitted for this graph, so a kernel that cannot
+    /// serve the graph must decline at a matcher, not here: an exception is never read as a
+    /// decline. Whatever its status, it fails the engine's workspace query and the
+    /// workspace-limit filter of plan building. While one candidate's plan is built it
+    /// costs only that candidate, and the next is tried, unless the status is
+    /// INVALID_VALUE, a malformed descriptor, which fails plan building. The declarative
+    /// launch handler's formulas are evaluated when the catalog admits the kernel, so it
+    /// does not throw here.
     // NOLINTNEXTLINE(portability-template-virtual-member-function)
     virtual size_t workspaceBytes(const MatchContext& context,
                                   const BoundTokens& bound,

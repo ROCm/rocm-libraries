@@ -1872,8 +1872,8 @@ TEST(TestKernelIngestorStateManager, APackAdmittingNoKernelSaysSoRatherThanRepor
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_INFO,
                                           "engine '" + std::string(ENGINE_NAME) + "' pack "
                                               + toString(PACK_ID)
-                                              + " admitted no kernel of 3 at the arch gate or a "
-                                                "kernel-scoped matcher"))
+                                              + " admitted no kernel of 3 at the arch gate, a "
+                                                "kernel-scoped matcher or its declarative launch"))
         << "a pack that contributed nothing must not read as one that scored zero:\n"
         << recorder.getRecordedLogsAsString();
 
@@ -2269,6 +2269,31 @@ TEST(TestKernelIngestorStateManager, DropsAKernelWhoseSignatureDisagreesWithTheD
         EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "kernel 'mismatched'"))
             << recorder.getRecordedLogsAsString();
     }
+}
+
+/// A packaged signature that records argument names (a kernel clang did not compile as
+/// `extern "C"`) must carry the authored names in order, or the launch would pass operands to
+/// the wrong parameters. One that records none, as for an `extern "C"` kernel, matches on
+/// kind and size alone. The launch's only argument is named `ws`.
+TEST(TestKernelIngestorStateManager, DropsAKernelWhoseNamedSignatureDisagreesWithTheLaunchsNames)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+
+    const auto definitions = definitionsUnderDeclarativeLaunch(
+        {makeKpackKernel(testId(0x97), "misnamed", 64, {{"global_buffer", 8, 0, "workspace"}}),
+         makeKpackKernel(testId(0x98), "named", 256, {{"global_buffer", 8, 0, "ws"}}),
+         makeKpackKernel(testId(0x99), "unnamed", 512, {{"global_buffer", 8, 0, ""}})});
+
+    std::vector<std::string> names;
+    names.reserve(definitions.size());
+    for(const auto& definition : definitions)
+    {
+        names.push_back(definition.name);
+    }
+    EXPECT_EQ(names, (std::vector<std::string>{"named", "unnamed"}));
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "kernel 'misnamed'"))
+        << recorder.getRecordedLogsAsString();
 }
 
 namespace

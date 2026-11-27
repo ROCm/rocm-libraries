@@ -1241,8 +1241,9 @@ describe the full kernel call as data, letting the launcher assemble it without 
 In `dim` and `stride` sources, `ref` is a `$`-prefixed pattern variable and `axis` a
 non-negative integer that selects a logical dimension, the same indexing `$q.dims` and
 `$q.strides` use; `$q.stride_order[axis]` is that dimension's stride rank. Argument names are
-non-empty and unique; they name the argument in diagnostics. The arguments bind to the kernel's
-parameters in written order.
+non-empty and unique. They name the argument in diagnostics, and they must match the kernel's
+parameter names where its packaged signature records them (see *Kernel sources and saved plans*
+below). The arguments bind to the kernel's parameters in written order.
 
 **Explicit kernarg offsets.** Not yet built. An argument entry that carries an `offset` is refused
 as not supported yet; the written order alone places each argument.
@@ -1288,23 +1289,32 @@ value then meets the rule of its field:
 A number literal that breaks its rule is refused when the UDD is read. A formula that, for one
 graph, yields null, a bool, a string, an array, or a value that breaks its rule throws
 `HIPDNN_PLUGIN_STATUS_BAD_PARAM` naming the UDD and the field, and so does a `pointer` whose tensor
-the binding holds no uid for. A failing `workspace_bytes` removes that kernel from the workspace
-query and from the workspace-limit filter, as a failed applicability check would; a failure at
-plan build logs a warning and moves the plan builder on to the next ranked kernel.
+the binding holds no uid for. So does a launch the device cannot run: grid times block on any
+axis above 2^32 − 1 work-items, a block of more than 1024 work-items, or `shared_mem_bytes` above
+the device's LDS per workgroup (not checked when the device does not report it). The catalog
+resolves the launch when it admits each kernel, so any of these failures drops that kernel for the
+graph, as a failed matcher would, and an engine left with no kernel declines the graph
+([§8.6](#86-the-base-path-invariant)). An admitted kernel's launch resolves again at plan build
+for the same graph and device.
 
 **Kernel sources and saved plans.** A declarative launch runs precompiled code: the state manager
 drops, with an error, a kernel of a declarative pack whose source is `embedded_source`, or whose
 packaged `signature` differs from the arguments in count, kind or size
-(8 bytes for a pointer, the workspace and an `i64`; 4 for the other scalars). `hkp_pack` turns
+(8 bytes for a pointer, the workspace and an `i64`; 4 for the other scalars). Where the packaged
+signature records parameter names, each must equal the argument name written in the same position,
+so a swapped pair of same-sized operands is refused; clang records no names for an `extern "C"`
+kernel, whose arguments match on kind and size alone. `hkp_pack` turns
 authored `hip`, `hsaco` and `rocke` sources into `kpack` entries, so every authored kind
 qualifies. A saved plan stores the resolved launch, its geometry, sizes and argument values, as
 plain data under `hipdnn.declarative_launch.v1`, because the formulas are data that can change
-independently of the saved code object; restoring the plan re-evaluates nothing.
+independently of the saved code object. Restoring the plan re-evaluates nothing; it checks the
+stored grid and block against the same work-item limits, and `shared_mem_bytes` against the LDS
+of the device it loads on, and refuses a launch that does not fit.
 
 The generic launcher runs the same steps for every kernel: resolve the argument sources against the
 bound variables, evaluate the grid/block/shared/workspace formulas, pack the arguments, load the
 kernel's code object, and launch. The provider registers one dispatch handler under the reserved
-symbol; it resolves the launch once at plan build and holds the resolved values, so a launch only
+symbol; it resolves the launch at plan build and holds the resolved values, so a launch only
 maps tensor uids to device pointers.
 
 ![The generic dispatch dataflow: a bound symbol table feeds the UDD's formula evaluator and argument resolver](../images/ukd_dispatch_flow.svg)
@@ -1406,7 +1416,10 @@ handler resolves from the provider-internal registry (`DispatchRegistry`, an
 `IKernelDispatchHandler`). Because a native handler replaces the UDD's declarative fields, it owns
 everything those fields would have provided, including workspace: `workspaceBytes` answers the
 workspace query before a kernel is chosen and before any plan is built, because that is when
-hipDNN asks, and `prepare` and `launch` build and run the plan. Matching and applicability still
+hipDNN asks, and `prepare` and `launch` build and run the plan. `workspaceBytes` is asked only
+about kernels the catalog admitted, so a throw from it is a fault, never a decline: whatever its
+status, it fails the workspace query and the workspace-limit filter. A kernel that cannot serve a
+graph declines at a matcher. Matching and applicability still
 happen declaratively through the engine's pattern and the pack's matchers, so only the launch
 itself becomes C++. On the drop-in path a native dispatch handler must be a built-in registered
 handler, subject to the source-trust rules for drop-in packages. An engine with kernel slots uses
@@ -1584,9 +1597,10 @@ the ones reading `$kernel.*`, last. A graph-level failure disqualifies every ker
 that lists that matcher, so the broadly shared checks prune before the per-kernel pass runs. A
 criterion reads the binding and never adds to it.
 *Produces two things, cached together under the applicability key:* the **catalog**, the kernels
-whose full matcher set passed, keyed by each kernel's metadata value tuple; and the **bound token
-state**, the match's binding read alongside the `$kernel.*` and `$device.*` values the criteria
-resolved.
+whose full matcher set passed and, under a declarative UDD, whose launch resolved for this graph
+and device ([§6](#6-dispatch-and-workspace)), keyed by each kernel's metadata value tuple; and the
+**bound token state**, the match's binding read alongside the `$kernel.*` and `$device.*` values
+the criteria resolved.
 
 **7. Return.** True if and only if the catalog is non-empty: applicability is whether any kernel
 survived matching. For an engine with kernel slots, every slot's catalog must be non-empty
@@ -1659,7 +1673,8 @@ and the launcher resolves each dispatch argument against it by uid.
 ### 8.6 The Base-Path Invariant
 
 **Accept implies a launchable kernel.** Returning true from `isApplicable` means at least one
-kernel passed every matcher in some pack, and it is a promise the engine keeps for the rest of the
+kernel passed every matcher in some pack and, under a declarative UDD, resolved its launch for the
+graph. It is a promise the engine keeps for the rest of the
 flow. Applicability is the only stage where declining is free: an empty catalog answers false, and
 hipDNN moves on to the next engine having lost nothing.
 
@@ -1671,7 +1686,9 @@ applicability and every later stage is a read, so there is nothing an engine can
 late. Producing no launchable kernel after accepting is a bug, not a legal outcome. For a multi-launch kernel
 ([§15.1](#151-several-kernels-for-one-operation)) that includes the launch set: a kernel whose
 launch names differ from those its pack's handler declares is dropped when the catalog is built,
-never accepted. For an engine with kernel slots, accepting promises a launchable kernel in every
+never accepted. Likewise a kernel whose declarative launch does not resolve for the graph
+([§6](#6-dispatch-and-workspace)) is dropped when the catalog is built. For an engine with kernel
+slots, accepting promises a launchable kernel in every
 slot. The same invariant applies to a composite's mandatory
 stage.
 

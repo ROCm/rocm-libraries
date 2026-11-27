@@ -79,9 +79,9 @@ inline hipdnn_plugin_sdk::ingestor::KernelDefinition
                                                          kernel.name,
                                                          kernel.treeRoot,
                                                          {},
-                                                         kernel.launch,
                                                          kernel.prepared,
-                                                         kernel.preparedBy};
+                                                         kernel.preparedBy,
+                                                         kernel.launch};
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine

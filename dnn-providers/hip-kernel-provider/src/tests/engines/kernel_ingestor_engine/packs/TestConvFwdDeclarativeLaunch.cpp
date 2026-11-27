@@ -271,6 +271,59 @@ TEST(TestConvFwdDeclarativeLaunch, HandlerRefusesAnEmbeddedSourceKernel)
         "prepare");
 }
 
+/// HIP refuses a launch whose grid times block on an axis passes 4294967295 work-items, so
+/// with block 64 the largest grid one axis holds is 67108863. A graph whose output count
+/// gives exactly that grid resolves. One more block of outputs (2^26 x 64 = 2^32) throws
+/// BAD_PARAM from resolve(), and so from prepare(), which resolves before it loads any
+/// code: the kernel declines the graph instead of failing at execute.
+TEST(TestConvFwdDeclarativeLaunch, AGridPastTheLaunchAxisLimitIsRefusedBeforeExecute)
+{
+    const auto& twin = packs::loadedSet(DECLARATIVE_ENGINE);
+    ASSERT_EQ(twin.dispatches.size(), 1U);
+    auto kernel = packs::makeKernel(64, "FLOAT", "ConvFwd");
+    kernel.source.kind = KernelSourceKind::KPACK;
+    kernel.launch = twin.dispatches.front().launch;
+    ASSERT_NE(kernel.launch, nullptr);
+
+    // n = 64, k = 1 and a 1x1 filter, so the output count is 64 * h * width.
+    const auto convGraph = [](int64_t h, int64_t width) {
+        return packs::buildConvFwdGraph(data_objects::DataType::FLOAT,
+                                        data_objects::ConvMode::CROSS_CORRELATION,
+                                        {1, 1},
+                                        {1, 1},
+                                        {0, 0},
+                                        {0, 0},
+                                        {64, 1, h, width},
+                                        std::vector<int64_t>{1, 1, 1, 1});
+    };
+
+    {
+        SCOPED_TRACE("at the limit: 64 * 8191 * 8193 outputs");
+        const packs::GraphFixture fixture(convGraph(8191, 8193));
+        const auto bound = bindTwin(twin, fixture.context());
+        ASSERT_TRUE(bound.has_value());
+        const auto resolved = kernel.launch->resolve(fixture.context(), *bound, kernel);
+        EXPECT_EQ(resolved.grid[0], 67108863U);
+        EXPECT_EQ(resolved.block[0], 64U);
+    }
+    {
+        SCOPED_TRACE("one block past it: 64 * 8192 * 8192 outputs");
+        const packs::GraphFixture fixture(convGraph(8192, 8192));
+        const auto bound = bindTwin(twin, fixture.context());
+        ASSERT_TRUE(bound.has_value());
+        expectRefusal(
+            [&] { static_cast<void>(kernel.launch->resolve(fixture.context(), *bound, kernel)); },
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "resolve");
+        expectRefusal(
+            [&] {
+                static_cast<void>(declarativeHandler().prepare(fixture.context(), *bound, kernel));
+            },
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "prepare");
+    }
+}
+
 // ---------------------------------------------------------------------------
 // On a device
 // ---------------------------------------------------------------------------
