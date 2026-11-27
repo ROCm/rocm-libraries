@@ -58,11 +58,12 @@ namespace TensileLite
         Any,
         One,
         NegativeOne,
+        Zero,
         Count
     };
 
-    TENSILELITEHOST_EXPORT std::string   ToString(ScalarValue d);
-    TENSILELITEHOST_EXPORT std::string   TypeAbbrev(ScalarValue d);
+    TENSILELITEHOST_EXPORT std::string ToString(ScalarValue d);
+    TENSILELITEHOST_EXPORT std::string TypeAbbrev(ScalarValue d);
     TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream& stream, ScalarValue const& t);
     TENSILELITEHOST_EXPORT std::istream& operator>>(std::istream& stream, ScalarValue& t);
 
@@ -130,6 +131,10 @@ namespace TensileLite
         : public BaseScalarValueInfo<ScalarValue::NegativeOne>
     {
     };
+    template <>
+    struct ScalarValueInfo<ScalarValue::Zero> : public BaseScalarValueInfo<ScalarValue::Zero>
+    {
+    };
 
     /**
 *  \ingroup ScalarValue
@@ -149,6 +154,10 @@ namespace TensileLite
             {
                 return ScalarValue::NegativeOne;
             }
+            else if(CompareValue(value, (double)0))
+            {
+                return ScalarValue::Zero;
+            }
             else
             {
                 return ScalarValue::Any;
@@ -165,6 +174,11 @@ namespace TensileLite
             {
 
                 return ScalarValue::NegativeOne;
+            }
+            else if(value == T(0))
+            {
+
+                return ScalarValue::Zero;
             }
             else
             {

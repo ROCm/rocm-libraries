@@ -36,7 +36,8 @@ The CTest tests are:
   `jit-library-concurrency`, `jit-end-to-end`, `jit-heuristic-off`,
   `jit-heuristic-fallback` and `jit-heuristic-forced`. CTest runs
   `jit-publish` before `jit-loader`. A build with `HIPBLASLT_ENABLE_JIT=OFF`
-  has `jit-heuristic-ignored` instead.
+  has `jit-heuristic-ignored` instead. A build with the HipKittens backend
+  also has `jit-hipkittens` and `jit-hipkittens-heuristic`.
 
 `jit-launch-cpu` and the `jit-gpu` tests exist when `GPU_TARGETS` include an
 architecture with committed assembly. A build with `HIPBLASLT_ENABLE_YAML=ON`
@@ -55,6 +56,8 @@ has none of them, because the library entry is MsgPack.
 | `jit-library`, `jit-library-concurrency` | `hipblaslt-jit-library-test` on the device's `plain` assembly: cache-key directory names and `cache-key.msgpack`, directory permissions, the stock TensileLite loader reading what the library writes, exact-size lookup, index allocation, a directory whose `cache-key.msgpack` names another backend version, a tampered directory, a library whose publish stopped early, the rejection of fused GEMM and all-to-all, and, in the concurrency case, publishers in separate processes |
 | `jit-end-to-end` | `getJitAlgo` with the replay backend, which replays the device's `plain` bundle as `plain-pair`: the first solution for K=512 and the second for K=256, each run through `hipblasLtMatmul`, `hipblaslt_ext::Gemm` and `getAlgosFromIndex` against a host reference, with the same index on a second lookup. A transposed A returns `NOT_SUPPORTED`. A request with FP16 compute and an FP32 scale type keeps FP32 alpha and beta |
 | `jit-heuristic-off`, `jit-heuristic-fallback`, `jit-heuristic-forced` | The C and C++ heuristic queries under `HIPBLASLT_JIT` `0`, `1` and `2`, with the replay backend added. `0` returns no JIT index. `2` returns no algorithm before the backend is added, then only JIT indices of the expected solution with the expected `wavesCount`, and nothing for a transposed A. `1` returns JIT first for a size without Equality rows, and after the Equality results otherwise. Both APIs return the same index, and a null algo runs the first ranked result. `jit-heuristic-ignored`, in a build without JIT, returns no JIT index under `HIPBLASLT_JIT=2` |
+| `jit-hipkittens` | `hipblaslt-jit-hipkittens-test`, built with gfx950 and `HIPBLASLT_JIT_ENABLE_HIPKITTENS` on, the default. The BF16 and FP16 kernels and their solutions; a capturing stream that returns no solution without compiling when the library is empty and the published index after a BF16 TN 256x256x128 GEMM whose D is 128; M=128 rejected; two ties that round to nearest even BF16; and, on a handle with uniform summation order left on, repeated rows of A that give bitwise-identical rows of D |
+| `jit-hipkittens-heuristic` | The same executable under `HIPBLASLT_JIT=2` with no backend added: a TN FP16 256x256 query returns the HipKittens FP16 kernel at K=128, the same index again, and nothing at K=64 |
 
 ## Test parameters
 

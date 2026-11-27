@@ -40,6 +40,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <mutex>
 #include <numeric>
@@ -1173,6 +1174,44 @@ namespace TensileLite
                 }
             };
 
+            // The custom kernel packs these strides as uint32. A value that does not
+            // fit is truncated, so the published solution must reject it.
+            struct StrideFitsInUint32
+                : public Predicate_CRTP<StrideFitsInUint32, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = false
+                };
+                StrideFitsInUint32() = default;
+
+                static std::string Type()
+                {
+                    return "StrideFitsInUint32";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    const auto fits = [](TensileLite::TensorDescriptor const& tensor) {
+                        if(tensor.strides().size() < 3)
+                            return true;
+                        constexpr size_t limit = size_t(std::numeric_limits<uint32_t>::max());
+                        return tensor.strides()[1] <= limit && tensor.strides()[2] <= limit;
+                    };
+                    return fits(problem.a()) && fits(problem.b()) && fits(problem.c())
+                           && fits(problem.d());
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    const bool rv = (*this)(problem);
+                    PredicateDebugger::printRow(stream, rv, this->type(), "strides fit in uint32");
+                    return rv;
+                }
+            };
+
             struct BetaOne : public Predicate_CRTP<BetaOne, ContractionProblemGemm>
             {
                 enum
@@ -1405,26 +1444,23 @@ namespace TensileLite
                     return "AlphaValue";
                 }
 
+                // Any matches every restriction except Zero. One and NegativeOne
+                // require that restriction. The number stays on ContractionInputs.
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
                 {
-                    return problem.alphaRestriction() == value || value == ScalarValue::Any;
+                    if(value == ScalarValue::Any)
+                        return problem.alphaRestriction() != ScalarValue::Zero;
+                    return problem.alphaRestriction() == value;
                 }
 
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
-                    return debugEvalCmp(problem,
-                                        stream,
-                                        "prob",
-                                        problem.alphaRestriction(),
-                                        "==",
-                                        "sol",
-                                        value,
-                                        "sol",
-                                        value,
-                                        "==",
-                                        "sol_any",
-                                        ScalarValue::Any);
+                    const bool         rv = (*this)(problem);
+                    std::ostringstream details;
+                    details << "prob=" << problem.alphaRestriction() << " sol=" << value;
+                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
+                    return rv;
                 }
             };
 
@@ -2311,6 +2347,46 @@ namespace TensileLite
                 {
                     return debugEvalCmp(
                         problem, stream, "prob", problem.stridedBatched(), "==", "sol", value);
+                }
+            };
+
+            // StridedBatchedEqual reads stridedBatched(), which the public path
+            // sets true for pointer-array batches too. This is the batch mode.
+            struct BatchModeEqual : public Predicate_CRTP<BatchModeEqual, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                int value;
+
+                BatchModeEqual() = default;
+                explicit BatchModeEqual(int value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "BatchModeEqual";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return static_cast<int>(problem.batchMode()) == value;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    return debugEvalCmp(problem,
+                                        stream,
+                                        "prob",
+                                        static_cast<int>(problem.batchMode()),
+                                        "==",
+                                        "sol",
+                                        value);
                 }
             };
 

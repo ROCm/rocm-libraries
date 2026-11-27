@@ -2341,8 +2341,9 @@ namespace
         else
             tensileProblem.setUseDeviceUserArguments(false);
 
+        // K = 0 does not apply alpha. Zero here would reject a non-zero launch alpha.
         if(prob.k == 0)
-            tensileProblem.setAlphaRestriction(TensileLite::toScalarValueEnum(0.0));
+            tensileProblem.setAlphaRestriction(TensileLite::ScalarValue::Any);
         else
             tensileProblem.setAlphaRestriction(
                 get_scalar_value_from_void_ptr(prob.alpha, scalarLoadType));
@@ -2695,8 +2696,9 @@ namespace
         else
             tensileProblem.setUseDeviceUserArguments(false);
 
+        // K = 0 does not apply alpha. Zero here would reject a non-zero launch alpha.
         if(prob.k == 0)
-            tensileProblem.setAlphaRestriction(TensileLite::toScalarValueEnum(0.0));
+            tensileProblem.setAlphaRestriction(TensileLite::ScalarValue::Any);
         else
             tensileProblem.setAlphaRestriction(
                 get_scalar_value_from_void_ptr(prob.alpha, scalarLoadType));

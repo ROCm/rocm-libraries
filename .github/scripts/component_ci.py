@@ -79,6 +79,8 @@ COMPONENTS = {
     # gfx942 and gfx950 runners.
     "hipblaslt_jit": [
         "projects/hipblaslt/library/src/amd_detail/hipblaslt-jit-*",
+        "projects/hipblaslt/library/src/amd_detail/hipkittens/**",
+        "projects/hipblaslt/cmake/hipblaslt-jit-hipkittens.cmake",
         "projects/hipblaslt/CMakeLists.txt",
         "projects/hipblaslt/library/src/amd_detail/CMakeLists.txt",
         "projects/hipblaslt/library/src/amd_detail/hipblaslt.cpp",
