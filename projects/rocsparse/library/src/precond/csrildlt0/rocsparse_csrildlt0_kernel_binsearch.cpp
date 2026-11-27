@@ -384,45 +384,89 @@ namespace rocsparse
         return rocsparse_status_success;
     }
 
-// clang-format off
-#define INST_ALL_BINSEARCH(WF, T, I, J)                                                          \
-    template rocsparse_status csrildlt0_kernel_binsearch_launch<false, 256, WF, T, I, J>(        \
-        rocsparse_handle, rocsparse_csrildlt0_info, rocsparse_spmat_descr,                        \
-        const rocsparse::numeric_boost*, void*, size_t, void*);                                   \
-    template rocsparse_status csrildlt0_kernel_binsearch_launch<true,  256, WF, T, I, J>(        \
-        rocsparse_handle, rocsparse_csrildlt0_info, rocsparse_spmat_descr,                        \
-        const rocsparse::numeric_boost*, void*, size_t, void*);
+    template <bool SLEEP, uint32_t BLOCKSIZE, uint32_t WF_SIZE, typename T, typename I>
+    static csrildlt0_kernel_launch_t transform_j_type(rocsparse_indextype value)
+    {
+        switch(value)
+        {
+        case rocsparse_indextype_i32:
+        {
+            return csrildlt0_kernel_binsearch_launch<SLEEP, BLOCKSIZE, WF_SIZE, T, I, int32_t>;
+        }
+        case rocsparse_indextype_i64:
+        {
+            return csrildlt0_kernel_binsearch_launch<SLEEP, BLOCKSIZE, WF_SIZE, T, I, int64_t>;
+        }
+        case deprecated_rocsparse_indextype_u16:
+        {
+            THROW_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
+                                                  "rocsparse_indextype_u16 not supported");
+        }
+        }
+        THROW_IF_ROCSPARSE_ERROR(rocsparse_status_internal_error);
+    }
 
-    // Explicit instantiations
-    INST_ALL_BINSEARCH(64, float,                    int32_t, int32_t);
-    INST_ALL_BINSEARCH(32, float,                    int32_t, int32_t);
-    INST_ALL_BINSEARCH(64, double,                   int32_t, int32_t);
-    INST_ALL_BINSEARCH(32, double,                   int32_t, int32_t);
-    INST_ALL_BINSEARCH(64, rocsparse_float_complex,  int32_t, int32_t);
-    INST_ALL_BINSEARCH(32, rocsparse_float_complex,  int32_t, int32_t);
-    INST_ALL_BINSEARCH(64, rocsparse_double_complex, int32_t, int32_t);
-    INST_ALL_BINSEARCH(32, rocsparse_double_complex, int32_t, int32_t);
-    INST_ALL_BINSEARCH(64, float,                    int64_t, int32_t);
-    INST_ALL_BINSEARCH(32, float,                    int64_t, int32_t);
-    INST_ALL_BINSEARCH(64, double,                   int64_t, int32_t);
-    INST_ALL_BINSEARCH(32, double,                   int64_t, int32_t);
-    INST_ALL_BINSEARCH(64, rocsparse_float_complex,  int64_t, int32_t);
-    INST_ALL_BINSEARCH(32, rocsparse_float_complex,  int64_t, int32_t);
-    INST_ALL_BINSEARCH(64, rocsparse_double_complex, int64_t, int32_t);
-    INST_ALL_BINSEARCH(32, rocsparse_double_complex, int64_t, int32_t);
-    INST_ALL_BINSEARCH(64, float,                    int64_t, int64_t);
-    INST_ALL_BINSEARCH(32, float,                    int64_t, int64_t);
-    INST_ALL_BINSEARCH(64, double,                   int64_t, int64_t);
-    INST_ALL_BINSEARCH(32, double,                   int64_t, int64_t);
-    INST_ALL_BINSEARCH(64, rocsparse_float_complex,  int64_t, int64_t);
-    INST_ALL_BINSEARCH(32, rocsparse_float_complex,  int64_t, int64_t);
-    INST_ALL_BINSEARCH(64, rocsparse_double_complex, int64_t, int64_t);
-    INST_ALL_BINSEARCH(32, rocsparse_double_complex, int64_t, int64_t);
+    template <bool SLEEP, uint32_t BLOCKSIZE, uint32_t WF_SIZE, typename T, typename... P>
+    static csrildlt0_kernel_launch_t transform_i_type(rocsparse_indextype value, P... p)
+    {
+        switch(value)
+        {
+        case rocsparse_indextype_i32:
+        {
+            return transform_j_type<SLEEP, BLOCKSIZE, WF_SIZE, T, int32_t>(std::forward<P>(p)...);
+        }
+        case rocsparse_indextype_i64:
+        {
+            return transform_j_type<SLEEP, BLOCKSIZE, WF_SIZE, T, int64_t>(std::forward<P>(p)...);
+        }
+        case deprecated_rocsparse_indextype_u16:
+        {
+            THROW_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
+                                                  "rocsparse_indextype_u16 not supported");
+        }
+        }
+        THROW_IF_ROCSPARSE_ERROR(rocsparse_status_internal_error);
+    }
 
-#undef INST_ALL_BINSEARCH
-    // clang-format on
+    template <bool SLEEP, uint32_t BLOCKSIZE, uint32_t WF_SIZE, typename... P>
+    static csrildlt0_kernel_launch_t transform_t_type(rocsparse_datatype value, P... p)
+    {
+        switch(value)
+        {
+        case rocsparse_datatype_f32_r:
+        {
+            return transform_i_type<SLEEP, BLOCKSIZE, WF_SIZE, float>(std::forward<P>(p)...);
+        }
+        case rocsparse_datatype_f32_c:
+        {
+            return transform_i_type<SLEEP, BLOCKSIZE, WF_SIZE, rocsparse_float_complex>(
+                std::forward<P>(p)...);
+        }
+        case rocsparse_datatype_f64_r:
+        {
+            return transform_i_type<SLEEP, BLOCKSIZE, WF_SIZE, double>(std::forward<P>(p)...);
+        }
+        case rocsparse_datatype_f64_c:
+        {
+            return transform_i_type<SLEEP, BLOCKSIZE, WF_SIZE, rocsparse_double_complex>(
+                std::forward<P>(p)...);
+        }
+        case rocsparse_datatype_i32_r:
+        case rocsparse_datatype_u32_r:
+        case rocsparse_datatype_i8_r:
+        case rocsparse_datatype_u8_r:
+        case rocsparse_datatype_f16_r:
+        case rocsparse_datatype_bf16_r:
+        {
+            std::stringstream sstr;
+            sstr << rocsparse::enum_utils::to_string(value) << " not supported";
+            THROW_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
+                                                  sstr.str().c_str());
+        }
+        }
+        THROW_IF_ROCSPARSE_ERROR(rocsparse_status_internal_error);
+    }
 
-    // find_csrildlt0_kernel_binsearch_launch: select based on device and matrix properties
     csrildlt0_kernel_launch_t
         find_csrildlt0_kernel_binsearch_launch(rocsparse_handle            handle,
                                                rocsparse_csrildlt0_info    csrildlt0_info,
@@ -430,115 +474,28 @@ namespace rocsparse
     {
         const bool sleep = (rocsparse::handle_get_arch_name(handle) == rocsparse_arch_names::gfx908
                             && handle->asic_rev < 2);
-        const bool use_wf64 = (handle->wavefront_size == 64);
 
-        // Helper lambda to select index-type variant given a fixed scalar type T
-#define INST_ALL_BINSEARCH_IDX(SCALAR_T)                                   \
-    [&]() -> csrildlt0_kernel_launch_t {                                   \
-        if(A->row_type == rocsparse_indextype_i32)                         \
-        {                                                                  \
-            if(use_wf64)                                                   \
-                return sleep ? csrildlt0_kernel_binsearch_launch<true,     \
-                                                                 256,      \
-                                                                 64,       \
-                                                                 SCALAR_T, \
-                                                                 int32_t,  \
-                                                                 int32_t>  \
-                             : csrildlt0_kernel_binsearch_launch<false,    \
-                                                                 256,      \
-                                                                 64,       \
-                                                                 SCALAR_T, \
-                                                                 int32_t,  \
-                                                                 int32_t>; \
-            else                                                           \
-                return sleep ? csrildlt0_kernel_binsearch_launch<true,     \
-                                                                 256,      \
-                                                                 32,       \
-                                                                 SCALAR_T, \
-                                                                 int32_t,  \
-                                                                 int32_t>  \
-                             : csrildlt0_kernel_binsearch_launch<false,    \
-                                                                 256,      \
-                                                                 32,       \
-                                                                 SCALAR_T, \
-                                                                 int32_t,  \
-                                                                 int32_t>; \
-        }                                                                  \
-        else if(A->col_type == rocsparse_indextype_i32)                    \
-        {                                                                  \
-            if(use_wf64)                                                   \
-                return sleep ? csrildlt0_kernel_binsearch_launch<true,     \
-                                                                 256,      \
-                                                                 64,       \
-                                                                 SCALAR_T, \
-                                                                 int64_t,  \
-                                                                 int32_t>  \
-                             : csrildlt0_kernel_binsearch_launch<false,    \
-                                                                 256,      \
-                                                                 64,       \
-                                                                 SCALAR_T, \
-                                                                 int64_t,  \
-                                                                 int32_t>; \
-            else                                                           \
-                return sleep ? csrildlt0_kernel_binsearch_launch<true,     \
-                                                                 256,      \
-                                                                 32,       \
-                                                                 SCALAR_T, \
-                                                                 int64_t,  \
-                                                                 int32_t>  \
-                             : csrildlt0_kernel_binsearch_launch<false,    \
-                                                                 256,      \
-                                                                 32,       \
-                                                                 SCALAR_T, \
-                                                                 int64_t,  \
-                                                                 int32_t>; \
-        }                                                                  \
-        else                                                               \
-        {                                                                  \
-            if(use_wf64)                                                   \
-                return sleep ? csrildlt0_kernel_binsearch_launch<true,     \
-                                                                 256,      \
-                                                                 64,       \
-                                                                 SCALAR_T, \
-                                                                 int64_t,  \
-                                                                 int64_t>  \
-                             : csrildlt0_kernel_binsearch_launch<false,    \
-                                                                 256,      \
-                                                                 64,       \
-                                                                 SCALAR_T, \
-                                                                 int64_t,  \
-                                                                 int64_t>; \
-            else                                                           \
-                return sleep ? csrildlt0_kernel_binsearch_launch<true,     \
-                                                                 256,      \
-                                                                 32,       \
-                                                                 SCALAR_T, \
-                                                                 int64_t,  \
-                                                                 int64_t>  \
-                             : csrildlt0_kernel_binsearch_launch<false,    \
-                                                                 256,      \
-                                                                 32,       \
-                                                                 SCALAR_T, \
-                                                                 int64_t,  \
-                                                                 int64_t>; \
-        }                                                                  \
-    }()
-
-        switch(A->data_type)
+        if(sleep)
         {
-        case rocsparse_datatype_f32_r:
-            return INST_ALL_BINSEARCH_IDX(float);
-        case rocsparse_datatype_f64_r:
-            return INST_ALL_BINSEARCH_IDX(double);
-        case rocsparse_datatype_f32_c:
-            return INST_ALL_BINSEARCH_IDX(rocsparse_float_complex);
-        case rocsparse_datatype_f64_c:
-            return INST_ALL_BINSEARCH_IDX(rocsparse_double_complex);
-        default:
-            return nullptr;
+            return transform_t_type<true, 256, 64>(A->data_type, A->row_type, A->col_type);
         }
 
-#undef INST_ALL_BINSEARCH_IDX
+        switch(handle->wavefront_size)
+        {
+        case 32:
+        {
+            return transform_t_type<false, 256, 32>(A->data_type, A->row_type, A->col_type);
+        }
+        case 64:
+        {
+            return transform_t_type<false, 256, 64>(A->data_type, A->row_type, A->col_type);
+        }
+        default:
+        {
+            THROW_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_internal_error,
+                                                  "invalid wavefront size");
+        }
+        }
     }
 
 } // namespace rocsparse
