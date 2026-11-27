@@ -31,6 +31,10 @@ namespace stinkytofu {
 class BasicBlock;
 class AsmIRBuilder;
 struct StinkyInstruction;
+struct StinkyRegister;
+
+/// True if \p inst writes \p execReg or a register aliasing it.
+STINKYTOFU_EXPORT bool writesExecReg(const StinkyInstruction& inst, const StinkyRegister& execReg);
 
 /// Collapse each narrow-exec-write..full-mask-reset span into a single opaque
 /// ExecMaskGroup pseudo-instruction so the DAG scheduler cannot reorder into or

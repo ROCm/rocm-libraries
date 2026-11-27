@@ -53,11 +53,15 @@ bool overlapsExec(const StinkyRegister& reg, const StinkyRegister& execReg) {
     return false;
 }
 
+}  // namespace
+
 bool writesExecReg(const StinkyInstruction& inst, const StinkyRegister& execReg) {
     for (const StinkyRegister& d : inst.getDestRegs())
         if (overlapsExec(d, execReg)) return true;
     return false;
 }
+
+namespace {
 
 // A full-mask reset: any exec write whose sole source is the literal -1.
 // The single-source constraint is the line we draw — it covers every sane reset
