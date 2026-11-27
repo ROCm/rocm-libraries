@@ -137,7 +137,7 @@ PARITY_CASES = [
     _row(
         "k_tail_160",
         T128X128X256,
-        "k_tail_full",
+        "ok",
         a="fp8",
         tuning={"split_b_lds_read": False},
         mnk=(1024, 1024, 2048 + 160),

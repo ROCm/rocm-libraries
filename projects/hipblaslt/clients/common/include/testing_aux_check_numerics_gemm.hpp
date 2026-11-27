@@ -368,7 +368,9 @@ inline void testing_aux_check_numerics_gemm(const Arguments& arg)
     // STOP_ON_FIRST=1: NaN at #3 trips the host-peek auto-drain on a
     // later call; the device flag is sticky so the on-demand drain still
     // reports 3. The per-call hipStreamSynchronize in run_scenario is what
-    // makes #3's atomicCAS host-visible to the peek.
+    // makes #3 host-visible to the peek: the scanner publishes it to a host
+    // mirror with a plain store, which needs no PCIe AtomicOp support, so
+    // these checks hold on every GPU.
     //
     // Behavioral coverage of the new auto-drain log path:
     //   1. Exactly one "auto-drain on host peek" log line (CAS-elect dedup

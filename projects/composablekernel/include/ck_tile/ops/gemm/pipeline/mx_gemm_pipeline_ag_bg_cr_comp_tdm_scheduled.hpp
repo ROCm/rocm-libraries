@@ -39,7 +39,7 @@ struct BaseMxGemmPipelineAgBgCrCompTDMScheduled
 {
     static constexpr index_t PrefetchStages = 2;
 
-    /// num_loop counts whole K tiles, the K tail excluded.
+    /// num_loop counts the loop's K tiles (GetFullTiles), the K tail excluded.
     CK_TILE_HOST_DEVICE static constexpr bool BlockHasHotloop(index_t num_loop)
     {
         return num_loop > PrefetchStages;
@@ -50,10 +50,20 @@ struct BaseMxGemmPipelineAgBgCrCompTDMScheduled
         return num_loop % PrefetchStages == 1 ? TailNumber::One : TailNumber::Two;
     }
 
-    /// The TailNumber of an M x N x K problem: of its whole K tiles, the K tail excluded.
+    /// The K tiles the loop of an M x N x K problem runs: its whole K tiles, and a partial last
+    /// tile that needs every K step (K mod tile_k above tile_k - atom K) as one more. A shorter
+    /// partial tile is the K tail (the instance's TailSteps), run after the loop.
+    CK_TILE_HOST_DEVICE static constexpr index_t GetFullTiles(index_t K)
+    {
+        constexpr index_t kK     = Problem::BlockGemmShape::kK;
+        constexpr index_t kAtomK = Problem::BlockGemmShape::WarpTile::at(number<2>{});
+        return K / kK + (K % kK > kK - kAtomK);
+    }
+
+    /// The TailNumber of an M x N x K problem: of its GetFullTiles, the K tail excluded.
     CK_TILE_HOST_DEVICE static constexpr TailNumber GetTailNumber(index_t K)
     {
-        return GetBlockLoopTailNum(K / Problem::BlockGemmShape::kK);
+        return GetBlockLoopTailNum(GetFullTiles(K));
     }
 
     /// Calls run_func(bool_constant<true>, integral_constant<TailNumber, tail_number>).
@@ -97,7 +107,8 @@ struct BaseMxGemmPipelineAgBgCrCompTDMScheduled
  * that depend on them (edges, wide offsets, a K tail). Tile t uses LDS buffer t % 2 and the loop
  * runs tile pairs; Problem::TailNum is the variant that runs the odd tile before the pairs
  * (TailNumber::One) or none (Two), so every tile's buffer is a compile-time constant. The host
- * picks it from the whole-tile count with the base's TailHandler and launches that kernel.
+ * picks it from the loop's tile count (GetFullTiles) with the base's TailHandler and launches
+ * that kernel.
  */
 template <typename Problem_, typename Policy_ = MxGemmPipelineAgBgCrCompTDMScheduledPolicy<>>
 struct MxGemmPipelineAgBgCrCompTDMScheduled
@@ -307,8 +318,6 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
             reason = R::KShort;
         else if(long_index_t{K} > numeric<index_t>::max() - kKLookahead)
             reason = R::KLong;
-        else if(K % kTileK > kTileK - Policy::kAtomK)
-            reason = R::KTailFull;
         else if(integer_divide_ceil(N, kTileN) % kClusterX ||
                 integer_divide_ceil(M, kTileM) % kClusterY)
             reason = R::ClusterGrid;
@@ -328,7 +337,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
         if(need.tail_steps != Traits::kTailSteps)
             return "the K tail (K mod tile_k, in 128-wide K steps) is not the instance's TailSteps";
         if(Problem::TailNum != TailNumber::Full && Base::GetTailNumber(K) != Problem::TailNum)
-            return "the whole K tile count's parity is not the instance's TailNum "
+            return "the loop's K tile count's parity is not the instance's TailNum "
                    "(the base's TailHandler picks it)";
         return nullptr;
     }
@@ -408,9 +417,9 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
               block_n(b_dram_.get_window_origin()[number<0>{}]),
               smem(smem_),
               packed_k(integer_divide_nonnegative<kKPerByte>(K)),
-              // The last K step is partial (and its scales zero-padded) only with a K tail.
-              k_atoms(integer_divide_nonnegative<Policy::kAtomK>(
-                  Traits::kHasTail ? K + Policy::kAtomK - 1 : K)),
+              // The last K step may be partial (its scales zero-padded): in the K tail, or in a
+              // partial last tile the loop runs.
+              k_atoms(integer_divide_nonnegative<Policy::kAtomK>(K + Policy::kAtomK - 1)),
               a_scale_stride(detail::opaque_scalar(M * 4)),
               b_scale_stride(detail::opaque_scalar(N * 4)),
               block_gemm(smem_, wave_m, wave_n)
@@ -743,8 +752,11 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
                         const index_t row0      = is_a ? cluster_m0 : cluster_n0;
                         const index_t unclamped = row0 + integer_divide_nonnegative<lines>(index);
                         const index_t row = edge ? min(unclamped, (is_a ? M : N) - 1) : unclamped;
-                        const index_t offset =
-                            k_byte + integer_modulo_nonnegative<lines>(index) * line;
+                        // A partial tile's lines past the end of the row are clamped to its last
+                        // byte: past the last row's they are past the end of the buffer. Any
+                        // instance may prefetch one: the K tail, or a partial last loop tile.
+                        const index_t offset = min(
+                            k_byte + integer_modulo_nonnegative<lines>(index) * line, packed_k - 1);
                         const index_t row_bytes = DramRowBytes<is_a>();
                         const uint8_t* base     = Bytes(DramWindow<is_a>());
                         if constexpr(wide)
@@ -756,9 +768,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
                     }
                     else
                     {
-                        constexpr bool is_a = kCat == 3;
-                        constexpr bool clamp =
-                            (is_a ? Traits::kEdgeM : Traits::kEdgeN) || Traits::kHasTail;
+                        constexpr bool is_a             = kCat == 3;
                         constexpr index_t lines_per_row = is_a ? a_lines_per_row : b_lines_per_row;
                         const index_t row_bytes         = is_a ? a_scale_stride : b_scale_stride;
                         const index_t mn0               = is_a ? cluster_m0 : cluster_n0;
@@ -766,9 +776,9 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
                             k_step + integer_divide_nonnegative<lines_per_row>(index);
                         const index_t offset =
                             mn0 * 4 + integer_modulo_nonnegative<lines_per_row>(index) * line;
-                        const index_t unclamped = row * row_bytes + offset;
+                        // A partial tile's rows past K, or an edge's lines past M or N.
                         const index_t element =
-                            clamp ? min(unclamped, k_atoms * row_bytes - 1) : unclamped;
+                            min(row * row_bytes + offset, k_atoms * row_bytes - 1);
                         return Bytes(ScaleDramWindow<is_a>()) + static_cast<uint32_t>(element);
                     }
                 };
@@ -1148,6 +1158,33 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
                     acc, a_tile, b_tile, k0, parity, buffer, next_buffer);
         }
 
+        /// The last K tile, after the loop: Steps K steps in buffer parity and nothing else. No
+        /// tile follows, so it reads no next tile, refills no buffer and prefetches nothing: a
+        /// refill's s_wait_dscnt counts next-tile reads, which the compiler drops here. With
+        /// PrefetchLdsRead, a_tile and b_tile hold step 0, read by the tile before.
+        template <index_t Steps>
+        CK_TILE_DEVICE void
+        tail_tile(AccTile& acc, ATile& a_tile, BTile& b_tile, index_t parity) const
+        {
+            const index_t buffer = BufferBase(parity);
+            if constexpr(!kPrefetchLdsRead)
+                wait_next_tile();
+            static_for<0, Steps, 1>{}([&](auto s) {
+                constexpr index_t step = decltype(s)::value;
+                if constexpr(!kPrefetchLdsRead || step > 0)
+                {
+                    a_tile = block_gemm.LocalPrefetchA(buffer, step);
+                    block_gemm.template LocalPrefetchB<0, kRn>(b_tile, buffer, step);
+                    step_wait<0>();
+                }
+                gemm<false, 0, kRn>(acc, a_tile, b_tile);
+                // Each step's reads feed its own WMMAs: the region ends the step, so the reads
+                // of later steps stay after it.
+                if constexpr(!kSourceOrder)
+                    __builtin_amdgcn_sched_barrier(0);
+            });
+        }
+
         /// The K loop: full_tiles whole K tiles, then the K tail with Traits::kHasTail.
         /// TailNum is the base's for full_tiles; TailNumber::Full has the odd tile and the K
         /// tail's buffer chosen at run time.
@@ -1207,23 +1244,27 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
             if constexpr(TailNum == TailNumber::Full)
             {
                 if(integer_modulo_nonnegative<2>(full_tiles))
-                    k_tile<kKSteps, 0>(acc, a_tile, b_tile, pairs_end, 0);
+                {
+                    // The odd tile feeds the K tail, or without one is the last tile.
+                    if constexpr(Traits::kHasTail)
+                        k_tile<kKSteps, 0>(acc, a_tile, b_tile, pairs_end, 0);
+                    else
+                        tail_tile<kKSteps>(acc, a_tile, b_tile, 0);
+                }
             }
             if constexpr(Traits::kHasTail)
             {
                 // The K tail is one more tile: its TDM loads are clipped at K and only its first
-                // tail_steps K steps are read. With TailNumber::Full the GL2 prefetch takes its
-                // parity as even, which only changes which lines are hinted.
+                // tail_steps K steps are read.
                 static_assert(Traits::kTailSteps < kKSteps,
                               "comp_tdm_scheduled: tail steps < k_steps");
                 constexpr index_t kTailParity = TailNum == TailNumber::One ? 1 : 0;
-                k_tile<Traits::kTailSteps, kTailParity>(
-                    acc,
-                    a_tile,
-                    b_tile,
-                    full_tiles * kTileK,
-                    TailNum == TailNumber::Full ? integer_modulo_nonnegative<2>(full_tiles)
-                                                : kTailParity);
+                tail_tile<Traits::kTailSteps>(acc,
+                                              a_tile,
+                                              b_tile,
+                                              TailNum == TailNumber::Full
+                                                  ? integer_modulo_nonnegative<2>(full_tiles)
+                                                  : kTailParity);
             }
             // No workgroup may exit while a TDM load into its LDS is in flight: with multicast,
             // peers' loads write here too.

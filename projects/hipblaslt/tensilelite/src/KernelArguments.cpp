@@ -93,9 +93,12 @@ namespace TensileLite
     void KernelArguments::reserve(size_t bytes, size_t count)
     {
         m_data.reserve(bytes);
-        m_names.reserve(count);
+        
         if(m_log)
+        {
+            m_names.reserve(count);
             m_argRecords.reserve(count);
+        }
     }
 
     bool KernelArguments::isFullyBound() const
@@ -145,7 +148,7 @@ namespace TensileLite
     }
 
     KernelArguments::const_iterator::const_iterator(KernelArguments const& args,
-                                                    std::string const&     name)
+                                                    std::string_view       name)
         : m_args(args)
         , m_currentArg(args.m_names.begin())
     {

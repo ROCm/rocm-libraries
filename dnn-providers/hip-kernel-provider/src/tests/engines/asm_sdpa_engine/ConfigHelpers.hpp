@@ -6,6 +6,7 @@
 #include "GraphTest.hpp"
 #include "asm_fmha_v3_fwd_configs.hpp"
 
+#include <cstdint>
 #include <flatbuffers/flatbuffer_builder.h>
 #include <string>
 #include <unordered_map>
@@ -18,16 +19,20 @@ namespace asm_sdpa_engine
  * @brief Converts an SDPA forward config to a valid graph builder.
  *
  * Creates a graph with dimensions matching the config's hdim_q and hdim_v,
- * using arbitrary values for batch, num_heads, seq_q, and seq_kv.
+ * using arbitrary values for batch and num_heads.
  * Supports all MaskType values and BATCH/GROUP modes.
  *
  * @param config The fmha_v3_fwdConfig containing kernel configuration
  * @param withStats When true, adds an FP32 stats tensor [B, H, Sq, 1]
  *                  and sets generate_stats=true
+ * @param seqQ Query sequence length (S_q)
+ * @param seqKv Key/value sequence length (S_kv)
  * @return flatbuffers::FlatBufferBuilder A builder containing the graph
  */
 flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdConfig& config,
-                                                       bool withStats = false);
+                                                       bool withStats = false,
+                                                       int64_t seqQ = 256,
+                                                       int64_t seqKv = 256);
 
 /**
  * @brief Retrieves all configurations matching a specific GPU architecture.
