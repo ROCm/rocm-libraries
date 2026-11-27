@@ -27,6 +27,16 @@
 
 namespace hipdnn_frontend::autotune
 {
+/**
+ * @brief Specific trigger that caused a stalled timed-run pass to request an unstalled restart.
+ */
+enum class StallRestartReason
+{
+    NONE,
+    WATCHDOG_TIMEOUT,
+    STALL_DECLINED,
+    NEGATIVE_BUDGET_EXHAUSTED
+};
 
 /**
  * @brief Result of a timed-run loop.
@@ -41,14 +51,14 @@ namespace hipdnn_frontend::autotune
  * UNSTALLED measurement, or exhausted its negative-reading budget for one
  * candidate: the loop stopped immediately without recording that sample, and the
  * caller must discard the whole comparison and rerun it unstalled rather than
- * trust this partial result.
+ * trust this partial result. @c restartReason identifies which trigger fired.
  * @c finalQuality is the TimingQuality of the last recorded sample (INVALID
  * if none was recorded), useful for a caller that wants to know which mode
  * produced @c timings without re-deriving it from the timing callback itself.
  * A finite negative elapsed reading is not a failure: it is re-measured in the same slot
  * within negativeReadingRetryBudget(), and @c discardedNegativeSamples counts those
- * re-measurements. @c timings never contains a negative sample. Exhausting the budget
- * sets @c restartUnstalled in a stalled pass and @c benchmarkFailed in an unstalled one.
+ * re-measurements. @c timings never contains a negative sample. Exhausting the budget sets
+ * @c restartUnstalled in a stalled pass and @c benchmarkFailed in an unstalled pass.
  */
 struct TimedRunOutcome
 {
@@ -57,6 +67,7 @@ struct TimedRunOutcome
     bool benchmarkFailed = false;
     std::string errorMessage;
     bool restartUnstalled = false;
+    StallRestartReason restartReason = StallRestartReason::NONE;
     TimingQuality finalQuality = TimingQuality::INVALID;
     int discardedNegativeSamples = 0;
 };
@@ -142,16 +153,35 @@ enum class MeasureOutcome
     FAILED
 };
 
+inline const char* stallRestartReasonString(StallRestartReason reason)
+{
+    switch(reason)
+    {
+    case StallRestartReason::WATCHDOG_TIMEOUT:
+        return "stall watchdog fired";
+    case StallRestartReason::STALL_DECLINED:
+        return "stalling was declined";
+    case StallRestartReason::NEGATIVE_BUDGET_EXHAUSTED:
+        return "stalled timing exhausted negative-reading retry budget (ROCm/rocm-systems#12925)";
+    case StallRestartReason::NONE:
+        return "none";
+    default:
+        return "unknown";
+    }
+}
+
 // Resolves one output sample: calls timeOnce, transparently retrying a TRANSIENT_INVALID
 // sample with a fresh measurement (bounded by extraAttemptsRemaining, shared across the
 // whole candidate run and decremented in place). `attempt` is used only for log/error-message
-// text; on RECORDED, `timing` holds the recorded measurement.
+// text; on RECORDED, `timing` holds the recorded measurement; on RESTART_UNSTALLED,
+// `restartReason` names the cause.
 template <typename TimeOnceFn>
 MeasureOutcome measureOneSample(TimeOnceFn&& timeOnce,
                                 bool stalled,
                                 int attempt,
                                 int& extraAttemptsRemaining,
                                 ExecutionTiming& timing,
+                                StallRestartReason& restartReason,
                                 std::string& errorMessage)
 {
     for(;;)
@@ -171,6 +201,8 @@ MeasureOutcome measureOneSample(TimeOnceFn&& timeOnce,
         }
         if(sampleOutcome == TimedSampleOutcome::RESTART_UNSTALLED)
         {
+            restartReason = timing.timedOut ? StallRestartReason::WATCHDOG_TIMEOUT
+                                            : StallRestartReason::STALL_DECLINED;
             return MeasureOutcome::RESTART_UNSTALLED;
         }
         if(sampleOutcome == TimedSampleOutcome::TRANSIENT_INVALID)
@@ -183,6 +215,7 @@ MeasureOutcome measureOneSample(TimeOnceFn&& timeOnce,
                 // closest to the timer floor), so re-measure the comparison unstalled.
                 if(stalled)
                 {
+                    restartReason = StallRestartReason::NEGATIVE_BUDGET_EXHAUSTED;
                     return MeasureOutcome::RESTART_UNSTALLED;
                 }
                 errorMessage = "Benchmark iteration " + std::to_string(attempt)
@@ -226,8 +259,13 @@ TimedRunOutcome runUntilStable(int maxIterations,
     for(int t = 0; t < maxIterations; ++t)
     {
         ExecutionTiming timing;
-        const auto measured = measureOneSample(
-            timeOnce, stalled, t, extraAttemptsRemaining, timing, outcome.errorMessage);
+        const auto measured = measureOneSample(timeOnce,
+                                               stalled,
+                                               t,
+                                               extraAttemptsRemaining,
+                                               timing,
+                                               outcome.restartReason,
+                                               outcome.errorMessage);
         if(measured == MeasureOutcome::RESTART_UNSTALLED)
         {
             outcome.restartUnstalled = true;
@@ -293,8 +331,13 @@ TimedRunOutcome runFixedAverage(int timedIterations,
     for(int t = 0; t < timedIterations; ++t)
     {
         ExecutionTiming timing;
-        const auto measured = measureOneSample(
-            timeOnce, stalled, t, extraAttemptsRemaining, timing, outcome.errorMessage);
+        const auto measured = measureOneSample(timeOnce,
+                                               stalled,
+                                               t,
+                                               extraAttemptsRemaining,
+                                               timing,
+                                               outcome.restartReason,
+                                               outcome.errorMessage);
         if(measured == MeasureOutcome::RESTART_UNSTALLED)
         {
             outcome.restartUnstalled = true;

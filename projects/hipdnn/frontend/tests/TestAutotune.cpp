@@ -330,6 +330,7 @@ TEST(TestAutotune, RunUntilStableReplacesSingleTransientNegativeElapsed)
                                                     noopRunUntilStableLog);
     EXPECT_TRUE(outcome.converged);
     EXPECT_FALSE(outcome.benchmarkFailed);
+    EXPECT_EQ(outcome.restartReason, StallRestartReason::NONE);
     EXPECT_EQ(outcome.timings, (std::vector<float>{10.0f, 10.0f, 10.0f}));
     // 3 recorded samples plus the one retried-away negative reading.
     EXPECT_EQ(timer.callCount, 4);
@@ -370,6 +371,7 @@ TEST(TestAutotune, RunFixedAverageRestartsStalledPassAfterThirdNegativeElapsed)
     EXPECT_FALSE(outcome.converged);
     EXPECT_FALSE(outcome.benchmarkFailed);
     EXPECT_TRUE(outcome.restartUnstalled);
+    EXPECT_EQ(outcome.restartReason, StallRestartReason::NEGATIVE_BUDGET_EXHAUSTED);
     EXPECT_TRUE(outcome.timings.empty());
     EXPECT_EQ(timer.callCount, 3);
 }
@@ -417,6 +419,20 @@ TEST(TestAutotune, RunFixedAverageUnstalledBudgetIsNeverBelowTwo)
     EXPECT_FALSE(outcome.benchmarkFailed);
     EXPECT_EQ(outcome.timings, (std::vector<float>{5.0f}));
     EXPECT_EQ(timer.callCount, 3);
+}
+
+TEST(TestAutotune, StallRestartReasonStringsCoverAllReasons)
+{
+    EXPECT_STREQ(autotune::detail::stallRestartReasonString(StallRestartReason::WATCHDOG_TIMEOUT),
+                 "stall watchdog fired");
+    EXPECT_STREQ(autotune::detail::stallRestartReasonString(StallRestartReason::STALL_DECLINED),
+                 "stalling was declined");
+    EXPECT_STREQ(
+        autotune::detail::stallRestartReasonString(StallRestartReason::NEGATIVE_BUDGET_EXHAUSTED),
+        "stalled timing exhausted negative-reading retry budget (ROCm/rocm-systems#12925)");
+    EXPECT_STREQ(autotune::detail::stallRestartReasonString(StallRestartReason::NONE), "none");
+    EXPECT_STREQ(autotune::detail::stallRestartReasonString(static_cast<StallRestartReason>(99)),
+                 "unknown");
 }
 
 TEST(TestAutotune, RunFixedAverageKeepsExactRequestedCountAfterTransientRetry)
@@ -480,6 +496,7 @@ TEST(TestAutotune, RunFixedAverageStopsImmediatelyOnStalledTimeout)
         /*timedIterations=*/5, /*stalled=*/true, timer, noopFixedAverageLog);
 
     EXPECT_TRUE(outcome.restartUnstalled);
+    EXPECT_EQ(outcome.restartReason, StallRestartReason::WATCHDOG_TIMEOUT);
     EXPECT_FALSE(outcome.benchmarkFailed);
     EXPECT_FALSE(outcome.converged);
     // Only the first (successful) sample was recorded; the timed-out one is discarded,
@@ -501,6 +518,7 @@ TEST(TestAutotune, RunUntilStableStopsImmediatelyOnUnstalledDuringStalledPass)
                                                     noopRunUntilStableLog);
 
     EXPECT_TRUE(outcome.restartUnstalled);
+    EXPECT_EQ(outcome.restartReason, StallRestartReason::STALL_DECLINED);
     EXPECT_FALSE(outcome.benchmarkFailed);
     EXPECT_FALSE(outcome.converged);
     ASSERT_EQ(outcome.timings.size(), 1u);

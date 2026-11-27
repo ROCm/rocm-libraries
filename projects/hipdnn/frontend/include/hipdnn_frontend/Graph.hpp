@@ -2353,9 +2353,9 @@ private:
                 std::vector<float> timings;
                 bool benchmarkFailed = false;
                 bool restartUnstalled = false;
+                auto restartReason = autotune::StallRestartReason::NONE;
                 int discardedNegativeSamples = 0;
                 auto candidateQuality = ::hipdnn_frontend::TimingQuality::INVALID;
-
                 // One lambda for both strategies: it just runs the reusable profiling
                 // sequence against this comparison's shared context; the loop helpers
                 // classify the result (record / restart-unstalled / malformed).
@@ -2381,6 +2381,7 @@ private:
                     timings = std::move(outcome.timings);
                     benchmarkFailed = outcome.benchmarkFailed;
                     restartUnstalled = outcome.restartUnstalled;
+                    restartReason = outcome.restartReason;
                     discardedNegativeSamples = outcome.discardedNegativeSamples;
                     candidateQuality = outcome.finalQuality;
                     if(benchmarkFailed)
@@ -2409,6 +2410,7 @@ private:
                     timings = std::move(outcome.timings);
                     benchmarkFailed = outcome.benchmarkFailed;
                     restartUnstalled = outcome.restartUnstalled;
+                    restartReason = outcome.restartReason;
                     discardedNegativeSamples = outcome.discardedNegativeSamples;
                     candidateQuality = outcome.finalQuality;
                     if(benchmarkFailed)
@@ -2423,10 +2425,10 @@ private:
                 {
                     HIPDNN_FE_LOG_WARN(
                         "autotune: engine "
-                        << result.engineName
-                        << ": stall watchdog fired, stalling was declined, or stalled "
-                           "timing kept reading negative mid-sweep; discarding this pass and "
-                           "re-measuring every candidate unstalled.");
+                        << result.engineName << ": "
+                        << autotune::detail::stallRestartReasonString(restartReason)
+                        << " (discardedNegativeSamples=" << discardedNegativeSamples
+                        << "); discarding this pass and re-measuring every candidate unstalled.");
                     restartUnstalledRequested = true;
                     break;
                 }

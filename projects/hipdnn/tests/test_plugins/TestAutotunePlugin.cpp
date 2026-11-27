@@ -34,10 +34,16 @@ constexpr size_t WORKSPACE_LARGE_COMPILED_SIZE = 8192;
 // host-only no-op, so the autotune START/STOP events would bracket zero device
 // work and hipEventElapsedTime (~1 us resolution) can return a sub-resolution
 // or even negative duration, making the strategy smoke tests flaky. Doing real
-// device work on the profiling stream guarantees a positive, above-resolution
-// measured time. 4 MiB clears the timer resolution on all supported GPUs with
-// margin.
+// device work on the profiling stream produces a positive, above-resolution
+// measured time. On Windows, a 4 MiB stalled fill returned -15 us on gfx1101
+// (https://github.com/ROCm/rocm-systems/issues/12925), so match
+// TestProfilingControlDescriptor with 128 MiB there while keeping 4 MiB on
+// non-Windows platforms so simulator lanes (FFM) stay fast.
+#if defined(_WIN32)
+constexpr size_t TIMING_SCRATCH_SIZE = size_t{128} * 1024 * 1024;
+#else
 constexpr size_t TIMING_SCRATCH_SIZE = size_t{4} * 1024 * 1024;
+#endif
 
 // The host-sync engine deliberately trips the stall watchdog. Only recovery tests
 // enable it, before handle creation discovers and caches the engine list.
