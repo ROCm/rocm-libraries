@@ -21,7 +21,9 @@ ARCH = "gfx1151"
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 
 
-def _pack(fixture, tmp_path, hipcc, rocm_kpack_dir):
+def _pack(
+    fixture, tmp_path, hip_compiler, rocm_kpack_dir, hip_path=None, device_lib_path=None
+):
     override = os.environ.get("HKP_PACK_OUTPUT_DIR")
     out = Path(override) / fixture if override else tmp_path / "out"
     if out.exists():
@@ -30,7 +32,9 @@ def _pack(fixture, tmp_path, hipcc, rocm_kpack_dir):
         source_root=FIXTURES / fixture,
         arches=[ARCH],
         out_root=out,
-        hipcc=hipcc,
+        hip_compiler=hip_compiler,
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
         rocm_kpack_dir=rocm_kpack_dir,
         inter_root=tmp_path / "inter",
     )
@@ -46,14 +50,23 @@ def _pack(fixture, tmp_path, hipcc, rocm_kpack_dir):
 )
 def test_a_multi_launch_bundle_packs_and_passes_the_full_desk_check(
     tmp_path,
-    hipcc,
+    hip_compiler,
+    hip_path,
+    device_lib_path,
     rocm_kpack_dir,
     rocke_available,
     fixture,
     launches,
     distinct_symbols,
 ):
-    out = _pack(fixture, tmp_path, hipcc, rocm_kpack_dir)
+    out = _pack(
+        fixture,
+        tmp_path,
+        hip_compiler,
+        rocm_kpack_dir,
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
+    )
     kdp = out / ARCH / "multi_launch.kdp.json"
     ukd = read_shipped(kdp)["kernelDescriptors"][0]
     assert set(ukd["sources"]) == launches

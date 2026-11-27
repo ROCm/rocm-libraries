@@ -59,27 +59,28 @@ using miopen::ai::lgbm::SetNumeric;
 // Metadata loader
 // ---------------------------------------------------------------------------
 
-class CPU_LgbmMetadata_NONE : public ::testing::Test
+class CPU_LgbmMetadata_NONE : public ::testing::TestWithParam<int>
 {
 protected:
     const LgbmMetadata& meta = LgbmMetadata::Get();
 
     void SetUp() override
     {
-        if(!meta.IsReady())
-            GTEST_SKIP() << "lgbm_model_meta.json not found in "
-                         << miopen::GetSystemDbPath().string();
+        // This file only builds with MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK, so a missing
+        // model asset is a packaging fault and must fail, not skip.
+        ASSERT_TRUE(meta.IsReady())
+            << "lgbm_model_meta.json not found in " << miopen::GetSystemDbPath().string();
     }
 };
 
-TEST_F(CPU_LgbmMetadata_NONE, LoadsSolverVocab)
+TEST_P(CPU_LgbmMetadata_NONE, LoadsSolverVocab)
 {
     // The model ships a non-trivial solver vocabulary; the exact count tracks
     // the model, so just assert it is populated.
     EXPECT_GT(meta.Solvers().size(), 1u);
 }
 
-TEST_F(CPU_LgbmMetadata_NONE, CategoricalCodesResolve)
+TEST_P(CPU_LgbmMetadata_NONE, CategoricalCodesResolve)
 {
     EXPECT_GE(meta.CategoricalCode("direction", "1"), 0);
     EXPECT_GE(meta.CategoricalCode("direction", "2"), 0);
@@ -95,14 +96,14 @@ TEST_F(CPU_LgbmMetadata_NONE, CategoricalCodesResolve)
     EXPECT_EQ(meta.SolverCode("NotARealSolver"), -1);
 }
 
-TEST_F(CPU_LgbmMetadata_NONE, SolverCodeMatchesVocabIndex)
+TEST_P(CPU_LgbmMetadata_NONE, SolverCodeMatchesVocabIndex)
 {
     const auto& solvers = meta.Solvers();
     for(int i = 0; i < static_cast<int>(solvers.size()); ++i)
         EXPECT_EQ(meta.SolverCode(solvers[i]), i);
 }
 
-TEST_F(CPU_LgbmMetadata_NONE, UnseenArchSupportIsConsistent)
+TEST_P(CPU_LgbmMetadata_NONE, UnseenArchSupportIsConsistent)
 {
     // The unseen-arch code is only meaningful when the model was trained for it;
     // when unsupported, the picker abstains on unknown arch. Either way the code
@@ -118,15 +119,15 @@ TEST_F(CPU_LgbmMetadata_NONE, UnseenArchSupportIsConsistent)
 // Scoring seam
 // ---------------------------------------------------------------------------
 
-class CPU_LgbmPicker_NONE : public ::testing::Test
+class CPU_LgbmPicker_NONE : public ::testing::TestWithParam<int>
 {
 protected:
     const LgbmMetadata& meta = LgbmMetadata::Get();
 
     void SetUp() override
     {
-        if(!meta.IsReady())
-            GTEST_SKIP() << "LGBM metadata unavailable; picker disabled in this build";
+        ASSERT_TRUE(meta.IsReady())
+            << "lgbm_model_meta.json not found in " << miopen::GetSystemDbPath().string();
     }
 };
 
@@ -134,7 +135,7 @@ protected:
 // rejects malformed input. Uses a fixed, arbitrary feature matrix: the test
 // asserts the seam's contract (valid index, determinism, error handling), not a
 // specific pick -- the .so is the source of truth for the actual scores.
-TEST_F(CPU_LgbmPicker_NONE, ScoresCandidateMatrix)
+TEST_P(CPU_LgbmPicker_NONE, ScoresCandidateMatrix)
 {
     constexpr int n_cands = 4;
     std::vector<std::vector<double>> rows(
@@ -159,7 +160,7 @@ TEST_F(CPU_LgbmPicker_NONE, ScoresCandidateMatrix)
 
 // gfx1250 parts report their device name as "gfx1250-strict". The model vocab only has the
 // base name, so the L1 lookup must treat both the same (and stay strict about anything else).
-TEST_F(CPU_LgbmPicker_NONE, StrictArchScoresLikeBaseArch)
+TEST_P(CPU_LgbmPicker_NONE, StrictArchScoresLikeBaseArch)
 {
     // The suffix rule mirrors legacy_ck_common.hpp: everything from the first '-' is dropped.
     EXPECT_EQ(NormalizeArchName("gfx1250-strict"), "gfx1250");
@@ -186,8 +187,8 @@ TEST_F(CPU_LgbmPicker_NONE, StrictArchScoresLikeBaseArch)
     EXPECT_EQ(GfxVocabCode(""), -1);
 
     const auto& forest = LgbmForest::GetRank();
-    if(!forest.IsReady())
-        GTEST_SKIP() << "rank model unavailable";
+    ASSERT_TRUE(forest.IsReady()) << "lgbm_rank.bin not found in "
+                                  << miopen::GetSystemDbPath().string();
 
     // Score every solver in the vocab on two fixed problem rows with the gfx_id column set from
     // GfxVocabCode, the same way PickSolverRanked fills it. gfx1250 and gfx1250-strict must
@@ -309,12 +310,12 @@ protected:
 using GPU_LgbmPickerStrictArch_FP16 = LgbmPickerStrictArch<miopenHalf>;
 using GPU_LgbmPickerStrictArch_FP32 = LgbmPickerStrictArch<miopenFloat>;
 
-TEST_F(GPU_LgbmPickerStrictArch_FP16, PickSolverRankedMatchesBaseArch)
+TEST_P(GPU_LgbmPickerStrictArch_FP16, PickSolverRankedMatchesBaseArch)
 {
     CheckPickSolverRankedMatchesBaseArch();
 }
 
-TEST_F(GPU_LgbmPickerStrictArch_FP32, PickSolverRankedMatchesBaseArch)
+TEST_P(GPU_LgbmPickerStrictArch_FP32, PickSolverRankedMatchesBaseArch)
 {
     CheckPickSolverRankedMatchesBaseArch();
 }
@@ -323,6 +324,8 @@ TEST_F(GPU_LgbmPickerStrictArch_FP32, PickSolverRankedMatchesBaseArch)
 // Golden-vector parity: the forest walker vs LightGBM's own scores
 // ---------------------------------------------------------------------------
 
+using CPU_LgbmForest_NONE = ::testing::TestWithParam<int>;
+
 // The walker (LgbmForest) must reproduce LightGBM's raw lambdarank score for
 // every committed (features -> expected) vector within a tight tolerance. Rows
 // are 61-feature LgbmEntry inputs: JSON null encodes a missing/NaN feature;
@@ -330,15 +333,17 @@ TEST_F(GPU_LgbmPickerStrictArch_FP32, PickSolverRankedMatchesBaseArch)
 // categorical bitset membership, and the missing/default-left path against
 // ground truth generated by the LightGBM Python API from the model shipped in
 // the tree.
-TEST(CPU_LgbmForest_NONE, MatchesGoldenVectors)
+TEST_P(CPU_LgbmForest_NONE, MatchesGoldenVectors)
 {
     const auto& forest = LgbmForest::GetRank();
-    if(!forest.IsReady())
-        GTEST_SKIP() << "rank model not found in " << miopen::GetSystemDbPath().string();
+    // This file only builds with MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK, so a missing model or
+    // fixture is a packaging fault and must fail, not skip.
+    ASSERT_TRUE(forest.IsReady()) << "lgbm_rank.bin not found in "
+                                  << miopen::GetSystemDbPath().string();
 
     const auto gpath = miopen::GetSystemDbPath() / "lgbm_rank_golden.json";
-    if(!miopen::fs::exists(gpath))
-        GTEST_SKIP() << "golden fixture not installed in " << miopen::GetSystemDbPath().string();
+    ASSERT_TRUE(miopen::fs::exists(gpath)) << "golden fixture lgbm_rank_golden.json not found in "
+                                           << miopen::GetSystemDbPath().string();
     std::ifstream in(gpath.string());
     ASSERT_TRUE(in.is_open()) << "cannot open golden fixture: " << gpath.string();
     nlohmann::json golden;
@@ -373,6 +378,12 @@ TEST(CPU_LgbmForest_NONE, MatchesGoldenVectors)
     }
     MIOPEN_LOG_I2("lgbm golden parity: " << rows.size() << " rows, max abs err " << max_abs_err);
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_LgbmMetadata_NONE, ::testing::Values(0));
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_LgbmPicker_NONE, ::testing::Values(0));
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_LgbmPickerStrictArch_FP16, ::testing::Values(0));
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_LgbmPickerStrictArch_FP32, ::testing::Values(0));
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_LgbmForest_NONE, ::testing::Values(0));
 
 } // namespace
 

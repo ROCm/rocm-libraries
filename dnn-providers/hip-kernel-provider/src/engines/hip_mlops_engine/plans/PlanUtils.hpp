@@ -6,6 +6,7 @@
 #include "hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h"
 #include "hipdnn_plugin_sdk/PluginException.hpp"
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <string>
 
@@ -58,6 +59,45 @@ template <typename T>
 inline T align(T value, T step)
 {
     return (value + step - 1) / step;
+}
+
+/**
+ * One kernel launch of a plan, with a one-dimensional grid and block.
+ */
+struct KernelLaunchShape
+{
+    const char* kernelName;
+    int64_t blocks; // grid size along x
+    int64_t threadsPerBlock; // block size along x
+};
+
+/**
+ * HIP rejects a launch whose total thread count reaches 2^32.
+ * Returns true iff blocks >= 1, threadsPerBlock >= 1 and blocks * threadsPerBlock <= UINT32_MAX,
+ * evaluated without overflow.
+ */
+inline bool launchFitsThreadLimit(int64_t blocks, int64_t threadsPerBlock)
+{
+    return blocks >= 1 && threadsPerBlock >= 1
+           && blocks
+                  <= static_cast<int64_t>(std::numeric_limits<uint32_t>::max()) / threadsPerBlock;
+}
+
+/**
+ * Throws HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM) naming the kernel, blocks and
+ * threads when launchFitsThreadLimit is false.
+ */
+inline void checkLaunchFitsThreadLimit(const KernelLaunchShape& shape)
+{
+    if(!launchFitsThreadLimit(shape.blocks, shape.threadsPerBlock))
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            std::string("Unsupported launch of kernel ") + shape.kernelName + ": "
+                + std::to_string(shape.blocks) + " blocks of "
+                + std::to_string(shape.threadsPerBlock)
+                + " threads reach the 2^32 thread limit or are empty");
+    }
 }
 
 namespace batchnorm

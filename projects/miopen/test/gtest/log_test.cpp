@@ -28,30 +28,38 @@
 #if MIOPEN_BACKEND_HIP
 #include "log.hpp"
 
-TEST(CPU_LOG_TEST_ASSERT_NONE, AssertLogCmdOutput)
+using CPU_LOG_TEST_ASSERT_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_LOG_TEST_ASSERT_NONE, AssertLogCmdOutput)
 {
     TestLogFun(miopen::debug::LogCmdConvolution, logConv, true);
 }
 
-TEST(CPU_LOG_TEST_ASSERT_NONE, AssertLogFindCmdOutput)
+TEST_P(CPU_LOG_TEST_ASSERT_NONE, AssertLogFindCmdOutput)
 {
     TestLogFun(miopen::debug::LogCmdFindConvolution, logFindConv, true);
 }
 
-TEST(CPU_LOG_TEST_ASSERT_NONE, AssertLogBufferOff) { TestLogBufferOff(); }
+TEST_P(CPU_LOG_TEST_ASSERT_NONE, AssertLogBufferOff) { TestLogBufferOff(); }
 
-TEST(CPU_LOG_TEST_ASSERT_NONE, AssertLogBufferEnvEnabled) { TestLogBufferEnvEnabled(); }
+TEST_P(CPU_LOG_TEST_ASSERT_NONE, AssertLogBufferEnvEnabled) { TestLogBufferEnvEnabled(); }
 
-TEST(CPU_LOG_TEST_ASSERT_NONE, AssertLogBufferOffAtHighLevel) { TestLogBufferOffAtHighLevel(); }
+TEST_P(CPU_LOG_TEST_ASSERT_NONE, AssertLogBufferOffAtHighLevel) { TestLogBufferOffAtHighLevel(); }
 
-TEST(CPU_LOG_TEST_FUSION_NONE, AssertTestLogCmdCBAFusionOutput)
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_LOG_TEST_ASSERT_NONE, testing::Values(0));
+
+using CPU_LOG_TEST_FUSION_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_LOG_TEST_FUSION_NONE, AssertTestLogCmdCBAFusionOutput)
 {
     TestLogCmdCBAFusion(miopen::debug::LogCmdFusion, logFusionConvBiasActiv, true);
 }
 
-TEST(CPU_LOG_TEST_FUSION_NONE, AssertTestLogCmdBNormFusionOutput)
+TEST_P(CPU_LOG_TEST_FUSION_NONE, AssertTestLogCmdBNormFusionOutput)
 {
     TestLogCmdBNormFusion(miopen::debug::LogCmdFusion, logBnormActiv, true);
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_LOG_TEST_FUSION_NONE, testing::Values(0));
 
 #endif
