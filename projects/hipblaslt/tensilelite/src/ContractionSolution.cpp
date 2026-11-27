@@ -7623,23 +7623,18 @@ namespace TensileLite
                 *outSelectedGrid = grid;
 
             // Tree-fixup uses scalarUInt24DivideAndRemainder (dividend < 2^24, divisor < 2^16).
-            // If we exceed those bounds, fall back to DP.
+            // If we exceed those bounds, fall back to DP. The dynamic split
+            // checks the same bounds and keeps every tile whole past them.
             if(reductionStrat == origami::reduction_t::tree)
             {
-                size_t itersPerTile = problem.getItersPerTile(self.sizeMapping);
-                size_t itersPerWG   = tiles * itersPerTile / grid;
+                const size_t itersPerTile = problem.getItersPerTile(self.sizeMapping);
                 // numWorkItems = grid * threadsPerWorkGroup
-                // the largest grid this fallback can express is
-                // UINT32_MAX / threadsPerWorkGroup -- 2^24 tiles at 256 threads
-                // but 2^25 at 128 and 2^22 at 1024.
                 const size_t threadsPerWorkGroup = self.sizeMapping.workGroupSize.x
                                                     * self.sizeMapping.workGroupSize.y
                                                     * self.sizeMapping.workGroupSize.z;
-                const size_t maxTiles = (size_t{std::numeric_limits<uint32_t>::max()} + 1)
-                                        / std::max(threadsPerWorkGroup, size_t{1});
+                const size_t maxTiles = StreamK::treeFixupMaxTiles(threadsPerWorkGroup);
 
-                if(itersPerTile >= 65536 || itersPerWG >= 65536
-                   || (tiles * itersPerTile) >= maxTiles)
+                if(StreamK::exceedsTreeFixupBounds(tiles, itersPerTile, grid, threadsPerWorkGroup))
                 {
                     const size_t occupancy
                     = std::max(self.sizeMapping.CUOccupancy, static_cast<int>(1));
@@ -7790,8 +7785,10 @@ namespace TensileLite
         const size_t prefixEntries = StreamK::Dynamic::queueRegionBytes(hardware) / sizeof(int);
         in.flagSlots
             = prefixEntries < StreamKFlagElements ? StreamKFlagElements - prefixEntries : 0;
-        in.workspaceBytes   = problem.workspaceSize();
-        in.partialTileBytes = partialTileSize(1);
+        in.workspaceBytes      = problem.workspaceSize();
+        in.partialTileBytes    = partialTileSize(1);
+        in.threadsPerWorkGroup = sizeMapping.workGroupSize.x * sizeMapping.workGroupSize.y
+                                 * sizeMapping.workGroupSize.z;
         return StreamK::Dynamic::computeSplit(in);
     }
 

@@ -2449,6 +2449,31 @@ TEST(StreamKDynamicSplitTest, ShrinksToFitWorkspaceAndFlags)
     EXPECT_LE(f.partialSlots(), fl.flagSlots);
 }
 
+// A split whose grid passes the tree-fixup bounds keeps every tile whole, as
+// grid selection would fall back to one workgroup per tile for it.
+TEST(StreamKDynamicSplitTest, TreeFixupBoundsKeepTilesWhole)
+{
+    auto in                = dynamicSplitInputs(1, 65536);
+    in.threadsPerWorkGroup = 256;
+    EXPECT_EQ(StreamK::Dynamic::computeSplit(in).tiles, 0u) << "65536 iterations per tile";
+    in.itersPerTile = 65535;
+    EXPECT_EQ(StreamK::Dynamic::computeSplit(in).split, 16u);
+
+    // tiles * itersPerTile past 2^32 / threads: 2^22 at 1024 threads.
+    in                     = dynamicSplitInputs(100, 41944);
+    in.threadsPerWorkGroup = 1024;
+    EXPECT_EQ(StreamK::Dynamic::computeSplit(in).tiles, 0u);
+    in.threadsPerWorkGroup = 256;
+    EXPECT_EQ(StreamK::Dynamic::computeSplit(in).split, 2u);
+
+    // Debug overrides too.
+    in                     = dynamicSplitInputs(1, 65536);
+    in.threadsPerWorkGroup = 256;
+    in.overrideTiles       = 1;
+    in.overrideSplit       = 4;
+    EXPECT_EQ(StreamK::Dynamic::computeSplit(in).tiles, 0u);
+}
+
 TEST(StreamKDynamicSplitTest, SplitNotAllowedKeepsTilesWhole)
 {
     auto in       = dynamicSplitInputs(1, 262144);
@@ -2927,6 +2952,26 @@ TEST_F(StreamKDynamicSplitSolveTest, DynamicWorkQueueSplitsFewTiles)
 
         EXPECT_EQ(spinFlag->streamKDynamicDecomposition(problem, device, tiles).tiles, 0u);
     }
+}
+
+// Past the tree-fixup bounds a tree launch falls back to one workgroup per tile,
+// static or dynamic, so the dynamic split keeps the tiles whole: one tile of
+// 524288 iterations on a DynamicWorkQueue kernel is one workgroup, no partials.
+TEST_F(StreamKDynamicSplitSolveTest, TreeFixupBoundsKeepTilesWhole)
+{
+    auto         queue   = dynamicSplitSolution(4);
+    auto         problem = dynamicSplitGemm({128, 128, 33554432, 1});
+    const size_t tiles   = problem.getNumTiles(queue->sizeMapping, 1);
+    ASSERT_GE(problem.getItersPerTile(queue->sizeMapping), 65536u);
+    const auto d = queue->streamKDynamicDecomposition(problem, device, tiles);
+    EXPECT_EQ(d.tiles, 0u);
+    EXPECT_EQ(d.grid, tiles);
+
+    const auto decided = queue->computeStreamKDecisions(problem, device);
+    EXPECT_TRUE(decided.treeBoundsFallbackFired);
+    EXPECT_EQ(decided.grid(), tiles);
+    ASSERT_NO_FATAL_FAILURE(expectWorkspaceAndLaunchCarry(*queue, problem, d));
+    EXPECT_EQ(problem.workspaceSize(), 0u);
 }
 
 // requiredWorkspaceSize(), the launch settings and the launch-summary snapshot

@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <type_traits>
 #include <variant>
@@ -173,6 +174,10 @@ namespace TensileLite
                 size_t flagSlots        = 0;
                 size_t workspaceBytes   = 0;
                 size_t partialTileBytes = 0;
+                // Threads per workgroup of the kernel. Nonzero holds splits to the
+                // tree-fixup bounds (StreamK::exceedsTreeFixupBounds), as grid
+                // selection does; 0 leaves them unchecked.
+                size_t threadsPerWorkGroup = 0;
 
                 // Policy. allowSplit false keeps every tile whole unless the debug
                 // overrides ask otherwise; uniform summation order ignores overrides
@@ -201,9 +206,10 @@ namespace TensileLite
              *
              * Fewer tiles than splitCUs are each cut into the largest of
              * SplitFactors parts with tiles*split <= splitCUs, at least
-             * MinItersPerWI iterations per part and partials that fit
-             * flagSlots and the workspace; otherwise every tile is whole. The debug
-             * overrides replace this rule, within the same workspace and flag limits.
+             * MinItersPerWI iterations per part, partials that fit flagSlots and
+             * the workspace and a grid within the tree-fixup bounds; otherwise every
+             * tile is whole. The debug overrides replace this rule, within the same
+             * limits.
              */
             TENSILELITEHOST_EXPORT static KernelArguments computeSplit(SplitInputs const& in);
 
@@ -645,6 +651,30 @@ namespace TensileLite
         static inline bool straddlesTiles(size_t itersPerTile, size_t skGrid, size_t tiles)
         {
             return skGrid > 0 && itersPerTile > 1 && (tiles % skGrid) != 0;
+        }
+
+        // The tile count past which one workgroup per tile no longer fits the
+        // 32-bit work-item count: 2^24 tiles at 256 threads, 2^25 at 128 and
+        // 2^22 at 1024.
+        static inline size_t treeFixupMaxTiles(size_t threadsPerWorkGroup)
+        {
+            return (size_t{std::numeric_limits<uint32_t>::max()} + 1)
+                   / std::max(threadsPerWorkGroup, size_t{1});
+        }
+
+        // Whether a tree-reduction launch of `grid` workgroups over tiles x
+        // itersPerTile passes the bounds of the tree fixup, which divides with
+        // scalarUInt24DivideAndRemainder (dividend < 2^24, divisor < 2^16).
+        // getPersistentGridImpl() then falls back to one workgroup per tile, and
+        // the dynamic split keeps every tile whole rather than split into parts
+        // that fallback would serialise.
+        static inline bool exceedsTreeFixupBounds(size_t tiles,
+                                                  size_t itersPerTile,
+                                                  size_t grid,
+                                                  size_t threadsPerWorkGroup)
+        {
+            return itersPerTile >= 65536 || (grid > 0 && tiles * itersPerTile / grid >= 65536)
+                   || tiles * itersPerTile >= treeFixupMaxTiles(threadsPerWorkGroup);
         }
 
         /**

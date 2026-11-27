@@ -360,10 +360,17 @@ namespace TensileLite
         constexpr size_t      defaultSplit = 2;
         const KernelArguments allWhole     = splitTiles(0, defaultSplit);
 
-        // The partials a split needs must fit the workspace and the flag region.
-        auto partialsFit = [&](size_t skTiles, size_t split) {
-            const size_t slots = skTiles * split;
-            return slots <= in.flagSlots && slots * in.partialTileBytes <= in.workspaceBytes;
+        // The partials a split needs must fit the workspace and the flag region,
+        // and its grid the tree-fixup bounds: past them grid selection falls back
+        // to one workgroup per tile, as for static StreamK.
+        auto partialsFit = [&](KernelArguments const& d) {
+            const size_t slots = size_t{d.tiles} * d.split;
+            return slots <= in.flagSlots && slots * in.partialTileBytes <= in.workspaceBytes
+                   && (in.threadsPerWorkGroup == 0
+                       || !StreamK::exceedsTreeFixupBounds(in.totalTiles,
+                                                           std::max(size_t{1}, in.itersPerTile),
+                                                           d.grid,
+                                                           in.threadsPerWorkGroup));
         };
 
         // Debug overrides replace the policy below. Uniform summation order
@@ -380,7 +387,7 @@ namespace TensileLite
             const bool overrideApplies = !in.uniformSummationOrder || d.tiles == 0
                                          || (isRowUniform(d, in.totalTiles) && in.allowSplit);
             if(overrideApplies)
-                return (d.tiles == 0 || partialsFit(d.tiles, d.split)) ? d : allWhole;
+                return (d.tiles == 0 || partialsFit(d)) ? d : allWhole;
         }
 
         if(!in.allowSplit || in.totalTiles == 0 || in.splitCUs == 0 || in.totalTiles >= in.splitCUs)
@@ -392,7 +399,7 @@ namespace TensileLite
             if(in.totalTiles * split > in.splitCUs || itersPerTile / split < MinItersPerWI)
                 continue;
             const KernelArguments d = splitTiles(in.totalTiles, split);
-            if(d.split >= 2 && partialsFit(d.tiles, d.split))
+            if(d.split >= 2 && partialsFit(d))
                 return d;
         }
         return allWhole;
