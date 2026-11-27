@@ -522,13 +522,19 @@ def _checkScalarLoadB(state, isaInfoMap, printRejectionReason):
   if depth < 2 * chunk:
     return no("the ring must hold at least two load chunks")
   if depth * state["ThreadTile1"] > 32:
-    return no("ring of %u SGPRs (ScalarLoadB * ThreadTile1) exceeds the 32 left for it" % (depth * state["ThreadTile1"]))
+    # coarse bound: other SGPRs (e.g. scalar global-read offsets of A) can still exhaust the file
+    return no("ring of %u SGPRs (ScalarLoadB * ThreadTile1) exceeds 32" % (depth * state["ThreadTile1"]))
   if state["ScalarLoadBPrefetch"]:
     cols = state["ThreadTile1"] // vwb if pt["TLUB"] else state["ThreadTile1"]
     if cols & (cols - 1) or cols > state["WavefrontSize"]:
       return no("ScalarLoadBPrefetch needs a power-of-two number of columns per wave")
-  # The stream of B is read in summation order, so the runtime StaggerU has to be off as well.
+    if state["PrefetchGlobalRead"] == 2 and not state["ScheduleGlobalRead"]:
+      # the local-write waits assume the warming load is newer than the reads they wait for
+      return no("ScalarLoadBPrefetch with PrefetchGlobalRead=2 needs ScheduleGlobalRead")
+  # The stream of B is read in summation order, so the runtime StaggerU has to be off as well,
+  # and so does a runtime GlobalSplitU: A would advance by GSU blocks and B by one.
   _disableRuntimeStaggerU(state)
+  state["InternalSupportParams"]["SupportUserGSU"] = False
   return True
 
 

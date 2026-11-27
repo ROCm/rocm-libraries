@@ -208,7 +208,10 @@ def _valid(path, arch=_ARCH):
 
 @pytest.mark.parametrize("arch", _ARCHS)
 def test_baseline_config_is_accepted(tmp_path, arch):
-    assert len(_valid(_config_with(tmp_path), arch)) == 1
+    (solution,) = _valid(_config_with(tmp_path), arch)
+    # B is a single summation-ordered stream: no runtime split-K or StaggerU
+    assert solution["InternalSupportParams"]["SupportUserGSU"] is False
+    assert solution["InternalSupportParams"]["SupportCustomStaggerU"] is False
 
 
 @pytest.mark.parametrize("forks", [
@@ -225,6 +228,8 @@ def test_baseline_config_is_accepted(tmp_path, arch):
     # loop close every second block reads the released StaggerU SGPR
     {"PrefetchGlobalRead": [2], "AssertSummationElementMultiple": [16]},
     {"TileProcessingStrategy": ["DataParallel"]},  # the next tile's setup would read the reused SGPRs
+    # local-write waits assume the warming load is newer than the reads they wait for
+    {"ScalarLoadBPrefetch": [2], "PrefetchGlobalRead": [2], "ScheduleGlobalRead": [0]},
 ], ids=lambda forks: "-".join(forks))
 def test_unsupported_configs_are_rejected(tmp_path, forks):
     assert _valid(_config_with(tmp_path, **forks)) == []

@@ -322,7 +322,7 @@ Solutions:
   InitCIterWmma: 0
   InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: false,
     SupportCustomWGM: true, SupportOccupancyProbe: false, SupportStreamKPerTileExtraIters: false,
-    SupportUserGSU: true, UseSFC: false, UseUniversalArgs: true}
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSSegInterleaveOffsets: {}
   LSCA: 8
@@ -541,7 +541,7 @@ Solutions:
   InitCIterWmma: 0
   InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: false,
     SupportCustomWGM: true, SupportOccupancyProbe: false, SupportStreamKPerTileExtraIters: false,
-    SupportUserGSU: true, UseSFC: false, UseUniversalArgs: true}
+    SupportUserGSU: false, UseSFC: false, UseUniversalArgs: true}
   Kernel: true
   LDSSegInterleaveOffsets: {}
   LSCA: 8
