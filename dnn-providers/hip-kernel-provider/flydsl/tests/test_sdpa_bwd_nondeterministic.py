@@ -24,6 +24,8 @@ from generators import _sdpa_bwd_cdna_build as build  # noqa: E402
 from generators import _sdpa_bwd_nondet as nondet  # noqa: E402
 from generators._sdpa_bwd_spec import Spec, family  # noqa: E402
 
+pytestmark = pytest.mark.quick
+
 DATA = FLYDSL / "tests" / "data"
 PLAIN = "dq,f16,64,causal,bk,0,1,tail,32,1"
 COMBINED = "dq,fp32,224,bias,bk,0,1,g1,192,1;block_m=32;block_n=16"
@@ -62,7 +64,7 @@ def write_rows(path: Path, *rows: dict[str, str]) -> Path:
     ("field", "value", "match"),
     [
         ("kind", "flaky", "kind"),
-        ("arch", "gfx12-generic", "arch"),
+        ("arch", "gfx1100", "arch"),
         ("pin_sha256", "abc", "pin_sha256"),
         ("variant_sha256s", sha("a") + ";short", "not a sha256"),
         ("hash", "0" * 12, "not the spec's"),
@@ -74,6 +76,25 @@ def test_a_row_that_breaks_the_schema_is_refused(tmp_path, field, value, match) 
     csv_row[field] = value
     with pytest.raises(nondet.NondeterministicListError, match=match):
         nondet.read(write_rows(tmp_path / "list.csv", csv_row))
+
+
+def test_a_gfx12_generic_row_is_a_valid_row_of_the_list(tmp_path) -> None:
+    """gfx12-generic is a listed arch (D4: a spec that flips under an unchanged source is listed with its variants and ships its pin)."""
+    assert set(nondet.ARCHES) == {
+        "gfx950",
+        "gfx11-generic",
+        "gfx12-generic",
+        "gfx942",
+        "gfx90a",
+    }
+    spec = "dq,f16,64,causal,bk,0,1,g1,32,1;arch=gfx12-generic"
+    listed = row(
+        spec, arch="gfx12-generic", kind="variants", variant_sha256s=(sha("v"),)
+    )
+    path = write_rows(tmp_path / "list.csv", listed.csv_row())
+    assert nondet.read(path, "gfx12-generic") == {listed.hash: listed}
+    assert nondet.read(path, "gfx11-generic") == {}
+    nondet.check([listed], reference(listed), combined)
 
 
 def test_a_list_with_a_duplicate_hash_or_other_columns_is_refused(tmp_path) -> None:

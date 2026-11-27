@@ -8,7 +8,7 @@ the one loader of the list, stdlib only: the gate tool, both generators, the com
 ``_instances`` alone reads the ``hash`` column itself (``_sdpa_bwd_nondeterministic_hashes``): an import here would make this
 file an input of every op's digest.
 
-Columns: ``arch`` (``gfx950``, ``gfx11-generic``, ``gfx942`` or ``gfx90a``), ``hash`` and ``spec`` of the row, ``kind``, ``pin_sha256`` (the
+Columns: ``arch`` (``gfx950``, ``gfx11-generic``, ``gfx12-generic``, ``gfx942`` or ``gfx90a``), ``hash`` and ``spec`` of the row, ``kind``, ``pin_sha256`` (the
 reference CSV's), ``variant_sha256s`` (``;``-joined whole-object shas seen besides the pin, sorted), ``variant_function_sha256s``
 (``;``-joined main-function shas of the variants besides the pin; combined rows only) and ``evidence`` (the sampling run and counts).
 ``kind`` is ``variants`` (rebuilds give different objects), ``dual_object`` (the dump holds two different objects) or ``both``.
@@ -46,7 +46,7 @@ COLUMNS = (
     "variant_function_sha256s",
     "evidence",
 )
-ARCHES = ("gfx950", "gfx11-generic", "gfx942", "gfx90a")
+ARCHES = ("gfx950", "gfx11-generic", "gfx12-generic", "gfx942", "gfx90a")
 KINDS = ("variants", "dual_object", "both")
 _SHA = re.compile(r"[0-9a-f]{64}")
 

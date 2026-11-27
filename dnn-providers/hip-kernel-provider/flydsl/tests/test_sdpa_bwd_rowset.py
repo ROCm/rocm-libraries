@@ -20,6 +20,8 @@ sys.path.insert(0, str(FLYDSL / "tools"))
 import sdpa_bwd_rowset as rowset  # noqa: E402
 from generators._sdpa_bwd_spec import Spec  # noqa: E402
 
+pytestmark = pytest.mark.quick
+
 
 @pytest.mark.parametrize("arch", ["gfx90a", "gfx942"])
 def test_the_row_set_has_the_documented_counts(arch: str) -> None:

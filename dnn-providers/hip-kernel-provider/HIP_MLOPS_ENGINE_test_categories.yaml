@@ -38,10 +38,11 @@
 # HIP_MLOPS_ENGINE_test_categories_integration.yaml because it has different
 # GTest naming conventions.
 #
-# Excluded from quick and ffm-quick: disabled tests, the higher tiers' expansions, and every
-# FlyDSL device suite. A gtest full name is "Suite.Case" or "Prefix/Suite.Case/Param", so
-# "TestGpuFlydsl*" matches a bare suite and "*/TestGpuFlydsl*" a prefixed one; the same holds
-# for IntegrationGpuFlydsl*.
+# Excluded from quick and ffm-quick: disabled tests, the higher tiers' expansions, every
+# FlyDSL device suite, and the FlyDSL SDPA backward Philox host suite, which reads the loaded
+# aiw pack set and the staged shard and so is not a basic test. A gtest full name is
+# "Suite.Case" or "Prefix/Suite.Case/Param", so "TestGpuFlydsl*" matches a bare suite and
+# "*/TestGpuFlydsl*" a prefixed one; the same holds for IntegrationGpuFlydsl*.
 _quick_excludes: &quick_excludes
   - "*DISABLED*"
   - "Comprehensive*"
@@ -51,6 +52,7 @@ _quick_excludes: &quick_excludes
   - "*/TestGpuFlydsl*"
   - "IntegrationGpuFlydsl*"
   - "*/IntegrationGpuFlydsl*"
+  - "TestFlydslSdpaBwdPhiloxForward*"
 
 test_categories:
   quick:

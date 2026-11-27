@@ -33,6 +33,8 @@ from generators import (
 from generators._codeobject import GeneratorError  # noqa: E402
 from generators._ops import OP_KERNEL_DIRS  # noqa: E402
 
+pytestmark = pytest.mark.quick
+
 KERNELS = FLYDSL / "kernels_src" / "kernels"
 CDNA = KERNELS / "attention_bwd_cdna"
 RDNA = KERNELS / "attention_bwd_rdna"
@@ -499,11 +501,11 @@ def test_the_kernel_builds_the_symbol_and_dtypes_the_generator_declares(
 
 
 def test_the_instance_rows_are_three_dtypes_per_arch_family() -> None:
-    for arch in ("gfx950", "gfx11-generic"):
+    for arch in ("gfx950", "gfx11-generic", "gfx12-generic"):
         rows = _instances.instances_for("sdpa_bwd_tailzero", arch)
         assert [r.dtype for r in rows] == ["f16", "bf16", "fp32"]
         assert {r.op for r in rows} == {"sdpa_bwd_tailzero"}
-    assert _instances.instances_for("sdpa_bwd_tailzero", "gfx12-generic") == []
+    assert _instances.instances_for("sdpa_bwd_tailzero", "gfx1100") == []
 
 
 def test_the_op_is_registered_with_the_split_ops_kernel_directories() -> None:
@@ -513,9 +515,31 @@ def test_the_op_is_registered_with_the_split_ops_kernel_directories() -> None:
 def test_the_generator_refuses_an_arch_it_does_not_build(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert tz.main(["--arch", "gfx12-generic", "--out-dir", str(tmp_path)]) == 1
+    assert tz.main(["--arch", "gfx1100", "--out-dir", str(tmp_path)]) == 1
     assert "gfx950" in capsys.readouterr().err
     assert not any(tmp_path.iterdir())
+
+
+def test_gfx12_generic_is_built_scan_only_from_the_rdna_kernel() -> None:
+    """gfx12-generic has content of its own, built like gfx11-generic: the RDNA kernel, no CDNA gates (G4)."""
+    assert "gfx12-generic" in tz.ARCHES
+    assert "gfx12-generic" in _instances.SDPA_BWD_TAILZERO_TARGETS
+    assert not tz._gated("gfx12-generic")
+    for dtype in tz.SDPA_BWD_TAILZERO_DTYPES:
+        assert tz.symbol_of("gfx12-generic", dtype) == tz.SYMBOL["gfx11-generic"]
+        assert (
+            tz.spec_key("gfx12-generic", dtype)
+            == f"tailzero,{dtype};arch=gfx12-generic"
+        )
+    for dtype in tz.HV_DTYPES:
+        assert (
+            tz.symbol_of("gfx12-generic", dtype, hv=True)
+            == tz.SYMBOL_HV["gfx11-generic"]
+        )
+        assert (
+            tz.spec_key("gfx12-generic", dtype, True)
+            == f"tailzero_hv,{dtype};arch=gfx12-generic"
+        )
 
 
 @pytest.mark.parametrize("arch", ["gfx942", "gfx90a"])
@@ -534,7 +558,8 @@ def test_a_cdna9_arch_has_companions_but_no_content_of_its_own(
 @pytest.mark.parametrize("arch", ["gfx942", "gfx90a"])
 def test_a_cdna9_object_comes_from_the_kernel_of_its_builder_family(arch: str) -> None:
     """16-bit objects are the gfx11 kernel's (the RDNA family), fp32 the gfx950 kernel's (the CDNA family); the arches that were
-    already built keep their own kernel, and every arch but gfx11-generic is gated."""
+    already built keep their own kernel, and every arch but the generic ones is gated.
+    """
     for dtype in tz.SDPA_BWD_TAILZERO_DTYPES:
         kernel = "gfx950" if dtype == "fp32" else "gfx11-generic"
         assert tz.symbol_of(arch, dtype) == tz.SYMBOL[kernel]
@@ -545,6 +570,7 @@ def test_a_cdna9_object_comes_from_the_kernel_of_its_builder_family(arch: str) -
     assert tz.symbol_of("gfx11-generic", "fp32") == tz.SYMBOL["gfx11-generic"]
     assert tz._gated(arch) and tz._gated("gfx950")
     assert not tz._gated("gfx11-generic")
+    assert not tz._gated("gfx12-generic")
 
 
 def test_a_companion_spec_names_its_role_and_dtype() -> None:

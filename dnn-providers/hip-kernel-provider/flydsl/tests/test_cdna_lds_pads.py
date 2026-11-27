@@ -23,6 +23,8 @@ sys.path.insert(0, str(FLYDSL))
 from generators import _sdpa_cdna_build as build  # noqa: E402
 from generators._instances import CdnaTier, _cdna_instance, instances_for  # noqa: E402
 
+pytestmark = pytest.mark.quick
+
 UNPADDED = {"k_pad": 0, "vt_pad": 0}
 SMALL_LDS_ARCHES = ("gfx942", "gfx90a")
 

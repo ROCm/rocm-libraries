@@ -37,6 +37,10 @@ These are skeleton timings, not the object's: a per-row timing run on the real o
 from dataclasses import dataclass
 
 LADDER = (16, 32, 48, 64, 80, 96, 128, 160, 192, 224, 256)
+GFX12_ARCH = "gfx12-generic"
+GFX12_LADDER = LADDER + (
+    512,
+)  # gfx12-generic only: one wide rung for head dims 257..512
 LDS_CAP_BYTES = 65536
 WARP_SIZE = 32
 ELEM_BYTES = 4
@@ -62,6 +66,8 @@ _NEAREST = {
     256: 256,
 }
 POLICY = {tile: _MEASURED[_NEAREST[tile]] for tile in LADDER}
+# gfx12-generic: the gfx11 rows plus the 512 rung, a copy of the hd 256 row.
+POLICY_GFX12 = {**POLICY, 512: POLICY[256]}
 
 FP_MODE = "noninf"  # `fmha.FastMath` mode: keeps the +inf LSE' of empty rows
 
@@ -121,11 +127,12 @@ def bwd_dq_knobs(arch, dtype, tile, cls, dropout, padded, hdim_qk, hdim_vo, **pi
         why.append(f"arch {arch!r} is not a gfx11/gfx12 target")
     if dtype != "fp32":
         why.append(f"dtype {dtype!r} is not fp32")
-    if tile not in LADDER:
-        why.append(f"tile {tile} is not a rung of {LADDER}")
+    ladder = GFX12_LADDER if arch == GFX12_ARCH else LADDER
+    if tile not in ladder:
+        why.append(f"tile {tile} is not a rung of {ladder}")
     if cls not in ("plain", "causal", "bias"):
         why.append(f"class {cls!r}")
-    base = POLICY.get(tile, POLICY[64])
+    base = (POLICY_GFX12 if arch == GFX12_ARCH else POLICY).get(tile, POLICY[64])
     bm = int(pins.get("block_m", base[0]))
     bn = int(pins.get("block_n", base[1]))
     nw = int(pins.get("num_waves", base[2]))
@@ -162,7 +169,7 @@ def bwd_dq_knobs(arch, dtype, tile, cls, dropout, padded, hdim_qk, hdim_vo, **pi
         dump=bool(pins.get("dump", 0)),
         fp_mode=FP_MODE,
         BLOCK_M=bm,
-        d_chunk=d_chunk(tile) if tile in LADDER else 0,
+        d_chunk=d_chunk(tile) if tile in ladder else 0,
         lds_bytes=lds,
         legal=not why,
         why="; ".join(why),

@@ -54,6 +54,9 @@ PIN_REFERENCE_CSVS = {
     "gfx11-generic": Path(__file__).resolve().parent
     / "data"
     / "sdpa_bwd_gfx11_reference.csv",
+    "gfx12-generic": Path(__file__).resolve().parent
+    / "data"
+    / "sdpa_bwd_gfx12_reference.csv",
     "gfx90a": Path(__file__).resolve().parent
     / "data"
     / "sdpa_bwd_gfx90a_reference.csv",
@@ -363,7 +366,7 @@ def test_split_rows_are_the_reference_rows(op: str) -> None:
 
 
 def _arch_pin_problems(manifest_path: Path, reference: dict[str, str]) -> list[str]:
-    """Where a gfx11-generic, gfx90a or gfx942 manifest differs from its S1 reference: every row and companion is a reference spec,
+    """Where a gfx11-generic, gfx12-generic, gfx90a or gfx942 manifest differs from its S1 reference: every row and companion is a reference spec,
     ships the reference's sha256 (such an object is its pin byte for byte; a combined row is gated against its pin), and no reference
     spec of the op's kinds is missing.
 
@@ -418,6 +421,7 @@ def test_split_rows_are_the_arch_reference_pins(op: str, arch: str) -> None:
     assert not problems, "rows differ from the reference:\n" + "\n".join(problems)
 
 
+@pytest.mark.quick
 def test_an_arch_row_that_is_not_its_pin_is_refused(tmp_path: Path) -> None:
     path = tmp_path / MANIFEST_NAME
     path.write_text(
@@ -440,6 +444,35 @@ def test_an_arch_row_that_is_not_its_pin_is_refused(tmp_path: Path) -> None:
     ]
 
 
+@pytest.mark.parametrize("op", SPLIT_KINDS)
+def test_a_gfx12_row_that_is_not_its_pin_is_refused(op: str, tmp_path: Path) -> None:
+    """The installed gfx12-generic manifest, with one object's sha256 changed and one row added outside the reference, is refused for both."""
+    path = CONTENT / op / "gfx12-generic" / MANIFEST_NAME
+    if not path.is_file():
+        pytest.skip(f"no {op} gfx12-generic content under {CONTENT}")
+    kinds = [SPLIT_KINDS[op]] + (["dbias_reduce,"] if op == "sdpa_bwd_dq" else [])
+    reference = {
+        spec: sha
+        for kind in kinds
+        for spec, sha in _reference_rows(
+            PIN_REFERENCE_CSVS["gfx12-generic"], kind
+        ).items()
+    }
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    assert manifest["instances"], f"{op} gfx12-generic ships no rows"
+    tuned = dict(manifest["instances"][-1], spec="tuned-not-a-pin")
+    pinned = manifest["instances"][0]
+    manifest["instances"][0] = dict(pinned, sha256="0" * 64)
+    manifest["instances"].append(tuned)
+    refused = tmp_path / MANIFEST_NAME
+    refused.write_text(json.dumps(manifest), encoding="utf-8")
+    assert _arch_pin_problems(refused, reference) == [
+        f"{pinned['spec']}: ships {'0' * 64}, the pin is {reference[pinned['spec']]}",
+        "tuned-not-a-pin: not a reference row",
+    ]
+
+
+@pytest.mark.quick
 def test_a_gfx11_tailzero_companion_needs_no_pin_and_a_tuned_row_still_does(
     tmp_path: Path,
 ) -> None:
@@ -473,6 +506,7 @@ def test_a_gfx11_tailzero_companion_needs_no_pin_and_a_tuned_row_still_does(
     ]
 
 
+@pytest.mark.quick
 def test_an_arch_combined_row_needs_its_pin_and_a_green_gate_but_not_the_pin_bytes(
     tmp_path: Path,
 ) -> None:
@@ -550,6 +584,7 @@ def _synthetic_split_op(
 EXCEPTION_SHA = "e" * 64
 
 
+@pytest.mark.quick
 def test_row_check_accepts_built_rows_and_gated_combined_rows(tmp_path: Path) -> None:
     # A plain row ships the build's bytes, so only a combined row's pin facts are checked.
     manifests, reference = _synthetic_split_op(
@@ -558,6 +593,7 @@ def test_row_check_accepts_built_rows_and_gated_combined_rows(tmp_path: Path) ->
     assert _pin_problems(manifests, reference, {}) == []
 
 
+@pytest.mark.quick
 def test_row_check_accepts_a_stored_pinned_exception_by_its_shipped_object(
     tmp_path: Path,
 ) -> None:
@@ -572,6 +608,7 @@ def test_row_check_accepts_a_stored_pinned_exception_by_its_shipped_object(
     assert _pin_problems(manifests, reference, {"dq,bf16,1": EXCEPTION_SHA}) == []
 
 
+@pytest.mark.quick
 @pytest.mark.parametrize(
     "row",
     [
@@ -591,6 +628,7 @@ def test_row_check_refuses_a_stored_pinned_exception_that_is_not_its_pin(
     assert problems and "a pinned exception ships" in problems[0], problems
 
 
+@pytest.mark.quick
 def test_row_check_accepts_a_standalone_pinned_exception_that_ships_its_pin(
     tmp_path: Path,
 ) -> None:
@@ -600,6 +638,7 @@ def test_row_check_accepts_a_standalone_pinned_exception_that_ships_its_pin(
     assert _pin_problems(manifests, reference, {"dq,bf16,1": EXCEPTION_SHA}) == []
 
 
+@pytest.mark.quick
 @pytest.mark.parametrize(
     "row",
     [
@@ -616,6 +655,7 @@ def test_row_check_refuses_a_standalone_pinned_exception_that_is_not_its_pin(
     assert problems and "a standalone pinned exception ships" in problems[0], problems
 
 
+@pytest.mark.quick
 @pytest.mark.parametrize(
     "row, diagnostic",
     [
@@ -631,6 +671,7 @@ def test_row_check_refuses(tmp_path: Path, row: dict, diagnostic: str) -> None:
     assert problems and diagnostic in problems[0], problems
 
 
+@pytest.mark.quick
 def test_row_check_refuses_a_missing_row(tmp_path: Path) -> None:
     manifests, reference = _synthetic_split_op(tmp_path, [{}])
     reference["dq,bf16,99"] = "a" * 64
@@ -639,6 +680,7 @@ def test_row_check_refuses_a_missing_row(tmp_path: Path) -> None:
     ]
 
 
+@pytest.mark.quick
 def test_row_check_refuses_a_row_outside_the_reference(tmp_path: Path) -> None:
     manifests, reference = _synthetic_split_op(tmp_path, [{}, {}])
     del reference["dq,bf16,1"]

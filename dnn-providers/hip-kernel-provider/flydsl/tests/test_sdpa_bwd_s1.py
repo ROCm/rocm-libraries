@@ -26,6 +26,8 @@ FLYDSL = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(FLYDSL / "tools"))
 import sdpa_bwd_s1 as s1  # noqa: E402
 
+pytestmark = pytest.mark.quick
+
 COLUMNS = ("hash", "spec", "status", "attempts", "sha256", *s1.RESOURCE_COLUMNS)
 GIT_ENV = {
     **os.environ,

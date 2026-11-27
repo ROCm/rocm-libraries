@@ -13,11 +13,14 @@ run a kernel and does not validate gfx12 on hardware.
 
 from __future__ import annotations
 
+import dataclasses
 import importlib.util
 import sys
 from pathlib import Path
 
 import pytest
+
+pytestmark = pytest.mark.quick
 
 np = pytest.importorskip("numpy")
 
@@ -417,15 +420,224 @@ def test_mfma16_dq_block_is_waves_times_sixty_four(arch):
     assert g11.block_size == g11.num_waves * 32
 
 
-def test_mfma16_ladders_reach_512_and_wmma_ladders_do_not():
-    for arch in ("gfx90a", "gfx942"):
+def test_mfma16_and_gfx12_ladders_reach_512_and_gfx11_does_not():
+    for arch in ("gfx90a", "gfx942", "gfx12-generic"):
         assert TDQ.bwd_dq_knobs(arch, "f16", 512, "plain", 0, 1, 512, 512).legal
+    for arch in ("gfx90a", "gfx942"):
         assert TDKDV.bwd_dkdv_knobs(arch, "f16", 512, "plain", 0, 1, 512, 512).legal
+    # gfx12 resolves a 512 dK/dV record; the gfx12 row carries `transposed_source=derived`, so the unpinned record is legal (a `tile` transposed source does not fit LDS).
+    default = TDKDV.bwd_dkdv_knobs("gfx12-generic", "f16", 512, "plain", 0, 1, 512, 512)
+    assert default.legal and default.transposed_source == "derived"
+    assert TDKDV.bwd_dkdv_knobs(
+        "gfx12-generic",
+        "f16",
+        512,
+        "plain",
+        0,
+        1,
+        512,
+        512,
+        transposed_source="derived",
+    ).legal
     assert not TDQ.bwd_dq_knobs(
         "gfx11-generic", "f16", 512, "plain", 0, 1, 512, 512
     ).legal
     with pytest.raises(ValueError):
-        TDKDV.bwd_dkdv_knobs("gfx12-generic", "f16", 512, "plain", 0, 1, 512, 512)
+        TDKDV.bwd_dkdv_knobs("gfx11-generic", "f16", 512, "plain", 0, 1, 512, 512)
+
+
+# The resolved wide-rung schedules of the shipped rows (dK/dV: split, shards, waves, block_q after the LDS walk-down; dQ: shards, waves, block_n).
+B1_WIDE_DKDV = {
+    320: (True, 1, 16, 16),
+    384: (True, 1, 16, 16),
+    448: (True, 2, 24, 16),
+    512: (True, 2, 8, 16),
+}
+B1_WIDE_DQ = {320: (4, 8, 16), 384: (4, 8, 16), 448: (4, 8, 16), 512: (4, 12, 16)}
+
+
+def test_the_wide_rungs_are_legal_on_gfx12_only_and_the_other_ladders_do_not_move():
+    wide = (320, 384, 448, 512)
+    assert (
+        TDKDV.LADDER == TDQ.LADDER == (16, 32, 48, 64, 80, 96, 128, 160, 192, 224, 256)
+    )
+    assert TDKDV.GFX12_LADDER == TDQ.GFX12_LADDER == TDKDV.LADDER + wide
+    # CDNA9 dQ keeps its literal ladder: it does not follow the extended generic one.
+    assert TDQ.MFMA16_LADDER == (16, 32, 48, 64, 80, 96, 128, 160, 192, 224, 256, 512)
+    for tile in wide:
+        k = TDKDV.bwd_dkdv_knobs(
+            "gfx12-generic",
+            "f16",
+            tile,
+            "plain",
+            0,
+            1,
+            tile,
+            tile,
+            transposed_source="derived",
+        )
+        assert k.legal, (tile, k.illegal_reason)
+        assert (k.split_head_dim, k.contraction_shards, k.num_waves, k.block_q) == (
+            B1_WIDE_DKDV[tile]
+        )
+        q = TDQ.bwd_dq_knobs("gfx12-generic", "f16", tile, "plain", 0, 1, tile, tile)
+        assert q.legal, (tile, q.why)
+        assert (q.contraction_shards, q.num_waves, q.block_n) == B1_WIDE_DQ[tile]
+        with pytest.raises(ValueError):
+            TDKDV.bwd_dkdv_knobs(
+                "gfx11-generic", "f16", tile, "plain", 0, 1, tile, tile
+            )
+        assert not TDQ.bwd_dq_knobs(
+            "gfx11-generic", "f16", tile, "plain", 0, 1, tile, tile
+        ).legal
+    # The pinned wide dK/dV keys spell `transposed_source=derived` (the `tile` copy of Q^T / dO^T does not fit 64 KiB at 512); a dQ 512 key may still pin 8 shards.
+    d512 = TDKDV.bwd_dkdv_knobs(
+        "gfx12-generic",
+        "f16",
+        512,
+        "plain",
+        0,
+        1,
+        512,
+        512,
+        transposed_source="derived",
+    )
+    assert d512.legal and d512.lds_bytes <= TDKDV.LDS_LIMIT
+    # the row is 4 shards x 12 waves; an 8-shard pin needs a wave count of its own
+    q512 = TDQ.bwd_dq_knobs("gfx12-generic", "f16", 512, "plain", 0, 1, 512, 512)
+    assert q512.legal and q512.slice == 128 and q512.num_waves == 12
+    q512_8 = TDQ.bwd_dq_knobs(
+        "gfx12-generic",
+        "f16",
+        512,
+        "plain",
+        0,
+        1,
+        512,
+        512,
+        contraction_shards=8,
+        num_waves=8,
+    )
+    assert q512_8.legal and q512_8.slice == 64 and q512_8.num_waves % 8 == 0
+
+
+@pytest.mark.parametrize("tile", (48, 64, 80, 96, 128, 256))
+def test_the_gfx12_exact_rungs_resolve_the_schedule_of_their_padded_twin(tile):
+    """An exact key (``padded`` 0) spells nothing beyond its padded twin, so both resolve the same dK/dV and dQ schedule at the six rungs."""
+    for cls in ("plain", "causal", "bias"):
+        exact_k = TDKDV.bwd_dkdv_knobs(
+            "gfx12-generic", "f16", tile, cls, 0, 0, tile, tile
+        )
+        padded_k = TDKDV.bwd_dkdv_knobs(
+            "gfx12-generic", "f16", tile, cls, 0, 1, tile, tile
+        )
+        exact_q = TDQ.bwd_dq_knobs("gfx12-generic", "f16", tile, cls, 0, 0, tile, tile)
+        padded_q = TDQ.bwd_dq_knobs("gfx12-generic", "f16", tile, cls, 0, 1, tile, tile)
+        assert exact_k.legal and exact_q.legal, (tile, cls, exact_q.why)
+        assert not exact_k.padded_head and padded_k.padded_head
+        assert exact_k == dataclasses.replace(padded_k, padded_head=False)
+        assert exact_q == padded_q
+
+
+@pytest.mark.parametrize("tile", (48, 64, 80, 96, 128, 256))
+def test_v8_dataflow_equals_dense_at_the_exact_rungs(tile):
+    """The V8 (gfx12 WMMA) dK/dV and dQ dataflow with a head dim equal to its rung (no padded tail), at the six exact rungs, against dense numpy."""
+    test_dkdv_q_rows_dataflow_equals_dense(L.ABI_V8, tile, 16)
+    test_dq_kv_rows_dataflow_equals_dense(L.ABI_V8, tile, 16)
+
+
+def _b1_gfx12_combos():
+    """The distinct (kernel, per-wave head-dim width, block) combinations the shipped gfx12 rows resolve to, exact and padded keys alike.
+
+    dK/dV: the columns one wave holds are ``hd / contraction_shards`` when the head dim is split (team of ``2 * C`` waves), else ``hd``;
+    dQ: ``slice = tile / contraction_shards``.
+    """
+    dk, dq = set(), set()
+    for tile in TDKDV.GFX12_LADDER:
+        for padded in (0, 1):
+            for cls in ("plain", "causal", "bias"):
+                k = TDKDV.bwd_dkdv_knobs(
+                    "gfx12-generic", "f16", tile, cls, 0, padded, tile, tile
+                )
+                q = TDQ.bwd_dq_knobs(
+                    "gfx12-generic", "f16", tile, cls, 0, padded, tile, tile
+                )
+                assert k.legal and q.legal, (tile, cls, padded)
+                dk.add((tile // k.contraction_shards, k.block_q))
+                dq.add((q.slice, q.block_n))
+    return sorted(dk), sorted(dq)
+
+
+_B1_DKDV_COMBOS, _B1_DQ_COMBOS = _b1_gfx12_combos()
+
+
+@pytest.mark.parametrize("width,block_q", _B1_DKDV_COMBOS)
+def test_v8_dkdv_dataflow_equals_dense_at_every_gfx12_policy_row(width, block_q):
+    """The V8 dK/dV dataflow at each (per-wave column width, block_q) the shipped gfx12 rows resolve to (unsplit kv128/256, split C1/C2, the wide rungs)."""
+    test_dkdv_q_rows_dataflow_equals_dense(L.ABI_V8, width, block_q)
+
+
+@pytest.mark.parametrize("width,block_n", _B1_DQ_COMBOS)
+def test_v8_dq_dataflow_equals_dense_at_every_gfx12_policy_row(width, block_n):
+    """The V8 dQ dataflow at each (slice width, block_n) the shipped gfx12 rows resolve to (C1 with block_n 32 at hd >= 128, C2/C4 slices, the 12-wave 512 row)."""
+    test_dq_kv_rows_dataflow_equals_dense(L.ABI_V8, width, block_n)
+
+
+def test_the_dq_scheduler_field_is_optional_validated_and_reaches_the_knob_record(
+    monkeypatch,
+):
+    """The fourth field of a gfx12 dQ policy row is the LLVM scheduler of the build. Absent it is empty; an unknown value raises; the
+    dK/dV values (and ``max-memory-clause``) are accepted, ``default`` reads as unset.
+    """
+    assert TDQ.SCHED_STRATEGIES == ("max-memory-clause", *TDKDV.SCHED_STRATEGIES)
+    # only the dQ 384 row carries the scheduler
+    assert {t for t, row in TDQ.POLICY_GFX12.items() if len(row) > 3} == {384}
+    assert TDQ.POLICY_GFX12[384][3] == "max-memory-clause"
+    for arch in ("gfx11-generic", "gfx12-generic", "gfx942"):
+        assert (
+            TDQ.bwd_dq_knobs(arch, "f16", 128, "plain", 0, 1, 128, 128).sched_strategy
+            == ""
+        )
+    for value in TDQ.SCHED_STRATEGIES:
+        monkeypatch.setitem(TDQ.POLICY_GFX12, 512, (4, 8, 16, value))
+        k = TDQ.bwd_dq_knobs("gfx12-generic", "f16", 512, "plain", 0, 1, 512, 512)
+        assert k.legal and k.sched_strategy == ("" if value == "default" else value)
+        # the other rungs and arches do not carry it; the 384 row ships `max-memory-clause`
+        assert (
+            TDQ.bwd_dq_knobs(
+                "gfx12-generic", "f16", 384, "plain", 0, 1, 384, 384
+            ).sched_strategy
+            == "max-memory-clause"
+        )
+        assert (
+            TDQ.bwd_dq_knobs(
+                "gfx12-generic", "f16", 320, "plain", 0, 1, 320, 320
+            ).sched_strategy
+            == ""
+        )
+        assert (
+            TDQ.bwd_dq_knobs(
+                "gfx11-generic", "f16", 128, "plain", 0, 1, 128, 128
+            ).sched_strategy
+            == ""
+        )
+    monkeypatch.setitem(TDQ.POLICY_GFX12, 512, (4, 8, 16, "max-memory-clauze"))
+    with pytest.raises(ValueError, match="sched_strategy"):
+        TDQ.bwd_dq_knobs("gfx12-generic", "f16", 512, "plain", 0, 1, 512, 512)
+    with pytest.raises(
+        TypeError
+    ):  # a pin spelling is not offered: the field lives in the policy row
+        TDQ.bwd_dq_knobs(
+            "gfx12-generic",
+            "f16",
+            512,
+            "plain",
+            0,
+            1,
+            512,
+            512,
+            sched_strategy="max-ilp",
+        )
 
 
 def test_mfma16_hd512_dkdv_default_fits_64k_and_the_transposed_tile_copy_does_not():
@@ -517,3 +729,147 @@ def test_fp32_exact_head_is_refused_on_gfx90a_only(kind):
         )
     padded = meta_cls(num_heads=1, head_dim=100)
     assert knobs("gfx90a", block_dmodel=128).resolve(padded).padded_head
+
+
+# ---- LSE / Delta, mask, bias and dB index maps: the layer's (q, kv) of each accumulator element against the instruction model ------------------------------
+ORIENTS = (L.Q_ROWS, L.KV_ROWS)
+
+
+def _model_q_kv(w, orient, r, q0, kv0):
+    """(q, kv) of element `r` of every lane from the instruction model alone (`_c_pos`): rows are q on `Q_ROWS`, kv on `KV_ROWS`."""
+    row = np.array([_c_pos(w.abi, l, r)[0] for l in range(w.n)])
+    col = np.array([_c_pos(w.abi, l, r)[1] for l in range(w.n)])
+    return (q0 + row, kv0 + col) if orient == L.Q_ROWS else (q0 + col, kv0 + row)
+
+
+def _tile_of(w, orient, q0, kv0, per_element):
+    """The 16 x 16 tile (rows are the orientation's rows) of `per_element(r, q, kv)` evaluated for every lane and element at the layer's indices,
+    stored at the instruction model's accumulator position; every position must be written once.
+    """
+    tile = np.full((16, 16), np.nan)
+    for r in range(w.acc):
+        q, kv = L.acc_q_kv(orient, r, w.lane, q0, kv0, w.abi)
+        vals = per_element(r, q, kv)
+        for l in range(w.n):
+            row, col = _c_pos(w.abi, l, r)
+            assert np.isnan(tile[row, col]) or tile[row, col] == vals[l]
+            tile[row, col] = vals[l]
+    assert not np.isnan(tile).any()
+    return tile
+
+
+@pytest.mark.parametrize("abi", ABIS)
+@pytest.mark.parametrize("orient", ORIENTS)
+def test_lse_and_delta_rows_are_the_q_index_of_the_instruction_model(abi, orient):
+    """LSE and Delta are read at `acc_q`: per element on `Q_ROWS` (the accumulator row), one per lane on `KV_ROWS` (its column); `acc_kv` is the other index."""
+    w = Wave(abi)
+    for q0, kv0 in ((0, 0), (16, 48), (96, 32)):
+        for r in range(w.acc):
+            q, kv = _model_q_kv(w, orient, r, q0, kv0)
+            assert np.array_equal(L.acc_q(orient, r, w.lane, q0, abi), q)
+            assert np.array_equal(L.acc_kv(orient, r, w.lane, kv0, abi), kv)
+            lq, lkv = L.acc_q_kv(orient, r, w.lane, q0, kv0, abi)
+            assert np.array_equal(lq, q) and np.array_equal(lkv, kv)
+    # With `lse` and `delta` vectors over q the per-element read gives the dense `lse[q] x ones` and `delta[q] x ones` tiles.
+    lse = rng.standard_normal(128)
+    delta = rng.standard_normal(128)
+    for read in (lse, delta):
+        got = _tile_of(w, orient, 16, 48, lambda r, q, kv: read[q])
+        qs = (
+            (16 + np.arange(16)[:, None] + 0 * np.arange(16)[None, :])
+            if orient == L.Q_ROWS
+            else (16 + 0 * np.arange(16)[:, None] + np.arange(16)[None, :])
+        )
+        assert np.array_equal(got, read[qs])
+
+
+def _visible_reference(kind, q, kv, sq, sk, wl, wr):
+    off = sk - sq if kind in ("br", "winbr") else 0
+    if kind in ("tl", "br"):
+        return (kv <= q + off) & (kv < sk)
+    return (q + off - wl <= kv) & (kv <= q + off + wr) & (kv < sk)
+
+
+@pytest.mark.parametrize("abi", ABIS)
+@pytest.mark.parametrize("orient", ORIENTS)
+@pytest.mark.parametrize(
+    "kind,wl,wr", (("tl", 0, 0), ("br", 0, 0), ("win", 3, 5), ("winbr", 4, 2))
+)
+@pytest.mark.parametrize("sq,sk", ((70, 90), (90, 70), (48, 48)))
+def test_causal_and_window_visibility_at_every_accumulator_element(
+    abi, orient, kind, wl, wr, sq, sk
+):
+    """The per-row `(first, span)` window of `kv_window` evaluated at the layer's (q, kv) of each element equals the dense causal / sliding-window mask."""
+    w = Wave(abi)
+    for q0 in range(0, sq + 16, 16):
+        for kv0 in range(0, sk + 16, 16):
+
+            def visible(r, q, kv):
+                first, span = L.kv_window(
+                    q, sq, sk, kind, wl, wr, np.maximum, np.minimum
+                )
+                return L.kv_visible(kv, first, span)
+
+            got = _tile_of(w, orient, q0, kv0, visible)
+            rows = np.arange(16)[:, None] + 0 * np.arange(16)[None, :]
+            cols = np.arange(16)[None, :] + 0 * np.arange(16)[:, None]
+            q, kv = (
+                (q0 + rows, kv0 + cols)
+                if orient == L.Q_ROWS
+                else (q0 + cols, kv0 + rows)
+            )
+            assert np.array_equal(
+                got.astype(bool), _visible_reference(kind, q, kv, sq, sk, wl, wr)
+            )
+
+
+@pytest.mark.parametrize("abi", ABIS)
+@pytest.mark.parametrize("orient", ORIENTS)
+@pytest.mark.parametrize("row_broadcast", (False, True))
+def test_bias_read_and_db_write_offsets_cover_the_dense_tile(
+    abi, orient, row_broadcast
+):
+    """The bias entry read by each element is the dense bias at its (q, kv); a full-shape dB written at `bias_offset` lands every dS element at its
+    own (q, kv) exactly once (a row-broadcast bias has q stride 0 and returns no dB)."""
+    w = Wave(abi)
+    sq, sk, pitch = 64, 72, 80
+    bias = rng.standard_normal((sq, sk))
+    plane = np.zeros(sq * pitch)
+    for i in range(sq):
+        plane[i * pitch : i * pitch + sk] = bias[i]
+    stride_q = 0 if row_broadcast else pitch
+    for q0, kv0 in ((0, 0), (16, 48), (48, 16)):
+        read = _tile_of(
+            w,
+            orient,
+            q0,
+            kv0,
+            lambda r, q, kv: plane[L.bias_offset(q, kv, stride_q, 1)],
+        )
+        for l in range(w.n):
+            for r in range(w.acc):
+                row, col = _c_pos(abi, l, r)
+                q, kv = (
+                    (q0 + row, kv0 + col)
+                    if orient == L.Q_ROWS
+                    else (q0 + col, kv0 + row)
+                )
+                assert read[row, col] == bias[0 if row_broadcast else q, kv]
+        if row_broadcast:
+            continue
+        ds = rng.standard_normal((16, 16))  # dS in the orientation's tile coordinates
+        db = np.full(sq * pitch, np.nan)
+        for r in range(w.acc):
+            q, kv = L.acc_q_kv(orient, r, w.lane, q0, kv0, abi)
+            for l in range(w.n):
+                row, col = _c_pos(abi, l, r)
+                off = int(L.bias_offset(q[l], kv[l], pitch, 1))
+                assert np.isnan(db[off]), "two elements write one dB entry"
+                db[off] = ds[row, col]
+        assert int(np.isfinite(db).sum()) == 256
+        for q in range(16):
+            for kv in range(16):
+                qq, kk = (
+                    (q0 + q, kv0 + kv) if orient == L.Q_ROWS else (q0 + kv, kv0 + q)
+                )
+                assert db[qq * pitch + kk] == ds[q, kv]

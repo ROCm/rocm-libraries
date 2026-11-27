@@ -307,6 +307,8 @@ def build_fmha_bwd_dq_gfx11_module_primary(meta, knobs, runtime_axes=()):
         _cache_tag += ("u2dq",)
     if DROPOUT:
         _cache_tag += ("dropout", PHILOX.width)
+    if knobs.sched_strategy:
+        _cache_tag += ("sched", knobs.sched_strategy)
     elem_numeric_cls = common_kernels.dtype_to_elem_type(dtype_str)
 
     @fx.struct
@@ -2104,9 +2106,20 @@ def build_fmha_bwd_dq_gfx11_module_primary(meta, knobs, runtime_axes=()):
 
         _entry = launch_fmha_bwd_dq_gfx11_dump
 
+    _hints = _COMPILE_HINTS
+    if knobs.sched_strategy:
+        # FlyDSL 0.3.4 drops the `amdgpu-sched-strategy` function attribute; the LLVM option is what reaches the backend.
+        _hints = {
+            **_COMPILE_HINTS,
+            "llvm_options": {
+                **_COMPILE_HINTS["llvm_options"],
+                "amdgpu-sched-strategy": knobs.sched_strategy,
+            },
+        }
+
     def _launch(*packed):
         """`packed` = the launcher's arguments in wire order (the harness's `gate2.arg_values` order), stream last."""
-        with CompilationContext.compile_hints(_COMPILE_HINTS):
+        with CompilationContext.compile_hints(_hints):
             return _entry(*packed)
 
     _launch.knobs = knobs

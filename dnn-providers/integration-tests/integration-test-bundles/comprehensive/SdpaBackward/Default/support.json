@@ -1323,6 +1323,12 @@
           "gfx1151": [
             "windows"
           ],
+          "gfx1200": [
+            "linux"
+          ],
+          "gfx1201": [
+            "linux"
+          ],
           "gfx90a": [
             "linux"
           ],
@@ -1341,6 +1347,12 @@
           "m25n_b1h8k1v1_128x128_d512_bfp16_cm_tlw32rinf_bshd_tolu"
         ],
         "support": {
+          "gfx1200": [
+            "linux"
+          ],
+          "gfx1201": [
+            "linux"
+          ],
           "gfx90a": [
             "linux"
           ],
@@ -2067,6 +2079,12 @@
           "gfx1151": [
             "windows"
           ],
+          "gfx1200": [
+            "linux"
+          ],
+          "gfx1201": [
+            "linux"
+          ],
           "gfx942": [
             "linux"
           ],
@@ -2087,6 +2105,12 @@
           "hf226t4_b1h2k2v2_1153x1153_d512_bfp16_none_bshd_toldl"
         ],
         "support": {
+          "gfx1200": [
+            "linux"
+          ],
+          "gfx1201": [
+            "linux"
+          ],
           "gfx942": [
             "linux"
           ],

@@ -186,7 +186,7 @@ if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
                 HIPKERNELPROVIDER_FLYDSL_ARCHS_${_flydsl_op_upper}="${_flydsl_archs}")
         endforeach()
     endforeach()
-    # The gfx11, gfx90a and gfx942 verdict tables and the manifests whose hashes they name, staged beside the
+    # The gfx11, gfx12, gfx90a and gfx942 verdict tables and the manifests whose hashes they name, staged beside the
     # descriptor trees so a relocated or staged build tree carries them: the split SDPA
     # backward suites (census and seam) resolve them from the executable's own directory like
     # the descriptor roots. configure_file re-copies when a source changes.
@@ -196,7 +196,7 @@ if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
     configure_file("${_hkp_provider_root}/flydsl/tests/data/sdpa_bwd_probe_graphs.csv"
                    "${_hkp_bwd_data}/sdpa_bwd_probe_graphs.csv" COPYONLY)
     # Each entry is <verdict table arch>:<content directory the table's hashes name>.
-    foreach(_hkp_bwd_table gfx11:gfx11-generic gfx90a:gfx90a gfx942:gfx942)
+    foreach(_hkp_bwd_table gfx11:gfx11-generic gfx12:gfx12-generic gfx90a:gfx90a gfx942:gfx942)
         string(REPLACE ":" ";" _hkp_bwd_table_parts "${_hkp_bwd_table}")
         list(GET _hkp_bwd_table_parts 0 _hkp_bwd_table_arch)
         list(GET _hkp_bwd_table_parts 1 _hkp_bwd_table_content)

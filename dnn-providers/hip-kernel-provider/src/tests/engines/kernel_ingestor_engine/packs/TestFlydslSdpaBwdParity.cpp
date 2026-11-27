@@ -16,26 +16,31 @@
 
 /**
  * @file TestFlydslSdpaBwdParity.cpp
- * @brief The cases of FlydslSdpaBwdParityCases.hpp, launched on a gfx11, a gfx90a or a gfx942 device.
+ * @brief The cases of FlydslSdpaBwdParityCases.hpp, launched on a gfx11, a gfx12, a gfx90a or a
+ *        gfx942 device.
  *
  * A served case is launched on the device and every gradient is compared with the harness's
  * double-precision reference. It covers bottom-right causal cross-attention in both length
  * orders, windows narrower than a tile, left-only, to the right of the diagonal and wider than
  * the keys, V narrower and wider than Q/K, rows no key reaches (dQ is zero, nothing is NaN),
  * biases that mask whole rows at the lowest finite value or at -inf and leading keys at -inf,
- * head dim 256 and the generic head dims across the gfx11 rung boundaries (gfx90a and gfx942 add 512), per-head and
- * query-dtype biases, grouped and multi-query attention, head-major, sequence-major and packed
- * QKV layouts with V, dO and the log-sum-exp through layouts of their own, and the scale as a
+ * head dim 256 and the generic head dims across the gfx11 rung boundaries (gfx90a and gfx942 add
+ * 512; gfx12 adds the wide rungs, below), per-head and query-dtype biases, grouped and
+ * multi-query attention, head-major, sequence-major and packed QKV layouts with V, dO and the
+ * log-sum-exp through layouts of their own, and the scale as a
  * runtime tensor or as the default 1. A declined case is checked to be absent from the
  * manager's applicable engines and refused when the engine is selected by id.
+ *
+ * On gfx12 the head dims past 256 run as a suite of their own (gfx12WideParityCases()): 300 to
+ * 512 in 16-bit and fp32 are served on the wide rungs, and a head dim past 512 is declined (DT-4).
  *
  * Forward features the backward contract does not have -- decode, sinks, the LSE output, MLA
  * absorption -- have no case here.
  *
  * The host half, which needs no device, is TestFlydslSdpaBwdParityGraphs.cpp: a census suite
- * over the installed gfx11 shard. This suite skips on any device that is not a gfx11, a gfx90a
- * or a gfx942 one, the architectures the verdict tables
- * (flydsl/tests/data/sdpa_bwd_{gfx11,gfx90a,gfx942}_verdicts.csv) describe.
+ * over the installed shard of the entry's architecture. This suite skips on any device that is
+ * not a gfx11, a gfx12, a gfx90a or a gfx942 one, the architectures the verdict tables
+ * (flydsl/tests/data/sdpa_bwd_{gfx11,gfx12,gfx90a,gfx942}_verdicts.csv) describe.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -50,7 +55,8 @@ using namespace hip_kernel_provider::kernel_ingestor_engine::testing::bwd_parity
 // device: the cases, launched
 // ---------------------------------------------------------------------------
 
-/// The split engine on a gfx11, a gfx90a or a gfx942 device: the architectures the verdict tables describe.
+/// The split engine on a gfx11, a gfx12, a gfx90a or a gfx942 device: the architectures the
+/// verdict tables describe.
 class TestGpuFlydslSdpaBwdSplitParity : public FlydslSdpaBwdDevice,
                                         public ::testing::WithParamInterface<size_t>
 {
@@ -68,11 +74,12 @@ protected:
             return;
         }
         const auto arch = packedArchDeviceProperties().gcnArchName;
-        if(arch.rfind("gfx11", 0) != 0 && arch.rfind("gfx90a", 0) != 0
-           && arch.rfind("gfx942", 0) != 0)
+        if(arch.rfind("gfx11", 0) != 0 && arch.rfind("gfx12", 0) != 0
+           && arch.rfind("gfx90a", 0) != 0 && arch.rfind("gfx942", 0) != 0)
         {
-            GTEST_SKIP() << "the parity cases follow the gfx11, gfx90a and gfx942 verdict tables; "
-                         << arch << " is none of them";
+            GTEST_SKIP()
+                << "the parity cases follow the gfx11, gfx12, gfx90a and gfx942 verdict tables; "
+                << arch << " is none of them";
         }
     }
 };
@@ -89,6 +96,49 @@ TEST_P(TestGpuFlydslSdpaBwdSplitParity, MatchesTheReferenceOrIsDeclined)
 }
 
 INSTANTIATE_TEST_SUITE_P(Standard, TestGpuFlydslSdpaBwdSplitParity, parityIndices(), parityName);
+
+/// The split engine on a gfx12 device, on the head dims past 256 the gfx12 catalog has the wide
+/// rungs for (gfx12WideParityCases()).
+class TestGpuFlydslSdpaBwdSplitGfx12WideParity : public FlydslSdpaBwdDevice,
+                                                 public ::testing::WithParamInterface<size_t>
+{
+protected:
+    TestGpuFlydslSdpaBwdSplitGfx12WideParity()
+        : FlydslSdpaBwdDevice(SPLIT_OPS)
+    {
+    }
+
+    void SetUp() override
+    {
+        FlydslSdpaBwdDevice::SetUp();
+        if(IsSkipped())
+        {
+            return;
+        }
+        const auto arch = packedArchDeviceProperties().gcnArchName;
+        if(arch.rfind("gfx12", 0) != 0)
+        {
+            GTEST_SKIP() << "the wide head dim cases follow the gfx12 catalog; " << arch
+                         << " is not a gfx12 device";
+        }
+    }
+};
+
+TEST_P(TestGpuFlydslSdpaBwdSplitGfx12WideParity, MatchesTheReferenceOrIsDeclined)
+{
+    const auto& parity = gfx12WideParityCases()[GetParam()];
+    if(parity.run.has_value())
+    {
+        expectCase(SPLIT_ENGINE, *parity.run);
+        return;
+    }
+    expectDeclined(SPLIT_ENGINE, parity.spec);
+}
+
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         TestGpuFlydslSdpaBwdSplitGfx12WideParity,
+                         gfx12WideParityIndices(),
+                         gfx12WideParityName);
 
 } // namespace
 } // namespace hip_kernel_provider::kernel_ingestor_engine

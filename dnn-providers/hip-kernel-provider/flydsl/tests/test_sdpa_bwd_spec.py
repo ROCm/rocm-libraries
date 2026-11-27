@@ -30,6 +30,8 @@ from generators._sdpa_bwd_spec import (  # noqa: E402
     to_spec,
 )
 
+pytestmark = pytest.mark.quick
+
 SWEEP_HASHES = {
     "dkdv,fp32,32,plain,bk,0,0,tail,0,1;block_q=32": "ccc139e916be",
     "dq,fp32,32,bias,bk,0,0,tail,0,1;block_m=32;block_n=16": "f2a3c5f87675",

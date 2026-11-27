@@ -119,9 +119,10 @@ std::vector<ClaimedEngine> claimedEngines()
 #ifdef HKP_DETERMINISM_FLYDSL_BWD_SPLIT
     // _instances.py (SDPA_BWD_TARGET = "gfx950", reused for fp32 on gfx942/gfx90a;
     // SDPA_BWD_GFX11_TARGET = "gfx11-generic", run token gfx1100;
+    // SDPA_BWD_GFX12_TARGET = "gfx12-generic", run token gfx1201;
     // SDPA_BWD_CDNA9_TARGETS = ("gfx942", "gfx90a")).
     engines.push_back(
-        {"hipkernel:flydsl_sdpa_bwd_split", {"gfx950", "gfx942", "gfx90a", "gfx1100"}});
+        {"hipkernel:flydsl_sdpa_bwd_split", {"gfx950", "gfx942", "gfx90a", "gfx1100", "gfx1201"}});
 #endif
     return engines;
 }

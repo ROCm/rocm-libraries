@@ -26,6 +26,8 @@ import sdpa_bwd_gate  # noqa: E402
 from generators._sdpa_bwd_spec import Spec  # noqa: E402
 from test_tools_scan import _mir  # noqa: E402
 
+pytestmark = pytest.mark.quick
+
 MERGED = "fmha_bwd_merged_gfx950_kernel_0"
 REDUCE = "fmha_bwd_dbias_reduce_gfx950_kernel_1"
 TEXT_ADDR = 0x2100

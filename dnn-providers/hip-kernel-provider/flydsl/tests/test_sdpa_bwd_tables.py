@@ -296,61 +296,93 @@ def test_the_engines_pack_bound_covers_every_packed_row(tables, monkeypatch) -> 
 
 
 GFX11 = "gfx11-generic"
+GFX12 = "gfx12-generic"
+GENERIC_ARCHES = {
+    GFX11: ("sdpa_bwd_gfx11_reference.csv", [33, 238, 230, 3], 82),
+    GFX12: ("sdpa_bwd_gfx12_reference.csv", [42, 328, 296, 3], 104),
+}
 GFX11_SPLIT_OPS = [f"sdpa_bwd_{k}" for k in ("prep", "dkdv", "dq")]
+generic_arches = pytest.mark.parametrize("arch", GENERIC_ARCHES)
 
 
-def test_gfx11_table_columns_agree_with_the_spec_grammar() -> None:
+def _generic_ladders(arch: str) -> dict[str, tuple[int, ...]]:
+    from generators._sdpa_bwd_spec import (  # noqa: PLC0415
+        FP32_LADDER,
+        GENERIC_LADDER,
+        GFX12_FP32_LADDER,
+        GFX12_LADDER,
+    )
+
+    wide, fp32 = (
+        (GFX12_LADDER, GFX12_FP32_LADDER)
+        if arch == GFX12
+        else (GENERIC_LADDER, FP32_LADDER)
+    )
+    return {"f16": wide, "bf16": wide, "fp32": fp32 if arch == GFX12 else wide}
+
+
+@generic_arches
+def test_generic_table_columns_agree_with_the_spec_grammar(arch: str) -> None:
     from generators._sdpa_bwd_spec import GENERIC_TABLE_KNOBS  # noqa: PLC0415
 
     assert _instances.SDPA_BWD_GFX11_KNOBS == GENERIC_TABLE_KNOBS
+    # A table row never has more columns than the grammar's.
+    tables = getattr(
+        _instances,
+        "SDPA_BWD_GFX12_TABLES" if arch == GFX12 else "SDPA_BWD_GFX11_TABLES",
+    )
+    for kind, rows in tables.items():
+        assert rows, kind
+        longest = 10 + len(GENERIC_TABLE_KNOBS[kind])
+        assert all(len(row) <= longest for row in rows), kind
 
 
-def test_gfx11_rows_are_the_s1_reference_set() -> None:
-    """Every table row's Spec is a pin of ``sdpa_bwd_gfx11_reference.csv`` and none is lost; the dBias reduce rows are the dQ companions."""
+@generic_arches
+def test_generic_rows_are_the_s1_reference_set(arch: str) -> None:
+    """Every table row's Spec is a pin of the arch's reference CSV and none is lost; the dBias reduce rows are the dQ companions."""
     from generators import _sdpa_bwd_rdna_build as build  # noqa: PLC0415
 
-    with (DATA / "sdpa_bwd_gfx11_reference.csv").open(
-        newline="", encoding="utf-8"
-    ) as fh:
+    reference_csv, counts, _ = GENERIC_ARCHES[arch]
+    with (DATA / reference_csv).open(newline="", encoding="utf-8") as fh:
         reference = {row["hash"]: row["spec"] for row in csv.DictReader(fh)}
     built = {}
     for kind in ("prep", "dkdv", "dq", "dbias_reduce"):
-        for spec in build.specs_for(kind, GFX11):
+        for spec in build.specs_for(kind, arch):
             assert spec.hash() not in built
             built[spec.hash()] = spec.key()
     assert built == reference
     assert [
-        len(build.specs_for(k, GFX11)) for k in ("prep", "dkdv", "dq", "dbias_reduce")
-    ] == [
-        33,
-        238,
-        230,
-        3,
-    ]
+        len(build.specs_for(k, arch)) for k in ("prep", "dkdv", "dq", "dbias_reduce")
+    ] == counts
 
 
-def test_gfx11_rows_have_the_field_set_of_the_gfx950_rows_of_their_op() -> None:
+@generic_arches
+def test_generic_rows_have_the_field_set_of_the_gfx950_rows_of_their_op(
+    arch: str,
+) -> None:
     """The KMD of an op is one for every arch: same fields, same order."""
     for op in GFX11_SPLIT_OPS:
         gfx950 = list(_instances.instances_for(op, TARGET)[0].knobs)
-        for instance in _instances.instances_for(op, GFX11):
+        for instance in _instances.instances_for(op, arch):
             assert list(instance.knobs) == gfx950, instance.name
 
 
-def test_gfx11_row_values_follow_the_kmd_contract() -> None:
-    from generators._sdpa_bwd_spec import GENERIC_LADDER  # noqa: PLC0415
-
-    for instance in _instances.instances_for("sdpa_bwd_prep", GFX11):
+@generic_arches
+def test_generic_row_values_follow_the_kmd_contract(arch: str) -> None:
+    ladders = _generic_ladders(arch)
+    for instance in _instances.instances_for("sdpa_bwd_prep", arch):
         k = instance.knobs
-        below = max([r for r in (0, *GENERIC_LADDER) if r < k["head_dim"]])
+        below = max([r for r in (0, *ladders[instance.dtype]) if r < k["head_dim"]])
         assert (k["sink"], k["padded"], k["dform"], k["floor"]) == (
             0,
             1,
             "bk",
             str(below),
         )
-    for instance in _instances.instances_for("sdpa_bwd_dkdv", GFX11):
+    for instance in _instances.instances_for("sdpa_bwd_dkdv", arch):
         k = instance.knobs
+        # a padded row's floor is `g1`; a gfx12 exact twin (`padded` 0) has the `tail` floor
+        floor = "tail" if arch == GFX12 and k["padded"] == 0 else "g1"
         assert (
             k["mfma_rows"],
             k["dkv_shards"],
@@ -358,9 +390,9 @@ def test_gfx11_row_values_follow_the_kmd_contract() -> None:
             k["num_stream_buffers"],
             k["gqa_pack"],
             k["floor"],
-        ) == (-1, -1, -1, -1, 0, "g1")
-    rows = _instances.instances_for("sdpa_bwd_dq", GFX11)
-    assert sum(bool(i.knobs["has_bias"]) for i in rows) == 82
+        ) == (-1, -1, -1, -1, 0, floor)
+    rows = _instances.instances_for("sdpa_bwd_dq", arch)
+    assert sum(bool(i.knobs["has_bias"]) for i in rows) == GENERIC_ARCHES[arch][2]
     for instance in rows:
         k = instance.knobs
         assert k["mfma_rows"] == -1 and k["head_dim_v"] == k["head_dim"]
@@ -379,6 +411,29 @@ def test_gfx11_row_values_follow_the_kmd_contract() -> None:
                 "auto",
                 "",
             )
+
+
+def test_gfx12_rows_are_the_gfx11_rows_plus_the_wide_rungs() -> None:
+    """gfx12-generic's 16-bit dQ rows reach 384 and 512 only (no 320 or 448 object), the dK/dV and prep rows every wide rung, fp32 stops at 512."""
+    wide = {
+        op: {
+            dtype: sorted(
+                {
+                    i.knobs["head_dim"]
+                    for i in _instances.instances_for(op, GFX12)
+                    if i.dtype == dtype and i.knobs["head_dim"] > 256
+                }
+            )
+            for dtype in ("f16", "bf16", "fp32")
+        }
+        for op in GFX11_SPLIT_OPS
+    }
+    for dtype in ("f16", "bf16"):
+        assert wide["sdpa_bwd_prep"][dtype] == [320, 384, 448, 512]
+        assert wide["sdpa_bwd_dkdv"][dtype] == [320, 384, 448, 512]
+        assert wide["sdpa_bwd_dq"][dtype] == [384, 512]
+    for op in GFX11_SPLIT_OPS:
+        assert wide[op]["fp32"] == [512]
 
 
 def test_the_split_engines_ladders_are_the_generators() -> None:
@@ -421,6 +476,7 @@ def _tables_tool():
     [
         ("gfx950", "sdpa_bwd_reference.csv"),
         ("gfx11-generic", "sdpa_bwd_gfx11_reference.csv"),
+        ("gfx12-generic", "sdpa_bwd_gfx12_reference.csv"),
         ("gfx942", "sdpa_bwd_gfx942_reference.csv"),
         ("gfx90a", "sdpa_bwd_gfx90a_reference.csv"),
     ],

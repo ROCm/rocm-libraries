@@ -8,10 +8,14 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 FLYDSL = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(FLYDSL / "tools"))
 import sdpa_bwd_tables_from_sweep as tool  # noqa: E402
 from generators._sdpa_bwd_spec import Spec  # noqa: E402
+
+pytestmark = pytest.mark.quick
 
 SHA = "a" * 64
 

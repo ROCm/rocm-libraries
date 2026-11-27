@@ -23,6 +23,8 @@ sys.path.insert(0, str(FLYDSL / "kernels_src"))
 from generators import _sdpa_cdna_build as build  # noqa: E402
 from generators._instances import sdpa_cdna_dualwave_instances  # noqa: E402
 
+pytestmark = pytest.mark.quick
+
 WARP = 64
 
 

@@ -29,6 +29,8 @@ from generators._codeobject import GeneratorError  # noqa: E402
 from generators._instances import instances_for  # noqa: E402
 from generators._sdpa_bwd_spec import to_spec  # noqa: E402
 
+pytestmark = pytest.mark.quick
+
 OP = "sdpa_bwd_merged"
 ARCH = "gfx950"
 MERGED_SYMBOL = "fmha_bwd_merged_gfx950_kernel_0"

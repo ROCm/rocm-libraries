@@ -22,6 +22,8 @@ sys.path.insert(0, str(FLYDSL / "tools"))
 sys.path.insert(0, str(FLYDSL))
 import check_shards  # noqa: E402
 
+pytestmark = pytest.mark.quick
+
 OP, TARGET, ARCH = "sdpa_bwd_dq", "gfx11-generic", "gfx1100"
 ROW_SHA, COMPANION_SHA, TAILZERO_SHA = "1" * 64, "2" * 64, "4" * 64
 TAILZERO = "fmha_bwd_tailzero_gfx11_kernel_0"

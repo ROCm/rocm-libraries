@@ -405,8 +405,9 @@ native::WorkspaceLayout provenLayout(const bwd::SdpaBwdProblem& problem, std::st
 /// architecture the engine knows no such rows for.
 std::vector<bwd::HeadDimBand> parityBandsOf(std::string_view arch)
 {
-    // gfx90a and gfx942 ship gfx11-style padded rows for these graphs.
-    if(arch.rfind("gfx11", 0) == 0 || arch.rfind("gfx90a", 0) == 0 || arch.rfind("gfx942", 0) == 0)
+    // gfx12, gfx90a and gfx942 ship gfx11-style padded rows for these graphs.
+    if(arch.rfind("gfx11", 0) == 0 || arch.rfind("gfx12", 0) == 0 || arch.rfind("gfx90a", 0) == 0
+       || arch.rfind("gfx942", 0) == 0)
     {
         return {bwd::GFX11_PARITY_BANDS.begin(), bwd::GFX11_PARITY_BANDS.end()};
     }

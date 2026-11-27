@@ -35,6 +35,8 @@ from test_sdpa_bwd_gate import (
     _elf,
 )  # noqa: E402
 
+pytestmark = pytest.mark.quick
+
 RESOURCES = dict(zip(RESOURCE_COLUMNS, (100, 0, 100, 90, 4, 0, 0, 8192, 4)))
 SPECS = {
     "same": "dkdv,bf16,64,plain,bk,0,0,tail,0,1",

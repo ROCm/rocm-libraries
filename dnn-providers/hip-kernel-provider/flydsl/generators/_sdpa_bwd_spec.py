@@ -45,7 +45,8 @@ Canonical string (``Spec.key()``, parsed by ``Spec.parse``):
             the native MFMA family) or ``rdna`` (the generic arches; the 16-bit rows and the fp32 ``dbias_reduce`` of gfx942 and gfx90a,
             the generic family over the MFMA16 layer). An arch
             other than gfx950 builds prep, dkdv, dq and dbias_reduce only. Tiles per ``ladder(arch, dtype)``: ``GENERIC_LADDER`` on
-            the generic arches (every dtype); gfx942 and gfx90a add the padded 512 rung to the 16-bit ladder (``CDNA9_LADDER``) and
+            gfx11-generic (every dtype); gfx12-generic adds the wide rungs 320..512 for 16-bit (``GFX12_LADDER``) and the 512 rung
+            for fp32 (``GFX12_FP32_LADDER``); gfx942 and gfx90a add the padded 512 rung to the 16-bit ladder (``CDNA9_LADDER``) and
             fp32 takes ``FP32_LADDER``. An ``rdna`` row's floor is ``g1`` for a padded dkdv or dq and ``tail`` for every other
             kernel; its knobs are ``KNOBS_GENERIC`` (``KNOBS_CDNA9`` on gfx942 and gfx90a; fp32 on a
             generic arch: ``KNOBS_GENERIC_F32``).
@@ -121,8 +122,11 @@ def family(arch: str, dtype: str | None = None, kernel: str | None = None) -> st
 
 # The generic arches build these kernels (from the gfx11 sources; gfx12-generic shares them).
 GENERIC_KERNELS = ("prep", "dkdv", "dq", "dbias_reduce")
-# The generic arches' native head-dim rungs: no 384 or 512, one ladder for every dtype.
+# gfx11-generic's head-dim rungs: no 384 or 512, one ladder for every dtype.
 GENERIC_LADDER = (16, 32, 48, 64, 80, 96, 128, 160, 192, 224, 256)
+# gfx12-generic: the generic rungs plus the wide rungs (16-bit: 320, 384, 448, 512; fp32: 512 only).
+GFX12_LADDER = GENERIC_LADDER + (320, 384, 448, 512)
+GFX12_FP32_LADDER = GENERIC_LADDER + (512,)
 # dbias_reduce's placeholder tile: the gfx950 spelling on every arch (16 is the generic ladder's first rung).
 REDUCE_TILE = 32
 SCHED_STRATEGIES = (
@@ -312,8 +316,8 @@ FP32_KNOBS["gfx942"] = FP32_KNOBS["gfx90a"] = {
     **FP32_KNOBS[GFX950],
     "prep": {"vec_tail": (1,)},
 }
-# The arches with an fp32 family: gfx12-generic has none. gfx942 and gfx90a use the gfx950 (native MFMA) family and its knobs.
-FP32_ARCHES = (GFX950, "gfx11-generic", *CDNA9_ARCHES)
+# The arches with an fp32 family. gfx942 and gfx90a use the gfx950 (native MFMA) family and its knobs.
+FP32_ARCHES = (GFX950, *RDNA_ARCHES, *CDNA9_ARCHES)
 # Knob values only the gfx950 fp32 family has (the gfx950 16-bit policies never take them): rejected on a gfx950 16-bit Spec.
 FP32_ONLY_VALUES = {
     "dkdv": {"block_q": (16,)},
@@ -375,13 +379,16 @@ def knobs_of(kernel: str, arch: str = GFX950, dtype: str | None = None) -> tuple
 def ladder(arch: str = GFX950, dtype: str | None = None) -> tuple:
     """The head-dim tiles of @p arch for @p dtype (None: the 16-bit ladder).
 
-    gfx950: ``LADDER`` (16-bit) or ``FP32_LADDER``. A generic arch has one ladder for every dtype. gfx942 and gfx90a: ``CDNA9_LADDER``
+    gfx950: ``LADDER`` (16-bit) or ``FP32_LADDER``. gfx11-generic has one ladder for every dtype; gfx12-generic has
+    ``GFX12_LADDER`` (16-bit, 15 rungs) or ``GFX12_FP32_LADDER`` (fp32, 12 rungs). gfx942 and gfx90a: ``CDNA9_LADDER``
     for 16-bit (12 rungs), ``FP32_LADDER`` for fp32 (8 rungs and the half-head 512 rung).
     """
     if arch == GFX950:
         return LADDERS.get(dtype, LADDER)
     if arch in CDNA9_ARCHES:
         return FP32_LADDER if dtype == FP32 else CDNA9_LADDER
+    if arch == "gfx12-generic":
+        return GFX12_FP32_LADDER if dtype == FP32 else GFX12_LADDER
     return GENERIC_LADDER
 
 

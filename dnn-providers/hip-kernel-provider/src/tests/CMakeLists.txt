@@ -479,7 +479,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # The split engine's slots are ops of their own (prep, dkdv, dq); its descriptor-only
     # engine folder has none. The census reads a shard only for an arch where all three slots
     # ship, and the suite keys its inventory on the arch the entry names: its own content for
-    # gfx950, gfx942 and gfx90a, gfx11-generic content for every gfx11 member. The merged engine's census above
+    # gfx950, gfx942 and gfx90a, gfx11-generic content for every gfx11 member, gfx12-generic content for every gfx12 member. The merged engine's census above
     # is registered only where merged content ships (gfx950).
     set(_hkp_split_arches)
     foreach(_arch IN LISTS HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_bwd_dq)
@@ -510,13 +510,13 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 DeclaresItsNumericalNotes
         )
     endif()
-    # The host half of the split engine's parity cases checks the gfx11, gfx90a and gfx942
+    # The host half of the split engine's parity cases checks the gfx11, gfx12, gfx90a and gfx942
     # shards against the matcher contract. The suite is compiled into the census binary whatever GPU_TARGETS
     # holds: TheRock installs one copy of that binary for every family's test job, so a
     # copy built without gfx11 targets must still contain the suite a gfx11 entry runs. The
     # suite skips, which a census entry reports as a failure, when the shard it is handed
     # holds no pack of the entry's family. Only the registration is per arch: an entry for each
-    # gfx11, gfx90a and gfx942 arch the three slot ops ship for, and none in a configuration
+    # gfx11, gfx12, gfx90a and gfx942 arch the three slot ops ship for, and none in a configuration
     # without one.
     if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
         target_sources(hip_kernel_provider_census_tests PRIVATE
@@ -525,7 +525,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     endif()
     set(_hkp_parity_split_arches)
     foreach(_arch IN LISTS _hkp_split_arches)
-        if(_arch MATCHES "^gfx11" OR _arch STREQUAL "gfx90a" OR _arch STREQUAL "gfx942")
+        if(_arch MATCHES "^gfx11" OR _arch MATCHES "^gfx12" OR _arch STREQUAL "gfx90a" OR _arch STREQUAL "gfx942")
             list(APPEND _hkp_parity_split_arches ${_arch})
         endif()
     endforeach()
@@ -589,6 +589,39 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 IsServedOrDeclinedAsTheMatcherContractStates/ReadsVAndDoAndTheLseThroughTheirOwnLayouts
                 IsServedOrDeclinedAsTheMatcherContractStates/ReadsARuntimeScaleAtExecute
                 IsServedOrDeclinedAsTheMatcherContractStates/AppliesTheDefaultScaleWhenTheGraphGivesNone
+        )
+    endif()
+    # The head dims past 256 are a suite of their own (TestFlydslSdpaBwdParityGraphsGfx12Wide), which
+    # skips off gfx12, so only the gfx12 members get an entry.
+    set(_hkp_parity_gfx12_arches)
+    foreach(_arch IN LISTS _hkp_parity_split_arches)
+        if(_arch MATCHES "^gfx12")
+            list(APPEND _hkp_parity_gfx12_arches ${_arch})
+        endif()
+    endforeach()
+    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND _hkp_parity_gfx12_arches)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES ${_hkp_parity_gfx12_arches}
+            SUITES TestFlydslSdpaBwdParityGraphsGfx12Wide
+            EXPECTED_CASES
+                IsServedOrDeclinedAsTheMatcherContractStates/ComputesHeadDim300OnTheDkdv320AndDq384Rungs
+                IsServedOrDeclinedAsTheMatcherContractStates/ComputesHeadDim320OnTheDkdv320AndDq384Rungs
+                IsServedOrDeclinedAsTheMatcherContractStates/ComputesHeadDim384OnTheDkdv384AndDq384Rungs
+                IsServedOrDeclinedAsTheMatcherContractStates/ComputesHeadDim400OnTheDkdv448AndDq512Rungs
+                IsServedOrDeclinedAsTheMatcherContractStates/ComputesHeadDim448OnTheDkdv448AndDq512Rungs
+                IsServedOrDeclinedAsTheMatcherContractStates/ComputesHeadDim512OnTheDkdv512AndDq512Rungs
+                IsServedOrDeclinedAsTheMatcherContractStates/ComputesHeadDim512NonCausal
+                IsServedOrDeclinedAsTheMatcherContractStates/ServesAValueHeadDimNarrowerThanAWideQueryOne
+                IsServedOrDeclinedAsTheMatcherContractStates/ServesAValueHeadDimWiderThanTheQueryOneOnAWideRung
+                IsServedOrDeclinedAsTheMatcherContractStates/ComputesFp32HeadDim512
+                IsServedOrDeclinedAsTheMatcherContractStates/ComputesFp32HeadDim300OnTheDkdv512AndDq512Rungs
+                IsServedOrDeclinedAsTheMatcherContractStates/DeclinesHeadDim513
+                IsServedOrDeclinedAsTheMatcherContractStates/DeclinesHeadDim640
+                IsServedOrDeclinedAsTheMatcherContractStates/DeclinesAQueryHeadDimPast512
+                IsServedOrDeclinedAsTheMatcherContractStates/DeclinesAValueHeadDimPast512
+                IsServedOrDeclinedAsTheMatcherContractStates/DeclinesFp32HeadDim768
         )
     endif()
     if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_rdna_decode)
@@ -978,10 +1011,13 @@ add_unit_test_target(hip_kernel_provider_tests ${CMAKE_CURRENT_BINARY_DIR})
 # (the device cases are the TestGpuFlydslSdpaBwd* suites, which the host label excludes).
 # The tier suites above run them too, but only the host label reaches a runner without a
 # GPU, so they get an entry of their own. Registered beside the drift-guard entry
-# (flydsl/CMakeLists.txt), with the same labels and the same YAML tier entry.
+# (flydsl/CMakeLists.txt), with the same labels and the same YAML tier entry. The Philox
+# forward case is left out: it reads the loaded aiw pack set and the staged shard, so it
+# runs in the standard tier, not in quick.
 if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
     add_test(NAME hip-kernel-provider-flydsl-sdpa-bwd-host
-             COMMAND hip_kernel_provider_tests "--gtest_filter=TestFlydslSdpaBwd*")
+             COMMAND hip_kernel_provider_tests
+                     "--gtest_filter=TestFlydslSdpaBwd*-TestFlydslSdpaBwdPhiloxForward*")
     set_tests_properties(hip-kernel-provider-flydsl-sdpa-bwd-host PROPERTIES
         LABELS "unit_test;hip-kernel-provider;host"
         ENVIRONMENT "${TEST_ENVIRONMENT}"

@@ -8,11 +8,14 @@
     python tools/sdpa_bwd_verdicts.py --import-bundle BUNDLE_DIR
                                                  # gfx11-generic: refresh tests/data/sdpa_bwd_gfx11_selection.csv from the bundle
     python tools/sdpa_bwd_verdicts.py --arch gfx90a --write-selection
-                                                 # gfx942, gfx90a: derive tests/data/sdpa_bwd_<arch>_selection.csv from the S1 reference
+                                                 # gfx942, gfx90a, gfx12-generic: derive tests/data/sdpa_bwd_<stem>_selection.csv from the S1 reference
 
-``ARCH`` is gfx11-generic (the default, ``tests/data/sdpa_bwd_gfx11_*``), gfx942 or gfx90a. The rung rule is per (arch, dtype): the
-smallest rung of the arch's ladder for the dtype (``_sdpa_bwd_spec.ladder``) that is at least the head dim; gfx942 and gfx90a have a
-12-rung 16-bit ladder (16..256, 512) and an fp32 ladder of 8 rungs and 512 (``ArchModel``).
+``ARCH`` is gfx11-generic (the default, ``tests/data/sdpa_bwd_gfx11_*``), gfx12-generic (``tests/data/sdpa_bwd_gfx12_*``), gfx942 or
+gfx90a. The rung rule is per (arch, dtype, kernel): the smallest rung of the arch's ladder for the dtype (``_sdpa_bwd_spec.ladder``)
+that is at least the head dim and that the kernel has objects at (prep: at least Dv); gfx942 and gfx90a have a 12-rung 16-bit ladder
+(16..256, 512) and an fp32 ladder of 8 rungs and 512; gfx12-generic a 15-rung 16-bit ladder (16..256, 320, 384, 448, 512) and a 12-rung
+fp32 ladder (16..256, 512). A kernel's rung is the smallest tile at least the head dim among the routing table's rows of that kernel
+and dtype (the table is membership, the ladder is validity): gfx12's 16-bit dQ has no 320 or 448 row.
 
 One row per graph spec (columns in ``COLUMNS``); the verdict is ``served`` with the 12-hex spec hash of each slot
 object, or ``declined`` with the rule ID of the matcher (``no_row`` when no matcher rule names the decline: the graph
@@ -206,6 +209,21 @@ class ArchModel:
     def ladders(self) -> dict[str, tuple]:
         return {d: ladder(self.arch, d) for d in SHIPPED_DTYPES}
 
+    def kernel_ladders(self, sel: dict, kernel: str) -> dict[str, tuple]:
+        """dtype -> the rungs at which @p kernel has rows: the tiles of the routing table @p sel (the table is membership), each a rung of
+        the arch's ladder (the ladder is validity)."""
+        out = {}
+        for d, rungs in self.ladders.items():
+            tiles = {k[2] for k in sel if k[:2] == (kernel, d)}
+            assert tiles <= set(rungs), (
+                self.arch,
+                kernel,
+                d,
+                sorted(tiles - set(rungs)),
+            )
+            out[d] = tuple(r for r in rungs if r in tiles)
+        return out
+
     @property
     def selection_csv(self) -> Path:
         return DATA / f"sdpa_bwd_{self.stem}_selection.csv"
@@ -221,6 +239,11 @@ class ArchModel:
 
 MODELS = {
     "gfx11-generic": ArchModel("gfx11-generic", "gfx11", True),
+    "gfx12-generic": ArchModel(
+        "gfx12-generic",
+        "gfx12",
+        False,
+    ),
     "gfx942": ArchModel("gfx942", "gfx942", False, ("fp32",)),
     "gfx90a": ArchModel("gfx90a", "gfx90a", False, ("fp32",)),
 }
@@ -405,19 +428,21 @@ def load_selection(path=SELECTION_CSV):
 
 
 def selection_from_reference(rows, model):
-    """The routing table (``load_selection``'s keys; both hashes the pinned object's) of the pins in @p rows, the rows of the arch's
-    reference CSV: a prep object serves every class and dropout of its rung; a dQ bias object serves both dBias requests unless a
-    ``store_db=0`` object of its rung serves the "null" one; the standalone reduce objects serve both dropouts. The routing is keyed
-    by the graph's class and dtype: a feature row (``bias_f32`` or ``u2``) is a different object family chosen by the graph's bias
-    dtype or head counts, so it holds no routing entry and is not read as the plain object of its slot.
-    """
-    table = {}
+    """The routing table (``load_selection``'s keys) of the pins in @p rows, the rows of the arch's reference CSV: a prep object serves
+    every class and dropout of its rung; a dQ bias object serves both dBias requests unless a ``store_db=0`` object of its rung
+    serves the "null" one; the standalone reduce objects serve both dropouts. The routing is keyed by the graph's class and dtype: a
+    feature row (``bias_f32`` or ``u2``) is a different object family chosen by the graph's bias dtype or head counts, so it holds
+    no routing entry and is not read as the plain object of its slot.
 
-    def put(key, hash_):
-        assert table.setdefault(key, (hash_, hash_)) == (hash_, hash_), (
-            key,
-            "two objects",
-        )
+    A key served by an exact row (``padded`` 0) and a padded row of the same rung has ``default_hash`` of the exact row (the graph
+    whose head dims equal the rung) and ``exact_false_hash`` of the padded row (every other graph); a key with one row has it in both.
+    A bias dQ "null" key reads the ``store_db=0`` row of the form when it has one, else its dB-storing row.
+    """
+    forms = {}  # key -> {padded: hash}
+
+    def put(key, padded, hash_):
+        by_form = forms.setdefault(key, {})
+        assert by_form.setdefault(padded, hash_) == hash_, (key, "two objects")
 
     nulls = set()
     for row in rows:
@@ -426,35 +451,39 @@ def selection_from_reference(rows, model):
         if spec.bias_f32 or spec.u2:
             continue
         if spec.kernel == "dq" and spec.store_db == 0:
-            nulls.add((spec.dtype, spec.tile, spec.dropout))
+            nulls.add((spec.dtype, spec.tile, spec.dropout, spec.padded))
     for row in rows:
         spec, h = Spec.parse(row["spec"]), row["hash"]
         if spec.bias_f32 or spec.u2:
             continue
+        pad = spec.padded
         if spec.kernel == "prep":
             for cls in ("plain", "causal", "bias"):
                 for drop in (0, 1):
-                    put(("prep", spec.dtype, spec.tile, cls, drop, ""), h)
+                    put(("prep", spec.dtype, spec.tile, cls, drop, ""), pad, h)
         elif spec.kernel == "dkdv":
-            put(("dkdv", spec.dtype, spec.tile, spec.cls, spec.dropout, ""), h)
+            put(("dkdv", spec.dtype, spec.tile, spec.cls, spec.dropout, ""), pad, h)
         elif spec.kernel == "dq" and spec.cls != "bias":
-            put(("dq", spec.dtype, spec.tile, spec.cls, spec.dropout, ""), h)
+            put(("dq", spec.dtype, spec.tile, spec.cls, spec.dropout, ""), pad, h)
         elif spec.kernel == "dq":
             args = (spec.dtype, spec.tile, "bias", spec.dropout)
             if spec.store_db == 0:
-                put(("dq", *args, "null"), h)
+                put(("dq", *args, "null"), pad, h)
             else:
-                put(("dq", *args, "requested"), h)
-                if (spec.dtype, spec.tile, spec.dropout) not in nulls:
-                    put(("dq", *args, "null"), h)
+                put(("dq", *args, "requested"), pad, h)
+                if (spec.dtype, spec.tile, spec.dropout, pad) not in nulls:
+                    put(("dq", *args, "null"), pad, h)
         elif spec.kernel == "dbias_reduce":
             for drop in (0, 1):
-                put(("dbias_reduce", spec.dtype, 0, "bias", drop, ""), h)
-    return table
+                put(("dbias_reduce", spec.dtype, 0, "bias", drop, ""), pad, h)
+    return {
+        key: (by_form.get(1, by_form.get(0)), by_form.get(0, by_form.get(1)))
+        for key, by_form in forms.items()
+    }
 
 
 def write_selection(model, reference=None, out=None):
-    """Derive the arch's routing CSV @p out from its reference CSV @p reference (gfx942, gfx90a; the arch's own files by default)."""
+    """Derive the arch's routing CSV @p out from its reference CSV @p reference (gfx942, gfx90a, gfx12-generic; the arch's own files by default)."""
     assert (
         not model.from_bundle
     ), f"{model.arch}'s routing is the bundle's: --import-bundle"
@@ -521,15 +550,23 @@ def expect(r, sel, model=GFX11):
         return ("declined", "", "", "", "", expected, basis)
     if rule:
         return ("declined", "", "", "", "", rule, f"contract:{rule}")
-    tile, _ = to_rung(max(r["dqk"], r["dv"]), None, r["dtype"], ladders)
+    tile, _ = to_rung(
+        max(r["dqk"], r["dv"]), None, r["dtype"], model.kernel_ladders(sel, "dkdv")
+    )
+    dq_tile, _ = to_rung(
+        max(r["dqk"], r["dv"]), None, r["dtype"], model.kernel_ladders(sel, "dq")
+    )
     cls, drop = row_class(r), r["dropout"]
     store_db = ("requested" if r["dbias"] else "null") if cls == "bias" else ""
-    # selection.json problem key: `tile` is the rung >= max(Dqk, Dv); for `prep` the rung >= Dv.
+    # selection.json problem key: `tile` is the rung >= max(Dqk, Dv) at which the kernel has objects; for `prep` the rung >= Dv.
     # Each routing entry is keyed (kernel, dtype, tile, class, dropout, store_db).
-    prep_tile, _ = to_rung(r["dv"], None, r["dtype"], ladders)
-    tiles = {"prep": prep_tile, "dkdv": tile, "dq": tile}
+    prep_tile, _ = to_rung(r["dv"], None, r["dtype"], model.kernel_ladders(sel, "prep"))
+    tiles = {"prep": prep_tile, "dkdv": tile, "dq": dq_tile}
+    # An exact row serves the graph whose head dims equal the rung (``default_hash``), a padded row every other (``exact_false_hash``).
     hashes = [
-        sel[(k, r["dtype"], tiles[k], cls, drop, store_db if k == "dq" else "")][1]
+        sel[(k, r["dtype"], tiles[k], cls, drop, store_db if k == "dq" else "")][
+            int((r["dqk"], r["dv"]) == (tiles[k], tiles[k]))
+        ]
         for k in ("prep", "dkdv", "dq")
     ]
     # A dtype whose reduce kernel is inside the dQ object has no standalone reduce slot.
@@ -541,6 +578,7 @@ def expect(r, sel, model=GFX11):
     basis = (
         f"selection:{r['dtype']}/{cls}/{drop}/{store_db or '-'}/{tile}"
         + (f";prep_tile={prep_tile}(rung>=Dv)" if prep_tile != tile else "")
+        + (f";dq_tile={dq_tile}" if dq_tile != tile else "")
         + "".join(f";{c}" for c in contract_clauses(r))
     )
     return ("served", *hashes, reduce, "", basis)
@@ -961,7 +999,7 @@ def main(argv=None):
     ap.add_argument(
         "--write-selection",
         action="store_true",
-        help="gfx942, gfx90a: derive the routing table from the arch's S1 reference CSV",
+        help="gfx942, gfx90a, gfx12-generic: derive the routing table from the arch's S1 reference CSV",
     )
     ap.add_argument("--out", type=Path, default=None)
     args = ap.parse_args(argv)

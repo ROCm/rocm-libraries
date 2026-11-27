@@ -48,8 +48,8 @@
  *  - Split: SPLIT_MATCH_OPTIONS (MatchOptions' acceptFloat, acceptF32Bias, acceptValueHeads), so
  *    fp32, an f32 bias beside a 16-bit Q and Hv != Hk at D 64 and 128 are served within the bands
  *    the shipped rows cover (flydslSdpaBwdSplitGraphMatches, parityBandsOf); kernel_match
- *    flydslSdpaBwdSplitKernelMatches. gfx950, gfx942, gfx90a and gfx11-generic (run on gfx1100);
- *    gfx942 and gfx90a fp32 reuse the gfx950 fp32 kernels.
+ *    flydslSdpaBwdSplitKernelMatches. gfx950, gfx942, gfx90a, gfx11-generic (run on gfx1100) and
+ *    gfx12-generic (run on gfx1201); gfx942 and gfx90a fp32 reuse the gfx950 fp32 kernels.
  *  - Every graph: bias with a causal mask or padding_mask declines, dBias strides are multiples
  *    of 8 elements, and dBias with a row-broadcast bias declines -- a row-broadcast bias with no
  *    dBias is served and rowed below (checkBias); padding_mask needs both lengths (checkVarlen);
@@ -781,9 +781,9 @@ std::vector<DeterminismRow> flydslBackwardRows()
 #ifdef HKP_DETERMINISM_FLYDSL_BWD_SPLIT
     {
         constexpr const char* SPLIT = "hipkernel:flydsl_sdpa_bwd_split";
-        const std::vector<std::string> all = {"gfx950", "gfx942", "gfx90a", "gfx1100"};
-        // Head size 512 ships for the CDNA targets only (gfx11-generic stops at 256).
-        const std::vector<std::string> cdna = {"gfx950", "gfx942", "gfx90a"};
+        const std::vector<std::string> all = {"gfx950", "gfx942", "gfx90a", "gfx1100", "gfx1201"};
+        // Head size 512 ships for the CDNA targets and gfx12-generic (gfx11-generic stops at 256).
+        const std::vector<std::string> hd512 = {"gfx950", "gfx942", "gfx90a", "gfx1201"};
         const std::vector<std::string> gfx950 = {"gfx950"};
 
         // Plain: prep, dkdv and dq per dtype, causal and not, and the GQA group fold.
@@ -792,7 +792,7 @@ std::vector<DeterminismRow> flydslBackwardRows()
         addPlain(rows, SPLIT, "Bf16Hd64Gqa", all, BF16, 8, 2, 64, false);
         addPlain(rows, SPLIT, "F16Hd128GqaCausal", all, F16, 8, 2, 128, true);
         addCase(rows, SPLIT, "Bf16Hd256", all, withBatchHeads(graphOf(BF16, 256), 1, 2));
-        addCase(rows, SPLIT, "Bf16Hd512", cdna, withBatchHeads(graphOf(BF16, 512), 1, 2));
+        addCase(rows, SPLIT, "Bf16Hd512", hd512, withBatchHeads(graphOf(BF16, 512), 1, 2));
         addCase(rows, SPLIT, "Bf16Hd64Tail", all, withSeq(graphOf(BF16, 64), 120, 136));
 
         // fp32 (the per-wave kernels and the D-split ones at 512; gfx942 and gfx90a reuse the
@@ -800,7 +800,7 @@ std::vector<DeterminismRow> flydslBackwardRows()
         addCase(rows, SPLIT, "F32Hd64", all, graphOf(F32, 64));
         addCase(rows, SPLIT, "F32Hd128Causal", all, withCausal(graphOf(F32, 128)));
         addCase(rows, SPLIT, "F32Hd256", all, withBatchHeads(graphOf(F32, 256), 1, 2));
-        addCase(rows, SPLIT, "F32Hd512", cdna, withBatchHeads(graphOf(F32, 512), 1, 2));
+        addCase(rows, SPLIT, "F32Hd512", hd512, withBatchHeads(graphOf(F32, 512), 1, 2));
         addCase(rows, SPLIT, "F32Hd64Gqa", all, withHeads(graphOf(F32, 64), 8, 2));
         // gfx11-generic bakes contraction_shards, split_head_dim and transposed_source per tile by
         // policy, not by a knob (the table rows leave them at policy: SDPA_BWD_GFX11_TABLES,
@@ -846,6 +846,58 @@ std::vector<DeterminismRow> flydslBackwardRows()
                 withCausal(withBatchHeads(graphOf(BF16, 224), 1, 2)),
                 {{"dq.head_dim", 224}, {"dkdv.head_dim", 224}},
                 KnobClass::STRUCTURE);
+        // gfx12-generic (run on gfx1201) bakes its tile policy too (POLICY_GFX12 in
+        // fmha_tuning_bwd_dq_gfx11.py and fmha_tuning_bwd_dkdv_gfx11.py), and head_dim pins both
+        // slots as above. dq (shards, waves, block_n): d96 (1, 8, 32), d160 (1, 4, 16) with
+        // waves_per_eu 1, d192 (1, 16, 32) with waves_per_eu 1 and kt_lds_layout staged, d224
+        // (2, 16, 16); d80 takes kt_lds_layout staged and waves_per_eu 3. dkdv (split_head_dim,
+        // shards, waves, block_q, transposed_source): d96 (F, 1, 8, 16), d160 (F, 1, 16, 16,
+        // tile), d192 (T, 1, 12, 16, tile), d224 (T, 1, 32, 16, tile).
+        const std::vector<std::string> gfx1201 = {"gfx1201"};
+        addCase(rows,
+                SPLIT,
+                "Bf16Hd96",
+                gfx1201,
+                withBatchHeads(graphOf(BF16, 96), 1, 2),
+                {{"dq.head_dim", 96}, {"dkdv.head_dim", 96}},
+                KnobClass::STRUCTURE);
+        addCase(rows,
+                SPLIT,
+                "Bf16Hd160",
+                gfx1201,
+                withBatchHeads(graphOf(BF16, 160), 1, 2),
+                {{"dq.head_dim", 160}, {"dkdv.head_dim", 160}},
+                KnobClass::STRUCTURE);
+        addCase(rows,
+                SPLIT,
+                "F16Hd192",
+                gfx1201,
+                withBatchHeads(graphOf(F16, 192), 1, 2),
+                {{"dq.head_dim", 192}, {"dkdv.head_dim", 192}},
+                KnobClass::STRUCTURE);
+        addCase(rows,
+                SPLIT,
+                "Bf16Hd224Causal",
+                gfx1201,
+                withCausal(withBatchHeads(graphOf(BF16, 224), 1, 2)),
+                {{"dq.head_dim", 224}, {"dkdv.head_dim", 224}},
+                KnobClass::STRUCTURE);
+        addCase(rows,
+                SPLIT,
+                "Bf16Hd80",
+                gfx1201,
+                withBatchHeads(graphOf(BF16, 80), 1, 2),
+                {{"dq.head_dim", 80}, {"dkdv.head_dim", 80}},
+                KnobClass::STRUCTURE);
+        // Head sizes past 256, one row per wide rung: dkdv 320 with dq 384, dq 384 alone with the
+        // max-memory-clause scheduler row (POLICY_GFX12[384]), dkdv 448 with dq 512.
+        addCase(rows, SPLIT, "Bf16Hd320", gfx1201, withBatchHeads(graphOf(BF16, 320), 1, 2));
+        addCase(rows,
+                SPLIT,
+                "F16Hd384Causal",
+                gfx1201,
+                withCausal(withBatchHeads(graphOf(F16, 384), 1, 2)));
+        addCase(rows, SPLIT, "Bf16Hd448", gfx1201, withBatchHeads(graphOf(BF16, 448), 1, 2));
         // Slot-qualified pins (dkdv.<knob>): the gp1 object (D96 and a group of 4) and the
         // dks1 4-wave object at D160 (nw4_mr16_dks1), both spelled in the gfx950 dkdv names.
         addCase(rows,
@@ -873,12 +925,12 @@ std::vector<DeterminismRow> flydslBackwardRows()
                 withCausal(withBatchHeads(graphOf(BF16, 160), 1, 2)),
                 {{"dkdv.num_stream_buffers", 1}},
                 KnobClass::TILE_SCHEDULE);
-        // Head size 512 with dBias on gfx942 and gfx90a: the dq d512 bias objects (sdb1 stores
-        // dB, SOURCE.md d512_causal0_bias1) and the d512 bias dkdv objects.
+        // Head size 512 with dBias on gfx942, gfx90a and gfx12-generic: the dq d512 bias objects
+        // (sdb1 stores dB, SOURCE.md d512_causal0_bias1) and the d512 bias dkdv objects.
         addCase(rows,
                 SPLIT,
                 "Bf16Hd512Dbias",
-                std::vector<std::string>{"gfx942", "gfx90a"},
+                std::vector<std::string>{"gfx942", "gfx90a", "gfx1201"},
                 withBias(withBatchHeads(graphOf(BF16, 512), 1, 2), BF16, true));
 
         // Padded head sizes: 100 is off 8 (row pitch 104) and 98 off 4 for fp32 (pitch 100).

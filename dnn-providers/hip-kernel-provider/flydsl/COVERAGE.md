@@ -16,7 +16,7 @@ engine of its own (256, §5.6). Every target also ships the keep-mask writer and
 padding copy (one object each); §6.2 has the per-target ledger.
 **SDPA forward on CDNA** (§7) is three engines -- the generic kernel's prefill, gfx950's
 dual-wave kernel and the split-KV decode -- built per arch for gfx950, gfx942 and gfx90a
-from FlyDSL's own CDNA kernels, and on gfx950 **SDPA backward** (§9, 2,707 object files; the split engine also on gfx942, gfx90a and gfx11-generic, 509 each). Every graph a pack accepts is
+from FlyDSL's own CDNA kernels, and on gfx950 **SDPA backward** (§9, 2,707 object files; the split engine also on gfx942, gfx90a and gfx11-generic, 509 each, and on gfx12-generic, 674). Every graph a pack accepts is
 computed by one of its objects; everything else is **declined**, so another
 engine gets the plan.
 
@@ -269,7 +269,7 @@ do not compute, declined rather than approximated.
 | Every staged object computes what its name says | `TestGpuFlydslRmsNormObjects` (`TestFlydslRmsNormObjects.cpp`): launches each object by name through its pack's dispatch handler against an f64 host reference, into NaN-prefilled outputs, with a different scale per row, the backward twice and compared bit for bit. `Standard/...OnePerForm` runs one object per (dtype, gamma form, inv_rms, tier), the case every PR runs; `Full/...Every` runs all 153 objects of the device's target, in the full tier only |
 | The baked tier is faster than the generic one where both apply | `Full/TestGpuFlydslRmsNormTiers` (wall-clock comparison), full tier only |
 | A device case cannot pass by skipping on an arch FlyDSL ships for | Each GPU case that finds its objects unstaged **fails** on an arch the build ships FlyDSL for, and skips only on other arches |
-| `gen_descriptors.py --check` and `tools/check_shards.py` still refuse a tampered tree | CTest `hip-kernel-provider-flydsl-drift-guards` (pytest, `flydsl/tests/test_drift_guards.py`): copies the content tree and one packed shard, breaks one thing at a time, and requires each check to refuse it. Host-only, quick tier |
+| `gen_descriptors.py --check` and `tools/check_shards.py` still refuse a tampered tree | CTest `hip-kernel-provider-flydsl-drift-guards-quick` and `hip-kernel-provider-flydsl-drift-guards` (pytest, `flydsl/tests/test_drift_guards.py` and the rest of `flydsl/tests`): copies the content tree and one packed shard, breaks one thing at a time, and requires each check to refuse it. Host-only; the row/pin checks run in quick, the content-backed checks in standard |
 
 Tiers (`HIP_MLOPS_ENGINE_test_categories.yaml`, matched on the GTest full name
 `Suite.Case` or `Prefix/Suite.Case/Param`):
@@ -2352,7 +2352,7 @@ Approved for this integration.
 
 ## 9. SDPA backward — `hipkernel:flydsl_sdpa_bwd_merged` and `hipkernel:flydsl_sdpa_bwd_split`
 
-Split and merged ship for gfx950; split alone also ships for gfx942, gfx90a and gfx11-generic. Both engines share one graph matcher
+Split and merged ship for gfx950; split alone also ships for gfx942, gfx90a, gfx11-generic and gfx12-generic. Both engines share one graph matcher
 ([`FlydslSdpaBwdCommon.hpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaBwdCommon.hpp)),
 a pure function of the graph that either computes the problem or says why it declines; what
 belongs to one engine (tile routing, bias staging, workspace bounds) is that engine's.
@@ -2362,7 +2362,7 @@ belongs to one engine (tile routing, bias staging, workspace bounds) is that eng
 | `hipkernel:flydsl_sdpa_bwd_merged` | one: dK, dV, dQ and, on a bias graph, dBias in one grid, with no prep kernel | `sdpa_bwd_merged` (325) |
 | `hipkernel:flydsl_sdpa_bwd_split` | three, in order, one per slot: prep (Delta and the statistics), dK/dV, dQ (and dBias) | `sdpa_bwd_prep` (86), `sdpa_bwd_dkdv` (1,329), `sdpa_bwd_dq` (962); `sdpa_bwd_split` carries the descriptors only |
 
-Backward rows exist for gfx950, gfx942, gfx90a and gfx11-generic (the merged engine on gfx950 only); the forward engines also run on gfx12. The table's split columns cover gfx950 and gfx11-generic; on gfx942 and gfx90a the split engine serves head dims up to 512, as on gfx950. What the engines serve, in one place (rule IDs and decline causes are in 9.1 and 9.2). In the last column, AOTriton's entry is `yes` where its backward test suite parametrizes the feature and `untested` where it does not; `?` marks a cell this document does not establish.
+Backward rows exist for gfx950, gfx942, gfx90a, gfx11-generic and gfx12-generic (the merged engine on gfx950 only). The table's split columns cover gfx950 and gfx11-generic; gfx12-generic's envelope is in 9.4; on gfx942 and gfx90a the split engine serves head dims up to 512, as on gfx950. What the engines serve, in one place (rule IDs and decline causes are in 9.1 and 9.2). In the last column, AOTriton's entry is `yes` where its backward test suite parametrizes the feature and `untested` where it does not; `?` marks a cell this document does not establish.
 
 | Variant | Split gfx950 | Split gfx11 | Merged gfx950 | Also served by: FlyDSL forward / cuDNN / AOTriton |
 |---|---|---|---|---|
@@ -2402,10 +2402,10 @@ declined with a named cause (data type, operand layout, mask, workspace overflow
 another engine gets the plan where one exists (on gfx11 the split engine is the only SDPA
 backward engine). The kernels and how the shipped objects are pinned are in
 [`kernels_src/kernels/attention_bwd_cdna/`](kernels_src/kernels/attention_bwd_cdna/README.md);
-the split ops also carry a 509-object-file set on each of gfx11-generic, gfx942 and gfx90a (prep 33, dK/dV 238, dQ 230 and 8 companions of the dQ op: 3 standalone dBias reduce objects and 5 tail-zero objects); the gfx11-generic set is built from [`kernels_src/kernels/attention_bwd_rdna/`](kernels_src/kernels/attention_bwd_rdna/README.md).
+the split ops also carry a 509-object-file set on each of gfx11-generic, gfx942 and gfx90a (prep 33, dK/dV 238, dQ 230 and 8 companions of the dQ op: 3 standalone dBias reduce objects and 5 tail-zero objects); the gfx11-generic set is built from [`kernels_src/kernels/attention_bwd_rdna/`](kernels_src/kernels/attention_bwd_rdna/README.md). gfx12-generic ships the split set of 666 rows and the same 8 companions (§9.4).
 
 **Regeneration needs only this tree.** The backward objects regenerate from the tree and the pulled content alone
-([REGEN.md](REGEN.md) §2-§3): each pin is a row of `tests/data/sdpa_bwd_reference.csv` (gfx11-generic: `sdpa_bwd_gfx11_reference.csv`),
+([REGEN.md](REGEN.md) §2-§3): each pin is a row of `tests/data/sdpa_bwd_reference.csv` (gfx11-generic: `sdpa_bwd_gfx11_reference.csv`; gfx12-generic: `sdpa_bwd_gfx12_reference.csv`),
 the shipped object is the pin of every row except the main kernels of the combined (dB-storing bias) objects and gfx950's standalone reduce
 kernels, and `tests/data/sdpa_bwd_pin_functions.csv` holds those pins' function digests. A rebuild is byte-identical to the shipped
 object except where the nondeterministic list (`tests/data/sdpa_bwd_nondeterministic.csv`) or the pinned-exception list ships a pin instead.
@@ -2440,10 +2440,10 @@ data (DT-2, split engine; cuDNN documents its SDPA backward for FP16 and BF16 on
 mask, bias or dBias with `padding_mask`, ragged bias or dBias, a dropout mask tensor, a
 device scale tensor (SC-2) and a window with bottom-right alignment under `padding_mask`
 (MW-13) are graphs cuDNN serves. cuDNN rejects a bottom-right causal mask with a bias, so
-that decline is no gap. No other hipDNN engine serves SDPA backward on gfx950 or gfx11
+that decline is no gap. No other hipDNN engine serves SDPA backward on gfx950, gfx11 or gfx12
 (asm_sdpa's backward builder is gfx942 only).
 
-The engines differ on those head dims. The gfx950 split engine serves every head dim up to 512 (a dim that is not a multiple of 8 only with a padded pitch, LY-3, DT-8). The merged engine serves Dqk = Dv at 64 to 256 in steps of 32, or both dims up to 32, and nothing above 256. The gfx11 split engine serves up to 256.
+The engines differ on those head dims. The gfx950 split engine serves every head dim up to 512 (a dim that is not a multiple of 8 only with a padded pitch, LY-3, DT-8). The merged engine serves Dqk = Dv at 64 to 256 in steps of 32, or both dims up to 32, and nothing above 256. The gfx11 split engine serves up to 256; the gfx12 split engine serves up to 512 (§9.4).
 
 Dropout follows hipDNN's SDPA dropout contract, not cuDNN's random stream: the kernel
 regenerates the mask with Philox from seed and offset, and the gradient is correct only when
@@ -2474,7 +2474,7 @@ A graph the forward engines serve can still decline in the backward, deliberatel
 - `seq_len_kv` alone over a ragged Q (PV-2, SEM-028);
 - a stats tensor that declares 4 or 8 bytes of alignment, which the forward accepts and the backward requires 16 (SS-3).
 
-On gfx12 the forward runs and no FlyDSL backward exists.
+On gfx12-generic the forward runs and the split backward engine serves the graphs within the envelope of §9.4.
 
 **Rows and head dims.** The new rows are exact tiles on gfx950 and padded `g1` tiles on
 gfx11-generic, for f16 and bf16, with and without baked dropout.
@@ -2490,7 +2490,7 @@ gfx11-generic 72 (the same without the 16-bit direct rows), and one V-head tail-
 
 A graph at other head dims is declined by the ingestor, with a coverage line in the engine's log. Head dims
 outside the rows above, with an f32 bias or `Hk != Hv`, are graphs the forward serves and the backward does not
-(gfx950 outside 64 and 128; gfx11-generic above 128).
+(gfx950 outside 64 and 128; gfx11-generic and gfx12-generic above 128).
 
 **Bias staging rule.** A dQ row's `bias_stage_resolved` is `lds` (the bias is staged through LDS), `direct` (the bias is
 read from memory and a staged row serves the same graphs), `direct_only` (read directly, no staged row exists) or `na`.
@@ -2531,7 +2531,7 @@ ship their pins. Residual resource cells, none with a correctness effect:
   gfx1103, gfx1150 to gfx1153) run the same object and have no device run of their own.
 - **Padded graphs.** With `padding_mask`, a launch after the gradient launches zeroes the
   dense dQ rows at or past `seq_len_q` and the dense dK/dV rows at or past `seq_len_kv`, on
-  gfx950, gfx942, gfx90a and gfx11-generic, as the references and cuDNN define them. A ragged output is not
+  gfx950, gfx942, gfx90a, gfx11-generic and gfx12-generic, as the references and cuDNN define them. A ragged output is not
   written past a length: that storage belongs to a gap or to the next sequence, and gap rows
   are not iterated. The `*_padneq_*` bundles run in both engine lanes; `padneq_nomask`,
   `padneq_causal_tl` and `padneq_causal_br` carry claims, and `padneq_dbias_batch` and
@@ -2544,3 +2544,17 @@ ship their pins. Residual resource cells, none with a correctness effect:
   config and carries no claim there. Scaling P into the normal range for the dV GEMM would remove it.
 - **Support claims on CDNA.** The split engine carries gfx942 and gfx90a claims over the SdpaBackward bundle graphs; the merged engine
   has no CDNA content and no CDNA claims.
+
+### 9.4 gfx12-generic
+
+The split engine ships for gfx12-generic (RDNA4: gfx1200, gfx1201) from the same RDNA kernels and table grammar as gfx11-generic. The 669 pins are 666 rows (prep 42, dK/dV 328, dQ 296) and 3 standalone dBias reduce objects; the dQ manifest also lists 5 unpinned tail-zero entries (3 `tailzero`, 2 `tailzero_hv` naming one object), 8 companions in all. 72 of the rows are exact (`padded=0`) twins of the 16-bit, no-dropout dK/dV and dQ base rows at head dims 48, 64, 80, 96, 128 and 256: a graph with `hd == rung` takes the exact row, which ranks above the padded rows of its rung. The schedules are tuned on gfx1201 (`POLICY_GFX12` in `fmha_tuning_bwd_dkdv_gfx11.py` and `fmha_tuning_bwd_dq_gfx11.py`, and the spelled knobs of the reference keys). The verdict table is `tests/data/sdpa_bwd_gfx12_verdicts.csv`.
+
+| | gfx11-generic | gfx12-generic |
+|---|---|---|
+| 16-bit head dims | up to 256 | up to 512: prep and dK/dV rungs 320, 384, 448 and 512 beyond 256; dQ rungs 384 and 512 only |
+| fp32 head dims | up to 256 | up to 512: one 512 rung beyond 256 |
+| Split K/V head rows (U6) | head dims 1 to 128 | head dims 1 to 128; no variants above 128 |
+
+A graph takes the smallest rung each kernel has, so head dim 300 runs dK/dV at 320 and dQ at 384, and head dim 448 runs dK/dV at 448 and dQ at 512. Above 512 the matcher declines (DT-4). The bias, dropout, `padding_mask`, ragged and tail-zero behaviour is gfx11-generic's. The tail-zero objects are scan-only, as on gfx11-generic.
+
+Both members are verified on device. The split engine carries support claims for gfx1201 over every SdpaBackward bundle tier (4,786 cases) and for gfx1200 over the quick, standard and comprehensive tiers and part of the full tier (2,166 cases); the in-tree device suites, every shipped object (`Full/`) and the integration lane pass on both. AOTriton runs gfx1200 as experimental, so gfx1200 is verified for correctness only; the performance tuning is measured on gfx1201.

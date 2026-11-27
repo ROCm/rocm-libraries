@@ -16,6 +16,8 @@ sys.path.insert(0, str(FLYDSL / "tools"))
 import analyze  # noqa: E402
 import rmir  # noqa: E402
 
+pytestmark = pytest.mark.quick
+
 
 def _mir(tmp_path: Path, save_arms: tuple[bool, bool]) -> str:
     """bb0 branches to bb1 and bb2, which each may save slot 0; bb3 restores it and uses it."""

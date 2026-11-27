@@ -4,20 +4,24 @@
 # CTest categories for the two families descriptor-packaging/cmake/HkpPackaging.cmake
 # pre-registers via add_test() rather than through a GTest binary: the hkp pytest entries
 # (hkp_register_tests) and the census entries (hkp_register_census_tests). flydsl/ adds
-# one more pytest entry of the same kind, for its drift guards.
+# two more pytest entries of the same kind, for its drift guards.
 #
-# The two pytest entries run DISJOINT sets -- quick is `-m quick` (the no-compile
-# subset), standard is `-m "not quick"`. The tier cascade labels a quick test
-# quick;standard;comprehensive;full and a standard test standard;comprehensive;full, so
-# each tier runs every test once and comprehensive/full run the union.
+# The two pytest entries of each family run DISJOINT sets -- quick is `-m quick` (the
+# basic device-free subset: no compile, DVC content or staged shard), standard is
+# `-m "not quick"`. The tier cascade labels a quick test quick;standard;comprehensive;full
+# and a standard test standard;comprehensive;full, so each tier runs every test once and
+# comprehensive/full run the union.
 #
 # The census pattern is a REGEX, unlike every other entry here: an entry is named
 # hip-kernel-provider-hkp-census-<arch>-<suite>, whose values are configure-time ones no
 # static YAML can spell. The parser takes the regex path on seeing a metacharacter and
 # anchors the pattern at both ends. That one pattern deliberately covers the entry AND
 # its three -control-* siblings, so a control cannot land in a different tier from the
-# entry it watches. The census sits in quick, and through the cascade in every tier,
-# because a census run is host-only and filtered to one suite.
+# entry it watches. The base census stays in quick, and through the cascade in every tier,
+# because a census run is host-only and filtered to one suite. The gfx12 FlyDSL SDPA
+# backward suites (gfx1200/gfx1201 TestFlydslSdpaBwd*) read the staged shard and the
+# verdict content, so they are not basic: exclude_tests keeps them out of quick and
+# ffm-quick, and standard names them, so they run from standard up.
 #
 # The quick block's three descriptive labels are load-bearing for the pytest entries,
 # whose add_test() sets none. _hkp_add_census_test() sets the same three on each census
@@ -25,31 +29,37 @@
 # dnn-providers/cmake/Tests.cmake falls back to `ctest -L unit_test`.
 test_categories:
   quick:
-    description: "hkp descriptor-packaging pytest (no-compile subset), the descriptor census, the FlyDSL drift-guard tests and the FlyDSL backward host suites"
+    description: "hkp descriptor-packaging pytest (no-compile subset), the descriptor census without the gfx12 FlyDSL SDPA backward suites, the FlyDSL drift-guard quick tests and the FlyDSL backward host suites"
     test_patterns:
       - "hip-kernel-provider-hkp-pack-quick"
       - "hip-kernel-provider-hkp-census-.*"
-      - "hip-kernel-provider-flydsl-drift-guards"
+      - "hip-kernel-provider-flydsl-drift-guards-quick"
       - "hip-kernel-provider-flydsl-sdpa-bwd-host"
+    exclude_tests:
+      - "hip-kernel-provider-hkp-census-gfx120[01]-TestFlydslSdpaBwd.*"
     labels:
       - "unit_test"
       - "hip-kernel-provider"
       - "host"
 
   ffm-quick:
-    description: "Fast-feedback mechanism (FFM) descriptor-packaging no-compile checks, census, FlyDSL drift guards and FlyDSL backward host suites"
+    description: "Fast-feedback mechanism (FFM) descriptor-packaging no-compile checks, census without the gfx12 FlyDSL SDPA backward suites, FlyDSL drift-guard quick tests and FlyDSL backward host suites"
     test_patterns:
       - "hip-kernel-provider-hkp-pack-quick"
       - "hip-kernel-provider-hkp-census-.*"
-      - "hip-kernel-provider-flydsl-drift-guards"
+      - "hip-kernel-provider-flydsl-drift-guards-quick"
       - "hip-kernel-provider-flydsl-sdpa-bwd-host"
+    exclude_tests:
+      - "hip-kernel-provider-hkp-census-gfx120[01]-TestFlydslSdpaBwd.*"
     labels:
       - "ffm-full"
 
   standard:
-    description: "hkp descriptor-packaging pytest: full suite (real compile)"
+    description: "hkp descriptor-packaging pytest: full suite (real compile), the FlyDSL drift-guard tests outside quick and the gfx12 FlyDSL SDPA backward census"
     test_patterns:
       - "hip-kernel-provider-hkp-pack"
+      - "hip-kernel-provider-flydsl-drift-guards"
+      - "hip-kernel-provider-hkp-census-gfx120[01]-TestFlydslSdpaBwd.*"
     labels:
       - "unit_test"
       - "hip-kernel-provider"

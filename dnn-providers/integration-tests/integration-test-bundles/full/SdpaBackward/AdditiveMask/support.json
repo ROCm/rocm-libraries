@@ -1,4 +1,81 @@
 {
-  "claims": {},
+  "claims": {
+    "hipkernel:flydsl_sdpa_bwd_split": [
+      {
+        "cases": [
+          "hf003x1_b2h4k1v1_1024x1024_d128_bfp16_none_bshd_biasm4to0_bias2x1x1024x1024io_told",
+          "hf004x1_b2h6k1v1_1024x1024_d256_bfp16_none_bshd_biasm4to0_bias2x1x1024x1024io_told",
+          "hf005x1_b2h4k1v1_1024x1024_d256_bfp16_none_bshd_biasm4to0_bias2x1x1024x1024io_told",
+          "hf006x1_b2h8k1v1_1024x1024_d256_bfp16_none_bshd_biasm4to0_bias2x1x1024x1024io_told",
+          "hf007x1_b2h2k1v1_1024x1024_d128_bfp16_none_bshd_biasm4to0_bias2x1x1024x1024io_told",
+          "hf009x1_b2h7k1v1_1024x1024_d128_bfp16_none_bshd_biasm4to0_bias2x1x1024x1024io_told",
+          "hf014x1_b2h5k1v1_1024x1024_d128_bfp16_none_bshd_biasm4to0_bias2x1x1024x1024io_told",
+          "hf020x1_b2h8k1v1_1024x1024_d128_bfp16_none_bshd_biasm4to0_bias2x1x1024x1024io_told",
+          "hf022x1_b2h16k1v1_1024x1024_d128_bfp16_none_bshd_biasm4to0_bias2x1x1024x1024io_told",
+          "hf025x1_b2h12k1v1_1024x1024_d256_bfp16_none_bshd_biasm4to0_bias2x1x1024x1024io_told",
+          "hf027x1_b2h2k2v2_1024x1024_d128_bfp16_none_bshd_biasm4to0_bias2x1x1024x1024io_told",
+          "hf030x1_b2h8k1v1_1024x1024_d512_bfp16_none_bshd_biasm4to0_bias2x1x1024x1024io_told",
+          "hf031x1_b2h2k2v2_1024x1024_d64_bfp16_none_bshd_biasm4to0_bias2x1x1024x1024io_told",
+          "hf032x1_b2h2k2v2_1024x1024_d256_bfp16_none_bshd_biasm4to0_bias2x1x1024x1024io_told",
+          "hf039x1_b2h6k1v1_1024x1024_d128_bfp16_none_bshd_biasm4to0_bias2x1x1024x1024io_told",
+          "hf040x1_b2h2k2v2_1024x1024_d192v128_bfp16_none_bshd_s0p135234_biasm4to0_bias2x1x1024x1024io_told",
+          "hf044x1_b2h16k1v1_1024x1024_d512_bfp16_none_bshd_biasm4to0_bias2x1x1024x1024io_told",
+          "hf050x1_b2h4k1v1_1024x1024_d512_bfp16_none_bshd_biasm4to0_bias2x1x1024x1024io_told",
+          "hf051x1_b2h7k1v1_1024x1024_d64_bfp16_none_bshd_biasm4to0_bias2x1x1024x1024io_told",
+          "hf057x1_b2h8k1v1_1024x1024_d64_bfp16_none_bshd_biasm4to0_bias2x1x1024x1024io_told",
+          "hf059x1_b2h2k2v2_1024x1024_d192v128_bfp16_none_bshd_biasm4to0_bias2x1x1024x1024io_told",
+          "hf061x1_b2h2k2v2_1024x1024_d192v128_bfp16_none_bshd_s0p14468_biasm4to0_bias2x1x1024x1024io_told",
+          "hf065x1_b2h4k1v1_1024x1024_d64_bfp16_none_bshd_biasm4to0_bias2x1x1024x1024io_told",
+          "hf066x1_b2h2k2v2_1024x1024_d80_bfp16_none_bshd_biasm4to0_bias2x1x1024x1024io_told",
+          "hf067x1_b2h16k1v1_1024x1024_d256_bfp16_none_bshd_biasm4to0_bias2x1x1024x1024io_told",
+          "hf068x1_b2h10k1v1_1024x1024_d128_bfp16_none_bshd_biasm4to0_bias2x1x1024x1024io_told",
+          "hf070x1_b2h2k2v2_128x128_d64_bfp16_none_bshd_biasm4to0_bias2x1x128x128io_told",
+          "hf070x2_b4h2k2v2_128x128_d64_bfp16_none_bshd_biasm4to0_bias4x1x1x128io_told",
+          "hf074x1_b2h2k1v1_1024x1024_d256_bfp16_none_bshd_biasm4to0_bias2x1x1024x1024io_told",
+          "hf094x1_b2h12k1v1_1024x1024_d128_bfp16_none_bshd_biasm4to0_bias2x1x1024x1024io_told",
+          "hf095x1_b2h3k1v1_1024x1024_d128_bfp16_none_bshd_biasm4to0_bias2x1x1024x1024io_told",
+          "hf098x1_b2h2k2v2_1024x1024_d192v128_bfp16_none_bshd_s0p130861_biasm4to0_bias2x1x1024x1024io_told",
+          "hf099x1_b2h2k1v1_1024x1024_d96_bfp16_none_bshd_biasm4to0_bias2x1x1024x1024io_told",
+          "hf100x1_b2h3k1v1_1024x1024_d64_bfp16_none_bshd_biasm4to0_bias2x1x1024x1024io_told",
+          "hf114x1_b2h2k2v2_1024x1024_d96_bfp16_none_bshd_biasm4to0_bias2x1x1024x1024io_told",
+          "hf117x1_b2h2k2v2_850x850_d32_bfp16_none_bshd_biasm4to0_bias2x1x850x850io_told",
+          "hf117x2_b4h2k2v2_850x850_d32_bfp16_none_bshd_biasm4to0_bias4x1x1x850io_told",
+          "hf118x1_b2h2k1v1_1024x1024_d64_bfp16_none_bshd_biasm4to0_bias2x1x1024x1024io_told",
+          "hf154x1_b2h16k1v1_1024x1024_d64_bfp16_none_bshd_biasm4to0_bias2x1x1024x1024io_told",
+          "hf159x1_b2h32k1v1_1024x1024_d128_bfp16_none_bshd_dom4to4_biasm4to0_bias2x1x1024x1024io_tolp",
+          "hf162x1_b2h2k2v2_1024x1024_d192v128_bfp16_none_bshd_s0p157811_biasm4to0_bias2x1x1024x1024io_told",
+          "hf187x1_b2h2k1v1_1024x1024_d80_bfp16_none_bshd_biasm4to0_bias2x1x1024x1024io_told",
+          "hf193x1_b2h48k1v1_1024x1024_d128_bfp16_none_xc474bd_tols",
+          "hf210x1_b2h2k1v1_1024x1024_d128_bfp16_none_bshd_s0p077152_biasm4to0_bias2x1x1024x1024io_told",
+          "hf214x1_b2h2k2v2_512x512_d48_bfp16_none_bshd_biasm4to0_bias2x1x512x512io_told",
+          "hf214x2_b4h2k2v2_512x512_d48_bfp16_none_bshd_biasm4to0_bias4x1x1x512io_told",
+          "hf215x1_b2h2k2v2_128x128_d48_bfp16_none_bshd_biasm4to0_bias2x1x128x128io_told",
+          "hf215x2_b4h2k2v2_128x128_d48_bfp16_none_bshd_dom2to2_biasm4to0_bias4x1x1x128io_tolp",
+          "hf220x1_b2h2k2v2_1024x1024_d192v128_bfp16_none_bshd_s0p114721_biasm4to0_bias2x1x1024x1024io_told",
+          "hf267x1_b2h9k1v1_1024x1024_d128_bfp16_none_bshd_biasm4to0_bias2x1x1024x1024io_told",
+          "hf272x1_b2h2k2v2_512x512_d128_bfp16_none_bshd_biasm4to0_bias2x1x512x512io_told",
+          "hf272x2_b4h2k2v2_512x512_d128_bfp16_none_bshd_biasm4to0_bias4x1x1x512io_told",
+          "hf273x1_b2h2k2v2_128x128_d128_bfp16_none_bshd_biasm4to0_bias2x1x128x128io_told",
+          "hf273x2_b4h2k2v2_128x128_d128_bfp16_none_bshd_biasm4to0_bias4x1x1x128io_tolp",
+          "hf275x1_b2h24k1v1_1024x1024_d128_bfp16_none_bshd_dom4to4_biasm4to0_bias2x1x1024x1024io_tolp",
+          "hf277x1_b2h2k2v2_128x128_d40_bfp16_none_bshd_biasm4to0_bias2x1x128x128io_told",
+          "hf277x2_b4h2k2v2_128x128_d40_bfp16_none_bshd_biasm4to0_bias4x1x1x128io_told",
+          "hf285x1_b2h5k1v1_1024x1024_d128_bfp16_none_bshd_s0p088388_biasm4to0_bias2x1x1024x1024io_told",
+          "hf287x1_b2h8k1v1_1024x1024_d96_bfp16_none_bshd_biasm4to0_bias2x1x1024x1024io_told",
+          "hf298x1_b2h2k1v1_1024x1024_d56_bfp16_none_bshd_biasm4to0_bias2x1x1024x1024io_told",
+          "hf316x1_b2h3k1v1_1024x1024_d256_bfp16_none_bshd_biasm4to0_bias2x1x1024x1024io_told",
+          "hf324x1_b2h2k2v2_1024x1024_d32_bfp16_none_bshd_biasm4to0_bias2x1x1024x1024io_told",
+          "hf325x1_b2h2k2v2_1024x1024_d72_bfp16_none_bshd_biasm4to0_bias2x1x1024x1024io_told",
+          "hf339x1_b2h4k1v1_1024x1024_d96_bfp16_none_bshd_biasm4to0_bias2x1x1024x1024io_told",
+          "hf343x1_b2h2k1v1_1024x1024_d128_bfp16_none_bshd_s0p083333_biasm4to0_bias2x1x1024x1024io_told"
+        ],
+        "support": {
+          "gfx1201": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
   "version": 1
 }

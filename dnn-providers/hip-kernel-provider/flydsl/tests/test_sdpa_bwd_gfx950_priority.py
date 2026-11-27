@@ -90,16 +90,19 @@ def cxx_scale(p: float) -> float:
     return f32(1.0 / f32(1.0 - f32(p)))
 
 
+@pytest.mark.quick
 @pytest.mark.parametrize("p", PROBABILITIES)
 def test_threshold_is_the_float32_formula(p: float) -> None:
     assert dropout_threshold(p) == cxx_threshold(p)
 
 
+@pytest.mark.quick
 @pytest.mark.parametrize("p", [q for q in PROBABILITIES if q < 1.0])
 def test_scale_is_the_float32_formula(p: float) -> None:
     assert dropout_scale(p) == cxx_scale(p)
 
 
+@pytest.mark.quick
 @pytest.mark.parametrize("p", [0.1, 0.2, 0.22])
 def test_threshold_differs_from_the_double_formula(p: float) -> None:
     """The cases the float32 form exists for: the double product lands on another i32."""
@@ -107,6 +110,7 @@ def test_threshold_differs_from_the_double_formula(p: float) -> None:
     assert dropout_threshold(p) != double
 
 
+@pytest.mark.quick
 @pytest.mark.parametrize("p", [-0.1, 1.5])
 def test_threshold_rejects_out_of_range(p: float) -> None:
     with pytest.raises(ValueError):
@@ -217,6 +221,7 @@ def tables(request):
     )
 
 
+@pytest.mark.quick
 def test_the_exact_tile_row_ranks_first(tables) -> None:
     """Where an exact padded-0 row serves the graph, a row of that tile and padded 0 outranks every other serving row."""
     kind, by_dtype, _ = tables
