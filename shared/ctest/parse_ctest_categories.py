@@ -21,6 +21,11 @@ _REGEX_META = re.compile(r"[.*+?^${}()|[\]\\]")
 
 TIER_ORDER = ["quick", "standard", "comprehensive", "full"]
 
+# Exit status when the YAML is rejected: the project's configuration is wrong and has to be
+# fixed. TestCategories.cmake turns this status into a configure error. Every other failure
+# exits with 1 (missing or unreadable file, Python errors) and stays a CMake warning.
+EXIT_INVALID_CONFIG = 2
+
 # Matches the test name in CTest add_test() invocations. Supports both
 # the short form `add_test(<name> <command> [args...])` and the long form
 # `add_test(NAME <name> COMMAND <command> [args...])`. Test names may be
@@ -70,6 +75,12 @@ def parse_yaml(path):
     """
     with open(path, "r") as f:
         data = yaml.safe_load(f)
+
+    if not isinstance(data, dict):
+        print(
+            f"Error: {path} must contain a mapping of test categories", file=sys.stderr
+        )
+        sys.exit(EXIT_INVALID_CONFIG)
 
     if "test_categories" in data and isinstance(data["test_categories"], dict):
         categories = data["test_categories"]
@@ -505,27 +516,37 @@ def main():
         print(f"Error: {input_path} not found", file=sys.stderr)
         sys.exit(1)
 
-    categories, general_excludes = parse_yaml(input_path)
+    try:
+        categories, general_excludes = parse_yaml(input_path)
+    except yaml.YAMLError as e:
+        print(f"Error: Invalid YAML syntax in {input_path}: {e}", file=sys.stderr)
+        sys.exit(EXIT_INVALID_CONFIG)
 
     if args.print_categories:
         print(";".join(categories.keys()))
         return
 
-    if install_test_file and explicit_tests:
-        # Install-tree path. Emit `set_tests_properties()` lines with the
-        # final per-test label set precomputed in Python. ctest's script
-        # interpreter does not surface labels set via
-        # `set_property(TEST ...)` to `--print-labels` / `-L`, so the
-        # ordinary build-tree emission would be a silent no-op here.
-        cmake_code = generate_cmake_install(
-            categories, general_excludes, explicit_tests
-        )
-    else:
-        cmake_code = generate_cmake(categories, explicit_tests=explicit_tests)
-        if general_excludes:
-            cmake_code += generate_cmake_general_excludes(
-                general_excludes, explicit_tests=explicit_tests
+    try:
+        if install_test_file and explicit_tests:
+            # Install-tree path. Emit `set_tests_properties()` lines with the
+            # final per-test label set precomputed in Python. ctest's script
+            # interpreter does not surface labels set via
+            # `set_property(TEST ...)` to `--print-labels` / `-L`, so the
+            # ordinary build-tree emission would be a silent no-op here.
+            cmake_code = generate_cmake_install(
+                categories, general_excludes, explicit_tests
             )
+        else:
+            cmake_code = generate_cmake(categories, explicit_tests=explicit_tests)
+            if general_excludes:
+                cmake_code += generate_cmake_general_excludes(
+                    general_excludes, explicit_tests=explicit_tests
+                )
+    except re.error as e:
+        print(
+            f"Error: invalid regular expression in {input_path}: {e}", file=sys.stderr
+        )
+        sys.exit(EXIT_INVALID_CONFIG)
 
     # Print to stdout for CMake OUTPUT_VARIABLE capture
     print(cmake_code, end="")

@@ -456,23 +456,52 @@ class TestCliIntegration(unittest.TestCase):
         self.assertIn("[[--test-config]] [[config.json]]", install_contents)
         self.assertIn("--gtest_filter=*quick*", install_contents)
 
-    def test_cli_invalid_yaml_exits_nonzero(self):
+    def test_cli_invalid_yaml_exits_with_invalid_config_status(self):
         result, _ = self._run_parser("test_categories:\n  bad:\n    labels: [quick]\n")
-        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.returncode, ptc.EXIT_INVALID_CONFIG)
         self.assertIn("validation error", result.stderr)
 
-    def test_cli_invalid_environment_exits_nonzero(self):
+    def test_cli_invalid_gtest_pattern_exits_with_invalid_config_status(self):
+        result, _ = self._run_parser(
+            "test_categories:\n  quick:\n    test_patterns: ['Suite?.Test']\n"
+        )
+        self.assertEqual(result.returncode, ptc.EXIT_INVALID_CONFIG)
+        self.assertIn("Invalid gtest pattern", result.stderr)
+
+    def test_cli_yaml_syntax_error_exits_with_invalid_config_status(self):
+        result, _ = self._run_parser("test_categories: [unterminated\n")
+        self.assertEqual(result.returncode, ptc.EXIT_INVALID_CONFIG)
+        self.assertIn("Invalid YAML syntax", result.stderr)
+
+    def test_cli_missing_yaml_file_is_not_an_invalid_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(_PARSER),
+                    str(Path(tmp) / "absent.yaml"),
+                    "t",
+                    tmp,
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("YAML file not found", result.stderr)
+
+    def test_cli_invalid_environment_exits_with_invalid_config_status(self):
         result, _ = self._run_parser(
             PATTERNS_ONLY_YAML, "--environment", "not-a-kv-pair"
         )
-        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.returncode, ptc.EXIT_INVALID_CONFIG)
         self.assertIn("invalid --environment value", result.stderr)
 
-    def test_cli_invalid_additional_label_exits_nonzero(self):
+    def test_cli_invalid_additional_label_exits_with_invalid_config_status(self):
         result, _ = self._run_parser(
             PATTERNS_ONLY_YAML, "--additional-label", "bad;label"
         )
-        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.returncode, ptc.EXIT_INVALID_CONFIG)
         self.assertIn("invalid --additional-label value", result.stderr)
 
     @staticmethod

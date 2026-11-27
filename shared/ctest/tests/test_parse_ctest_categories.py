@@ -143,5 +143,44 @@ apply_ctest_category_labels("${{CMAKE_CURRENT_SOURCE_DIR}}/categories.yaml")
             )
 
 
+class TestInvalidConfigExitStatus(unittest.TestCase):
+    def _run(self, yaml_text, *extra_args):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "test_categories.yaml"
+            path.write_text(yaml_text, encoding="utf-8")
+            return subprocess.run(
+                [
+                    sys.executable,
+                    str(_CTEST_DIR / "parse_ctest_categories.py"),
+                    str(path),
+                    *extra_args,
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+    def test_yaml_syntax_error(self):
+        result = self._run("quick: [unterminated\n")
+        self.assertEqual(result.returncode, pcc.EXIT_INVALID_CONFIG)
+        self.assertIn("Invalid YAML syntax", result.stderr)
+
+    def test_top_level_that_is_not_a_mapping(self):
+        result = self._run("- quick\n- standard\n")
+        self.assertEqual(result.returncode, pcc.EXIT_INVALID_CONFIG)
+        self.assertIn("must contain a mapping", result.stderr)
+
+    def test_invalid_regular_expression_when_expanded_against_known_tests(self):
+        result = self._run(
+            "quick:\n  test_patterns: ['(unclosed.*']\n", "--explicit-tests", "a;b"
+        )
+        self.assertEqual(result.returncode, pcc.EXIT_INVALID_CONFIG)
+        self.assertIn("invalid regular expression", result.stderr)
+
+    def test_valid_yaml_exits_zero(self):
+        result = self._run("quick:\n  test_patterns: ['plain_binary']\n")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()
