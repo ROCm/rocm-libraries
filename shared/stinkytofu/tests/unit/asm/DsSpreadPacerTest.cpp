@@ -528,6 +528,28 @@ TEST(DsSpreadPacer, TheQueueFillLeavesAStageThatIssuedOrHasNotOpened) {
     EXPECT_EQ(issueBatch(p, 24, late), 2);
 }
 
+// 16 loads opened by the barrier wait at WMMA 71 of an 80-WMMA region. No fill: 3 batches of at
+// most 6. A fill of 4 leaves 2 batches of 8; a fill of 5 or more leaves one batch, all 16 in a row.
+TEST(DsSpreadPacer, HeldByFillGivesTheRunAQueueFillLeaves) {
+    Loads v;
+    add(v, 16, 0, 71);
+    DsSpreadPacer p;
+    p.plan(v, 80, 4, 0);
+    const DsSpreadPacer::Held now = p.heldByFill(71, 0);
+    EXPECT_EQ(now.loads, 16);
+    EXPECT_EQ(now.end, 80);
+    EXPECT_EQ(now.run, 6);
+    EXPECT_EQ(p.heldByFill(71, 4).run, 8);
+    EXPECT_EQ(p.heldByFill(71, 5).run, 16);
+    EXPECT_EQ(p.heldByFill(71, 9).run, 16);
+    // A stage that opens after the fill's end is not held.
+    EXPECT_EQ(p.heldByFill(60, 4).loads, 0);
+
+    // The query did not change the live pacer.
+    auto pending = ids(v);
+    EXPECT_EQ(issueBatch(p, 71, pending), 6);
+}
+
 TEST(DsSpreadPacer, AStageIsDueAtItsEndWithLoadsLeft) {
     Loads v;
     add(v, 2, 0, 8, 20);

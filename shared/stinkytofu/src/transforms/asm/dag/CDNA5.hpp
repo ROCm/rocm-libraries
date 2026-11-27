@@ -519,6 +519,13 @@ class CDNA5ReadyQueue : public ReadyQueue {
         if (cover >= 0) return cover;
         return (effectiveWmmaQueueDepth() - 1) * std::max(1, wmmaLatency);
     }
+    // The longest back-to-back ds_load run a full WMMA queue hides: its cover (depth x the WMMA's
+    // latency, the refill target) over the LDS return rate the pacer plans with. No rate: no limit.
+    int dsRunCoveredByQueue(int wmmaLatency) const {
+        const int cpl = effectiveDsCyclesPerLoad(dsTotalThisRegion_);
+        if (!wmmaQueueOn() || cpl <= 0) return INT_MAX;
+        return (effectiveWmmaQueueDepth() * std::max(1, wmmaLatency) + cpl - 1) / cpl;
+    }
     // WMMA refill (see PassFeatureConfig::DagFeatures::wmmaRefillMode). A refill starts when the
     // queued cover drops below the refill line (wmmaQueueCover) with room in the queue, and
     // keeps issuing WMMAs ahead of other work until it is done: Fixed after wmmaBatchSize
@@ -1048,6 +1055,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
     bool promotePrefetchAddressValu();
     bool promotePrefetchAtWindow();
     bool promoteWmmaQueueFill();
+    void decideWmmaQueueFill();
     bool loopHeadQueueFillPolicyAllowsBurst();
     bool issuableNow(DAGNode* node) const;
     DAGNode* bestDsRead(DAGNode** fallbackOut = nullptr) const;
@@ -2073,6 +2081,35 @@ bool CDNA5ReadyQueue::promoteWmmaQueueFill() {
     return true;
 }
 
+// At a queue reset (a region that starts with an empty queue, or a barrier wait), with
+// wmmaQueueFillPending_ set by the loop-head policy: the fill runs until the queue is full, unless
+// that leaves a held ds stage a back-to-back run longer than a full queue hides
+// (dsRunCoveredByQueue). Then there is no fill and the held stages start at the reset, unless
+// that does not shorten the run (the stage is late anyway): then the full fill runs.
+void CDNA5ReadyQueue::decideWmmaQueueFill() {
+    const int r = wmmaIssuedCountThisRegion_;
+    const auto windows = std::span<const WmmaQueueWindow>(regionWmmaWindows_);
+    const auto rest =
+        windows.subspan(static_cast<size_t>(std::clamp(r, 0, static_cast<int>(windows.size()))));
+    const int burst = predictWmmaQueueFillBurst(rest, effectiveWmmaQueueDepth());
+    const int limit = rest.empty() ? INT_MAX : dsRunCoveredByQueue(rest.front().latency);
+    const DsSpreadPacer::Held now = dsSpread_.heldByFill(r, 0);
+    const bool armed = wmmaQueueFillPending_;
+    const int run = dsSpread_.heldByFill(r, armed ? burst : 0).run;
+    int fill = armed ? burst : 0;
+    if (armed && run > limit && now.run < run) {
+        fill = 0;
+        wmmaQueueFillPending_ = false;
+        dsSpread_.noteHeldUntil(r);
+    }
+    PASS_DEBUG(std::cerr << "[CDNA5 queueResetFill] totalWmma=" << wmmaTotalThisRegion_
+                         << " r=" << r << " stageEnd=" << (now.end == INT_MAX ? -1 : now.end)
+                         << " wmmaLeft=" << (now.end == INT_MAX ? 0 : now.end - r) << " dsPending="
+                         << now.loads << " burst=" << burst << " armed=" << armed << " run=" << run
+                         << " limit=" << (limit == INT_MAX ? -1 : limit) << " fill=" << fill
+                         << " newRun=" << dsSpread_.heldByFill(r, fill).run << "\n");
+}
+
 // The ds_load the phases consider: the best by dsReadPriority among those the spread releases,
 // else among all. A load the spread holds does not stand in for the ones it releases: its stage
 // may open later than another's.
@@ -2896,8 +2933,10 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
             // window. It can issue later than that (a predecessor was held, an SCC chain, an open
             // barrier pair). Count the batches from here; the stage's planned end stays.
             dsSpread_.noteOpen(barrier->id, wmmaIssuedCountThisRegion_);
-            if (queueReset)
+            if (queueReset) {
                 wmmaQueueFillPending_ = wmmaQueueOn() && loopQueueFillPolicy_.value_or(false);
+                decideWmmaQueueFill();
+            }
             PASS_DEBUG(std::cerr << "[DAG CDNA5 pickOne] barrier dagId=" << barrier->id
                                  << " promoted=" << (promotedPhase_ == PromotePhase::Barrier)
                                  << "\n";
@@ -3258,6 +3297,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
 
     // The queue starts empty at the loop header's first WMMA region and in a region cut by a
     // barrier wait: fill it first. The loop-head deferral wins over the fill.
+    bool queueResetAtStart = false;
     if (wmmaQueueOn() && hasWMMAInRegion_) {
         const bool headerStart =
             headerFillPending_ && loop && loop->headerBB == blockBegin->getParent();
@@ -3267,6 +3307,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
             afterWait = prev != nullptr && isBarrierWait(*prev);
         }
         if (headerStart) headerFillPending_ = false;
+        queueResetAtStart = headerStart || afterWait;
         const bool resetCandidate = (headerStart || afterWait) && !deferHeadBalanceThisRegion_;
         wmmaQueueFillPending_ =
             resetCandidate && (headerStart || loopQueueFillPolicy_.value_or(false));
@@ -4309,6 +4350,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     if (wmmaQueueFillPending_ && !loopQueueFillPolicy_.has_value())
         loopQueueFillPolicy_ = loopHeadQueueFillPolicyAllowsBurst();
     if (wmmaQueueFillPending_) wmmaQueueFillPending_ = *loopQueueFillPolicy_;
+    if (queueResetAtStart) decideWmmaQueueFill();
     lockDsReadOrder();
     lockWmmaOrder();
 
