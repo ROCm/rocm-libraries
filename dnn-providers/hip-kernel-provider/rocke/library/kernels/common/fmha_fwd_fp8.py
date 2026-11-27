@@ -85,8 +85,8 @@ class FmhaFwdFp8Spec:
 
 # CDNA generations whose ``cvt.f32.fp8`` / ``cvt.f32.bf8`` intrinsics
 # decode the fp8 byte as the **fnuz** variant (e4m3fnuz / e5m2fnuz, the
-# MI200/MI300 native format) rather than the OCP ``e4m3fn`` / ``e5m2``
-# format that gfx950 (MI350) and gfx11 use. ``ArchTarget.target_family``
+# gfx90a / gfx942 native format) rather than the OCP ``e4m3fn`` / ``e5m2``
+# format that gfx950 and gfx11 use. ``ArchTarget.target_family``
 # is the SSOT discriminator: gfx942/gfx940/gfx941 all share the
 # ``gfx9_mfma`` family, gfx950 has its own ``gfx950`` family.
 _FNUZ_FP8_TARGET_FAMILIES = frozenset({"gfx9_mfma"})

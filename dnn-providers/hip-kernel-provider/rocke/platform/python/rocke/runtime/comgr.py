@@ -76,6 +76,18 @@ class ComgrProcessDied(ComgrError):
     it reported a result or an error: a toolchain crash, not a compile error."""
 
 
+class ComgrOutOfMemory(ComgrProcessDied):
+    """The process compiling one module (``fresh_process=True``) ran out of
+    memory: on POSIX, under :data:`FRESH_PROCESS_MEMORY_CAP_BYTES`."""
+
+
+# Address-space cap of the process compiling one module (``fresh_process=True``;
+# POSIX only). The kernels compiled this way (iglp_opt(1) kernels) compile far
+# below it; it stops a compiler that allocates without bound early instead of
+# letting it take the host's memory.
+FRESH_PROCESS_MEMORY_CAP_BYTES = 4 * 1024**3
+
+
 def _load_lib() -> ctypes.CDLL:
     # Pair the loader with ``hip_module._load_lib`` so the two halves of
     # the process always share a single HIP/comgr runtime instance. See
@@ -752,6 +764,33 @@ def _extract_first(data_set: _DataSet, kind: int) -> bytes:
     return out
 
 
+# What LLVM writes to stderr before it aborts on a failed allocation.
+_LLVM_OUT_OF_MEMORY = "LLVM ERROR: out of memory"
+
+
+def _out_of_memory_message(stderr: str, *, capped: bool) -> str:
+    """The :class:`ComgrOutOfMemory` message: the cap (when ``capped``), what
+    the child reported, and the known cause."""
+    lines = stderr.strip().splitlines()
+    reported = next(
+        (line.strip() for line in lines if _LLVM_OUT_OF_MEMORY in line),
+        lines[-1] if lines else "no output",
+    )
+    cap = (
+        f" under its {FRESH_PROCESS_MEMORY_CAP_BYTES / 1024**3:g} GiB "
+        "address-space cap"
+        if capped
+        else ""
+    )
+    return (
+        f"the fresh compile process ran out of memory{cap} ({reported}). A known "
+        "cause: llvm.amdgcn.iglp.opt(i32 1) in a scheduling region with fewer "
+        "than 4 LDS reads, on a compiler without LLVM commit 576e1affab35 "
+        "(ROCm older than 7.11); see known issue 8 in "
+        "dsl_docs/architecture/gfx_support_audit.md"
+    )
+
+
 def _build_in_fresh_process(
     ir_text: str, *, isa: str, options: List[str]
 ) -> Tuple[bytes, ComgrTimings]:
@@ -761,13 +800,25 @@ def _build_in_fresh_process(
     library this process loaded and runs with comgr's own on-disk cache off
     (:func:`comgr_child_env`; a torch-bundled library is kept even though the
     child does not import torch), and imports this rocke package (its root is
-    put first on ``PYTHONPATH``).
-    Raises :class:`ComgrError` with the child's message for a compile error and
-    :class:`ComgrProcessDied` when the child dies.
+    put first on ``PYTHONPATH``). On POSIX the child caps its own address
+    space at :data:`FRESH_PROCESS_MEMORY_CAP_BYTES`.
+    Raises :class:`ComgrError` with the child's message for a compile error,
+    :class:`ComgrOutOfMemory` when the child runs out of memory and
+    :class:`ComgrProcessDied` when the child dies otherwise.
     """
     import json
     import subprocess
     import tempfile
+
+    # Not at module top: the child runs as ``python -m`` that module, and
+    # importing it first (this module loads with the package) makes runpy warn
+    # on the child's stderr.
+    from ._comgr_fresh_process import (
+        ADDRESS_SPACE_CAP_APPLIES,
+        COMPILE_ERROR_EXIT_STATUS,
+        OUT_OF_MEMORY_EXIT_STATUS,
+        UNCAUGHT_EXCEPTION_EXIT_STATUS,
+    )
 
     # The parent's own checks first: the same library, the same flavor gate.
     _assert_ir_flavor_matches_lib(ir_text)
@@ -780,7 +831,12 @@ def _build_in_fresh_process(
     )
     with tempfile.TemporaryDirectory(prefix="rocke-comgr-") as tmp:
         out_path = os.path.join(tmp, "out.bin")
-        header = {"isa": isa, "options": list(options), "out": out_path}
+        header = {
+            "isa": isa,
+            "options": list(options),
+            "out": out_path,
+            "memory_cap_bytes": FRESH_PROCESS_MEMORY_CAP_BYTES,
+        }
         proc = subprocess.run(
             [sys.executable, "-m", "rocke.runtime._comgr_fresh_process"],
             input=json.dumps(header).encode("utf-8") + b"\n" + ir_text.encode("utf-8"),
@@ -788,10 +844,23 @@ def _build_in_fresh_process(
             stderr=subprocess.PIPE,
             env=env,
         )
-        tail = proc.stderr.decode("utf-8", "replace")[-2000:]
-        if proc.returncode == 2:  # the child's ComgrError, message on stderr
+        stderr = proc.stderr.decode("utf-8", "replace")
+        tail = stderr[-2000:]
+        reported_statuses = (
+            0,
+            COMPILE_ERROR_EXIT_STATUS,
+            UNCAUGHT_EXCEPTION_EXIT_STATUS,
+            OUT_OF_MEMORY_EXIT_STATUS,
+        )
+        if proc.returncode == OUT_OF_MEMORY_EXIT_STATUS or (
+            proc.returncode not in reported_statuses and _LLVM_OUT_OF_MEMORY in stderr
+        ):
+            raise ComgrOutOfMemory(
+                _out_of_memory_message(stderr, capped=ADDRESS_SPACE_CAP_APPLIES)
+            )
+        if proc.returncode == COMPILE_ERROR_EXIT_STATUS:  # message on stderr
             raise ComgrError(tail.strip())
-        if proc.returncode == 1:  # an exception other than ComgrError
+        if proc.returncode == UNCAUGHT_EXCEPTION_EXIT_STATUS:  # traceback
             raise ComgrError(f"the fresh compile process failed: {tail.strip()}")
         if proc.returncode != 0 or not os.path.exists(out_path):
             raise ComgrProcessDied(
@@ -920,7 +989,12 @@ def build_hsaco_from_llvm_ir(
     a module depends on every earlier ``iglp_opt(1)`` compile in the process.
     A process that compiles one module gives the code the strategy is written
     for (its own assertion expects those counts to be zero) and the same code
-    object every time. The default keeps the in-process compile.
+    object every time. On POSIX the fresh process also runs under an
+    address-space cap (:data:`FRESH_PROCESS_MEMORY_CAP_BYTES`): the same
+    strategy, on a compiler without LLVM commit 576e1affab35, allocates
+    without bound in a region with fewer than 4 LDS reads, and the cap turns
+    that into :class:`ComgrOutOfMemory`. The default keeps the in-process
+    compile.
 
     A ``-mllvm`` option the loaded compiler does not accept raises before
     COMGR is called (:func:`require_options_accepted`).

@@ -5,6 +5,12 @@
 The ``SdpaRequest`` -> ``AttentionRequest`` translation, the band comparison
 both gates use to refuse a band their kernels would not compute, the value
 checks on carried hints, and the per-operand views the bindings copy through.
+
+The bindings take any array :func:`rocke.runtime.device_array.array_info`
+describes -- a torch tensor or a :class:`~rocke.runtime.device_array.DeviceArray`
+-- and move data with the runtime's memcpy and memset
+(:func:`~rocke.runtime.device_array.copy_elements`,
+:func:`~rocke.runtime.device_array.zero_elements`), so they need no torch.
 """
 
 from __future__ import annotations
@@ -16,7 +22,14 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from rocke.runtime.torch_interop import resolve_stream, torch_dtype
+from rocke.runtime.device_array import (
+    ArrayInfo,
+    array_info,
+    dense_strides,
+    host_values,
+    strided_view,
+)
+from rocke.runtime.torch_interop import resolve_stream
 
 from dispatch.attention import AttentionMaskType, AttentionRequest
 from dispatch.attention.common import Alignment, AttentionBand
@@ -25,7 +38,7 @@ if TYPE_CHECKING:
     from .common import SdpaRequest, SdpaTensor
 
 __all__ = [
-    "TORCH_DTYPES",
+    "ELEMENT_TYPES",
     "Operand",
     "asked_band",
     "band_text",
@@ -36,6 +49,7 @@ __all__ = [
     "kept_keys",
     "launch_stream",
     "nonfinite_scale_reject",
+    "require_one_device",
     "to_attention_request",
     "usable_in_place",
     "value_rejects",
@@ -44,14 +58,15 @@ __all__ = [
 # ``SdpaRequest`` dispatch selectors; only ``"auto"`` is served.
 _DISPATCH_PINS = ("algorithm", "spec_id", "tuning_id")
 
-# Torch dtype names, resolved through ``rocke.runtime.torch_interop.torch_dtype``:
-# the I/O dtypes, FP32 stats, and the integer lengths and ragged offsets.
-TORCH_DTYPES = {
-    "fp16": "float16",
-    "bf16": "bfloat16",
-    "fp32": "float32",
-    "int32": "int32",
-    "int64": "int64",
+# The rocKE element type (``rocke.core.dtypes`` name) of each request dtype a
+# binding reads or allocates: the I/O dtypes, FP32 stats, and the integer
+# lengths and ragged offsets.
+ELEMENT_TYPES = {
+    "fp16": "fp16",
+    "bf16": "bf16",
+    "fp32": "fp32",
+    "int32": "i32",
+    "int64": "i64",
 }
 
 # Base-pointer alignment, in bytes, the unified and dense kernels declare for
@@ -279,10 +294,11 @@ def launch_stream(stream: Any, device: Any, family: str) -> int:
     names it by handle, as graph capture does.
 
     Any other stream is refused. The binding's ``pack()`` / ``unpack()`` are
-    Torch copies on the current stream, and its workspace buffers were
+    copies queued on the current stream, and its workspace buffers were
     allocated against the stream current at bind time (see
     ``resolve_stream``), so launching only the kernel on another stream would
-    race on those buffers.
+    race on those buffers. Without torch the current stream is HIP's null
+    stream.
     """
     current = resolve_stream(0, device=device)
     if stream is None or int(stream) in (0, current):
@@ -298,73 +314,88 @@ def launch_stream(stream: Any, device: Any, family: str) -> int:
 # --- operands ------------------------------------------------------------------
 
 
-def host_ints(tensor) -> list[int]:
-    return [int(x) for x in tensor.detach().reshape(-1).cpu().tolist()]
+def host_ints(array) -> list[int]:
+    """The elements of a (device) array as host Python ints."""
+    return [int(x) for x in host_values(array).reshape(-1).tolist()]
 
 
-def check_dtype(name: str, tensor, desc: SdpaTensor) -> None:
-    """Refuse a tensor whose dtype is not the one its descriptor names.
+def check_dtype(name: str, array, desc: SdpaTensor) -> None:
+    """Refuse an array whose element type is not the one its descriptor names.
 
-    The one dtype rule for every tensor a binding reads: operands, stats,
+    The one dtype rule for every array a binding reads: operands, stats,
     ``seq_len_*`` and ragged offsets. A lenient read would bind the wrong
     data silently: ``int()`` truncates a float offset (0.5 -> 0), and a copy
     into an FP32 workspace casts FP16 stats.
     """
-    want = TORCH_DTYPES.get(desc.dtype)
+    want = ELEMENT_TYPES.get(desc.dtype)
     if want is None:
-        raise ValueError(f"{name}: no torch dtype for the request's {desc.dtype}")
-    want = torch_dtype(want)
-    if tensor.dtype != want:
-        raise ValueError(
-            f"{name} must be {want} as the request describes, got {tensor.dtype}"
-        )
+        raise ValueError(f"{name}: no element type for the request's {desc.dtype}")
+    got = array_info(array).dtype
+    if got != want:
+        raise ValueError(f"{name} must be {want} as the request describes, got {got}")
 
 
-def usable_in_place(view) -> bool:
-    """Whether a binding may hand ``view`` to a kernel as is: contiguous, with
-    the 16-byte-aligned base pointer the kernels declare (a contiguous view
-    one FP16 element into its allocation is not). Anything else is copied
-    through a workspace buffer."""
-    return view.is_contiguous() and view.data_ptr() % _KERNEL_ALIGNMENT == 0
+def require_one_device(tensors: Mapping[str, Any]) -> None:
+    """Refuse K, V, O or stats on another device than Q (``None``: host
+    memory)."""
+    device = array_info(tensors["q"]).device
+    for name in ("k", "v", "o", "stats"):
+        if name in tensors and array_info(tensors[name]).device != device:
+            raise ValueError(
+                f"{name}: expected an array on device {device}, got "
+                f"{array_info(tensors[name]).device}"
+            )
+
+
+def usable_in_place(info: ArrayInfo) -> bool:
+    """Whether a binding may hand the memory ``info`` describes to a kernel as
+    is: contiguous, with the 16-byte-aligned base pointer the kernels declare
+    (a contiguous view one FP16 element into its allocation is not). Anything
+    else is copied through a workspace buffer."""
+    return info.is_contiguous() and info.data_ptr % _KERNEL_ALIGNMENT == 0
 
 
 class Operand:
     """Per-batch ``(rows, heads, d)`` views of one operand.
 
-    A dense operand is its logical BHSD tensor, with the request's strides. A
+    A dense operand is its logical BHSD array, with the request's strides. A
     ragged operand is its packed buffer plus ``B + 1`` offsets: batch ``b``
     starts at element ``offsets[b] * ragged_offset_multiplier``, as hipDNN
-    reads it, and the batch stride is unused.
+    reads it, and the batch stride is unused. The views are
+    :class:`~rocke.runtime.device_array.ArrayInfo` descriptions of the
+    operand's memory, which the bindings copy to and from; an in-place view
+    is an array of the caller's kind
+    (:func:`~rocke.runtime.device_array.strided_view`).
     """
 
-    def __init__(self, name: str, desc: SdpaTensor, tensor, offsets=None) -> None:
+    def __init__(self, name: str, desc: SdpaTensor, array, offsets=None) -> None:
         batch, heads, extent, width = desc.dims
-        check_dtype(name, tensor, desc)
-        self.name, self.desc, self.tensor = name, desc, tensor
+        check_dtype(name, array, desc)
+        self.name, self.desc, self.array = name, desc, array
+        self.info = info = array_info(array)
         self.heads, self.extent, self.width = heads, extent, width
         self.starts: list[int] | None = None
         self.lengths: list[int] | None = None
         if not desc.ragged:
-            if tuple(tensor.shape) != tuple(desc.dims):
+            if info.shape != tuple(desc.dims):
                 raise ValueError(
-                    f"{name}: tensor shape {tuple(tensor.shape)} is not the "
-                    f"request's dims {desc.dims}"
+                    f"{name}: shape {info.shape} is not the request's "
+                    f"dims {desc.dims}"
                 )
-            for n, got, want in zip(desc.dims, tensor.stride(), desc.strides):
+            for n, got, want in zip(desc.dims, info.strides, desc.strides):
                 if n > 1 and got != want:
                     raise ValueError(
-                        f"{name}: tensor strides {tuple(tensor.stride())} are not "
-                        f"the request's strides {desc.strides}"
+                        f"{name}: strides {info.strides} are not the "
+                        f"request's strides {desc.strides}"
                     )
             return
         if offsets is None:
             raise ValueError(f"ragged operand {name!r} needs its ragged offsets")
-        if not tensor.is_contiguous():
+        if not info.is_contiguous():
             raise ValueError(f"{name}: a ragged buffer must be contiguous")
         _, s_h, s_s, s_d = desc.strides
         mult = int(desc.ragged_offset_multiplier)
         check_dtype(f"{name}: ragged offsets", offsets, desc.ragged_offset)
-        self.flat = tensor.reshape(-1)
         self.starts = [o * mult for o in host_ints(offsets)]
         self.row_strides = (s_s, s_h, s_d)
         if len(self.starts) != batch + 1 or any(x % s_s for x in self.starts):
@@ -378,41 +409,65 @@ class Operand:
                 f"{name}: ragged lengths {self.lengths} must be in [0, {extent}]"
             )
 
-    def rows(self, b: int, n: int):
+    def rows(self, b: int, n: int) -> ArrayInfo:
         """Batch ``b``'s first ``n`` rows as ``(n, heads, d)``."""
+        shape = (n, self.heads, self.width)
         if self.starts is None:
-            return self.tensor[b, :, :n, :].transpose(0, 1)
-        return self.flat.as_strided(
-            (n, self.heads, self.width),
-            self.row_strides,
-            self.flat.storage_offset() + self.starts[b],
+            s_b, s_h, s_s, s_d = self.info.strides
+            return self.info.view(shape, (s_s, s_h, s_d), offset=b * s_b)
+        return self.info.view(shape, self.row_strides, offset=self.starts[b])
+
+    def tail(self, b: int, n: int) -> ArrayInfo:
+        """Dense batch ``b``'s rows from ``n`` to the extent, as
+        ``(heads, extent - n, d)``: the rows past a sequence's length."""
+        s_b, s_h, s_s, s_d = self.info.strides
+        return self.info.view(
+            (self.heads, self.extent - n, self.width),
+            (s_h, s_s, s_d),
+            offset=b * s_b + n * s_s,
         )
 
+    def bshd(self) -> ArrayInfo:
+        """A dense operand as ``[B, S, H, D]`` over its own memory."""
+        b, h, s, d = self.info.shape
+        s_b, s_h, s_s, s_d = self.info.strides
+        return self.info.view((b, s, h, d), (s_b, s_s, s_h, s_d))
+
+    def _in_place(self, shape: tuple[int, ...], rows: ArrayInfo | None = None):
+        """The caller's array from its first element as dense ``shape``, when
+        the memory that covers (``rows``, by default the dense view itself) is
+        :func:`usable_in_place`; else ``None``."""
+        strides = dense_strides(shape)
+        if not usable_in_place(
+            rows if rows is not None else self.info.view(shape, strides)
+        ):
+            return None
+        return strided_view(self.array, shape, strides)
+
     def packed_view(self, cu: list[int]):
-        """A ``(total, heads, d)`` view when the rows already sit packed in
-        token order (packed BSHD at full length, or contiguous ragged) and
-        :func:`usable_in_place` allows it, else ``None`` (the caller copies
-        through its workspace).
+        """A ``(total, heads, d)`` array over the caller's memory when the
+        rows already sit packed in token order (packed BSHD at full length, or
+        contiguous ragged) and :func:`usable_in_place` allows it, else
+        ``None`` (the caller copies through its workspace).
         """
         total, h, d = cu[-1], self.heads, self.width
         if self.starts is None:
             if any(b - a != self.extent for a, b in pairwise(cu)):
                 return None
-            bshd = self.tensor.transpose(1, 2)
-            return bshd.reshape(total, h, d) if usable_in_place(bshd) else None
+            return self._in_place((total, h, d), self.bshd())
         if self.row_strides != (h * d, d, 1) or any(
             s != c * h * d for s, c in zip(self.starts, cu)
         ):
             return None
-        view = self.flat[: total * h * d].view(total, h, d)
-        return view if usable_in_place(view) else None
+        return self._in_place((total, h, d))
 
     def paged_view(self, lengths: list[int], block: int):
-        """A ``(B * S / block, block, heads, d)`` paged-cache view, for the
-        identity block table, when the rows already sit there: every batch at
-        full length (``lengths`` all equal the extent, a nonzero multiple of
-        ``block``), packed in token order, and :func:`usable_in_place`. Else
-        ``None`` and the caller copies into a zero-filled cache.
+        """A ``(B * S / block, block, heads, d)`` paged-cache array over the
+        caller's memory, for the identity block table, when the rows already
+        sit there: every batch at full length (``lengths`` all equal the
+        extent, a nonzero multiple of ``block``), packed in token order, and
+        :func:`usable_in_place`. Else ``None`` and the caller copies into a
+        zero-filled cache.
 
         Full length only: a kernel may read a KV tile's masked trailing rows
         (see the gfx942 4-warp body), and a masked row still reaches P @ V, so
@@ -422,14 +477,11 @@ class Operand:
         h, d, extent = self.heads, self.width, self.extent
         if extent == 0 or extent % block or any(n != extent for n in lengths):
             return None
+        shape = (len(lengths) * extent // block, block, h, d)
         if self.starts is None:
-            rows = self.tensor.transpose(1, 2)
-        else:
-            if self.row_strides != (h * d, d, 1) or any(
-                s != b * extent * h * d for b, s in enumerate(self.starts)
-            ):
-                return None
-            rows = self.flat[: len(lengths) * extent * h * d]
-        if not usable_in_place(rows):
+            return self._in_place(shape, self.bshd())
+        if self.row_strides != (h * d, d, 1) or any(
+            s != b * extent * h * d for b, s in enumerate(self.starts)
+        ):
             return None
-        return rows.reshape(-1, block, h, d)
+        return self._in_place(shape)

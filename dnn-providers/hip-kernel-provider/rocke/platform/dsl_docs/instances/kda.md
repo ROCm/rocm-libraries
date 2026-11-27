@@ -152,13 +152,17 @@ swizzled LDS store/load pairing here is specific to `a_per_lane == 4`.
 
 ## Host drivers
 
-`library/builders/gfx942/kda/` carries two host lanes over the *same* packed
-layout, so either can validate the other:
+`library/builders/gfx942/kda/` packs through one numpy layout, and every
+builder checks against the same float64 references in
+`rocke.numeric.gated_delta`: a token-serial oracle for the gated delta rule
+(`gated_delta_recurrence`), which shares no algebra with the chunkwise
+factorization, and the six per-chunk tiles (`chunkwise_tiles`):
 
-- `kda_chunk_fused.py`, `kda_chunk_prep.py`, `kda_chunk_split.py` -- torch GPU
-  experiments: parity sweeps and local benchmarks against a torch reference
-- `hostpack.py` -- torch-free numpy pack/unpack plus a float64 token-serial
-  oracle for the gated delta rule, independent of the fused factorization
+- `kda_chunk_fused.py`, `kda_chunk_prep.py`, `kda_chunk_split.py` -- torch-free
+  host builders: parity sweeps and local benchmarks for the fused, per-chunk
+  tile and split paths
+- `hostpack.py` -- numpy pack/unpack between the dense `[B,H,T,*]` layout and
+  the V partitions
 - `manifest.py` -- registers the `kda_chunk_fused_bf16` manifest-runner kind, so
   `python -m rocke.run_manifest <hsaco> <manifest> --verify` runs the pack and
   the correctness check on a remote node with no torch installed

@@ -26,6 +26,7 @@ from rocke.core.ir import (
     type_bits,
 )
 from rocke.core.ir_serialize import parse, serialize
+from rocke.core.isa.matrix_calls import MATRIX_CALLS
 from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 from rocke.tests.engines import native_engine_or_skip
@@ -439,10 +440,17 @@ _INTEGER_WMMA_CASES = [
 ]
 
 
-@pytest.mark.parametrize(
-    "case", _INTEGER_WMMA_CASES, ids=[c[1] for c in _INTEGER_WMMA_CASES]
-)
-@pytest.mark.parametrize("flavor", [*FLAVORS, "llvm24"])
+# Each integer WMMA case with each flavor its call lowers at; the refusal below
+# that is pinned by tests/core/test_matrix_calls.py.
+_INTEGER_WMMA_FLAVOR_CASES = [
+    pytest.param(case, flavor, id=f"{flavor}-{case[1]}")
+    for case in _INTEGER_WMMA_CASES
+    for flavor in (*FLAVORS, "llvm24")
+    if MATRIX_CALLS[case[1]].lowers_at(flavor)
+]
+
+
+@pytest.mark.parametrize("case, flavor", _INTEGER_WMMA_FLAVOR_CASES)
 def test_integer_registry_preserves_valid_carriers_and_signedness(case, flavor):
     kernel, _ = _kernel(case, use_result=True)
     native = native_engine_or_skip()
@@ -456,10 +464,7 @@ def test_integer_registry_preserves_valid_carriers_and_signedness(case, flavor):
         assert "bitcast <1 x i32>" in text
 
 
-@pytest.mark.parametrize(
-    "case", _INTEGER_WMMA_CASES, ids=[c[1] for c in _INTEGER_WMMA_CASES]
-)
-@pytest.mark.parametrize("flavor", [*FLAVORS, "llvm24"])
+@pytest.mark.parametrize("case, flavor", _INTEGER_WMMA_FLAVOR_CASES)
 @pytest.mark.parametrize("role", ["src2", "dst"])
 @pytest.mark.parametrize("engine", ["python", "native"])
 def test_integer_registry_preflights_fixed_source_and_result(

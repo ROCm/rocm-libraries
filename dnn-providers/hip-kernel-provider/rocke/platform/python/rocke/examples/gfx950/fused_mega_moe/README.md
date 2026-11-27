@@ -31,7 +31,7 @@ gate GEMM + up GEMM  ->  SiLU  ->  Hidden (stays in LDS)  ->  reshape
 
 | | |
 |---|---|
-| GPU | AMD Instinct MI355X (gfx950), 256 CU, 160 KB LDS/CU, 512 VGPR + 512 AGPR/SIMD |
+| GPU | gfx950, 256 CU, 160 KB LDS/CU, 512 VGPR + 512 AGPR/SIMD |
 | ROCm | 7.2 |
 | shapes | canonical decode **T=1** and batch **T=8**, `E=8, K=2, H=4096, I=7168` |
 | dtype | fp8 e4m3 weights + activations, per-128-block f32 scales, bf16 output |

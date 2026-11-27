@@ -36,7 +36,6 @@ import math
 
 import numpy as np
 import pytest
-
 from kernels.common.attention_unified import (
     UnifiedAttentionProblem,
     _gfx942_4warp_route,
@@ -48,12 +47,13 @@ from rocke.tests.lanes import skip_needing_arch
 from ._attention_paged_reference import paged_attention_reference, round_to_half
 from ._attention_tiled_launch import launch_tiled_one_sequence
 
+_ARCHES = ("gfx942", "gfx950")
 _ARCH = get_device_arch()
 pytestmark = [
     pytest.mark.gpu,
     pytest.mark.skipif(
-        _ARCH not in ("gfx942", "gfx950"),
-        reason=f"needs a gfx942 or gfx950 GPU, found {_ARCH}",
+        _ARCH not in _ARCHES,
+        reason=f"needs a {' or '.join(_ARCHES)} GPU, found {_ARCH}",
     ),
 ]
 
@@ -94,6 +94,11 @@ _HEAD_SIZES = [64, 128, 256]
 _PAGE_SIZES = [16, 64]
 
 
+_SEQUENCE_LEN = 256
+# The KV pages _paged_cache allocates beyond those the sequence needs.
+_SPARE_PAGES = 3
+
+
 def _problem(dtype, q_len, kv_len, num_blocks, bs, head_size):
     return UnifiedAttentionProblem(
         total_q=q_len,
@@ -110,8 +115,9 @@ def _problem(dtype, q_len, kv_len, num_blocks, bs, head_size):
     )
 
 
-def _branch_spec(problem, branch, bs, arch):
-    """The tuning spec that pins ``branch`` of the epilogue on ``arch``."""
+def _canonical_branch_spec(problem, branch, bs, arch):
+    """``(spec, why, spec_id, knobs)``: the tuning spec that pins ``branch`` of
+    the epilogue on ``arch``, or ``None`` and the reason the rules refuse it."""
     from dispatch.attention.unified_rules import canonicalize_tuning_spec
 
     if arch == "gfx942":
@@ -127,12 +133,28 @@ def _branch_spec(problem, branch, bs, arch):
     variant = next(v for v in variants if v.spec_id == spec_id)
     knobs = {"use_transposed_scalar_state": True} if branch.endswith("_s1") else {}
     spec, why = canonicalize_tuning_spec(problem, variant, knobs)
+    return spec, why, spec_id, knobs
+
+
+def _admitting_arches(problem, branch, bs):
+    """The arches whose tuning rules take ``branch`` for ``problem``."""
+    return tuple(
+        arch
+        for arch in _ARCHES
+        if _canonical_branch_spec(problem, branch, bs, arch)[0] is not None
+    )
+
+
+def _branch_spec(problem, branch, bs, arch):
+    """The tuning spec that pins ``branch`` of the epilogue on ``arch``."""
+    spec, why, spec_id, knobs = _canonical_branch_spec(problem, branch, bs, arch)
     if spec is None and problem.head_size == 256:
-        reason = f"{spec_id} {knobs} does not take D256 here: {why} (runs on gfx950)"
-        # D256 fits the LDS of gfx950 only; there a refusal is a defect.
-        if arch != "gfx950":
-            skip_needing_arch(("gfx950",), reason=reason)
-        pytest.skip(reason)
+        # Only gfx950's LDS holds D256 tiles, so elsewhere a D256 case waits
+        # for gfx950. _masked_tile_cases leaves out the D256 cases no arch takes.
+        skip_needing_arch(
+            _admitting_arches(problem, branch, bs),
+            reason=f"{spec_id} {knobs} does not take D256 here: {why}",
+        )
     assert spec is not None, f"{spec_id} {knobs}: {why}"
     return spec
 
@@ -168,11 +190,23 @@ def _reference(q, k_cache, v_cache, kv_len, block_table, scale):
     )
 
 
+def _kv_pages(kv_len, bs):
+    """The KV pages a sequence of ``kv_len`` keys fills at page size ``bs``."""
+    return (kv_len + bs - 1) // bs
+
+
+def _cache_pages(kv_len, bs):
+    """The pages of the cache ``_paged_cache`` allocates: the sequence's and
+    ``_SPARE_PAGES`` more."""
+    return _kv_pages(kv_len, bs) + _SPARE_PAGES
+
+
 def _paged_cache(rng, kv_len, bs, head_size, dtype, k_value=None):
-    """K/V caches (float32 values exact in ``dtype``) with three spare pages and
-    a shuffled block table. K is ``k_value`` everywhere, or randn if None."""
-    max_blocks = (kv_len + bs - 1) // bs
-    num_blocks = max_blocks + 3
+    """K/V caches (float32 values exact in ``dtype``) with ``_SPARE_PAGES``
+    spare pages and a shuffled block table. K is ``k_value`` everywhere, or
+    randn if None."""
+    max_blocks = _kv_pages(kv_len, bs)
+    num_blocks = _cache_pages(kv_len, bs)
     shape = (num_blocks, bs, _HKV, head_size)
     if k_value is None:
         k_cache = round_to_half(rng.standard_normal(shape), dtype)
@@ -190,7 +224,7 @@ def _run_and_check(dtype, score, bs, head_size, spec_for):
     ``spec_for(problem)`` returns the tuning spec to pin, or ``None`` for the
     production auto route.
     """
-    q_len = kv_len = 256
+    q_len = kv_len = _SEQUENCE_LEN
     rng = np.random.default_rng(0)
     scale = 1.0 / math.sqrt(head_size)
     # Every visible score equals `score`: q = a, k = b with a * b * D * scale = score.
@@ -228,10 +262,29 @@ def _run_and_check(dtype, score, bs, head_size, spec_for):
     )
 
 
-@pytest.mark.parametrize("head_size", _HEAD_SIZES)
-@pytest.mark.parametrize("bs", _PAGE_SIZES)
-@pytest.mark.parametrize("dtype,score", _SCORES)
-@pytest.mark.parametrize("branch", _BRANCHES)
+def _masked_tile_cases():
+    """``(branch, dtype, score, bs, head_size)`` of each case. A D256 case
+    that no arch's tuning rules take is left out rather than skipped, since no
+    lane could run it."""
+    cases = []
+    for branch in _BRANCHES:
+        for dtype, score in _SCORES:
+            for bs in _PAGE_SIZES:
+                for head_size in _HEAD_SIZES:
+                    problem = _problem(
+                        dtype,
+                        _SEQUENCE_LEN,
+                        _SEQUENCE_LEN,
+                        _cache_pages(_SEQUENCE_LEN, bs),
+                        bs,
+                        head_size,
+                    )
+                    if head_size != 256 or _admitting_arches(problem, branch, bs):
+                        cases.append((branch, dtype, score, bs, head_size))
+    return cases
+
+
+@pytest.mark.parametrize("branch,dtype,score,bs,head_size", _masked_tile_cases())
 def test_masked_leading_tile_keeps_rows_with_keys(branch, dtype, score, bs, head_size):
     _run_and_check(
         dtype,

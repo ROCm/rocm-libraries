@@ -1383,12 +1383,8 @@ def test_zero_scratch_no_spills_and_lds_equal_to_the_plan(arch, var):
         current_flavor,
         evaluate_resource_gate,
         find_objdump,
-        pin_production_comgr,
     )
 
-    # torch's bundled comgr, the production one, pinned by path (torch is not
-    # imported); unpinned, a node's system comgr loads (the gate refuses it)
-    pin_production_comgr()
     if find_objdump() is None:
         pytest.skip("llvm-objdump not found (needed for the q-loop AGPR copy rule)")
     # A verdict counts on the production flavor and comgr only (the predicate
@@ -2102,10 +2098,8 @@ def test_new_levers_pass_the_resource_gate(arch, spec):
         current_flavor,
         evaluate_resource_gate,
         find_objdump,
-        pin_production_comgr,
     )
 
-    pin_production_comgr()  # torch's bundled comgr, by path; torch not imported
     if find_objdump() is None:
         pytest.skip("llvm-objdump not found (needed for the q-loop AGPR copy rule)")
     flavor, comgr = current_flavor(), comgr_version()

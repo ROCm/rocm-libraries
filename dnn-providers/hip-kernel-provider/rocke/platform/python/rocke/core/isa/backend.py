@@ -10,7 +10,7 @@ emission, async copy, and LDS transpose reads — goes behind an
 
 Status (first milestone): for the CDNA targets wired up today (gfx942 / gfx950)
 the datalayout, triple, and the ``s_waitcnt`` *layout* are identical — this is
-hardware-verified for the base f16 GEMM path on both MI300X and MI350X. The
+hardware-verified for the base f16 GEMM path on both gfx942 and gfx950. The
 backend therefore selects the same shared constants for both, while exposing
 distinct classes (``Gfx950Backend`` vs ``Gfx9MfmaBackend``). The
 ``arch.vmcnt_bits`` fact is load-bearing: :meth:`ISABackend.encode_waitcnt`
@@ -34,10 +34,10 @@ from typing import Callable, Dict, Tuple, Union
 from ..arch import ArchTarget, known_arches, listed_arch_for
 from ..arch.wmma_scale import gfx1250_scaled_wmma
 from ..ir import BF16, F16, F32, I32, I64, Op, VectorType
-from ..llvm_profile import _supports_llvm23_target_ops
+from ..llvm_profile import supports_llvm23_target_ops
 from ..tf32 import tf32_mma_target_error
 from ..wmma import validate_unscaled_wmma
-from .matrix_call_lowering import emit_matrix_call
+from .matrix_call_lowering import emit_matrix_call, refuse_llvm23_matrix_op
 from .matrix_calls import MATRIX_CALLS
 from .matrix_operand_forms import f8f6f4_operand_form
 from .wmma_scale import ScaledWmmaLLVM
@@ -291,11 +291,9 @@ class ISABackend:
         spec = gfx1250_scaled_wmma(op.name)
         if spec is None:
             raise NotImplementedError(f"unsupported scaled WMMA op {op.name!r}")
+        if not supports_llvm23_target_ops(lowerer._flavor):
+            refuse_llvm23_matrix_op(spec.op_id, lowerer._flavor)
         name = f"tile.{spec.op_id}"
-        if not _supports_llvm23_target_ops(lowerer._flavor):
-            raise NotImplementedError(
-                f"{name} requires llvm23 (ROCm 7.13+), got {lowerer._flavor}"
-            )
         if len(op.operands) != 5 or len(op.results) != 1:
             raise ValueError(f"{name} expects 5 operands and 1 result")
         if op.operands[2].type != VectorType(F32, 8) or op.result.type != VectorType(
@@ -341,7 +339,7 @@ class ISABackend:
 
 
 class Gfx950Backend(ISABackend):
-    """CDNA4 / MI350-MI355. 6-bit VMCNT, fp8/bf8/fp4 MFMA, ``ds_read_*_tr_*``,
+    """CDNA4. 6-bit VMCNT, fp8/bf8/fp4 MFMA, ``ds_read_*_tr_*``,
     160 KB LDS. This is the historical default; its output is the byte-identical
     baseline."""
 
@@ -446,7 +444,7 @@ _GFX1250_WMMA_FP8 = {
 
 
 class Gfx11RdnaBackend(ISABackend):
-    """RDNA3 / RDNA3.5 (gfx11, e.g. gfx1151 Strix Halo). **wave32**, **WMMA**
+    """RDNA3 / RDNA3.5 (gfx11, e.g. gfx1151). **wave32**, **WMMA**
     (no MFMA), and a distinct ``s_waitcnt`` layout from gfx9/10. Datalayout +
     triple are identical to CDNA on the ROCm releases we target (clang-verified
     on gfx1151), so those are inherited unchanged."""
@@ -460,7 +458,7 @@ class Gfx11RdnaBackend(ISABackend):
         encoding moved relative to gfx9). The CDNA value ``0x00027000`` makes
         every ``raw.ptr.buffer.load/store`` read 0 / drop on gfx11; this is
         the value that makes bounds-checked raw buffer access work on the
-        gfx1151 Strix Halo box."""
+        gfx1151 box."""
         return 0x31014000
 
     def _emit_named_mma(self, lowerer, op) -> None:
@@ -523,7 +521,7 @@ class Gfx11RdnaBackend(ISABackend):
 
 
 class Gfx12RdnaBackend(Gfx11RdnaBackend):
-    """RDNA4 (gfx12, e.g. gfx1201 Navi 48). **wave32**, **WMMA** with the gfx12
+    """RDNA4 (gfx12, e.g. gfx1201). **wave32**, **WMMA** with the gfx12
     fragment ABI: A/B operands are ``<8 x ...>`` per lane (the RDNA3/3.5
     cross-half duplication was removed) and the accumulator is column-distributed.
     Datalayout / triple / buffer SRD word3 / s_waitcnt layout are inherited from

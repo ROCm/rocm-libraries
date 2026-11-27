@@ -13,12 +13,16 @@ from __future__ import annotations
 
 import pytest
 from rocke.core.arch import known_arches
-from rocke.tests.gpu import current_device_arch, current_device_arch_in
+from rocke.tests.gpu import (
+    DEVICE_MEMORY_HEADROOM_BYTES,
+    current_device_arch,
+    current_device_arch_in,
+    skip_without_device_memory,
+)
 from rocke.tests.lanes import (
-    MULTI_GPU_RUNNER,
     lanes_waited_for,
     runner_lanes_for,
-    skip_until,
+    skip_needing_gpus,
     skip_until_reason,
 )
 
@@ -44,7 +48,7 @@ def test_reports_the_only_devices_arch():
 
 def test_follows_a_change_of_current_device():
     if hip.get_device_count() < 2:
-        skip_until(MULTI_GPU_RUNNER, reason="needs two GPUs")
+        skip_needing_gpus(2, reason="needs two GPUs")
     previous = hip.current_device()
     try:
         _select_device(1)
@@ -56,7 +60,7 @@ def test_follows_a_change_of_current_device():
 
 
 def _another_arch_with(runner_lane: bool) -> str:
-    """A known arch that is not the current GPU's, with a runner lane CI lacks
+    """A known arch that is not the current GPU's, whose GPU no CI runner has
     (``rocke.tests.lanes.runner_lanes_for``) or without one."""
     arch = current_device_arch()
     return next(
@@ -128,3 +132,18 @@ def test_a_required_arch_that_is_the_current_gpu_passes(monkeypatch):
     arch = current_device_arch()
     monkeypatch.setenv(f"ROCKE_REQUIRE_{arch.upper()}", "1")
     assert current_device_arch_in((arch,)) == arch
+
+
+@pytest.mark.gpu
+def test_the_memory_skip_holds_room_for_the_allocation_and_its_headroom():
+    """A device whose total is exactly the allocation plus the headroom runs
+    the test; one byte more skips it, naming the subject and what it needs."""
+    total = hip.get_device_total_memory()
+    fits = total - DEVICE_MEMORY_HEADROOM_BYTES
+    skip_without_device_memory(fits, "the probe")
+    needed = (fits + 1 + DEVICE_MEMORY_HEADROOM_BYTES) / 2**30
+    with pytest.raises(
+        pytest.skip.Exception,
+        match=rf"^the probe needs a device with {needed:.1f} GiB of memory; found ",
+    ):
+        skip_without_device_memory(fits + 1, "the probe")

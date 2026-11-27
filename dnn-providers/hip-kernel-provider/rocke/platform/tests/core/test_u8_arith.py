@@ -392,6 +392,7 @@ def _expected(a, b, c, f):
         }
 
 
+@pytest.mark.gpu
 def test_u8_ops_on_gpu_match_numpy_uint8():
     a, b, c, f = _inputs()
     host_dtype = {U8: np.uint8, F32: np.float32, I32: np.int32}

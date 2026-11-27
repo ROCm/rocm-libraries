@@ -109,17 +109,6 @@ def test_both_engines_emit_the_same_text(kernel):
 # --------------------------------------------------------------------------
 
 
-def _gpu_arch():
-    try:
-        from rocke.runtime.hip_module import get_device_arch
-    except ImportError:
-        return None
-    try:
-        return get_device_arch()
-    except Exception:  # noqa: BLE001 - no HIP runtime means no GPU test
-        return None
-
-
 def _run(arch, kernel, inputs):
     """Launch ``kernel`` on one wave over ``inputs``; return its i32 output."""
     from rocke.runtime.comgr import build_hsaco_from_llvm_ir
@@ -157,12 +146,13 @@ def _run(arch, kernel, inputs):
 
 @pytest.fixture(scope="module")
 def gpu_arch():
-    arch = _gpu_arch()
-    if not arch:
-        pytest.skip("no GPU")
+    from rocke.tests.gpu import current_device_arch
+
+    arch = current_device_arch()
     return arch
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("divisor", DIVISORS)
 def test_static_quotients_match_numpy(gpu_arch, divisor):
     dividends = np.array(DIVIDENDS, dtype=np.int32)
@@ -170,6 +160,7 @@ def test_static_quotients_match_numpy(gpu_arch, divisor):
     np.testing.assert_array_equal(got, dividends // divisor)
 
 
+@pytest.mark.gpu
 def test_dynamic_quotients_match_numpy(gpu_arch):
     cases = [(n, d) for d in DIVISORS for n in DIVIDENDS]
     dividends = np.array([n for n, _ in cases], dtype=np.int32)

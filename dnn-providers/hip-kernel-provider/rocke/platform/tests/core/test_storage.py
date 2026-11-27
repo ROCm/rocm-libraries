@@ -20,6 +20,7 @@ from rocke.core.storage import (
     element_bytes,
     elements_to_storage,
     is_register_packed,
+    offset_to_storage,
     packed_word_range,
     register_packing,
     storage_dtype,
@@ -222,6 +223,39 @@ def test_elements_to_storage_counts_the_storage_elements_that_hold_them(
 def test_storage_to_elements_inverts_whole_groups(dtype, storage, elements):
     assert storage_to_elements(dtype, storage) == elements
     assert elements_to_storage(dtype, elements) == storage
+
+
+@pytest.mark.parametrize(
+    ("dtype", "offset", "storage"),
+    [
+        ("fp4e2m1", 64, 8),
+        ("fp4e2m1", -64, -8),  # a reversed view's stride moves back by whole words
+        ("fp6e2m3", -32, -6),
+        ("fp6e2m3", 0, 0),
+        ("tf32", -8, -8),
+        ("fp16", -496, -496),
+    ],
+)
+def test_offset_to_storage_moves_by_whole_storage_elements_either_way(
+    dtype, offset, storage
+):
+    assert offset_to_storage(dtype, offset) == storage
+
+
+@pytest.mark.parametrize("offset", [4, -4, 17])
+def test_offset_to_storage_refuses_an_offset_that_splits_a_group(offset):
+    message = (
+        f"offset_to_storage failed - offset={offset} fp4e2m1 elements, expected a multiple "
+        "of 8: a packed offset moves by whole groups of 32-bit words"
+    )
+    with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
+        offset_to_storage("fp4e2m1", offset)
+
+
+@pytest.mark.parametrize("offset", [8.0, True])
+def test_offset_to_storage_refuses_an_offset_that_is_not_an_integer(offset):
+    with pytest.raises(TypeError, match=f"^offset must be an integer, got {offset!r}$"):
+        offset_to_storage("fp4e2m1", offset)
 
 
 @pytest.mark.parametrize(

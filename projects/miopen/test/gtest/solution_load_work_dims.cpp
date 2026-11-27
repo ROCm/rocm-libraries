@@ -21,7 +21,9 @@
 
 #include <vector>
 
-TEST(CPU_SolutionLoadWorkDims_NONE, RejectsTooManyWorkDims)
+using CPU_SolutionLoadWorkDims_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_SolutionLoadWorkDims_NONE, RejectsTooManyWorkDims)
 {
     // A vector with more than 3 entries is the exact malicious payload that
     // would overrun the std::array<size_t, 3> destination; it must be rejected.
@@ -42,7 +44,7 @@ TEST(CPU_SolutionLoadWorkDims_NONE, RejectsTooManyWorkDims)
     }
 }
 
-TEST(CPU_SolutionLoadWorkDims_NONE, RejectsEmptyWorkDims)
+TEST_P(CPU_SolutionLoadWorkDims_NONE, RejectsEmptyWorkDims)
 {
     // An empty vector violates the pre-existing non-empty invariant.
     const std::vector<size_t> empty{};
@@ -51,10 +53,12 @@ TEST(CPU_SolutionLoadWorkDims_NONE, RejectsEmptyWorkDims)
     EXPECT_THROW(miopen::ValidateSerializedWorkDims(empty, "global"), miopen::Exception);
 }
 
-TEST(CPU_SolutionLoadWorkDims_NONE, AcceptsValidWorkDims)
+TEST_P(CPU_SolutionLoadWorkDims_NONE, AcceptsValidWorkDims)
 {
     // 1..3 entries fit the destination array and must be accepted.
     EXPECT_NO_THROW(miopen::ValidateSerializedWorkDims(std::vector<size_t>{256}, "local"));
     EXPECT_NO_THROW(miopen::ValidateSerializedWorkDims(std::vector<size_t>{256, 1}, "local"));
     EXPECT_NO_THROW(miopen::ValidateSerializedWorkDims(std::vector<size_t>{256, 1, 1}, "global"));
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_SolutionLoadWorkDims_NONE, testing::Values(0));

@@ -10,7 +10,7 @@ from dataclasses import replace
 
 import numpy as np
 import pytest
-from rocke.tests.lanes import TORCH_IN_CI, import_or_skip_until
+from rocke.tests.lanes import TICKET, import_or_skip_until
 
 from tests.sdpa import cases as C
 from tests.sdpa import helpers as H
@@ -297,7 +297,7 @@ def test_window_left_w_keeps_w_plus_one_keys():
 
 
 def test_to_torch_roundtrip_if_torch_available():
-    torch = import_or_skip_until("torch", TORCH_IN_CI)
+    torch = import_or_skip_until("torch", TICKET)
     for cid in (
         "layout_packed_qkv_mha_d128",
         "layout_strided_bshd_fp16_causal_tl",

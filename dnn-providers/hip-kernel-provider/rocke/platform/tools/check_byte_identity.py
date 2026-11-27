@@ -69,10 +69,10 @@ def _selected_profile_supports_target_ops() -> bool:
     """Resolve the selected lane once and query its structural profile."""
     from rocke.core.lower_llvm import (
         _resolve_llvm_flavor,
-        _supports_llvm23_target_ops,
+        supports_llvm23_target_ops,
     )
 
-    return _supports_llvm23_target_ops(_resolve_llvm_flavor())
+    return supports_llvm23_target_ops(_resolve_llvm_flavor())
 
 
 def _host_flavor_env() -> dict[str, str]:

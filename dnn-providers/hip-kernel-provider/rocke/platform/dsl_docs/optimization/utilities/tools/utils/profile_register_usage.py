@@ -216,7 +216,7 @@ if __name__ == "__main__":
 
     # Calculate occupancy limits
     print("\n" + "=" * 60)
-    print("OCCUPANCY ANALYSIS (gfx950 / MI355X)")
+    print("OCCUPANCY ANALYSIS (gfx950)")
     print("=" * 60)
     print("Limits per CU:")
     print("  Max waves: 8")

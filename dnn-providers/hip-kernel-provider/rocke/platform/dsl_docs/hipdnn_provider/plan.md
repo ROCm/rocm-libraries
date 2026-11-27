@@ -1,5 +1,10 @@
 # rocke hipDNN Provider — Plan v0.9
 
+> **Binding note.** The provider build uses no pybind11 (`ROCKE_BUILD_PYBIND`
+> stays OFF there). Should a provider build ever need a Python engine module,
+> it would be a nanobind module. The pybind11 choices below are this plan's
+> history, not the direction.
+
 **Status:** All open questions resolved; plan is implementation-ready
 pending a final review pass. v0.9 renames the single M1 engine to
 `RockeConvImplicitGemmEngine` to make the eventual per-op engine

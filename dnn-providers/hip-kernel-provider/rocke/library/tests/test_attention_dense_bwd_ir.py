@@ -601,11 +601,8 @@ def test_zero_scratch_no_spills_and_lds_within_the_plan(arch, cid, over):
         current_flavor,
         evaluate_resource_gate,
         find_objdump,
-        pin_production_comgr,
     )
 
-    # torch's bundled (production) comgr, pinned by path; torch not imported
-    pin_production_comgr()
     if find_objdump() is None:
         pytest.skip("llvm-objdump not found (needed for the q-loop AGPR copy rule)")
     flavor, comgr = current_flavor(), comgr_version()
@@ -654,10 +651,8 @@ def test_dense_dq_resource_gate(arch, cid, over):
         current_flavor,
         evaluate_resource_gate,
         find_objdump,
-        pin_production_comgr,
     )
 
-    pin_production_comgr()
     if find_objdump() is None:
         pytest.skip("llvm-objdump not found (needed for the key-loop AGPR rule)")
     flavor, comgr = current_flavor(), comgr_version()

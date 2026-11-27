@@ -10,7 +10,7 @@ rather than emitting scalar FMUL / FADD per output cell.
 Why it matters
 ==============
 
-* CDNA3 (MI300X / gfx950) ``mfma_f32_16x16x32_f16`` emits **one MFMA
+* CDNA4 (gfx950) ``mfma_f32_16x16x32_f16`` emits **one MFMA
   per 4 cycles** for a 16x16x32 matmul; that is 512 MAC ops per atom
   or **128 FLOPS/cycle/lane**. The legacy ``mfma_f32_16x16x16_f16``
   atom yields 256 MACs / 64 FLOPS/cycle/lane; the scalar-inner v1 in

@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: MIT
  *
  * rocke/instance_gfx1151_wmma_gemm_int8.h -- C99 port of the gfx1151
- * (RDNA3.5 / Strix Halo) INT8-storage / f16-compute WMMA GEMM kernel instance
+ * (RDNA3.5) INT8-storage / f16-compute WMMA GEMM kernel instance
  * builder rocke/instances/gfx1151/wmma_gemm_int8.py.
  *
  *   Python (gfx1151/wmma_gemm_int8.py)    C99 (this header)

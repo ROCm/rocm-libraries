@@ -44,12 +44,13 @@ from rocke.helpers.mx_scale import (
 )
 from rocke.instances.common.mx_gemm import MxGemmSpec, build_mx_gemm
 from rocke.tests.arch_marks import COVERED_ARCHES
+from rocke.tests.comgr import require_comgr_target
 from rocke.tests.engines import (
     all_engines_backend,
     engine_modules_available,
     native_engine_or_skip,
 )
-from rocke.tests.lanes import BINDING_LANE, skip_until
+from rocke.tests.lanes import BUILD_VARIANT, skip_until
 
 pytestmark = pytest.mark.filterwarnings(
     "error::rocke.core.lower_llvm.ArchDomainWarning"
@@ -143,7 +144,7 @@ def test_mx_gemm_reads_the_scale_bytes_unsigned_in_both_engines(arch):
     # The C++ MX GEMM builder must emit the same LLVM IR as the Python one;
     # backend="both" lowers through each and fails on any byte difference.
     if not engine_modules_available():
-        skip_until(BINDING_LANE, reason="needs the rocke_engine binding")
+        skip_until(BUILD_VARIANT, reason="needs the rocke_engine binding")
     ll = lower_mx_gemm(_mx_gemm_spec(), arch=arch, backend="both").llvm_text
     assert ll.count("zext i8") >= 2  # the A and the B scale bytes
     assert "sext i8" not in ll
@@ -249,28 +250,10 @@ def test_safe_code_refuses_a_count_that_is_not_positive():
         largest_safe_mx_scale_code(FP8_E4M3_OCP, FP8_E4M3_OCP, 0)
 
 
-def _skip_unless_comgr_targets(isa: str) -> None:
-    """Skip when COMGR cannot be loaded or cannot target ``isa``.
-
-    Only a missing or unloadable COMGR, or one that does not list ``isa``,
-    skips; a compile error after this check fails the test.
-    """
-    try:
-        from rocke.runtime import comgr
-    except ImportError as exc:  # environment-dependent
-        pytest.skip(f"comgr unavailable: {exc}")
-    try:
-        isas = comgr.supported_isas()
-    except comgr.ComgrError as exc:  # environment-dependent
-        pytest.skip(f"comgr unavailable: {exc}")
-    if isa not in isas:
-        pytest.skip(f"the loaded comgr cannot target {isa}")
-
-
 @pytest.mark.parametrize("arch", COVERED_ARCHES)
 def test_mx_gemm_compiles_for_each_covered_arch(arch):
     # Compile-checked only: MX GEMM numerics need a GPU of the matching arch.
-    _skip_unless_comgr_targets(f"amdgcn-amd-amdhsa--{arch}")
+    require_comgr_target(arch)
     artifact = compile_kernel(
         build_mx_gemm(_mx_gemm_spec(), arch=arch),
         arch=arch,
@@ -326,6 +309,7 @@ def _decode_on_gpu(arch):
         module.unload()
 
 
+@pytest.mark.gpu
 def test_all_codes_decode_to_the_spec_value_on_gpu(gpu_arch):
     got = _decode_on_gpu(gpu_arch)
     for code in range(_CODES):

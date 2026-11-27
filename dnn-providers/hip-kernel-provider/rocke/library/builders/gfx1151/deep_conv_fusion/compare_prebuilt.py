@@ -5,7 +5,7 @@
 
 Board analog of ``compare_configs.py``: that one calls ``compile_kernel`` (needs
 the gfx950 toolchain), this one loads prebuilt ``gfx11-generic`` hsaco+manifest
-pairs so it runs on the toolchain-less Windows Strix Halo board. Every other step
+pairs so it runs on the toolchain-less Windows gfx1151 board. Every other step
 -- buffer setup, bit-exact verify against the integer-exact numpy reference, and
 the round-robin timing -- is reused verbatim from ``run_manifest`` so the numbers
 are directly comparable.

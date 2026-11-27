@@ -78,6 +78,7 @@ from ...core.ir import (
 )
 from ...helpers.asm import mfma_f8f6f4_agpr, mfma_f8f6f4_agpr_cluster
 from ...helpers.atoms import MfmaAtom
+from ...helpers.compile import COMGR_FRESH_PROCESS_ATTR
 from ...helpers.mfma_gemm_inner import (
     decode_mfma_lanes,
     validate_arch_and_block_size,
@@ -198,16 +199,21 @@ _ASM_MFMA_HAZARD_NOP = int(os.environ.get("ROCKE_FP8_MFMA_NOP", "8"))
 
 # D5 scheduling-cadence sweep knob (additive). Values:
 #   "iglp1" -> (KEPT, default) emit ``b.iglp_opt(1)``
-#              (MFMASmallGemmSingleWaveOpt) once at the top of the gate/up + down
-#              K-loop bodies. The post-RA scheduler then imposes the canned
-#              MFMA/DS interleave for each loop region. Won the D5 sweep:
-#              same-session best-of-5 T1 ~0.1586 vs "none" ~0.1597 (strictly
-#              faster across 3 alternating thermal-controlled pairs, parity PASS,
-#              golden digest unchanged). Mutually exclusive with sched_*barrier
-#              (so no sched_group_barrier is emitted when this is set).
+#              (MFMASmallGemmSingleWaveOpt) once at the top of every down K-loop
+#              body, and of the gate/up K-loop body when that loop stages its
+#              weights through LDS (direct-to-LDS). The scheduler then imposes its
+#              canned MFMA/DS interleave on each loop region. Won the D5 sweep on
+#              the gfx950 direct-to-LDS kernel (strictly faster than "none"
+#              across 3 alternating thermal-controlled pairs, parity PASS, golden
+#              digest unchanged). A gate/up loop without LDS staging reads no
+#              LDS, and there the hint runs the compile out of memory on
+#              compilers older than ROCm 7.11 (``IRBuilder.iglp_opt``) and slows
+#              the gfx942 kernel down on fixed ones, so that loop gets no hint.
+#              Mutually exclusive with sched_*barrier (so no sched_group_barrier
+#              is emitted when this is set).
 #   "none"  -> no scheduler hint (pre-D5 baseline; byte-identical IR).
 #   "sgb"   -> explicit sched_group_barrier cadence in the active DTLA gate/up +
-#              down loops. D5-swept: REGRESSED (~0.166 T1) -> not kept.
+#              down loops. D5-swept: REGRESSED -> not kept.
 _SCHED_CADENCE = os.environ.get("ROCKE_FP8_SCHED", "iglp1").strip().lower()
 
 
@@ -220,9 +226,16 @@ def _emit_loop_cadence_hint(b: IRBuilder, cadence: str | None = None) -> None:
     ``cadence`` (level 9 flag) overrides the import-time ``_SCHED_CADENCE`` env
     default when the spec pins it; ``None`` => use the env default (so the
     default build is byte-identical).
+
+    ``iglp_opt(1)`` also marks the kernel to compile in a fresh process
+    (``COMGR_FRESH_PROCESS_ATTR``; the LLVM IR is unchanged): LLVM's strategy
+    behind it keeps counts across the compiles of a process, and on a compiler
+    older than ROCm 7.11 it can allocate without bound, which the fresh
+    process's memory cap turns into ``ComgrOutOfMemory``.
     """
     if (cadence if cadence is not None else _SCHED_CADENCE) == "iglp1":
         b.iglp_opt(1)
+        b.kernel.attrs[COMGR_FRESH_PROCESS_ATTR] = True
 
 
 # sched_group_barrier mask bits.
@@ -338,6 +351,8 @@ class FusedMegaKernelSpecFp8:
       hint. ``None`` (default) defers to the ``ROCKE_FP8_SCHED`` env var
       (default ``iglp1`` = best); set to ``"iglp1"`` / ``"none"`` / ``"sgb"`` to
       pin the cadence on the spec (overrides the env for this build).
+      ``iglp1`` puts the hint in every down loop and, under direct-to-LDS, in
+      the gate/up loop (see ``_SCHED_CADENCE``).
     """
 
     name: str
@@ -431,7 +446,7 @@ def moe_fused_mega_fp8_grid(
     return (gx, num_m_blocks, 1)
 
 
-# Default persistent-grid cap: MI355X 256 CU x ~2 blocks/CU at block_size 256.
+# Default persistent-grid cap: gfx950 256 CU x ~2 blocks/CU at block_size 256.
 PERSISTENT_P_CAP = 512
 
 
@@ -604,6 +619,9 @@ def _emit_fp8_gateup_fused_kloop(
     c_atom_k = b.const_i32(atom.k)
     atoms_per_group = GROUP_K // atom.k  # 4
     nni = len(n_tile_bases)
+    # The DTLA path stages the weight operands through LDS; otherwise this loop
+    # reads no LDS at all.
+    stages_b_through_lds = dtla is not None and atoms_per_group == 1
 
     # One A scale row per output the lane holds (shared by every ni cell).
     a_scale_row_offsets = _a_scale_row_offsets(
@@ -631,7 +649,8 @@ def _emit_fp8_gateup_fused_kloop(
         b.const_i32(0), num_groups, b.const_i32(1), iter_args, iv_name=f"kg_{tag}"
     )
     with outer as (kg, outs):
-        _emit_loop_cadence_hint(b, cadence)
+        if stages_b_through_lds:
+            _emit_loop_cadence_hint(b, cadence)
         gate_outer = list(outs[:nni])
         up_outer = list(outs[nni:])
 
@@ -691,7 +710,7 @@ def _emit_fp8_gateup_fused_kloop(
         g_acc = [zero] * nni
         u_acc = [zero] * nni
 
-        if dtla is not None and atoms_per_group == 1:
+        if stages_b_through_lds:
             # ---- DTLA path (GOAL 1): direct-to-LDS gate+up B operands -------
             # The A activation stays a cheap global->VGPR load (tiny, reused).
             # The dominant WGate/WUp weight streams go global->LDS->MFMA via
@@ -1254,6 +1273,11 @@ def _emit_fp8_down_group_gemm(
         iv_name=f"dg_{tag}",
     )
     with outer as (kg, (down_outer,)):
+        # With the K=128 atom one iteration reads LDS 3 times (the two halves
+        # of the A fragment and its scale), under the 4 that iglp_opt(1) needs
+        # on compilers older than ROCm 7.11. The trip count is a small
+        # constant, so LLVM unrolls this loop fully and its iterations share
+        # one scheduling region with more.
         _emit_loop_cadence_hint(b, cadence)
         # A-side dynamic scale: HiddenScale_smem[m_row, local-inter-block kg].
         a_scale_v = b.vec_extract(

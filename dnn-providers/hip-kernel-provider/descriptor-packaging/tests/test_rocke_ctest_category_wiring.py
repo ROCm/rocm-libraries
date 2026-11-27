@@ -81,16 +81,10 @@ def test_new_tests_are_registered_outside_fast_ci_tiers():
 
     # Fallback labels and YAML categories both keep the new entries away from
     # quick/standard pre-merge and post-merge selection.
-    assert (
-        'LABELS \\"ckc\\\\;python\\\\;host\\\\;runner\\\\;comprehensive'
-        '\\\\;full\\"' in cmake
-    )
-    assert (
-        'LABELS \\"ckc\\\\;python\\\\;host\\\\;runner\\\\;integration'
-        '\\\\;comprehensive\\\\;full\\"' in cmake
-    )
-    assert "structural\\\\;comprehensive\\\\;full" in cmake
-    assert "compiler\\\\;comprehensive\\\\;full" in cmake
+    assert 'LABELS \\"ckc;python;host;runner;comprehensive;full\\"' in cmake
+    assert 'LABELS \\"ckc;python;host;runner;integration;comprehensive;full\\"' in cmake
+    assert "structural;comprehensive;full" in cmake
+    assert "compiler;comprehensive;full" in cmake
 
     assert "ROCKE_ISA_INSPECT_PROBE=" in cmake
     assert "ROCKE_BWD_NO_COMGR_PIN=" in cmake

@@ -428,7 +428,7 @@ static int test_packed_only_values()
 static int test_smem_vector_elements()
 {
     static const char* const admitted
-        = "f16 / bf16 / i16 / f32 / i32 / tf32 / f64 / fp8e4m3 / bf8e5m2 / i8";
+        = "f16 / bf16 / i16 / f32 / i32 / tf32 / f64 / i64 / fp8e4m3 / bf8e5m2 / i8";
     for(bool store : {false, true})
     {
         const build_outcome refused = smem_vector_access(store, "u8", 4);

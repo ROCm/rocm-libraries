@@ -188,6 +188,7 @@ def _run(case: _Case, kernel, signature, grid, block_size: int) -> None:
     )
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("name", sorted(_MULTI_D_CASES))
 def test_multi_d_gemm_applies_each_d_in_order_on_gpu(name):
     case = _MULTI_D_CASES[name]
@@ -201,6 +202,7 @@ def test_multi_d_gemm_applies_each_d_in_order_on_gpu(name):
     )
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("name", sorted(_MULTI_ABD_CASES))
 def test_multi_abd_gemm_with_one_a_and_one_b_on_gpu(name):
     case = _MULTI_ABD_CASES[name]

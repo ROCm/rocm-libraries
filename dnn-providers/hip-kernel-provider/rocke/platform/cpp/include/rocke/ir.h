@@ -1981,6 +1981,9 @@ void rocke_b_s_setprio(rocke_ir_builder_t* b, int level);
  * of dsl_docs/reference/op_vocabulary.md. A taken trap does not let the process
  * carry on, so it is a last resort. */
 void rocke_b_trap(rocke_ir_builder_t* b);
+/* Python IRBuilder.iglp_opt. Level 1 needs ROCm 7.11 or newer, the 10.x
+ * releases included: see known issue 8 in
+ * dsl_docs/architecture/gfx_support_audit.md. */
 void rocke_b_iglp_opt(rocke_ir_builder_t* b, int level);
 void rocke_b_sched_barrier(rocke_ir_builder_t* b, int mask);
 void rocke_b_sched_group_barrier(rocke_ir_builder_t* b, int mask, int count, int group);

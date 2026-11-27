@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: MIT
  *
  * rocke/instance_gfx1151_wmma_gemm_iu8_dequant.h -- C99 port of the gfx1151
- * (RDNA3.5 / Strix Halo) true-INT8 WMMA GEMM with f16 dequant output kernel
+ * (RDNA3.5) true-INT8 WMMA GEMM with f16 dequant output kernel
  * instance builder rocke/instances/gfx1151/wmma_gemm_iu8_dequant.py.
  *
  *   Python (gfx1151/wmma_gemm_iu8_dequant.py)   C99 (this header)

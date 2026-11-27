@@ -14,7 +14,7 @@ and why, and what to try next. Companion to
 - **Decode (3D split-KV):** `q_len=1`, `kv_len ∈ {512,1024,2048,4096}`,
   `num_seqs ∈ {2..256}`. The hot path.
 - **Prefill (2D tiled):** `q_len ∈ {64,128,2048}`.
-- **Reference arch:** gfx950 (MI355X), wave64 MFMA, with async LDS DMA and
+- **Reference arch:** gfx950, wave64 MFMA, with async LDS DMA and
   `ds_read_tr` transpose reads.
 - **gfx1250 constraints:** wave32 WMMA `16x16x32`; **no async global→LDS DMA**;
   **no `ds_read_tr`**; 160 KiB LDS/CU.
@@ -264,7 +264,7 @@ serial over segments), small-batch startup/graph-replay, occupancy-gate
 ## 8. Methodology notes
 
 - **Always cross-arch benchmark** with `decode_3d_verify.py --bench
-  --bench-split --csv` (local gfx950 = MI355X, remote gfx1250). Segment-vs-reduce
+  --bench-split --csv` (local gfx950, remote gfx1250). Segment-vs-reduce
   split timing is essential to attribute wins.
 - **Probe free GPUs first** (`rocm-smi --showpidgpus`) — the remote box shares
   GPUs with tensilelite jobs; pick an idle device.

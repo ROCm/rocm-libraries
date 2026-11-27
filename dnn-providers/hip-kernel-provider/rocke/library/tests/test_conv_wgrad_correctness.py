@@ -1119,15 +1119,7 @@ class TestConvWgradCorrectness(unittest.TestCase):
     def test_grouped_depthwise(self):
         # Depthwise (groups == C, cpg == 1): each input channel is its own group.
         # kpg==1 (K==C) is pure depthwise; kpg==2 (K==2C) is a channel multiplier.
-        # cpg==1/kpg==1 forces scalar loads (vec==1), which the C++ *serialized*
-        # lowerer cannot handle yet (no scalar `tile.buffer_load` op), so skip the
-        # ROCKE_BACKEND=both differential lane; numeric correctness is validated
-        # via the (reference) Python engine in the default lane.
-        if os.environ.get("ROCKE_BACKEND") == "both":
-            self.skipTest(
-                "C++ serialized engine lacks scalar tile.buffer_load; depthwise "
-                "(vec=1) is validated numerically via the Python engine"
-            )
+        # cpg==1/kpg==1 forces scalar loads (vec==1).
         depthwise = [
             _Shape(
                 "dw_g32_c32k32",
@@ -1246,7 +1238,7 @@ class TestConvWgradVectorLoad(unittest.TestCase):
         )
 
     def test_gfx1250_wgrad_vectorized_dual_engine(self):
-        # gfx1250 (MI400/MI450 gen, wave32 WMMA) uses the 16x16x32 hero atom.
+        # gfx1250 (wave32 WMMA) uses the 16x16x32 hero atom.
         # Lower through the backend dispatcher (not the python-only lowerer) so
         # that under ROCKE_BACKEND=both this also asserts Python == C++ on the
         # gfx1250 serialized-IR path -- the actual runtime cpp backend. No GPU /
@@ -2563,8 +2555,9 @@ class TestWgradWmmaCShuffle(unittest.TestCase):
 
     def _sweep(self, **knobs) -> None:
         if GPU_ARCH != "gfx1250":
-            self.skipTest(
-                f"the WMMA cshuffle epilogue is gfx1250-tested; on {GPU_ARCH}"
+            skip_needing_arch(
+                ("gfx1250",),
+                reason=f"the WMMA cshuffle epilogue is gfx1250-tested; on {GPU_ARCH}",
             )
         from kernels.common._conv_implicit_gemm_common import ConvProblem
         from kernels.common.conv_implicit_gemm import ConvDataSpec

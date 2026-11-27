@@ -10,12 +10,14 @@ combination -- the signed op_id, and the op_id with ``_u8_i8`` (A unsigned),
 operands) -- and the lowering reads each flag from that row's operand dtype.
 
 The cases below pin, for every integer WMMA and all four combinations, the two
-flags both engines emit at every LLVM flavor, that the gfx11 unsigned rows
+flags each engine emits at every LLVM flavor, that the gfx11 unsigned rows
 compile and link for gfx1100 and gfx11-generic and select the instruction
-(compile-verified, not run), that both engines' HIP lowering of every gfx11 row
+(compile-verified, not run), that each engine's HIP lowering of every gfx11 row
 passes its builtin the bools the row gives and hipcc turns them into the same
 flags, that the gfx11 signed rows keep their declaration, and that neither
-engine's source writes a flag as a literal.
+engine's source writes a flag as a literal. The per-engine cases check the
+Python engine in every lane; the C++ cases run where the C++ engine can, and
+there also require its text to equal the Python engine's.
 """
 
 from __future__ import annotations
@@ -30,9 +32,9 @@ from rocke.core.arch.target import integer_mma_op_ids
 from rocke.core.ir import IRBuilder, PtrType, VectorType, dtype_to_ir_type
 from rocke.core.isa.matrix_calls import MATRIX_CALLS, MatrixOperand
 from rocke.core.lower_llvm import LLVM_FLAVORS
-from rocke.tests.engines import lower_hip_with_both_engines, lower_with_both_engines
+from rocke.tests.engines import ENGINES, lower_hip_with_engine, lower_with_engine
 from rocke.tests.ir_validity import assert_target_accepts, target_mnemonics
-from rocke.tests.lanes import SOURCE_TREE_CASES, skip_until
+from rocke.tests.lanes import SOURCE_TREE, skip_until
 
 # (signed op_id, operand bits, the generic target whose row lists it)
 _INSTRUCTIONS = (
@@ -99,10 +101,20 @@ def test_every_integer_row_is_listed_with_its_operand_dtypes():
         assert op.b_dtype[0] == ("i" if flag_b == "i1 1" else "u"), op_id
 
 
-@pytest.mark.parametrize("flavor", LLVM_FLAVORS)
-@pytest.mark.parametrize("op_id, gfx, flags", _ROWS)
-def test_both_engines_pass_the_flags_the_row_gives(op_id, gfx, flags, flavor):
-    text = lower_with_both_engines(_kernel(gfx, op_id), gfx, flavor)
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize(
+    "op_id, gfx, flags, flavor",
+    [
+        (op_id, gfx, flags, flavor)
+        for op_id, gfx, flags in _ROWS
+        for flavor in LLVM_FLAVORS
+        if MATRIX_CALLS[op_id].lowers_at(flavor)
+    ],
+)
+def test_each_engine_passes_the_flags_the_row_gives(op_id, gfx, flags, flavor, engine):
+    text = lower_with_engine(
+        _kernel(gfx, op_id), gfx, engine=engine, llvm_flavor=flavor
+    )
     assert _flags(text, MATRIX_CALLS[op_id].intrinsic) == flags
 
 
@@ -132,8 +144,12 @@ def test_the_gfx11_rows_compile_link_and_select_the_instruction(
     op_id, mnemonic, target
 ):
     """Lowered for gfx11-generic at the host's LLVM flavor and compiled for
-    gfx1100 and gfx11-generic; compile-verified, not run."""
-    text = lower_with_both_engines(_kernel("gfx11-generic", op_id), "gfx11-generic")
+    gfx1100 and gfx11-generic; compile-verified, not run. The flags test above
+    holds the C++ engine's text to the Python engine's, so one engine's text
+    is compiled."""
+    text = lower_with_engine(
+        _kernel("gfx11-generic", op_id), "gfx11-generic", engine="python"
+    )
     assert_target_accepts(text, target)
     mnemonics = target_mnemonics(text, target)
     assert [m for m in mnemonics if m.startswith("v_wmma")] == [mnemonic]
@@ -154,12 +170,13 @@ def _hip_flags(source: str, op_id: str) -> tuple[str, str]:
     return arguments[0], arguments[2]
 
 
+@pytest.mark.parametrize("engine", ENGINES)
 @pytest.mark.parametrize("op_id, flags", _GFX11_ROWS)
-def test_the_hip_lowering_passes_the_bools_the_row_gives(op_id, flags):
-    """Every gfx11 integer row, signed or not, lowers in both engines to its
+def test_the_hip_lowering_passes_the_bools_the_row_gives(op_id, flags, engine):
+    """Every gfx11 integer row, signed or not, lowers in each engine to its
     builtin with one bool per operand taken from the row."""
-    source = lower_hip_with_both_engines(
-        _kernel("gfx11-generic", op_id), "gfx11-generic"
+    source = lower_hip_with_engine(
+        _kernel("gfx11-generic", op_id), "gfx11-generic", engine=engine
     )
     assert _hip_flags(source, op_id) == tuple(_HIP_BOOL[flag] for flag in flags)
 
@@ -179,6 +196,7 @@ def test_hipcc_turns_the_hip_bools_into_the_rows_flags(op_id, flags):
     assert _flags(llvm, intrinsic) == tuple(_HIPCC_FLAG[flag] for flag in flags)
 
 
+@pytest.mark.parametrize("engine", ENGINES)
 @pytest.mark.parametrize(
     "op_id, declaration",
     [
@@ -198,10 +216,10 @@ def test_hipcc_turns_the_hip_bools_into_the_rows_flags(op_id, flags):
         ),
     ],
 )
-def test_the_gfx11_signed_rows_keep_their_declaration(op_id, declaration):
+def test_the_gfx11_signed_rows_keep_their_declaration(op_id, declaration, engine):
     """Moving the gfx11 integer WMMAs into the table left their emitted
     declaration (no immarg on the flags) unchanged."""
-    text = lower_with_both_engines(_kernel("gfx1151", op_id), "gfx1151")
+    text = lower_with_engine(_kernel("gfx1151", op_id), "gfx1151", engine=engine)
     assert declaration in text.splitlines()
 
 
@@ -224,7 +242,7 @@ def test_neither_engine_writes_a_signedness_flag_literal():
     ]
     if not sources:
         skip_until(
-            SOURCE_TREE_CASES,
+            SOURCE_TREE,
             reason=f"source-tree check: no engine sources under {root}",
         )
     found = [

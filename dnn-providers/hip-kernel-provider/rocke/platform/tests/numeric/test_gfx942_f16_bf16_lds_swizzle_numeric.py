@@ -16,6 +16,8 @@ from rocke.tests.engines import available_builder_engines
 from rocke.tests.gpu import current_device_arch_in
 from rocke.tests.universal_gemm import launch_universal_gemm, lower_universal_gemm
 
+pytestmark = pytest.mark.gpu
+
 
 def _swizzle_spec(tile, warp_tile, pipeline, dtype):
     tile_m, tile_n, tile_k, warp_m, warp_n = tile

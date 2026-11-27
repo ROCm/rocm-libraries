@@ -66,7 +66,7 @@ from kernels.conv.engine_bridge import (
     lower_conv_implicit_gemm,
 )
 from rocke.core import backend as bk
-from rocke.tests.lanes import BINDING_LANE, skip_until_reason
+from rocke.tests.lanes import BUILD_VARIANT, skip_until_reason
 
 _HAS_ENGINE = importlib.util.find_spec("rocke_library_engine") is not None
 
@@ -76,7 +76,7 @@ _SKIP = (
     ""
     if _HAS_ENGINE
     else skip_until_reason(
-        BINDING_LANE, reason="rocke_library_engine extension not importable"
+        BUILD_VARIANT, reason="rocke_library_engine extension not importable"
     )
 )
 

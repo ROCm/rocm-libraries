@@ -112,6 +112,8 @@ def test_compile_kernel_selects_targets(
     compiler_isa = f"amdgcn-amd-amdhsa--{compiler_target}"
     assert build.call_args.kwargs["isa"] == compiler_isa
     assert artifact.isa == compiler_isa
+    # The artifact records the options COMGR was given, as it records the ISA.
+    assert artifact.options == tuple(build.call_args.kwargs["options"])
 
 
 @pytest.mark.parametrize(

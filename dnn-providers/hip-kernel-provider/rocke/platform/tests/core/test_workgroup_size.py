@@ -97,6 +97,7 @@ def test_a_launch_config_leaves_the_block_unset_by_default():
     assert LaunchConfig().block is None
 
 
+@pytest.mark.gpu
 def test_gpu_an_unset_block_launches_one_wave64():
     """On the GPU, ``__call__`` and ``bind`` with ``block`` unset each launch
     one 64-lane block of a ``workgroup_size=64`` kernel: lanes 0..63 store,

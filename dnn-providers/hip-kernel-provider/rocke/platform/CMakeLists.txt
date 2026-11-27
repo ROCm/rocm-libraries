@@ -156,6 +156,25 @@ function(rocke_cxx_test_installed_name out_var target)
   endif()
 endfunction()
 
+# Record where `target`, a program the build makes, lands: its path is written to
+# <target>.path at the top of the build tree, under the configuration's
+# directory in a multi-config build, as tests/run_all.py looks for it. The name
+# and directory vary with the mode (the provider renames C++ test programs and
+# puts them in bin/), so the runner reads the configured path instead of
+# guessing it. The top is CMAKE_BINARY_DIR, the directory holding CMakeCache.txt,
+# which is the --build-root run_all expects in every mode: the platform or rocke
+# tree configured alone, and the hip-kernel-provider build that adds rocke as a
+# subdirectory (there CMAKE_CURRENT_BINARY_DIR is <build-root>/rocke/platform).
+function(rocke_record_program_path target)
+  get_property(_rocke_multi_config GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+  if(_rocke_multi_config)
+    set(_rocke_path_file "${CMAKE_BINARY_DIR}/$<CONFIG>/${target}.path")
+  else()
+    set(_rocke_path_file "${CMAKE_BINARY_DIR}/${target}.path")
+  endif()
+  file(GENERATE OUTPUT "${_rocke_path_file}" CONTENT "$<TARGET_FILE:${target}>\n")
+endfunction()
+
 # Every installed rocKE pytest entry except the explicit gates starts its
 # command with this text. The rocke.tests.ctest_shard plugin and its flag make
 # the entry run only the CI shard's share of its tests. The gates stop on a
@@ -170,10 +189,17 @@ set(_ROCKE_INSTALLED_PYTEST
 # ${_ROCKE_INSTALLED_PYTEST}: CTest runs a shard's entries one at a time, and
 # the rocke.tests.ctest_workers plugin runs the entry's share in worker
 # processes, each on its own block of the CPUs; the few GPU tests of such an
-# entry share the shard's GPU among the workers. rocke_library_gpu_pytest takes
-# it too, its workers sharing the shard's GPU: its tests compile their kernels
-# on the CPU before they launch them.
+# entry share the shard's GPU among the workers. rocke_library_gpu_pytest and
+# rocke_platform_gpu_pytest take it too, their workers sharing the shard's GPU:
+# their tests compile their kernels on the CPU before they launch them.
 set(_ROCKE_INSTALLED_PYTEST_WORKERS "-p rocke.tests.ctest_workers --rocke-workers 4")
+
+# The marker filter and per-test limit of every rocke_pytest_<part>. The
+# filter leaves out the tests marked gpu, which launch GPU work;
+# rocke_platform_gpu_pytest runs them, with the same per-test limit.
+set(_ROCKE_PLATFORM_PYTEST_MARKERS "not integration and not gpu")
+set(_ROCKE_PLATFORM_PYTEST_GPU_MARKERS "gpu and not integration")
+set(_ROCKE_PLATFORM_PYTEST_ITEM_TIMEOUT "--timeout=60")
 
 # Return the installed-CTestTestfile text that registers rocke_pytest_<part>,
 # one part of the platform pytest suite. The remaining arguments are the part's
@@ -195,7 +221,7 @@ function(rocke_platform_pytest_entry out_var part)
     string(APPEND _pytest_arguments " \"${_pytest_argument}\"")
   endforeach()
   string(CONCAT _entry
-         "add_test(${_test_name} ${_ROCKE_INSTALLED_PYTEST} ${_ROCKE_INSTALLED_PYTEST_WORKERS}${_pytest_arguments} -m \"not integration\" -v -rs --timeout=60)\n"
+         "add_test(${_test_name} ${_ROCKE_INSTALLED_PYTEST} ${_ROCKE_INSTALLED_PYTEST_WORKERS}${_pytest_arguments} -m \"${_ROCKE_PLATFORM_PYTEST_MARKERS}\" -v -rs ${_ROCKE_PLATFORM_PYTEST_ITEM_TIMEOUT})\n"
          "set_tests_properties(${_test_name} PROPERTIES\n"
          "  LABELS \"ckc;python;standard\"\n"
          "  ENVIRONMENT \"\${_rocke_platform_pytest_environment}\"\n"
@@ -213,9 +239,13 @@ set(ROCKE_PYTHON_INSTALL_DIR "${_ROCKE_DEFAULT_PYTHON_INSTALL_DIR}"
 # of them. Provider mode co-locates them with the installed tests
 # (bin/<subdir>), whose CTest entries put that directory on PYTHONPATH and
 # whose files TheRock's test artifact captures (paired with a matching include
-# in ml-libs/artifact-hipkernelprovider.toml for bin/<subdir>/rocke/**; the
-# modules, as .so files, are claimed by the artifact's lib component). A
-# standalone install keeps the site-packages layout.
+# in ml-libs/artifact-hipkernelprovider.toml for bin/<subdir>/rocke/**). The
+# modules and the shared engine are .so files, which TheRock's lib component
+# claims wherever they are (its default patterns match every *.so and *.so.*,
+# and it comes first in the component chain), so until that manifest excludes
+# them from lib and includes them in test, they ship in the provider's lib
+# artifact rather than with the tests. A standalone install keeps the
+# site-packages layout.
 if(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR)
   set(ROCKE_PYTHON_PACKAGE_INSTALL_DIR "${ROCKE_TEST_INSTALL_DIR}")
 else()
@@ -368,7 +398,9 @@ if(ROCKE_BUILD_SHARED_ENGINE)
   # A provider build installs it beside the rocke package, where
   # rocke.core.native_engine finds it, as the engine's Python modules do, and
   # only with its tests: there it is test content, and lib/ would make it a
-  # public library of the ROCm install. A standalone install keeps lib/.
+  # public library of the ROCm install (TheRock's lib component still claims
+  # it, as it does every .so; see ROCKE_PYTHON_PACKAGE_INSTALL_DIR). A
+  # standalone install keeps lib/.
   if(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR)
     if(ROCKE_INSTALL_TESTS)
       set(_ROCKE_SHARED_ENGINE_BESIDE_PACKAGE ON)
@@ -407,14 +439,32 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/TestTimeouts.cmake")
 # stall the method prints the test's stack under its name (the -v line) and
 # ends the pytest process; rocke.tests.ctest_workers names a worker that ended
 # so, and rocke.tests.run_records records the tests it did not run as
-# unfinished. An entry with no per-test limit of its own puts
-# _ROCKE_INSTALLED_PYTEST_GPU_TEST_LIMIT at the end of its command; one with a
-# lower limit adds only the method. Every GPU entry also takes the CTest
-# resource lock _ROCKE_INSTALLED_GPU_RESOURCE_LOCK, so a parallel ctest -j
-# never runs two of them at once on the one GPU.
-set(_ROCKE_INSTALLED_PYTEST_GPU_TIMEOUT_METHOD "--timeout-method=thread")
+# unfinished. Two limits of the method remain: the rest of that process's
+# tests do not run, and a stall inside a native call that holds the Python GIL
+# stops the method's timer thread too, so only the entry's CTest limit ends it,
+# without the test's name.
+#
+# The rocke.tests.item_time_limit plugin keeps one per-test limit for every
+# test of the entry but one that declares its slowest measured CI time (the
+# rocke_measured_seconds mark), which gets twice that time; a pytest.mark.timeout
+# above the entry's limit is a usage error. An entry with no per-test limit of
+# its own puts _ROCKE_INSTALLED_PYTEST_GPU_TEST_LIMIT at the end of its
+# command; one with a lower limit adds only _ROCKE_INSTALLED_PYTEST_GPU_TEST_POLICY,
+# the plugins and the method. The policy also loads rocke.tests.require_gpu
+# (its docstring says why). Every GPU entry also takes the CTest resource lock _ROCKE_INSTALLED_GPU_RESOURCE_LOCK, so a
+# parallel ctest -j never runs two of them at once on the one GPU.
+set(_ROCKE_INSTALLED_PYTEST_GPU_TEST_POLICY
+    "-p rocke.tests.item_time_limit -p rocke.tests.require_gpu --timeout-method=thread")
+# Where the shared engine is beside the package, the policy also loads
+# rocke.tests.differential_engines (ROCKE_BACKEND=both): the GPU checks run the
+# Python engine's kernels, which the provider ships, and compare the C++
+# engine's output with them on every kernel they build.
+if(_ROCKE_SHARED_ENGINE_BESIDE_PACKAGE)
+  string(APPEND _ROCKE_INSTALLED_PYTEST_GPU_TEST_POLICY
+         " -p rocke.tests.differential_engines")
+endif()
 set(_ROCKE_INSTALLED_PYTEST_GPU_TEST_LIMIT
-    "--timeout=${ROCKE_TEST_ITEM_TIMEOUT_GPU} ${_ROCKE_INSTALLED_PYTEST_GPU_TIMEOUT_METHOD}")
+    "--timeout=${ROCKE_TEST_ITEM_TIMEOUT_GPU} ${_ROCKE_INSTALLED_PYTEST_GPU_TEST_POLICY}")
 set(_ROCKE_INSTALLED_GPU_RESOURCE_LOCK "rocke_gpu")
 
 # C++ test targets are orchestrated from tests/CMakeLists.txt and registered in
@@ -505,10 +555,10 @@ if(ROCKE_INSTALL_TESTS)
     # installed guard rocke_engine_modules_check (rocke.tests.engine_modules),
     # which fails when a module or the shared engine the build made does not
     # load. Under tests/, which TheRock's test artifact captures. A build that
-    # decides against the modules (the provider build, on Windows or without
-    # pybind11) says why in ROCKE_ENGINE_MODULES_ABSENT_REASON, and one that
-    # does not install the shared engine beside the package says why in
-    # ROCKE_SHARED_ENGINE_ABSENT_REASON.
+    # decides against the modules (the provider build on Windows) says why in
+    # ROCKE_ENGINE_MODULES_ABSENT_REASON, one with ROCKE_BUILD_PYBIND off gets
+    # the default reason below, and one that does not install the shared engine
+    # beside the package says why in ROCKE_SHARED_ENGINE_ABSENT_REASON.
 
     # `value` as a JSON string literal: its backslashes, then its quotes, escaped.
     function(_rocke_json_string out_var value)
@@ -608,8 +658,7 @@ if(ROCKE_INSTALL_TESTS)
               PATTERN "__pycache__" EXCLUDE
               REGEX "\\.pyc$" EXCLUDE
               PATTERN "*.c" EXCLUDE
-              PATTERN "reference_bundles" EXCLUDE
-              PATTERN "check_torch_reference.py" EXCLUDE)
+              PATTERN "reference_bundles" EXCLUDE)
 
     else()
       message(WARNING
@@ -635,9 +684,14 @@ if(ROCKE_INSTALL_TESTS)
     # LDS analyzer and dsl_probes tests (load tools from the adjacent dsl_doc
     # source tree), the arch-table parity test (reads cpp/core/arch/data.cpp),
     # the MMA catalog cross-check unit tests (load tools/ from the source tree),
-    # and the arch-domain artifact/probe unit tests. The host-only support-policy
-    # units are installed with the rest of tests/tools; the full regeneration
-    # sweep has its own CTest timeout and resource policy.
+    # the tree-wide checks of rocke.tests.torch_uses and
+    # rocke.tests.toolchain_pins and their allowlists (they list the source
+    # checkout), the compliance-pattern test (reads rocke/tools/ and lists the
+    # source checkout), the registration checks of rocke_pending_lanes_check
+    # (they configure the source tree), and the arch-domain artifact/probe unit
+    # tests. The host-only support-policy units are installed with the rest of
+    # tests/tools; the full regeneration sweep has its own CTest timeout and
+    # resource policy.
     # Include run_all.py: installed runner unit tests import it as a dependency.
     # Linux detector fixtures link a stdin wrapper against the production archive.
     # Keep it with the pytest assets so TheRock's test artifact captures it even
@@ -665,7 +719,14 @@ if(ROCKE_INSTALL_TESTS)
               PATTERN "test_check_mma_catalog.py" EXCLUDE
               PATTERN "test_gpu_references.py" EXCLUDE
               PATTERN "test_pending_lanes.py" EXCLUDE
-              PATTERN "test_limbo_audit.py" EXCLUDE)
+              PATTERN "test_limbo_audit.py" EXCLUDE
+              PATTERN "test_gpu_work_placement.py" EXCLUDE
+              PATTERN "test_quick_tier.py" EXCLUDE
+              PATTERN "test_no_torch.py" EXCLUDE
+              PATTERN "no_torch_allowlist.txt" EXCLUDE
+              PATTERN "test_toolchain_pins.py" EXCLUDE
+              PATTERN "toolchain_pins_allowlist.txt" EXCLUDE
+              PATTERN "test_compliance_patterns.py" EXCLUDE)
 
     endblock()
 
@@ -729,6 +790,10 @@ if(ROCKE_INSTALL_TESTS)
             DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/benchmark")
   endif()
 
+  # No entry registers the quick label: the quick list of the provider
+  # categories (ROCKE_ENGINE_test_categories_external.yaml) alone decides what
+  # quick runs, and tests/tools/test_quick_tier.py fails a registration that
+  # bakes it in (TESTING.md, section 5.0.3).
   set(_ROCKE_INSTALLED_CTEST_ENTRIES "")
   get_property(_ROCKE_INSTALL_TEST_TARGETS GLOBAL PROPERTY ROCKE_INSTALL_TEST_TARGETS)
   foreach(_test_target ${_ROCKE_INSTALL_TEST_TARGETS})
@@ -736,7 +801,7 @@ if(ROCKE_INSTALL_TESTS)
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "add_test(${_test_target} \"${ROCKE_CXX_TEST_CTEST_REL}${_rocke_installed_name}\")\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "set_tests_properties(${_test_target} PROPERTIES LABELS \"ckc;unit;host;quick\" TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
+           "set_tests_properties(${_test_target} PROPERTIES LABELS \"ckc;unit;host;standard\" TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
   endforeach()
 
   if(ROCKE_INSTALL_PYTHON_TESTS)
@@ -769,14 +834,15 @@ if(ROCKE_INSTALL_TESTS)
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "add_test(rocke_python_import_smoke python \"${ROCKE_TEST_CTEST_REL}rocke_installed_smoke.py\")\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "set_tests_properties(rocke_python_import_smoke PROPERTIES LABELS \"ckc;python;quick\" TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
+           "set_tests_properties(rocke_python_import_smoke PROPERTIES LABELS \"ckc;python;standard\" TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 
     # The engine modules and the shared engine the build made load from the
     # installed tree, and lower_kernel_to_llvm lowers through the C++ engine:
     # without this entry, losing them turns thousands of installed tests into
     # skips and the run stays green. It skips (exit 77) with the marker's
     # reasons when the build made neither. Not a pytest entry, so it runs whole
-    # on every CI shard; it costs about a second.
+    # on every CI shard; it costs about a second. With the import smoke it is
+    # the quick tier's packaging check (TESTING.md, section 5.0.3).
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "add_test(rocke_engine_modules_check python -m rocke.tests.engine_modules \"${ROCKE_TEST_CTEST_REL}tests/rocke_engine_modules.json\")\n"
            "set_tests_properties(rocke_engine_modules_check PROPERTIES\n"
@@ -785,6 +851,9 @@ if(ROCKE_INSTALL_TESTS)
            "  SKIP_RETURN_CODE 77\n"
            "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 
+    # Each CI shard compares the HIP emitter configurations it owns
+    # (rocke.tests.ci_shard, imported from the installed package); without the
+    # shard variables it compares them all.
     set(_rocke_barrier_parity_entries "")
     if(TARGET rocke_optimization_barrier_emit)
       rocke_cxx_test_installed_name(_rocke_installed_name
@@ -797,9 +866,12 @@ if(ROCKE_INSTALL_TESTS)
              "--launcher \"${_ROCKE_INSTALLED_PYTHONPATH}/rocke/tests/"
              "subprocess_launcher.py\" --emitter "
              "\"${ROCKE_TEST_CTEST_REL}tests/instances/parity/"
-             "optimization_barrier_emit.py\" --count 17)\n"
+             "optimization_barrier_emit.py\" --count 17 "
+             "--rocke-shard-from-gtest-env)\n"
              "set_tests_properties(rocke_optimization_barrier_hip_pair "
-             "PROPERTIES LABELS \"ckc;python;host;quick\" TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
+             "PROPERTIES LABELS \"ckc;python;host;standard\"\n"
+             "  ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\"\n"
+             "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
     endif()
     # The golden entries below check only their CI shard's share (the
     # rocke.tests.ci_shard rule, the same as the pytest entries'), so each
@@ -808,16 +880,17 @@ if(ROCKE_INSTALL_TESTS)
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "add_test(rocke_golden_static python \"${ROCKE_TEST_CTEST_REL}rocke_installed_golden_test.py\" --rocke-shard-from-gtest-env)\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "set_tests_properties(rocke_golden_static PROPERTIES LABELS \"ckc;python;golden;host;quick\" TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n"
+           "set_tests_properties(rocke_golden_static PROPERTIES LABELS \"ckc;python;golden;host;standard\" TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n"
            "${_rocke_barrier_parity_entries}")
 
     # Would every entry of this registration fit its CI shard budget? Run
     # from the CTest directory, the check lists the registration there.
+    # It is one case of its own, so a sharded tier runs it on one shard only.
     if(EXISTS "${_ROCKE_ENTRY_TIME_CHECK}")
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-             "add_test(rocke_entry_time_check python \"${ROCKE_TEST_CTEST_REL}tests/tools/check_entry_times.py\" check --ctest-dir .)\n"
+             "add_test(rocke_entry_time_check python \"${ROCKE_TEST_CTEST_REL}tests/tools/check_entry_times.py\" check --ctest-dir . --rocke-shard-from-gtest-env)\n"
              "set_tests_properties(rocke_entry_time_check PROPERTIES\n"
-             "  LABELS \"ckc;python;host;quick\"\n"
+             "  LABELS \"ckc;python;host;standard\"\n"
              "  ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\"\n"
              "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
     endif()
@@ -876,11 +949,11 @@ if(ROCKE_INSTALL_TESTS)
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "add_test(rocke_differential_golden_ll python \"${_ROCKE_RUN_DIFF}\" --mode ll --python-only --check-golden --flavor all --rocke-shard-from-gtest-env)\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "set_tests_properties(rocke_differential_golden_ll PROPERTIES LABELS \"ckc;python;golden;host;quick\" ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\" TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
+           "set_tests_properties(rocke_differential_golden_ll PROPERTIES LABELS \"ckc;python;golden;host;standard\" ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\" TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "add_test(rocke_differential_golden_canonical python \"${_ROCKE_RUN_DIFF}\" --mode ir --canonical --python-only --check-golden --rocke-shard-from-gtest-env)\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "set_tests_properties(rocke_differential_golden_canonical PROPERTIES LABELS \"ckc;python;golden;host;quick\" ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\" TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
+           "set_tests_properties(rocke_differential_golden_canonical PROPERTIES LABELS \"ckc;python;golden;host;standard\" ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\" TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 
     # The installed tests compare the C++ HIP lowering with the Python one
     # through rocke_ir_lower_cli, as the wheel has no rocke_engine binding:
@@ -1013,12 +1086,15 @@ if(ROCKE_INSTALL_TESTS)
       # The HIP source identity test and the HIP lowering parity files run in
       # their own entries (above): their both-engine checks need the C++ HIP
       # lowering, which the installed tree reaches only through
-      # rocke_ir_lower_cli. On Windows, where those entries are not
-      # registered, the files run in none, so their other checks do not run
-      # there either.
-      list(APPEND _ROCKE_PLATFORM_PYTEST_IGNORE_instances_dispatch
-           ${_ROCKE_HIP_SOURCE_IDENTITY_TEST})
-      list(APPEND _ROCKE_PLATFORM_PYTEST_IGNORE_core ${_ROCKE_HIP_LOWERING_PARITY_TESTS})
+      # rocke_ir_lower_cli. Where those entries are not registered (Windows),
+      # the files stay in their directory's part, so their Python-engine
+      # checks still run there. (A Windows build installs no shared engine,
+      # so their C++ cases have no engine to compare there.)
+      if(_ROCKE_IR_LOWER_CLI_ENVIRONMENT)
+        list(APPEND _ROCKE_PLATFORM_PYTEST_IGNORE_instances_dispatch
+             ${_ROCKE_HIP_SOURCE_IDENTITY_TEST})
+        list(APPEND _ROCKE_PLATFORM_PYTEST_IGNORE_core ${_ROCKE_HIP_LOWERING_PARITY_TESTS})
+      endif()
       set(_ROCKE_PLATFORM_PYTEST_GROUP_core core)
       set(_ROCKE_PLATFORM_PYTEST_GROUP_instances_dispatch instances dispatch)
       set(_ROCKE_PLATFORM_PYTEST_GROUP_runtime_tools
@@ -1028,7 +1104,7 @@ if(ROCKE_INSTALL_TESTS)
       # categories tier as standard, so the quick tier does not run them.
       list(APPEND _ROCKE_PLATFORM_PYTEST_IGNORE_other test_ctest_shard.py)
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-             "add_test(rocke_ctest_shard_pytest ${_ROCKE_INSTALLED_PYTEST} ${_ROCKE_INSTALLED_PYTEST_WORKERS} \"${ROCKE_TEST_CTEST_REL}tests/test_ctest_shard.py\" -m \"not integration\" -v -rs --timeout=60)\n"
+             "add_test(rocke_ctest_shard_pytest ${_ROCKE_INSTALLED_PYTEST} ${_ROCKE_INSTALLED_PYTEST_WORKERS} \"${ROCKE_TEST_CTEST_REL}tests/test_ctest_shard.py\" -m \"${_ROCKE_PLATFORM_PYTEST_MARKERS}\" -v -rs ${_ROCKE_PLATFORM_PYTEST_ITEM_TIMEOUT})\n"
              "set_tests_properties(rocke_ctest_shard_pytest PROPERTIES\n"
              "  LABELS \"ckc;python;standard\"\n"
              "  ENVIRONMENT \"\${_rocke_platform_pytest_environment}\"\n"
@@ -1054,6 +1130,19 @@ if(ROCKE_INSTALL_TESTS)
       endforeach()
       rocke_platform_pytest_entry(_rocke_pytest_entry other ${_rocke_pytest_other_arguments})
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES "${_rocke_pytest_entry}")
+
+      # The platform tests that launch GPU work, the ones marked gpu
+      # (tests/pytest.ini), run in this GPU entry instead of their parts: it
+      # collects tests/ less the library tests and keeps only those tests,
+      # with the parts' per-test limit and the GPU policy, lock and CTest
+      # limit. Not a part: it selects by mark, not by directory.
+      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+             "add_test(rocke_platform_gpu_pytest ${_ROCKE_INSTALLED_PYTEST} ${_ROCKE_INSTALLED_PYTEST_WORKERS} \"${ROCKE_TEST_CTEST_REL}tests\" --ignore \"${ROCKE_TEST_CTEST_REL}tests/library\" -m \"${_ROCKE_PLATFORM_PYTEST_GPU_MARKERS}\" -v -rs ${_ROCKE_PLATFORM_PYTEST_ITEM_TIMEOUT} ${_ROCKE_INSTALLED_PYTEST_GPU_TEST_POLICY})\n"
+             "set_tests_properties(rocke_platform_gpu_pytest PROPERTIES\n"
+             "  LABELS \"ckc;python;gpu;standard\"\n"
+             "  ENVIRONMENT \"\${_rocke_platform_pytest_environment}\"\n"
+             "  RESOURCE_LOCK ${_ROCKE_INSTALLED_GPU_RESOURCE_LOCK}\n"
+             "  TIMEOUT ${ROCKE_TEST_TIMEOUT_GPU})\n")
 
       # The tiling package's tests live inside the package
       # (rocke/tests/helpers/tiling), so the rocke_pytest_* parts above, which
@@ -1083,29 +1172,45 @@ if(ROCKE_INSTALL_TESTS)
       # pyproject.toml above the install (a CI workspace has one whose
       # python_files collects nothing here). -c names the installed
       # tests/pytest.ini, the configuration the rocke_pytest_* parts run under.
+      # The launcher and options serve every entry that runs a test directory
+      # of the installed package (the tiling and heuristics entries below).
       set(_ROCKE_TILING_TESTS "${_ROCKE_INSTALLED_PYTHONPATH}/rocke/tests/helpers/tiling")
       set(_ROCKE_TILING_VISUALIZATION_TESTS "${_ROCKE_TILING_TESTS}/visualization")
-      set(_rocke_tiling_pytest_launcher "${_ROCKE_INSTALLED_PYTEST} -c \"${ROCKE_TEST_CTEST_REL}tests/pytest.ini\"")
-      set(_rocke_tiling_pytest_options "-v -rs --timeout=60")
+      set(_rocke_package_pytest_launcher "${_ROCKE_INSTALLED_PYTEST} -c \"${ROCKE_TEST_CTEST_REL}tests/pytest.ini\"")
+      set(_rocke_package_pytest_options "-v -rs --timeout=60")
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
              "set(_rocke_tiling_pytest_environment \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\")\n"
              "list(APPEND _rocke_tiling_pytest_environment \${_rocke_compiler_tool_environment})\n"
-             "add_test(rocke_tiling_pytest ${_rocke_tiling_pytest_launcher} ${_ROCKE_INSTALLED_PYTEST_WORKERS} \"${_ROCKE_TILING_TESTS}\" --ignore \"${_ROCKE_TILING_VISUALIZATION_TESTS}\" ${_rocke_tiling_pytest_options} -m \"not gpu\")\n"
+             "add_test(rocke_tiling_pytest ${_rocke_package_pytest_launcher} ${_ROCKE_INSTALLED_PYTEST_WORKERS} \"${_ROCKE_TILING_TESTS}\" --ignore \"${_ROCKE_TILING_VISUALIZATION_TESTS}\" ${_rocke_package_pytest_options} -m \"not gpu\")\n"
              "set_tests_properties(rocke_tiling_pytest PROPERTIES\n"
              "  LABELS \"ckc;python;standard\"\n"
              "  ENVIRONMENT \"\${_rocke_tiling_pytest_environment}\"\n"
              "  TIMEOUT ${ROCKE_TEST_TIMEOUT_TOOLCHAIN})\n"
-             "add_test(rocke_tiling_visualization_pytest ${_rocke_tiling_pytest_launcher} \"${_ROCKE_TILING_VISUALIZATION_TESTS}\" ${_rocke_tiling_pytest_options} -m \"not gpu\")\n"
+             "add_test(rocke_tiling_visualization_pytest ${_rocke_package_pytest_launcher} \"${_ROCKE_TILING_VISUALIZATION_TESTS}\" ${_rocke_package_pytest_options} -m \"not gpu\")\n"
              "set_tests_properties(rocke_tiling_visualization_pytest PROPERTIES\n"
              "  LABELS \"ckc;python\"\n"
              "  ENVIRONMENT \"\${_rocke_tiling_pytest_environment}\"\n"
              "  TIMEOUT ${ROCKE_TEST_TIMEOUT_TOOLCHAIN})\n"
-             "add_test(rocke_tiling_gpu_pytest ${_rocke_tiling_pytest_launcher} \"${_ROCKE_TILING_TESTS}\" ${_rocke_tiling_pytest_options} ${_ROCKE_INSTALLED_PYTEST_GPU_TIMEOUT_METHOD} -m gpu)\n"
+             "add_test(rocke_tiling_gpu_pytest ${_rocke_package_pytest_launcher} \"${_ROCKE_TILING_TESTS}\" ${_rocke_package_pytest_options} ${_ROCKE_INSTALLED_PYTEST_GPU_TEST_POLICY} -m gpu)\n"
              "set_tests_properties(rocke_tiling_gpu_pytest PROPERTIES\n"
              "  LABELS \"ckc;python;gpu\"\n"
              "  ENVIRONMENT \"\${_rocke_tiling_pytest_environment}\"\n"
              "  RESOURCE_LOCK ${_ROCKE_INSTALLED_GPU_RESOURCE_LOCK}\n"
              "  TIMEOUT ${ROCKE_TEST_TIMEOUT_GPU})\n")
+      # The kernel-selection heuristics tests live inside the package
+      # (rocke/heuristics/tests) and need packages that are not rocKE
+      # dependencies: rocke/heuristics/tests/requirements.txt, installed beside
+      # the tests, lists them, and each test module reads it, skipping where one
+      # is missing (waiting for the build-variant lane). A job that runs this
+      # entry installs them with `pip install -r <that requirements.txt>`.
+      # Scheduled CI only (the comprehensive tier).
+      set(_ROCKE_HEURISTICS_TESTS "${_ROCKE_INSTALLED_PYTHONPATH}/rocke/heuristics/tests")
+      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+             "add_test(rocke_heuristics_pytest ${_rocke_package_pytest_launcher} \"${_ROCKE_HEURISTICS_TESTS}\" ${_rocke_package_pytest_options})\n"
+             "set_tests_properties(rocke_heuristics_pytest PROPERTIES\n"
+             "  LABELS \"ckc;python;host;comprehensive;full\"\n"
+             "  ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\"\n"
+             "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
       # check_backend_access_width.py compiles a few copy kernels through COMGR
       # and reads their disassembly. A host module that does that is kept out of
       # ordinary test discovery (TESTING.md, section 5.0.1), so this entry names
@@ -1117,7 +1222,7 @@ if(ROCKE_INSTALL_TESTS)
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
              "set(_rocke_tiling_backend_width_pytest_environment \${_rocke_tiling_pytest_environment})\n"
              "list(APPEND _rocke_tiling_backend_width_pytest_environment \${_rocke_compiler_requirement_environment})\n"
-             "add_test(rocke_tiling_backend_width_pytest ${_rocke_tiling_pytest_launcher} \"${_ROCKE_TILING_TESTS}/check_backend_access_width.py\" ${_rocke_tiling_pytest_options})\n"
+             "add_test(rocke_tiling_backend_width_pytest ${_rocke_package_pytest_launcher} \"${_ROCKE_TILING_TESTS}/check_backend_access_width.py\" ${_rocke_package_pytest_options})\n"
              "set_tests_properties(rocke_tiling_backend_width_pytest PROPERTIES\n"
              "  LABELS \"ckc;python;standard\"\n"
              "  ENVIRONMENT \"\${_rocke_tiling_backend_width_pytest_environment}\"\n"
@@ -1140,13 +1245,15 @@ if(ROCKE_INSTALL_TESTS)
              "add_test(rocke_${_operation}_reference_unit_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_${_operation}_reference_contract.py\" -v -rs --timeout=30)\n")
       string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
              "set_tests_properties(rocke_${_operation}_reference_unit_pytest PROPERTIES\n"
-             "  LABELS \"ckc;python;${_operation};host;quick\"\n"
+             "  LABELS \"ckc;python;${_operation};host;standard\"\n"
              "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
              "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 
       # Each installed architecture retains its own GPU CTest result, which
       # covers every variant installed for it; the gpu limit covers the at most
-      # two variants one entry runs, each at its five-minute request timeout.
+      # two variants one entry runs, each request of a case stopping at the
+      # worker's 100 s request timeout (PINNED_REQUEST_TIMEOUT_SECONDS), below
+      # the 120 s per-test limit of the GPU pytest entries.
       # library/tests/reference_common/docs/gpu-reference-workflow.md records
       # this trade-off and when to register one CTest per variant instead.
       foreach(_arch IN LISTS _ROCKE_${_operation_upper}_INSTALLED_ARCHITECTURES)
@@ -1154,7 +1261,7 @@ if(ROCKE_INSTALL_TESTS)
                "add_test(rocke_${_operation}_gpu_${_arch}_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_${_operation}_pinned_reference.py\" --rocke-reference-operation ${_operation} --rocke-reference-arch ${_arch} -v -rs ${_ROCKE_INSTALLED_PYTEST_GPU_TEST_LIMIT})\n")
         string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
                "set_tests_properties(rocke_${_operation}_gpu_${_arch}_pytest PROPERTIES\n"
-               "  LABELS \"ckc;python;${_operation};gpu;quick\"\n"
+               "  LABELS \"ckc;python;${_operation};gpu;standard\"\n"
                "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
                "  SKIP_RETURN_CODE 77\n"
                "  RESOURCE_LOCK ${_ROCKE_INSTALLED_GPU_RESOURCE_LOCK}\n"

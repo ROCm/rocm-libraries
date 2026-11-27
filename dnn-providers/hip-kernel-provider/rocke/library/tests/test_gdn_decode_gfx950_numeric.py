@@ -27,7 +27,7 @@ import numpy as np
 import pytest
 from rocke.numeric import storage
 from rocke.runtime.device_array import DeviceArray
-from rocke.tests.gpu import probe_device_arch
+from rocke.tests.gpu import probe_device_arch, skip_without_device_memory
 from rocke.tests.lanes import arch_skip_reason
 
 ARCH = "gfx950"
@@ -333,6 +333,9 @@ def test_mismatched_skip_index_leaves_write_page_untouched(harness):
     ), "a mismatched skip lane modified its write page"
 
 
+# Its state pool takes most of a small device's memory, so it runs with no
+# other test process on the device (rocke.tests.ctest_workers).
+@pytest.mark.rocke_run_alone
 @requires_gfx950
 def test_large_pool_crosses_the_i32_offset_boundary(harness):
     """A pool deep enough that ``slot * S_POOL`` overflows a signed i32 must
@@ -344,7 +347,8 @@ def test_large_pool_crosses_the_i32_offset_boundary(harness):
     in the intended slot rather than a wrapped-around one. A read-only fix would
     pass ``out`` yet corrupt a different slot, so the state write is checked too.
     The pool (4 GiB of bf16) lives on the device once and on the host twice
-    (the input and the read-back).
+    (the input and the read-back); a device without room for it skips the test
+    (``skip_without_device_memory``).
     """
     from kernels.gfx950.gdn_decode import GdnDecodeSpec
 
@@ -353,6 +357,8 @@ def test_large_pool_crosses_the_i32_offset_boundary(harness):
     s_pool = hv * dv * dk
     slot = (1 << 31) // s_pool  # first slot whose element base overflows i32
     pool_depth = slot + 1
+    pool_bytes = pool_depth * s_pool * storage.host_dtype(spec.state_dtype).itemsize
+    skip_without_device_memory(pool_bytes, "the i32 offset boundary pool")
 
     batch = 1
     inp = harness["make_inputs"](spec, batch)

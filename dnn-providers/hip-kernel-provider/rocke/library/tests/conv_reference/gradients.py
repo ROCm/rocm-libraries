@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Small independent gradient oracles for direct numerical checks without Torch.
+"""Small independent NumPy gradient oracles for direct numerical checks.
 
 These checks compute an oracle at test time. They do not use the deterministic
 pinned-forward certificate for atomic gradient outputs.
