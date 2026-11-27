@@ -338,6 +338,26 @@ class _CompiledDispatcher:
 
         # Unless a field says otherwise, expect the base-feature variant.
         fields = {**_BASE_FEATURES, **fields}
+        # qr_tdm_pingpong's bias / ALiBi, sink tokens and FP8 descales but per-tensor come
+        # with the sequence padding only (qr_tdm_pingpong_tile_takes), which serves aligned
+        # lengths too
+        rare = (
+            fields["bias"] != "no"
+            or fields["sink"] == "t"
+            or (
+                fields.get("dtype") in ("fp8", "fp8bf16")
+                and fields["qscale"] != "pertensor"
+            )
+            or fields["qscale"] in ("perhead", "blockscale")
+        )
+        if (
+            rare
+            and fields.get("pipeline", "qr_tdm_pingpong") == "qr_tdm_pingpong"
+            and fields["packgqa"] != "t"
+        ):
+            for key in ("spad", "skpad"):
+                if fields.get(key) == "f":
+                    fields[key] = "t"
         matches = {
             index
             for kernel, index in self.kernel_ids
@@ -650,9 +670,14 @@ message(\"options:${{options}}\")
 
                 self.assertTrue(candidates)
                 # The kernel filter leaves the sink tokens as the only extra feature: every
-                # base instance on the decode and general tiles has a sink twin, the 64-row
-                # tile's none (qr_tdm_pingpong_tile_takes).
-                with_sink = [k for k in candidates if k.F_tile.F_bm0 != 64]
+                # sequence-padded base instance on the decode and general tiles has a sink
+                # twin, the 64-row tile's none (qr_tdm_pingpong_tile_takes).
+                with_sink = [
+                    k
+                    for k in candidates
+                    if k.F_tile.F_bm0 != 64
+                    and (k.F_pipeline.F_spad, k.F_pipeline.F_skpad) == ("t", "t")
+                ]
                 self.assertTrue(with_sink)
                 self.assertEqual(
                     Counter(k.F_pipeline.F_sink for k in family)["t"], len(with_sink)

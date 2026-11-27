@@ -612,7 +612,8 @@ INSTANTIATE_TEST_SUITE_P(
     Values(std::tuple{mode_enum::batch, 4, 64, 64, "0", "n", true, "_npad_", false},
            std::tuple{mode_enum::batch, 4, 64, 100, "0", "n", true, "_npad_", false},
            std::tuple{mode_enum::batch, 4, 64, 100, "0", "e", true, "_pssk_", false},
-           std::tuple{mode_enum::batch, 4, 64, 128, "0", "e", true, "_npad_", false},
+           // a bias comes with the sequence padding only, aligned lengths too
+           std::tuple{mode_enum::batch, 4, 64, 128, "0", "e", true, "_pssk_", false},
            std::tuple{mode_enum::batch, 8, 64, 192, "0", "a", true, "_alibi_", false},
            std::tuple{mode_enum::batch, 8, 64, 192, "0", "a", false, "_alibi_", false},
            std::tuple{mode_enum::batch, 4, 232, 232, "t:50,64", "n", true, "_mask_", false},

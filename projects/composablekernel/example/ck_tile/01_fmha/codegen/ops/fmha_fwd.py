@@ -1177,10 +1177,12 @@ def qr_tdm_pingpong_tile_takes(tile, pipeline, dtype, hdim) -> bool:
     common calls; the rarer ones run on a dispatch's last, unguarded tile (its general
     128- or 64-row tile, every call's fallback), so their instances do not multiply by the
     tiles:
-    - bias or ALiBi, dropout and head-dim padding (where the tile's head dim is the call's)
-      also take the general decode tile (the 16-row one without a key-count guard);
+    - dropout and head-dim padding (where the tile's head dim is the call's) also take the
+      general decode tile (the 16-row one without a key-count guard); bias or ALiBi does not;
     - sink tokens and FP8's descales but per-tensor (none, per-head, block scale) also take
       every decode tile;
+    - bias or ALiBi, sink tokens and FP8's descales but per-tensor are generated with the
+      sequence padding only (spad, skpad), which takes aligned lengths too;
     - head-dim padding without sequence padding is generated only where the tile pads the
       head dim itself (MX's staged head dims); elsewhere the fully padded instance serves it."""
     fallback = str(tile.F_constraint) == "true"
@@ -1194,10 +1196,14 @@ def qr_tdm_pingpong_tile_takes(tile, pipeline, dtype, hdim) -> bool:
     rare = p.F_bias != "no" or p.F_dropout == "t" or (p.F_dpad == "t" and exact_head)
     if rare and not (fallback or general_decode):
         return False
+    if p.F_bias != "no" and not fallback:
+        return False
     rare_decode = p.F_sink == "t" or (
         dtype in KernelComponentFactoryGfx125._DT_FP8_FP8BF16
         and p.F_qscale != "pertensor"
     )
+    if (p.F_bias != "no" or rare_decode) and (p.F_spad == "f" or p.F_skpad == "f"):
+        return False
     return not rare_decode or fallback or decode
 
 
