@@ -159,6 +159,8 @@ set(others_test_source
   # rocsolver logging
   logging_gtest.cpp
   asan_helpers_gtest.cpp
+  # rocsolver_get/set_alg_mode argument validation
+  alg_mode_gtest.cpp
   # helpers
   #common/client_environment_helpers.cpp
 )
