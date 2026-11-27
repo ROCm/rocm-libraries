@@ -132,5 +132,48 @@ class MiopenProseSelectionTest(unittest.TestCase):
         self.assertIn("miopen=true", output)
 
 
+class TensileLiteLaneSelectionTest(unittest.TestCase):
+    """Which changes start the two CPU-only TensileLite lanes."""
+
+    def selected(self, path):
+        return detect_changed_components({path})
+
+    def test_tensilelite_source_runs_both_lanes(self):
+        result = self.selected(
+            "projects/hipblaslt/tensilelite/tensilelite/Activation.py"
+        )
+        self.assertTrue(result["tensilelite_unit"])
+        self.assertTrue(result["tensilelite_gtest"])
+
+    def test_build_inputs_outside_tensilelite_run_the_gtest_lane(self):
+        # The gtest build configures through projects/hipblaslt and compiles
+        # clients/common sources; each of these files is read by that build.
+        for path in (
+            "projects/hipblaslt/CMakeLists.txt",
+            "projects/hipblaslt/library/experimental/features.cmake",
+            "projects/hipblaslt/clients/common/src/hipblaslt_bench_options.cpp",
+            "projects/hipblaslt/library/include/hipblaslt/hipblaslt.h",
+        ):
+            with self.subTest(path=path):
+                result = self.selected(path)
+                self.assertTrue(result["tensilelite_gtest"])
+                self.assertFalse(result["tensilelite_unit"])
+
+    def test_each_lane_runs_when_its_own_workflow_changes(self):
+        unit = self.selected(".github/workflows/component-ci-tensilelite-unit.yml")
+        gtest = self.selected(".github/workflows/component-ci-tensilelite-gtest.yml")
+        self.assertTrue(unit["tensilelite_unit"])
+        self.assertFalse(unit["tensilelite_gtest"])
+        self.assertTrue(gtest["tensilelite_gtest"])
+        self.assertFalse(gtest["tensilelite_unit"])
+
+    def test_hipblaslt_library_source_runs_neither_lane(self):
+        result = self.selected(
+            "projects/hipblaslt/library/src/amd_detail/hipblaslt.cpp"
+        )
+        self.assertFalse(result["tensilelite_unit"])
+        self.assertFalse(result["tensilelite_gtest"])
+
+
 if __name__ == "__main__":
     unittest.main()

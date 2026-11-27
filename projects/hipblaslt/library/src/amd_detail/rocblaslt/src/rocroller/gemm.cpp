@@ -7,6 +7,7 @@
 
 #include "utility.hpp"
 
+#include <rocRoller/GPUArchitecture/GPUArchitectureLibrary.hpp>
 #include <rocRoller/KernelOptions_detail.hpp>
 
 using namespace rocRoller;
@@ -566,7 +567,10 @@ std::shared_ptr<RocRollerGemmKernel> RocRollerGemmKernel::generate(std::shared_p
         params->workgroupMappingDim = dim;
     }
 
-    if(gemm->workgroupRemapXCC)
+    // Kernel generation rejects the XCC remap on architectures without XCCs, such as gfx942.
+    if(gemm->workgroupRemapXCC
+       && GPUArchitectureLibrary::getInstance()->GetDefaultHipDeviceArch().HasCapability(
+           GPUCapability::HasXCC))
     {
         params->workgroupRemapXCC = 8;
     }

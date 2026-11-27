@@ -22,6 +22,7 @@
 #include <string>
 #include <tuple>
 #include <vector>
+#include "DeviceTestUtils.hpp"
 
 using namespace TensileLite;
 using namespace TensileLite::Client;
@@ -173,9 +174,7 @@ static std::vector<uint8_t> readDevice(void const* ptr, size_t bytes)
 // the size of the largest problem that the pristine inputs are allocated for.
 TEST_P(RotatingBufferSizing, EachProblemRotatesAccordingToItsOwnSize)
 {
-    int32_t deviceCount = 0;
-    if(hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount == 0)
-        GTEST_SKIP() << "no HIP device available";
+    SKIP_IF_NO_DEVICE();
 
     int32_t const mode    = std::get<0>(GetParam());
     bool const    useBeta = std::get<1>(GetParam());

@@ -65,13 +65,15 @@ inline uint32_t mxSeedIndex(bool isMatrixA, int64_t batch, int64_t batchStride)
 // initMethod uses one fixed seed for all matrices and batches.
 // integer_exact supports fp8 and fp6 data. With swizzled scales it currently requires K along
 // stored rows (transposed A or non-transposed B); other orientations throw before writing.
-// With K along the stored rows, a non-positive row or column throws std::invalid_argument
-// before writing: the row count divides the padded-layout check. Otherwise the reference
-// covers all stride * col elements the generator writes, and stride * col must be a multiple
-// of row, or it throws before writing.
+// Data and scales are generated from the logical dense dimensions, then data and reference values
+// are placed at the requested leading dimension with zero padding. The leading dimension must be
+// at least the stored row count, and non-positive dimensions throw before writing.
 // With K along the stored columns (non-transposed A or transposed B), K must be a multiple of
 // the scale block. A partial block makes getAlignedFloat read past the packed buffer, so
 // integer_exact throws before writing.
+// With returnReference false the returned dequantized reference vector is not built, and
+// an empty vector is returned; the data and scale bytes written are the same either way.
+// Decoupled scale initialization can still use internal floats to generate those bytes.
 std::vector<float> generateMXInput(hipDataType            dataType,
                                    hipDataType            scaleType,
                                    void*                  data,
@@ -88,7 +90,8 @@ std::vector<float> generateMXInput(hipDataType            dataType,
                                    float                  min_val     = -1.0f,
                                    float                  max_val     = 1.0f,
                                    std::string_view const scaleInitMethod = "",
-                                   uint32_t               seedIndex       = 0);
+                                   uint32_t               seedIndex       = 0,
+                                   bool                   returnReference = true);
 
 // generateMXInput emits scales packed for the unpadded data K, but setMXScaleA/B
 // on gfx950 pad ceil(K/mxBlock) up to a multiple of 8. K-fast layouts need this

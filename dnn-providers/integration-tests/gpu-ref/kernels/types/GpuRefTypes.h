@@ -307,6 +307,30 @@ __device__ inline __bf16 fabs(__bf16 x)
     return static_cast<__bf16>(__builtin_fabsf(static_cast<float>(x)));
 }
 
+// --- exp and tanh overloads ---
+// Without these, a call with a _Float16 or __bf16 argument is ambiguous between the float and
+// double overloads, so a pointwise node with fp16 or bf16 compute would fail to compile.
+
+__device__ inline _Float16 exp(_Float16 x)
+{
+    return static_cast<_Float16>(expf(static_cast<float>(x)));
+}
+
+__device__ inline __bf16 exp(__bf16 x)
+{
+    return static_cast<__bf16>(expf(static_cast<float>(x)));
+}
+
+__device__ inline _Float16 tanh(_Float16 x)
+{
+    return static_cast<_Float16>(tanhf(static_cast<float>(x)));
+}
+
+__device__ inline __bf16 tanh(__bf16 x)
+{
+    return static_cast<__bf16>(tanhf(static_cast<float>(x)));
+}
+
 // --- isnan overloads ---
 
 __device__ inline bool isnan(_Float16 x)
