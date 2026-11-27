@@ -64,7 +64,7 @@ extern "C" HIPDNN_PLUGIN_EXPORT void hipdnnEnginePluginResetKpackModuleCacheForT
 }
 
 /// Lowers the per-image byte limit the dgrad AOT engines' batch chunker
-/// (hipkernel:Gfx950ConvDgradAot and hipkernel:Gfx1250ConvDgradAot share it) slices at,
+/// (every hipkernel:Gfx*ConvDgradAot engine shares it) slices at,
 /// inside this loaded plugin, so a small batch exercises the chunked-launch device
 /// path without needing a multi-GiB image. FOR TESTS ONLY, for the same reason as
 /// hipdnnEnginePluginResetKpackModuleCacheForTesting above: the limit lives in a
