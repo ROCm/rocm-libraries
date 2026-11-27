@@ -203,6 +203,7 @@ endfunction()
 #   A target nothing registered kernels on (the plugin built without the HIP MLOps engine)
 #   still gets the generated files, with empty tables: both lists come back empty instead
 #   of holding the property's -NOTFOUND value, which would be read as a file name.
+#   ../../descriptor-packaging/tests/test_kernel_embedding.py configures that case.
 function(_get_registered_kernels REGISTERED_TARGET REGISTERED_FILES_VAR REGISTERED_KEYS_VAR)
     get_target_property(_registered_files ${REGISTERED_TARGET} KERNELEMBEDDING_KERNEL_FILES)
     get_target_property(_registered_keys ${REGISTERED_TARGET} KERNELEMBEDDING_KERNEL_KEYS)
