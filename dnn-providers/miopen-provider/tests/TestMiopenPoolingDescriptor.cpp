@@ -221,18 +221,3 @@ TEST(TestMiopenPoolingDescriptor, SelfMoveAssignmentKeepsDescriptor)
     // NOLINTNEXTLINE(bugprone-use-after-move)
     EXPECT_EQ(descriptor.poolingDescriptor(), handle);
 }
-
-TEST(TestMiopenPoolingDescriptor, IndexTypeSizeCoversEveryMiopenIndexType)
-{
-    EXPECT_EQ(poolingIndexTypeSize(miopenIndexUint8), sizeof(uint8_t));
-    EXPECT_EQ(poolingIndexTypeSize(miopenIndexUint16), sizeof(uint16_t));
-    EXPECT_EQ(poolingIndexTypeSize(miopenIndexUint32), sizeof(uint32_t));
-    EXPECT_EQ(poolingIndexTypeSize(miopenIndexUint64), sizeof(uint64_t));
-}
-
-TEST(TestMiopenPoolingDescriptor, IndexTypeSizeThrowsOnUnknownIndexType)
-{
-    // Use a value not in the enum
-    EXPECT_THROW(poolingIndexTypeSize(static_cast<miopenIndexType_t>(-1)),
-                 hipdnn_plugin_sdk::HipdnnPluginException);
-}

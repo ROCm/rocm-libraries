@@ -721,10 +721,10 @@ TEST(TestMiopenResampleFwdChecks, ResolveReportsIndexTypes)
 {
     const auto int32Config = resolveSpec(defaultSpec(ResampleMode::MAXPOOL, DataType::INT32));
     EXPECT_EQ(int32Config.indexUid, std::optional<int64_t>(ResampleFwdGraphSpec::INDEX_UID));
-    EXPECT_EQ(int32Config.indexType, miopenIndexUint32);
+    EXPECT_EQ(int32Config.indexType.type, miopenIndexUint32);
 
     const auto int8Config = resolveSpec(defaultSpec(ResampleMode::MAXPOOL, DataType::INT8));
-    EXPECT_EQ(int8Config.indexType, miopenIndexUint8);
+    EXPECT_EQ(int8Config.indexType.type, miopenIndexUint8);
 
     EXPECT_FALSE(resolveSpec(defaultSpec(ResampleMode::MAXPOOL)).indexUid.has_value());
 }

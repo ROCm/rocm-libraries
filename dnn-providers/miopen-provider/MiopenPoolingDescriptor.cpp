@@ -1,7 +1,6 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <cstdint>
 #include <memory>
 #include <string>
 #include <type_traits>
@@ -108,26 +107,6 @@ MiopenPoolingDescriptor::~MiopenPoolingDescriptor()
 miopenPoolingDescriptor_t MiopenPoolingDescriptor::poolingDescriptor() const
 {
     return _descriptor;
-}
-
-size_t poolingIndexTypeSize(miopenIndexType_t indexType)
-{
-    switch(indexType)
-    {
-    case miopenIndexUint8:
-        return sizeof(uint8_t);
-    case miopenIndexUint16:
-        return sizeof(uint16_t);
-    case miopenIndexUint32:
-        return sizeof(uint32_t);
-    case miopenIndexUint64:
-        return sizeof(uint64_t);
-    default:
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Unsupported MIOpen pooling index type: "
-                + std::to_string(static_cast<int>(indexType)));
-    }
 }
 
 } // namespace miopen_plugin

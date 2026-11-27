@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <vector>
@@ -14,6 +15,12 @@
 
 namespace miopen_plugin::resample_fwd_applicability
 {
+
+struct PoolingIndexType
+{
+    miopenIndexType_t type{miopenIndexUint8};
+    std::size_t elementSize{sizeof(uint8_t)};
+};
 
 // Everything MiopenResampleFwdPlan needs, resolved from a graph the checks accepted.
 //
@@ -43,7 +50,7 @@ struct ResampleFwdConfig
     // Set when the node has an index tensor. MIOpen writes the indices, packed in NC(D)HW order,
     // to the front of its workspace; the plan copies them into this tensor.
     std::optional<int64_t> indexUid;
-    miopenIndexType_t indexType{miopenIndexUint8};
+    PoolingIndexType indexType;
 };
 
 // Resolves a single-node ResampleFwd graph to a MIOpen pooling forward configuration. Throws

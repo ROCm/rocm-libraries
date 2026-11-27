@@ -10,12 +10,14 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <numeric>
 #include <optional>
 #include <vector>
 
 #include <gtest/gtest.h>
+#include <hip/hip_runtime.h>
 
 #include "MiopenApi.hpp"
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
@@ -233,6 +235,59 @@ protected:
         return tensors.read();
     }
 
+    template <typename IndexT>
+    void expectExactIndexCopy(DataType indexType)
+    {
+        constexpr size_t prefix = 16;
+        constexpr size_t count = 4;
+        constexpr size_t payload = count * sizeof(IndexT);
+        constexpr size_t suffix = 64;
+        constexpr size_t total = prefix + payload + suffix;
+
+        const auto spec = planarMaxSpec(indexType);
+        const auto plan = buildPlan(spec);
+        PoolingTensors<float, IndexT> tensors(spec, planarMaxInput());
+        auto buffers = tensors.deviceBuffers();
+        ASSERT_EQ(buffers.size(), 3u);
+        ASSERT_EQ(buffers[2].uid, ResampleFwdGraphSpec::INDEX_UID);
+
+        const hipdnn_data_sdk::utilities::Workspace<> guardedOutput(total);
+        const size_t workspaceBytes = std::max(plan->getWorkspaceSize(*_handle), size_t{64}) + 64;
+        const hipdnn_data_sdk::utilities::Workspace<> workspace(workspaceBytes);
+        buffers[2].ptr = static_cast<char*>(guardedOutput.get()) + prefix;
+
+        for(const unsigned char fill : {static_cast<unsigned char>(0xa5),
+                                        static_cast<unsigned char>(0x5a)})
+        {
+            SCOPED_TRACE(static_cast<int>(fill));
+            ASSERT_EQ(hipMemset(guardedOutput.get(), fill, total), hipSuccess);
+            ASSERT_EQ(hipMemset(workspace.get(), 0, workspaceBytes), hipSuccess);
+            plan->execute(*_handle,
+                          buffers.data(),
+                          static_cast<uint32_t>(buffers.size()),
+                          workspace.get());
+            synchronize();
+
+            std::vector<unsigned char> bytes(total);
+            ASSERT_EQ(hipMemcpy(bytes.data(),
+                                guardedOutput.get(),
+                                total,
+                                hipMemcpyDeviceToHost),
+                      hipSuccess);
+            std::vector<IndexT> actual(count);
+            std::memcpy(actual.data(), bytes.data() + prefix, payload);
+            EXPECT_EQ(actual, (std::vector<IndexT>{1, 6, 13, 11}));
+            for(size_t i = 0; i < prefix; ++i)
+            {
+                EXPECT_EQ(bytes[i], fill) << "prefix byte " << i;
+            }
+            for(size_t i = prefix + payload; i < total; ++i)
+            {
+                EXPECT_EQ(bytes[i], fill) << "suffix byte " << (i - prefix - payload);
+            }
+        }
+    }
+
     std::unique_ptr<HipdnnMiopenHandle> _handle;
 };
 
@@ -257,6 +312,16 @@ TEST_F(TestGpuMiopenResampleFwdPlan, MaxPoolWritesInt8Indices)
     expectMatches(run<float, int8_t>(planarMaxSpec(DataType::INT8), planarMaxInput()),
                   planarMaxExpected(),
                   0.0);
+}
+
+TEST_F(TestGpuMiopenResampleFwdPlan, MaxPoolCopiesExactlyInt8IndexBytes)
+{
+    expectExactIndexCopy<int8_t>(DataType::INT8);
+}
+
+TEST_F(TestGpuMiopenResampleFwdPlan, MaxPoolCopiesExactlyInt32IndexBytes)
+{
+    expectExactIndexCopy<int32_t>(DataType::INT32);
 }
 
 TEST_F(TestGpuMiopenResampleFwdPlan, MaxPoolWithoutIndexWritesValues)

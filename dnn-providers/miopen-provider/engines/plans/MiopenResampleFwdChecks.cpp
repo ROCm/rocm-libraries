@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include <algorithm>
+#include <cstdint>
 #include <limits>
 #include <set>
 #include <string>
@@ -166,16 +167,16 @@ miopenPoolingMode_t toMiopenPoolingMode(ResampleMode mode)
     }
 }
 
-miopenIndexType_t toMiopenIndexType(DataType dataType)
+PoolingIndexType toMiopenIndexType(DataType dataType)
 {
     // hipDNN's index is signed, MIOpen's unsigned; the range check in resolve() keeps every
     // index MIOpen can write representable in the signed type.
     switch(dataType)
     {
     case DataType::INT8:
-        return miopenIndexUint8;
+        return {miopenIndexUint8, sizeof(uint8_t)};
     case DataType::INT32:
-        return miopenIndexUint32;
+        return {miopenIndexUint32, sizeof(uint32_t)};
     default:
         decline("index tensor data type must be INT8 or INT32, got "
                 + std::string(hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(dataType)));

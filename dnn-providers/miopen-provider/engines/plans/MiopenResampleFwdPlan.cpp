@@ -28,12 +28,12 @@ MiopenResampleFwdPlan::MiopenResampleFwdPlan(
     const resample_fwd_applicability::ResampleFwdConfig& config)
     : _x(config.xUid, config.dataType, config.xDims, config.xStrides)
     , _y(config.yUid, config.dataType, config.yDims, config.yStrides)
-    , _pooling(config.mode, config.window, config.padding, config.stride, config.indexType)
+    , _pooling(config.mode, config.window, config.padding, config.stride, config.indexType.type)
     , _indexUid(config.indexUid)
 {
     if(_indexUid.has_value())
     {
-        _indexBytes = elementCount(config.yDims) * poolingIndexTypeSize(config.indexType);
+        _indexBytes = elementCount(config.yDims) * config.indexType.elementSize;
     }
 
     THROW_ON_MIOPEN_FAILURE(miopenPoolingGetWorkSpaceSizeV2(
