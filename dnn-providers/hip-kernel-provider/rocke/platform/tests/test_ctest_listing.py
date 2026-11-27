@@ -57,6 +57,13 @@ def _path_with_ctest_only(scratch: Path) -> str:
     return str(tools)
 
 
+def test_a_label_pattern_lists_only_the_entries_with_a_matching_label(tmp_path):
+    _register(tmp_path)
+    tests = list_ctest_entries(tmp_path, label_pattern="^standard$")
+    assert [test["name"] for test in tests] == ["rocke_first"]
+    assert list_ctest_entries(tmp_path, label_pattern="^no-such-label$") == []
+
+
 @needs_posix_symlinks
 def test_a_bare_python_entry_lists_its_command_with_python_put_on_path(tmp_path):
     """Without python on PATH CTest drops the entry's command; listed as an

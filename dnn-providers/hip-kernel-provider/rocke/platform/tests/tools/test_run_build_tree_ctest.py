@@ -7,8 +7,10 @@ sibling library, and runs named CTest entries of that tree. The entries the
 pre-commit hook names must be registered there. A name CTest's ``-R`` filter
 does not match would just leave nothing to run for it, so a renamed or removed
 entry would drop out of the check unnoticed; the runner refuses such a name
-before it builds anything. Without cmake or ctest on PATH it fails with one
-line naming them, before it configures anything.
+before it builds anything, and likewise a label that selects no entry. The
+rocke-native-unit-tests hook selects the native unit entries by label. Without
+cmake or ctest on PATH the runner fails with one line naming them, before it
+configures anything.
 """
 
 from __future__ import annotations
@@ -78,6 +80,34 @@ def test_an_unregistered_entry_is_refused_by_name(runner, configured_tree):
         runner.require_registered(
             configured_tree, [*HOOK_ENTRIES, "rocke_no_such_entry"]
         )
+
+
+def test_the_unit_label_selects_the_native_programs_and_no_python_entry(
+    runner, configured_tree
+):
+    selected = runner.labelled_entries(configured_tree, ["^unit$"])
+    assert "rocke_arch_data_mirror" in selected
+    assert not selected & set(HOOK_ENTRIES)
+
+
+def test_a_label_that_selects_no_entry_is_refused_by_name(runner, configured_tree):
+    with pytest.raises(
+        ValueError,
+        match=r"labels=\['\^no-such-label\$'\] select no entry, expected each "
+        r"label to select an entry registered in ",
+    ):
+        runner.labelled_entries(configured_tree, ["^unit$", "^no-such-label$"])
+
+
+def test_a_run_that_names_no_test_and_no_label_is_refused(tmp_path):
+    result = subprocess.run(
+        [sys.executable, "-B", str(RUNNER), "--build-root", str(tmp_path)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 2
+    assert "name at least one --test or --label" in result.stderr
 
 
 def test_a_missing_cmake_and_ctest_fail_with_one_line_naming_them(tmp_path):

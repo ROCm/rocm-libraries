@@ -49,10 +49,12 @@ def list_ctest_entries(
     *,
     config: str | None = None,
     name_pattern: str | None = None,
+    label_pattern: str | None = None,
     env: Mapping[str, str] | None = None,
 ) -> list[dict]:
     """The json-v1 ``tests`` of ``test_dir``, optionally for one build
-    ``config`` and only names matching the ``name_pattern`` regex (``-R``).
+    ``config``, only names matching the ``name_pattern`` regex (``-R``) and
+    only entries with a label matching the ``label_pattern`` regex (``-L``).
     ``env`` replaces the environment CTest evaluates the registration in."""
     command = ["ctest", "--test-dir", str(test_dir)]
     if config is not None:
@@ -60,6 +62,8 @@ def list_ctest_entries(
     command.append("--show-only=json-v1")
     if name_pattern is not None:
         command += ["-R", name_pattern]
+    if label_pattern is not None:
+        command += ["-L", label_pattern]
     listed = subprocess.run(
         command, check=True, capture_output=True, text=True, env=env
     )

@@ -79,9 +79,11 @@ def build_platform_targets(
     build_root: Path, targets: Sequence[str], *, config: str = "Release"
 ) -> None:
     """Build ``targets`` of the configured tree ``build_root`` with this
-    process's share of the CPUs. The build's output is shown: the compiler
-    reports errors there. Raises ``subprocess.CalledProcessError`` when the
-    build fails."""
+    process's share of the CPUs; with no ``targets``, the tree's default
+    target, which builds every program the configure defines. The build's
+    output is shown: the compiler reports errors there. Raises
+    ``subprocess.CalledProcessError`` when the build fails."""
+    target_arguments = ["--target", *targets] if targets else []
     subprocess.run(
         [
             "cmake",
@@ -89,8 +91,7 @@ def build_platform_targets(
             str(build_root),
             "--config",
             config,
-            "--target",
-            *targets,
+            *target_arguments,
             "--parallel",
             str(available_cpus()),
         ],

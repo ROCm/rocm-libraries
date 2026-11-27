@@ -2,29 +2,33 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# run_build_tree_ctest.py -- build named targets of the platform and run named
+# run_build_tree_ctest.py -- build targets of the platform and run selected
 # CTest entries of its build tree.
 #
 # Some CTest entries exist in the build tree only: they run a program the build
 # makes against files the installed test tree does not carry. This runner lets a
 # job that has no build tree of its own (a pre-commit hook) run such entries:
-# it configures the platform, builds only the targets the entries need, and
-# runs the entries through CTest, so the command each entry runs stays defined
-# in one place, its CMake registration. It needs cmake, ctest and a C++
-# compiler on PATH, and fails with one line naming cmake or ctest when either
-# is missing; a new build tree uses Ninja when it is on PATH.
+# it configures the platform, builds the targets the entries need (or, when it
+# names none, every program of the tree), and runs the entries through CTest,
+# so the command each entry runs stays defined in one place, its CMake
+# registration. It selects entries by exact name, by label, or both. It needs
+# cmake, ctest and a C++ compiler on PATH, and fails with one line naming cmake
+# or ctest when either is missing; a new build tree uses Ninja when it is on
+# PATH.
 #
 # The configure leaves out the sibling library and the install rules, so it
 # reads no CMake file outside the platform. The build tree is kept between runs,
 # one per user and source tree, in the temporary directory, so a repeated run
 # rebuilds only what changed. Before building, the runner checks that every
-# named entry is registered, so a renamed or removed entry fails here instead of
+# named entry is registered and that every label selects an entry, so a
+# renamed or removed entry, or a label no entry carries, fails here instead of
 # leaving nothing to run.
 #
 # Usage:
 #   python rocke/platform/tools/run_build_tree_ctest.py \
-#       --target <cmake target> [--target ...] --test <ctest entry> [--test ...] \
-#       [--build-root DIR]
+#       [--target <cmake target> ...] [--test <ctest entry> ...] \
+#       [--label <label regex> ...] [--build-root DIR]
+# At least one --test or --label is required.
 
 from __future__ import annotations
 
@@ -91,6 +95,8 @@ def _exact_names(tests: Sequence[str]) -> str:
 def require_registered(build_root: Path, tests: Sequence[str]) -> None:
     """Raise ``ValueError`` naming each of ``tests`` that ``build_root`` does
     not register."""
+    if not tests:
+        return
     registered = {
         entry["name"]
         for entry in list_ctest_entries(
@@ -103,6 +109,30 @@ def require_registered(build_root: Path, tests: Sequence[str]) -> None:
             f"build-tree CTest run failed - unregistered={unregistered!r}, "
             f"expected every named test registered in {build_root}"
         )
+
+
+def labelled_entries(build_root: Path, labels: Sequence[str]) -> set[str]:
+    """The names of the entries of ``build_root`` with a label matching one of
+    the ``labels`` regexes. Raises ``ValueError`` naming each regex that
+    selects no entry."""
+    selected: set[str] = set()
+    unmatched = []
+    for label in labels:
+        names = {
+            entry["name"]
+            for entry in list_ctest_entries(
+                build_root, config=CONFIG, label_pattern=label
+            )
+        }
+        if not names:
+            unmatched.append(label)
+        selected |= names
+    if unmatched:
+        raise ValueError(
+            f"build-tree CTest run failed - labels={unmatched!r} select no entry, "
+            f"expected each label to select an entry registered in {build_root}"
+        )
+    return selected
 
 
 def run_tests(build_root: Path, tests: Sequence[str]) -> int:
@@ -133,17 +163,27 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--target",
         action="append",
-        required=True,
-        help="a CMake target the entries need (repeatable)",
+        default=[],
+        help="a CMake target the entries need (repeatable); with none, the "
+        "build builds every program of the tree",
     )
     parser.add_argument(
         "--test",
         action="append",
-        required=True,
+        default=[],
         help="a CTest entry to run, by exact name (repeatable)",
+    )
+    parser.add_argument(
+        "--label",
+        action="append",
+        default=[],
+        help="a regex of CTest labels; runs every entry with a matching label "
+        "(repeatable)",
     )
     parser.add_argument("--build-root", type=Path, default=default_build_root())
     args = parser.parse_args(argv)
+    if not (args.test or args.label):
+        parser.error("name at least one --test or --label")
 
     if missing := missing_programs():
         print(
@@ -155,6 +195,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         configure_platform(args.build_root, *PLATFORM_ONLY, config=CONFIG)
         require_registered(args.build_root, args.test)
+        tests = sorted(set(args.test) | labelled_entries(args.build_root, args.label))
         build_platform_targets(args.build_root, args.target, config=CONFIG)
     except ValueError as error:
         print(f"error: {error}", file=sys.stderr)
@@ -166,7 +207,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 1
-    return run_tests(args.build_root, args.test)
+    return run_tests(args.build_root, tests)
 
 
 if __name__ == "__main__":
