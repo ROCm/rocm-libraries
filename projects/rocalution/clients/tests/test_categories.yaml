@@ -34,7 +34,7 @@
 #   ROCALUTION_EMULATION_EXTENDED=1   -> extended subset
 #   (no env var)                      -> full parameter sweep
 #
-# GPU-heavy tests (local_matrix, local_vector, etc.) skip automatically when
+# GPU-heavy tests (local_matrix, backend, etc.) skip automatically when
 # any ROCALUTION_EMULATION_* variable is set. Solver tests (cg, bicgstab,
 # gmres, etc.) run with reduced parameter sets based on the specific variable.
 #
@@ -43,7 +43,8 @@
 #   Direct: lu, qr, inversion
 #   AMG:    hybrid_amg, pairwise_amg, ruge_stueben_amg, saamg, uaamg
 #   Other:  preconditioner, itersolver, chebyshev, mixed_precision
-#   Local:  local_matrix_*, local_vector                 (skip in emulation)
+#   Local:  local_matrix_*                               (skip in emulation)
+#           local_vector_amax_ties                       (runs in every category)
 #   Infra:  backend, backend_init_order,                 (skip in emulation)
 #           backend_disable_accelerator_after_stop
 #   OpenMP: backend_omp_parallel_region,                 (run in every category)

@@ -229,6 +229,16 @@ namespace rocalution_unit
     constexpr bool hip_has_asserts = true;
 #endif
 
+    // GCC defines __SANITIZE_ADDRESS__, clang before 22 only __has_feature. GCC 13
+    // has no __has_feature and cannot parse it in the same #if as defined().
+#if defined(__SANITIZE_ADDRESS__)
+#define ROCALUTION_UNIT_ASAN 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define ROCALUTION_UNIT_ASAN 1
+#endif
+#endif
+
     // Restores the backend descriptor, the OpenMP thread count and the CPU
     // affinity on destruction, also after fatal failures and exceptions. Setting
     // the thread count pins the calling thread to cores, and the threads it

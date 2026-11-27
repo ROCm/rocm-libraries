@@ -130,6 +130,11 @@ namespace rocalution_unit
         {
             return (x.*&BackendProbe::is_accel_)();
         }
+
+        static bool on_host(const Object& x)
+        {
+            return (x.*&BackendProbe::is_host_)();
+        }
     };
 
     template <typename Object>
@@ -138,9 +143,14 @@ namespace rocalution_unit
         return BackendProbe<Object>::on_accelerator(x);
     }
 
+    // "no backend" for an object that has lost both backend objects, for which
+    // is_host_ and is_accel_ both hold
     template <typename Object>
     std::string backend_of(const Object& x)
     {
-        return backend_name(on_accelerator(x) ? Backend::Accelerator : Backend::Host);
+        const bool host  = BackendProbe<Object>::on_host(x);
+        const bool accel = on_accelerator(x);
+        return host && accel ? "no backend"
+                             : backend_name(accel ? Backend::Accelerator : Backend::Host);
     }
 }
