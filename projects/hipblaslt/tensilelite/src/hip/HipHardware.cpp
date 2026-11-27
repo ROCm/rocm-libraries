@@ -31,6 +31,7 @@
 
 #include <cstdio>
 #include <iostream>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 
@@ -101,6 +102,17 @@ namespace TensileLite
                                                                     analyticalProp,
                                                                     pciChipId));
             }
+        }
+
+        bool page24RuleHolds(std::string const& amdgpuVersion)
+        {
+            std::istringstream in(amdgpuVersion);
+            int                major = -1, minor = -1;
+            char               dot   = 0;
+            // The die bit is xgmi_physical_id & 1 from amdgpu 6.19 on. Older
+            // drivers, including 6.16, do not provide that bit.
+            return (in >> major >> dot >> minor) && dot == '.' && major >= 0 && minor >= 0
+                   && (major > 6 || (major == 6 && minor >= 19));
         }
 
         std::string HipAMDGPU::archName() const

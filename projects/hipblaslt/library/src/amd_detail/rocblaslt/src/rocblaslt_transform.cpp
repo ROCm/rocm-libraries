@@ -24,18 +24,24 @@
  *
  * ************************************************************************ */
 #include "handle.h"
+#include "matrix-transform/gfx950/mxfp6_page24.h"
 #include "matrix-transform/matrix_transform.h"
 #include "rocblaslt-auxiliary.h"
 #include "rocblaslt-types.h"
 #include "rocblaslt.h"
+#include "rocblaslt_mat_utils.hpp"
+#include <Tensile/hip/HipHardware.hpp>
 #include <Tensile/hip/HipSolutionAdapter.hpp>
 #include <Tensile/hip/HipUtils.hpp>
 #include <functional>
+#include <hipblaslt/hipblaslt-export.h>
 #include <hipblaslt/hipblaslt-types.h>
 
 #include <filesystem>
+#include <fstream>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <tuple>
@@ -43,14 +49,15 @@
 
 namespace
 {
-    std::optional<std::filesystem::path> transformCodeObjectPath()
+    // The current device's architecture without target features, for example "gfx950".
+    std::optional<std::string> deviceArchName()
     {
         int             deviceId{};
         hipDeviceProp_t props{};
         if(hipGetDevice(&deviceId) != hipSuccess
            || hipGetDeviceProperties(&props, deviceId) != hipSuccess)
         {
-            rocblaslt_log_error("transformCodeObjectPath",
+            rocblaslt_log_error("deviceArchName",
                                 "hipGetDevice/hipGetDeviceProperties",
                                 "failed to query device for matrix-transform arch lookup");
             return std::nullopt;
@@ -60,9 +67,17 @@ namespace
         auto        colonPos = archName.find(':');
         if(colonPos != std::string::npos)
             archName = archName.substr(0, colonPos);
+        return archName;
+    }
 
-        auto relpath = std::filesystem::path(archName)
-                       / ("hipblasltTransform_" + archName + ".hsaco");
+    std::optional<std::filesystem::path> transformCodeObjectPath()
+    {
+        auto archName = deviceArchName();
+        if(!archName)
+            return std::nullopt;
+
+        auto relpath
+            = std::filesystem::path(*archName) / ("hipblasltTransform_" + *archName + ".hsaco");
         auto perArchPath = rocblaslt_find_library_relative_path(relpath);
         if(!perArchPath)
         {
@@ -133,6 +148,229 @@ namespace
     {
         static T scalar{};
         return &scalar;
+    }
+
+    // rocKE MXFP6 packers for gfx950, assembled from device-library/matrix-transform/gfx950. They
+    // are built for one shape and bounds-check nothing, so findMxfp6Packer must match that shape
+    // exactly before one is launched.
+    struct Mxfp6Packer
+    {
+        const char* kernelName;
+        uint32_t    numWorkGroups;
+    };
+
+    constexpr char     mxfp6PackerCodeObject[] = "hipblasltTransformPack_gfx950.co";
+    constexpr uint64_t mxfp6PackerRows         = 4096; // M or N indices of the operand
+    constexpr uint64_t mxfp6PackerK            = 65536;
+    constexpr uint64_t mxfp6PackerScaleBlock   = 32;
+
+    bool isMxfp6Pack(const rocblaslt_matrix_transform_desc* desc,
+                     rocblaslt_matrix_layout                layoutA,
+                     rocblaslt_matrix_layout                layoutB,
+                     rocblaslt_matrix_layout                layoutC)
+    {
+        return desc->scaleModeC != HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F
+               || isFp6TiledOrder(layoutA->order) || isFp6TiledOrder(layoutB->order)
+               || isFp6TiledOrder(layoutC->order);
+    }
+
+    // The packer that writes layoutC from layoutA, or nullptr if there is none.
+    const Mxfp6Packer* findMxfp6Packer(const rocblaslt_matrix_transform_desc* desc,
+                                       rocblaslt_matrix_layout                layoutA,
+                                       rocblaslt_matrix_layout                layoutC)
+    {
+        static constexpr Mxfp6Packer data{
+            "rocke_mxfp6_pack_op_4096x65536_r256_w128t4_xcd_c0c1p_nosc", 4096};
+        static constexpr Mxfp6Packer scales{
+            "rocke_mxfp6_pack_scales_4096_0x65536_16x16x128_xcd_nts", 512};
+
+        const bool sameShape = layoutA->type == layoutC->type && layoutA->m == layoutC->m
+                               && layoutA->n == layoutC->n && layoutA->ld == layoutC->ld
+                               && layoutA->batch_count == 1 && layoutC->batch_count == 1;
+        const bool packed = static_cast<uint64_t>(layoutA->ld) == layoutA->m;
+        if(!sameShape || !packed || layoutA->order != HIPBLASLT_ORDER_COL
+           || layoutA->n != mxfp6PackerRows || desc->opA != HIPBLAS_OP_N)
+        {
+            return nullptr;
+        }
+
+        if(desc->scaleModeC == HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F)
+        {
+            if(isFp6Datatype(layoutA->type) && layoutC->order == HIPBLASLT_ORDER_COL256_R128_P16_EXT
+               && layoutA->m == mxfp6PackerK)
+            {
+                return &data;
+            }
+        }
+        else if(desc->scaleModeC == HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT)
+        {
+            if(layoutA->type == HIP_R_8F_UE8M0 && layoutC->order == HIPBLASLT_ORDER_COL
+               && layoutA->m == mxfp6PackerK / mxfp6PackerScaleBlock)
+            {
+                return &scales;
+            }
+        }
+        return nullptr;
+    }
+
+    // The near-die placement kernels of device-library/matrix-transform/gfx950/mxfp6_page24.cpp.
+    // Like the packers, they bounds-check nothing.
+    constexpr char     page24CodeObject[] = "hipblasltTransformPage24_gfx950.hsaco";
+    constexpr uint32_t page24KTiles       = mxfp6PackerK / 128;
+    constexpr uint32_t page24Tiles        = mxfp6PackerRows / 256;
+
+    enum class Page24Write
+    {
+        None,
+        SplitData, // B: HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_SPLIT_EXT
+        DuplicatedData, // A: HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_EXT
+        DuplicatedScales, // A: HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_PAGE24_EXT
+    };
+
+    // What the near-die kernels write to layoutC from layoutA: 48-byte tiles (order 105) to a
+    // near-die order, or 128x4 scales (scale mode 1018, as a COL UE8M0 matrix) to near-die scales.
+    Page24Write findPage24Write(const rocblaslt_matrix_transform_desc* desc,
+                                rocblaslt_matrix_layout                layoutA,
+                                rocblaslt_matrix_layout                layoutC)
+    {
+        const bool sameShape = layoutA->type == layoutC->type && layoutA->m == layoutC->m
+                               && layoutA->n == layoutC->n && layoutA->ld == layoutC->ld
+                               && layoutA->batch_count == 1 && layoutC->batch_count == 1;
+        const bool packed = static_cast<uint64_t>(layoutA->ld) == layoutA->m;
+        if(!sameShape || !packed || layoutA->n != mxfp6PackerRows || desc->opA != HIPBLAS_OP_N)
+        {
+            return Page24Write::None;
+        }
+
+        if(desc->scaleModeC == HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F)
+        {
+            if(isFp6Datatype(layoutA->type) && layoutA->order == HIPBLASLT_ORDER_COL256_R128_P48_EXT
+               && layoutA->m == mxfp6PackerK)
+            {
+                if(layoutC->order == HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_SPLIT_EXT)
+                    return Page24Write::SplitData;
+                if(layoutC->order == HIPBLASLT_ORDER_COL256_R128_P48_PAGE24_EXT)
+                    return Page24Write::DuplicatedData;
+            }
+        }
+        else if(desc->scaleModeC == HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_PAGE24_EXT)
+        {
+            if(layoutA->type == HIP_R_8F_UE8M0 && layoutA->order == HIPBLASLT_ORDER_COL
+               && layoutC->order == HIPBLASLT_ORDER_COL
+               && layoutA->m == mxfp6PackerK / mxfp6PackerScaleBlock)
+            {
+                return Page24Write::DuplicatedScales;
+            }
+        }
+        return Page24Write::None;
+    }
+
+    // Set by hipblaslt_page24_driver_for_test: replaces the contents of
+    // /sys/module/amdgpu/version.
+    std::mutex                 page24DriverMutex;
+    std::optional<std::string> page24DriverOverride;
+
+    std::string amdgpuVersion()
+    {
+        {
+            std::lock_guard<std::mutex> lock(page24DriverMutex);
+            if(page24DriverOverride)
+                return *page24DriverOverride;
+        }
+        std::ifstream file("/sys/module/amdgpu/version");
+        std::string   version;
+        file >> version;
+        return version;
+    }
+
+    rocblaslt_status page24Place(Page24Write write, const void* A, void* C, hipStream_t stream)
+    {
+        if(deviceArchName() != "gfx950")
+        {
+            return rocblaslt_status_arch_mismatch;
+        }
+        const std::string version = amdgpuVersion();
+        if(!TensileLite::hip::page24RuleHolds(version))
+        {
+            log_error(__func__,
+                      "the near-die placement needs amdgpu 6.19 or newer; got amdgpu version '",
+                      version,
+                      "'");
+            return rocblaslt_status_not_supported;
+        }
+
+        const bool                   scales = write == Page24Write::DuplicatedScales;
+        TensileLite::KernelArguments kArgs(false);
+        kArgs.appendAligned("dst", static_cast<const void*>(C));
+        kArgs.appendAligned("src", A);
+        if(!scales)
+        {
+            kArgs.appendAligned("kTiles", page24KTiles);
+            kArgs.appendAligned("split", uint32_t(write == Page24Write::SplitData));
+        }
+
+        constexpr uint32_t NUM_WORKITEMS{mxfp6Page24Threads};
+        const uint32_t     numWorkGroups = scales ? page24KTiles : page24Tiles * page24KTiles;
+        TensileLite::KernelInvocation invocation{scales ? "hipblaslt_mxfp6_page24_scales"
+                                                        : "hipblaslt_mxfp6_page24_data",
+                                                 page24CodeObject,
+                                                 false,
+                                                 {1, 1, 1},
+                                                 {NUM_WORKITEMS, 1, 1},
+                                                 {numWorkGroups, 1, 1},
+                                                 {numWorkGroups * NUM_WORKITEMS, 1, 1},
+                                                 0,
+                                                 kArgs};
+        const auto err = transformAdapter().launchKernel(invocation, stream, nullptr, nullptr);
+        return (err == hipSuccess) ? rocblaslt_status_success : rocblaslt_status_internal_error;
+    }
+
+    rocblaslt_status mxfp6Pack(const rocblaslt_matrix_transform_desc* desc,
+                               const void*                            A,
+                               rocblaslt_matrix_layout                layoutA,
+                               const void*                            B,
+                               void*                                  C,
+                               rocblaslt_matrix_layout                layoutC,
+                               hipStream_t                            stream)
+    {
+        const Page24Write  page24 = findPage24Write(desc, layoutA, layoutC);
+        const Mxfp6Packer* packer = findMxfp6Packer(desc, layoutA, layoutC);
+        if((!packer && page24 == Page24Write::None) || !A || B)
+        {
+            return rocblaslt_status_invalid_value;
+        }
+
+        if(page24 != Page24Write::None)
+        {
+            return page24Place(page24, A, C, stream);
+        }
+
+        if(deviceArchName() != "gfx950")
+        {
+            return rocblaslt_status_arch_mismatch;
+        }
+
+        // Each packer takes a second operand's source and destination, which it never reads.
+        const void* unused = nullptr;
+
+        TensileLite::KernelArguments kArgs(false);
+        kArgs.appendAligned("src", A);
+        kArgs.appendAligned("otherSrc", unused);
+        kArgs.appendAligned("dst", static_cast<const void*>(C));
+        kArgs.appendAligned("otherDst", unused);
+
+        constexpr uint32_t            NUM_WORKITEMS{256};
+        TensileLite::KernelInvocation invocation{packer->kernelName,
+                                                 mxfp6PackerCodeObject,
+                                                 false,
+                                                 {1, 1, 1},
+                                                 {NUM_WORKITEMS, 1, 1},
+                                                 {packer->numWorkGroups, 1, 1},
+                                                 {packer->numWorkGroups * NUM_WORKITEMS, 1, 1},
+                                                 0,
+                                                 kArgs};
+        const auto err = transformAdapter().launchKernel(invocation, stream, nullptr, nullptr);
+        return (err == hipSuccess) ? rocblaslt_status_success : rocblaslt_status_internal_error;
     }
 
     template <typename DType,
@@ -803,6 +1041,11 @@ rocblaslt_status rocblaslt_matrix_transform(rocblaslt_handle                 han
         layoutB = dummyMatrixLayout();
     }
 
+    if(isMxfp6Pack(desc, layoutA, layoutB, layoutC))
+    {
+        return mxfp6Pack(desc, A, layoutA, B, C, layoutC, stream);
+    }
+
     size_t vw  = layoutC->m < 4 || layoutC->n < 4 ? 1 : 4;
     auto   key = std::make_tuple(
         layoutA->type, desc->scaleType, layoutA->order, layoutB->order, layoutC->order, vw);
@@ -836,4 +1079,16 @@ rocblaslt_status rocblaslt_matrix_transform(rocblaslt_handle                 han
                                               kernelName);
 
     return (err == hipSuccess) ? rocblaslt_status_success : rocblaslt_status_internal_error;
+}
+
+// Test support: the near-die transforms take `version` as the contents of
+// /sys/module/amdgpu/version, so a test can drive the driver rule on any driver. NULL restores
+// the file. Not part of any supported interface.
+extern "C" HIPBLASLT_EXPORT void hipblaslt_page24_driver_for_test(const char* version)
+{
+    std::lock_guard<std::mutex> lock(page24DriverMutex);
+    if(version)
+        page24DriverOverride = version;
+    else
+        page24DriverOverride.reset();
 }
