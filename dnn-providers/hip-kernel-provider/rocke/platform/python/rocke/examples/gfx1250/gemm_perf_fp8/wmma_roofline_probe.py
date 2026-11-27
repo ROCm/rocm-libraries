@@ -26,8 +26,8 @@ Method:
   sets so consecutive WMMAs see different bits, as GEMM fragments do. Compare a
   GEMM only against the ceiling measured on matching data.
 
-This is a RATE probe: results are not checked. Needs ``hipcc`` (``$HIPCC``,
-``PATH`` or ``$ROCM_PATH/bin``) and a gfx1250 device.
+This is a RATE probe: results are not checked. Needs ``amdclang++``
+(``$ROCM_PATH/bin`` or ``PATH``) and a gfx1250 device.
 
 Examples: ``--list``, or see EXAMPLES at the bottom of this file / ``--help``.
 """
@@ -437,16 +437,15 @@ int main(int argc, char** argv) {{
 # --------------------------------------------------------------------------
 # Build / run / report
 # --------------------------------------------------------------------------
-def _hipcc() -> str:
+def _hip_compiler() -> str:
     rocm = os.environ.get("ROCM_PATH") or os.environ.get("ROCM_HOME")
     for cand in (
-        os.environ.get("HIPCC"),
-        shutil.which("hipcc"),
-        str(Path(rocm) / "bin" / "hipcc") if rocm else None,
+        shutil.which("amdclang++"),
+        str(Path(rocm) / "bin" / "amdclang++") if rocm else None,
     ):
         if cand and Path(cand).exists():
             return cand
-    raise SystemExit("hipcc not found; set HIPCC, put hipcc on PATH, or set ROCM_PATH")
+    raise SystemExit("amdclang++ not found; put amdclang++ on PATH or set ROCM_PATH")
 
 
 def build(src: str, work: Path, check_asm: bool) -> tuple[Path, str | None]:
@@ -458,10 +457,20 @@ def build(src: str, work: Path, check_asm: bool) -> tuple[Path, str | None]:
         work / f"probe_{tag}.s",
     )
     hip.write_text(src)
-    cc = _hipcc()
+    cc = _hip_compiler()
     if not exe.exists():
         subprocess.run(
-            [cc, "-O3", "-w", f"--offload-arch={ARCH}", str(hip), "-o", str(exe)],
+            [
+                cc,
+                "-x",
+                "hip",
+                "-O3",
+                "-w",
+                f"--offload-arch={ARCH}",
+                str(hip),
+                "-o",
+                str(exe),
+            ],
             check=True,
         )
     text = None
@@ -470,6 +479,8 @@ def build(src: str, work: Path, check_asm: bool) -> tuple[Path, str | None]:
             subprocess.run(
                 [
                     cc,
+                    "-x",
+                    "hip",
                     "-O3",
                     "-w",
                     f"--offload-arch={ARCH}",

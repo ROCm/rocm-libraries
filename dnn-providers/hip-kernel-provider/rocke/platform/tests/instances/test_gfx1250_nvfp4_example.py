@@ -25,9 +25,7 @@ def test_generic_verifier_rejects_tensor_spec_before_device_or_compile(monkeypat
 
     monkeypatch.setattr(block_scaled_gemm_verify, "get_device_arch", unexpected)
     monkeypatch.setattr(block_scaled_gemm_verify, "compile_kernel", unexpected)
-    monkeypatch.setattr(
-        block_scaled_gemm_verify, "compile_kernel_via_hipcc", unexpected
-    )
+    monkeypatch.setattr(block_scaled_gemm_verify, "compile_kernel_via_hip", unexpected)
     spec = NvFp4GemmSpec("tensor", 16, 16, 128).block_spec()
     for route in ("comgr", "hip"):
         with pytest.raises(ValueError, match="nvfp4_gemm_verify.run_cases"):

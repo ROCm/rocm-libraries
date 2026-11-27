@@ -134,16 +134,18 @@ def test_u8_ops_lower_to_uint8_t_in_hip():
 
 
 def test_u8_hip_source_compiles(tmp_path):
-    if not shutil.which("hipcc"):
-        pytest.skip("hipcc not in PATH")
+    if not shutil.which("amdclang++"):
+        pytest.skip("amdclang++ not in PATH")
     path = tmp_path / "kernel.hip"
     path.write_text(lower_kernel_to_hip(_u8_arith_kernel(), arch="gfx90a"))
     subprocess.run(
         [
-            "hipcc",
-            "--offload-arch=gfx90a",
-            "--cuda-device-only",
+            "amdclang++",
+            "--offload-device-only",
             "-fsyntax-only",
+            "-x",
+            "hip",
+            "--offload-arch=gfx90a",
             str(path),
         ],
         check=True,

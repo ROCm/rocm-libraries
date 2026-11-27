@@ -156,7 +156,7 @@ Twelve tests. They fall into three groups, and the sizes are the interesting par
 |---|---|---|
 | internal consistency | 9 | the partition is exhaustive, markers match constants, no hand-rolled lists, unknown flavors raise, compiler majors map to baseline flavors |
 | cross-engine agreement | 2 | `test_cpp_engine_accepts_exactly_the_python_flavor_set`, `test_cpp_backend_path_accepts_every_known_flavor` |
-| **toolchain conformance** | **1** | `test_datalayout_matches_hipcc_emitted_ir` — the only one that compares against a real toolchain, and only for the flavor of the `hipcc` on PATH |
+| **toolchain conformance** | **1** | `test_datalayout_matches_hip_compiler_emitted_ir` — the only one that compares against a real toolchain, and only for the flavor of the `amdclang++` on PATH |
 
 ### 1.7 How the three gates treat the flavor axis
 

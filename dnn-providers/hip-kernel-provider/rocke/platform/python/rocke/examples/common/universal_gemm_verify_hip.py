@@ -1,9 +1,9 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""HIP-path (hipcc) Universal GEMM build + numeric verify.
+"""HIP-path Universal GEMM build + numeric verify.
 
 Identical to ``universal_gemm_verify`` except the kernel is compiled through
-the HIP-C++ -> hipcc backend (``compile_kernel_via_hipcc``) instead of the
+the HIP-C++ -> amdclang++ backend (``compile_kernel_via_hip``) instead of the
 LLVM-IR -> libamd_comgr backend. Used by the arch-hardening VERIFY pass to
 confirm the HIP lowering path (lower_hip.py) is numerically correct on each
 arch: MFMA builtins on CDNA (gfx942/gfx950) and WMMA C++ builtins on RDNA
@@ -22,7 +22,7 @@ from pathlib import Path
 
 from rocke.core.arch import ArchTarget
 from rocke.helpers import make_gemm_manifest, write_artifact
-from rocke.helpers.compile import compile_kernel_via_hipcc
+from rocke.helpers.compile import compile_kernel_via_hip
 from rocke.instances.common.gemm_universal import (
     DataSpec,
     TileSpec,
@@ -110,12 +110,12 @@ def main() -> int:
     if not res.ok:
         return 2
 
-    art = compile_kernel_via_hipcc(
+    art = compile_kernel_via_hip(
         build_universal_gemm(spec, arch=args.arch), arch=args.arch
     )
     print(
         f"[{args.arch}] HIP-path built {art.kernel_name} ({art.hsaco_bytes} B, "
-        f"isa={art.isa}) hipcc={art.timings.get('hipcc', 0):.0f}ms "
+        f"isa={art.isa}) hip={art.timings.get('hip', 0):.0f}ms "
         f"total={art.timings.get('total', 0):.0f}ms"
     )
 

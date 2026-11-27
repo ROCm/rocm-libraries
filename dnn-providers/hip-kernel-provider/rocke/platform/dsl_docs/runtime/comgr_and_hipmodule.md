@@ -4,7 +4,7 @@
 
 ## COMGR
 
-`libamd_comgr.so` is the ROCm compiler-support library. Its API lets a process compile LLVM IR text to a HSA code object (HSACO) without spawning hipcc or clang. The DSL drives the following chain:
+`libamd_comgr.so` is the ROCm compiler-support library. Its API lets a process compile LLVM IR text to a HSA code object (HSACO) without spawning amdclang++ or clang. The DSL drives the following chain:
 
 ```text
 LLVM IR text (utf-8)

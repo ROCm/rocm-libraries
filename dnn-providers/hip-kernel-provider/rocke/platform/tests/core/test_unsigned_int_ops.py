@@ -575,16 +575,18 @@ def test_hip_lowering_refuses_a_pred_the_ir_rule_refuses(
 
 
 def test_hip_add_nuw_compiles_without_nsw(tmp_path):
-    hipcc = shutil.which("hipcc")
-    if hipcc is None:
-        pytest.skip("hipcc not found")
+    amdclangxx = shutil.which("amdclang++")
+    if amdclangxx is None:
+        pytest.skip("amdclang++ not found")
     source = tmp_path / "unsigned_int_ops.hip"
     source.write_text(lower_kernel_to_hip(_hip_kernel(), arch="gfx942"))
     device_ir = tmp_path / "unsigned_int_ops.ll"
     subprocess.run(
         [
-            hipcc,
-            "--cuda-device-only",
+            amdclangxx,
+            "--offload-device-only",
+            "-x",
+            "hip",
             "--offload-arch=gfx942",
             "-O1",
             "-S",

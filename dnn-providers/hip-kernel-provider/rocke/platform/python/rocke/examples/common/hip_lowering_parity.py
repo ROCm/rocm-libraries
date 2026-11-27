@@ -7,8 +7,8 @@ This harness deliberately separates three levels of confidence:
 1. Build a representative instance ``KernelDef``.
 2. Require production LLVM lowering to succeed, then require HIP debug
    lowering to produce source for the same ``KernelDef``.
-3. Optionally compile the generated HIP source to HSACO with ``hipcc
-   --genco``. This catches source-level gaps that a string lowerer cannot
+3. Optionally compile the generated HIP source to HSACO with ``amdclang++
+   --offload-device-only``. This catches source-level gaps that a string lowerer cannot
    see: missing prologue declarations, unsupported clang builtins, invalid
    vector types, and malformed C++.
 
@@ -801,9 +801,11 @@ def _compile_hip_source(
     hsaco = output_dir / f"{name.replace('.', '_')}.hsaco"
     src.write_text(source, encoding="utf-8")
     cmd = [
-        "hipcc",
+        "amdclang++",
+        "--offload-device-only",
+        "-x",
+        "hip",
         f"--offload-arch={arch}",
-        "--genco",
         str(src),
         "-o",
         str(hsaco),
@@ -817,7 +819,7 @@ def _compile_hip_source(
     )
     if proc.returncode != 0:
         msg = "\n".join(proc.stdout.splitlines()[:40])
-        raise RuntimeError(f"hipcc failed with rc={proc.returncode}\n{msg}")
+        raise RuntimeError(f"amdclang++ failed with rc={proc.returncode}\n{msg}")
 
 
 def audit_cases(
@@ -907,7 +909,7 @@ with tempfile.TemporaryDirectory() as td:
         hsaco = td_path / f"{{stem}}.hsaco"
         src.write_text(lower_kernel_to_hip(kernel, arch="{arch}"), encoding="utf-8")
         proc = subprocess.run(
-            ["hipcc", "--offload-arch={arch}", "--genco", str(src), "-o", str(hsaco)],
+            ["amdclang++", "--offload-device-only", "-x", "hip", "--offload-arch={arch}", str(src), "-o", str(hsaco)],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -1043,7 +1045,7 @@ def main() -> int:
     for r in results:
         compile_status = ""
         if args.compile_hip:
-            compile_status = f" hipcc={'OK' if r.hip_compile_ok else 'FAIL'}"
+            compile_status = f" hip={'OK' if r.hip_compile_ok else 'FAIL'}"
         status = "OK" if r.ok else "FAIL"
         print(
             f"{status:4} {r.group:9} {r.name:28} "

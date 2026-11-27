@@ -511,10 +511,10 @@ class CkVariantBench:
             backend = self.compile_backend or _select_2d_compile_backend(
                 problem, "gfx950"
             )
-            if backend == "hipcc":
-                from rocke.helpers.compile import compile_kernel_via_hipcc
+            if backend == "hip":
+                from rocke.helpers.compile import compile_kernel_via_hip
 
-                artifact = compile_kernel_via_hipcc(kernel)
+                artifact = compile_kernel_via_hip(kernel)
             else:
                 artifact = compile_kernel(kernel, capture_ir_text=False)
             self._launchers[key] = (
@@ -799,12 +799,12 @@ def main() -> int:
     ap.add_argument("--num-cus", type=int, default=256)
     ap.add_argument(
         "--compile-backend",
-        choices=("auto", "llvm", "hipcc"),
+        choices=("auto", "llvm", "hip"),
         default="auto",
         help="Compile backend for all CK DSL lanes (prod + build() variants). "
         "'auto' (default) matches production dispatch "
-        "(_select_2d_compile_backend); 'llvm'/'hipcc' force a backend for A/B. "
-        "Forcing 'llvm' mismeasures cohorts whose production backend is hipcc "
+        "(_select_2d_compile_backend); 'llvm'/'hip' force a backend for A/B. "
+        "Forcing 'llvm' mismeasures cohorts whose production backend is hip "
         "(e.g. D256 large prefill) by ~3x.",
     )
     ap.add_argument("--tol", type=float, default=5e-2)

@@ -19,7 +19,7 @@ condition and two branches, of a yield in the kernel body or in an scf.if in a
 loop body, and of a malformed if/else in an unrolled loop of zero trips,
 directly in its body or in an scf.if there; a loop in a branch keeps its own
 yield; and, when a GPU is present, a kernel whose lanes take both branches on
-the LLVM and the hipcc route. The refusals run the verifier and the Python
+the LLVM and the HIP route. The refusals run the verifier and the Python
 lowerings everywhere, and the C++ lowerings where the ``rocke_engine`` binding
 is built.
 """
@@ -183,16 +183,15 @@ def test_hip_declares_the_results_before_the_if_and_assigns_them_in_both_branche
 
 
 def test_hip_source_compiles(tmp_path):
-    """The HIP lowering is accepted by hipcc (no GPU needed)."""
-    hipcc = shutil.which("hipcc")
-    if hipcc is None:
-        pytest.skip("hipcc not found")
+    """The HIP lowering is accepted by amdclang++ (no GPU needed)."""
+    amdclangxx = shutil.which("amdclang++")
+    if amdclangxx is None:
+        pytest.skip("amdclang++ not found")
     source = tmp_path / "if_else.hip"
-    source.write_text(
-        lower_kernel_to_hip(_branch_kernel("if_else_hipcc"), arch="gfx942")
-    )
+    source.write_text(lower_kernel_to_hip(_branch_kernel("if_else_hip"), arch="gfx942"))
     subprocess.run(
-        [hipcc, "--offload-arch=gfx942", "--genco", "-O3", str(source), "-o",
+        [amdclangxx, "--offload-device-only", "-x", "hip",
+         "--offload-arch=gfx942", "-O3", str(source), "-o",
          str(tmp_path / "out.hsaco")],
         check=True,
         capture_output=True,
@@ -775,7 +774,7 @@ def _run(blob, kernel_name, x):
     return outputs
 
 
-@pytest.mark.parametrize("route", ["llvm", "hipcc"])
+@pytest.mark.parametrize("route", ["llvm", "hip"])
 def test_gpu_lanes_take_both_branches(route):
     arch = _gpu_arch()
     if not arch:
@@ -786,11 +785,11 @@ def test_gpu_lanes_take_both_branches(route):
 
         blob = compile_kernel(kernel, arch=arch).hsaco
     else:
-        if shutil.which("hipcc") is None:
-            pytest.skip("hipcc not found")
-        from rocke.helpers.compile import compile_kernel_via_hipcc
+        if shutil.which("amdclang++") is None:
+            pytest.skip("amdclang++ not found")
+        from rocke.helpers.compile import compile_kernel_via_hip
 
-        blob = compile_kernel_via_hipcc(kernel, arch=arch).hsaco
+        blob = compile_kernel_via_hip(kernel, arch=arch).hsaco
     x = np.random.default_rng(3).standard_normal(LANES).astype(np.float32)
     y, z, w = _run(blob, kernel.name, x)
     expected_y, expected_z, expected_w = _expected(x)

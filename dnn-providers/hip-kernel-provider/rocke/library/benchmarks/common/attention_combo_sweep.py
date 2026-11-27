@@ -244,7 +244,7 @@ def _dense_tensors(req, seed: int):
 
 def _lower_kernel(kernel, spec, arch: str) -> str:
     backend = str(getattr(spec, "compile_backend", "llvm") or "llvm")
-    if backend == "hipcc":
+    if backend == "hip":
         from rocke.core.lower_hip import lower_kernel_to_hip
 
         source = lower_kernel_to_hip(kernel, arch=arch)

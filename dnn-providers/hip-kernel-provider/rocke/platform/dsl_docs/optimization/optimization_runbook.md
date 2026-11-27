@@ -28,7 +28,7 @@ For the specific shape you are optimizing:
    MFMA atom, pipeline / prefetch-ring depth, single- vs double-buffer flags
    (K *and* V), scheduling hints (`sched_barrier`, `iglp_opt`), LDS layout
    (conflict-free / bank-pad), transposed-softmax sub-flags, epilogue variant,
-   compiler backend (`llvm` vs `hipcc`), and **every default-off opt-in flag**.
+   compiler backend (`llvm` vs `hip`), and **every default-off opt-in flag**.
    Include the levers that are currently OFF — those are exactly the ones a
    heuristic may be mis-picking.
 2. **Run an EXHAUSTIVE cartesian sweep over that space for the shape.** The
@@ -513,7 +513,7 @@ Before paying for a full rocprof run, exercise the static probes under
 | Will it fit at the expected occupancy? | `probe_occupancy.py` | ~0.5 s/variant (compile + readelf) |
 | Are the right intrinsics emitted? | `probe_intrinsic_counts.py` | ~0.05 s/variant (lower only) |
 | What is the opcode mix? | `probe_isa_inspect.py` | ~0.5 s/variant (compile + objdump) |
-| Does HIP-debug agree with LLVM-direct? | `probe_lowering_compare.py` | ~10 s/variant (hipcc) |
+| Does HIP-debug agree with LLVM-direct? | `probe_lowering_compare.py` | ~10 s/variant (amdclang++) |
 | Best variant of a sweep? | `probe_config_sweep.py` + your `run_fn` | depends on `run_fn` |
 | Best vs Triton on production shapes? | `probe_targeted_bench.py` | ~0.5 s per (shape, backend) |
 
@@ -1688,11 +1688,11 @@ near-assembly results (cf. Triton); the work is always in the backend/scheduler.
 **CK Tile is NOT a hand-assembly baseline — there is no ceiling against it.**
 When measuring against CK Tile FMHA / GEMM, remember the comparison is
 IR-frontend vs IR-frontend, not IR vs assembly. CK Tile is C++ templates →
-`hipcc` (clang) → the **same** LLVM AMDGPU backend (same instruction selection,
+`amdclang++` (clang) → the **same** LLVM AMDGPU backend (same instruction selection,
 register allocation, post-RA scheduler) the DSL emits IR into. The DSL's control
 is a strict superset: it *states* the atom, the LDS swizzle, the partial
 `lgkmcnt` waits, the direct-to-LDS async copies, and the scheduling fences that
-hipcc must *infer*. So matching and beating CK Tile everywhere is the correct
+amdclang++ must *infer*. So matching and beating CK Tile everywhere is the correct
 expectation — a gap to CK Tile is undone engineering (a missing technique or a
 selection bug), not an architectural wall. The hand-assembly ceiling above
 applies **only** to full hand-asm targets that bypass the LLVM scheduler
@@ -1756,7 +1756,7 @@ probe_occupancy.py          → readelf notes + occupancy estimate
 To diff a DSL kernel against a **hand-written C++/HIP reference** (a tile-library
 or research kernel you want to match), use
 `utilities/tools/utils/reference_isa_diff.py`: it compiles the reference with
-`hipcc`, extracts the `gfx950` code object from the fatbin (`roc-obj-ls`),
+`amdclang++`, extracts the `gfx950` code object from the fatbin (`roc-obj-ls`),
 disassembles both sides, and prints a semantic histogram + run-length diff
 (`reference_isa()` / `rocke_isa()` / `diff_report()`). This is the only tool that
 introspects a non-DSL reference — the rest of the layer only sees `KernelDef`s.
@@ -3384,7 +3384,7 @@ This sequence costs roughly:
 - step 2: 500 ms × N → typically 5-10 s
 - step 3: 50 ms × N
 - step 4: 500 ms × N
-- step 5: 10 s × N (hipcc dominates)
+- step 5: 10 s × N (amdclang++ dominates)
 - step 6: 1-5 s × N × M shapes
 - step 7: 10-60 s per kernel (rocprof)
 

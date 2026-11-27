@@ -54,8 +54,8 @@ def llvm23_compiler():
         yield
 
 
-def _hipcc(clang_major: int, output: str):
-    """A stand-in for ``hipcc`` whose clang is LLVM ``clang_major``: answers
+def _hip_compiler(clang_major: int, output: str):
+    """A stand-in for ``amdclang++`` whose clang is LLVM ``clang_major``: answers
     ``--version`` and writes ``output`` to the ``-o`` path of a compile."""
 
     def run(args, **kwargs):
@@ -127,7 +127,7 @@ def test_compile_kernel_selects_targets(
         ("gfx1154", "gfx1154", "gfx11-generic"),
     ],
 )
-def test_hipcc_selects_targets(
+def test_hip_compiler_selects_targets(
     kernel: KernelDef, target_id: str, base_arch: str, compiler_target: str
 ) -> None:
     with (
@@ -135,18 +135,20 @@ def test_hipcc_selects_targets(
             compile_module, "lower_kernel_to_hip", return_value="hip"
         ) as lower,
         mock.patch.object(
-            compile_module.subprocess, "run", side_effect=_hipcc(23, "hsaco")
+            compile_module.subprocess, "run", side_effect=_hip_compiler(23, "hsaco")
         ) as run,
         _falls_back() if target_id == "gfx1154" else _no_warning(),
     ):
-        artifact = compile_module.compile_kernel_via_hipcc(kernel, arch=target_id)
+        artifact = compile_module.compile_kernel_via_hip(kernel, arch=target_id)
 
     lower.assert_called_once_with(kernel, arch=base_arch)
     assert f"--offload-arch={compiler_target}" in run.call_args.args[0]
     assert artifact.isa == f"amdgcn-amd-amdhsa--{compiler_target}"
 
 
-def test_hipcc_ir_maps_runtime_profile_to_compiler_target(kernel: KernelDef) -> None:
+def test_hip_compiler_ir_maps_runtime_profile_to_compiler_target(
+    kernel: KernelDef,
+) -> None:
     with (
         mock.patch.object(
             compile_module, "lower_kernel_to_hip", return_value="hip"
@@ -154,10 +156,10 @@ def test_hipcc_ir_maps_runtime_profile_to_compiler_target(kernel: KernelDef) -> 
         mock.patch.object(
             compile_module.subprocess,
             "run",
-            side_effect=_hipcc(23, 'target datalayout = "test"\n'),
+            side_effect=_hip_compiler(23, 'target datalayout = "test"\n'),
         ) as run,
     ):
-        llvm_ir = compile_module.emit_device_llvm_ir_via_hipcc(
+        llvm_ir = compile_module.emit_device_llvm_ir_via_hip(
             kernel, arch="gfx1250-strict"
         )
 
@@ -233,49 +235,51 @@ def _falls_back():
     return pytest.warns(UserWarning, match="compiling for 'gfx11-generic' instead")
 
 
-def test_hipcc_chooses_the_target_for_its_own_clang(kernel: KernelDef) -> None:
-    """hipcc's clang decides, not the compiler COMGR loads: with
-    ROCKE_LLVM_FLAVOR=llvm23 and a clang-20 hipcc, gfx1250 is refused before
+def test_hip_compiler_chooses_the_target_for_its_own_clang(kernel: KernelDef) -> None:
+    """amdclang++'s clang decides, not the compiler COMGR loads: with
+    ROCKE_LLVM_FLAVOR=llvm23 and a clang-20 amdclang++, gfx1250 is refused before
     lowering because the llvm20 compiler does not accept it."""
     with (
         mock.patch.object(compile_module, "lower_kernel_to_hip") as lower,
         mock.patch.object(
-            compile_module.subprocess, "run", side_effect=_hipcc(20, "hsaco")
+            compile_module.subprocess, "run", side_effect=_hip_compiler(20, "hsaco")
         ),
         pytest.raises(
             ValueError, match="llvm20 compiler does not accept the processor 'gfx1250'"
         ),
     ):
-        compile_module.compile_kernel_via_hipcc(kernel, arch="gfx1250")
+        compile_module.compile_kernel_via_hip(kernel, arch="gfx1250")
     lower.assert_not_called()
 
 
 @pytest.mark.parametrize("target_id", ["gfx1154", "gfx1250-strict"])
-def test_a_hipcc_newer_than_every_lane_keeps_the_processor(
+def test_a_hip_compiler_newer_than_every_lane_keeps_the_processor(
     kernel: KernelDef, target_id: str
 ) -> None:
-    """A clang 25 hipcc was never measured, so the HIP paths pass the processor
-    (profile removed) and let hipcc decide instead of refusing every kernel."""
+    """A clang 25 amdclang++ was never measured, so the HIP paths pass the processor
+    (profile removed) and let amdclang++ decide instead of refusing every kernel."""
     with (
         mock.patch.object(compile_module, "lower_kernel_to_hip", return_value="hip"),
         mock.patch.object(
-            compile_module.subprocess, "run", side_effect=_hipcc(25, "hsaco")
+            compile_module.subprocess, "run", side_effect=_hip_compiler(25, "hsaco")
         ) as run,
         _no_warning(),
     ):
-        artifact = compile_module.compile_kernel_via_hipcc(kernel, arch=target_id)
-        compile_module.emit_device_llvm_ir_via_hipcc(kernel, arch=target_id)
+        artifact = compile_module.compile_kernel_via_hip(kernel, arch=target_id)
+        compile_module.emit_device_llvm_ir_via_hip(kernel, arch=target_id)
     processor = target_id.removesuffix("-strict")
     assert f"--offload-arch={processor}" in run.call_args.args[0]
     assert artifact.isa == f"amdgcn-amd-amdhsa--{processor}"
 
 
-def test_an_unreadable_hipcc_version_is_refused(kernel: KernelDef) -> None:
+def test_an_unreadable_hip_compiler_version_is_refused(kernel: KernelDef) -> None:
     def run(args, **kwargs):
-        return subprocess.CompletedProcess(args, 0, stdout="hipcc\n", stderr="")
+        return subprocess.CompletedProcess(args, 0, stdout="amdclang++\n", stderr="")
 
     with (
         mock.patch.object(compile_module.subprocess, "run", side_effect=run),
-        pytest.raises(RuntimeError, match="cannot read the LLVM version of hipcc"),
+        pytest.raises(
+            RuntimeError, match="cannot read the LLVM version of amdclang\\+\\+"
+        ),
     ):
-        compile_module.compile_kernel_via_hipcc(kernel, arch="gfx942")
+        compile_module.compile_kernel_via_hip(kernel, arch="gfx942")

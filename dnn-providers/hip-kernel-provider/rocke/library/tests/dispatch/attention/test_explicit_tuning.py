@@ -163,6 +163,27 @@ class TestExplicitAttentionBuilders(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("all-decode", why)
 
+    def test_2d_builder_normalizes_legacy_hipcc_backend(self):
+        # "hipcc" is accepted as a legacy alias for "hip"; the normalizer in
+        # make_explicit_attention_2d_spec maps it before validation, so this
+        # must not raise.
+        spec = make_explicit_attention_2d_spec(
+            _problem(),
+            ExplicitAttention2DConfig(
+                num_warps=2,
+                block_m_per_warp=16,
+                tile_policy="4x",
+                compile_backend="hipcc",
+            ),
+            arch="gfx950",
+        )
+        self.assertIsNotNone(spec)
+
+    def test_select_2d_compile_backend_normalizes_legacy_hipcc(self):
+        problem = _problem(compile_backend="hipcc")
+        result = au._select_2d_compile_backend(problem, "gfx950")
+        self.assertEqual(result, "hip")
+
     def test_invalid_geometry_is_rejected_not_fixed(self):
         with self.assertRaises(ValueError):
             make_explicit_attention_2d_spec(

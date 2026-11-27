@@ -821,24 +821,24 @@ class TestDatalayoutDriftGuard(unittest.TestCase):
     so a wrong-but-well-formed hardcoded string compiles fine — but relying
     on that parser leniency is fragile across ingestion paths.
 
-    This test re-derives the ground truth from the project's own ``hipcc``:
-    it lowers a tiny kernel to HIP C++, runs ``hipcc --offload-arch=<arch>
-    -S -emit-llvm --cuda-device-only`` (the same toolchain that compiles
+    This test re-derives the ground truth from the project's own ``amdclang++``:
+    it lowers a tiny kernel to HIP C++, runs ``amdclang++ --offload-arch=<arch>
+    -S -emit-llvm --offload-device-only`` (the same toolchain that compiles
     real kernels), extracts the ``target datalayout`` line, and asserts
     rocke's flavor-keyed constant matches byte-for-byte.
 
     When ROCm bumps the canonical datalayout (or a new drift item appears),
     this fails with a clear "regenerate the constant" message on any dev/CI
-    box with hipcc, instead of silently leaning on comgr's override.
+    box with amdclang++, instead of silently leaning on comgr's override.
 
-    Skipped cleanly when hipcc is absent (e.g., pure-Python test envs).
+    Skipped cleanly when amdclang++ is absent (e.g., pure-Python test envs).
     """
 
-    def _find_hipcc(self) -> bool:
-        """Return whether hipcc is in PATH."""
+    def _find_hip_compiler(self) -> bool:
+        """Return whether amdclang++ is in PATH."""
         import shutil
 
-        return shutil.which("hipcc") is not None
+        return shutil.which("amdclang++") is not None
 
     def _extract_datalayout_from_ir(self, ir_text: str) -> str:
         """Extract 'target datalayout = "..."' from LLVM IR text."""
@@ -850,10 +850,10 @@ class TestDatalayoutDriftGuard(unittest.TestCase):
                 return m.group(1)
         raise ValueError("no target datalayout line found in IR")
 
-    def test_datalayout_matches_hipcc_emitted_ir(self):
-        """Assert rocke's hardcoded datalayout matches hipcc's emitted IR."""
-        if not self._find_hipcc():
-            self.skipTest("hipcc not in PATH")
+    def test_datalayout_matches_hip_compiler_emitted_ir(self):
+        """Assert rocke's hardcoded datalayout matches amdclang++'s emitted IR."""
+        if not self._find_hip_compiler():
+            self.skipTest("amdclang++ not in PATH")
 
         from rocke.core.ir import F32, KernelDef, Param, PtrType, Region
         from rocke.core.isa.backend import wired_arches
@@ -863,7 +863,7 @@ class TestDatalayoutDriftGuard(unittest.TestCase):
             _emission_profile,
             _flavor_for_llvm,
         )
-        from rocke.helpers.compile import emit_device_llvm_ir_via_hipcc
+        from rocke.helpers.compile import emit_device_llvm_ir_via_hip
 
         # Build a minimal kernel (any wired arch works; datalayout is gfx-invariant).
         kernel = KernelDef(
@@ -873,18 +873,18 @@ class TestDatalayoutDriftGuard(unittest.TestCase):
             attrs={},
         )
 
-        # This reference is hipcc on PATH, which may differ from loaded COMGR.
+        # This reference is amdclang++ on PATH, which may differ from loaded COMGR.
         # Query that executable rather than assigning /opt/rocm's package
         # metadata to an unrelated compiler selected by an environment module.
         import re
         import subprocess
 
         version = subprocess.run(
-            ["hipcc", "--version"], capture_output=True, text=True, timeout=30
+            ["amdclang++", "--version"], capture_output=True, text=True, timeout=30
         )
         match = re.search(r"clang version (\d+)", version.stdout + version.stderr)
         if version.returncode or not match:
-            self.skipTest("cannot determine reference hipcc's LLVM version")
+            self.skipTest("cannot determine reference amdclang++'s LLVM version")
         detected_flavor = _flavor_for_llvm(int(match[1]))
         rocke_dl = _datalayout_for_flavor(detected_flavor)
         uses_llvm23_profile = _emission_profile(detected_flavor) is _emission_profile(
@@ -929,14 +929,16 @@ class TestDatalayoutDriftGuard(unittest.TestCase):
         for arch in wired_arches():
             with self.subTest(arch=arch):
                 try:
-                    ir = emit_device_llvm_ir_via_hipcc(kernel, arch=arch, timeout_s=60)
+                    ir = emit_device_llvm_ir_via_hip(kernel, arch=arch, timeout_s=60)
                 except Exception as e:
-                    # hipcc on this box may not support every wired arch (e.g. a
+                    # amdclang++ on this box may not support every wired arch (e.g. a
                     # newer GFX12 target like gfx1250 on an older ROCm toolchain).
                     # That is a toolchain limitation, NOT a datalayout drift, so
                     # skip this arch rather than fail -- the other arches still
                     # prove the gfx-invariant datalayout the flavor split needs.
-                    self.skipTest(f"hipcc cannot target {arch} on this toolchain: {e}")
+                    self.skipTest(
+                        f"amdclang++ cannot target {arch} on this toolchain: {e}"
+                    )
                 toolchain_dl = self._extract_datalayout_from_ir(ir)
                 if (
                     uses_llvm23_profile
@@ -944,7 +946,7 @@ class TestDatalayoutDriftGuard(unittest.TestCase):
                     and toolchain_dl.replace("-i64:64", expected_p10_p15 + "-i64:64", 1)
                     == rocke_dl
                 ):
-                    # The ONLY observed difference is that this hipcc's layout
+                    # The ONLY observed difference is that this amdclang++'s layout
                     # omits the p10-p15 block (upstream 5bf967cb132b); every other
                     # field matches. Compiler builds vary here -- a box can pair a
                     # new-numbered ROCm with a clang whose layout predates that
@@ -961,7 +963,7 @@ class TestDatalayoutDriftGuard(unittest.TestCase):
                     # kernel on a toolchain that does enforce it (see the rationale
                     # on _DATALAYOUT_LLVM23 in core/lower_llvm.py).
                     self.skipTest(
-                        f"hipcc for {arch} emits a datalayout that differs from "
+                        f"amdclang++ for {arch} emits a datalayout that differs from "
                         f"rocKE's llvm23 constant only by the p10-p15 block "
                         f"(upstream 5bf967cb132b); treated as compiler-build "
                         f"variation, not drift"
@@ -971,7 +973,7 @@ class TestDatalayoutDriftGuard(unittest.TestCase):
                     toolchain_dl,
                     f"Datalayout drift detected for {arch} under {detected_flavor}.\n"
                     f"  rocke constant: {rocke_dl}\n"
-                    f"  hipcc emitted:   {toolchain_dl}\n"
+                    f"  amdclang++ emitted: {toolchain_dl}\n"
                     f"Regenerate _DATALAYOUT_{detected_flavor.upper().replace('llvm', '')} "
                     f"in core/lower_llvm.py by running:\n"
                     f'  echo "" | /opt/rocm/llvm/bin/clang -target amdgcn-amd-amdhsa '

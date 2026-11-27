@@ -2,14 +2,14 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 """Step 10: re-compile the t16x16x512 winner through the alternate
-HIP-C++ -> hipcc backend instead of the default LLVM-IR -> libamd_comgr.
+HIP-C++ -> amdclang++ backend instead of the default LLVM-IR -> libamd_comgr.
 
-`rocke.helpers.compile_kernel_via_hipcc` lowers the same IR to HIP C++
-and pushes it through `hipcc --genco -O3`. The runtime ABI is identical
+`rocke.helpers.compile_kernel_via_hip` lowers the same IR to HIP C++
+and pushes it through `amdclang++ --offload-device-only -x hip -O3`. The runtime ABI is identical
 (same HSACO arg-pack), but the codegen path is different:
 
   default (compile_kernel):       IR -> LLVM IR -> libamd_comgr      ~90 ms
-  alternate (via_hipcc):          IR -> HIP C++ -> hipcc -O3         ~450 ms
+  alternate (via_hip):            IR -> HIP C++ -> amdclang++ -O3    ~450 ms
 
 Per the helpers/compile.py docstring, this has historically given
 ~5% speedup on long-running attention kernels because the clang
@@ -43,7 +43,7 @@ from rocke.instances.common.gemm_universal import (  # noqa: E402
     build_universal_gemm,
 )
 from rocke.helpers import compile_kernel, make_gemm_manifest  # noqa: E402
-from rocke.helpers.compile import compile_kernel_via_hipcc  # noqa: E402
+from rocke.helpers.compile import compile_kernel_via_hip  # noqa: E402
 from rocke.runtime.hip_module import Runtime  # noqa: E402
 
 M, N, K = 2, 4096, 4096
@@ -57,23 +57,23 @@ def _build_llvm(spec):
     return compile_kernel(build_universal_gemm(spec), isa="amdgcn-amd-amdhsa--gfx950")
 
 
-def _build_hipcc(spec, flags=None):
-    return compile_kernel_via_hipcc(
+def _build_hip(spec, flags=None):
+    return compile_kernel_via_hip(
         build_universal_gemm(spec), arch="gfx950", extra_flags=flags or []
     )
 
 
 VARIANTS = [
     ("llvm_default", lambda s: _build_llvm(s)),
-    ("hipcc_O3", lambda s: _build_hipcc(s, [])),
-    ("hipcc_O3_ffast", lambda s: _build_hipcc(s, ["-ffast-math"])),
+    ("hip_O3", lambda s: _build_hip(s, [])),
+    ("hip_O3_ffast", lambda s: _build_hip(s, ["-ffast-math"])),
     (
-        "hipcc_O3_flushdenorm",
-        lambda s: _build_hipcc(s, ["-ffast-math", "-fgpu-flush-denormals-to-zero"]),
+        "hip_O3_flushdenorm",
+        lambda s: _build_hip(s, ["-ffast-math", "-fgpu-flush-denormals-to-zero"]),
     ),
     (
-        "hipcc_O3_inline_all",
-        lambda s: _build_hipcc(
+        "hip_O3_inline_all",
+        lambda s: _build_hip(
             s,
             [
                 "-ffast-math",

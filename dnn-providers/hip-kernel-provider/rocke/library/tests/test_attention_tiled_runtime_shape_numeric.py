@@ -85,7 +85,7 @@ _D64_BATCH_Q = [300, 280, 400, 260, 350, 310, 270, 290, 330]
 # the plain tiled kernel. gfx950: ``route`` names an attention_unified selector
 # both shapes must satisfy, or None for no check. gfx950 pairs sit on one side
 # of every seqlen threshold the selectors read (combo above 256 query tokens,
-# hipcc above 512), so only the head counts, the window and the batch differ.
+# hip above 512), so only the head counts, the window and the batch differ.
 _CASES = (
     (
         "gfx942",

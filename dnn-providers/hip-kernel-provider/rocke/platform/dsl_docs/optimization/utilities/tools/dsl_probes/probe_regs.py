@@ -21,7 +21,7 @@ a specific kernel family:
 1. A pre-built code object on disk (fully decoupled -- no rocke build at all)::
 
        python probe_regs.py --arch gfx950 --co path/to/kernel.co
-       python probe_regs.py --arch gfx950 --hsaco path/to/kernel.hsaco   # hipcc bundle ok
+       python probe_regs.py --arch gfx950 --hsaco path/to/kernel.hsaco   # amdclang++ bundle ok
 
 2. A builder resolved dynamically at runtime (the import happens in *your*
    string, not in this module)::
@@ -93,7 +93,7 @@ from rocke.analysis.isa import analyze_hsaco  # noqa: E402
 from rocke.core.arch import ArchTarget, known_arches  # noqa: E402
 from rocke.helpers.compile import (  # noqa: E402
     compile_kernel,
-    compile_kernel_via_hipcc,
+    compile_kernel_via_hip,
 )
 
 
@@ -148,7 +148,7 @@ def _bundler() -> str:
 def _to_code_object(blob: bytes, arch: str, out: Path) -> Path:
     """Return a bare AMDGPU ELF path for ``blob``.
 
-    ``compile_kernel`` (comgr) already yields a bare ELF; ``hipcc --genco`` and
+    ``compile_kernel`` (comgr) already yields a bare ELF; the HIP route and
     saved ``.hsaco`` files may be a ``__CLANG_OFFLOAD_BUNDLE__`` that must be
     unbundled first.
     """
@@ -252,7 +252,7 @@ def probe_regs(
     entries: Iterable[tuple],
     *,
     arch: str,
-    use_hipcc: bool = False,
+    use_hip: bool = False,
 ) -> list[dict]:
     """Compile and probe each ``(label, KernelDef, block_size)`` entry.
 
@@ -269,8 +269,8 @@ def probe_regs(
         for i, (label, kdef, block_size) in enumerate(entries):
             try:
                 art = (
-                    compile_kernel_via_hipcc(kdef, arch=arch)
-                    if use_hipcc
+                    compile_kernel_via_hip(kdef, arch=arch)
+                    if use_hip
                     else compile_kernel(kdef, arch=arch)
                 )
             except Exception as e:  # noqa: BLE001
@@ -305,7 +305,7 @@ def _resolve_builder(spec: str):
 
 
 def _probe_via_builder(
-    spec: str, kwargs_json: str, *, arch: str, block_size: int, use_hipcc: bool
+    spec: str, kwargs_json: str, *, arch: str, block_size: int, use_hip: bool
 ) -> int:
     build_fn = _resolve_builder(spec)
     kwargs = json.loads(kwargs_json) if kwargs_json else {}
@@ -319,7 +319,7 @@ def _probe_via_builder(
         kdef = result
     bs = block_size or 256
     label = getattr(kdef, "name", spec.split(":")[-1])
-    probe_regs([(label, kdef, bs)], arch=arch, use_hipcc=use_hipcc)
+    probe_regs([(label, kdef, bs)], arch=arch, use_hip=use_hip)
     return 0
 
 
@@ -348,7 +348,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     src = p.add_mutually_exclusive_group()
     src.add_argument("--co", type=Path, help="probe an existing bare code object")
     src.add_argument(
-        "--hsaco", type=Path, help="probe an existing HSACO (hipcc bundle ok)"
+        "--hsaco", type=Path, help="probe an existing HSACO (amdclang++ bundle ok)"
     )
     src.add_argument(
         "--builder",
@@ -370,9 +370,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         help="launch block size (threads/block) for the occupancy estimate",
     )
     p.add_argument(
-        "--hipcc",
+        "--hip",
         action="store_true",
-        help="compile through hipcc --genco instead of the comgr LLVM path",
+        help="compile through the HIP route (amdclang++) instead of the comgr LLVM path",
     )
     args = p.parse_args(argv)
 
@@ -386,7 +386,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             args.builder_kwargs,
             arch=args.arch,
             block_size=args.bs,
-            use_hipcc=args.hipcc,
+            use_hip=args.hip,
         )
     return _probe_demo(arch=args.arch, block_size=args.bs or 256)
 

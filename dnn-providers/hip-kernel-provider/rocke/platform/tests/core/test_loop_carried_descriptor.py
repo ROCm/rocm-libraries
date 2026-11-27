@@ -223,8 +223,8 @@ def test_supported_forms_lower_identically_to_hip_and_compile(form):
     kernel = _SUPPORTED[form](unroll=False)
     hip = lower_kernel_to_hip(kernel, arch=_ARCH)
     assert _engine().lower_serialized_ir_hip(serialize(kernel), arch=_ARCH) == hip
-    if shutil.which("hipcc") is None:
-        pytest.skip("hipcc not found on PATH")
-    from rocke.helpers.compile import compile_kernel_via_hipcc
+    if shutil.which("amdclang++") is None:
+        pytest.skip("amdclang++ not found on PATH")
+    from rocke.helpers.compile import compile_kernel_via_hip
 
-    assert compile_kernel_via_hipcc(kernel, arch=_ARCH).hsaco
+    assert compile_kernel_via_hip(kernel, arch=_ARCH).hsaco

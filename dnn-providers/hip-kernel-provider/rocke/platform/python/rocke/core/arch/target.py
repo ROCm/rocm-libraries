@@ -2746,7 +2746,7 @@ def compiler_target_for_llvm_major(target_id: str, llvm_major: int | None) -> st
     """The compiler target to pass to the LLVM ``llvm_major`` compiler for ``target_id``.
 
     Pass the major of the compiler that will run (the one COMGR loads, or
-    hipcc's clang), never an emission override such as ``ROCKE_LLVM_FLAVOR``.
+    amdclang++), never an emission override such as ``ROCKE_LLVM_FLAVOR``.
     A major in a qualified lane routes through that lane's measured processor
     answers (:func:`compiler_target_for_flavor`). A major newer than every
     lane, or ``None`` for a compiler whose version is unknown, was never

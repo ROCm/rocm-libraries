@@ -358,18 +358,20 @@ def _mma_builtin_call(source: str) -> str:
     )
 
 
-def _assert_hipcc_accepts(source: str, arch: str, tmp_path) -> None:
-    """Compile ``source`` for ``arch`` with hipcc, when hipcc is present."""
-    if not shutil.which("hipcc"):
-        pytest.skip("hipcc not in PATH")
+def _assert_amdclangxx_accepts(source: str, arch: str, tmp_path) -> None:
+    """Compile ``source`` for ``arch`` with amdclang++, when amdclang++ is present."""
+    if not shutil.which("amdclang++"):
+        pytest.skip("amdclang++ not in PATH")
     path = tmp_path / "kernel.hip"
     path.write_text(source)
     subprocess.run(
         [
-            "hipcc",
-            f"--offload-arch={arch}",
-            "--cuda-device-only",
+            "amdclang++",
+            "--offload-device-only",
             "-fsyntax-only",
+            "-x",
+            "hip",
+            f"--offload-arch={arch}",
             str(path),
         ],
         check=True,
@@ -391,7 +393,7 @@ def test_hip_f32_mfma_takes_scalars_unchanged(arch, op_id, accumulator_count, tm
     )
     source = lower_hip_with_both_engines(kernel, arch)
     assert "__builtin_bit_cast" not in _mma_builtin_call(source)
-    _assert_hipcc_accepts(source, arch, tmp_path)
+    _assert_amdclangxx_accepts(source, arch, tmp_path)
 
 
 @pytest.mark.parametrize(("op_id", "accumulator_count"), _F32_MFMAS)
@@ -411,7 +413,7 @@ def test_hip_f32_mfma_reinterprets_only_the_one_element_vector(
     call = _mma_builtin_call(source)
     assert re.search(r"\(\w+, __builtin_bit_cast\(float, \w+\), \w+, 0, 0, 0\);", call)
     assert call.count("__builtin_bit_cast") == 1
-    _assert_hipcc_accepts(source, arch, tmp_path)
+    _assert_amdclangxx_accepts(source, arch, tmp_path)
 
 
 @pytest.mark.parametrize(
@@ -439,7 +441,7 @@ def test_hip_batched_4x4x4_mfma_lowers_in_both_engines(
         rf"= __builtin_amdgcn_{builtin}\(\w+, \w+, \w+, 0, 0, 0\);",
         _mma_builtin_call(source),
     )
-    _assert_hipcc_accepts(source, arch, tmp_path)
+    _assert_amdclangxx_accepts(source, arch, tmp_path)
 
 
 def test_hip_integer_wmma_reinterprets_only_the_packed_byte_operand(tmp_path):
@@ -456,7 +458,7 @@ def test_hip_integer_wmma_reinterprets_only_the_packed_byte_operand(tmp_path):
         r"\(true, __builtin_bit_cast\(i32x4, \w+\), true, \w+, \w+, false\);",
         _mma_builtin_call(source),
     )
-    _assert_hipcc_accepts(source, "gfx1151", tmp_path)
+    _assert_amdclangxx_accepts(source, "gfx1151", tmp_path)
 
 
 def test_hip_integer_wmma_takes_packed_words_unchanged():

@@ -10,7 +10,7 @@ max_abs against an fp32 torch reference of
 added after the softcap, as for ALiBi/QQ bias. The 2D lane covers both score
 paths: short prefill (16x16) and long prefill (max_seqlen_q > 256, multi- and
 single-batch), which selects the transposed 32x32 path, plus a multi-batch
-group past max_seqlen_q=512 that compiles through hipcc. Softcap and
+group past max_seqlen_q=512 that compiles through the HIP backend. Softcap and
 sliding-window groups run on 2D and 3D, and a d64 / block 32 GQA-8 bf16 group
 covers the transposed 32x32 combo stack. Every 2D group asserts its score path
 and compile backend so the coverage cannot silently drift.
@@ -77,16 +77,16 @@ _CASES = {
     "3d": ("3d", [(1, 300), (3, 517), (1, 64)]),
 }
 
-# Extra paths: case -> (backend, seq_lens, features). ``tiled_long_hipcc`` is
-# multi-batch prefill past max_seqlen_q=512, which compiles through hipcc
-# instead of LLVM-direct. The softcap and sliding-window groups pin the score
+# Extra paths: case -> (backend, seq_lens, features). ``tiled_long_hip`` is
+# multi-batch prefill past max_seqlen_q=512, which compiles through the HIP
+# backend instead of LLVM-direct. The softcap and sliding-window groups pin the score
 # order and the masked bias load under a window, on 2D and 3D; the single-seq
 # fp16 window case lands on the transposed 32x32 path. The softcap is small
 # enough that ``softcap(QK*scale) + bias`` and ``softcap(QK*scale + bias)``
 # differ. Each group runs on two bias layouts (a padded full layout and a
 # broadcast one) to bound the lane's runtime; _CASES covers all seven layouts.
 _EXTRA_CASES = {
-    "tiled_long_hipcc": ("tiled", [(640, 640), (768, 900)], {}),
+    "tiled_long_hip": ("tiled", [(640, 640), (768, 900)], {}),
     "tiled_softcap": ("tiled", [(300, 420), (512, 512)], {"softcap": 2.0}),
     "tiled_window": ("tiled", [(300, 420), (512, 512)], {"sliding_window": 64}),
     "tiled_window_1seq": ("tiled", [(384, 640)], {"sliding_window": 64}),
@@ -115,9 +115,9 @@ _ROUTES = {
         "fp16": ("transposed32", "llvm"),
         "bf16": ("transposed32", "llvm"),
     },
-    "tiled_long_hipcc": {
-        "fp16": ("transposed32", "hipcc"),
-        "bf16": ("transposed32", "hipcc"),
+    "tiled_long_hip": {
+        "fp16": ("transposed32", "hip"),
+        "bf16": ("transposed32", "hip"),
     },
     "tiled_softcap": {"fp16": ("16x16", "llvm"), "bf16": ("16x16", "llvm")},
     "tiled_window": {"fp16": ("16x16", "llvm"), "bf16": ("16x16", "llvm")},

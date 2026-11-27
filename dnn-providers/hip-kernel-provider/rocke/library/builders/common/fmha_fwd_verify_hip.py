@@ -1,11 +1,11 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""HIP-path (hipcc) FMHA forward build + numeric verify on CDNA and RDNA.
+"""HIP-path FMHA forward build + numeric verify on CDNA and RDNA.
 
 Builds the unified tiled FMHA forward kernel
 (:func:`kernels.common.fmha_mfma.build_fmha_fwd_mfma` -- one body,
 MFMA on CDNA / WMMA on RDNA wave32), compiles it through the **HIP-C++ ->
-hipcc** backend (``compile_kernel_via_hipcc``) instead of the LLVM-IR ->
+amdclang++** backend (``compile_kernel_via_hip``) instead of the LLVM-IR ->
 libamd_comgr backend, launches it via the HIP runtime, and compares the
 output against a torch-free numpy dense-attention reference.
 
@@ -35,7 +35,7 @@ import math
 import struct
 
 from rocke.core.arch import ArchTarget
-from rocke.helpers.compile import compile_kernel_via_hipcc
+from rocke.helpers.compile import compile_kernel_via_hip
 from kernels.common._fmha_common import FmhaCommonSpec, FmhaShape
 from kernels.common.fmha_mfma import (
     FmhaMfmaSpec,
@@ -113,13 +113,13 @@ def main() -> int:
     if not ok:
         return 2
 
-    art = compile_kernel_via_hipcc(
+    art = compile_kernel_via_hip(
         build_fmha_fwd_mfma(spec, arch=args.arch), arch=args.arch
     )
     print(
         f"[{args.arch}] HIP-path built {art.kernel_name} "
         f"({art.hsaco_bytes} B, isa={art.isa}) "
-        f"hipcc={art.timings.get('hipcc', 0):.0f}ms "
+        f"hip={art.timings.get('hip', 0):.0f}ms "
         f"total={art.timings.get('total', 0):.0f}ms"
     )
 

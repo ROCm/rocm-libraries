@@ -123,10 +123,10 @@ class UnifiedAttentionProblem:
     #   - ``None`` (default): auto-pick. Uses the LLVM-direct
     #     pipeline (``compile_kernel``) except for large prefill
     #     (``max_seqlen_q > 512 or num_seqs * max_seqlen_q > 1024``),
-    #     where ``hipcc --genco`` is measurably faster (≈5% on
+    #     where the HIP route (amdclang++) is measurably faster (≈5% on
     #     ``b4_q1000_kv1000``) thanks to clang's heavier scheduling.
     #   - ``"llvm"``: always use the LLVM-direct path (~90ms compile).
-    #   - ``"hipcc"``: always lower to HIP C++ and compile via hipcc
+    #   - ``"hip"``: always lower to HIP C++ and compile via amdclang++
     #     (~450ms compile but ~5% faster on long-running kernels).
     # See ``probe_hip_lowering.py`` for the per-shape comparison.
     compile_backend: Optional[str] = None
@@ -1314,8 +1314,8 @@ def _select_2d_tile_size(problem: UnifiedAttentionProblem, arch: str) -> int:
     # confirmed this should stay FP8-only: for bf16 SW long-prefill the
     # correctness-clean winner was T=64, not T=32
     # (``trace_bench/sweep_attention2d_configs.json``:
-    # bf16_sw_n16_q1000_k1050 best T=64/mw16/hipcc at ~257us; T=32
-    # variants were >=258us and often incorrect under hipcc).
+    # bf16_sw_n16_q1000_k1050 best T=64/mw16/hip at ~257us; T=32
+    # variants were >=258us and often incorrect under hip).
     if problem.use_fp8 and problem.sliding_window > 0 and problem.max_seqlen_q > 256:
         return problem.block_size
     # gfx942 full-causal sink prefill: T=2*block_size (paired with mw16, LDS still
@@ -3492,8 +3492,8 @@ def _select_2d_block_m_per_warp(problem: UnifiedAttentionProblem, arch: str) -> 
 
       - **bf16 long-prefill SW**, ``n=16 q=1000 k=1050 sw=128``:
         the broad sweep revised the earlier local result: correctness-
-        clean best is ``mw=16 T=64 hipcc`` at ~257us. ``mw=32`` and
-        T=32 do not beat it consistently, and several hipcc T=32
+        clean best is ``mw=16 T=64 hip`` at ~257us. ``mw=32`` and
+        T=32 do not beat it consistently, and several hip T=32
         combinations are numerically wrong. Keep bf16 SW on mw=16.
 
     Cost: VGPR pressure rises (each warp tracks 32 rows × QK_N_TILES +
@@ -5792,30 +5792,33 @@ def _get_3d_pipeline(
 
 
 def _select_2d_compile_backend(problem: UnifiedAttentionProblem, arch: str) -> str:
-    """Pick the compile backend (LLVM-direct vs hipcc) for the 2D tiled kernel.
+    """Pick the compile backend (LLVM-direct vs HIP) for the 2D tiled kernel.
 
-    The HIP path (``hipcc --genco``) is measurably faster than the
+    The HIP path (``amdclang++ --offload-device-only -x hip``) is measurably faster than the
     LLVM-direct path on large-batch bf16/fp16 prefill (≈5% on
     ``b4_q1000_kv1000``) because clang's frontend + AMDGPU backend
     pipeline does heavier instruction scheduling for the long
     unrolled loop body. Smaller workloads (decode, small prefill)
-    are 5-29% slower via hipcc, so the auto-selector only switches
-    when the workload is large enough to amortize hipcc's ~450ms
+    are 5-29% slower via HIP, so the auto-selector only switches
+    when the workload is large enough to amortize HIP's ~450ms
     compile cost AND benefit from its scheduling.
 
     The FP8 K/V path uses sync-dequant loaders with intrinsics that
     the HIP debug backend may not fully cover; the auto-selector
-    pins FP8 to ``llvm`` until ``hipcc`` is validated for that
+    pins FP8 to ``llvm`` until the HIP backend is validated for that
     code path.
 
     See the out-of-tree ``probe_hip_lowering.py`` for the per-shape sweep.
     """
     if arch == "gfx1250":
         return "llvm"
-    if problem.compile_backend in ("llvm", "hipcc"):
-        return problem.compile_backend
+    backend = problem.compile_backend
+    if backend == "hipcc":
+        backend = "hip"  # legacy alias
+    if backend in ("llvm", "hip"):
+        return backend
     # Auto: HIP for large-batch bf16/fp16 prefill workloads where
-    # hipcc's heavier scheduler measurably wins. FP8 stays on LLVM
+    # the HIP backend's heavier scheduler measurably wins. FP8 stays on LLVM
     # until the HIP path is exercised on the dequant-loader kernels.
     if problem.use_fp8:
         return "llvm"
@@ -5826,14 +5829,14 @@ def _select_2d_compile_backend(problem: UnifiedAttentionProblem, arch: str) -> s
     if arch == "gfx942":
         return "llvm"
     # MHA (num_queries_per_kv == 1) head_size-64 prefill REGRESSES under
-    # hipcc: the perf_attn2d sweep (B2 H8 d64 fp16, gfx950) measured the
-    # hipcc auto path at 95/186 TFLOPS for s1024/s2048 vs 131/218 on the
-    # LLVM-direct path (the byte-identical fallback geometry), i.e. hipcc
+    # HIP: the perf_attn2d sweep (B2 H8 d64 fp16, gfx950) measured the
+    # HIP auto path at 95/186 TFLOPS for s1024/s2048 vs 131/218 on the
+    # LLVM-direct path (the byte-identical fallback geometry), i.e. HIP
     # is 17-27% SLOWER here, not the ~5% faster the b4 GQA shape showed.
     # The fast-path 16x16 MHA loop body does not benefit from clang's
     # heavier unrolled-loop scheduler the way the GQA-8 / combo geometry
     # does, so pin this family to LLVM-direct. (The combo / GQA path below
-    # keeps its hipcc eligibility.)
+    # keeps its HIP eligibility.)
     if (
         problem.num_queries_per_kv == 1
         and problem.head_size == 64
@@ -5841,11 +5844,11 @@ def _select_2d_compile_backend(problem: UnifiedAttentionProblem, arch: str) -> s
     ):
         return "llvm"
     # Single-batch (num_seqs == 1) d128/d64 prefill combo cohort: pin to
-    # LLVM-direct. The hipcc scheduler's heavier unrolled-loop pass only pays
+    # LLVM-direct. The HIP scheduler's heavier unrolled-loop pass only pays
     # off on the LARGE multi-batch grid; for the single-seq grid it is a big
     # REGRESSION (same-session A/B: d128
-    # S1024 none_hipcc 95us vs none_llvm 49us; d128 S2048 hipcc ~174us vs llvm
-    # 143us). The total_work rule below would otherwise pick hipcc for these
+    # S1024 none_hip 95us vs none_llvm 49us; d128 S2048 hip ~174us vs llvm
+    # 143us). The total_work rule below would otherwise pick HIP for these
     # long single-seq shapes, so gate them to LLVM explicitly.
     if _enable_single_batch_combo(problem, arch):
         return "llvm"
@@ -5854,7 +5857,7 @@ def _select_2d_compile_backend(problem: UnifiedAttentionProblem, arch: str) -> s
     # migration (``_enable_register_pv``) nor the 32x32 transposed combo
     # (``_enable_mfma_32x32``), the PV stage publishes the softmax
     # probabilities to LDS as 16-bit and reads them back transposed via
-    # ``ds_read_tr16``. The shipped system hipcc (ROCm 7.0 / LLVM 20)
+    # ``ds_read_tr16``. The shipped system amdclang++ (ROCm 7.0 / LLVM 20)
     # MISCOMPILES that transposed-LDS-read sequence: the output is ~0.84
     # max-abs wrong (bad != 0) versus the fp32 reference, while the
     # LLVM-direct (comgr / LLVM 22) build of the *same* IR is correct
@@ -5863,15 +5866,15 @@ def _select_2d_compile_backend(problem: UnifiedAttentionProblem, arch: str) -> s
     # off -- but the only production config that still routes onto this path
     # is head_size==256 (the 32x32 combo excludes hd256 and register-P is
     # bf16-only), so in practice this pins fp16 d256 long-prefill (which auto
-    # would otherwise compile via hipcc). Pin it to the proven LLVM-direct
-    # backend until the system hipcc is upgraded / the path is moved onto
-    # register-P for hd256. The perf delta is the ~5% hipcc-scheduler edge,
+    # would otherwise compile via HIP). Pin it to the proven LLVM-direct
+    # backend until the system amdclang++ is upgraded / the path is moved onto
+    # register-P for hd256. The perf delta is the ~5% HIP-scheduler edge,
     # which correctness strictly outranks.
     if not _enable_register_pv(problem, arch) and not _enable_mfma_32x32(problem, arch):
         return "llvm"
     total_work = problem.num_seqs * max(problem.max_seqlen_q, 1)
     if problem.max_seqlen_q > 512 and total_work > 1024:
-        return "hipcc"
+        return "hip"
     return "llvm"
 
 
@@ -5913,10 +5916,10 @@ def _get_2d_launcher(
         else:
             kernel = _tiled_2d_kernel(problem, arch)
             backend = _select_2d_compile_backend(problem, arch)
-        if backend == "hipcc":
-            from rocke.helpers.compile import compile_kernel_via_hipcc
+        if backend == "hip":
+            from rocke.helpers.compile import compile_kernel_via_hip
 
-            artifact = compile_kernel_via_hipcc(kernel)
+            artifact = compile_kernel_via_hip(kernel)
         else:
             artifact = compile_kernel(kernel, arch=arch, capture_ir_text=False)
         _ATTN_TILED_CACHE[cache_key] = (artifact.hsaco, artifact.kernel_name)

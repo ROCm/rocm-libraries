@@ -307,8 +307,8 @@ def test_bare_hip_keeps_required_vector_declarations(route, tmp_path):
         source = actual
     assert "#include" not in source
     assert source.count("using i8x12 =") == 1
-    if not shutil.which("hipcc"):
-        pytest.skip("hipcc not in PATH")
+    if not shutil.which("amdclang++"):
+        pytest.skip("amdclang++ not in PATH")
     path = tmp_path / "composed.hip"
     path.write_text(
         HIP_PROLOGUE
@@ -317,10 +317,12 @@ def test_bare_hip_keeps_required_vector_declarations(route, tmp_path):
     )
     subprocess.run(
         [
-            "hipcc",
-            "--offload-arch=gfx950",
-            "--cuda-device-only",
+            "amdclang++",
+            "--offload-device-only",
             "-fsyntax-only",
+            "-x",
+            "hip",
+            "--offload-arch=gfx950",
             str(path),
         ],
         check=True,
@@ -363,11 +365,11 @@ def test_hip_rejects_unsupported_vector_element(elem_type):
 )
 def test_hip_compiler_preserves_fragment_load_alignment(dtype, copy_bytes, alignment):
     """Inspect compiler IR: source parity cannot detect a shared alignment bug."""
-    if not shutil.which("hipcc"):
-        pytest.skip("hipcc not in PATH")
-    from rocke.helpers.compile import emit_device_llvm_ir_via_hipcc
+    if not shutil.which("amdclang++"):
+        pytest.skip("amdclang++ not in PATH")
+    from rocke.helpers.compile import emit_device_llvm_ir_via_hip
 
-    llvm = emit_device_llvm_ir_via_hipcc(
+    llvm = emit_device_llvm_ir_via_hip(
         build_transport(dtype), arch="gfx950", extra_flags=["-O0"]
     )
     source_alignments = [
@@ -475,11 +477,11 @@ def test_96bit_loads_copy_exact_payload(dtype):
         )
     hip = lower_kernel_to_hip(kernel, arch="gfx1250")
     assert len(re.findall(r"__builtin_memcpy\([^\n]*, 12\);", hip)) == 3
-    if not shutil.which("hipcc"):
-        pytest.skip("hipcc not in PATH")
-    from rocke.helpers.compile import emit_device_llvm_ir_via_hipcc
+    if not shutil.which("amdclang++"):
+        pytest.skip("amdclang++ not in PATH")
+    from rocke.helpers.compile import emit_device_llvm_ir_via_hip
 
-    compiled = emit_device_llvm_ir_via_hipcc(kernel, arch="gfx950", extra_flags=["-O0"])
+    compiled = emit_device_llvm_ir_via_hip(kernel, arch="gfx950", extra_flags=["-O0"])
     # Clang's vector object is 16 bytes; the source copy must remain 12 bytes.
     compiled = compiled.split("define protected amdgpu_kernel void @transport(", 1)[
         1

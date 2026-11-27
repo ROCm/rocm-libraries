@@ -42,7 +42,7 @@ _TILES = ("1x", "2x", "4x", "8x")
 def _variants():
     # Narrow 16x16 path: one atom per warp at any CTA width, or two stacked
     # atoms per warp (M=32), which the 1024-thread cap limits to nw<=4.
-    for backend in ("llvm", "hipcc"):
+    for backend in ("llvm", "hip"):
         for tile in _TILES:
             for nw, mw in [(nw, 16) for nw in (1, 2, 4, 8)] + [
                 (nw, 32) for nw in (1, 2, 4)
@@ -59,7 +59,7 @@ def _variants():
                 )
     # gfx950 32x32 paths require M-per-warp=32 and reject nw=8.
     for codepath in ("wide32", "transposed32"):
-        for backend in ("llvm", "hipcc"):
+        for backend in ("llvm", "hip"):
             for tile in _TILES:
                 for nw in (1, 2, 4):
                     yield AttentionGeometryVariant(

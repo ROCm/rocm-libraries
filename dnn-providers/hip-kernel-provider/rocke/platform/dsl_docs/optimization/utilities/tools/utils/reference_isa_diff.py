@@ -4,13 +4,13 @@
 
 The DSL's own ISA introspection (``rocke.analysis``, ``probe_isa_inspect.py``)
 only works on ``KernelDef``s. This adds the missing side: compile an arbitrary
-C++/HIP reference kernel with ``hipcc``, pull the gfx950 code object out of the
+C++/HIP reference kernel with ``amdclang++``, pull the gfx950 code object out of the
 embedded HIP fatbin (``roc-obj-ls``), disassemble it, and diff the instruction
 mix against the DSL kernel. Use it whenever you have a hand-tuned reference to
 match (a tile-library kernel, a research kernel, a vendor sample).
 
 The diff targets **semantic equivalence** (same opcode mix / run-length), NOT
-byte equality: ``hipcc`` and ``libamd_comgr`` use different register allocators
+byte equality: ``amdclang++`` and ``libamd_comgr`` use different register allocators
 and post-RA schedulers, so register numbers and ``s_nop`` padding differ even
 for identical algorithms. We compare instruction-class histograms + run-length
 sequences.
@@ -95,7 +95,7 @@ def reference_isa(
     pybind: bool = False,
     extra=(),
 ) -> str:
-    """Compile a C++/HIP kernel with hipcc and return its ``arch`` disasm.
+    """Compile a C++/HIP kernel with amdclang++ and return its ``arch`` disasm.
 
     ``defines`` / ``include_dirs`` / ``extra`` are passed through verbatim, so
     this is reference-kernel-agnostic — supply whatever the kernel needs.
@@ -104,7 +104,9 @@ def reference_isa(
     """
     so = tempfile.mktemp(suffix=".so")
     cmd = [
-        "hipcc",
+        "amdclang++",
+        "-x",
+        "hip",
         cpp_path,
         f"--offload-arch={arch}",
         "-std=c++20",
@@ -130,7 +132,7 @@ def reference_isa(
         cmd += pb + ["-I", sysconfig.get_path("include")]
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
     if not os.path.exists(so):
-        raise RuntimeError("hipcc failed:\n" + r.stderr[-2000:])
+        raise RuntimeError("amdclang++ failed:\n" + r.stderr[-2000:])
     try:
         ls = subprocess.run(["roc-obj-ls", so], capture_output=True, text=True).stdout
         m = re.search(rf"{arch}\s+file://[^#]+#offset=(\d+)&size=(\d+)", ls)

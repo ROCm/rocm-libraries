@@ -261,8 +261,8 @@ def _type_to_hip(t) -> str:
 # the typedefs the handlers reference (``fp16``, ``bf16``, ``fNxM``)
 # resolve, and the AMDGCN builtins we emit (``__builtin_amdgcn_*``,
 # ``__hexp2f``, etc.) are available. The prologue is plain C++ that
-# any modern hipcc / amdclang understands; no <hip/hip_runtime.h>
-# dependency beyond what hipcc auto-injects for ``__global__`` kernels.
+# any modern amdclang++ understands; no <hip/hip_runtime.h>
+# dependency beyond what amdclang++ auto-injects for ``__global__`` kernels.
 HIP_PROLOGUE = """\
 // === rocke lower_hip prologue (auto-generated) ===
 #include <hip/hip_runtime.h>
@@ -2086,11 +2086,11 @@ class _Lowerer:
 
         e4m3 sibling of :meth:`_op_arith_cvt_pk_f32_bf8x4`; mirrors the
         LLVM lowering's two-packed-cvt + concat shape but in HIP
-        builtin form so the debug source compiles with hipcc. The
+        builtin form so the debug source compiles with amdclang++. The
         result-vector C++ type is taken from
         :func:`_type_to_hip` (``f32x4``) — the historical
         ``vec<f32x4>`` spelling was not a real C++ type and broke
-        ``hipcc --genco`` on the attention kernels that consume this
+        ``amdclang++ --offload-device-only`` on the attention kernels that consume this
         cvt (HIP_LOWERINGS_REPORT.md §4a).
         """
         (v,) = op.operands
@@ -2185,7 +2185,7 @@ class _Lowerer:
         """Packed <4 x f32> -> <4 x i8> saturating cvt.
 
         Per-element ``rintf`` + clamp + cast loop; AMDGPU's pattern
-        matcher in hipcc folds the chain into ``v_med3_i32`` plus a
+        matcher in amdclang++ folds the chain into ``v_med3_i32`` plus a
         single ``v_perm_b32`` byte-select on the production path. Same
         semantics as the LLVM lowering's ``llvm.amdgcn.perm`` shape.
         """
@@ -2395,7 +2395,7 @@ class _Lowerer:
         passed ``_name(smem)`` (the SSA name like ``lds_hist6``)
         rather than the actual ``__shared__`` array
         (``lds_hist6_storage`` from ``smem.op.attrs["_storage"]``);
-        the resulting ``hipcc --compile-hip`` failed on
+        the resulting HIP compilation via amdclang++ failed on
         ``moe_sort_histogram`` with ``use of undeclared identifier
         'lds_hist6'``. Every other smem op in this file routes
         through ``smem.op.attrs["_storage"]`` (see e.g.
@@ -3207,7 +3207,7 @@ def lower_kernel_to_hip(
             sig_args.append(f"{t} {param.name}")
     signature = ", ".join(sig_args)
     # ``extern "C"`` keeps the kernel symbol name unmangled in the
-    # emitted device ELF. Without it, hipcc / clang's C++ name mangler
+    # emitted device ELF. Without it, amdclang++'s C++ name mangler
     # produces something like ``_Z<len><name>P<arg-types>`` which the
     # run_manifest runner cannot look up (it keys off the IR's
     # ``KernelDef.name``).

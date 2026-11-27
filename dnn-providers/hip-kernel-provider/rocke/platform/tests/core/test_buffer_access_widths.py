@@ -8,7 +8,7 @@ Both take any scalar whose width is whole bytes and move 1, 2, 4, 8 or 16 bytes
 per access. Covers the LLVM IR each width lowers to, that both engines emit the
 same LLVM IR and the same HIP source, the builder's, the verifier's and the
 lowerers' refusals, and, when a GPU is present, a bit-exact copy through both compile routes (LLVM
-through COMGR, HIP through hipcc). The C++ builder's refusal texts are checked
+through COMGR, HIP through amdclang++). The C++ builder's refusal texts are checked
 in the ``rocke_future_intrinsic_lowering`` ctest, the same texts as here.
 """
 
@@ -431,7 +431,7 @@ GPU_WIDTHS = (
 )  # fmt: skip
 
 
-@pytest.mark.parametrize("route", ["llvm", "hipcc"])
+@pytest.mark.parametrize("route", ["llvm", "hip"])
 def test_gpu_copy_is_bit_exact(route):
     arch = _gpu_arch()
     if not arch:
@@ -443,11 +443,11 @@ def test_gpu_copy_is_bit_exact(route):
 
         blob = compile_kernel(kernel, arch=arch).hsaco
     else:
-        if shutil.which("hipcc") is None:
-            pytest.skip("hipcc not found")
-        from rocke.helpers.compile import compile_kernel_via_hipcc
+        if shutil.which("amdclang++") is None:
+            pytest.skip("amdclang++ not found")
+        from rocke.helpers.compile import compile_kernel_via_hip
 
-        blob = compile_kernel_via_hipcc(kernel, arch=arch).hsaco
+        blob = compile_kernel_via_hip(kernel, arch=arch).hsaco
     source = np.random.default_rng(7).integers(0, 256, total, dtype=np.uint8)
     out = _run_copy(blob, kernel.name, source, lanes)
     np.testing.assert_array_equal(out[:total], source)
@@ -456,18 +456,18 @@ def test_gpu_copy_is_bit_exact(route):
 
 
 def test_hip_source_of_every_width_compiles(tmp_path):
-    """The HIP lowering of every width is accepted by hipcc (no GPU needed)."""
+    """The HIP lowering of every width is accepted by amdclang++ (no GPU needed)."""
     import subprocess
 
-    hipcc = shutil.which("hipcc")
-    if hipcc is None:
-        pytest.skip("hipcc not found")
+    amdclangxx = shutil.which("amdclang++")
+    if amdclangxx is None:
+        pytest.skip("amdclang++ not found")
     kernel, _ = _copy_kernel("buffer_every_width_hip", WIDTHS)
     source = tmp_path / "buffer_every_width.hip"
     source.write_text(lower_kernel_to_hip(kernel, arch="gfx942"))
     subprocess.run(
-        [hipcc, "--offload-arch=gfx942", "--genco", "-O3", str(source), "-o",
-         str(tmp_path / "out.hsaco")],
+        [amdclangxx, "--offload-device-only", "-x", "hip", "--offload-arch=gfx942",
+         "-O3", str(source), "-o", str(tmp_path / "out.hsaco")],
         check=True,
         capture_output=True,
         timeout=240,

@@ -10,7 +10,7 @@ import struct
 import numpy as np
 
 from ....helpers import compile_kernel
-from ....helpers.compile import compile_kernel_via_hipcc
+from ....helpers.compile import compile_kernel_via_hip
 from ....instances.gfx950.block_scaled_gemm import (
     BlockScaledGemmSpec,
     block_scaled_gemm_grid,
@@ -137,9 +137,7 @@ def run_cases(
     if arch != "gfx950":
         raise RuntimeError(f"visible HIP device 0 must be gfx950, got {arch!r}")
     kernel = build_block_scaled_gemm(spec, arch=arch)
-    compile_fn = (
-        compile_kernel if compile_route == "comgr" else compile_kernel_via_hipcc
-    )
+    compile_fn = compile_kernel if compile_route == "comgr" else compile_kernel_via_hip
     art = compile_fn(kernel, arch=arch)
     print(
         f"[{arch}/{compile_route}] compiled {art.kernel_name} isa={art.isa}", flush=True

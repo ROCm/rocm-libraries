@@ -485,7 +485,7 @@ rocke_kernel_def_t* rocke_dconv16c_stream_h_loop(rocke_dconv_16c_ctx_t* ctx)
                      * promoted to a SECOND wide atom with its upper 16 K
                      * zero-padded. Mixing a 16x16x16 residual into the same
                      * accumulator is a read-after-write accumulator hazard
-                     * that both comgr and hipcc miscompile here. */
+                     * that both comgr and amdclang++ miscompile here. */
                     if(is_bf16)
                     {
                         acc_in = rocke_b_mfma_f32_16x16x32_bf16(

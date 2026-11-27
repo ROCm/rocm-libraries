@@ -13,7 +13,7 @@ The cases below pin, for every integer WMMA and all four combinations, the two
 flags both engines emit at every LLVM flavor, that the gfx11 unsigned rows
 compile and link for gfx1100 and gfx11-generic and select the instruction
 (compile-verified, not run), that the HIP lowering of every gfx11 row passes
-its builtin the bools the row gives and hipcc turns them into the same flags,
+its builtin the bools the row gives and amdclang++ turns them into the same flags,
 that the gfx11 signed rows keep their declaration, and that neither engine's
 source writes a flag as a literal.
 """
@@ -140,7 +140,7 @@ def test_the_gfx11_rows_compile_link_and_select_the_instruction(
 
 
 _GFX11_ROWS = [(op_id, flags) for op_id, gfx, flags in _ROWS if gfx == "gfx11-generic"]
-# The HIP builtin's bool for each LLVM flag, and the flag as hipcc prints it.
+# The HIP builtin's bool for each LLVM flag, and the flag as amdclang++ prints it.
 _HIP_BOOL = {"i1 1": "true", "i1 0": "false"}
 _HIPCC_FLAG = {"i1 1": "i1 true", "i1 0": "i1 false"}
 
@@ -163,16 +163,14 @@ def test_the_hip_lowering_passes_the_bools_the_row_gives(op_id, flags):
 
 
 @pytest.mark.parametrize("op_id, flags", _GFX11_ROWS)
-def test_hipcc_turns_the_hip_bools_into_the_rows_flags(op_id, flags):
-    """hipcc compiles the HIP lowering for gfx1100 to the intrinsic call with
+def test_hip_compiler_turns_the_hip_bools_into_the_rows_flags(op_id, flags):
+    """amdclang++ compiles the HIP lowering for gfx1100 to the intrinsic call with
     the row's flags (compile-verified, not run)."""
-    if not shutil.which("hipcc"):
-        pytest.skip("hipcc not in PATH")
-    from rocke.helpers.compile import emit_device_llvm_ir_via_hipcc
+    if not shutil.which("amdclang++"):
+        pytest.skip("amdclang++ not in PATH")
+    from rocke.helpers.compile import emit_device_llvm_ir_via_hip
 
-    llvm = emit_device_llvm_ir_via_hipcc(
-        _kernel("gfx11-generic", op_id), arch="gfx1100"
-    )
+    llvm = emit_device_llvm_ir_via_hip(_kernel("gfx11-generic", op_id), arch="gfx1100")
     intrinsic = MATRIX_CALLS[op_id].intrinsic
     assert _flags(llvm, intrinsic) == tuple(_HIPCC_FLAG[flag] for flag in flags)
 

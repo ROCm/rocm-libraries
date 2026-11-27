@@ -1766,10 +1766,10 @@ def _run_rocke(
                     "correct: numerics preserved)"
                 )
             kernel = build_unified_attention_2d_tiled(spec)
-            if _select_2d_compile_backend(problem, _ARCH) == "hipcc":
-                from rocke.helpers.compile import compile_kernel_via_hipcc
+            if _select_2d_compile_backend(problem, _ARCH) == "hip":
+                from rocke.helpers.compile import compile_kernel_via_hip
 
-                artifact = compile_kernel_via_hipcc(kernel)
+                artifact = compile_kernel_via_hip(kernel)
             else:
                 artifact = compile_kernel(kernel, capture_ir_text=False)
             launcher = KernelLauncher(
@@ -1837,10 +1837,10 @@ def _run_rocke(
 
         spec = _tiled_spec_from_problem(problem, _ARCH)
         kernel = build_unified_attention_2d_tiled(spec)
-        if _select_2d_compile_backend(problem, _ARCH) == "hipcc":
-            from rocke.helpers.compile import compile_kernel_via_hipcc
+        if _select_2d_compile_backend(problem, _ARCH) == "hip":
+            from rocke.helpers.compile import compile_kernel_via_hip
 
-            artifact = compile_kernel_via_hipcc(kernel)
+            artifact = compile_kernel_via_hip(kernel)
         else:
             artifact = compile_kernel(kernel, capture_ir_text=False)
         launcher = KernelLauncher(

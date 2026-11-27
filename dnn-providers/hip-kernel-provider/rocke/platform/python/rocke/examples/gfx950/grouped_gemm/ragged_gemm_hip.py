@@ -23,7 +23,7 @@ import math
 import numpy as np
 import torch
 
-from rocke.helpers.compile import compile_kernel_via_hipcc
+from rocke.helpers.compile import compile_kernel_via_hip
 from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
 
@@ -201,7 +201,7 @@ def _main(argv=None) -> int:
     )
 
     kernel, BS, tm, tn = build_ragged_gemm(spec)
-    art = compile_kernel_via_hipcc(kernel, arch="gfx950")
+    art = compile_kernel_via_hip(kernel, arch="gfx950")
     sig = ragged_gemm_signature()
     L = KernelLauncher(
         hsaco=art.hsaco,

@@ -184,7 +184,7 @@ class TestNumericVerification(unittest.TestCase):
         self.assertIn("OK", out)
 
     def test_elementwise_hip_numeric(self):
-        """HIP-C++ (hipcc) non-MMA elementwise-add vs numpy, every arch.
+        """HIP-C++ (amdclang++) non-MMA elementwise-add vs numpy, every arch.
 
         Closes the non-MMA HIP-path numeric gate on all three arches. The
         elementwise builder has no MMA atom (just loads / vec pack / f32

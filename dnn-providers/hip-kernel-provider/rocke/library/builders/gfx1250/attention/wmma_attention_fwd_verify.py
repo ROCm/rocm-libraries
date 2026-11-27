@@ -27,7 +27,7 @@ import math
 import struct
 
 from rocke.helpers import compile_kernel
-from rocke.helpers.compile import compile_kernel_via_hipcc
+from rocke.helpers.compile import compile_kernel_via_hip
 from kernels.gfx1250.wmma_attention_fwd import (
     WmmaAttentionFwdSpec,
     build_wmma_attention_fwd,
@@ -69,10 +69,10 @@ def main() -> int:
     p.add_argument("--causal", action="store_true")
     p.add_argument(
         "--compile-path",
-        choices=("auto", "llvm", "hipcc"),
+        choices=("auto", "llvm", "hip"),
         default="auto",
         help=(
-            "Compilation path. auto uses hipcc for gfx1250 causal attention "
+            "Compilation path. auto uses amdclang++ for gfx1250 causal attention "
             "because the direct LLVM path still has a WMMA scheduling issue; "
             "non-causal uses direct LLVM."
         ),
@@ -98,17 +98,17 @@ def main() -> int:
         name=f"wmma_attn_{args.arch}",
     )
     kernel = build_wmma_attention_fwd(spec, arch=args.arch)
-    use_hipcc = args.compile_path == "hipcc" or (
+    use_hip = args.compile_path == "hip" or (
         args.compile_path == "auto" and args.arch == "gfx1250" and args.causal
     )
     art = (
-        compile_kernel_via_hipcc(kernel, arch=args.arch)
-        if use_hipcc
+        compile_kernel_via_hip(kernel, arch=args.arch)
+        if use_hip
         else compile_kernel(kernel, arch=args.arch)
     )
     print(
         f"[{args.arch}] built {art.kernel_name} ({art.hsaco_bytes} B, isa={art.isa}, "
-        f"path={'hipcc' if use_hipcc else 'llvm'}) total={art.timings.get('total', 0):.1f}ms"
+        f"path={'hip' if use_hip else 'llvm'}) total={art.timings.get('total', 0):.1f}ms"
     )
 
     if args.no_verify:

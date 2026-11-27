@@ -565,7 +565,7 @@ see `platform/AGENTS.md` §Profiling) around a script that builds one arm with
 ## 19. Reproducing Part 2
 
 Needs a gfx1250 device, a ROCm install (`ROCM_PATH`; the probe compiles with
-its `hipcc`), and numpy. Keep output outside the repository.
+its `amdclang++`), and numpy. Keep output outside the repository.
 
 ```sh
 export PYTHONPATH=<platform>/python ROCM_PATH=<rocm>

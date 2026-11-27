@@ -212,7 +212,7 @@ class TestInstances(unittest.TestCase):
         # wide atom (zero-padded upper K) so both atoms on the accumulator
         # are the same width. Mixing a 16x16x16 residual into the same
         # accumulator triggered a cross-width MFMA accumulator hazard that
-        # both comgr and hipcc miscompiled at the H-edges; the all-wide fold
+        # both comgr and HIP miscompiled at the H-edges; the all-wide fold
         # is bit-correct.
         self.assertIn("@llvm.amdgcn.mfma.f32.16x16x32.f16", ll)
         self.assertNotIn("@llvm.amdgcn.mfma.f32.16x16x16f16", ll)

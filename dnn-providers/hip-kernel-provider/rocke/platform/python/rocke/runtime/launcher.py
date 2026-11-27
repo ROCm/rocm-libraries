@@ -497,7 +497,7 @@ class KernelLauncher:
     ) -> KernelLauncher:
         """A launcher that checks the kernel's parameter contract before every launch.
 
-        ``artifact`` is what ``compile_kernel`` / ``compile_kernel_via_hipcc``
+        ``artifact`` is what ``compile_kernel`` / ``compile_kernel_via_hip``
         (a ``KernelArtifact``) or ``compile_module`` (a ``ModuleArtifact``)
         returns; both hold the ``KernelDef``, from which the contract, the
         argument signature and ``cluster_dims`` are taken, so the caller
@@ -760,7 +760,7 @@ def _artifact_kernel(artifact: Any, kernel_name: str | None) -> KernelDef:
     else:
         raise TypeError(
             "KernelLauncher.from_artifact takes what compile_kernel, "
-            "compile_kernel_via_hipcc or compile_module returns, got "
+            "compile_kernel_via_hip or compile_module returns, got "
             f"{type(artifact).__name__}"
         )
     for candidate in kernels:

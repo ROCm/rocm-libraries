@@ -453,10 +453,10 @@ permutation. Bit-exact correctness (max_abs_diff = 0).
 optimal on this skinny-M shape; preshuffle helps more when the strided
 load pattern is the actual bottleneck.
 
-### Step 10 — `lower_kernel_to_hip` + hipcc backend (`10_hipcc_backend.py`)
+### Step 10 — `lower_kernel_to_hip` + HIP backend (`10_hipcc_backend.py`)
 
-The DSL has a second compile path: `compile_kernel_via_hipcc` lowers
-the same IR to HIP C++ and runs it through `hipcc --genco -O3`. Same
+The DSL has a second compile path: `compile_kernel_via_hip` lowers
+the same IR to HIP C++ and runs it through `amdclang++ --offload-device-only -O3`. Same
 runtime ABI, different codegen frontend (clang for HIP vs the direct
 LLVM-IR → libamd_comgr path). Tested 5 variants:
 
@@ -465,14 +465,14 @@ From the committed `data/10_hipcc_backend.json` (best-ms basis):
 | backend / flags | µs | compile |
 |---|---:|---:|
 | llvm_default (libamd_comgr) | 13.44 | 10 ms |
-| hipcc -O3 | 13.49 | 429 ms |
-| hipcc -O3 -ffast-math | 13.50 | 402 ms |
-| hipcc -O3 -ffast-math -fgpu-flush-denormals-to-zero | 13.48 | 410 ms |
-| hipcc -O3 -ffast-math -flushdenorm -mllvm -amdgpu-early-inline-all=true | 13.50 | 423 ms |
+| amdclang++ -O3 | 13.49 | 429 ms |
+| amdclang++ -O3 -ffast-math | 13.50 | 402 ms |
+| amdclang++ -O3 -ffast-math -fgpu-flush-denormals-to-zero | 13.48 | 410 ms |
+| amdclang++ -O3 -ffast-math -flushdenorm -mllvm -amdgpu-early-inline-all=true | 13.50 | 423 ms |
 
-All within ≈0.06 µs (noise); hipcc is ~40× slower to compile. For a memory-bound kernel the codegen
+All within ≈0.06 µs (noise); amdclang++ is ~40× slower to compile. For a memory-bound kernel the codegen
 backend doesn't matter; for a long-running attention kernel the
-helpers/compile.py docstring's ~5 % hipcc win could plausibly show up,
+helpers/compile.py docstring's ~5 % HIP win could plausibly show up,
 just not here.
 
 ### Step 11 — final side-by-side (`11_final_compare.py`)
@@ -830,7 +830,7 @@ rocke/examples/gfx950/gemm_perf_skinny_decode/
 │   ├── 07_push_tile_k.py                  # push tile_k → MT16x16x512 winner
 │   ├── 08_lever_combinations.py           # 192 scheduling combos on winner
 │   ├── 09_preshuffle_b.py                 # preshuffle_b with custom harness
-│   ├── 10_hipcc_backend.py                # LLVM vs hipcc-O3 backend
+│   ├── 10_hipcc_backend.py                # LLVM vs amdclang++-O3 backend
 │   ├── 11_final_compare.py                # final apples-to-apples ratio
 │   ├── 12_direct_to_lds.py                # DTLA/DTLB lever (wires upstream patch)
 │   ├── 13_dtl_sweep.py                    # DTLA × tile_k × pipeline × cache-hints

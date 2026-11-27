@@ -275,8 +275,11 @@ def main() -> int:
     import os as _os
 
     _seg_compile = compile_kernel
-    if _os.environ.get("ROCKE_DECODE3D_HIPCC") == "1":
-        from rocke.helpers.compile import compile_kernel_via_hipcc as _seg_compile
+    if (
+        _os.environ.get("ROCKE_DECODE3D_HIP", _os.environ.get("ROCKE_DECODE3D_HIPCC"))
+        == "1"
+    ):
+        from rocke.helpers.compile import compile_kernel_via_hip as _seg_compile
     seg_art = _seg_compile(build_seg(seg_spec, arch=arch), arch=arch)
     red_art = compile_kernel(build_red(red_spec, arch=arch), arch=arch)
     print(

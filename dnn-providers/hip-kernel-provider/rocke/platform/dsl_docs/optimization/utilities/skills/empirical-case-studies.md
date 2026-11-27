@@ -293,7 +293,7 @@ fences — transcribed from the CK Tile C++ reference.
 Removing ALL of those directives and letting comgr schedule freely is a real,
 correctness-preserving uplift — the first positive lever after exhausting AGPR form,
 grid/chiplet swizzle, comgr scheduler flags, `iglp_opt`, tile/warp/K sweeps,
-hipcc-vs-comgr, MFMA atom shape, `waves_per_eu`, and register read-ahead (all
+HIP-vs-comgr, MFMA atom shape, `waves_per_eu`, and register read-ahead (all
 neutral/negative on this kernel).
 
 | variant (square fp16 8192³)     | /rocBLAS | MfmaUtil |
@@ -302,7 +302,7 @@ neutral/negative on this kernel).
 | compv4 directives removed       | 0.854    | 67.8%    |
 
 Generality: +2.3% fp16, +2.1% bf16 (0.846→0.864), +1.9–2.5% on rectangular shapes.
-Works on the default comgr path (no hipcc).
+Works on the default comgr path (no amdclang++).
 
 ### Why (measured mechanism)
 

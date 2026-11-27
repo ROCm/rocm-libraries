@@ -64,8 +64,8 @@ opcode mix (MFMA, `ds_read` / `ds_write`, `buffer_load_lds`, `s_waitcnt` /
 `s_barrier` / `sched_barrier`, VALU / SALU), the `ds_read/mfma` ratio,
 and a gfx950/gfx942 unified-VGPR occupancy estimate (blocks/CU + limiter).
 
-How it works: compiles via `compile_kernel` (comgr, or `--hipcc` for the
-`hipcc --genco` path), unbundles the code object if needed, then runs
+How it works: compiles via `compile_kernel` (comgr, or `--hip` for the
+`amdclang++ --offload-device-only` path), unbundles the code object if needed, then runs
 `rocke.analysis.isa.analyze_hsaco` (one `llvm-objdump` + `llvm-readelf`
 pass) for both the resource notes and the opcode histogram.
 
@@ -124,7 +124,7 @@ backends; optional VGPR / LDS deltas from `llvm-readelf` on both.
 
 How it works: production path is `compile_kernel(kdef, arch=arch)`; debug path is
 `lower_kernel_to_hip(kdef, arch=arch)` written to disk and compiled with
-`hipcc --offload-arch=<arch> --genco`. The two backends should agree
+`amdclang++ --offload-arch=<arch> --offload-device-only`. The two backends should agree
 on a healthy kernel; large size or resource deltas usually mean one
 backend is missing an op lowering (the HIP-debug backend's op coverage
 is narrower than LLVM-direct's).

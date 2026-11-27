@@ -12,10 +12,10 @@ These tests pin that word per target family in the HIP text, check it equals
 the word in the LLVM IR for the same target, compare the Python HIP text with
 the C++ engine's (through the native ``rocke_buffer_rsrc_hip`` test binary
 named by ``ROCKE_BUFFER_RSRC_HIP_TEST``), compile the gfx11 / gfx12 source with
-hipcc, and run a bounds-checked copy through the HIP route on the current GPU,
+amdclang++, and run a bounds-checked copy through the HIP route on the current GPU,
 lowered for that GPU's target (or its family's generic target when the GPU has
 no ISA backend of its own), so gfx9, gfx11 and gfx12 GPUs all run it. Tests
-needing hipcc, the native binary or a GPU skip when it is missing.
+needing amdclang++, the native binary or a GPU skip when it is missing.
 """
 
 from __future__ import annotations
@@ -120,25 +120,25 @@ def test_hip_source_matches_cpp_engine(arch):
     assert native == lower_kernel_to_hip(_copy_kernel(), arch=arch)
 
 
-def _require_hipcc():
-    if shutil.which("hipcc") is None:
-        pytest.skip("hipcc not found on PATH")
+def _require_amdclangxx():
+    if shutil.which("amdclang++") is None:
+        pytest.skip("amdclang++ not found on PATH")
 
 
 @pytest.mark.parametrize("arch", ["gfx1151", "gfx1201"])
 def test_gfx11_gfx12_hip_source_compiles_with_the_target_word(arch):
-    """No gfx11 / gfx12 GPU is needed: hipcc compiles the HIP source for the
+    """No gfx11 / gfx12 GPU is needed: amdclang++ compiles the HIP source for the
     target, and the device IR it emits keeps the target word on both
     descriptors."""
     from rocke.helpers.compile import (
-        compile_kernel_via_hipcc,
-        emit_device_llvm_ir_via_hipcc,
+        compile_kernel_via_hip,
+        emit_device_llvm_ir_via_hip,
     )
 
-    _require_hipcc()
+    _require_amdclangxx()
     kernel = _copy_kernel()
-    assert compile_kernel_via_hipcc(kernel, arch=arch).hsaco
-    device_ir = emit_device_llvm_ir_via_hipcc(kernel, arch=arch)
+    assert compile_kernel_via_hip(kernel, arch=arch).hsaco
+    device_ir = emit_device_llvm_ir_via_hip(kernel, arch=arch)
     words = re.findall(
         r"@llvm\.amdgcn\.make\.buffer\.rsrc\.[\w.]+\(.*, i32 (-?\d+)\)", device_ir
     )
@@ -161,7 +161,7 @@ def test_hip_route_copy_is_bounds_checked_on_the_gpu():
     bound leave D untouched. A descriptor word that disables buffer access on
     the target (the gfx9 word on gfx11 and gfx12, for example) leaves all of D
     untouched and fails the check."""
-    from rocke.helpers.compile import compile_kernel_via_hipcc
+    from rocke.helpers.compile import compile_kernel_via_hip
     from rocke.runtime.hip_module import Runtime
     from rocke.tests.gpu import current_device_arch
 
@@ -170,14 +170,14 @@ def test_hip_route_copy_is_bounds_checked_on_the_gpu():
     arch = _lowering_target(device_arch)
     if arch is None:
         pytest.skip(f"no ISA backend for the device's {device_arch}")
-    _require_hipcc()
+    _require_amdclangxx()
 
     load_lanes, store_lanes = 40, 56
     src_values = np.arange(1, 2 * _WAVE + 1, dtype=np.float16)
     sentinel = np.float16(-7.0)
     nbytes = src_values.nbytes
 
-    art = compile_kernel_via_hipcc(_copy_kernel(), arch=arch)
+    art = compile_kernel_via_hip(_copy_kernel(), arch=arch)
     rt = Runtime()
     module = rt.load_module(art.hsaco)
     src = rt.alloc(nbytes)

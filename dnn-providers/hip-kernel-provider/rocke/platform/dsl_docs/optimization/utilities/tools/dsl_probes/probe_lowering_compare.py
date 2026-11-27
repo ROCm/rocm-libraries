@@ -7,13 +7,13 @@ For each KernelDef this script:
 1. compiles via ``rocke.helpers.compile_kernel`` for ``arch`` (LLVM-direct →
    comgr → HSACO);
 2. lowers via ``rocke.core.lower_hip.lower_kernel_to_hip`` and compiles
-   the emitted HIP C++ via ``hipcc --genco`` to a second HSACO;
+   the emitted HIP C++ via ``amdclang++`` to a second HSACO;
 3. reports the HSACO sizes side-by-side and (optionally) inspects each
    blob with ``llvm-readelf --notes`` so VGPR / LDS deltas are visible
    without launching either kernel.
 
 The HIP-debug backend is **not** the production path. It exists to give
-authors a readable HIP C++ source they can compile with ``hipcc`` and to
+authors a readable HIP C++ source they can compile with ``amdclang++`` and to
 cross-check that production LLVM lowering and HIP debug lowering agree
 on what the kernel should be.
 
@@ -106,7 +106,7 @@ def compile_hip_backend(
     out_dir: Path | None = None,
     timeout: int = 240,
 ) -> tuple[bytes, Path]:
-    """Lower kdef to HIP, run ``hipcc --genco``, return ``(hsaco, hip_src)``."""
+    """Lower kdef to HIP, compile with ``amdclang++``, return ``(hsaco, hip_src)``."""
     if out_dir is None:
         out_dir = Path(tempfile.mkdtemp(prefix="rocke_hip_lower_"))
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -116,9 +116,11 @@ def compile_hip_backend(
     hip_src.write_text(lower_kernel_to_hip(kdef, arch=arch))
     proc = subprocess.run(
         [
-            "hipcc",
+            "amdclang++",
+            "--offload-device-only",
+            "-x",
+            "hip",
             f"--offload-arch={arch}",
-            "--genco",
             "-O3",
             str(hip_src),
             "-o",
@@ -130,7 +132,7 @@ def compile_hip_backend(
     )
     if proc.returncode != 0:
         raise RuntimeError(
-            f"hipcc rc={proc.returncode}\n"
+            f"amdclang++ rc={proc.returncode}\n"
             f"stdout:\n{proc.stdout[-2000:]}\n"
             f"stderr:\n{proc.stderr[-2000:]}"
         )
