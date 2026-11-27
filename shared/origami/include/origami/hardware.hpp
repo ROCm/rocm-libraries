@@ -124,15 +124,29 @@ class ORIGAMI_EXPORT hardware_t {
   /**
    * @brief Architecture-specific constants for memory and compute characteristics.
    *
+   * hardware_t turns the mem*_perf_ratio constants into bytes per compute-clock cycle:
+   *   mem1 (L2)   = C1 / compute_clock
+   *   mem2 (MALL) = C2 / (memory_clock * mem_clock_ratio)
+   *   mem3 (DRAM) = C3 / memory_clock
+   * get_hardware_for_device() is what hipBLASLt uses at runtime and takes both clocks from
+   * HIP (hipDeviceProp_t::clockRate / memoryClockRate).  get_hardware_for_arch() has no
+   * device and derives the memory clock as compute_clock / mem_clock_ratio, so it only
+   * models the same machine if mem_clock_ratio is the compute/memory clock ratio the device
+   * reports.
+   *
+   * With that ratio, C1 and C2 are bandwidths in TB/s and C3 is a bandwidth in TB/s scaled
+   * by memory clock / compute clock (see gfx1250, gfx1151).  Where the ratio was not checked,
+   * the constants are effective values that fit the model through the device path, not
+   * necessarily the physical bandwidths.
    */
   struct architecture_constants {
-    double mem1_perf_ratio;
-    double mem2_perf_ratio;
-    double mem3_perf_ratio;
+    double mem1_perf_ratio;  ///< L2 bandwidth (C1 above)
+    double mem2_perf_ratio;  ///< MALL bandwidth (C2 above)
+    double mem3_perf_ratio;  ///< DRAM/HBM bandwidth (C3 above)
     size_t parallel_mi_cu;  ///< Number of parallel matrix instructions per compute unit
     std::tuple<double, double, double>
         mem_bw_per_wg_coefficients;  ///< Memory bandwidth coefficients per workgroup
-    double mem_clock_ratio;          ///< Memory clock ratio relative to compute clock
+    double mem_clock_ratio;          ///< Compute clock / memory clock as reported by HIP
     size_t simds_per_cu;   ///< SIMD units per Compute Unit (CDNA: 4 SIMD16, RDNA3/4: 2 SIMD32)
     size_t l1_capacity;    ///< L1 data cache capacity per CU in bytes (shared across all SIMDs)
     constexpr architecture_constants(double mem1_perf_ratio,
@@ -140,7 +154,7 @@ class ORIGAMI_EXPORT hardware_t {
                                      double mem3_perf_ratio,
                                      size_t parallel_mi_cu,
                                      std::tuple<double, double, double> mem_bw_per_wg_coefficients,
-                                     double mem_clock_ratio,  // Obtained through microbenchmarking
+                                     double mem_clock_ratio,
                                      size_t simds_per_cu,
                                      size_t l1_capacity)
         : mem1_perf_ratio(mem1_perf_ratio)
@@ -348,6 +362,8 @@ class ORIGAMI_EXPORT hardware_t {
       architecture_t arch,
       std::optional<int> pci_chip_id = std::nullopt,
       size_t n_cu = 0) noexcept {
+    // mem_clock_ratio is max. SCLK / max. MCLK as HIP reports them (printed by hipblaslt-bench).
+    // Only gfx1150, gfx1151 and gfx1250 are set that way; the 1.5 entries have not been checked.
     switch (arch) {
       case architecture_t::gfx90a:
         return {5.5, 1.21875121875121875122 * 1.2, 1.2, 4, std::make_tuple(0, 0.03, 0), 1.5, 4, 16 * 1024};
@@ -372,11 +388,14 @@ class ORIGAMI_EXPORT hardware_t {
         // AMD Navi 32
         return {4.86133, 1.21875121875121875122 * 1.28305, 0.420583, 2, std::make_tuple(0, 0.13169, 0), 1.5, 2, 32 * 1024};
       case architecture_t::gfx1150:
-        // AMD Strix Point iGPU
-        return {1.497, NO_MALL_AVAILABLE, 0.0300383, 2, std::make_tuple(0, 0.18, 0), 1.5, 2, 32 * 1024};
+        // AMD Strix Point iGPU: HIP reports 2900 / 2800 MHz.  DRAM-bound kernels stream
+        // 0.0703 TB/s (the median of the W4A16 dot2 kernels on weights over 8 MB; the peak
+        // measured on the device is 0.0841); the constant is scaled by memory / compute clock.
+        return {1.497, NO_MALL_AVAILABLE, 0.0703 * 2.8 / 2.9, 2, std::make_tuple(0, 0.18, 0), 2.9 / 2.8, 2, 32 * 1024};
       case architecture_t::gfx1151:
-        // AMD Strix Halo iGPU
-        return {2.47, 1.21875121875121875122 * 0.93, 0.215, 2, std::make_tuple(0, 0.22, 0), 1.5, 2, 32 * 1024};
+        // AMD Strix Halo iGPU: HIP reports 2900 / 1000 MHz.  DRAM streams 0.215 TB/s; the
+        // constant is scaled by memory / compute clock.
+        return {2.47, 1.21875121875121875122 * 0.93, 0.215 * 1.0 / 2.9, 2, std::make_tuple(0, 0.22, 0), 2.9 / 1.0, 2, 32 * 1024};
       case architecture_t::gfx1152:
         // AMD Radeon 840M iGPU
         return {0.849, NO_MALL_AVAILABLE, 0.096, 4, std::make_tuple(0, 0.13, 0), 1.5, 2, 32 * 1024};
@@ -722,6 +741,9 @@ class ORIGAMI_EXPORT hardware_t {
              {matrix_instruction(16, 16, 16, data_type_t::Int8), 32},  // v_wmma_i32_16x16x16_iu8
              // I4
              {matrix_instruction(16, 16, 16, data_type_t::Int4), 16},  // v_wmma_i32_16x16x16_iu4
+             // DOT2: one vector-ALU instruction of a wave
+             {matrix_instruction(1, 1, 64, data_type_t::Half), 1}, // v_dot2_f32_f16
+             {matrix_instruction(1, 1, 64, data_type_t::BFloat16), 1}, // v_dot2_f32_bf16
          }},
         {architecture_t::gfx1151,
          {
@@ -733,6 +755,9 @@ class ORIGAMI_EXPORT hardware_t {
              {matrix_instruction(16, 16, 16, data_type_t::Int8), 32},  // v_wmma_i32_16x16x16_iu8
              // I4
              {matrix_instruction(16, 16, 16, data_type_t::Int4), 16},  // v_wmma_i32_16x16x16_iu4
+             // DOT2: one vector-ALU instruction of a wave
+             {matrix_instruction(1, 1, 64, data_type_t::Half), 1}, // v_dot2_f32_f16
+             {matrix_instruction(1, 1, 64, data_type_t::BFloat16), 1}, // v_dot2_f32_bf16
          }},
         {architecture_t::gfx1152,
          {
@@ -1122,9 +1147,21 @@ class ORIGAMI_EXPORT hardware_t {
    * @param MI_N Matrix instruction N dimension
    * @param MI_K Matrix instruction K dimension
    * @param mi_input_type Input data type for the matrix instruction
-   * @return size_t Instruction latency in cycles, or 0 if not found
+   * @return double Instruction latency in cycles of the CU (the instruction's cycles on one SIMD
+   *         over the instructions a CU issues in parallel, so it can be a fraction), or the
+   *         default latency if not found
    */
-  size_t get_mi_latency(size_t MI_M, size_t MI_N, size_t MI_K, data_type_t mi_input_type) const;
+  double get_mi_latency(size_t MI_M, size_t MI_N, size_t MI_K, data_type_t mi_input_type) const;
+
+  /**
+   * @brief The same device at another compute clock.
+   *
+   * The memory rates are bytes per compute cycle, so they are rescaled to keep the bandwidths.
+   *
+   * @param ghz Compute clock in GHz
+   * @return hardware_t Copy of this hardware with compute_clock_ghz = @p ghz
+   */
+  hardware_t at_compute_clock(double ghz) const;
 
   /**
    * @brief Get valid matrix instruction dimensions for a given datatype.

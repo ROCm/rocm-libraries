@@ -77,6 +77,9 @@ struct heuristic_defaults_t {
   // Model tuning constants (relocated from gemm.cpp)
   static constexpr double TARGET_WG_SLOTS_PER_CU       = 2.0;
   static constexpr double K_ITER_LOOP_OVERHEAD         = 500.0;
+  /// gfx115x (RDNA3.5): slope of the loop-skeleton time (WMMA, loads, stores and LDS
+  /// removed) over K-iterations, fit on 14 shipped gfx1150/gfx1151 kernels.
+  static constexpr double GFX115X_K_ITER_LOOP_OVERHEAD = 120.0;
   static constexpr double BATCHED_FILL_ITER_TARGET     = 4.0;
   static constexpr double BATCHED_FILL_PENALTY         = 4.0;
   static constexpr double TAIL_WASTE_PENALTY           = 4.0;
@@ -232,69 +235,153 @@ struct heuristic_defaults_t {
   /// applied as its ratio, max(1, S_fit / occ) / max(1, S_dev / occ).
   static constexpr double GFX1250_FIT_EPILOGUE_OCC_SATURATION     = 2.5326976116052373;
   static constexpr double GFX1250_FIT_EPILOGUE_OCC_SATURATION_DEV = 2.0;
+
+  /// Per-K-iteration loop bookkeeping (branch / counter / barrier) for an architecture.
+  static constexpr double k_iter_loop_overhead(hardware_t::architecture_t arch) noexcept {
+    switch (arch) {
+      case hardware_t::architecture_t::gfx1150:
+      case hardware_t::architecture_t::gfx1151:
+      case hardware_t::architecture_t::gfx1152:
+      case hardware_t::architecture_t::gfx1153: return GFX115X_K_ITER_LOOP_OVERHEAD;
+      default: return K_ITER_LOOP_OVERHEAD;
+    }
+  }
+
+  /// gfx1151: round trip of one K-iteration's global loads that hit the caches, in compute
+  /// cycles (it tracks the shader clock).  Fitted to memory-only kernel timings
+  /// (tests/test_gemm.cpp, gfx1151 L_mem reference).
+  static constexpr double GFX1151_LOAD_LATENCY_CYCLES = 1050.0;
+  /// gfx1150: the same round trip, fitted to the W4A16 dot2 kernels (one wave per workgroup, 8 to
+  /// 16 workgroups per CU) on 1 to 5 token shapes that DRAM does not bound; 850 to 1250 fit
+  /// alike, and so does the gfx1151 value on the gfx1151 timings of those kernels.
+  static constexpr double GFX1150_LOAD_LATENCY_CYCLES = 1050.0;
+
+  /// Round trip of one K-iteration's global loads of a workgroup, in compute cycles; 0 where it
+  /// has not been measured.
+  static constexpr double load_latency_cycles(hardware_t::architecture_t arch) noexcept {
+    switch (arch) {
+      case hardware_t::architecture_t::gfx1151: return GFX1151_LOAD_LATENCY_CYCLES;
+      case hardware_t::architecture_t::gfx1150: return GFX1150_LOAD_LATENCY_CYCLES;
+      default: return 0.0;
+    }
+  }
+
+  /// Soft-maximum sharpness with which the memory and the compute time of a K loop overlap; 0
+  /// where they overlap fully (the loop takes the larger of the two).
+  /// gfx1150 [MEASURED]: the eight 8-wave W4A16 kernels with 8 workgroups (each alone on a WGP,
+  /// on its four SIMDs) against 16 (two per WGP), one tile each, K 3968 and 8064: alone a
+  /// workgroup is 1.65 to 1.9x faster, not 2x, because its memory time, which does not shrink,
+  /// is then half or more of its compute.  A sharpness of 3 gives both launches within 7% (a
+  /// plain maximum has the 16 right and the 8 6 to 22% under), and brings the per-kernel
+  /// campaigns from 0.90 to 0.93 of measured to 0.97 to 0.99; 2.5 to 4 fit alike.
+  /// gfx1151: the same measurement gives 1.9 to 2.1x and the plain maximum is within 7% on
+  /// both launches (its memory is three times faster, behind a MALL): full overlap.
+  static constexpr double GFX1150_KLOOP_OVERLAP = 3.0;
+  static constexpr double kloop_overlap_sharpness(hardware_t::architecture_t arch) noexcept {
+    return arch == hardware_t::architecture_t::gfx1150 ? GFX1150_KLOOP_OVERLAP : 0.0;
+  }
+
+  /// Rate at which the kernels of a device without a MALL store their output, in GB/s of the
+  /// output's bytes; 0 where it is not measured (the store then goes at the DRAM rate of the
+  /// sectors it touches).
+  /// gfx1150 [MEASURED]: 2560 rows x 256 to 4096 tokens (an output of 1.3 to 21 MB) at K 64 and
+  /// 256, seven tile kernels of 128 and 256 columns at one workgroup per tile: the kernel time
+  /// is linear in the tokens and the same for every kernel, 0.075 to 0.082 us per token at
+  /// K 64 and 0.136 to 0.150 at K 256, which leaves 0.055 us per token (5120 B) that does not
+  /// depend on K: 93 GB/s.  The model had 0.146 (the sectors of the stores, twice the bytes,
+  /// at the 70 GB/s of its DRAM).
+  static constexpr double GFX1150_OUTPUT_STORE_GB_PER_S = 93.0;
+  static constexpr double output_store_gb_per_s(hardware_t::architecture_t arch) noexcept {
+    return arch == hardware_t::architecture_t::gfx1150 ? GFX1150_OUTPUT_STORE_GB_PER_S : 0.0;
+  }
+
+  /// Time a workgroup spends on a tile outside its K loop (argument and address set-up,
+  /// reduction and store), in compute cycles; 0 where it has not been measured.  Fitted to the
+  /// same dot2 kernel timings as the round trip above: the time left at zero K iterations.
+  static constexpr double GFX1151_TILE_SETUP_CYCLES = 3500.0;
+  static constexpr double GFX1150_TILE_SETUP_CYCLES = 5000.0;
+  static constexpr double tile_setup_cycles(hardware_t::architecture_t arch) noexcept {
+    switch (arch) {
+      case hardware_t::architecture_t::gfx1150: return GFX1150_TILE_SETUP_CYCLES;
+      case hardware_t::architecture_t::gfx1151: return GFX1151_TILE_SETUP_CYCLES;
+      default: return 0.0;
+    }
+  }
+
+  /// Compute clock at which the architecture runs a kernel of matrix instructions, in GHz; 0
+  /// where it runs it at the clock the device reports.  gfx1150 and gfx1151 report their
+  /// maximum (2.9 GHz) and run WMMA kernels at 2.1: the time per K iteration of 44 W4A16 WMMA
+  /// kernels in the compute-bound regime gives 16 x 2.9 / 22 cycles per WMMA on both, the
+  /// gfx1151 WMMA roofline (43 TFLOP/s) gives the same, and the shader clock read on a gfx1151
+  /// stays near 2.3 GHz under a WMMA kernel and reaches 2.9 under a dot2 one.  The cycle
+  /// constants of these architectures (MI table, loop skeleton, load round trip) are cycles of
+  /// the clock the kernel runs at.
+  static constexpr double GFX115X_MATRIX_CLOCK_GHZ = 2.1;
+  static constexpr double matrix_kernel_clock_ghz(hardware_t::architecture_t arch) noexcept {
+    switch (arch) {
+      case hardware_t::architecture_t::gfx1150:
+      case hardware_t::architecture_t::gfx1151: return GFX115X_MATRIX_CLOCK_GHZ;
+      default: return 0.0;
+    }
+  }
+
+  /// Whether the terms of the tile model were checked on the architecture against kernels
+  /// timed one by one, with the per-workgroup costs above measured as what one workgroup waits
+  /// or spends.  The tile model then shares those costs among the workgroups resident on a CU,
+  /// whose waits overlap, and charges a launched tile what it runs.  Elsewhere the costs are
+  /// charges fitted per tile, with the corrections fitted along with them, and stay as they are.
+  static constexpr bool has_measured_tile_terms(hardware_t::architecture_t arch) noexcept {
+    return load_latency_cycles(arch) > 0.0;
+  }
 };
 
 /**
- * @brief W4A16 (int4 A dequantized to a bf16/fp16 MI type) on gfx1150 and gfx1151: constants of
- *        the latency model and of the Stream-K launch grid, fit on hipBLASLt kernel times.
+ * @brief W4A16 (int4 A dequantized to a bf16/fp16 MI type) on gfx1150 and gfx1151: what the
+ *        tile model has to know about the kernels.
  *
  * The two architectures run the same kernels on the same ISA, so every constant that describes
  * the kernels is the same on both.  What differs is read from hardware_t (CUs, SIMDs per CU,
- * MALL) and from the kernel's CUOccupancy, except the DRAM bandwidth of the decode model.
+ * MALL, memory rates, per-workgroup costs) and from the kernel's CUOccupancy.  None of the
+ * constants is fitted to the picks: [KERNEL] marks a property of the kernels of the set, counted
+ * in them, and [MEASURED] a rate timed on the device.
  */
 struct w4a16_params_t {
-  // Legend: the tag at the end of each constant says how its value was obtained.
-  //   [EMPIRICAL] chosen by sweeping it against measured hipBLASLt kernel times;
-  //   [KERNEL]    a property of the kernels of the set, not fitted;
-  //   [DEFAULT]   a fallback for a config that does not carry the value, not fitted.
-  //   [MEASURED]  measured on the device (the DRAM bandwidths of the decode model, in
-  //               w4a16_decode_dram_bytes_per_us below).
 
   // --- Tile latency model ---
-  // Dequantize VALU per element, with its dependency stalls (bf16 rounds f32 products, fp16
-  // uses packed halves).
-  static constexpr double BF16_DEQUANT_VALU_PER_ELEM = 10.0;  // [EMPIRICAL]
-  static constexpr double F16_DEQUANT_VALU_PER_ELEM  = 5.0;  // [EMPIRICAL]
-  // Cycles per C element of a Stream-K partial tile on the critical path: the workgroup that
-  // finishes a tile waits for, reads and adds the f32 partial of each other workgroup.
-  // This one depends on the memory system, not only on the kernels: it was fitted on gfx1151,
-  // which holds the partials in its MALL.  gfx1150 has no MALL and takes the same value because
-  // its picks do not depend on it: from 0 to twice this value none of 632 measured problems
-  // changes kernel.
-  static constexpr double SK_FIXUP_CYCLES_PER_ELEM = 2.71;  // [EMPIRICAL]
+  // Instructions a K iteration issues on the SIMDs other than the matrix instruction, per
+  // weight of a lane, counted in the kernels' K loops (the model does not see the zero point
+  // and takes the middle of the kernels with and without it).  The WMMA kernels dequantize
+  // into LDS: VALU (bf16 3.50 and 3.94, fp16 2.25 and 2.48), LDS reads and writes (0.6 to 1.0)
+  // and global loads (0.2 to 0.3).  The dot2 kernels dequantize into registers: VALU other
+  // than the dot2 (bf16 2.05 and 3.10, fp16 2.19 and 2.34).
+  static constexpr double BF16_DEQUANT_VALU_PER_ELEM      = 4.7;  // [KERNEL]
+  static constexpr double F16_DEQUANT_VALU_PER_ELEM       = 3.4;  // [KERNEL]
+  static constexpr double BF16_DOT2_DEQUANT_VALU_PER_ELEM = 2.6;  // [KERNEL]
+  static constexpr double F16_DOT2_DEQUANT_VALU_PER_ELEM  = 2.3;  // [KERNEL]
 
-  // --- Stream-K grid (grid_k_split_aware_w4a16) ---
-  // Waves of a workgroup when the config does not carry its wave layout.
-  static constexpr int DEFAULT_WAVES_PER_WORKGROUP = 4;  // [DEFAULT]
-  // Workgroups with this many waves fill a CU (rules 1 and 4).
-  static constexpr int FULL_CU_WAVES = 16;  // [KERNEL]
-  // Rule 2: K iterations up to which a tile per CU or less stays DP, and up to which it does
-  // when the tiles are more than half the CUs (each workgroup then gets over half a tile).
-  static constexpr size_t SK_SPLIT_MIN_K_ITERS           = 8;  // [EMPIRICAL]
-  static constexpr size_t SK_SPLIT_MIN_K_ITERS_OVER_HALF = 64;  // [EMPIRICAL]
-  // Rules 4 and 6: with a MALL to hold the partials, tiles are shared below this many tiles
-  // per CU (a single row of token tiles up to it).
-  static constexpr size_t SHARED_MAX_TILES_PER_CU = 5;  // [EMPIRICAL]
-  // Above the shared range (or without a MALL): DP for K up to this many iterations.
-  static constexpr size_t MANY_TILES_DP_MAX_K_ITERS = 16;  // [EMPIRICAL]
-  // Rule 4: largest ceil(t) / t that still runs DP: full-CU workgroups, 4-wave (non-token)
-  // ones, and the rest.
-  static constexpr double DP_MAX_WAVE_ROUNDING_FULL_CU = 1.5;  // [EMPIRICAL]
-  static constexpr double DP_MAX_WAVE_ROUNDING_4_WAVES = 1.15;  // [EMPIRICAL]
-  static constexpr double DP_MAX_WAVE_ROUNDING         = 1.06;  // [EMPIRICAL]
-  // Rule 5: token tiles (MT_N at most this) get one workgroup per SIMD of the CU.
-  static constexpr size_t TOKEN_TILE_MAX_N = 48;  // [EMPIRICAL]
-
-  // --- Decode kernels (dot2 WaveSplitK: one wave per workgroup, MT_M weight rows x MT_N
-  // tokens, K split over the wave's lanes; see compute_w4a16_decode_latency) ---
-  // Cycles of a wave: fixed (start, prologue, reduction, store), and per K iteration (the
-  // load-to-use latency of its global reads and the work on them).
-  static constexpr double DECODE_WAVE_CYCLES = 5000.0;  // [EMPIRICAL]
-  static constexpr double DECODE_ITER_CYCLES = 1500.0;  // [EMPIRICAL]
+  // Stream-K fixup (Components/StreamK.py, linear reduction): the workgroup that owns a tile
+  // waits for the flag of each other workgroup that worked on it, loads that workgroup's whole
+  // MT_M x MT_N f32 partial from the workspace and adds it, one partial after another.
+  // [MEASURED] on a gfx1151: one tile split over 2 to 6 workgroups with the same K each (so the
+  // K loops do not change), seven kernels of 4, 8 and 16 waves and partials of 2 to 197 KB:
+  // the kernel grows per partial by 0.3 us for 2 KB, 1.6 for 98 KB, 3.2 for 197 KB, whatever
+  // part of the tile lies inside the problem: the bytes at 69 GB/s, on top of the flag poll.
+  // The poll is a load that goes to memory, charged as a load round trip: with the CUs shared
+  // a partial of 2 KB costs 0.4 to 0.65 us (80 and 40 workgroups of 32x16x128 as 2 to 40
+  // splits per tile, the same K each), 0.3 with the device idle.  (128x128x64 and 160x128x64
+  // loaded a partial 2 accumulators at a time, 32 and 40 serialized batches, and cost 3.7 and
+  // 4.45 us per partial; their fixup now loads it in 2 to 4 batches and they are on the line:
+  // 1.1 to 1.5 us.)
+  // That is the owner's rate with the device idle.  With every CU busy the fixup is bound by
+  // the device's memory instead, through which all the partials are stored and loaded (40
+  // workgroups of 96x256x64, same K each: 20 tiles split in 2 take 15.6 us more than 40 whole
+  // tiles, 10 split in 4 25.8, 5 split in 8 30: 2 to 3.4 MB of partials at 115 to 125 GB/s,
+  // half the DRAM rate); that bound is computed from the hardware's bandwidth.
+  static constexpr double SK_FIXUP_GB_PER_S       = 69.0;  // [MEASURED]
 };
 
-/// Whether the W4A16 model applies to @p problem on @p hardware. The latency model and the
-/// Stream-K grid rule both use it, so they apply together.
+/// Whether the W4A16 terms apply to @p problem on @p hardware. The latency model and the
+/// Stream-K launch grid both use it, so they apply together.
 inline bool is_w4a16(const problem_t& problem, const hardware_t& hardware) {
   if (problem.a_dtype != data_type_t::Int4) return false;
   if (problem.mi_dtype != data_type_t::BFloat16 && problem.mi_dtype != data_type_t::Half) return false;
@@ -304,25 +391,6 @@ inline bool is_w4a16(const problem_t& problem, const hardware_t& hardware) {
       return true;
     default:
       return false;
-  }
-}
-
-/// Peak DRAM read bandwidth of the device for the W4A16 decode model, in bytes/us (measured), or
-/// nullopt where the device has no decode model.
-// TODO(AIESW-51613): these values should come from hardware_t (mem3_perf_ratio is the DRAM
-// bandwidth), not from here.  The values hardware_t holds today are wrong: about 623 GB/s on
-// gfx1151 and 31 GB/s on gfx1150, against the 247 and 84.1 GB/s measured.  The tile model is
-// calibrated with them (it underestimates the memory latency and gfx1150's value compensates
-// for that), so the Origami model has to be fixed before they can change.  Until then the
-// decode model keeps the measured bandwidths here.
-inline std::optional<double> w4a16_decode_dram_bytes_per_us(const hardware_t& hardware) {
-  switch (hardware.arch) {
-    case hardware_t::architecture_t::gfx1150:
-      return 84.1e3;  // [MEASURED] Strix Point: 78.3 GiB/s
-    case hardware_t::architecture_t::gfx1151:
-      return 247.0e3;  // [MEASURED] Strix Halo: 230 GiB/s
-    default:
-      return std::nullopt;
   }
 }
 

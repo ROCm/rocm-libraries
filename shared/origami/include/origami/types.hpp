@@ -630,6 +630,10 @@ struct config_t {
   /// Grid selection algorithm.
   grid_selection_t grid_selection = grid_selection_t::k_split_aware;
 
+  /// Stream-K launch grid (workgroups) to model the kernel with.  0: the grid that
+  /// streamk::select_grid_size picks with grid_selection.
+  std::size_t launch_grid = 0;
+
   /// Index of config, not used by Origami but can be used by the user
   std::size_t index = 0;
 
@@ -779,6 +783,11 @@ struct problem_t {
   /// MX block size.
   std::size_t a_mx_block_size = 0;
   std::size_t b_mx_block_size = 0;
+
+  /// Bytes from one stored vector of A (B) to the next: lda (ldb) times the element size.
+  /// 0: the stride of an unpadded matrix.
+  std::size_t a_stride_bytes = 0;
+  std::size_t b_stride_bytes = 0;
 };
 
 /**

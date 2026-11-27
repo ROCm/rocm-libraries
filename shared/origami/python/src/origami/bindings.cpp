@@ -191,6 +191,7 @@ NB_MODULE(origami, m) {
       .def_rw("workspace_size_per_elem_c", &origami::config_t::workspace_size_per_elem_c)
       .def_rw("reduction_strategy", &origami::config_t::reduction_strategy)
       .def_rw("grid_selection", &origami::config_t::grid_selection)
+      .def_rw("launch_grid", &origami::config_t::launch_grid)
       .def_rw("prediction_mode", &origami::config_t::prediction_mode)
       .def_rw("grvw_a", &origami::config_t::grvw_a)
       .def_rw("grvw_b", &origami::config_t::grvw_b)
@@ -258,7 +259,9 @@ NB_MODULE(origami, m) {
       .def_rw("d_dtype", &origami::problem_t::d_dtype)
       .def_rw("mi_dtype", &origami::problem_t::mi_dtype)
       .def_rw("a_mx_block_size", &origami::problem_t::a_mx_block_size)
-      .def_rw("b_mx_block_size", &origami::problem_t::b_mx_block_size);
+      .def_rw("b_mx_block_size", &origami::problem_t::b_mx_block_size)
+      .def_rw("a_stride_bytes", &origami::problem_t::a_stride_bytes)
+      .def_rw("b_stride_bytes", &origami::problem_t::b_stride_bytes);
 
   nanobind::class_<origami::staggerU_t>(m, "staggerU_t")
       .def(nanobind::init<>())

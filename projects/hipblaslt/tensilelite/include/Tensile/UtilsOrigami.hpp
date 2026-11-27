@@ -38,6 +38,20 @@
 namespace TensileLite
 {
 
+    /**
+     * Bytes from one stored vector of a matrix operand to the next (its leading dimension times
+     * its element size), for origami::problem_t::a_stride_bytes and b_stride_bytes. 0 for a
+     * tensor without a second dimension.
+     */
+    template <typename Tensor>
+    inline std::size_t operandStrideBytes(const Tensor& tensor)
+    {
+        const auto& strides = tensor.strides();
+        return strides.size() > 1
+                   ? static_cast<std::size_t>(static_cast<double>(strides[1]) * tensor.elementBytes())
+                   : 0;
+    }
+
     inline origami::data_type_t datatypeToAnalyticalDatatype(rocisa::DataType type)
     {
         switch(type)
@@ -127,6 +141,13 @@ namespace TensileLite
             .workspace_size            = std::numeric_limits<size_t>::max(),
             .workspace_size_per_elem_c = std::numeric_limits<size_t>::max(),
             .stream_k                  = (sm.isStreamK() ? (sm.hasDynamicAssignment() ? 4 : sm.hasHybridAssignment() ? 5 : 3) : 0),
+            // A handwritten custom kernel reduces its Stream-K partials in the kernel (see
+            // ContractionSolution::getSKReduction): Origami must not rank it with a separate
+            // reduction launch.
+            .reduction_strategy        = (sm.isStreamK() && !solution.customKernel.name.empty()
+                                          && !solution.customKernel.generated)
+                                             ? origami::reduction_t::tree
+                                             : origami::reduction_t::none,
             .index                     = index,
             .grvw_a                    = static_cast<std::size_t>(sm.grvwA),
             .grvw_b                    = static_cast<std::size_t>(sm.grvwB),

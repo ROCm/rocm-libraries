@@ -73,6 +73,8 @@ hardware_t::hardware_t(architecture_t arch,
           lds_capacity,
           rf_capacity,
           num_xcds,
+          // TB/s -> bytes per compute-clock cycle; memory_clock * mem_clock_ratio stands in for
+          // the compute clock, and mem3 carries the remaining clock ratio in its constant.
           1e9 * constants.mem1_perf_ratio / (compute_clock_ghz * 1e6),
           1e9 * constants.mem2_perf_ratio / (memory_clock_ghz * 1e6 * constants.mem_clock_ratio),
           1e9 * constants.mem3_perf_ratio / (memory_clock_ghz * 1e6),
@@ -293,7 +295,19 @@ void hardware_t::print() const {
   std::cout << "===========================================================\n";
 }
 
-size_t hardware_t::get_mi_latency(size_t MI_M,
+hardware_t hardware_t::at_compute_clock(double ghz) const {
+  hardware_t other = *this;
+  if (ghz > 0.0 && compute_clock_ghz > 0.0) {
+    const double scale = compute_clock_ghz / ghz;
+    other.mem1_perf_ratio *= scale;
+    other.mem2_perf_ratio *= scale;
+    other.mem3_perf_ratio *= scale;
+    other.compute_clock_ghz = ghz;
+  }
+  return other;
+}
+
+double hardware_t::get_mi_latency(size_t MI_M,
                                   size_t MI_N,
                                   size_t MI_K,
                                   data_type_t mi_input_type) const {
@@ -302,13 +316,13 @@ size_t hardware_t::get_mi_latency(size_t MI_M,
 
   auto it = instruction_map.find(key);
   if (it != instruction_map.end()) {
-    return it->second / parallel_mi_cu;
+    return static_cast<double>(it->second) / static_cast<double>(parallel_mi_cu);
   } else {
     if (origami::runtime_options::get().debug_enabled)
       std::cerr << "Warning: Latency not found for MI_M=" << MI_M << ", MI_N=" << MI_N
                 << ", MI_K=" << MI_K << ", mi_input_type=" << datatype_to_string(mi_input_type)
                 << ". Returning latency value of 32 (really slow).\n";
-    return 32 / parallel_mi_cu;  // Default latency if instruction is not found
+    return 32.0 / static_cast<double>(parallel_mi_cu);  // Default latency if instruction is not found
   }
 }
 

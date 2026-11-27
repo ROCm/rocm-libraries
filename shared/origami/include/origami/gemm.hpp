@@ -58,6 +58,11 @@ struct ORIGAMI_EXPORT context_t {
   /// This is the effective CU count the whole model schedules against.
   size_t n_cu                 = 0;
   size_t active_cus           = 0;
+  /// Workgroups resident on an active CU at a time (the kernel's occupancy caps them, and so
+  /// does the grid when it hands a CU fewer).  A fraction where a workgroup takes more than a
+  /// CU: hardware_t counts a CU per simds_per_cu SIMDs and CUOccupancy counts workgroups per
+  /// hardware_t::OCCUPANCY_SIMDS SIMDs.
+  double resident_wgs         = 1.0;
   double mem_bw_limited       = 0.0;
   double write_mem_bw_limited = 0.0;
 
@@ -397,9 +402,9 @@ ORIGAMI_EXPORT double compute_cvt_overhead(const problem_t& problem,
  * @param problem Problem description (M, N, K, etc.)
  * @param hardware Hardware characteristics (@see origami::hardware_t)
  * @param config Kernel configuration.
- * @return size_t Latency in cycles.
+ * @return double Latency in cycles.
  */
-ORIGAMI_EXPORT size_t compute_mt_compute_latency(const problem_t& problem,
+ORIGAMI_EXPORT double compute_mt_compute_latency(const problem_t& problem,
                                   const hardware_t& hardware,
                                   const config_t& config);
 
