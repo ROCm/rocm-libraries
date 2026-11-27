@@ -77,6 +77,9 @@ struct BlockFmhaBwdPipelineTdmPolicy : BlockFmhaBwdPipelineDefaultPolicy
     // store_tile, keeps its XOR instead.
     static constexpr index_t kOperandLdsPad = 8;
 
+    // gfx1250 LDS: 64 banks * 4 B (CDNA5 ISA 11.1)
+    static constexpr index_t kLdsBankRowBytes = 256;
+
     // TDM encodes pad_amount as (dwords of padding - 1) and pad_interval as
     // (log2 of the dwords written between pads - 1). One row is exactly one
     // interval, so every row gets kOperandLdsPad elements appended. That must
@@ -817,12 +820,71 @@ struct BlockFmhaBwdPipelineTdmPolicy : BlockFmhaBwdPipelineDefaultPolicy
                GetSmemSizeV<Problem>() + (j - 1) * GetQDOSlotStride<Problem>();
     }
 
+    // Two dS boxes, used in turn: consecutive tiles never share a box,
+    // so a dS store can't overwrite a box another wave still reads.
+    // One box when there is one slot (the TDM drain already orders the
+    // read) or a bias/dbias (box 0 aliases bias_lds, so the barrier
+    // stays anyway)
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetSGradBoxes()
+    {
+        if constexpr(GetQDOSlots<Problem>() >= 2 &&
+                     Problem::BiasEnum != BlockAttentionBiasEnum::ELEMENTWISE_BIAS &&
+                     !Problem::kHasBiasGrad)
+        {
+            return 2;
+        }
+        else
+        {
+            return 1;
+        }
+    }
+
+    // Distance between box j and box j+1 in bytes in whole bank rows
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetSGradBoxStride()
+    {
+        constexpr index_t kBytes = sizeof(typename Problem::GemmDataType) *
+                                   MakeSGradLdsBlockDescriptor<Problem>().get_element_space_size();
+        return integer_least_multiple(kBytes, kLdsBankRowBytes);
+    }
+
+    // Offset of dS box 0: right after slot 0's Qt, dO, dOt, Q, LSE and D.
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetSGradBox0Offset()
+    {
+        return GetSmemSizeQT<Problem>() + GetSmemSizeOGrad<Problem>() +
+               GetSmemSizeOGradT<Problem>() + GetSmemSizeQ<Problem>() + GetSmemSizeLSE<Problem>() +
+               GetSmemSizeD<Problem>();
+    }
+
+    // Start of box j, j >= 1 (box 0 comes from GetSGradBox0Offset)
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr index_t GetSGradBoxBase(index_t j)
+    {
+        // first byte after the last slot, box 1 goes here
+        constexpr index_t kEnd = GetQDOSlotBase<Problem>(GetQDOSlots<Problem>());
+        constexpr index_t kGap =
+            ((GetSGradBox0Offset<Problem>() - kEnd) % kLdsBankRowBytes + kLdsBankRowBytes) %
+            kLdsBankRowBytes;
+        // gap puts box 1 in box 0's bank alignment
+        return kEnd + kGap + (j - 1) * GetSGradBoxStride<Problem>();
+    }
+
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
     {
-        constexpr index_t single =
-            GetSmemSizeStaged<Problem>() + GetSmemSizeVGradAcc<Problem>() + GetSmemSizeV<Problem>();
-        return single + (GetQDOSlots<Problem>() - 1) * GetQDOSlotStride<Problem>();
+        if constexpr(GetSGradBoxes<Problem>() > 1)
+        {
+            // end of box 1
+            return GetSGradBoxBase<Problem>(GetSGradBoxes<Problem>());
+        }
+        else
+        {
+            constexpr index_t single = GetSmemSizeStaged<Problem>() +
+                                       GetSmemSizeVGradAcc<Problem>() + GetSmemSizeV<Problem>();
+            return single + (GetQDOSlots<Problem>() - 1) * GetQDOSlotStride<Problem>();
+        }
     }
 };
 
