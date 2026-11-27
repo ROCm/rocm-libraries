@@ -4542,15 +4542,17 @@ namespace
     // test hooks nothing can set one, and every check below is constant false.
     enum class TuningFailureStage : int
     {
-        None               = 0,
-        Setup              = 1,
-        Enumeration        = 2,
-        MidSearch          = 3,
-        TruncateAfterFirst = 4,
-        BudgetSpent        = 5,
-        ScratchAlloc       = 6,
-        Seeding            = 7,
-        FlushCost          = 8,
+        None                       = 0,
+        Setup                      = 1,
+        Enumeration                = 2,
+        MidSearch                  = 3,
+        TruncateAfterFirst         = 4,
+        BudgetSpent                = 5,
+        ScratchAlloc               = 6,
+        Seeding                    = 7,
+        FlushCost                  = 8,
+        TruncateWithNegativeTiming = 9,
+        TruncateWithoutBaseline    = 10,
     };
 
     std::atomic<int> g_injectedTuningFailure{0};
@@ -5683,10 +5685,12 @@ namespace
         size_t                                                  required     = 0;
         bool                                                    launchFailed = false;
 
-        std::vector<double> measuredUs(candidates.size(), -1.0);
-        std::vector<size_t> requiredBytes(candidates.size(), 0);
-        size_t              measured  = 0;
-        size_t              attempted = 0;
+        // Flush correction can make a successful measurement negative, so its
+        // presence must be independent of its value.
+        std::vector<std::optional<double>> measuredUs(candidates.size());
+        std::vector<size_t>                requiredBytes(candidates.size(), 0);
+        size_t                             measured  = 0;
+        size_t                             attempted = 0;
 
         auto discardCandidate = [&] {
             static_cast<void>(hipStreamSynchronize(prob.stream));
@@ -5717,6 +5721,9 @@ namespace
             launchFailed = false;
 
             const auto& solution = candidates[c];
+            if(solution->index == baselineIndex
+               && tuningFailureInjected(TuningFailureStage::TruncateWithoutBaseline))
+                return false;
             try
             {
                 static_cast<void>(resetSynchronizer());
@@ -5798,6 +5805,11 @@ namespace
                 return false;
             }
 
+            // Exercise a successful measurement whose flush correction went
+            // below zero, without depending on timing jitter in a test.
+            if(tuningFailureInjected(TuningFailureStage::TruncateWithNegativeTiming))
+                result.median_us = -1.0;
+
             measured++;
             measuredUs[c]    = result.median_us;
             requiredBytes[c] = required;
@@ -5817,7 +5829,10 @@ namespace
 
         auto shouldStop = [&] {
             if(outOfBudget()
-               || (measured > 0 && tuningFailureInjected(TuningFailureStage::TruncateAfterFirst)))
+               || (measured > 0
+                   && (tuningFailureInjected(TuningFailureStage::TruncateAfterFirst)
+                       || tuningFailureInjected(TuningFailureStage::TruncateWithNegativeTiming)
+                       || tuningFailureInjected(TuningFailureStage::TruncateWithoutBaseline))))
                 return true;
 
             if(wantProgress && elapsedUs() >= nextProgressUs)
@@ -5874,7 +5889,7 @@ namespace
         // otherwise run, so recording it could make the shape slower.
         bool baselineMeasured = false;
         for(size_t c = 0; c < candidates.size(); c++)
-            if(candidates[c]->index == baselineIndex && measuredUs[c] >= 0.0)
+            if(candidates[c]->index == baselineIndex && measuredUs[c].has_value())
                 baselineMeasured = true;
 
         if(found.best >= candidates.size() || (found.stopped && !baselineMeasured))
@@ -5892,13 +5907,13 @@ namespace
         auto recordedUs = [](double us) { return std::max(1e-3, us); };
 
         for(size_t c = 0; c < candidates.size(); c++)
-            if(candidates[c]->index == baselineIndex && measuredUs[c] >= 0.0)
-                winnerOut.baselineTimeUs = recordedUs(measuredUs[c]);
+            if(candidates[c]->index == baselineIndex && measuredUs[c].has_value())
+                winnerOut.baselineTimeUs = recordedUs(*measuredUs[c]);
 
         const auto& winner               = candidates[found.best];
         winnerOut.solutionIndex          = winner->index;
         winnerOut.requiredWorkspaceBytes = requiredBytes[found.best];
-        winnerOut.winnerTimeUs           = recordedUs(measuredUs[found.best]);
+        winnerOut.winnerTimeUs           = recordedUs(measuredUs[found.best].value());
         winnerOut.baselineIndex          = baselineIndex;
 
         // From the measured object, which candidate resolution above guarantees

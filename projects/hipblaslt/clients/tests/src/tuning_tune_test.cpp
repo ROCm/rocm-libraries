@@ -2047,6 +2047,74 @@ namespace
             << "the partial search did not start with the caller's algo";
     }
 
+    // A successful measurement can be negative after flush correction. It is
+    // still a measured baseline, so a stopped search must record its result.
+    TEST_F(TuningTune_pre_checkin, smoke_PartialSearchAcceptsANegativeBaseline)
+    {
+        const auto identities = candidateIdentities(1024, 512, 1024, 8);
+        if(identities.size() < 2)
+            GTEST_SKIP() << "this device offers one solution for the shape";
+        const int given = identities[1].first;
+
+        enterMode("tune", m_path);
+        hipblaslt_tuning_inject_failure_for_test(9);
+
+        int launched = -1;
+        ASSERT_TRUE(runGemmWith(1024, 512, 1024, AlgoFrom::Index, given, &launched));
+        EXPECT_EQ(launched, given);
+        ASSERT_EQ(valueRowCount(m_path), 1u)
+            << "the negative baseline discarded the partial result";
+        EXPECT_EQ(columnValues(m_path, "complete").at(0), "0");
+        EXPECT_EQ(std::stoi(columnValues(m_path, "solution_index").at(0)), given);
+        EXPECT_DOUBLE_EQ(std::stod(columnValues(m_path, "us").at(0)), 1e-3);
+    }
+
+    // Timing another candidate cannot justify a partial result when the
+    // caller's baseline was never measured, regardless of its stored duration.
+    TEST_F(TuningTune_pre_checkin, smoke_PartialSearchRejectsAnUnmeasuredBaseline)
+    {
+        const auto identities = candidateIdentities(1024, 512, 1024, 8);
+        if(identities.size() < 3)
+            GTEST_SKIP() << "this device needs three solutions to stop before exhausting the search";
+        const int given = identities[1].first;
+
+        enterMode("tune", m_path);
+        hipblaslt_tuning_inject_failure_for_test(10);
+
+        int launched = -1;
+        ASSERT_TRUE(runGemmWith(1024, 512, 1024, AlgoFrom::Index, given, &launched));
+        EXPECT_EQ(launched, given);
+        EXPECT_EQ(valueRowCount(m_path), 0u);
+        EXPECT_EQ(counters().skipped, 1u)
+            << "the search did not stop after measuring an alternative to the baseline";
+        EXPECT_EQ(counters().tuned, 0u);
+    }
+
+    // A finished search can have a measured winner even when its baseline
+    // could not be timed. The alternative is last with a two-candidate cap,
+    // so the injected stop cannot fire before the search finishes.
+    TEST_F(TuningTune_pre_checkin, smoke_FinishedSearchRecordsWinnerWithoutMeasuredBaseline)
+    {
+        const auto identities = candidateIdentities(1024, 512, 1024, 2);
+        if(identities.size() < 2)
+            GTEST_SKIP() << "this device offers one solution for the shape";
+        const int given = identities[1].first;
+
+        enterMode("tune", m_path);
+        setenv("HIPBLASLT_TUNING_MAX_CANDIDATES", "2", 1);
+        hipblaslt_tuning_reset_for_test();
+        hipblaslt_tuning_inject_failure_for_test(10);
+
+        int launched = -1;
+        ASSERT_TRUE(runGemmWith(1024, 512, 1024, AlgoFrom::Index, given, &launched));
+        EXPECT_EQ(launched, given);
+        ASSERT_EQ(valueRowCount(m_path), 1u);
+        EXPECT_EQ(columnValues(m_path, "complete").at(0), "1");
+        EXPECT_EQ(std::stoi(columnValues(m_path, "solution_index").at(0)), identities[0].first);
+        EXPECT_EQ(counters().tuned, 1u);
+        EXPECT_EQ(counters().skipped, 0u);
+    }
+
     // The same for an algo past the candidates the tuner searches, such as one
     // far down the list the heuristic hands a caller. It is not among the
     // candidates at all, so it has to be added to them, at the front.
