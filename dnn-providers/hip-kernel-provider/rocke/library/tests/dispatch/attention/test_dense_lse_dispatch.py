@@ -4,15 +4,16 @@
 """Dispatcher contract for the optional dense LSE output (host only)."""
 
 import dataclasses
+import re
 
 import pytest
-
 from dispatch.attention import (
     AttentionRequest,
     attention_execution_candidates,
     dispatch_attention,
     dispatch_attention_all,
 )
+from rocke.tests.bool_flags import bool_flag_refusal
 
 _DENSE_SPEC_IDS = {
     "gfx942": ("gfx942_dense",),
@@ -51,7 +52,8 @@ def _pinned(req, spec_id):
 
 @pytest.mark.parametrize("bad_emit_lse", ["false", 0, 1, None])
 def test_emit_lse_rejects_non_boolean_values(bad_emit_lse):
-    with pytest.raises(ValueError, match="emit_lse must be a bool"):
+    message = bool_flag_refusal("emit_lse", bad_emit_lse, what="AttentionRequest")
+    with pytest.raises(ValueError, match=re.escape(message)):
         dispatch_attention(_request("gfx950", emit_lse=bad_emit_lse))
 
 

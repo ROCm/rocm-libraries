@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import re
 from collections import Counter
 from dataclasses import dataclass, fields, is_dataclass, replace
 
@@ -34,6 +35,7 @@ from rocke.dispatch.core import (
     KernelCandidate,
     stable_json_hash,
 )
+from rocke.tests.bool_flags import bool_flag_refusal
 from tests.sdpa.request_cases import (
     CASES,
     bhsd,
@@ -433,8 +435,14 @@ def test_dims_vocabulary():
         ({"compute_dtype": "fp12"}, "compute dtype"),
         ({"mma_core_mode": "fp12"}, "mma_core_mode"),
         # bool("false") is True: coercing would turn the flag on.
-        ({"alibi": "false"}, "alibi must be a bool"),
-        ({"padding_mask": 0}, "padding_mask must be a bool"),
+        (
+            {"alibi": "false"},
+            re.escape(bool_flag_refusal("alibi", "false", what="SdpaRequest")),
+        ),
+        (
+            {"padding_mask": 0},
+            re.escape(bool_flag_refusal("padding_mask", 0, what="SdpaRequest")),
+        ),
     ],
 )
 def test_malformed_requests_are_rejected(overrides, match):
@@ -476,8 +484,14 @@ def test_tensor_rejects_non_integer_metadata(kwargs, match):
         ({"dims": (2, -4)}, "dims must be positive"),
         ({"strides": (4, -1)}, "strides must be non-negative"),
         # A truthy "false" would exempt a device buffer from the alignment check.
-        ({"by_value": "false"}, "by_value must be a bool"),
-        ({"by_value": 1}, "by_value must be a bool"),
+        (
+            {"by_value": "false"},
+            re.escape(bool_flag_refusal("by_value", "false", what="SdpaTensor")),
+        ),
+        (
+            {"by_value": 1},
+            re.escape(bool_flag_refusal("by_value", 1, what="SdpaTensor")),
+        ),
     ],
 )
 def test_tensor_rejects_invalid_metadata(kwargs, match):

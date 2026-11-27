@@ -40,7 +40,6 @@ from typing import ClassVar, Optional, Tuple
 
 from kernels.common._fmha_common import check_head_counts, gqa_ratio
 from kernels.common._lse_store import lse_row_has_mass, lse_store
-from kernels.common._spec_checks import require_bool
 from kernels.common.attention_mask_type import band_mask_type
 from kernels.common.attention_tiled_2d_rules import (
     validate_skip_legacy_qreg,
@@ -84,6 +83,7 @@ from rocke.helpers.attention import (
 from rocke.helpers.distribution import make_static_tile_distribution
 from rocke.helpers.layouts import TransposeLdsReader
 from rocke.helpers.mfma_gemm_inner import decode_mfma_lanes
+from rocke.helpers.spec import require_bool_fields
 from rocke.helpers.transforms import (
     DynamicTensorDescriptor,
     TensorDescriptor,
@@ -517,12 +517,9 @@ class UnifiedAttention2DTiledSpec:
     emit_lse: bool = field(default=False, kw_only=True)
 
     def __post_init__(self):
-        require_bool("emit_lse", self.emit_lse)
-        # The K and V read sources: a truthy non-bool such as "false" must be
-        # refused, not read as True. A ValueError: dispatch reads only a
-        # ValueError as "this spec cannot run".
-        require_bool("use_k_hbm_direct", self.use_k_hbm_direct)
-        require_bool("use_v_hbm_direct", self.use_v_hbm_direct)
+        # The LSE output and the K and V read sources: a truthy non-bool such
+        # as "false" must be refused, not read as True.
+        require_bool_fields(self, "emit_lse", "use_k_hbm_direct", "use_v_hbm_direct")
         # gfx942 (CDNA3) variant: the narrow ``16x16x16`` default path only.
         # The wide-K (32x32x16 migration) and transpose-read / native-fp8
         # experimental knobs all depend on gfx950-only ISA (wide-K MFMA atoms,

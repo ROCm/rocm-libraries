@@ -1469,6 +1469,7 @@ class TestAttentionHelpers(unittest.TestCase):
             UnifiedAttention3DTiledSpec,
             UnifiedAttentionProblem,
         )
+        from rocke.tests.bool_flags import bool_flag_refusal
 
         common = dict(
             head_size=64,
@@ -1479,13 +1480,13 @@ class TestAttentionHelpers(unittest.TestCase):
         )
         spec_common = dict(common, use_sinks=False, sliding_window=0, has_softcap=False)
         makers = {
-            "2d": lambda v: UnifiedAttention2DTiledSpec(
+            UnifiedAttention2DTiledSpec: lambda v: UnifiedAttention2DTiledSpec(
                 **spec_common, use_additive_bias=v
             ),
-            "3d": lambda v: UnifiedAttention3DTiledSpec(
+            UnifiedAttention3DTiledSpec: lambda v: UnifiedAttention3DTiledSpec(
                 **spec_common, num_segments=4, use_additive_bias=v
             ),
-            "problem": lambda v: UnifiedAttentionProblem(
+            UnifiedAttentionProblem: lambda v: UnifiedAttentionProblem(
                 **common,
                 total_q=64,
                 num_seqs=1,
@@ -1496,9 +1497,13 @@ class TestAttentionHelpers(unittest.TestCase):
         }
         for kind, make in makers.items():
             for bad in ("false", 1, None):
-                with self.subTest(kind=kind, value=bad):
-                    with self.assertRaisesRegex(ValueError, "must be a bool"):
+                with self.subTest(kind=kind.__name__, value=bad):
+                    with self.assertRaises(ValueError) as refusal:
                         make(bad)
+                    self.assertEqual(
+                        str(refusal.exception),
+                        bool_flag_refusal("use_additive_bias", bad, what=kind.__name__),
+                    )
 
     def test_unified_attention_2d_additive_bias_rejects_unrouted_paths(self):
         """Bias is emitted only on the 16x16 and plain transposed 32x32 paths,

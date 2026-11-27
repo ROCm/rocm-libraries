@@ -25,9 +25,9 @@ from __future__ import annotations
 
 import dataclasses as dc
 import itertools
+import re
 
 import pytest
-
 from kernels.gfx950.gdn_decode import (
     ROW_LOADS,
     STATE_HINTS,
@@ -43,6 +43,7 @@ from kernels.gfx950.gdn_decode import (
     stream_rows_applies,
     xcd_remap_applies,
 )
+from rocke.tests.bool_flags import bool_flag_reason
 
 ARCH = "gfx950"
 
@@ -92,7 +93,7 @@ def test_non_bool_flag_is_rejected(field, value):
     spec = _spec(**_FUSED, fuse_conv=True, fuse_out_norm=True, **knobs)
     ok, why = is_valid_spec(spec, arch=ARCH)
     assert not ok
-    assert f"{field} must be a bool" in why
+    assert why == bool_flag_reason(field, value)
 
 
 @pytest.mark.parametrize("field", BOOL_KNOBS)
@@ -116,7 +117,7 @@ def test_launcher_cache_hit_does_not_bypass_flag_validation(field, value, monkey
     assert len(cache) == 2  # the knob changes the name, so both keys are distinct
     monkeypatch.setattr(builder, "_LAUNCHER_CACHE", cache)
 
-    with pytest.raises(ValueError, match=f"{field} must be a bool"):
+    with pytest.raises(ValueError, match=re.escape(bool_flag_reason(field, value))):
         builder.launcher_for(spec_for(value), arch=ARCH)
     # the valid specs keep hitting the cache
     assert builder.launcher_for(spec_for(True), arch=ARCH) is cached

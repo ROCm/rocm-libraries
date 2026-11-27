@@ -30,6 +30,7 @@ from kernels.gfx950.gdn_decode import (
 )
 from rocke.dispatch.core import OperatorRequest, normalize_selector
 from rocke.dispatch.tuning import Knobs, normalize_knobs
+from rocke.helpers.spec import bool_flag_reason
 
 FAMILY = "gdn_decode"
 
@@ -233,9 +234,8 @@ def request_errors(req: OperatorRequest) -> list:
         if isinstance(value, bool) or not isinstance(value, Integral):
             errors.append(f"{field} must be an int, got {value!r}")
     for field in ("use_qk_l2norm", "fuse_conv", "fuse_out_norm"):
-        value = getattr(req, field)
-        if type(value) is not bool:
-            errors.append(f"{field} must be a bool, got {value!r}")
+        if (reason := bool_flag_reason(field, getattr(req, field))) is not None:
+            errors.append(reason)
     if errors:
         return errors
     if req.batch <= 0:

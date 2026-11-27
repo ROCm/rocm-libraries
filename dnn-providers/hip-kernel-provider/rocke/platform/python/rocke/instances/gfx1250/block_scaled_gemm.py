@@ -31,8 +31,10 @@ from ...helpers.mma_io import load_matrix_fragment, pack_fragment_bits, storage_
 from ...core.storage import BitPacking
 from ...helpers.spec import (
     SignatureBuilder,
+    bool_flag_reason,
     ceil_div_grid,
     kernel_name_join,
+    require_bool_fields,
     salted_kernel_name,
 )
 
@@ -129,10 +131,7 @@ class BlockScaledGemmSpec:
         )
 
     def __post_init__(self) -> None:
-        if type(self.tensor_scale) is not bool:
-            raise TypeError("tensor_scale must be a bool")
-        if type(self.prefetch) is not bool:
-            raise TypeError("prefetch must be a bool")
+        require_bool_fields(self, "tensor_scale", "prefetch")
         object.__setattr__(self, "dtype_a", normalize_dtype(self.dtype_a))
         object.__setattr__(self, "dtype_b", normalize_dtype(self.dtype_b))
 
@@ -189,10 +188,9 @@ def is_valid_spec(spec: BlockScaledGemmSpec, arch: str = "gfx1250") -> Tuple[boo
     """Return ``(ok, reason)`` for the gfx1250 block-scaled GEMM contract."""
     from ...core.arch import ArchTarget
 
-    if type(spec.tensor_scale) is not bool:
-        return False, "tensor_scale must be a bool"
-    if type(spec.prefetch) is not bool:
-        return False, "prefetch must be a bool"
+    for flag in ("tensor_scale", "prefetch"):
+        if (reason := bool_flag_reason(flag, getattr(spec, flag))) is not None:
+            return False, reason
 
     try:
         target = ArchTarget.from_gfx(arch)

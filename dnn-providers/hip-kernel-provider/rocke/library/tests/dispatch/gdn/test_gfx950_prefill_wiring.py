@@ -11,15 +11,17 @@ GPU here -- this asserts the request maps onto the right spec, tile and grid.
 
 from __future__ import annotations
 
+import re
+
 import numpy as np
 import pytest
-
 from dispatch.gdn import (
     GdnPrefillRequest,
     dispatch_gdn_prefill,
     gdn_prefill_candidates,
 )
 from dispatch.gdn.prefill_gfx950 import value_splits_for
+from rocke.tests.bool_flags import bool_flag_reason
 
 ARCH = "gfx950"
 
@@ -238,7 +240,7 @@ def test_non_int_head_dim_is_rejected(algorithm, field, bad):
 @pytest.mark.parametrize("bad", ["false", 1, 0, None])
 def test_non_bool_state_flag_is_rejected(algorithm, field, bad):
     """``bool("false")`` used to select the kernel that reads h0."""
-    with pytest.raises(ValueError, match=f"{field} must be a bool"):
+    with pytest.raises(ValueError, match=re.escape(bool_flag_reason(field, bad))):
         dispatch_gdn_prefill(_req(algorithm=algorithm, **{field: bad}))
 
 

@@ -36,12 +36,22 @@ import inspect
 import re
 
 import pytest
-
 from kernels.common.attention_dense_decode import FASTDIV_DIVIDEND_LIMIT
 from kernels.common.attention_dense_spec import attention_dense_cache_key
 from kernels.gfx942.attention_dense import (
+    _BLOCK_M,
+    _DEFAULT_LDS_ROW_PAD,
     AttentionDenseSpec,
     Gfx942AttentionDenseSpec,
+    _as_gfx942_spec,
+    _k_group_pad_active,
+    _k_group_stride,
+    _lds_bytes,
+    _tuned_waves_per_eu,
+    _use_kdb,
+    _use_vpf,
+    _v_row_pad,
+    _v_swizzle_width,
     attention_dense_block,
     attention_dense_grid,
     attention_dense_runtime_args,
@@ -52,18 +62,8 @@ from kernels.gfx942.attention_dense import (
     gfx942_kernel_name,
     run_attention_dense_torch,
     supports_attention_dense,
-    _BLOCK_M,
-    _as_gfx942_spec,
-    _DEFAULT_LDS_ROW_PAD,
-    _k_group_pad_active,
-    _k_group_stride,
-    _lds_bytes,
-    _use_kdb,
-    _use_vpf,
-    _v_row_pad,
-    _v_swizzle_width,
-    _tuned_waves_per_eu,
 )
+from rocke.tests.bool_flags import bool_flag_refusal
 
 # Query rows per CTA baked into the P0 body; block_n must divide it. IMPORTED, not
 # restated: a local literal here would silently stop testing the shipped geometry the
@@ -804,6 +804,8 @@ def test_ir_body_probe_detects_a_baked_shape_on_the_gfx950_control():
     """
     from kernels.gfx950.attention_dense import (
         Gfx950AttentionDenseSpec,
+    )
+    from kernels.gfx950.attention_dense import (
         build_attention_dense as build_gfx950,
     )
 
@@ -1111,7 +1113,6 @@ def test_lds_budget_boundary_is_accepted_at_exactly_capacity():
     accident, and so the over-budget test above keeps a real margin.
     """
     from kernels.common.attention_arch import attention_lds_capacity_bytes
-
     from kernels.gfx942.attention_dense import _lds_bytes
 
     spec = _spec(
@@ -1247,11 +1248,15 @@ def test_cfvst_kdb_vpf_lds_budgets(overrides, expected_bytes):
     [
         (
             {"use_cfvst": "false"},
-            "use_cfvst must be None or a bool, got str",
+            bool_flag_refusal(
+                "use_cfvst", "false", what="Gfx942AttentionDenseSpec", allow_none=True
+            ),
         ),
         (
             {"use_cfvst": 1},
-            "use_cfvst must be None or a bool, got int",
+            bool_flag_refusal(
+                "use_cfvst", 1, what="Gfx942AttentionDenseSpec", allow_none=True
+            ),
         ),
         (
             {"lds_num_buffers": 2.0},
@@ -1263,15 +1268,17 @@ def test_cfvst_kdb_vpf_lds_budgets(overrides, expected_bytes):
         ),
         (
             {"v_reg_prefetch": "false"},
-            "v_reg_prefetch must be a bool, got str",
+            bool_flag_refusal(
+                "v_reg_prefetch", "false", what="Gfx942AttentionDenseSpec"
+            ),
         ),
         (
             {"v_reg_prefetch": 1},
-            "v_reg_prefetch must be a bool, got int",
+            bool_flag_refusal("v_reg_prefetch", 1, what="Gfx942AttentionDenseSpec"),
         ),
         (
             {"v_reg_prefetch": None},
-            "v_reg_prefetch must be a bool, got NoneType",
+            bool_flag_refusal("v_reg_prefetch", None, what="Gfx942AttentionDenseSpec"),
         ),
     ],
     ids=[
@@ -2337,8 +2344,11 @@ def test_dispatch_applies_gfx942_waves_per_eu_and_leaves_gfx950_alone():
     assertion. Both are exercised here precisely because they are now two functions:
     the guard is that they stayed different in the intended direction only.
     """
-    from dispatch.attention import AttentionRequest
-    from dispatch.attention import attention_tuning_spec, tuning_spec_with_knobs
+    from dispatch.attention import (
+        AttentionRequest,
+        attention_tuning_spec,
+        tuning_spec_with_knobs,
+    )
 
     def _dense_spec(req, **knobs):
         if knobs:
@@ -2455,8 +2465,11 @@ def test_dispatch_ships_the_padded_d64_path_without_restating_the_pad():
     duplicate that collapsing ``d64_kpad`` into ``lds_k_group_pad`` removed, and would
     let the two drift. gfx950's own factory is exercised alongside to pin that this
     branch changed nothing for it."""
-    from dispatch.attention import AttentionRequest
-    from dispatch.attention import attention_tuning_spec, tuning_spec_with_knobs
+    from dispatch.attention import (
+        AttentionRequest,
+        attention_tuning_spec,
+        tuning_spec_with_knobs,
+    )
 
     def _dense_spec(req, **knobs):
         if knobs:
@@ -2933,8 +2946,11 @@ def test_dispatch_persistent_auto_turns_on_for_d128_only():
     batch (num_persistent defaulted to 304), and stays off at D64. The
     ``persistent`` knob is honored; gfx950 keeps its 256 default and is otherwise
     untouched."""
-    from dispatch.attention import AttentionRequest
-    from dispatch.attention import attention_tuning_spec, tuning_spec_with_knobs
+    from dispatch.attention import (
+        AttentionRequest,
+        attention_tuning_spec,
+        tuning_spec_with_knobs,
+    )
 
     def _dense_spec(req, **knobs):
         if knobs:

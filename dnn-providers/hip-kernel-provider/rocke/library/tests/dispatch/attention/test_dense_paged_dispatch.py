@@ -15,6 +15,7 @@ from dispatch.attention import (
     AttentionRequest,
     dispatch_attention,
 )
+from rocke.tests.bool_flags import bool_flag_refusal
 
 _PAGED_SPEC_IDS = {
     "gfx942": ("gfx942_dense",),
@@ -218,10 +219,19 @@ def test_binding_and_spec_refuse_non_bool_paged_flags(arch, spec_id):
     result = dispatch_attention(pinned(_request(arch), spec_id))
     cache = paged_cache((_SQ // _BS, _BS, _HKV, _D))
     tensors = {"q": None, "k": cache, "v": cache, "out": None}
-    with pytest.raises(ValueError, match="must be a bool"):
+    with pytest.raises(ValueError) as refusal:
         result.bind_torch(tensors, unsafe_skip_paged_value_validation="False")
-    with pytest.raises(ValueError, match="paged must be a bool"):
-        dataclasses.replace(result.spec.kernel_spec, paged="no")
+    assert str(refusal.value) == bool_flag_refusal(
+        "unsafe_skip_paged_value_validation",
+        "False",
+        what="bind_dense_attention_torch",
+    )
+    kernel_spec = result.spec.kernel_spec
+    with pytest.raises(ValueError) as refusal:
+        dataclasses.replace(kernel_spec, paged="no")
+    assert str(refusal.value) == bool_flag_refusal(
+        "paged", "no", what=type(kernel_spec).__name__
+    )
 
 
 @pytest.mark.parametrize("arch,spec_id", _CASES)

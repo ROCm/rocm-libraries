@@ -121,7 +121,7 @@ from typing import Any
 from rocke.core.arch import ArchTarget
 from rocke.helpers.compile import COMGR_FRESH_PROCESS_ATTR
 from rocke.helpers.schedule import DS_READ, DS_WRITE, MFMA, VMEM_READ, VMEM_WRITE
-from rocke.helpers.spec import ceil_div
+from rocke.helpers.spec import ceil_div, require_bool_fields
 
 from ._attention_bwd_lds import default_xt_writer
 
@@ -524,8 +524,7 @@ class StageTable:
             raise ValueError("kv_residency must be 'reg' or 'lds'")
         if self.kt_source == "reg" and self.kv_residency != "reg":
             raise ValueError("kt_source='reg' requires kv_residency='reg'")
-        if not isinstance(self.acc_in_lds, bool):
-            raise ValueError("acc_in_lds must be a bool")
+        require_bool_fields(self, "acc_in_lds")
         if self.global_path not in ("vgpr", "dma"):
             raise ValueError("global_path must be 'vgpr' or 'dma'")
         if self.pt_route not in ("relabel", "lds"):
@@ -1524,8 +1523,7 @@ class DqStageTable:
             raise ValueError(f"kv_pad must be one of {_DQ_KV_PADS}")
         if self.stage_vec not in (1, 8):
             raise ValueError("stage_vec must be 8 or 1")
-        if not isinstance(self.kv_prefetch, bool):
-            raise ValueError("kv_prefetch must be a bool")
+        require_bool_fields(self, "kv_prefetch")
         w, d, m0, n0 = self.waves, self.head_size, self.k_m0, self.k_n0
         checks = (
             (m0 % (16 * w) == 0, f"kM0 {m0} % (16 * waves {w}) != 0"),

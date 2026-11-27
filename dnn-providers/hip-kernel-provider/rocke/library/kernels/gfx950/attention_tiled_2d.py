@@ -53,7 +53,6 @@ from kernels.common._lse_store import (
     lse_store,
     unified_lse_offset,
 )
-from kernels.common._spec_checks import require_bool
 from kernels.common.attention_mask_type import band_mask_type
 from kernels.common.attention_tiled_2d_rules import (
     validate_grouped_kv2_and_early_v,
@@ -93,6 +92,7 @@ from rocke.helpers.attention import (
 )
 from rocke.helpers.distribution import make_static_tile_distribution
 from rocke.helpers.layouts import TransposeLdsReader
+from rocke.helpers.spec import require_bool_fields
 from rocke.helpers.transforms import (
     DynamicTensorDescriptor,
     TensorDescriptor,
@@ -550,7 +550,7 @@ class UnifiedAttention2DTiledSpec:
     lse_layout: str = field(default="token_major", kw_only=True)
 
     def __post_init__(self):
-        require_bool("emit_lse", self.emit_lse)
+        require_bool_fields(self, "emit_lse")
         if self.lse_layout not in UNIFIED_LSE_LAYOUTS:
             raise ValueError(
                 f"lse_layout must be one of {UNIFIED_LSE_LAYOUTS}, "
@@ -558,11 +558,7 @@ class UnifiedAttention2DTiledSpec:
             )
         if self.lse_layout != "token_major" and not self.emit_lse:
             raise ValueError(f"lse_layout={self.lse_layout!r} requires emit_lse")
-        if type(self.use_additive_bias) is not bool:
-            raise ValueError(
-                "use_additive_bias must be a bool, got "
-                f"{type(self.use_additive_bias).__name__}"
-            )
+        require_bool_fields(self, "use_additive_bias")
         if self.kq_lds_pad_halves < 0:
             raise ValueError(
                 "KQ LDS pad width failed - "

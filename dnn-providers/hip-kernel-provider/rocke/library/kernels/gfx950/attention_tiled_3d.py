@@ -41,7 +41,6 @@ from kernels.common._attention_strided_kv import (
     strided_kv_resource,
 )
 from kernels.common._lse_store import emit_lse_field, reduce_lse_store
-from kernels.common._spec_checks import require_bool
 from kernels.common.attention_mask_type import band_mask_type
 from kernels.common.attention_split_kv_reduce import (
     split_kv_reduce_max_segments,
@@ -77,6 +76,7 @@ from rocke.helpers.attention import (
 )
 from rocke.helpers.distribution import make_static_tile_distribution
 from rocke.helpers.layouts import TransposeLdsReader
+from rocke.helpers.spec import require_bool_fields
 from rocke.helpers.transforms import DynamicTensorDescriptor, indirect, unmerge
 
 MFMA_M = 16
@@ -234,12 +234,7 @@ class UnifiedAttention3DTiledSpec:
     emit_lse: bool = field(default=False, kw_only=True)
 
     def __post_init__(self):
-        require_bool("emit_lse", self.emit_lse)
-        if type(self.use_additive_bias) is not bool:
-            raise ValueError(
-                "use_additive_bias must be a bool, got "
-                f"{type(self.use_additive_bias).__name__}"
-            )
+        require_bool_fields(self, "emit_lse", "use_additive_bias")
         if self.num_segments < 1:
             raise ValueError("num_segments must be >= 1")
         if self.kv_layout not in ("paged", "strided"):
@@ -1477,7 +1472,7 @@ class UnifiedAttentionReduceTiledSpec:
     emit_lse: bool = emit_lse_field()
 
     def __post_init__(self) -> None:
-        require_bool("emit_lse", self.emit_lse)
+        require_bool_fields(self, "emit_lse")
         if self.num_segments < 1:
             raise ValueError("num_segments must be >= 1")
 

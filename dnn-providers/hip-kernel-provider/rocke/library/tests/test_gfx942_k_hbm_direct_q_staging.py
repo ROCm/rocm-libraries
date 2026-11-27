@@ -34,6 +34,7 @@ from kernels.gfx942.attention_tiled_2d import (
     build_unified_attention_2d_tiled,
 )
 from rocke.core.lower_llvm import lower_kernel_to_llvm
+from rocke.tests.bool_flags import bool_flag_refusal
 
 ARCH = "gfx942"
 
@@ -177,4 +178,6 @@ def test_hbm_knobs_refuse_a_non_bool(knob):
     # ValueError, the type dispatch reads as "this spec cannot run".
     with pytest.raises(ValueError) as refusal:
         dataclasses.replace(_FP16_D64_K_FROM_HBM_SINKS, **{knob: "false"})
-    assert str(refusal.value) == f"{knob} must be a bool, got str"
+    assert str(refusal.value) == bool_flag_refusal(
+        knob, "false", what="UnifiedAttention2DTiledSpec"
+    )

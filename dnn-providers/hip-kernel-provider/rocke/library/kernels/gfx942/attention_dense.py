@@ -194,6 +194,7 @@ from rocke.core.ir import (
     I64,
 )
 from rocke.helpers.attention import mfma_32x32x8_for_dtype
+from rocke.helpers.spec import require_bool_fields
 
 # Shared problem/geometry fields live in an architecture-neutral module.
 from kernels.common.attention_dense_decode import (
@@ -244,7 +245,6 @@ from kernels.common._lse_store import (
     validate_dense_lse,
     zero_keyless_row,
 )
-from kernels.common._spec_checks import require_bool
 
 LOG2E = 1.4426950408889634
 _DTYPE_IR = {"bf16": BF16, "fp16": F16}
@@ -529,23 +529,16 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
 
     def __post_init__(self) -> None:
         super().__post_init__()
-        require_bool("emit_lse", self.emit_lse)
+        require_bool_fields(self, "emit_lse")
         # Reject, never coerce: bool("false") is True, so a truthiness read would
         # silently build the CFVST kernel the caller asked to turn off.
-        if self.use_cfvst is not None and type(self.use_cfvst) is not bool:
-            raise ValueError(
-                f"use_cfvst must be None or a bool, got {type(self.use_cfvst).__name__}"
-            )
+        require_bool_fields(self, "use_cfvst", allow_none=True)
         if type(self.lds_num_buffers) is not int:
             raise ValueError(
                 "lds_num_buffers must be an int, got "
                 f"{type(self.lds_num_buffers).__name__}"
             )
-        if type(self.v_reg_prefetch) is not bool:
-            raise ValueError(
-                "v_reg_prefetch must be a bool, got "
-                f"{type(self.v_reg_prefetch).__name__}"
-            )
+        require_bool_fields(self, "v_reg_prefetch")
 
     def resolved_use_cfvst(self) -> bool:
         """Resolved conflict-free-V decision (``None`` -> :func:`default_use_cfvst`)."""

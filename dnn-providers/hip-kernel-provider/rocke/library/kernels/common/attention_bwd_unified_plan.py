@@ -326,7 +326,7 @@ class AttnBwdUnifiedRequest:
     num_xcds: Optional[int] = None
 
     def __post_init__(self) -> None:
-        # Flags are bools and extents ints (TypeError otherwise), as in the
+        # Flags are bools and extents ints (ValueError otherwise), as in the
         # general request.
         check_field_types(self, _REQ_BOOLS, _REQ_INTS, _REQ_OPT_INTS)
         object.__setattr__(self, "strides", _frozen_strides(self.strides))

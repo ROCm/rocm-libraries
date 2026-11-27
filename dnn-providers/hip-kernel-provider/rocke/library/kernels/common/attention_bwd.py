@@ -124,7 +124,11 @@ from rocke.core.codegen_policy import (
 from rocke.core.ir import F32, I32, I64, IRBuilder, PtrType
 
 from rocke.helpers.attention_band import AttnRuntimeBounds
-from rocke.helpers.spec import non_default_fields, salted_kernel_name
+from rocke.helpers.spec import (
+    non_default_fields,
+    require_bool_fields,
+    salted_kernel_name,
+)
 
 from kernels.common._attention_bwd_addr import (
     PackedRows,
@@ -1085,10 +1089,15 @@ class AttnBwdSpec:
             v = getattr(self, fname)
             if v is not None:
                 _check_in(fname, v, allowed)
-        for fname in ("setprio", "edge_tiles", "head_pack", "acc_in_lds", "s_in_agpr"):
-            v = getattr(self, fname)
-            if v is not None and not isinstance(v, bool):
-                raise ValueError(f"{fname} must be a bool or None, got {v!r}")
+        require_bool_fields(
+            self,
+            "setprio",
+            "edge_tiles",
+            "head_pack",
+            "acc_in_lds",
+            "s_in_agpr",
+            allow_none=True,
+        )
         _check_in("dq_issue", self.dq_issue, DQ_ISSUES)
         _check_in("g4_slicing", self.g4_slicing, G4_SLICINGS)
         if self.g4_slicing != DEFAULT_G4_SLICING:
@@ -1110,15 +1119,10 @@ class AttnBwdSpec:
                     f"g4_slicing='slice_db_g3' reads G4's first dS slice under "
                     f"G3: stage_order must be one of {G4_AFTER_G3_ORDERS}"
                 )
-        for fname in ("q_rotate", "lb_interleave"):
-            if not isinstance(getattr(self, fname), bool):
-                raise ValueError(
-                    f"{fname} must be a bool, got {getattr(self, fname)!r}"
-                )
+        require_bool_fields(self, "q_rotate", "lb_interleave")
         if not (self.ptr_noalias is False or self.ptr_noalias in PTR_NOALIAS[1:]):
             raise ValueError(f"ptr_noalias={self.ptr_noalias!r} not in {PTR_NOALIAS}")
-        if not isinstance(self.xcd_remap, bool):
-            raise ValueError(f"xcd_remap must be a bool, got {self.xcd_remap!r}")
+        require_bool_fields(self, "xcd_remap")
         _check_in("counted_issue", self.counted_issue, COUNTED_ISSUES)
         if self.counted_issue != COUNTED_ISSUES[0] and self.loop_sync != "counted":
             raise ValueError("counted_issue applies to loop_sync='counted' only")
@@ -1136,7 +1140,8 @@ class AttnBwdSpec:
                 f"stats_vec={self.stats_vec} needs ws_layout='head_major' (token-major "
                 "stats rows are h_q floats apart)"
             )
-        for fname in (
+        require_bool_fields(
+            self,
             "dkv_slab_hoist",
             "interior_clamp",
             "lb_mirror",
@@ -1144,11 +1149,7 @@ class AttnBwdSpec:
             "worklist",
             "asm_load_hoist",
             "slab_carry",
-        ):
-            if not isinstance(getattr(self, fname), bool):
-                raise ValueError(
-                    f"{fname} must be a bool, got {getattr(self, fname)!r}"
-                )
+        )
         _check_in("barrier_merge", self.barrier_merge, BARRIER_MERGES)
         _check_in("ring_issue", self.ring_issue, RING_ISSUES)
         if self.barrier_merge == "off" and self.ring_issue != RING_ISSUES[0]:

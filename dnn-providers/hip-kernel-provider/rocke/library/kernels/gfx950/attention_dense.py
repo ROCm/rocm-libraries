@@ -93,7 +93,7 @@ from rocke.helpers.attention import (
     dequant_fp8x8_to_dtype,
 )
 from rocke.helpers.schedule import MFMA, VALU, TRANS, DS_READ
-from rocke.helpers.spec import align_up as _align_up
+from rocke.helpers.spec import align_up as _align_up, require_bool_fields
 from kernels.common.attention_dense_spec import (
     AttentionDenseSpec as _AttentionDenseSpecBase,
     DENSE_TILE_GEOMETRIES,
@@ -143,7 +143,6 @@ from kernels.common._lse_store import (
     validate_varlen_keys,
     zero_keyless_row,
 )
-from kernels.common._spec_checks import require_bool
 
 LOG2E = 1.4426950408889634
 
@@ -348,7 +347,7 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
                 f"kv_storage_dtype must be None or one of "
                 f"{sorted(_KV_STORAGE_DTYPES)}, got {self.kv_storage_dtype}"
             )
-        require_bool("emit_lse", self.emit_lse)
+        require_bool_fields(self, "emit_lse")
         if self.lds_v_row_pad < 0 or self.lds_v_row_pad % 8 != 0:
             raise ValueError(
                 "lds_v_row_pad must be a non-negative multiple of 8 bf16 "

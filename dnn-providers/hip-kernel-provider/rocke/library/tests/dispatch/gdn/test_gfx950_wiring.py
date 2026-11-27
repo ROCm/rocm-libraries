@@ -17,7 +17,6 @@ from itertools import product
 
 import numpy as np
 import pytest
-
 from dispatch.gdn import (
     GDN_REGISTRY,
     GdnDecodeRequest,
@@ -42,6 +41,7 @@ from kernels.gfx950.gdn_decode import (
     is_valid_spec,
 )
 from rocke.dispatch.core import PinRefused
+from rocke.tests.bool_flags import bool_flag_reason
 
 _TILE = lambda s: (s.num_warps, s.warp_threads_k, s.blocks_per_v_dim)  # noqa: E731
 
@@ -428,7 +428,7 @@ class TestMalformedRequestFields(unittest.TestCase):
                 with self.subTest(value=value, gate_kind=gate_kind):
                     self._assert_rejected(
                         "use_qk_l2norm",
-                        "must be a bool",
+                        bool_flag_reason("use_qk_l2norm", value),
                         use_qk_l2norm=value,
                         gate_kind=gate_kind,
                         num_k_heads=32,
@@ -941,10 +941,7 @@ class TestRequestFieldTypes(unittest.TestCase):
                 with self.subTest(field=field, value=bad):
                     req = _fused_req(**{field: bad})
                     errors = request_errors(req)
-                    self.assertTrue(
-                        any(e.startswith(f"{field} must be a bool") for e in errors),
-                        errors,
-                    )
+                    self.assertIn(bool_flag_reason(field, bad), errors)
                     with self.assertRaises(ValueError):
                         dispatch_gdn_decode(req)
                     self.assertEqual(dispatch_gdn_decode_all(req), ())
@@ -1023,10 +1020,6 @@ class TestNumpyIntegralFields(unittest.TestCase):
             self.assertIs(type(value), int)
 
     def test_np_bool_flag_is_not_a_bool(self):
-        req = _fused_req(use_qk_l2norm=np.bool_(True))
-        self.assertTrue(
-            any(
-                e.startswith("use_qk_l2norm must be a bool")
-                for e in request_errors(req)
-            )
-        )
+        flag = np.bool_(True)
+        req = _fused_req(use_qk_l2norm=flag)
+        self.assertIn(bool_flag_reason("use_qk_l2norm", flag), request_errors(req))

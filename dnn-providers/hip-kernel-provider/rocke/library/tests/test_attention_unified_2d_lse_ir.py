@@ -7,10 +7,10 @@ import importlib
 import re
 
 import pytest
-
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python, lower_kernel_to_llvm
 from rocke.core.passes import eliminate_dead_pure_ops
 from rocke.helpers.tiling.lds_conflict import NumBuilder
+from rocke.tests.bool_flags import bool_flag_refusal
 
 _BASE = dict(
     head_size=128,
@@ -197,8 +197,11 @@ def _define_line(ir):
 @pytest.mark.parametrize("arch", _SPEC_ARCHES)
 @pytest.mark.parametrize("bad", ["false", 0, 1, None])
 def test_2d_spec_rejects_non_boolean_emit_lse(arch, bad):
-    with pytest.raises(ValueError, match="emit_lse must be a bool"):
+    with pytest.raises(ValueError) as refusal:
         _spec(arch, "striped16", emit_lse=bad)
+    assert str(refusal.value) == bool_flag_refusal(
+        "emit_lse", bad, what="UnifiedAttention2DTiledSpec"
+    )
 
 
 @pytest.mark.parametrize("arch,branch", _CASES)

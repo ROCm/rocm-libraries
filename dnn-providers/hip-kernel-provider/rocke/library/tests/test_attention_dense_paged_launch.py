@@ -6,7 +6,10 @@ block table from driving an out-of-bounds read. Host-only array stand-ins replac
 device arrays, and compile is patched out, so no torch, comgr or GPU is needed."""
 
 import importlib
+import re
 import unittest
+
+from rocke.tests.bool_flags import bool_flag_refusal
 
 from ._dense_paged_stand_ins import (
     dense_arch_spec_class,
@@ -246,9 +249,10 @@ class TestDensePagedLaunch(unittest.TestCase):
                         )
             for flag in (None, 0, 1, "no"):
                 with self.subTest(arch=arch, validate_paged=flag):
-                    with self.assertRaisesRegex(
-                        ValueError, "validate_paged must be a bool"
-                    ):
+                    message = bool_flag_refusal(
+                        "validate_paged", flag, what="validate_paged_launch"
+                    )
+                    with self.assertRaisesRegex(ValueError, re.escape(message)):
                         ad.run_attention_dense_torch(
                             spec=spec,
                             q=q,

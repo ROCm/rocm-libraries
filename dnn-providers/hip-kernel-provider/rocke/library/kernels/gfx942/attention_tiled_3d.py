@@ -41,7 +41,6 @@ from kernels.common._attention_strided_kv import (
     strided_kv_resource,
 )
 from kernels.common._lse_store import emit_lse_field, reduce_lse_store
-from kernels.common._spec_checks import require_bool
 from kernels.common.attention_split_kv_reduce import (
     split_kv_reduce_spec,
     tiled_reduce_unsupported_reason,
@@ -74,6 +73,7 @@ from rocke.helpers.attention import (
     wave64_reduce_sum as _wave64_reduce_sum,
 )
 from rocke.helpers.distribution import make_static_tile_distribution
+from rocke.helpers.spec import require_bool_fields
 from rocke.helpers.transforms import (
     DynamicTensorDescriptor,
     embed,
@@ -1347,7 +1347,7 @@ class UnifiedAttentionReduceTiledSpec:
     emit_lse: bool = emit_lse_field()
 
     def __post_init__(self) -> None:
-        require_bool("emit_lse", self.emit_lse)
+        require_bool_fields(self, "emit_lse")
         if self.num_segments < 1:
             raise ValueError("num_segments must be >= 1")
 

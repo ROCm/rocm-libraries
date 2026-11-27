@@ -95,7 +95,11 @@ from dataclasses import dataclass, fields
 from types import MappingProxyType
 from typing import ClassVar, Optional
 
-from rocke.helpers.spec import non_default_fields, salted_kernel_name
+from rocke.helpers.spec import (
+    non_default_fields,
+    require_bool_fields,
+    salted_kernel_name,
+)
 
 from kernels.common.attention_bwd import (
     BWD_DTYPES,
@@ -309,16 +313,15 @@ class AttentionDenseBwdSpec:
         _check_in("oob", self.oob, DENSE_OOB_MODES)
         _check_in("ws_layout", self.ws_layout, WS_LAYOUTS)
         _check_in("persist_decode", self.persist_decode, DENSE_PERSIST_DECODES)
-        for fname in (
+        require_bool_fields(
+            self,
             "causal",
             "causal_bottom_right",
             "ragged",
             "edge_tiles",
             "persistent",
             "xcd_remap",
-        ):
-            if not isinstance(getattr(self, fname), bool):
-                raise ValueError(f"{fname} must be a bool")
+        )
         sw = self.sliding_window
         if isinstance(sw, bool) or not isinstance(sw, int) or sw < 0:
             raise ValueError(f"sliding_window={sw!r} must be an int >= 0")

@@ -11,6 +11,7 @@ from dispatch.attention import (
     dispatch_attention,
     dispatch_attention_all,
 )
+from rocke.tests.bool_flags import bool_flag_refusal
 from rocke.tests.host_arrays import HostArray
 
 _ARCHES = ("gfx942", "gfx950")
@@ -78,8 +79,11 @@ def test_unpinned_lse_spec_has_its_own_identity(arch):
 def test_attention_spec_rejects_non_boolean_emit_lse(bad):
     """AttentionSpec is public: a truthy non-bool must not become an LSE identity."""
     spec = dispatch_attention(_decode_request("gfx950")).spec
-    with pytest.raises(ValueError, match="emit_lse must be a bool"):
+    with pytest.raises(ValueError) as refusal:
         dataclasses.replace(spec, emit_lse=bad)
+    assert str(refusal.value) == bool_flag_refusal(
+        "emit_lse", bad, what="AttentionSpec"
+    )
 
 
 @pytest.mark.parametrize("arch", _ARCHES)

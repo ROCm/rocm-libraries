@@ -16,6 +16,7 @@ import unittest
 import numpy as np
 import pytest
 from rocke.numeric import storage
+from rocke.tests.bool_flags import bool_flag_reason
 from rocke.tests.comgr import loaded_compiler_build
 from rocke.tests.pending_lanes import (
     measured_budget_kernels,
@@ -107,7 +108,7 @@ class TestFusedSpec(unittest.TestCase):
                 with self.subTest(flag=flag, bad=bad):
                     ok, why = is_valid_spec(_fused(**{flag: bad}), arch=ARCH)
                     self.assertFalse(ok)
-                    self.assertIn(f"{flag} must be a bool", why)
+                    self.assertEqual(why, bool_flag_reason(flag, bad))
 
     def test_integer_fields_must_be_integers(self):
         for field, bad in (

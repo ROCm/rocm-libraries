@@ -40,6 +40,7 @@ from typing import Any, Literal, TypeAlias
 
 from rocke.dispatch.core import OperatorRequest
 from rocke.dispatch.tuning.identity import normalize_knobs
+from rocke.helpers.spec import require_bool_fields
 from rocke.numeric.sdpa_reference import as_index as _as_int
 from rocke.numeric.sdpa_reference import check_hipdnn_band
 
@@ -156,12 +157,6 @@ def _check_choice(value: object, choices: tuple[str, ...], what: str) -> None:
         raise ValueError(f"{what} must be one of {choices}, got {value!r}")
 
 
-def _check_bool(value: object, what: str) -> None:
-    """``bool("false")`` is ``True``, so a non-bool flag is malformed, not coerced."""
-    if not isinstance(value, bool):
-        raise ValueError(f"{what} must be a bool, got {value!r}")
-
-
 @dataclass(frozen=True)
 class SdpaTensor:
     """One operand: hipDNN ``TensorAttributes`` minus the uid, name and value.
@@ -186,7 +181,7 @@ class SdpaTensor:
 
     def __post_init__(self) -> None:
         _check_dtype(self.dtype, "tensor")
-        _check_bool(self.by_value, "by_value")
+        require_bool_fields(self, "by_value")
         dims = tuple(_as_int(d, "tensor dims") for d in self.dims)
         strides = tuple(_as_int(s, "tensor strides") for s in self.strides)
         if len(dims) != len(strides):
@@ -474,8 +469,7 @@ class SdpaRequest(OperatorRequest):
 
     def _validate(self) -> None:
         """Frontend rules (``SdpaFwdNode::pre_validate_node``) plus Python-caller ones."""
-        _check_bool(self.alibi, "alibi")
-        _check_bool(self.padding_mask, "padding_mask")
+        require_bool_fields(self, "alibi", "padding_mask")
         _check_dtype(self.compute_dtype, "compute")
         if self.mma_core_mode is not None:
             _check_dtype(self.mma_core_mode, "mma_core_mode")

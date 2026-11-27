@@ -21,6 +21,7 @@ import unittest
 from pathlib import Path
 
 from rocke.core.lower_llvm import lower_kernel_to_llvm
+from rocke.tests.bool_flags import bool_flag_refusal
 from rocke.tests.comgr import compile_kernel_or_skip, loaded_compiler_build
 from rocke.tests.compiler_tools import require_tools_or_skip
 from rocke.tests.pending_lanes import (
@@ -109,9 +110,13 @@ class TestMlaPrefillSpec(unittest.TestCase):
             for value in ("false", 0, 1, None):
                 with (
                     self.subTest(name=name, value=value),
-                    self.assertRaisesRegex(TypeError, f"{name} must be a bool"),
+                    self.assertRaises(ValueError) as refusal,
                 ):
                     _spec(**{name: value})
+                self.assertEqual(
+                    str(refusal.exception),
+                    bool_flag_refusal(name, value, what="MlaPrefillSpec"),
+                )
 
     def test_int_fields_reject_bool_float_and_str(self):
         # True == 1 and 1.0 == 1 would otherwise pass every range check.
@@ -134,9 +139,13 @@ class TestMlaPrefillSpec(unittest.TestCase):
             for value in (True, 1.0, "1"):
                 with (
                     self.subTest(name=name, value=value),
-                    self.assertRaisesRegex(TypeError, f"{name} must be an int"),
+                    self.assertRaises(ValueError) as refusal,
                 ):
                     _spec(**{name: value})
+                self.assertEqual(
+                    str(refusal.exception),
+                    f"MlaPrefillSpec failed - {name}={value!r}, expected an int",
+                )
 
 
 class TestMlaPrefillGate(unittest.TestCase):

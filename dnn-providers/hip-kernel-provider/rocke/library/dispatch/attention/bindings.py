@@ -14,6 +14,7 @@ from dataclasses import dataclass, replace
 from typing import Any, Dict, Mapping, Optional, Tuple
 
 from rocke.dispatch.core import TorchBinding
+from rocke.helpers.spec import require_bool
 
 
 def _shape(tensor, name: str) -> tuple[int, ...]:
@@ -335,11 +336,11 @@ def bind_dense_attention_torch(
         scale = 1.0 / math.sqrt(int(getattr(request, "hdim_q", spec.head_size)))
     stream = kwargs.get("stream", 0)
     unsafe_skip = kwargs.get("unsafe_skip_paged_value_validation", False)
-    if type(unsafe_skip) is not bool:
-        raise ValueError(
-            "unsafe_skip_paged_value_validation must be a bool, got "
-            f"{type(unsafe_skip).__name__}"
-        )
+    require_bool(
+        "unsafe_skip_paged_value_validation",
+        unsafe_skip,
+        what="bind_dense_attention_torch",
+    )
     bind_k_scale = bind_v_scale = None
     if getattr(spec, "kv_storage_dtype", None) is not None:
         bind_k_scale = _resolve_fp8_scale("k_scale", kwargs, "fp8 dense")
@@ -451,11 +452,11 @@ def bind_tuning_attention_torch(
         raise ValueError("explicit tuning bindings do not support additive bias")
     _reject_additive_bias_inputs(tensors, "tensors")
     unsafe_skip = kwargs.pop("unsafe_skip_paged_value_validation", False)
-    if type(unsafe_skip) is not bool:
-        raise ValueError(
-            "unsafe_skip_paged_value_validation must be a bool, got "
-            f"{type(unsafe_skip).__name__}"
-        )
+    require_bool(
+        "unsafe_skip_paged_value_validation",
+        unsafe_skip,
+        what="bind_tuning_attention_torch",
+    )
     num_blocks = validate_tuning_attention_tensors(
         problem,
         tensors,

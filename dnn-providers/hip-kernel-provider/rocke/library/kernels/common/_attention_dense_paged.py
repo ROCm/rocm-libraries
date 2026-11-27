@@ -12,6 +12,7 @@ block-table lookup per wave serves all of the wave's rows.
 from __future__ import annotations
 
 from rocke.core.ir import I32, PtrType
+from rocke.helpers.spec import require_bool
 
 
 def declare_paged_params(b):
@@ -118,10 +119,7 @@ def validate_paged_launch(spec, k, v, block_tables, kv_lens, validate_paged: boo
     Every array is anything :func:`rocke.runtime.device_array.array_info` describes
     (a torch tensor or a ``DeviceArray``).
     """
-    if type(validate_paged) is not bool:
-        raise ValueError(
-            f"validate_paged must be a bool, got {type(validate_paged).__name__}"
-        )
+    require_bool("validate_paged", validate_paged, what="validate_paged_launch")
     if spec.paged and (block_tables is None or kv_lens is None):
         raise ValueError("paged=True requires block_tables and kv_lens")
     if not spec.paged and (block_tables is not None or kv_lens is not None):

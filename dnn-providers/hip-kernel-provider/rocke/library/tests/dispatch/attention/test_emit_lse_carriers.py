@@ -3,10 +3,10 @@
 
 """Inventory of the classes that carry an ``emit_lse`` field (host only).
 
-Each carrier refuses a non-bool value in ``__post_init__`` through ``require_bool``,
-and its own test pins that refusal. This test fails when a class reachable from the
-dispatcher gains an ``emit_lse`` field without being listed here, so the new guard
-and its refusal test are not forgotten.
+Each carrier refuses a non-bool value in ``__post_init__`` through
+``rocke.helpers.spec.require_bool``, and its own test pins that refusal. This test
+fails when a class reachable from the dispatcher gains an ``emit_lse`` field without
+being listed here, so the new guard and its refusal test are not forgotten.
 """
 
 import dataclasses

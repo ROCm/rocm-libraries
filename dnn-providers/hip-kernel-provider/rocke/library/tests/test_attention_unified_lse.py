@@ -12,6 +12,7 @@ import pytest
 from kernels.common import attention_unified as au
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.runtime import device_array
+from rocke.tests.bool_flags import bool_flag_refusal
 from rocke.tests.host_arrays import HostArray
 
 _ARCHES = ("gfx942", "gfx950")
@@ -43,8 +44,11 @@ def _reduce_ir(arch, spec):
 @pytest.mark.parametrize("arch", _ARCHES)
 @pytest.mark.parametrize("bad", ["false", 0, 1, None])
 def test_reduce_spec_rejects_non_boolean_emit_lse(arch, bad):
-    with pytest.raises(ValueError, match="emit_lse must be a bool"):
+    with pytest.raises(ValueError) as refusal:
         _reduce_spec(arch, emit_lse=bad)
+    assert str(refusal.value) == bool_flag_refusal(
+        "emit_lse", bad, what="UnifiedAttentionReduceTiledSpec"
+    )
 
 
 @pytest.mark.parametrize("arch", _ARCHES)
@@ -102,8 +106,11 @@ def _prefill_problem(arch, **overrides):
 
 @pytest.mark.parametrize("bad", ["false", 0, 1, None])
 def test_problem_rejects_non_boolean_emit_lse(bad):
-    with pytest.raises(ValueError, match="emit_lse must be a bool"):
+    with pytest.raises(ValueError) as refusal:
         _problem(emit_lse=bad)
+    assert str(refusal.value) == bool_flag_refusal(
+        "emit_lse", bad, what="UnifiedAttentionProblem"
+    )
 
 
 @pytest.mark.parametrize("arch", _ARCHES)

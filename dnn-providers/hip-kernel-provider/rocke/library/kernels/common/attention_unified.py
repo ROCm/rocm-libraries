@@ -63,13 +63,13 @@ from rocke.helpers.attention import (
 )
 
 from rocke.helpers.magic_division import calculate_magic_numbers, do_magic_division
+from rocke.helpers.spec import require_bool_fields
 from rocke.helpers.transforms import (
     TensorDescriptor,
 )
 
 from ._attention_additive_bias import append_additive_bias_signature
 from ._lse_store import validate_unified_lse
-from ._spec_checks import require_bool
 
 # Alias the promoted log2-domain softcap helper under the local name used by
 # the scalar reference kernels (matches the gfx950 tiled modules' convention).
@@ -162,18 +162,14 @@ class UnifiedAttentionProblem:
     emit_lse: bool = False
 
     def __post_init__(self):
-        require_bool("emit_lse", self.emit_lse)
+        require_bool_fields(self, "emit_lse")
         if self.right_bound < -1:
             raise ValueError(
                 f"right_bound must be >= -1 (-1 = unbounded), got {self.right_bound}"
             )
         # Changes the kernel ABI (4 appended params), so a truthy non-bool such as
         # "false" must not silently enable it.
-        if type(self.use_additive_bias) is not bool:
-            raise ValueError(
-                "use_additive_bias must be a bool, got "
-                f"{type(self.use_additive_bias).__name__}"
-            )
+        require_bool_fields(self, "use_additive_bias")
 
     @property
     def causal(self) -> bool:

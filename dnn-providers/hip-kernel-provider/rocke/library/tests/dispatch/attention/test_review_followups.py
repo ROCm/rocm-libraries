@@ -28,6 +28,7 @@ from dispatch.attention.unified_rules import (
     _explicit_configs,
 )
 from kernels.common import attention_unified as au
+from rocke.tests.bool_flags import bool_flag_refusal
 from rocke.tests.host_arrays import HostArray
 
 
@@ -444,10 +445,12 @@ class TestFp8DenseGuards(unittest.TestCase):
         and a missing encoding pass as OCP. The request refuses them when it is
         built, so the refusal names the flag."""
         for flag, bad in (("use_fp8", "false"), ("fp8_fnuz", None)):
-            with self.subTest(flag=flag), self.assertRaisesRegex(
-                ValueError, f"{flag} must be a bool"
-            ):
+            with self.subTest(flag=flag), self.assertRaises(ValueError) as caught:
                 self._fp8_req(**{flag: bad})
+            self.assertEqual(
+                str(caught.exception),
+                bool_flag_refusal(flag, bad, what="AttentionRequest"),
+            )
 
     def test_runner_rejects_non_ocp_kv_for_an_fp8_spec(self):
         # The binding guard only covers dispatch callers; a direct call to the

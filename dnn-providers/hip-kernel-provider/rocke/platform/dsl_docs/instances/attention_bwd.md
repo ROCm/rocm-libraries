@@ -2610,7 +2610,7 @@ with `NOT_YET_IMPLEMENTED:`), `request_limit` (a malformed request, or one past
 the kernels' index, grid or format limits) or `policy` (the shipping policy
 declines). The request is type-checked at construction: a flag that is not a
 `bool`, or an extent, bound or count that is not an integer, raises
-`TypeError`. An accepted request plans: after the request checks the predicate
+`ValueError`. An accepted request plans: after the request checks the predicate
 resolves the plan of the request's route under the policy, its tuned knobs
 included, and declines `INSTANCE_UNAVAILABLE` when no plan builds (a spec the
 family validator refuses, among them the recorded resource-gate failures, or

@@ -15,7 +15,7 @@ from dataclasses import dataclass, field, fields as _dataclass_fields
 from types import MappingProxyType
 
 from rocke.core.ir import BF16, F16
-from rocke.helpers.spec import kernel_name_join
+from rocke.helpers.spec import kernel_name_join, require_bool_fields
 
 from kernels.common._attention_dense_paged import paged_cache_bytes, paged_tile_check
 from kernels.common.attention_dense_decode import (
@@ -286,8 +286,7 @@ class AttentionDenseSpec:
         if not 1 <= self.waves_per_eu <= 8:
             raise ValueError(f"waves_per_eu must be in [1, 8], got {self.waves_per_eu}")
 
-        if type(self.paged) is not bool:
-            raise ValueError(f"paged must be a bool, got {type(self.paged).__name__}")
+        require_bool_fields(self, "paged")
         if self.paged:
             if self.block_size <= 0:
                 raise ValueError("paged=True requires block_size > 0")

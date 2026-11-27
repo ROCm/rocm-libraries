@@ -421,6 +421,12 @@ raise ValueError("invalid shape")
 | `NotImplementedError` | The input is valid but this code path is not written yet. | `raise NotImplementedError(f"no HIP lowering for op {op.name!r}")` |
 | `RuntimeError` | Something outside the caller's arguments failed, or the engine broke its own invariant. Raise the existing subclass where there is one. | `raise ComgrError(...)` (a `RuntimeError` from `runtime/comgr.py`); `HipError` (`runtime/hip_module.py`) for a HIP API failure |
 
+- **A spec or request field of the wrong type is a `ValueError`, not a `TypeError`.**
+  A non-bool flag or a non-integer extent in a dataclass a selector builds is a bad
+  value of the spec, and dispatch reads only `ValueError` as "this arch or config
+  cannot run it"; a `TypeError` would raise through the selector instead of
+  declining the spec. `TypeError` stays for an argument that is the wrong kind of
+  object (a spec of another family, an unknown keyword).
 - **Never use `assert` to validate input to a public API.** `python -O` removes assert
   statements, so the check vanishes in optimized runs. `assert` is fine in tests and for
   internal sanity checks whose loss would not let bad input through.

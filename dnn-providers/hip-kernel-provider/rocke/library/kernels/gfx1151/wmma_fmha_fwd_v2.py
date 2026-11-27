@@ -86,6 +86,7 @@ from rocke.core.ir import (
     KernelDef,
     PtrType,
 )
+from rocke.helpers.spec import require_bool_fields
 
 __all__ = [
     "WmmaFmhaFwdV2Spec",
@@ -170,10 +171,7 @@ class WmmaFmhaFwdV2Spec:
                 raise ValueError("paged attention needs a power-of-two page size")
         elif ps:
             raise ValueError("page_block_size is only valid for the paged layout")
-        for flag in ("dense_q", "seqused_q"):
-            value = getattr(self, flag)
-            if type(value) is not bool:
-                raise TypeError(f"{flag} must be a bool, got {value!r}")
+        require_bool_fields(self, "dense_q", "seqused_q")
         if self.dense_q and self.layout != "paged":
             raise ValueError("dense_q is only valid for the paged layout")
         if self.seqused_q and self.layout == "dense":

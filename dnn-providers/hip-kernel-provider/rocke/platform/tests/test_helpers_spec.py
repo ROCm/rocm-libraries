@@ -9,7 +9,11 @@
 * ``non_default_fields``: declared defaults only, field order, ``skip``;
 * ``salted_kernel_name``: the base alone without salt, otherwise the first
   10 hex digits of the SHA-1 of the name-sorted pairs (a pinned value: a
-  kernel name is the code object's symbol and keys the IR goldens).
+  kernel name is the code object's symbol and keys the IR goldens);
+* ``bool_flag_reason`` / ``require_bool`` / ``require_bool_fields``: only an
+  exact ``bool`` passes (or ``None`` too, with ``allow_none``), and a refusal
+  is a ``ValueError`` in the error template that names the owner, the flag and
+  its value.
 """
 
 from __future__ import annotations
@@ -18,6 +22,7 @@ import dataclasses
 import sys
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 _PLATFORM_PY = str(Path(__file__).resolve().parents[1] / "python")
@@ -26,11 +31,15 @@ if _PLATFORM_PY not in sys.path:
 
 from rocke.helpers.spec import (  # noqa: E402
     align_up,
+    bool_flag_reason,
     ceil_div,
     ceil_div_grid,
     non_default_fields,
+    require_bool,
+    require_bool_fields,
     salted_kernel_name,
 )
+from rocke.tests import bool_flags as expected_text  # noqa: E402
 
 
 @pytest.mark.parametrize("a", range(-20, 21))
@@ -90,3 +99,59 @@ def test_salted_kernel_name():
     pairs = [("b", (2, "x")), ("a", 1)]
     assert salted_kernel_name("k", pairs) == "k_420a851fb6"
     assert salted_kernel_name("k", reversed(pairs)) == "k_420a851fb6"
+
+
+# Truthy and falsy stand-ins a coercion would read as a flag.
+_NOT_BOOLS = ("false", "", 0, 1, 0.0, np.bool_(True), np.bool_(False))
+
+
+@pytest.mark.parametrize("flag", (True, False))
+def test_a_bool_passes(flag):
+    assert bool_flag_reason("emit_lse", flag) is None
+    require_bool("emit_lse", flag, what="Spec")
+
+
+@pytest.mark.parametrize("value", (*_NOT_BOOLS, None))
+def test_a_non_bool_is_refused_in_the_error_template(value):
+    reason = f"emit_lse={value!r}, expected a bool"
+    assert bool_flag_reason("emit_lse", value) == reason
+    with pytest.raises(ValueError) as refusal:
+        require_bool("emit_lse", value, what="Spec")
+    assert str(refusal.value) == f"Spec failed - {reason}"
+    assert str(refusal.value) == expected_text.bool_flag_refusal(
+        "emit_lse", value, what="Spec"
+    )
+
+
+def test_allow_none_admits_none_only():
+    assert bool_flag_reason("use_cfvst", None, allow_none=True) is None
+    require_bool("use_cfvst", None, what="Spec", allow_none=True)
+    for value in _NOT_BOOLS:
+        reason = f"use_cfvst={value!r}, expected a bool or None"
+        assert bool_flag_reason("use_cfvst", value, allow_none=True) == reason
+        with pytest.raises(ValueError) as refusal:
+            require_bool("use_cfvst", value, what="Spec", allow_none=True)
+        assert str(refusal.value) == f"Spec failed - {reason}"
+        assert str(refusal.value) == expected_text.bool_flag_refusal(
+            "use_cfvst", value, what="Spec", allow_none=True
+        )
+
+
+@dataclasses.dataclass(frozen=True)
+class _Flags:
+    first: object = True
+    second: object = False
+
+
+class _SubFlags(_Flags):
+    pass
+
+
+def test_require_bool_fields_names_the_owner_class_and_the_first_bad_field():
+    require_bool_fields(_Flags(), "first", "second")
+    require_bool_fields(_Flags(first=None), "first", allow_none=True)
+    with pytest.raises(ValueError) as refusal:
+        require_bool_fields(_SubFlags(first=1, second="no"), "first", "second")
+    assert str(refusal.value) == expected_text.bool_flag_refusal(
+        "first", 1, what="_SubFlags"
+    )

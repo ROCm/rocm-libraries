@@ -17,16 +17,16 @@
 * the declaration (version 2, ABI tags, classes, statuses, decline kinds);
 * predicate-accept implies the plan builds (a refused instance or an
   untakeable tuned value declines ``INSTANCE_UNAVAILABLE``);
-* request flags are bools and extents ints (``TypeError``);
+* request flags are bools and extents ints (``ValueError``);
 * the main kernel's ``page_rows`` is ``num_blocks * page`` in both modes.
 """
 
 from __future__ import annotations
 
 import dataclasses
+import re
 
 import pytest
-
 from kernels.common.attention_bwd_plan import DECLINE_KINDS
 from kernels.common.attention_bwd_unified import (
     ATTN_BWD_UNIFIED_ABI,
@@ -48,6 +48,7 @@ from kernels.common.attention_bwd_unified_plan import (
     attn_bwd_unified_workspace_layout,
     unified_stage_params,
 )
+from rocke.tests.bool_flags import bool_flag_refusal
 
 CDNA = ("gfx942", "gfx950")
 
@@ -482,15 +483,23 @@ def test_decline_kinds(kw, code, prefixed):
 
 @pytest.mark.parametrize(
     "name,bad",
+    [("block_table_injective", 1), ("bottom_right", 0), ("sinks", "no")],
+)
+def test_request_flag_types(name, bad):
+    message = bool_flag_refusal(name, bad, what="AttnBwdUnifiedRequest")
+    with pytest.raises(ValueError, match=re.escape(message)):
+        _req(**{name: bad})
+
+
+@pytest.mark.parametrize(
+    "name,bad,expected",
     [
-        ("block_table_injective", 1),
-        ("bottom_right", 0),
-        ("sinks", "no"),
-        ("page", 16.0),
-        ("num_blocks", True),
-        ("bt_stride", 2.5),
+        ("page", 16.0, "an int"),
+        ("num_blocks", True, "an int"),
+        ("bt_stride", 2.5, "None or an int"),
     ],
 )
-def test_request_types(name, bad):
-    with pytest.raises(TypeError, match=f"{name} must be"):
+def test_request_extent_types(name, bad, expected):
+    message = f"AttnBwdUnifiedRequest failed - {name}={bad!r}, expected {expected}"
+    with pytest.raises(ValueError, match=re.escape(message)):
         _req(**{name: bad})

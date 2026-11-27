@@ -87,6 +87,7 @@ from typing import Tuple
 
 from rocke.core.ir import BF16, F32, KernelDef
 from rocke.helpers.attention import safe_inv_l
+from rocke.helpers.spec import require_bool_fields
 
 from kernels.common._read_ahead import read_ahead
 from kernels.common.attention_arch import attention_lds_capacity_bytes
@@ -374,12 +375,7 @@ class MlaPrefillSpec:
             )
         # Exact types, never coerced: "false" is truthy and True == 1, so a
         # loose value would silently build a different kernel.
-        for name in ("agpr_acc", "absorbed_query"):
-            value = getattr(self, name)
-            if type(value) is not bool:
-                raise TypeError(
-                    f"{name} must be a bool, got {type(value).__name__} {value!r}"
-                )
+        require_bool_fields(self, "agpr_acc", "absorbed_query")
         for name in (
             "num_heads",
             "d_nope",
@@ -398,8 +394,8 @@ class MlaPrefillSpec:
         ):
             value = getattr(self, name)
             if type(value) is not int:
-                raise TypeError(
-                    f"{name} must be an int, got {type(value).__name__} {value!r}"
+                raise ValueError(
+                    f"{type(self).__name__} failed - {name}={value!r}, expected an int"
                 )
         positive = (
             "num_heads",

@@ -54,7 +54,7 @@ from enum import IntEnum
 from operator import index
 from typing import Any, Tuple, get_type_hints
 
-from kernels.common._spec_checks import require_bool
+from rocke.helpers.spec import require_bool_fields
 
 # Re-exported, never redeclared: the tiled kernel specs name their band by these
 # ordinals (``mask_type()``), so the ordinals have one home, beside that mapping.
@@ -237,12 +237,11 @@ class AttentionRequest(OperatorRequest):
         # Exact values, refused rather than coerced, and here rather than in a
         # factory: requests key the selection caches, and ``1 == True`` with the
         # same hash, so a later check is skipped by a cache hit; ``bool("false")``
-        # is True, so coercing where a flag is read turns it on. ``require_bool``
-        # is the library's one refusal of a non-bool flag. ``_BOOL_FIELDS`` is
-        # defined below the class because ``get_type_hints`` needs the finished
-        # class.
-        for name in _BOOL_FIELDS:
-            require_bool(name, getattr(self, name))
+        # is True, so coercing where a flag is read turns it on.
+        # ``rocke.helpers.spec.require_bool`` is the shared refusal of a non-bool
+        # spec or request flag. ``_BOOL_FIELDS`` is defined below the class because
+        # ``get_type_hints`` needs the finished class.
+        require_bool_fields(self, *_BOOL_FIELDS)
         if self.attn_bias_dtype not in ATTN_BIAS_DTYPES:
             raise ValueError(
                 "AttentionRequest rejected - "
@@ -920,7 +919,7 @@ class AttentionSpec:
     def __post_init__(self) -> None:
         # identity() and kernel_name() branch on emit_lse, so a truthy non-bool
         # (1, "yes") would silently produce an LSE identity: refuse it instead.
-        require_bool("emit_lse", self.emit_lse)
+        require_bool_fields(self, "emit_lse")
 
     def identity(self) -> dict:
         """``spec_hash`` payload: every field, except ``emit_lse`` when it is off,

@@ -993,19 +993,30 @@ class TestSplitKSpecDict(unittest.TestCase):
         # relu is a bool and the bounds real numbers: a truthy non-bool or a
         # non-numeric field is rejected, not coerced by the bridge.
         from kernels.common.conv_implicit_gemm import ConvAccumulatorEpilogue
+        from rocke.tests.bool_flags import bool_flag_refusal
 
-        for kw in (
-            dict(relu=1),
-            dict(relu="no"),
-            dict(relu=None),
-            dict(bias="1"),
-            dict(scale=True),
-            dict(clamp_min="0"),
-            dict(clamp_max=[1.0]),
+        for relu in (1, "no", None):
+            with self.subTest(relu=relu):
+                with self.assertRaises(ValueError) as refusal:
+                    ConvAccumulatorEpilogue(relu=relu)
+                self.assertEqual(
+                    str(refusal.exception),
+                    bool_flag_refusal("relu", relu, what="ConvAccumulatorEpilogue"),
+                )
+        for name, bad, expected in (
+            ("bias", "1", "a real number"),
+            ("scale", True, "a real number"),
+            ("clamp_min", "0", "a real number or None"),
+            ("clamp_max", [1.0], "a real number or None"),
         ):
-            with self.subTest(**kw):
-                with self.assertRaises(TypeError):
-                    ConvAccumulatorEpilogue(**kw)
+            with self.subTest(name=name, value=bad):
+                with self.assertRaises(ValueError) as refusal:
+                    ConvAccumulatorEpilogue(**{name: bad})
+                self.assertEqual(
+                    str(refusal.exception),
+                    f"ConvAccumulatorEpilogue failed - {name}={bad!r}, "
+                    f"expected {expected}",
+                )
 
     def test_acc_epilogue_fields_are_forwarded_as_typed(self):
         from kernels.common.conv_implicit_gemm import ConvAccumulatorEpilogue

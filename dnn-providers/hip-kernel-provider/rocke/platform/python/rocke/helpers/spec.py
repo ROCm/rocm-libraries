@@ -34,6 +34,7 @@ __all__ = [
     "SignatureBuilder",
     "WarpTileBlockSizeMixin",
     "align_up",
+    "bool_flag_reason",
     "ceil_div",
     "ceil_div_grid",
     "choose_load_vec",
@@ -41,6 +42,8 @@ __all__ = [
     "kernel_name_join",
     "non_default_fields",
     "ptr_type_str",
+    "require_bool",
+    "require_bool_fields",
     "salted_kernel_name",
     "sig_param",
     "sig_scalar",
@@ -104,6 +107,56 @@ def validate_io(rule: IOSpecRule) -> Tuple[bool, str]:
                     "pick a larger block_size or a multi-pass kernel"
                 )
     return True, "ok"
+
+
+# ---------------------------------------------------------------------
+# bool_flag_reason / require_bool / require_bool_fields
+# ---------------------------------------------------------------------
+
+
+def bool_flag_reason(
+    name: str, value: object, *, allow_none: bool = False
+) -> str | None:
+    """Why ``value`` cannot be the flag ``name``, or ``None`` when it can.
+
+    A flag is a ``bool`` (or ``None`` too, with ``allow_none``). It is checked,
+    never coerced: ``bool("false")`` is ``True``, and ``1`` or ``"yes"`` would
+    silently change a kernel's identity. ``numpy.bool_`` is not a ``bool``, so
+    it is refused. The text is the ``{param}={value!r}, expected {constraint}``
+    part of the error template, so an ``(ok, reason)`` gate returns it as its
+    reason and the caller that raises supplies ``{what} failed``.
+    """
+    if type(value) is bool or (allow_none and value is None):
+        return None
+    expected = "a bool or None" if allow_none else "a bool"
+    return f"{name}={value!r}, expected {expected}"
+
+
+def require_bool(
+    name: str, value: object, *, what: str, allow_none: bool = False
+) -> None:
+    """Raise ``ValueError`` unless ``value`` can be the flag ``name``.
+
+    ``what`` names the spec, request or call that refuses the flag; the message
+    is ``"{what} failed - "`` followed by :func:`bool_flag_reason`. It raises
+    ``ValueError`` because dispatch reads that as "this spec cannot run"; a
+    call that takes a flag as an argument refuses it the same way.
+    """
+    reason = bool_flag_reason(name, value, allow_none=allow_none)
+    if reason is not None:
+        raise ValueError(f"{what} failed - {reason}")
+
+
+def require_bool_fields(owner: object, *names: str, allow_none: bool = False) -> None:
+    """:func:`require_bool` on each named field of ``owner``, in order.
+
+    For a dataclass's ``__post_init__``: the refusal names the owner's class
+    (``type(owner).__name__``), so a subclass reports itself.
+    """
+    for name in names:
+        require_bool(
+            name, getattr(owner, name), what=type(owner).__name__, allow_none=allow_none
+        )
 
 
 # ---------------------------------------------------------------------

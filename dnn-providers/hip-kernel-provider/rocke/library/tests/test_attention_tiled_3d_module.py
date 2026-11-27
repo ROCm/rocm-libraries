@@ -18,7 +18,6 @@ import dataclasses
 import itertools
 
 import pytest
-
 from dispatch.attention import attention_candidates
 from dispatch.attention.common import AttentionMaskType, AttentionRequest
 from kernels.gfx950.attention_tiled_3d import (
@@ -28,6 +27,7 @@ from kernels.gfx950.attention_tiled_3d import (
     supports_tiled_3d_spec,
     supports_unified_attention_3d_tiled_module,
 )
+from rocke.tests.bool_flags import bool_flag_refusal
 
 
 def _gfx950_3d_candidates():
@@ -188,8 +188,11 @@ def test_reduce_spec_defaults_to_the_segment_emit_lse():
 
 @pytest.mark.parametrize("bad", ["false", 0, 1, None])
 def test_segment_spec_rejects_non_boolean_emit_lse(bad):
-    with pytest.raises(ValueError, match="emit_lse must be a bool"):
+    with pytest.raises(ValueError) as refusal:
         _segment(emit_lse=bad)
+    assert str(refusal.value) == bool_flag_refusal(
+        "emit_lse", bad, what="UnifiedAttention3DTiledSpec"
+    )
 
 
 def test_segment_name_gains_lse_suffix_only_when_on():

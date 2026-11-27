@@ -15,6 +15,7 @@ from dispatch.attention import (
     dispatch_attention,
 )
 from dispatch.attention.common import ATTENTION_FEATURES
+from rocke.tests.bool_flags import bool_flag_refusal
 
 # Frozen map of every registered candidate to the feature set its Capability
 # declares. Generated once from the registry; a new candidate (or a features
@@ -324,17 +325,19 @@ class TestAttentionRequestFieldValues(unittest.TestCase):
                         _attn(**{flag: bad})
                     self.assertEqual(
                         str(caught.exception),
-                        f"{flag} must be a bool, got {type(bad).__name__}",
+                        bool_flag_refusal(flag, bad, what="AttentionRequest"),
                     )
 
     def test_a_flag_is_refused_after_the_same_request_with_true_was_selected(self):
         selected = dispatch_attention(_attn(use_sinks=True))
         self.assertIn("sinks", selected.request.features())
         for bad in (1, "true"):
-            with self.subTest(value=bad), self.assertRaisesRegex(
-                ValueError, "use_sinks must be a bool"
-            ):
+            with self.subTest(value=bad), self.assertRaises(ValueError) as caught:
                 dispatch_attention(_attn(use_sinks=bad))
+            self.assertEqual(
+                str(caught.exception),
+                bool_flag_refusal("use_sinks", bad, what="AttentionRequest"),
+            )
 
     def test_attn_bias_dtype_takes_its_exact_spellings_only(self):
         for dtype in ("f32", "q"):

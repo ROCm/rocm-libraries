@@ -17,6 +17,7 @@ from dispatch.attention import (
 from dispatch.attention import bindings as attention_bindings
 from dispatch.attention.common import AttentionTuningSpec, attention_problem
 from kernels.common.attention_dense_spec import AttentionDenseSpec
+from rocke.tests.bool_flags import bool_flag_refusal
 from rocke.tests.host_arrays import HostArray
 
 
@@ -415,10 +416,18 @@ class TestRegistrySplit(unittest.TestCase):
         )
         for value in ("False", 0, None):
             with self.subTest(value=value):
-                with self.assertRaisesRegex(ValueError, "must be a bool"):
+                with self.assertRaises(ValueError) as caught:
                     candidate.bound_torch(
                         req, spec, tensors, unsafe_skip_paged_value_validation=value
                     )
+                self.assertEqual(
+                    str(caught.exception),
+                    bool_flag_refusal(
+                        "unsafe_skip_paged_value_validation",
+                        value,
+                        what="bind_tuning_attention_torch",
+                    ),
+                )
         with self.assertRaisesRegex(ValueError, "block"):
             candidate.bound_torch(req, spec, tensors)
         candidate.bound_torch(

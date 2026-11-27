@@ -125,7 +125,12 @@ from rocke.helpers.io import (
     store_vec,
 )
 from rocke.helpers.reduction import block_lds_reduce_with_wave_prologue, tree_reduce
-from rocke.helpers.spec import SignatureBuilder, ceil_div_grid, kernel_name_join
+from rocke.helpers.spec import (
+    SignatureBuilder,
+    bool_flag_reason,
+    ceil_div_grid,
+    kernel_name_join,
+)
 
 __all__ = [
     "GdnDecodeSpec",
@@ -883,9 +888,8 @@ def _field_type_error(spec: GdnDecodeSpec) -> Optional[str]:
         "norm_gate_once",
         "out_lds",
     ):
-        _value = getattr(spec, _field)
-        if type(_value) is not bool:
-            return f"{_field} must be a bool, got {_value!r}"
+        if (_reason := bool_flag_reason(_field, getattr(spec, _field))) is not None:
+            return _reason
     for _field in (
         "num_k_heads",
         "num_v_heads",
