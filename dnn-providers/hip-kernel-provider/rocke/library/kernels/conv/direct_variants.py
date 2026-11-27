@@ -201,6 +201,7 @@ DIRECT_WGRAD_REDUCE = "direct_wgrad_reduce"
 DIRECT_WGRAD_TWO_STAGE = (
     "direct_wgrad",
     "direct_wgrad_small_c",
+    "direct_wgrad_small_k",
     "direct_depthwise_wgrad",
 )
 # Register budget for the MFMA dgrad fprop pass's preloaded weights and
@@ -505,6 +506,17 @@ def make_direct_spec(variant: str, problem, knobs: dict, wave_size: int = 64):
             wave_size=32,
             mfma_k=32,
             small_c=True,
+            **knobs,
+        )
+    if variant == "direct_wgrad_small_k":
+        # small_c on the swapped problem (see DirectConvWgradSpec.small_k).
+        return dc.DirectConvWgradSpec(
+            problem=problem,
+            name="rocke_direct_conv_wgrad_sk",
+            wave_size=32,
+            mfma_k=32,
+            small_c=True,
+            small_k=True,
             **knobs,
         )
     if variant == "direct_depthwise_wgrad":
@@ -845,7 +857,7 @@ def validate_direct_spec(variant: str, spec, arch: str) -> tuple[bool, str]:
             from kernels.common.conv_direct_fwd_wmma import is_valid_fwd_wmma_spec
 
             return is_valid_fwd_wmma_spec(spec, arch=arch)
-        if variant in ("direct_wgrad", "direct_wgrad_small_c"):
+        if variant in ("direct_wgrad", "direct_wgrad_small_c", "direct_wgrad_small_k"):
             spec.validate()
             return dc.is_valid_wgrad_spec(spec, arch=arch)
         if variant == "direct_wgrad_tiled":
@@ -967,6 +979,7 @@ def select_direct_kernel_builder(variant: str, spec, arch: str):
         "direct_grouped_dgrad_fused": dc.build_direct_conv,
         "direct_wgrad": dc.build_direct_conv_wgrad,
         "direct_wgrad_small_c": dc.build_direct_conv_wgrad,
+        "direct_wgrad_small_k": dc.build_direct_conv_wgrad,
         "direct_depthwise_wgrad": dc.build_direct_depthwise_wgrad,
         DIRECT_WGRAD_REDUCE: build_conv_wgrad_workspace_reduce,
         DIRECT_DGRAD_TRANSPOSE: dc.build_direct_transpose_weights_dgrad,

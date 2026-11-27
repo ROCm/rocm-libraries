@@ -43,6 +43,10 @@ _DENSE = DirectConvProblem(
 _STEM = DirectConvProblem(
     N=2, H=13, W=37, groups=1, cpg=3, kpg=32, KH=3, KW=3, PAD=1, stride=1
 )
+# A small-K output layer: three output channels, X carries the 8-channel runs.
+_OUT = DirectConvProblem(
+    N=2, H=13, W=37, groups=1, cpg=64, kpg=3, KH=3, KW=3, PAD=1, stride=1
+)
 _DW = DirectConvProblem(
     N=2, H=9, W=13, groups=64, cpg=1, kpg=1, KH=3, KW=3, PAD=1, stride=1
 )
@@ -54,6 +58,7 @@ _BASES = {
         problem=_DENSE, wave_size=32, image_per_block=True, waves_k=2, waves_c=2
     ),
     "sc": DirectConvWgradSpec(problem=_STEM, wave_size=32, small_c=True),
+    "sk": DirectConvWgradSpec(problem=_OUT, wave_size=32, small_c=True, small_k=True),
     "dw": DirectDepthwiseWgradSpec(
         problem=_DW, wave_size=32, waves=4, rows_per_wave=2, wo_chunk=4, ws_replicas=4
     ),
@@ -92,6 +97,8 @@ _CASES = [
     ("sc_mfma_k", "sc", {"mfma_k": 16}, {}, "gfx1250"),
     ("sc_groups", "sc", {}, {"groups": 2}, "gfx1250"),
     ("sc_kpg", "sc", {}, {"kpg": 12}, "gfx1250"),
+    ("sc_cpg0", "sc", {}, {"cpg": 0}, "gfx1250"),
+    ("sc_kpg0", "sc", {}, {"kpg": 0}, "gfx1250"),
     ("sc_filter", "sc", {}, {"KW": 0}, "gfx1250"),
     ("sc_wave_tile", "sc", {"wave_tile_c": 32}, {}, "gfx1250"),
     ("sc_waves_lt1", "sc", {"waves_c": 0}, {}, "gfx1250"),
@@ -110,6 +117,14 @@ _CASES = [
       "vec_x": 4, "sub_steps": 4, "uniform_wave": True}, {}, "gfx1250"),
     # ---- is_valid_wgrad_spec: the small_c arch gate
     ("sc_arch", "sc", {}, {}, "gfx1151"),
+    # ---- small_k: _wgrad_image_reason, then _wgrad_small_c_reason
+    ("sk_need_sc", "w32", {"small_k": True}, {}, "gfx1250"),
+    ("sk_stride", "sk", {}, {"stride": 2}, "gfx1250"),
+    ("sk_square", "sk", {}, {"KW": 5}, "gfx1250"),
+    ("sk_pad_w", "sk", {}, {"pad_w": 0}, "gfx1250"),
+    ("sk_pad", "sk", {}, {"PAD": 3}, "gfx1250"),
+    ("sk_cpg", "sk", {}, {"cpg": 12}, "gfx1250"),
+    ("sk_kpg0", "sk", {}, {"kpg": 0}, "gfx1250"),
     # ---- _depthwise_wgrad_reason
     ("dw_dtype", "dw", {}, {"dtype": "fp32"}, "gfx1250"),
     ("dw_cpg", "dw", {}, {"cpg": 2, "kpg": 2}, "gfx1250"),
@@ -171,7 +186,9 @@ def test_wgrad_refusal_bases_are_valid(base):
 
 
 # The refusals of a boolean flag: the message itself names the value.
-_FLAG_CASES = frozenset({"img_ldsepi_need_img", "sc_and_img", "sc_runtime_channels"})
+_FLAG_CASES = frozenset(
+    {"img_ldsepi_need_img", "sc_and_img", "sc_runtime_channels", "sk_need_sc"}
+)
 
 # The refusals that state the offending value inside the sentence, mostly a
 # measured size against its limit, rather than in a "(got ...)" tail: the

@@ -2778,6 +2778,104 @@ class TestDirectConvWgradCorrectness(unittest.TestCase):
                             cfg=(wk, wc, 1, 32, 1),
                             extra=dict(extra, small_c=True),
                         )
+        # The shipped narrow layer (64 -> 128, 3x3, stride 2) at its cached tile.
+        narrow = _Shape(
+            "sc_narrow_3x3s2",
+            N=2,
+            H=17,
+            W=23,
+            groups=1,
+            cpg=64,
+            kpg=128,
+            PAD=1,
+            stride=2,
+        )
+        tile = dict(
+            wave_tiles_k=1,
+            wave_tiles_c=3,
+            vec_x=4,
+            sub_steps=2,
+            ws_replicas=32,
+            row_blocks=32,
+        )
+        with self.subTest(shape=narrow.id, dtype="fp16"):
+            self._run_wgrad(
+                narrow,
+                dtype="fp16",
+                cfg=(8, 1, 1, 32, 1),
+                extra=dict(tile, small_c=True),
+            )
+        self._assert_ran()
+
+    def test_wgrad_small_k(self):
+        """Small-K variant (gfx1250): the small_c GEMM on the swapped problem
+        for output layers with three or four output channels.
+
+        X takes dY's place as the 8-channel vector operand, dY is gathered at
+        padding KH - 1 - PAD over X's pixel range, and the epilogue writes the
+        flipped filter taps. The shapes cover 3x3 at padding 1 and 0 (swapped
+        padding 1 and 2), a 5x5 filter at padding 1 (swapped padding 3),
+        K = 4, and odd extents so the last pixel step is ragged. The knobs
+        are the AOT grid's tiles: gathered and vector dY runs, register
+        blocking, several pixel chunks per synchronisation, a uniform wave
+        index, and pixel splits over scratch replicas.
+        """
+        if GPU_ARCH != "gfx1250":
+            skip_needing_arch(("gfx1250",), reason="small_k is wave32-only (gfx1250)")
+        shapes = [
+            _Shape("sk_c64k3_3x3p1", N=2, H=17, W=23, groups=1, cpg=64, kpg=3, PAD=1),
+            _Shape("sk_c32k4_3x3p1", N=3, H=11, W=13, groups=1, cpg=32, kpg=4, PAD=1),
+            _Shape("sk_c16k3_3x3p0", N=2, H=15, W=19, groups=1, cpg=16, kpg=3, PAD=0),
+            _Shape(
+                "sk_c16k3_5x5p1",
+                N=2,
+                H=15,
+                W=19,
+                groups=1,
+                cpg=16,
+                kpg=3,
+                KH=5,
+                KW=5,
+                PAD=1,
+            ),
+        ]
+        knobs = [
+            (
+                1,
+                1,
+                dict(wave_tiles_k=2, wave_tiles_c=2, sub_steps=2, ws_replicas=8),
+            ),
+            (
+                8,
+                1,
+                dict(
+                    wave_tiles_c=3, vec_x=4, sub_steps=2, ws_replicas=32, row_blocks=7
+                ),
+            ),
+            (
+                8,
+                1,
+                dict(
+                    wave_tiles_c=3,
+                    vec_x=4,
+                    sub_steps=4,
+                    ws_replicas=32,
+                    row_blocks=5,
+                    uniform_wave=True,
+                ),
+            ),
+            (2, 2, dict(vec_x=8, row_blocks=3, ws_replicas=4)),
+        ]
+        for dtype in ("fp16", "bf16"):
+            for s in shapes:
+                for wk, wc, extra in knobs:
+                    with self.subTest(shape=s.id, dtype=dtype, wk=wk, wc=wc, **extra):
+                        self._run_wgrad(
+                            s,
+                            dtype=dtype,
+                            cfg=(wk, wc, 1, 32, 1),
+                            extra=dict(extra, small_c=True, small_k=True),
+                        )
         self._assert_ran()
 
     def test_wgrad(self):

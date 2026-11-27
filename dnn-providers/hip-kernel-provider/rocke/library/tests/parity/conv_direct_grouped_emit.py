@@ -2521,8 +2521,76 @@ def _wgrad_pp_spec(idx: int):
     return ("wgrad_tiled", sel, "gfx950")
 
 
+# ---------------------------------------------------------------------------
+# gfx1250 small-K wgrad (small_c on the swapped problem), indices 371..376:
+# the AOT grid's 3- and 4-channel output layers in both dtypes (gathered and
+# vector X runs, a uniform wave index), a 5x5 filter whose padding 1 turns
+# into 3 on the swapped problem, and two specs both engines must reject:
+# small_k at stride 2 and small_k without small_c.
+# ---------------------------------------------------------------------------
+_WGRAD_SK_CFG_BASE = 371
+
+
+def _wgrad_sk_spec(idx: int):
+    """Return (kind, spec, arch) for config ``_WGRAD_SK_CFG_BASE + idx``, or None."""
+
+    def sprob(cpg, kpg, *, F=3, stride=1, PAD=1, dtype="fp16"):
+        return DirectConvProblem(
+            N=2,
+            H=13,
+            W=37,
+            groups=1,
+            cpg=cpg,
+            kpg=kpg,
+            KH=F,
+            KW=F,
+            PAD=PAD,
+            stride=stride,
+            dtype=dtype,
+        )
+
+    def ws(problem, waves_k, waves_c, tiles_k, tiles_c, vec_x, sub_steps, wsr, rb, uw):
+        return DirectConvWgradSpec(
+            problem=problem,
+            name="rocke_direct_conv_wgrad_sk",
+            wave_size=32,
+            small_c=True,
+            small_k=True,
+            waves_k=waves_k,
+            waves_c=waves_c,
+            wave_tiles_k=tiles_k,
+            wave_tiles_c=tiles_c,
+            vec_x=vec_x,
+            sub_steps=sub_steps,
+            ws_replicas=wsr,
+            row_blocks=rb,
+            uniform_wave=uw,
+        )
+
+    table = {
+        0: ws(sprob(64, 3), 1, 1, 2, 2, 0, 2, 8, 512, False),
+        1: ws(sprob(320, 4, dtype="bf16"), 8, 1, 1, 3, 4, 2, 32, 512, False),
+        2: ws(sprob(128, 3, dtype="bf16"), 8, 1, 1, 3, 4, 4, 32, 512, True),
+        3: ws(sprob(16, 3, F=5, PAD=1), 2, 2, 1, 2, 8, 1, 4, 3, False),
+        # Must reject: small_k swaps X and dY, which needs stride 1.
+        4: ws(sprob(64, 3, stride=2), 1, 1, 2, 2, 0, 2, 8, 512, False),
+        # Must reject: small_k needs small_c (a dense problem, so the
+        # refusal is that one).
+        5: DirectConvWgradSpec(problem=sprob(64, 64), wave_size=32, small_k=True),
+    }
+    sel = table.get(idx)
+    if sel is None:
+        return None
+    return ("wgrad", sel, "gfx1250")
+
+
 def _spec(idx: int):
     """Return (kind, spec, arch) for config index `idx`."""
+    if idx >= _WGRAD_SK_CFG_BASE:
+        sel = _wgrad_sk_spec(idx - _WGRAD_SK_CFG_BASE)
+        if sel is not None:
+            return sel
+        raise SystemExit(f"unknown config index {idx}")
     if idx >= _WGRAD_PP_CFG_BASE:
         sel = _wgrad_pp_spec(idx - _WGRAD_PP_CFG_BASE)
         if sel is not None:

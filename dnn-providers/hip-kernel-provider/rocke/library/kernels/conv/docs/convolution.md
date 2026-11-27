@@ -1877,7 +1877,8 @@ target at its wave size, but the AOT cache carries it for the wave32 targets onl
 | Spec / variant | Builds for | Validator accepts | AOT cache carries | Output |
 |---|---|---|---|---|
 | `DirectConvWgradSpec(image_per_block=True)` / `direct_wgrad` | gfx1250 | dense and grouped, stride 1, `KH, KW <= 8` and within the accumulator and fragment register estimate of `_wgrad_image_reason` (budget `_WGRAD_IMG_VGPR_BUDGET`; C++ `rocke_wgrad_image_reason`): square filters up to 4x4 at one tile per wave, so 5x5 and 7x7 are refused | 3x3, `PAD` 0 and 1 | `ws_replicas` fp32 scratch slabs, or the zeroed fp32 `dW` at one replica |
-| `DirectConvWgradSpec(small_c=True)` / `direct_wgrad_small_c` | gfx1250 | ungrouped, `kpg` a multiple of 8, any filter, stride and padding (channel counts baked) | 3-channel stems 3x3/s1 `PAD` 1, 3x3/s2 `PAD` 0 and 1, 7x7/s2, 4x4/s4, 14x14/s14, 16x16/s16; 4-channel 3x3/s1 `PAD` 1 | `ws_replicas` fp32 scratch slabs |
+| `DirectConvWgradSpec(small_c=True)` / `direct_wgrad_small_c` | gfx1250 | ungrouped, `kpg` a multiple of 8, any filter, stride and padding (channel counts baked) | 3-channel stems 3x3/s1 `PAD` 1, 3x3/s2 `PAD` 0 and 1, 7x7/s2, 4x4/s4, 14x14/s14, 16x16/s16; 4-channel 3x3/s1 `PAD` 1; fp16 64 -> 128 channels 3x3/s2 `PAD` 1 | `ws_replicas` fp32 scratch slabs |
+| `DirectConvWgradSpec(small_c=True, small_k=True)` / `direct_wgrad_small_k` | gfx1250 | ungrouped, stride 1, square filter with one padding `0 <= PAD <= KH - 1`, `cpg` a multiple of 8 (channel counts baked) | 3x3/s1 `PAD` 1 output layers: fp16 64 -> 3, bf16 128 -> 3 and 320 -> 4 | `ws_replicas` fp32 scratch slabs |
 | `DirectDepthwiseWgradSpec` / `direct_depthwise_wgrad` | every target at its wave size (wave64 on gfx9, wave32 on gfx11 / gfx12 / gfx1250) | depthwise (`cpg = kpg = 1`, channel count from the kernargs, a multiple of `chan_per_lane`), any stride and padding | every wave32 target (gfx11, gfx12, gfx1250): 3x3, 5x5 and 7x7, stride 1 and 2, `PAD` 0 and "same" | `ws_replicas` fp32 scratch slabs |
 
 The plain wave32 port of `DirectConvWgradSpec` (`image_per_block=False`,
@@ -1892,6 +1893,10 @@ to 8x8); the AOT cache does not carry it.
 - **Small C.** A GEMM over the flattened `(r, s, c)` filter row, with
   vectorised X loads (`vec_x`), `sub_steps` staging, an optional uniform wave
   index (`uniform_wave`) and a pixel-range split over grid y (`row_blocks`).
+- **Small K.** The small-C GEMM on the swapped problem, for output layers
+  whose `kpg` is the small side: X is the 8-channel vector operand, dY is
+  gathered at padding `KH - 1 - PAD` over X's pixels, and the epilogue writes
+  the flipped filter tap, so X is read once instead of `KH * KW` times.
 - **Depthwise VALU.** Lanes own `chan_per_lane` channels and accumulate the
   filter taps in fp32 registers (`r_split` splits the filter rows over wave
   groups), with an LDS reduction over the waves.

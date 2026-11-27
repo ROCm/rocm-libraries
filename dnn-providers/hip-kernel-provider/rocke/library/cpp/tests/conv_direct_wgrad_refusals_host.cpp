@@ -35,10 +35,10 @@
  * rocke_direct_conv_wgrad_spec_t from its own header, so growing it must move
  * ROCKE_ABI_VERSION too. Editing the struct fails the build here; the fix is
  * to bump ROCKE_ABI_VERSION in platform/cpp/include/rocke/abi.h and BINARY_ABI
- * in platform/python/rocke/portable_ir/src/abi.py, then update this pin.
+ * in platform/python/rocke/core/native_engine.py, then update this pin.
  * 64-bit only. */
 #if INTPTR_MAX == INT64_MAX
-static_assert(sizeof(rocke_direct_conv_wgrad_spec_t) == 160 && ROCKE_ABI_VERSION >= 15,
+static_assert(sizeof(rocke_direct_conv_wgrad_spec_t) == 160 && ROCKE_ABI_VERSION >= 24,
               "rocke_direct_conv_wgrad_spec_t changed size: bump ROCKE_ABI_VERSION in "
               "rocke/abi.h, then update this pin");
 #endif
@@ -50,6 +50,7 @@ typedef enum
     BASE_W32,
     BASE_IMG,
     BASE_SC,
+    BASE_SK,
 } wgrad_base_t;
 
 /* A spec both validators accept on gfx1250, to change one knob of. */
@@ -66,6 +67,12 @@ static rocke_direct_conv_wgrad_spec_t wgrad_base(wgrad_base_t base)
         p.cpg = 3;
         p.kpg = 32;
     }
+    else if(base == BASE_SK)
+    {
+        p.H = 13;
+        p.cpg = 64;
+        p.kpg = 3;
+    }
     else
     {
         p.H = 8;
@@ -80,8 +87,10 @@ static rocke_direct_conv_wgrad_spec_t wgrad_base(wgrad_base_t base)
         s.waves_k = 2;
         s.waves_c = 2;
     }
-    if(base == BASE_SC)
+    if(base == BASE_SC || base == BASE_SK)
         s.small_c = 1;
+    if(base == BASE_SK)
+        s.small_k = 1;
     return s;
 }
 
@@ -175,6 +184,8 @@ static const wgrad_case_t k_wgrad_cases[] = {
     {"sc_mfma_k", BASE_SC, [](W* s) { s->mfma_k = 16; }, "gfx1250"},
     {"sc_groups", BASE_SC, [](W* s) { s->problem.groups = 2; }, "gfx1250"},
     {"sc_kpg", BASE_SC, [](W* s) { s->problem.kpg = 12; }, "gfx1250"},
+    {"sc_cpg0", BASE_SC, [](W* s) { s->problem.cpg = 0; }, "gfx1250"},
+    {"sc_kpg0", BASE_SC, [](W* s) { s->problem.kpg = 0; }, "gfx1250"},
     {"sc_filter", BASE_SC, [](W* s) { s->problem.KW = 0; }, "gfx1250"},
     {"sc_wave_tile", BASE_SC, [](W* s) { s->wave_tile_c = 32; }, "gfx1250"},
     {"sc_waves_lt1", BASE_SC, [](W* s) { s->waves_c = 0; }, "gfx1250"},
@@ -214,6 +225,14 @@ static const wgrad_case_t k_wgrad_cases[] = {
      "gfx1250"},
     /* ---- is_valid_wgrad_spec: the small_c arch gate */
     {"sc_arch", BASE_SC, [](W*) {}, "gfx1151"},
+    /* ---- small_k: _wgrad_image_reason, then _wgrad_small_c_reason */
+    {"sk_need_sc", BASE_W32, [](W* s) { s->small_k = 1; }, "gfx1250"},
+    {"sk_stride", BASE_SK, [](W* s) { s->problem.stride = 2; }, "gfx1250"},
+    {"sk_square", BASE_SK, [](W* s) { s->problem.KW = 5; }, "gfx1250"},
+    {"sk_pad_w", BASE_SK, [](W* s) { s->problem.pad_w = 0; }, "gfx1250"},
+    {"sk_pad", BASE_SK, [](W* s) { s->problem.PAD = 3; }, "gfx1250"},
+    {"sk_cpg", BASE_SK, [](W* s) { s->problem.cpg = 12; }, "gfx1250"},
+    {"sk_kpg0", BASE_SK, [](W* s) { s->problem.kpg = 0; }, "gfx1250"},
 };
 
 static const dw_case_t k_dw_cases[] = {
@@ -304,7 +323,7 @@ static void expect_refused(const char* id, bool ok, const char* why, const char*
 
 /* The refusals of a boolean flag: the message itself names the value. */
 static const char* const k_flag_cases[]
-    = {"img_ldsepi_need_img", "sc_and_img", "sc_runtime_channels"};
+    = {"img_ldsepi_need_img", "sc_and_img", "sc_runtime_channels", "sk_need_sc"};
 
 /* The refusals that state the offending value inside the sentence, mostly a
  * measured size against its limit, rather than in a "(got ...)" tail: the
@@ -425,7 +444,7 @@ static void check_dw_cachepolicy(const char* arch, int64_t want)
 int main(void)
 {
     char why[REASON_CAP];
-    const wgrad_base_t bases[] = {BASE_W32, BASE_IMG, BASE_SC};
+    const wgrad_base_t bases[] = {BASE_W32, BASE_IMG, BASE_SC, BASE_SK};
     size_t i;
 
     /* Each case changes one knob of a base spec, so the bases must pass. */

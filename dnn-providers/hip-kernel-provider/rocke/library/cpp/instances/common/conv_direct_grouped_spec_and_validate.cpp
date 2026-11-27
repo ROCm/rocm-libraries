@@ -2763,6 +2763,10 @@ static bool rocke_wgrad_image_reason(const rocke_direct_conv_wgrad_spec_t* spec,
                             spec->vec_x,
                             spec->uniform_wave ? "True" : "False");
     }
+    if(spec->small_k)
+    {
+        ROCKE_WGRAD_IMG_WHY("small_k needs small_c=True");
+    }
     blocked = spec->wave_tiles_k > 1 || spec->wave_tiles_c > 1;
     if(!spec->image_per_block)
     {
@@ -2905,7 +2909,40 @@ static bool rocke_wgrad_small_c_reason(const rocke_direct_conv_wgrad_spec_t* spe
     {
         ROCKE_WGRAD_SC_WHY("small_c needs groups=1 (got %d)", p->groups);
     }
-    if(p->kpg % 8)
+    if(p->cpg < 1 || p->kpg < 1)
+    {
+        ROCKE_WGRAD_SC_WHY(
+            "small_c needs cpg >= 1 and kpg >= 1 (got cpg %d, kpg %d)", p->cpg, p->kpg);
+    }
+    if(spec->small_k)
+    {
+        int pad_w = rocke_direct_conv_problem_pad_w(p);
+        if(p->stride != 1)
+        {
+            ROCKE_WGRAD_SC_WHY("small_k swaps X and dY, which needs stride 1 (got %d)", p->stride);
+        }
+        if(p->KH != p->KW || pad_w != p->PAD)
+        {
+            ROCKE_WGRAD_SC_WHY("small_k needs a square filter and one padding "
+                               "(got %dx%d, PAD %d, pad_w %d)",
+                               p->KH,
+                               p->KW,
+                               p->PAD,
+                               pad_w);
+        }
+        if(!(0 <= p->PAD && p->PAD <= p->KH - 1))
+        {
+            ROCKE_WGRAD_SC_WHY(
+                "small_k needs 0 <= PAD <= KH - 1 (got PAD %d, KH %d)", p->PAD, p->KH);
+        }
+        if(p->cpg % 8)
+        {
+            ROCKE_WGRAD_SC_WHY(
+                "small_k loads X as 8-channel vectors; cpg must be a multiple of 8 (got %d)",
+                p->cpg);
+        }
+    }
+    else if(p->kpg % 8)
     {
         ROCKE_WGRAD_SC_WHY(
             "small_c loads dY as 8-channel vectors; kpg must be a multiple of 8 (got %d)", p->kpg);
@@ -3023,12 +3060,29 @@ rocke_direct_conv_wgrad_spec_t rocke_direct_conv_wgrad_spec_default(void)
     spec.sub_steps = 1;
     spec.vec_x = 0;
     spec.uniform_wave = 0;
+    spec.small_k = 0;
     return spec;
+}
+
+int rocke_direct_conv_wgrad_sc_cpg(const rocke_direct_conv_wgrad_spec_t* spec)
+{
+    return spec->small_k ? spec->problem.kpg : spec->problem.cpg;
+}
+
+int rocke_direct_conv_wgrad_sc_kpg(const rocke_direct_conv_wgrad_spec_t* spec)
+{
+    return spec->small_k ? spec->problem.cpg : spec->problem.kpg;
+}
+
+int rocke_direct_conv_wgrad_sc_pad(const rocke_direct_conv_wgrad_spec_t* spec)
+{
+    const rocke_direct_conv_problem_t* p = &spec->problem;
+    return spec->small_k ? p->KH - 1 - p->PAD : p->PAD;
 }
 
 int rocke_direct_conv_wgrad_small_c_run(const rocke_direct_conv_wgrad_spec_t* spec)
 {
-    int run = spec->problem.KW * spec->problem.cpg;
+    int run = spec->problem.KW * rocke_direct_conv_wgrad_sc_cpg(spec);
     if(spec->vec_x)
         return (run + spec->vec_x - 1) / spec->vec_x * spec->vec_x;
     return run;
@@ -3097,8 +3151,8 @@ rocke_status_t rocke_direct_conv_wgrad_kernel_name(const rocke_direct_conv_wgrad
     char bc_buf[24];
     char hpb_buf[24];
     char mk_buf[24];
-    const char* flag_names[18];
-    int flag_on[18];
+    const char* flag_names[19];
+    int flag_on[19];
     char tk_buf[24];
     char tc_buf[24];
     char rps_buf[24];
@@ -3136,7 +3190,7 @@ rocke_status_t rocke_direct_conv_wgrad_kernel_name(const rocke_direct_conv_wgrad
     parts[3] = hpb_buf;
     parts[4] = mk_buf;
     /* Python: flags={"wq": waves_q} if waves_q > 1 else {}, then w32, img,
-     * tk<n>, tc<n>, rps<n>, rb<n>, tdm<n>, wsr<n>, ldsepi, sc, ss<n>, vx<n>, uw, bf16 and
+     * tk<n>, tc<n>, rps<n>, rb<n>, tdm<n>, wsr<n>, ldsepi, sc, sk, ss<n>, vx<n>, uw, bf16 and
      * rtc, each only when set.
      * kernel_name_join appends the NAME (not the value) for a truthy entry, so
      * a false entry and an absent one name the same kernel. Order matches the
@@ -3164,6 +3218,8 @@ rocke_status_t rocke_direct_conv_wgrad_kernel_name(const rocke_direct_conv_wgrad
     flag_on[nf++] = spec->lds_epilogue ? 1 : 0;
     flag_names[nf] = "sc";
     flag_on[nf++] = spec->small_c ? 1 : 0;
+    flag_names[nf] = "sk";
+    flag_on[nf++] = spec->small_k ? 1 : 0;
     flag_names[nf] = ss_buf;
     flag_on[nf++] = (spec->sub_steps > 1) ? 1 : 0;
     flag_names[nf] = vx_buf;

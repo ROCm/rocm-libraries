@@ -865,6 +865,15 @@ typedef struct rocke_direct_conv_wgrad_spec
     int vec_x;
     /* default 0 -- small_c: readfirstlane the wave index. Name flag uw. */
     int uniform_wave;
+    /* Appended after uniform_wave. Mirrors DirectConvWgradSpec.small_k.
+     * default 0 -- nonzero (needs small_c, stride 1, a square filter): the
+     * small_c GEMM on the swapped problem for layers whose kpg is the small
+     * side. X (cpg channels) is the 8-channel vector operand, dY (kpg
+     * channels) the im2col operand at padding KH - 1 - PAD, and the epilogue
+     * writes GEMM element [c][(r', s', k)] to dW[k][KH-1-r'][KW-1-s'][c]. The
+     * kernargs, the scratch and its fold stay those of the real problem.
+     * Name flag sk. */
+    int small_k;
 } rocke_direct_conv_wgrad_spec_t;
 
 /* ===================================================================== *
@@ -946,6 +955,12 @@ rocke_direct_conv_wgrad_spec_t rocke_direct_conv_wgrad_spec_default(void);
  * padded to the vec_x unit, and KH of them (the small_c GEMM N). */
 int rocke_direct_conv_wgrad_small_c_run(const rocke_direct_conv_wgrad_spec_t* spec);
 int rocke_direct_conv_wgrad_small_c_n(const rocke_direct_conv_wgrad_spec_t* spec);
+/* DirectConvWgradSpec.sc_cpg / sc_kpg / sc_pad: the small_c GEMM's im2col
+ * channels, vector channels and im2col padding (kpg, cpg and KH - 1 - PAD
+ * with small_k; cpg, kpg and PAD without). */
+int rocke_direct_conv_wgrad_sc_cpg(const rocke_direct_conv_wgrad_spec_t* spec);
+int rocke_direct_conv_wgrad_sc_kpg(const rocke_direct_conv_wgrad_spec_t* spec);
+int rocke_direct_conv_wgrad_sc_pad(const rocke_direct_conv_wgrad_spec_t* spec);
 
 /* @property block_k -> waves_k * wave_tile_k * wave_tiles_k. */
 int rocke_direct_conv_wgrad_block_k(const rocke_direct_conv_wgrad_spec_t* spec);
