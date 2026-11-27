@@ -470,15 +470,18 @@ repos:
       # runs on every change; one that deletes nothing costs a git diff. CI
       # checks out only the directories a change touches, so this command
       # (shared with rocke-hook-checks) runs python with the arguments after
-      # the first only when that path, rocKE, is checked out. It is not for a
-      # change that touches nothing under hip-kernel-provider, which deletes
-      # nothing under rocKE, or that only moves rocKE files elsewhere (CI
-      # lists a rename by its new path).
+      # the first only when that path, rocKE, is checked out, and otherwise
+      # prints a SKIP line (shown with pre-commit run --verbose) and passes.
+      # It is not for a change that touches nothing under hip-kernel-provider,
+      # which deletes nothing under rocKE, or that only moves rocKE files
+      # elsewhere (CI lists a rename by its new path).
       - id: rocke-on-deletion
         name: rocKE hooks run for a change that only deletes files they read
         entry: &rocke_when_checked_out >-
           python -c "import os, subprocess, sys;
-          sys.exit(os.path.exists(sys.argv[1])
+          present = os.path.exists(sys.argv[1]);
+          present or print('SKIP:', sys.argv[1], 'is not checked out');
+          sys.exit(present
           and subprocess.call([sys.executable, '-B', *sys.argv[2:]]))"
         args:
           - dnn-providers/hip-kernel-provider/rocke

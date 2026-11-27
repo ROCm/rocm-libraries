@@ -13,6 +13,8 @@ rules.
 from __future__ import annotations
 
 import shlex
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -252,3 +254,23 @@ def test_every_file_a_rocke_hook_runs_exists(rocke_hooks):
     assert not missing, "rocKE hooks run files that do not exist:\n  " + "\n  ".join(
         missing
     )
+
+
+@pytest.mark.parametrize("hook_id", ["rocke-on-deletion", "rocke-hook-checks"])
+def test_a_wrapped_hook_says_skip_and_passes_where_rocke_is_not_checked_out(
+    rocke_hooks, hook_id, tmp_path
+):
+    # CI checks out only the directories a change touches; from a directory
+    # without rocKE the wrapper runs nothing, and says so.
+    (hook,) = [hook for hook in rocke_hooks if hook.hook_id == hook_id]
+    program, *arguments = shlex.split(hook.entry)
+    assert program == "python"
+    result = subprocess.run(
+        [sys.executable, *arguments, *hook.args],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0
+    assert result.stdout == f"SKIP: {hook.args[0]} is not checked out\n"
