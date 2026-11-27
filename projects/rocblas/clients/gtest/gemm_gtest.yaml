@@ -3756,6 +3756,25 @@ Tests:
   os_flags: LINUX
   gpu_arch: ['90?']
 
+- name: gemm_ex_hpl_low_precision_out
+  # HPL data with half and bfloat16 outputs: the exact check, which accepts a rounded or a
+  # truncated output, applies to them (the accumulation tolerance is for wider outputs only)
+  category: pre_checkin
+  function: gemm_ex
+  matrix_size:
+    - { M:    16, N:    16, K:     1, lda:    16, ldb:    16, ldc:    16, ldd:    16 }
+    - { M:    16, N:    16, K:     4, lda:    16, ldb:    16, ldc:    16, ldd:    16 }
+  precision:
+    - *hpa_half_precision
+    - *hpa_bf16_precision
+  transA_transB:
+    - { transA: N, transB: N }
+    - { transA: T, transB: N }
+  alpha_beta:
+    - { alpha:  1, beta:  0 }
+    - { alpha:  1, beta:  1 }
+  initialization: hpl
+
 # Commented out as the category known_bug has currently no good purpose
 # This is category known_bug until the sizes are supported by Tensile,
 # since they take too long with a naive host-side algorithm.
