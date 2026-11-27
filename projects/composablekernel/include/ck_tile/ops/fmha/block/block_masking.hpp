@@ -320,6 +320,18 @@ struct GenericAttentionMask
         }
     }
 
+    // Same contract as SimplifiedGenericAttentionMask::IsEdgeTileForValidRows. This mask keeps the
+    // conservative IsEdgeTile answer: without a local window it never tests the bottom edge, and
+    // the local-window form is not narrowed to the valid rows.
+    template <index_t TileHeight, index_t TileWidth>
+    CK_TILE_HOST_DEVICE constexpr auto IsEdgeTileForValidRows(index_t i_tile_top,
+                                                              index_t i_tile_left,
+                                                              number<TileHeight> h,
+                                                              number<TileWidth> w) const
+    {
+        return IsEdgeTile(i_tile_top, i_tile_left, h, w);
+    }
+
     // the key sequence length, i.e. one past the last valid X index
     CK_TILE_HOST_DEVICE constexpr index_t GetXTotal() const { return x_total; }
 
@@ -561,6 +573,19 @@ struct SimplifiedGenericAttentionMask
         }
     }
 
+    // The valid key columns of row i_y as (x_start, width): IsOutOfBoundUnsigned(i_y, i_x) is
+    // uint32_t(i_x - x_start) >= width. Lets a caller form the row's bounds once for all its
+    // columns.
+    CK_TILE_HOST_DEVICE constexpr auto GetRowRangeUnsigned(index_t i_y) const
+    {
+        static_assert(IsMasking);
+        const index_t x_start = -y + i_y + 1;
+        const index_t x_end   = min(i_y + x, x_total);
+        const uint32_t width =
+            i_y < y_total && x_start < x_end ? uint32_t(x_end) - uint32_t(x_start) : 0u;
+        return ck_tile::make_tuple(x_start, width);
+    }
+
     CK_TILE_HOST_DEVICE constexpr auto IsOutOfSinkBound(index_t i_y, index_t i_x) const
     {
         if constexpr(!IsMasking)
@@ -613,20 +638,28 @@ struct SimplifiedGenericAttentionMask
     }
 
     // IsEdgeTile, but rows at or past y_total are ignored when deciding whether the tile needs
-    // the per-pixel mask. The caller must never store those rows.
+    // the per-pixel mask. The caller must never store those rows. Without masking this is
+    // IsEdgeTile: the scheduled TDM pipelines also call it for padded key lengths.
     template <index_t TileHeight, index_t TileWidth>
-    CK_TILE_HOST_DEVICE constexpr auto
-    IsEdgeTileForValidRows(index_t i_y, index_t i_x, number<TileHeight>, number<TileWidth>) const
+    CK_TILE_HOST_DEVICE constexpr auto IsEdgeTileForValidRows(index_t i_y,
+                                                              index_t i_x,
+                                                              number<TileHeight> h,
+                                                              number<TileWidth> w) const
     {
-        static_assert(IsMasking, "use IsEdgeTile without masking");
+        if constexpr(!IsMasking)
+        {
+            return IsEdgeTile(i_y, i_x, h, w);
+        }
+        else
+        {
+            index_t i_x_end = i_x + TileWidth;
+            index_t i_y_end = min(i_y + TileHeight, y_total);
 
-        index_t i_x_end = i_x + TileWidth;
-        index_t i_y_end = min(i_y + TileHeight, y_total);
+            bool top_right_edge   = i_x_end > min(i_y + x, x_total);
+            bool bottom_left_edge = i_y_end > i_x + y;
 
-        bool top_right_edge   = i_x_end > min(i_y + x, x_total);
-        bool bottom_left_edge = i_y_end > i_x + y;
-
-        return top_right_edge || bottom_left_edge;
+            return top_right_edge || bottom_left_edge;
+        }
     }
 
     // the key sequence length, i.e. one past the last valid X index

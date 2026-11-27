@@ -51,15 +51,66 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
     static constexpr index_t kVFootprintBytes =
         kVFootprintElements * sizeof(typename Geometry::VDataType);
     // Named geometry knobs. Values frozen to the current D128/D192 formulas.
-    static constexpr bool kEarlyOutputRescale = Geometry::kHeadDimQK == 128;
-    static constexpr bool kLeadFirstLoad      = Geometry::kHeadDimQK == 128;
-    static constexpr bool kUseUnsignedCausalMask =
-        Geometry::kHeadDimQK == 128 || Geometry::kHeadDimQK == 192;
+    static constexpr bool kEarlyOutputRescale      = Geometry::kHeadDimQK == 128;
+    static constexpr bool kLeadFirstLoad           = Geometry::kHeadDimQK == 128;
     static constexpr index_t kKPrefetchTensorCount = Tuning::kKWait;
     static constexpr index_t kVPrefetchTensorCount = Tuning::kVWait;
     static constexpr bool kPrefetchTailDrain       = Tuning::kTailDrain;
     static_assert(kKPrefetchTensorCount == 0 || kKPrefetchTensorCount == 1);
     static_assert(kVPrefetchTensorCount == 0 || kVPrefetchTensorCount == 1);
+
+    struct PreparedLdsReadContext
+    {
+        FmhaTdmPreparedKRead::Address qk_stage0{};
+        FmhaTdmPreparedKRead::Address v0{};
+        FmhaTdmPreparedKRead::Address pv_k0{};
+    };
+
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr bool UseEarlyLdsBases()
+    {
+        // The lead-first D128 placement uses its own reads. Masked D192 N128 retains the
+        // ordinary path to limit register pressure; D64 already prepares its read-first bases.
+        return !kLeadFirstLoad && Geometry::kHeadDimQK == 192 &&
+               (Geometry::kN == 64 || !Problem::FmhaMask::IsMasking);
+    }
+
+    template <typename Problem, typename KTileView, typename VTileWindow>
+    CK_TILE_DEVICE static void
+    PrepareIterationLdsReads(PreparedLdsReadContext& prepared_context,
+                             const KTileView& k_lds_read_view,
+                             typename Geometry::KDataType* k_lds_write_ptr,
+                             const VTileWindow& v_lds_read_window,
+                             typename Geometry::KDataType* k_lds_read_ptr)
+    {
+        auto next_su_window = make_tile_window(
+            k_lds_read_view,
+            make_tuple(number<Geometry::kQkSuColumns>{}, number<Geometry::kHeadDimQK>{}),
+            {Geometry::kQkSuColumns, 0},
+            MakeKSuRegTileDistribution<Problem>());
+        next_su_window.set_bottom_tensor_view_data_ptr(k_lds_write_ptr);
+        prepared_context.qk_stage0 = FmhaTdmPreparedKRead::Prepare<0>(next_su_window);
+        if constexpr(UseEarlyLdsBases<Problem>())
+        {
+            // Keep the tile's read bases in VGPRs before the WMMA stream. Otherwise a late
+            // VALU address write can make its LDS-read dependency wait drain intervening WMMA.
+            prepared_context.v0 = FmhaTdmPreparedKRead::Prepare<0>(v_lds_read_window);
+            asm volatile("" : "+v"(prepared_context.qk_stage0.byte_address));
+            asm volatile("" : "+v"(prepared_context.v0.byte_address));
+            // N64's final PV K reads use the ordinary instruction path.
+            if constexpr(Geometry::kN == 128)
+            {
+                auto pv_k_window = make_tile_window(
+                    k_lds_read_view,
+                    make_tuple(number<Geometry::kQkSuColumns>{}, number<Geometry::kHeadDimQK>{}),
+                    {0, 0},
+                    MakeKSuRegTileDistribution<Problem>());
+                pv_k_window.set_bottom_tensor_view_data_ptr(k_lds_read_ptr);
+                prepared_context.pv_k0 = FmhaTdmPreparedKRead::Prepare<0>(pv_k_window);
+                asm volatile("" : "+v"(prepared_context.pv_k0.byte_address));
+            }
+        }
+    }
 
     template <index_t Stage>
     CK_TILE_HOST_DEVICE static constexpr index_t GetQkTailDsCount()
@@ -93,12 +144,13 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
     static constexpr index_t kLdsOffsetV1  = kLdsOffsetV0 + kVFootprintBytes;
     static constexpr index_t kLdsArenaSize = kLdsOffsetV1 + kVFootprintBytes;
 
-    using OutputFragments = FmhaTdmSchedOutputFragmentsFor<Geometry::kPvNIter / 2>;
+    using OutputFragments =
+        FmhaTdmSchedOutputFragmentsFor<Geometry::kPvNIter / 2, Geometry::kPvMIter>;
 
     // The split-softmax score mapping and the PV output fragments are hand-written for one
     // decomposition; tie them to the derived geometry.
     static_assert(FmhaTdmSchedSupportedGeometry<Geometry>::value);
-    using ScoreSoftmax = FmhaTdmSchedSplitSoftmaxFor<Geometry::kQkStages>;
+    using ScoreSoftmax = FmhaTdmSchedSplitSoftmaxFor<Geometry::kQkStages, Geometry::kQkMIter>;
     using ScoreMapping = typename ScoreSoftmax::Mapping;
     static_assert(ScoreMapping::kNumMIter == Geometry::kQkMIter &&
                       ScoreMapping::kNumNIter == Geometry::kN / Geometry::kQkWmmaN &&
@@ -163,6 +215,66 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
         return make_static_tile_distribution(BlockGemm::MakeBBlockDistributionEncode());
     }
 
+    // WMMA-source keep-alive. Each scheduled stage issues the next stage's LDS reads right after
+    // its WMMAs (FmhaTdmSchedWmmaFirstPlacement). A read may reuse the VGPRs of a source that the
+    // last WMMAs have consumed; in expert scheduling mode the compiler then waits (s_wait_alu
+    // va_vdst) until those WMMAs complete before the read is issued (clang 24 inserts these WAR
+    // waits; clang 23 did not). Keeping the LDS-fed source (K in QK, V in PV) of the previous
+    // kWmmaSourceKeepDepth WMMAs of the stage alive until the next WMMA makes the allocator give
+    // the reads other VGPRs, so the reused registers belong to WMMAs that have long completed.
+    // Depths as measured on gfx1250 (clang 23 and 24): 2 for D64 M64 tiles, 3 for D64 M128xN128,
+    // D128 (M128 and M64) and D192 N64 tiles, none for D64 N64 tiles (no such waits to remove; the
+    // FP16 batch tile would cross 256 VGPRs) and D192 N128 tiles (the FP16 tile would cross 512
+    // VGPRs). For D128 M64 with clang 24, depths 2 and 1 were 0.7 % and 0.9 % slower than 3 and
+    // depth 0 was 23 % slower; with clang 23 all four were within 0.2 %.
+    static constexpr index_t kWmmaSourceKeepDepth =
+        (Geometry::kHeadDimQK == 64 && Geometry::kN == 64) ||
+                (Geometry::kHeadDimQK == 192 && Geometry::kN == 128)
+            ? 0
+        : (Geometry::kHeadDimQK == 64 && Geometry::kQkMIter == 1) ? 2
+                                                                  : 3;
+
+    // An empty use of a fragment's registers at this point, one 32-bit operand per dword: an
+    // inline-asm VGPR operand must sit in the low VGPR range, and a single wide operand would also
+    // need a contiguous aligned tuple there.
+    template <typename Buffer>
+    CK_TILE_DEVICE static void KeepFragmentAlive(const Buffer& buffer)
+    {
+#if defined(__HIP_DEVICE_COMPILE__)
+        static_assert(sizeof(Buffer) % 4 == 0);
+        constexpr index_t kDwords = sizeof(Buffer) / 4;
+        using Dwords              = ext_vector_t<float, kDwords>;
+        const Dwords dwords       = bit_cast<Dwords>(buffer);
+#pragma unroll
+        for(index_t i = 0; i < kDwords; ++i)
+        {
+            const float dword = dwords[i];
+            asm volatile("" : : "v"(dword));
+        }
+#else
+        (void)buffer;
+#endif
+    }
+
+    // The B (K) slice that RunQkSuWmma<WmmaOrdinal> passes to the warp GEMM. RunQkSuWmma takes its
+    // B operand from here, so the keep-alive below holds exactly the slice the WMMA reads.
+    template <index_t WmmaOrdinal, typename BlockGemm, typename BBlockTensor>
+    CK_TILE_DEVICE static auto GetQkBSlice(const BBlockTensor& b_block_tensor)
+    {
+        using WarpGemm  = typename BlockGemm::WarpGemm;
+        using BWarpDstr = typename WarpGemm::BWarpDstr;
+        constexpr auto b_warp_y_lengths =
+            to_sequence(BWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
+        constexpr auto b_warp_y_index_zeros = uniform_sequence_gen_t<BWarpDstr::NDimY, 0>{};
+        constexpr index_t n_iter =
+            WmmaOrdinal / (BlockGemm::KIterPerWarp * BlockGemm::MIterPerWarp);
+        constexpr index_t k_iter =
+            (WmmaOrdinal / BlockGemm::MIterPerWarp) % BlockGemm::KIterPerWarp;
+        return b_block_tensor.get_y_sliced_thread_data(
+            merge_sequences(sequence<n_iter, k_iter>{}, b_warp_y_index_zeros),
+            merge_sequences(sequence<1, 1>{}, b_warp_y_lengths));
+    }
+
     template <index_t WmmaOrdinal,
               typename BlockGemm,
               typename CBlockTensor,
@@ -174,7 +286,6 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
     {
         using WarpGemm    = typename BlockGemm::WarpGemm;
         using AWarpDstr   = typename WarpGemm::AWarpDstr;
-        using BWarpDstr   = typename WarpGemm::BWarpDstr;
         using CWarpDstr   = typename WarpGemm::CWarpDstr;
         using AWarpTensor = typename WarpGemm::AWarpTensor;
         using BWarpTensor = typename WarpGemm::BWarpTensor;
@@ -182,12 +293,9 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
 
         constexpr auto a_warp_y_lengths =
             to_sequence(AWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
-        constexpr auto b_warp_y_lengths =
-            to_sequence(BWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
         constexpr auto c_warp_y_lengths =
             to_sequence(CWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
         constexpr auto a_warp_y_index_zeros = uniform_sequence_gen_t<AWarpDstr::NDimY, 0>{};
-        constexpr auto b_warp_y_index_zeros = uniform_sequence_gen_t<BWarpDstr::NDimY, 0>{};
         constexpr auto c_warp_y_index_zeros = uniform_sequence_gen_t<CWarpDstr::NDimY, 0>{};
 
         static_assert(WmmaOrdinal >= 0 && WmmaOrdinal < BlockGemm::NIterPerWarp *
@@ -205,9 +313,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
             merge_sequences(sequence<1, 1>{}, a_warp_y_lengths));
 
         BWarpTensor b_warp_tensor;
-        b_warp_tensor.get_thread_buffer() = b_block_tensor.get_y_sliced_thread_data(
-            merge_sequences(sequence<n_iter, k_iter>{}, b_warp_y_index_zeros),
-            merge_sequences(sequence<1, 1>{}, b_warp_y_lengths));
+        b_warp_tensor.get_thread_buffer() = GetQkBSlice<WmmaOrdinal, BlockGemm>(b_block_tensor);
 
         CWarpTensor c_warp_tensor;
         c_warp_tensor.get_thread_buffer() = c_block_tensor.get_y_sliced_thread_data(
@@ -223,20 +329,20 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
 
     template <index_t Stage,
               typename Mode,
+              typename Problem,
               typename BlockGemm,
               typename CBlockTensor,
               typename ABlockTensor,
               typename BBlockTensor,
               typename NextBBlockTensor,
               typename BTileWindow>
-    CK_TILE_DEVICE static void
-    RunQkScheduledStage(const BlockGemm&,
-                        CBlockTensor& c_block_tensor,
-                        const ABlockTensor& a_block_tensor,
-                        const BBlockTensor& b_block_tensor,
-                        NextBBlockTensor& next_b_block_tensor,
-                        const BTileWindow& b_lds_window,
-                        const FmhaTdmPreparedKRead::Address* prepared_stage0 = nullptr)
+    CK_TILE_DEVICE static void RunQkScheduledStage(const BlockGemm&,
+                                                   CBlockTensor& c_block_tensor,
+                                                   const ABlockTensor& a_block_tensor,
+                                                   const BBlockTensor& b_block_tensor,
+                                                   NextBBlockTensor& next_b_block_tensor,
+                                                   const BTileWindow& b_lds_window,
+                                                   const PreparedLdsReadContext& prepared_context)
     {
         using SelectedSchedule = typename Mode::SelectedPolicy::Schedule;
         using Executor         = FmhaTdmSchedPlacementExecutor<SelectedSchedule, Mode>;
@@ -247,22 +353,25 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
                       (Stage == SelectedSchedule::kNumQkStages - 1 &&
                        BTileWindow::NumAccessPerCoord == Geometry::kVStageLoadCount));
         constexpr bool kUseAffineKRead = Stage < Geometry::kQkStages - 1;
+        constexpr bool kUsePreparedTailBase =
+            Stage == Geometry::kQkStages - 1 &&
+            Mode::SelectedPolicy::template UseEarlyLdsBases<Problem>();
 
         const auto affine_k0 = [&]() {
             if constexpr(kUseAffineKRead)
             {
                 if constexpr(Stage == 0)
-                {
-                    if(prepared_stage0 != nullptr)
-                        return *prepared_stage0;
-                }
-                return FmhaTdmPreparedKRead::Prepare<0>(b_lds_window);
+                    return prepared_context.qk_stage0;
+                else
+                    return FmhaTdmPreparedKRead::Prepare<0>(b_lds_window);
             }
             else
                 return FmhaTdmPreparedKRead::Address{};
         }();
         const auto affine_v0 = [&]() {
-            if constexpr(Stage == Geometry::kQkStages - 1)
+            if constexpr(kUsePreparedTailBase)
+                return prepared_context.v0;
+            else if constexpr(Stage == Geometry::kQkStages - 1)
                 return FmhaTdmPreparedKRead::Prepare<0>(b_lds_window);
             else
                 return FmhaTdmPreparedKRead::Address{};
@@ -313,28 +422,75 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
                 __builtin_amdgcn_sched_barrier(0x0002 | 0x0400);
         };
 
+        // K slices of the last kWmmaSourceKeepDepth WMMAs of this stage (keep_b the newest).
+        using KeepSlice = remove_cvref_t<decltype(GetQkBSlice<0, BlockGemm>(b_block_tensor))>;
+        [[maybe_unused]] KeepSlice keep_b;
+        [[maybe_unused]] KeepSlice keep_b2;
+        [[maybe_unused]] KeepSlice keep_b3;
         auto emit_wmma = [&](auto, auto wmma) {
-            RunQkSuWmma<decltype(wmma)::value, BlockGemm>(
-                c_block_tensor, a_block_tensor, b_block_tensor);
+            constexpr index_t w = decltype(wmma)::value;
+            if constexpr(kWmmaSourceKeepDepth >= 1 && w > 0)
+                KeepFragmentAlive(keep_b);
+            if constexpr(kWmmaSourceKeepDepth >= 2 && w > 1)
+                KeepFragmentAlive(keep_b2);
+            if constexpr(kWmmaSourceKeepDepth >= 3 && w > 2)
+                KeepFragmentAlive(keep_b3);
+            RunQkSuWmma<w, BlockGemm>(c_block_tensor, a_block_tensor, b_block_tensor);
+            if constexpr(kWmmaSourceKeepDepth >= 3 && w > 1)
+                keep_b3 = keep_b2;
+            if constexpr(kWmmaSourceKeepDepth >= 2 && w > 0)
+                keep_b2 = keep_b;
+            keep_b = GetQkBSlice<w, BlockGemm>(b_block_tensor);
         };
         Executor::template ExecuteQkStage<Stage>(emit_wmma, emit_token, emit_point);
+        constexpr index_t kQkW = SelectedSchedule::kQkWmmasPerStage;
+        if constexpr(kWmmaSourceKeepDepth >= 1)
+            KeepFragmentAlive(keep_b);
+        if constexpr(kWmmaSourceKeepDepth >= 2 && kQkW > 1)
+            KeepFragmentAlive(keep_b2);
+        if constexpr(kWmmaSourceKeepDepth >= 3 && kQkW > 2)
+            KeepFragmentAlive(keep_b3);
         WaitQkStageTail<Stage>();
     }
 
     template <index_t Stage,
               typename Mode,
+              typename Problem,
               typename NextBBlockTensor,
               typename BTileWindow,
               typename WmmaEmitter,
               typename RescaleEmitter>
-    CK_TILE_DEVICE static void RunPvScheduledStageWithWmma(NextBBlockTensor& next_b_block_tensor,
-                                                           const BTileWindow& b_lds_window,
-                                                           WmmaEmitter& emit_wmma,
-                                                           RescaleEmitter& emit_rescale)
+    CK_TILE_DEVICE static void
+    RunPvScheduledStageWithWmma(NextBBlockTensor& next_b_block_tensor,
+                                const BTileWindow& b_lds_window,
+                                WmmaEmitter& emit_wmma,
+                                RescaleEmitter& emit_rescale,
+                                const PreparedLdsReadContext& prepared_context)
     {
         using SelectedSchedule = typename Mode::SelectedPolicy::Schedule;
         using Executor         = FmhaTdmSchedPlacementExecutor<SelectedSchedule, Mode>;
         using Kind             = FmhaTdmSchedLoadKind;
+        constexpr bool kUsePreparedBase =
+            Mode::SelectedPolicy::template UseEarlyLdsBases<Problem>() &&
+            (Stage < Geometry::kPvStages - 1 || Geometry::kN == 128);
+        static_assert(!kUsePreparedBase || !Mode::SelectedPolicy::kLeadFirstLoad,
+                      "prepared PV bases require the WMMA-first placement");
+        // V stage s reads rows [(s+1)*kK1, (s+2)*kK1) of the QK tail's V buffer. Keep the
+        // stage offset constant so every read uses an immediate offset from its prepared base.
+        // N64's final K stage retains the ordinary instruction path.
+        [[maybe_unused]] const auto prepared_base = [&]() {
+            if constexpr(kUsePreparedBase && Stage < Geometry::kPvStages - 1)
+            {
+                auto base = prepared_context.v0;
+                base.byte_address += (Stage + 1) * Problem::BlockFmhaShape::kK1 * kVPhysicalStride *
+                                     sizeof(typename Geometry::VDataType);
+                return base;
+            }
+            else if constexpr(kUsePreparedBase)
+                return prepared_context.pv_k0;
+            else
+                return FmhaTdmPreparedKRead::Address{};
+        }();
         static_assert(Stage >= 0 && Stage < SelectedSchedule::kNumPvStages);
         static_assert((Stage < SelectedSchedule::kNumPvStages - 1 &&
                        BTileWindow::NumAccessPerCoord == Geometry::kVStageLoadCount) ||
@@ -365,7 +521,8 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
             __builtin_amdgcn_sched_barrier(0);
         }
         auto emit_prepared_wmma = [&](auto stage, auto wmma) {
-            if constexpr(!kLeadFirstLoadThisStage && Stage == 0 && decltype(wmma)::value == 0)
+            if constexpr(!kUsePreparedBase && !kLeadFirstLoadThisStage && Stage == 0 &&
+                         decltype(wmma)::value == 0)
             {
                 prepared_v1 = FmhaTdmPreparedKRead::Prepare<1>(b_lds_window);
                 __builtin_amdgcn_sched_barrier(0);
@@ -373,7 +530,10 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
             if constexpr(!kLeadFirstLoadThisStage && Stage == Geometry::kPvStages - 1 &&
                          decltype(wmma)::value == 0)
             {
-                affine_k0 = FmhaTdmPreparedKRead::Prepare<0>(b_lds_window);
+                if constexpr(kUsePreparedBase)
+                    affine_k0 = prepared_base;
+                else
+                    affine_k0 = FmhaTdmPreparedKRead::Prepare<0>(b_lds_window);
             }
             emit_wmma(stage, wmma);
         };
@@ -391,8 +551,12 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
             else if constexpr(decltype(kind)::value == Kind::VRead)
             {
                 static_assert(Stage < Geometry::kPvStages - 1);
-                VLoad::template LoadAccess<decltype(access)::value>(next_b_block_tensor,
-                                                                    b_lds_window);
+                if constexpr(kUsePreparedBase)
+                    FmhaTdmAffineVRead::Load<decltype(access)::value, kVPhysicalStride>(
+                        next_b_block_tensor, b_lds_window, prepared_base);
+                else
+                    VLoad::template LoadAccess<decltype(access)::value>(next_b_block_tensor,
+                                                                        b_lds_window);
             }
         };
         auto emit_point = [](auto, auto, auto point) {
@@ -407,8 +571,8 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
             {
                 // Access0 was issued before WMMA0; do not issue it twice.
             }
-            else if constexpr(Stage == 0 && decltype(kind)::value == Kind::VRead &&
-                              decltype(access)::value == 1)
+            else if constexpr(!kUsePreparedBase && Stage == 0 &&
+                              decltype(kind)::value == Kind::VRead && decltype(access)::value == 1)
                 FmhaTdmPreparedVRead::Load<1>(next_b_block_tensor, b_lds_window, prepared_v1);
             else
                 emit_token(kind, access);
@@ -422,8 +586,10 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr bool UseCountdownLoop()
     {
-        return Geometry::kHeadDimQK == 128 && !Problem::FmhaMask::IsMasking && !Problem::kHasSink &&
-               Problem::BiasEnum == BlockAttentionBiasEnum::NO_BIAS;
+        // Derive the key origin from the prefetched V window only when no sink phase or bias
+        // origin is needed. D192 N128 retains the index loop to limit register pressure.
+        return !Problem::kHasSink && Problem::BiasEnum == BlockAttentionBiasEnum::NO_BIAS &&
+               !(Geometry::kHeadDimQK == 192 && Geometry::kN == 128);
     }
 
     template <typename Problem>
@@ -437,16 +603,62 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
                Problem::BlockFmhaShape::Gemm0BlockWarps::at(number<1>{}) == 1;
     }
 
-    template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr bool UseCompilerMax()
+    // Local max of MSB Msb for RunPart1 (lane max, its lane-half partner and the old max), with
+    // the lane max formed on the score pairs (c, c + 1) as two-wide vectors.
+    template <index_t Msb, typename ScoreTensor>
+    CK_TILE_DEVICE static float PairLocalMax(const ScoreTensor& score, float old_max)
     {
-        // Let the allocator place score tuples above the inline-asm low-VGPR range.
-        // D64/D128 and D192 dense batch use compiler-scheduled maximum chains.
-        return Geometry::kHeadDimQK <= 128 ||
-               (Geometry::kHeadDimQK == 192 && !Problem::kIsGroupMode &&
-                !Problem::FmhaMask::IsMasking);
+        using Softmax = ScoreSoftmax;
+        using Mapping = typename Softmax::Mapping;
+        array<typename Mapping::Pair, Mapping::kPairsPerMsb> pairs{};
+        static_for<0, Mapping::kPairsPerMsb, 1>{}(
+            [&](auto p) { pairs(p) = Mapping::template LoadPair<Msb, decltype(p)::value>(score); });
+        const auto pair_max  = PairTreeMax(pairs);
+        const float lane_max = max(pair_max[0], pair_max[1]);
+        return Softmax::Max3(lane_max, Softmax::PermuteLaneX16(lane_max), old_max);
     }
 
+    // ck_tile::max(float, float) is __builtin_fmaxf (llvm.maxnum); the same on two-wide vectors.
+    template <typename Pair>
+    CK_TILE_DEVICE static Pair PairMax(const Pair& x, const Pair& y)
+    {
+        return __builtin_elementwise_maxnum(x, y);
+    }
+
+    // Max of N pairs by max3 levels, lane by lane.
+    template <typename Pair, index_t N>
+    CK_TILE_DEVICE static Pair PairTreeMax(const array<Pair, N>& v)
+    {
+        if constexpr(N == 1)
+            return v[number<0>{}];
+        else if constexpr(N == 2)
+            return PairMax(v[number<0>{}], v[number<1>{}]);
+        else
+        {
+            constexpr index_t kTriples = N / 3;
+            constexpr index_t kRest    = N % 3;
+            array<Pair, kTriples + kRest> next{};
+            static_for<0, kTriples, 1>{}([&](auto i) {
+                constexpr index_t k = 3 * decltype(i)::value;
+                next(i) = PairMax(PairMax(v[number<k>{}], v[number<k + 1>{}]), v[number<k + 2>{}]);
+            });
+            static_for<0, kRest, 1>{}([&](auto i) {
+                constexpr index_t k          = decltype(i)::value;
+                next(number<kTriples + k>{}) = v[number<3 * kTriples + k>{}];
+            });
+            return PairTreeMax(next);
+        }
+    }
+
+    // Row maxima of the split softmax. Each MSB's score pairs (c, c + 1) reduce as two-wide vectors
+    // before one horizontal max, for every geometry:
+    // - On scalar max chains, the clang 24 SLP vectorizer pairs the two row halves' chains into
+    //   <2 x float> maxima (gfx1250 has no packed FP32 maximum) and carries that pairing into the
+    //   score PHIs and the mask selects: D64 M128 masked needs 336 VGPRs with 35 spilled, D128
+    //   M128 masked 514 (two waves per SIMD -> one).
+    // - It replaces the inline-asm v_max3 chains D192 used: inline-asm VGPR operands must sit in
+    //   the low VGPR range, which the WMMA-source keep-alive (KeepFragmentAlive) also needs.
+    // The maximum is associative and commutative, so the regrouped result is the same.
     template <typename Problem, typename ScoreTensor, typename RowTensor>
     CK_TILE_DEVICE static void RunSplitSoftmaxPart01(
         ScoreTensor& score, RowTensor& row_max, float log2e_scale, float& delta_m0, float& delta_m1)
@@ -457,31 +669,31 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
         static_assert(Problem::BiasEnum == BlockAttentionBiasEnum::NO_BIAS);
         static_assert(!Problem::kHasLogitsSoftCap);
         static_assert(ScoreTensor::get_thread_buffer_size() == Mapping::kThreadBufferSize);
-        static_assert(RowTensor::get_thread_buffer_size() == 2);
-
-        const float old_max_m0 = row_max.get_thread_buffer()[number<0>{}];
-        const float old_max_m1 = row_max.get_thread_buffer()[number<1>{}];
-
-        constexpr bool kUseCompilerMax = UseCompilerMax<Problem>();
-        const auto p0_m0 = Softmax::template RunPart0<0, ScoreTensor, kUseCompilerMax>(
-            score, old_max_m0, log2e_scale);
-        const auto p0_m1 = Softmax::template RunPart0<1, ScoreTensor, kUseCompilerMax>(
-            score, old_max_m0, log2e_scale);
-        const auto p0_m2 = Softmax::template RunPart0<2, ScoreTensor, kUseCompilerMax>(
-            score, old_max_m1, log2e_scale);
-        const auto p0_m3 = Softmax::template RunPart0<3, ScoreTensor, kUseCompilerMax>(
-            score, old_max_m1, log2e_scale);
+        static_assert(RowTensor::get_thread_buffer_size() == Geometry::kQkMIter);
 
         constexpr bool kValidateMax = Problem::FmhaMask::IsMasking;
+        const float old_max_m0      = row_max.get_thread_buffer()[number<0>{}];
+        const float local_m0        = PairLocalMax<0>(score, old_max_m0);
+        const float local_m1        = PairLocalMax<1>(score, old_max_m0);
         const auto p1_m0            = Softmax::template RunPart1<kValidateMax>(
-            p0_m0.local_max, p0_m1.local_max, p0_m0.old_max_log2e, log2e_scale);
-        const auto p1_m1 = Softmax::template RunPart1<kValidateMax>(
-            p0_m2.local_max, p0_m3.local_max, p0_m2.old_max_log2e, log2e_scale);
-
+            local_m0, local_m1, old_max_m0 * log2e_scale, log2e_scale);
         row_max.get_thread_buffer()[number<0>{}] = p1_m0.row_max;
-        row_max.get_thread_buffer()[number<1>{}] = p1_m1.row_max;
         delta_m0                                 = p1_m0.delta;
-        delta_m1                                 = p1_m1.delta;
+        if constexpr(Geometry::kQkMIter == 1)
+        {
+            // M64: each lane owns one row (Msb 0/1); there is no second row group.
+            delta_m1 = 0.0f;
+        }
+        else
+        {
+            const float old_max_m1 = row_max.get_thread_buffer()[number<1>{}];
+            const float local_m2   = PairLocalMax<2>(score, old_max_m1);
+            const float local_m3   = PairLocalMax<3>(score, old_max_m1);
+            const auto p1_m1       = Softmax::template RunPart1<kValidateMax>(
+                local_m2, local_m3, old_max_m1 * log2e_scale, log2e_scale);
+            row_max.get_thread_buffer()[number<1>{}] = p1_m1.row_max;
+            delta_m1                                 = p1_m1.delta;
+        }
     }
 
     template <typename Problem, typename ScoreTensor, typename RowTensor>
@@ -500,7 +712,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
         static_assert(Problem::BiasEnum == BlockAttentionBiasEnum::NO_BIAS);
         static_assert(!Problem::kHasLogitsSoftCap);
         static_assert(ScoreTensor::get_thread_buffer_size() == Mapping::kThreadBufferSize);
-        static_assert(RowTensor::get_thread_buffer_size() == 2);
+        static_assert(RowTensor::get_thread_buffer_size() == Geometry::kQkMIter);
 
         constexpr bool kValidateMax = Problem::FmhaMask::IsMasking;
 
@@ -515,27 +727,44 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
             }
         };
 
-        const float row_max_m0 = row_max.get_thread_buffer()[number<0>{}];
-        const float row_max_m1 = row_max.get_thread_buffer()[number<1>{}];
-        const float old_sum_m0 = row_sum.get_thread_buffer()[number<0>{}];
-        const float old_sum_m1 = row_sum.get_thread_buffer()[number<1>{}];
+        if constexpr(Geometry::kQkMIter == 1)
+        {
+            // M64: one row group per lane.
+            const float row_max_m0 = row_max.get_thread_buffer()[number<0>{}];
+            const float old_sum_m0 = row_sum.get_thread_buffer()[number<0>{}];
+            const float sum_m0     = Softmax::template RunPart2LocalSum<0>(
+                score, validated_max(row_max_m0), log2e_scale);
+            const float sum_m1 = Softmax::template RunPart2LocalSum<1>(
+                score, validated_max(row_max_m0), log2e_scale);
+            row_sum.get_thread_buffer()[number<0>{}] =
+                Softmax::UpdateRowSum(old_sum_m0, Softmax::MergeRowSum(sum_m0, sum_m1), delta_m0);
+            output_scale_m0 = Softmax::Exp2(delta_m0);
+            output_scale_m1 = 1.0f;
+        }
+        else
+        {
+            const float row_max_m0 = row_max.get_thread_buffer()[number<0>{}];
+            const float row_max_m1 = row_max.get_thread_buffer()[number<1>{}];
+            const float old_sum_m0 = row_sum.get_thread_buffer()[number<0>{}];
+            const float old_sum_m1 = row_sum.get_thread_buffer()[number<1>{}];
 
-        const float sum_m0 =
-            Softmax::template RunPart2LocalSum<0>(score, validated_max(row_max_m0), log2e_scale);
-        const float sum_m1 =
-            Softmax::template RunPart2LocalSum<1>(score, validated_max(row_max_m0), log2e_scale);
-        const float sum_m2 =
-            Softmax::template RunPart2LocalSum<2>(score, validated_max(row_max_m1), log2e_scale);
-        const float sum_m3 =
-            Softmax::template RunPart2LocalSum<3>(score, validated_max(row_max_m1), log2e_scale);
+            const float sum_m0 = Softmax::template RunPart2LocalSum<0>(
+                score, validated_max(row_max_m0), log2e_scale);
+            const float sum_m1 = Softmax::template RunPart2LocalSum<1>(
+                score, validated_max(row_max_m0), log2e_scale);
+            const float sum_m2 = Softmax::template RunPart2LocalSum<2>(
+                score, validated_max(row_max_m1), log2e_scale);
+            const float sum_m3 = Softmax::template RunPart2LocalSum<3>(
+                score, validated_max(row_max_m1), log2e_scale);
 
-        row_sum.get_thread_buffer()[number<0>{}] =
-            Softmax::UpdateRowSum(old_sum_m0, Softmax::MergeRowSum(sum_m0, sum_m1), delta_m0);
-        row_sum.get_thread_buffer()[number<1>{}] =
-            Softmax::UpdateRowSum(old_sum_m1, Softmax::MergeRowSum(sum_m2, sum_m3), delta_m1);
+            row_sum.get_thread_buffer()[number<0>{}] =
+                Softmax::UpdateRowSum(old_sum_m0, Softmax::MergeRowSum(sum_m0, sum_m1), delta_m0);
+            row_sum.get_thread_buffer()[number<1>{}] =
+                Softmax::UpdateRowSum(old_sum_m1, Softmax::MergeRowSum(sum_m2, sum_m3), delta_m1);
 
-        output_scale_m0 = Softmax::Exp2(delta_m0);
-        output_scale_m1 = Softmax::Exp2(delta_m1);
+            output_scale_m0 = Softmax::Exp2(delta_m0);
+            output_scale_m1 = Softmax::Exp2(delta_m1);
+        }
     }
 
     template <index_t Ordinal, typename Fragments>

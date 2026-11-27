@@ -1757,9 +1757,13 @@ struct FmhaFwdKernel
         // The head-stride guard avoids the single-head BSHD false positive.
         features.is_bhsd = kargs.stride_q == kargs.hdim_q && kargs.nhead_stride_q > kargs.hdim_q;
         features.uniform_lengths = HasUniformSequenceLengths(kargs);
+        // Square lengths with no right window. Top-left/bottom-right finite left windows keep
+        // Q-tile work nondecreasing; MASK_GENERIC finite windows keep their order (unmeasured).
         if constexpr(kHasMask)
             features.square_causal = kargs.seqlen_q == kargs.seqlen_k &&
-                                     kargs.window_size_left < 0 && kargs.window_size_right == 0;
+                                     kargs.window_size_right == 0 &&
+                                     (kargs.window_size_left < 0 ||
+                                      kargs.mask_type != GenericAttentionMaskEnum::MASK_GENERIC);
 
         if constexpr(kEnableHeadMajor && kHasMask && !kIsGroupMode && !kHasDropout &&
                      detail::uses_global_causal_order_v<FmhaPipeline>)
@@ -2722,8 +2726,10 @@ struct FmhaFwdKernel
             // cache
             constexpr bool PrefillCase =
                 FmhaPipeline::kM0 > 64 && FmhaPipeline::BlockFmhaShape::kQKHeaddim < 256;
-            // qr_tdm_fp8_sched takes the fixed LDS arena path, one-wavefront decode tiles included.
-            constexpr bool kPrefillLdsPath = PrefillCase || kPipelineName == "qr_tdm_fp8_sched";
+            // The scheduled pipelines take the fixed LDS arena path for every tile:
+            // qr_tdm_fp8_sched one-wavefront decode tiles and qr_tdm_sched M64 tiles included.
+            constexpr bool kPrefillLdsPath = PrefillCase || kPipelineName == "qr_tdm_fp8_sched" ||
+                                             kPipelineName == "qr_tdm_sched";
             // divide problem
             const auto [i_tile_m, i_tile_n, i_nhead, i_batch] = GetTileIndex(kargs);
             const index_t i_m0                                = i_tile_m * FmhaPipeline::kM0;

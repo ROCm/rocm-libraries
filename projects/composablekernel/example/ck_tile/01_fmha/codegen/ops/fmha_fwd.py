@@ -7,7 +7,7 @@ import itertools
 import json
 import os
 from collections import OrderedDict
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, ClassVar, Dict, Iterable, List, Optional, Tuple
 
@@ -445,7 +445,15 @@ class FmhaFwdApiTrait:
             if self.skpad == "t":
                 return "true"
             else:
-                return f"(a.cu_seqlen_k_ptr == nullptr) && (a.seqlen_k != 0 && a.seqlen_k % {self.bn0} == 0)"
+                cumulative_q_check = (
+                    "(a.cu_seqlen_q_ptr == nullptr) && "
+                    if self.pipeline_tag == "qr_tdm_sched" and self.bn0 == 128
+                    else ""
+                )
+                return (
+                    cumulative_q_check
+                    + f"(a.cu_seqlen_k_ptr == nullptr) && (a.seqlen_k != 0 && a.seqlen_k % {self.bn0} == 0)"
+                )
         elif self.pipeline_tag in [
             "qr_async_trload",
             "qr_async_trload_v3",
@@ -1064,15 +1072,25 @@ class FmhaFwdKernel:
         )
 
     def _pipeline_constraint(self) -> CppConstraint:
+        constraint = self.F_pipeline.F_constraint
+        if (
+            self.F_pipeline.tag == "qr_tdm_sched"
+            and int(self.F_hdim) == 64
+            and self.F_tile.F_bn0 == 128
+        ):
+            constraint = constraint & GFX125_D64_N128_CONSTRAINT
+            if self.F_pipeline.F_mask == "causal":
+                constraint = constraint & GFX125_D64_N128_GENERIC_CAUSAL_CONSTRAINT
+
         if self.F_pipeline.F_packgqa != "t":
-            return self.F_pipeline.F_constraint
+            return constraint
         # A KV head's packed query rows must fit the tile; one-wavefront tiles also take MHA.
         tile = self.F_tile
         one_wave = tile.F_rm0 * tile.F_rn0 * tile.F_rk0 == 1
         has_lse = BOOL_MAP[self.F_pipeline.F_lse]
         is_mx = BOOL_MAP[self.F_pipeline.F_qscale == "mx"]
         allow_mha = ", true" if one_wave else ""
-        return self.F_pipeline.F_constraint & CppConstraint(
+        return constraint & CppConstraint(
             f"fmha_fwd_can_merge_head_groups(a, {tile.F_bm0}, {has_lse}, {is_mx}{allow_mha})"
         )
 
@@ -1966,17 +1984,97 @@ GFX125_QR_TDM_BM0_CROSSOVER_MAX_SEQLEN_Q = {
 # divided by batch. Logical member lengths still come from their sequence metadata.
 GFX125_D192_N128_MIN_AVERAGE_K = 512
 
-# d128 fp16/bf16 queries that qr_tdm_pingpong takes from qr_tdm_sched (from 128 rows)
-# and qr_tdm (below). qr_tdm_pingpong relies on several resident blocks to overlap
-# softmax with the gemms, while qr_tdm_sched and qr_tdm's double K/V buffer prefetch
-# a tile ahead. Measured on gfx1250, pingpong wins below 640 rows once there are at
-# least 2 (batch, head) pairs per num_cus (HIP's multiProcessorCount, 256 there);
-# with fewer, or with longer aligned queries, it loses up to 21%. A block count does
-# not draw that line: 16 x 16 heads of 512 rows (2048 blocks) lose 10%, while 1792 x 1
-# heads of 32 rows (1792 blocks) win 1.5x.
+# Batch mode passes one K length; group mode passes total packed K, so compare
+# its average against the same per-sequence threshold. Logical length pointers
+# indicate that physical padding may inflate the total, so those cases keep N64.
+GFX125_D192_N128_CONSTRAINT = CppConstraint(
+    f"a.seqlen_k >= {GFX125_D192_N128_MIN_AVERAGE_K}LL * "
+    "(t.is_group_mode ? a.batch : 1)"
+    " && a.seqlen_k_ptr == nullptr"
+    " && a.cu_seqlen_k_ptr == nullptr"
+    " && get_num_blocks(128) <= num_cus"
+    " && (t.mask_type == mask_enum::no_mask ||"
+    " ((t.mask_type == mask_enum::mask_top_left ||"
+    " t.mask_type == mask_enum::mask_bottom_right)"
+    " && a.window_size_left < 0 && a.window_size_right == 0"
+    " && a.seqlen_q == a.seqlen_k))"
+)
+
+# d128 fp16/bf16 queries that qr_tdm_pingpong serves instead of qr_tdm (below 128 rows,
+# or when qr_tdm_sched does not apply) and batch-mode qr_tdm_sched (from 128 rows).
+# qr_tdm_pingpong relies on several resident blocks to overlap softmax with the gemms,
+# while qr_tdm_sched and qr_tdm's double K/V buffer prefetch a tile ahead. Measured on
+# gfx1250, pingpong wins below 640 rows once there are at least 2 (batch, head) pairs
+# per num_cus (HIP's multiProcessorCount, 256 there); with fewer, or with longer
+# aligned queries, it loses up to 21%. A block count does not draw that line: 16 x 16
+# heads of 512 rows (2048 blocks) lose 10%, while 1792 x 1 heads of 32 rows (1792
+# blocks) win 1.5x. In group mode qr_tdm_sched wins from 128 rows: on group-mode GQA
+# prefill (16 or 8 query heads per KV head, 32-64 sequences of 128-256 rows, prefix
+# 0-71K keys, BF16) it takes 0.77-0.92x pingpong's time with clang 24 and clang 23, so
+# sched_seqlen_q below does not yield group mode to pingpong; group-mode calls that
+# qr_tdm_sched rejects (bias, sink, unaligned O or padded head dims) still fall through
+# to pingpong here.
 GFX125_QR_TDM_PINGPONG_RANGE = (
     "a.max_seqlen_q < 640"
     " && a.batch * a.nhead_q >= 2 * static_cast<ck_tile::index_t>(num_cus)"
+)
+
+# Paired gfx1250 FP16/BF16 measurements cover both layouts, supported padded strides,
+# rectangular/partial Q and heterogeneous lengths. Keep measured N64 crossovers:
+# K tails, short high-supply BHSD, small Q-only masked BHSD, and narrow/local windows.
+# Group K is a physical total; compare its average with 64-bit multiplication.
+# These are tuning thresholds, not ISA restrictions. Attach them to every N128
+# API trait so custom-tune tiles cannot bypass the same fallback decisions.
+_LL = "static_cast<long long>"
+GFX125_D64_N128_CONSTRAINT = CppConstraint(
+    "(t.is_group_mode ?"
+    f" (a.batch > 0 && {_LL}(a.seqlen_k) >= {_LL}(1024) * a.batch) :"
+    " (a.seqlen_k > 0 && a.seqlen_k % 128 == 0"
+    " && a.seqlen_q_ptr == nullptr && a.seqlen_k_ptr == nullptr))"
+    " && (!(a.stride_q == a.hdim_q && a.nhead_stride_q > a.hdim_q) ||"
+    " ((t.mask_type == mask_enum::no_mask ?"
+    f" ({_LL}(a.seqlen_k) >= {_LL}(2048) * (t.is_group_mode ? a.batch : 1)"
+    f" || {_LL}(get_num_blocks(128)) <= {_LL}(2) * num_cus) :"
+    " (a.max_seqlen_q >= 2048 || get_num_blocks(128) < num_cus))"
+    " && (t.mask_type == mask_enum::no_mask || a.cu_seqlen_q_ptr == nullptr"
+    " || a.cu_seqlen_k_ptr != nullptr || a.seqlen_k >= 1024)))"
+    " && (t.mask_type == mask_enum::no_mask ||"
+    " ((t.mask_type == mask_enum::mask_top_left ||"
+    " t.mask_type == mask_enum::mask_bottom_right) && a.window_size_right == 0"
+    " && (a.window_size_left < 0 ||"
+    " (t.is_group_mode && a.window_size_left >= 127) ||"
+    " (!t.is_group_mode && a.seqlen_q == a.seqlen_k && a.window_size_left >= 127"
+    " && a.seqlen_q_ptr == nullptr && a.seqlen_k_ptr == nullptr"
+    " && a.cu_seqlen_q_ptr == nullptr && a.cu_seqlen_k_ptr == nullptr))))"
+)
+
+# D64 scheduled M64 doubles the workgroup count of M128. Measured on D64 group-mode prefill (16
+# query heads, 2026-11-17): it wins when the M128 grid leaves CUs idle, or fills each CU once
+# with at least 2048 query rows; with fewer rows the per-workgroup prologue dominates. The M64
+# tiles are emitted for group mode only (see check_qr_tdm_sched_codegen_compatibility).
+GFX125_D64_SCHED_M64_CONSTRAINT = CppConstraint(
+    "get_num_blocks(128) < num_cus"
+    " || (get_num_blocks(128) <= num_cus && a.max_seqlen_q >= 2048)"
+)
+
+# D128 scheduled M64: the D64 grid rule, except that the one-block-per-CU case with long queries
+# excludes sliding windows. There every Q tile has the same windowed K range, so M64 balances
+# nothing and costs more K/V loads per row (measured 6-9 % slower than M128 for window 2047,
+# while causal attention with short or no prefix gains 3-9 %). Measured on group-mode BF16
+# prefill built with clang 24; with clang 23 the long-prefix causal cases of that branch run
+# 5-8 % slower on M64. Group mode only, like the D64 tile.
+GFX125_D128_SCHED_M64_CONSTRAINT = CppConstraint(
+    "get_num_blocks(128) < num_cus"
+    " || (get_num_blocks(128) <= num_cus && a.max_seqlen_q >= 2048 && a.window_size_left < 0)"
+)
+
+# GenericAttentionMask causal has a different measured crossover from the
+# simplified mask. Its non-local specialization must not accept finite windows.
+GFX125_D64_N128_GENERIC_CAUSAL_CONSTRAINT = CppConstraint(
+    "a.window_size_left < 0 && a.window_size_right == 0"
+    " && (a.max_seqlen_q >= 8192 ||"
+    " (a.max_seqlen_q >= 4096"
+    f" && {_LL}(get_num_blocks(128)) <= {_LL}(8) * num_cus))"
 )
 
 
@@ -2015,17 +2113,41 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
     # Pipelines whose tiles carry F_pipeline_tag (see check_tile_owner).
     _PIPELINES_WITH_OWN_TILES = ("qr_tdm_pingpong",)
 
-    # Define scheduled tile configurations once. Codegen inventory and pipeline
-    # compatibility share these entries; runtime constraints are attached to copies.
+    # Define scheduled tiles and their default runtime constraints once.
+    # Codegen inventory and pipeline compatibility share these entries.
     _QR_TDM_SCHED_TILES = {
         (64, 64): (
+            FmhaFwdTileSize(128, 128, 32, 64, 32, 64, 4, 1, 1, 4, 1, 1, 16, 16, 32, 16, 16, 32, 3),
             FmhaFwdTileSize(128, 64, 32, 64, 32, 64, 4, 1, 1, 4, 1, 1, 16, 16, 32, 16, 16, 32, 3),
+            # M64: four waves of 16 query rows (one WMMA row tile per wave). N128 only:
+            # with N64 the per-iteration K/V reads and barriers dominate 16-row waves.
+            FmhaFwdTileSize(
+                64, 128, 32, 64, 32, 64,
+                4, 1, 1, 4, 1, 1,
+                16, 16, 32, 16, 16, 32,
+                3,
+                F_constraint=GFX125_D64_SCHED_M64_CONSTRAINT,
+            ),
         ),
         (128, 128): (
             FmhaFwdTileSize(128, 128, 32, 128, 32, 128, 4, 1, 1, 4, 1, 1, 16, 16, 32, 16, 16, 32, 1),
+            # M64: four waves of 16 query rows, N128 as for D64.
+            FmhaFwdTileSize(
+                64, 128, 32, 128, 32, 128,
+                4, 1, 1, 4, 1, 1,
+                16, 16, 32, 16, 16, 32,
+                1,
+                F_constraint=GFX125_D128_SCHED_M64_CONSTRAINT,
+            ),
         ),
         (192, 128): (
-            FmhaFwdTileSize(128, 128, 32, 128, 32, 192, 4, 1, 1, 4, 1, 1, 16, 16, 32, 16, 16, 32, 1),
+            FmhaFwdTileSize(
+                128, 128, 32, 128, 32, 192,
+                4, 1, 1, 4, 1, 1,
+                16, 16, 32, 16, 16, 32,
+                1,
+                F_constraint=GFX125_D192_N128_CONSTRAINT,
+            ),
             FmhaFwdTileSize(128, 64, 32, 128, 32, 192, 4, 1, 1, 4, 1, 1, 16, 16, 32, 16, 16, 32, 2),
         ),
     }  # fmt: skip
@@ -2263,7 +2385,22 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             if not is_qr_tdm_sched_tile:
                 return False
 
+            # The M64 tiles were measured on group-mode prefill only. Batch mode keeps the
+            # M128 tiles, including the batch-mode XCD causal tile order, which needs kM0 == 128.
+            if kernel_ctx.tile.F_bm0 == 64 and problem_ctx.mode != "group":
+                return False
+
             if problem_ctx.hdim == 64:
+                # N128 shares the existing D64 sequence-padding contract. Emit
+                # padded batch/group and generic dense/causal candidates; their
+                # profitability belongs to the per-trait runtime constraint.
+                # Generic finite windows retain N64: the wider tile regresses
+                # those measured workloads despite supporting their geometry.
+                if (
+                    kernel_ctx.tile.F_bn0 == 128
+                    and kernel_ctx.pipeline.F_mask == "generic"
+                ):
+                    return False
                 # Match qr_tdm's exact D64/V64 head traits. Aligned batch can
                 # use unpadded sequences; group and tails retain padding.
                 return (
@@ -2376,38 +2513,23 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 (512, 512) : [FmhaFwdTileSize( 64,  64,  32, 512,  32,  512,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
             })  # fmt: skip
             if dtype in cls._DT_FP16_BF16:
-                # D64 matches qr_tdm's M128/N64 geometry and occupancy hint3.
+                # D64 tries N128 first (its measured contract is attached to every
+                # N128 trait in FmhaFwdKernel.api_trait), then N64.
                 result[(64, 64)].extend(
                     copy.deepcopy(cls._QR_TDM_SCHED_TILES[(64, 64)])
                 )
+                # Dispatch order is ascending bm0; the stable sort keeps each pipeline's order.
+                result[(64, 64)].sort(key=lambda tile: tile.F_bm0)
                 # Append the qr_tdm_sched tiles. The codegen compatibility rule pairs
                 # these tile variants with the scheduled pipeline: D128 uses N128,
-                # while D192 tries N128 first and then N64. Batch mode passes
-                # one K length; group mode passes total packed K, so compare
-                # its average against the same per-sequence threshold. Logical
-                # length pointers indicate that physical padding may inflate
-                # the total, so those cases keep N64.
-                d192_n128_constraint = CppConstraint(
-                    f"a.seqlen_k >= {GFX125_D192_N128_MIN_AVERAGE_K}LL * "
-                    "(t.is_group_mode ? a.batch : 1)"
-                    " && a.seqlen_k_ptr == nullptr"
-                    " && a.cu_seqlen_k_ptr == nullptr"
-                    " && get_num_blocks(128) <= num_cus"
-                    " && (t.mask_type == mask_enum::no_mask ||"
-                    " ((t.mask_type == mask_enum::mask_top_left ||"
-                    " t.mask_type == mask_enum::mask_bottom_right)"
-                    " && a.window_size_left < 0 && a.window_size_right == 0"
-                    " && a.seqlen_q == a.seqlen_k))"
-                )
+                # while D192 tries N128 first and then N64.
                 result[(128, 128)].extend(
                     copy.deepcopy(cls._QR_TDM_SCHED_TILES[(128, 128)])
                 )
-                d192_n128, d192_n64 = copy.deepcopy(cls._QR_TDM_SCHED_TILES[(192, 128)])
+                # As for D64: ascending bm0, the stable sort keeps each pipeline's order.
+                result[(128, 128)].sort(key=lambda tile: tile.F_bm0)
                 result[(192, 128)].extend(
-                    [
-                        replace(d192_n128, F_constraint=d192_n128_constraint),
-                        d192_n64,
-                    ]
+                    copy.deepcopy(cls._QR_TDM_SCHED_TILES[(192, 128)])
                 )
             return result
         elif dtype in cls._DT_FP8_FP8BF16:
@@ -2492,7 +2614,9 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 # Finite virtual-sink logits retain the existing qr_tdm fallback.
                 sched_seqlen_q = "a.max_seqlen_q >= 128"
                 if (hdim, hdim_v) == (128, 128):
-                    sched_seqlen_q += f" && !({GFX125_QR_TDM_PINGPONG_RANGE})"
+                    sched_seqlen_q += (
+                        f" && (t.is_group_mode || !({GFX125_QR_TDM_PINGPONG_RANGE}))"
+                    )
                 sched_constraint = CppConstraint(
                     f"a.hdim_q == {hdim} && "
                     f"a.hdim_v == {hdim_v} && a.sink_ptr == nullptr && "

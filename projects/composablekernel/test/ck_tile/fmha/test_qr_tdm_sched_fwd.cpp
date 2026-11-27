@@ -40,7 +40,17 @@ enum class SequencePointers
     PerSequence,
     Cumulative,
     AboveCuGrid,
+    BatchCumulative,
+    BatchCumulativeQ,
+    BatchCumulativeK,
 };
+
+constexpr bool IsBatchCumulative(SequencePointers pointers)
+{
+    return pointers == SequencePointers::BatchCumulative ||
+           pointers == SequencePointers::BatchCumulativeQ ||
+           pointers == SequencePointers::BatchCumulativeK;
+}
 
 struct ForwardCase
 {
@@ -61,6 +71,7 @@ struct ForwardCase
     int second_key_length   = 513;
     bool square_causal      = false;
     bool virtual_sink       = false;
+    int layout_padding      = 0; // bit0: row pitch; bit1: head gap; bit2: batch gap
 };
 
 // Sixteen bounded inputs, each checked with and without LSE in both dtype binaries.
@@ -76,7 +87,7 @@ constexpr std::array<ForwardCase, 16> kCases{{
      2,
      1,
      SequencePointers::Batch,
-     64},
+     128},
     {"D64BottomRightK513",
      64,
      128,
@@ -313,7 +324,7 @@ constexpr std::array<ForwardCase, 23> kAdditionalCases{{
      2,
      1,
      SequencePointers::Batch,
-     64,
+     128,
      true,
      -1,
      0,
@@ -567,8 +578,480 @@ constexpr std::array<ForwardCase, 2> kSelectorCases{{
      513},
 }};
 
-constexpr int kCaseCount = static_cast<int>(kCases.size() + kAdditionalCases.size() +
-                                            kVirtualSinkCases.size() + kSelectorCases.size());
+// Masked batch inputs with a partial last query tile (seqlen_q % 128 != 0), whose padding rows
+// must not force the per-pixel mask on valid rows, and 128-aligned masked inputs that dispatch the
+// instances without sequence padding. Appended after every earlier input and index.
+constexpr std::array<ForwardCase, 12> kPartialQueryCases{{
+    {"D64BatchPartialQBottomRightNoPadK",
+     64,
+     1000,
+     1024,
+     mask_enum::mask_bottom_right,
+     false,
+     2,
+     1,
+     SequencePointers::Batch,
+     128},
+    {"D64BatchPartialQTopLeftBhsd",
+     64,
+     200,
+     700,
+     mask_enum::mask_top_left,
+     true,
+     2,
+     1,
+     SequencePointers::Batch,
+     64},
+    {"D64BatchAlignedBottomRightNoPad",
+     64,
+     512,
+     1024,
+     mask_enum::mask_bottom_right,
+     false,
+     2,
+     1,
+     SequencePointers::Batch,
+     128},
+    {"D128BatchPartialQTopLeftBhsd",
+     128,
+     200,
+     512,
+     mask_enum::mask_top_left,
+     true,
+     2,
+     1,
+     SequencePointers::Batch,
+     128},
+    {"D128BatchPartialQLocal",
+     128,
+     1000,
+     1300,
+     mask_enum::mask_bottom_right,
+     false,
+     2,
+     1,
+     SequencePointers::Batch,
+     128,
+     true,
+     31,
+     7},
+    {"D192BatchPartialQSquareCausalN128Bhsd",
+     192,
+     1000,
+     1000,
+     mask_enum::mask_bottom_right,
+     true,
+     2,
+     1,
+     SequencePointers::Batch,
+     128,
+     true,
+     -1,
+     0,
+     63,
+     513,
+     true},
+    {"D192BatchPartialQBottomRightN64Bhsd",
+     192,
+     1000,
+     1100,
+     mask_enum::mask_bottom_right,
+     true,
+     2,
+     1,
+     SequencePointers::Batch,
+     64},
+    {"D192BatchPartialQLocalN64",
+     192,
+     300,
+     700,
+     mask_enum::mask_bottom_right,
+     false,
+     2,
+     1,
+     SequencePointers::Batch,
+     64,
+     true,
+     31,
+     7},
+    {"D192BatchAlignedTopLeftN64NoPad",
+     192,
+     512,
+     1024,
+     mask_enum::mask_top_left,
+     false,
+     2,
+     1,
+     SequencePointers::Batch,
+     64},
+    // One valid row in the last query tile, and the window's lower edge crosses that row exactly at
+    // a key-tile boundary (y = -64, key tile 192): the valid-row bound must include the last row.
+    {"D64BatchLocalOneRowTail",
+     64,
+     129,
+     257,
+     mask_enum::mask_bottom_right,
+     false,
+     2,
+     1,
+     SequencePointers::Batch,
+     64,
+     true,
+     63,
+     7},
+    {"D192BatchLocalOneRowTailN64",
+     192,
+     129,
+     257,
+     mask_enum::mask_bottom_right,
+     true,
+     2,
+     1,
+     SequencePointers::Batch,
+     64,
+     true,
+     63,
+     7},
+    {"D128GroupPartialQBottomRight",
+     128,
+     1000,
+     1000,
+     mask_enum::mask_bottom_right,
+     false,
+     2,
+     1,
+     SequencePointers::Packed,
+     128},
+}};
+
+// Exercise every output row and component of the wider D64 key tile with the independent FP32
+// reference. Both FP16 and BF16 select N128 inside this contract. Append
+// these inputs so every earlier case index remains stable.
+constexpr int kD64WideTileN = 128;
+constexpr std::array<ForwardCase, 4> kD64WideTileCases{{
+    {"D64BatchWideTileDense256",
+     64,
+     256,
+     256,
+     mask_enum::no_mask,
+     false,
+     4,
+     2,
+     SequencePointers::Batch,
+     kD64WideTileN},
+    {"D64BatchWideTileTopLeft256",
+     64,
+     256,
+     256,
+     mask_enum::mask_top_left,
+     false,
+     4,
+     2,
+     SequencePointers::Batch,
+     kD64WideTileN},
+    {"D64BatchWideTileBottomRight256",
+     64,
+     256,
+     256,
+     mask_enum::mask_bottom_right,
+     false,
+     4,
+     2,
+     SequencePointers::Batch,
+     kD64WideTileN},
+    {"D64BatchWideTileDense768",
+     64,
+     768,
+     768,
+     mask_enum::no_mask,
+     false,
+     4,
+     1,
+     SequencePointers::Batch,
+     kD64WideTileN},
+}};
+
+// Preserve all earlier case indices. These cases separate physical batch strides from
+// heterogeneous logical lengths and check every output component/gap with the FP32 oracle.
+constexpr std::array<ForwardCase, 16> kD64ExpandedCases = [] {
+    std::array<ForwardCase, 16> cases{{
+        {"D64DenseRectangularBshd",
+         64,
+         384,
+         512,
+         mask_enum::no_mask,
+         false,
+         4,
+         2,
+         SequencePointers::Batch,
+         128},
+        {"D64DenseRectangularBhsd",
+         64,
+         512,
+         384,
+         mask_enum::no_mask,
+         true,
+         4,
+         2,
+         SequencePointers::Batch,
+         128},
+        {"D64DensePartialQueryBhsd",
+         64,
+         129,
+         256,
+         mask_enum::no_mask,
+         true,
+         4,
+         2,
+         SequencePointers::Batch,
+         128},
+        {"D64DenseStridePaddingBshd",
+         64,
+         512,
+         512,
+         mask_enum::no_mask,
+         false,
+         4,
+         2,
+         SequencePointers::Batch,
+         128},
+        {"D64CausalStridePaddingBhsd",
+         64,
+         512,
+         512,
+         mask_enum::mask_top_left,
+         true,
+         4,
+         2,
+         SequencePointers::Batch,
+         128},
+        {"D64GroupWidePerSequenceDense",
+         64,
+         1024,
+         2048,
+         mask_enum::no_mask,
+         false,
+         4,
+         2,
+         SequencePointers::PerSequence,
+         128},
+        {"D64GroupWideCumulativeCausal",
+         64,
+         1024,
+         2048,
+         mask_enum::mask_bottom_right,
+         true,
+         4,
+         2,
+         SequencePointers::Cumulative,
+         128},
+        {"D64BatchWideCumulativeDense",
+         64,
+         384,
+         512,
+         mask_enum::no_mask,
+         false,
+         4,
+         2,
+         SequencePointers::BatchCumulative,
+         128},
+        {"D64BatchWideCumulativeQOnlyCausal",
+         64,
+         384,
+         512,
+         mask_enum::mask_bottom_right,
+         true,
+         4,
+         2,
+         SequencePointers::BatchCumulativeQ,
+         64},
+        {"D64BatchWideCumulativeKOnlyDense",
+         64,
+         384,
+         512,
+         mask_enum::no_mask,
+         false,
+         4,
+         2,
+         SequencePointers::BatchCumulativeK,
+         128},
+        {"D64DenseKeyTailRetainsN64",
+         64,
+         256,
+         257,
+         mask_enum::no_mask,
+         true,
+         4,
+         2,
+         SequencePointers::Batch,
+         64},
+        {"D64FiniteLeft127WideBhsd",
+         64,
+         1024,
+         1024,
+         mask_enum::mask_top_left,
+         true,
+         4,
+         2,
+         SequencePointers::Batch,
+         128},
+        {"D64FiniteLeft31RetainsN64",
+         64,
+         1024,
+         1024,
+         mask_enum::mask_top_left,
+         true,
+         4,
+         2,
+         SequencePointers::Batch,
+         64},
+        {"D64RectangularRightWindowRetainsN64",
+         64,
+         300,
+         700,
+         mask_enum::mask_bottom_right,
+         false,
+         4,
+         2,
+         SequencePointers::Batch,
+         64},
+        {"D64CausalKeyTailRetainsN64",
+         64,
+         256,
+         257,
+         mask_enum::mask_top_left,
+         true,
+         4,
+         2,
+         SequencePointers::Batch,
+         64},
+        {"D64BatchLargeCumulativeQOnlyCausal",
+         64,
+         1024,
+         2048,
+         mask_enum::mask_bottom_right,
+         true,
+         4,
+         2,
+         SequencePointers::BatchCumulativeQ,
+         128},
+    }};
+    cases[3].layout_padding = cases[4].layout_padding = 7;
+    for(int index : {5, 6})
+    {
+        cases[index].second_query_length = 200;
+        cases[index].second_key_length   = 1577;
+    }
+    for(int index : {7, 8, 9, 15})
+    {
+        cases[index].second_query_length = 200;
+        cases[index].second_key_length   = 311;
+    }
+    cases[11].window_size_left  = 127;
+    cases[12].window_size_left  = 31;
+    cases[13].window_size_left  = 127;
+    cases[13].window_size_right = 7;
+    return cases;
+}();
+
+// D64 and D128 N128 inputs whose M128 grid exceeds the CU count, so the M64 tile's grid predicate
+// fails and the M128xN128 scheduled tile runs (every other D64 or D128 N128 scheduled input here
+// takes M64). Appended so every earlier case index remains stable.
+constexpr std::array<ForwardCase, 4> kSchedM128GridCases{{
+    {"D64GroupGridAboveCuM128Dense",
+     64,
+     128,
+     1024,
+     mask_enum::no_mask,
+     false,
+     1,
+     1,
+     SequencePointers::AboveCuGrid,
+     128},
+    {"D64GroupGridAboveCuM128BottomRight",
+     64,
+     128,
+     1024,
+     mask_enum::mask_bottom_right,
+     false,
+     1,
+     1,
+     SequencePointers::AboveCuGrid,
+     128},
+    {"D128GroupGridAboveCuM128Dense",
+     128,
+     128,
+     1024,
+     mask_enum::no_mask,
+     false,
+     1,
+     1,
+     SequencePointers::AboveCuGrid,
+     128},
+    {"D128GroupGridAboveCuM128BottomRight",
+     128,
+     128,
+     1024,
+     mask_enum::mask_bottom_right,
+     false,
+     1,
+     1,
+     SequencePointers::AboveCuGrid,
+     128},
+}};
+
+// As kSchedM128GridCases, with three query tiles in the first sequence (q 384, so the M128 grid
+// is 3 * (CU + 1) blocks and max_seqlen_q stays below the M64 fill-once threshold): the M128xN128
+// scheduled tile walks several Q tiles of one group sequence, including the causal tile order.
+// Batch mode needs no such case: it has no M64 tile, so its D64 / D128 N128 cases above already
+// run M128 with up to eight Q tiles. Appended so every earlier case index remains stable.
+constexpr std::array<ForwardCase, 4> kSchedM128MultiTileCases{{
+    {"D64GroupGridAboveCuM128MultiTileDense",
+     64,
+     384,
+     1024,
+     mask_enum::no_mask,
+     false,
+     1,
+     1,
+     SequencePointers::AboveCuGrid,
+     128},
+    {"D64GroupGridAboveCuM128MultiTileBottomRight",
+     64,
+     384,
+     1024,
+     mask_enum::mask_bottom_right,
+     false,
+     1,
+     1,
+     SequencePointers::AboveCuGrid,
+     128},
+    {"D128GroupGridAboveCuM128MultiTileDense",
+     128,
+     384,
+     1024,
+     mask_enum::no_mask,
+     false,
+     1,
+     1,
+     SequencePointers::AboveCuGrid,
+     128},
+    {"D128GroupGridAboveCuM128MultiTileBottomRight",
+     128,
+     384,
+     1024,
+     mask_enum::mask_bottom_right,
+     false,
+     1,
+     1,
+     SequencePointers::AboveCuGrid,
+     128},
+}};
+
+constexpr int kCaseCount = static_cast<int>(
+    kCases.size() + kAdditionalCases.size() + kVirtualSinkCases.size() + kSelectorCases.size() +
+    kPartialQueryCases.size() + kD64WideTileCases.size() + kD64ExpandedCases.size() +
+    kSchedM128GridCases.size() + kSchedM128MultiTileCases.size());
 
 const ForwardCase& GetCase(int index)
 {
@@ -580,7 +1063,22 @@ const ForwardCase& GetCase(int index)
     index -= static_cast<int>(kAdditionalCases.size());
     if(index < static_cast<int>(kVirtualSinkCases.size()))
         return kVirtualSinkCases[index];
-    return kSelectorCases[index - kVirtualSinkCases.size()];
+    index -= static_cast<int>(kVirtualSinkCases.size());
+    if(index < static_cast<int>(kSelectorCases.size()))
+        return kSelectorCases[index];
+    index -= static_cast<int>(kSelectorCases.size());
+    if(index < static_cast<int>(kPartialQueryCases.size()))
+        return kPartialQueryCases[index];
+    index -= static_cast<int>(kPartialQueryCases.size());
+    if(index < static_cast<int>(kD64WideTileCases.size()))
+        return kD64WideTileCases[index];
+    index -= static_cast<int>(kD64WideTileCases.size());
+    if(index < static_cast<int>(kD64ExpandedCases.size()))
+        return kD64ExpandedCases[index];
+    index -= static_cast<int>(kD64ExpandedCases.size());
+    if(index < static_cast<int>(kSchedM128GridCases.size()))
+        return kSchedM128GridCases[index];
+    return kSchedM128MultiTileCases[index - kSchedM128GridCases.size()];
 }
 
 enum class ValuePattern
@@ -607,7 +1105,7 @@ struct Sequences
 Sequences MakeSequences(const ForwardCase& c, int num_cus)
 {
     Sequences sequences;
-    sequences.group = c.pointers != SequencePointers::Batch;
+    sequences.group = c.pointers != SequencePointers::Batch && !IsBatchCumulative(c.pointers);
     const int batch = c.pointers == SequencePointers::AboveCuGrid ? num_cus + 1
                       : sequences.group || c.scheduled            ? 2
                                                                   : 1;
@@ -615,8 +1113,9 @@ Sequences MakeSequences(const ForwardCase& c, int num_cus)
     sequences.k_lengths.assign(batch, c.key_length);
     if(c.pointers == SequencePointers::AboveCuGrid)
     {
-        // max_seqlen_q is the actual maximum (128). All CU+1 groups are nonempty,
-        // so get_num_blocks(128) = (CU+1) * 1 * ceil(128/128) exceeds CU.
+        // max_seqlen_q is the actual maximum (the first sequence's query_length). All CU+1
+        // groups are nonempty, so get_num_blocks(128) = (CU+1) * 1 * ceil(query_length/128)
+        // exceeds CU.
         std::fill(sequences.q_lengths.begin() + 1, sequences.q_lengths.end(), 1);
     }
     else if(sequences.group)
@@ -624,8 +1123,17 @@ Sequences MakeSequences(const ForwardCase& c, int num_cus)
         sequences.q_lengths[1] = c.second_query_length;
         sequences.k_lengths[1] = c.second_key_length;
     }
-    auto physical_q = sequences.q_lengths;
-    auto physical_k = sequences.k_lengths;
+    else if(IsBatchCumulative(c.pointers))
+    {
+        if(c.pointers != SequencePointers::BatchCumulativeK)
+            sequences.q_lengths[1] = c.second_query_length;
+        if(c.pointers != SequencePointers::BatchCumulativeQ)
+            sequences.k_lengths[1] = c.second_key_length;
+    }
+    auto physical_q =
+        sequences.group ? sequences.q_lengths : std::vector<int32_t>(batch, c.query_length);
+    auto physical_k =
+        sequences.group ? sequences.k_lengths : std::vector<int32_t>(batch, c.key_length);
     if(c.pointers == SequencePointers::PerSequence || c.pointers == SequencePointers::Cumulative)
     {
         // Real gaps separate the physical starts from either logical-length API.
@@ -647,12 +1155,31 @@ struct Layout
 {
     std::size_t head_stride, row_stride, batch_stride, elements;
 
-    Layout(int batch, int heads, int physical_rows, int dimension, bool bhsd, bool group)
-        : head_stride(bhsd ? static_cast<std::size_t>(physical_rows) * dimension : dimension),
-          row_stride(bhsd ? dimension : static_cast<std::size_t>(heads) * dimension),
-          batch_stride(static_cast<std::size_t>(heads) * physical_rows * dimension),
-          elements(batch_stride * (group ? 1 : batch))
+    Layout(int batch,
+           int heads,
+           int physical_rows,
+           int dimension,
+           bool bhsd,
+           bool group,
+           int padding = 0)
     {
+        const bool row_pad = padding & 1, head_pad = padding & 2, batch_pad = padding & 4;
+        if(bhsd)
+        {
+            row_stride  = dimension + (row_pad ? 8 : 0);
+            head_stride = static_cast<std::size_t>(physical_rows - 1) * row_stride + dimension +
+                          (head_pad ? 16 : 0);
+        }
+        else
+        {
+            head_stride = dimension + (head_pad ? 8 : 0);
+            row_stride =
+                static_cast<std::size_t>(heads - 1) * head_stride + dimension + (row_pad ? 16 : 0);
+        }
+        batch_stride = static_cast<std::size_t>(heads - 1) * head_stride +
+                       static_cast<std::size_t>(physical_rows - 1) * row_stride + dimension +
+                       (batch_pad ? 32 : 0);
+        elements = batch_stride * (group ? 1 : batch);
     }
 
     std::size_t SequenceOffset(int batch, int32_t physical_start, bool group) const
@@ -712,14 +1239,28 @@ std::vector<float> Decode(const std::vector<Data>& data)
     return decoded;
 }
 
-std::string ExpectedKernel(const ForwardCase& c, bool lse, bool group)
+std::string ExpectedKernel(const ForwardCase& c,
+                           bool lse,
+                           bool group,
+                           std::size_t m128_blocks,
+                           int num_cus,
+                           int max_seqlen_q)
 {
     const int value_dimension = c.dimension == 64 ? 64 : 128;
-    const int m               = c.scheduled ? 128 : 64;
     const int n               = c.virtual_sink ? 64 : c.expected_n;
     // Finite virtual sinks use the qr_tdm fallback; sched is specialized for null sink.
     const bool use_scheduled = c.scheduled && !c.virtual_sink;
-    std::string name         = "fmha_fwd_d" + std::to_string(c.dimension) + "_" + kDataType +
+    // Group-mode D64 and D128 scheduled N128 take the M64 tile when the M128 grid leaves CUs idle,
+    // or fills each CU once with at least 2048 query rows; for D128 the latter only without a
+    // sliding window (GFX125_D64_SCHED_M64_CONSTRAINT and GFX125_D128_SCHED_M64_CONSTRAINT in the
+    // codegen). Batch mode has no M64 sched tile.
+    const std::size_t cus = static_cast<std::size_t>(num_cus);
+    const bool fill_once =
+        m128_blocks <= cus && max_seqlen_q >= 2048 && (c.dimension == 64 || c.window_size_left < 0);
+    const bool sched_m64 = use_scheduled && group && (c.dimension == 64 || c.dimension == 128) &&
+                           n == 128 && (m128_blocks < cus || fill_once);
+    const int m      = c.scheduled && !sched_m64 ? 128 : 64;
+    std::string name = "fmha_fwd_d" + std::to_string(c.dimension) + "_" + kDataType +
                        (group ? "_group_b" : "_batch_b") + std::to_string(m) + "x" +
                        std::to_string(n) + "x32x" + std::to_string(value_dimension) + "x32x" +
                        std::to_string(c.dimension) + "_r4x1x1_r4x1x1_w16x16x32_w16x16x32";
@@ -728,7 +1269,13 @@ std::string ExpectedKernel(const ForwardCase& c, bool lse, bool group)
         const int occupancy = c.dimension == 64 ? 3 : c.expected_n == 64 ? 2 : 1;
         name += "_o" + std::to_string(occupancy) + "_qr_tdm_sched_vr_";
         if(c.dimension == 64)
-            name += group || c.key_length % 64 != 0 ? "pssk" : "npad";
+        {
+            const bool cumulative_k = c.pointers == SequencePointers::BatchCumulative ||
+                                      c.pointers == SequencePointers::BatchCumulativeK;
+            const bool cumulative_q = n == 128 && IsBatchCumulative(c.pointers);
+            name +=
+                group || c.key_length % n != 0 || cumulative_k || cumulative_q ? "pssk" : "npad";
+        }
         else
             name += group || c.dimension == 128 ? "psskddv" : "pddv";
     }
@@ -777,19 +1324,35 @@ TEST_P(QrTdmSchedForward, GeneratedDispatcherAndIndependentFp32)
     const auto sequences      = MakeSequences(c, properties.multiProcessorCount);
     const int batch           = sequences.q_lengths.size();
     const int value_dimension = c.dimension == 64 ? 64 : 128;
-    const Layout q_layout(
-        batch, c.query_heads, sequences.physical_q_rows, c.dimension, c.bhsd, sequences.group);
-    const Layout k_layout(
-        batch, c.kv_heads, sequences.physical_k_rows, c.dimension, c.bhsd, sequences.group);
-    const Layout v_layout(
-        batch, c.kv_heads, sequences.physical_k_rows, value_dimension, c.bhsd, sequences.group);
+    const Layout q_layout(batch,
+                          c.query_heads,
+                          sequences.physical_q_rows,
+                          c.dimension,
+                          c.bhsd,
+                          sequences.group,
+                          c.layout_padding);
+    const Layout k_layout(batch,
+                          c.kv_heads,
+                          sequences.physical_k_rows,
+                          c.dimension,
+                          c.bhsd,
+                          sequences.group,
+                          c.layout_padding);
+    const Layout v_layout(batch,
+                          c.kv_heads,
+                          sequences.physical_k_rows,
+                          value_dimension,
+                          c.bhsd,
+                          sequences.group,
+                          c.layout_padding);
     // 128 spare O rows per head/batch catch stores past seqlen_q.
     const Layout o_layout(batch,
                           c.query_heads,
                           sequences.physical_q_rows + 128,
                           value_dimension,
                           c.bhsd,
-                          sequences.group);
+                          sequences.group,
+                          c.layout_padding);
     const Layout lse_layout(
         batch, c.query_heads, sequences.physical_q_rows, 1, true, sequences.group);
     const auto q       = MakeInput(q_layout,
@@ -897,11 +1460,16 @@ TEST_P(QrTdmSchedForward, GeneratedDispatcherAndIndependentFp32)
         args.seqlen_q_ptr = q_lengths_device.GetDeviceBuffer();
         args.seqlen_k_ptr = k_lengths_device.GetDeviceBuffer();
     }
-    if(c.pointers == SequencePointers::Cumulative)
+    if(c.pointers == SequencePointers::Cumulative ||
+       c.pointers == SequencePointers::BatchCumulative)
     {
         args.cu_seqlen_q_ptr = q_cumulative_device.GetDeviceBuffer();
         args.cu_seqlen_k_ptr = k_cumulative_device.GetDeviceBuffer();
     }
+    if(c.pointers == SequencePointers::BatchCumulativeQ)
+        args.cu_seqlen_q_ptr = q_cumulative_device.GetDeviceBuffer();
+    if(c.pointers == SequencePointers::BatchCumulativeK)
+        args.cu_seqlen_k_ptr = k_cumulative_device.GetDeviceBuffer();
     const auto grid_blocks =
         static_cast<std::size_t>(batch) * c.query_heads * ((args.max_seqlen_q + 127) / 128);
     const int selector_begin =
@@ -943,15 +1511,25 @@ TEST_P(QrTdmSchedForward, GeneratedDispatcherAndIndependentFp32)
     }
     if(c.window_size_left >= 0)
     {
-        ASSERT_EQ(c.mask, mask_enum::mask_bottom_right);
+        ASSERT_TRUE(c.mask == mask_enum::mask_top_left || c.mask == mask_enum::mask_bottom_right);
         ASSERT_GT(c.query_length, 128);
         for(int sequence = 0; sequence < batch; ++sequence)
         {
-            // At Q origin zero, the first window tile already has a nonzero K origin.
             const int first_key = std::max(sequences.k_lengths[sequence] -
                                                sequences.q_lengths[sequence] - c.window_size_left,
                                            0);
-            ASSERT_GT((first_key / c.expected_n) * c.expected_n, 0);
+            if(sequences.q_lengths[sequence] == sequences.k_lengths[sequence])
+            {
+                // A square causal window starts at K origin zero for the first Q tile.
+                ASSERT_EQ(c.window_size_right, 0);
+                ASSERT_EQ(first_key, 0);
+            }
+            else
+            {
+                // Rectangular coverage requires a nonzero first K tile at Q origin zero.
+                ASSERT_EQ(c.mask, mask_enum::mask_bottom_right);
+                ASSERT_GT((first_key / c.expected_n) * c.expected_n, 0);
+            }
         }
         if(sequences.group)
         {
@@ -982,14 +1560,18 @@ TEST_P(QrTdmSchedForward, GeneratedDispatcherAndIndependentFp32)
     }
     if(c.pointers == SequencePointers::AboveCuGrid)
     {
-        // Every N128 predicate except grid<=CU is true. No fabricated maximum or
+        // D192: every N128 predicate except grid<=CU is true. D64 and D128: every N128
+        // predicate is true and only the M64 grid predicate fails. No fabricated maximum or
         // empty sequence is used to make this branch reachable on any CU count.
-        ASSERT_EQ(args.max_seqlen_q, 128);
-        ASSERT_EQ(args.seqlen_k, 512 * batch);
+        ASSERT_EQ(args.max_seqlen_q, c.query_length);
+        ASSERT_EQ(args.seqlen_k, c.key_length * batch);
         ASSERT_EQ(args.seqlen_k_ptr, nullptr);
         ASSERT_EQ(args.cu_seqlen_k_ptr, nullptr);
-        ASSERT_EQ(c.mask, mask_enum::no_mask);
-        ASSERT_EQ(grid_blocks, static_cast<std::size_t>(properties.multiProcessorCount) + 1);
+        if(c.dimension == 192)
+            ASSERT_EQ(c.mask, mask_enum::no_mask);
+        ASSERT_EQ(grid_blocks,
+                  (static_cast<std::size_t>(properties.multiProcessorCount) + 1) *
+                      ((c.query_length + 127) / 128));
     }
     fmha_fwd_traits traits{};
     traits.hdim_q        = c.dimension;
@@ -1014,7 +1596,13 @@ TEST_P(QrTdmSchedForward, GeneratedDispatcherAndIndependentFp32)
     ASSERT_GE(result, 0) << "Generated dispatcher has no supported instance";
     ASSERT_EQ(hipGetLastError(), hipSuccess);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
-    ASSERT_EQ(selected_kernel, ExpectedKernel(c, lse, sequences.group));
+    ASSERT_EQ(selected_kernel,
+              ExpectedKernel(c,
+                             lse,
+                             sequences.group,
+                             grid_blocks,
+                             properties.multiProcessorCount,
+                             args.max_seqlen_q));
     o_device.FromDevice(o.data());
     if(lse)
         lse_device.FromDevice(lse_data.data());

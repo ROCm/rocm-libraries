@@ -41,7 +41,7 @@ struct FmhaFwdWorkgroupFeatures
 {
     bool is_bhsd         = false;
     bool uniform_lengths = false;
-    bool square_causal   = false;
+    bool square_causal   = false; // right window 0; finite left unless mask_type is MASK_GENERIC
 };
 
 // Existing opt-in tm5r topology assumptions. These are not inferred from num_xcds

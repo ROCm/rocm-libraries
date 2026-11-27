@@ -7,10 +7,12 @@
 
 namespace ck_tile {
 
-template <index_t NumSu>
+// NumMIter is the number of 16-row WMMA row tiles a wave owns: 2 for the M128 tiles, 1 for M64.
+template <index_t NumSu, index_t NumMIter = 2>
 struct FmhaTdmSchedScoreFragmentMappingFor
 {
     static_assert(NumSu == 2 || NumSu == 4 || NumSu == 8);
+    static_assert(NumMIter == 1 || NumMIter == 2);
     using Pair = ext_vector_t<float, 2>;
 
     struct Coordinate
@@ -21,9 +23,9 @@ struct FmhaTdmSchedScoreFragmentMappingFor
         index_t element;
     };
 
-    static constexpr index_t kNumMIter         = 2;
+    static constexpr index_t kNumMIter         = NumMIter;
     static constexpr index_t kNumNIter         = NumSu * 2;
-    static constexpr index_t kNumMsb           = 4;
+    static constexpr index_t kNumMsb           = 2 * NumMIter;
     static constexpr index_t kNumSu            = NumSu;
     static constexpr index_t kPairsPerFragment = 4;
     static constexpr index_t kElementsPerPair  = 2;
@@ -155,18 +157,14 @@ struct FmhaTdmSchedScoreFragmentMappingFor
 using FmhaTdmSchedScoreFragmentMapping = FmhaTdmSchedScoreFragmentMappingFor<4>;
 static_assert(FmhaTdmSchedScoreFragmentMappingFor<2>::ValidateBijection());
 static_assert(FmhaTdmSchedScoreFragmentMapping::ValidateBijection());
+static_assert(FmhaTdmSchedScoreFragmentMappingFor<2, 1>::ValidateBijection());
+static_assert(FmhaTdmSchedScoreFragmentMappingFor<4, 1>::ValidateBijection());
 
-template <index_t NumSu>
+template <index_t NumSu, index_t NumMIter = 2>
 struct FmhaTdmSchedSplitSoftmaxFor
 {
-    using Mapping = FmhaTdmSchedScoreFragmentMappingFor<NumSu>;
+    using Mapping = FmhaTdmSchedScoreFragmentMappingFor<NumSu, NumMIter>;
     using Pair    = typename Mapping::Pair;
-
-    struct Part0State
-    {
-        float local_max;
-        float old_max_log2e;
-    };
 
     struct Part1State
     {
@@ -174,24 +172,7 @@ struct FmhaTdmSchedSplitSoftmaxFor
         float delta;
     };
 
-    template <bool UseCompilerMax = false>
-    CK_TILE_DEVICE static float Max3(float x, float y, float z)
-    {
-        if constexpr(UseCompilerMax)
-        {
-            return max(max(x, y), z);
-        }
-        else
-        {
-#if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx125__)
-            float result;
-            asm volatile("v_max3_num_f32 %0, %1, %2, %3" : "=v"(result) : "v"(x), "v"(y), "v"(z));
-            return result;
-#else
-            return max(max(x, y), z);
-#endif
-        }
-    }
+    CK_TILE_DEVICE static float Max3(float x, float y, float z) { return max(max(x, y), z); }
 
     CK_TILE_DEVICE static float PermuteLaneX16(float value)
     {
@@ -202,42 +183,6 @@ struct FmhaTdmSchedSplitSoftmaxFor
 #else
         return value;
 #endif
-    }
-
-    template <index_t Msb, typename ScoreTensor, bool UseCompilerMax = false>
-    CK_TILE_DEVICE static Part0State
-    RunPart0(const ScoreTensor& score, float old_max, float log2e_scale)
-    {
-        array<float, Mapping::kNumSu> group_max{};
-
-        static_for<0, Mapping::kNumSu, 1>{}([&](auto su) {
-            constexpr index_t pair_base = su * Mapping::kPairsPerFragment;
-            const auto pair0            = Mapping::template LoadPair<Msb, pair_base + 0>(score);
-            const auto pair1            = Mapping::template LoadPair<Msb, pair_base + 1>(score);
-            const auto pair2            = Mapping::template LoadPair<Msb, pair_base + 2>(score);
-            const auto pair3            = Mapping::template LoadPair<Msb, pair_base + 3>(score);
-
-            float value   = Max3<UseCompilerMax>(pair0[0], pair0[1], pair1[0]);
-            value         = Max3<UseCompilerMax>(pair1[1], pair2[0], value);
-            value         = Max3<UseCompilerMax>(pair2[1], pair3[0], value);
-            group_max(su) = Max3<UseCompilerMax>(pair3[1], value, pair0[0]);
-        });
-
-        float lane_max;
-        if constexpr(Mapping::kNumSu == 4)
-        {
-            lane_max = Max3<UseCompilerMax>(
-                group_max[number<0>{}], group_max[number<1>{}], group_max[number<2>{}]);
-            lane_max =
-                Max3<UseCompilerMax>(lane_max, group_max[number<3>{}], group_max[number<1>{}]);
-        }
-        else
-        {
-            lane_max = max(group_max[number<0>{}], group_max[number<1>{}]);
-        }
-        lane_max = Max3<UseCompilerMax>(lane_max, PermuteLaneX16(lane_max), old_max);
-
-        return Part0State{lane_max, old_max * log2e_scale};
     }
 
     template <bool ValidateMax = false>

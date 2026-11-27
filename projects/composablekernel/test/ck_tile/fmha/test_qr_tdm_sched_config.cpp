@@ -4,16 +4,14 @@
 #include "fmha_test_common.hpp"
 #include "gtest/gtest.h"
 
-#include <array>
-
 namespace {
 
 using namespace ck_tile;
 
-template <typename T, int D, int N, int V>
+template <typename T, int D, int N, int V, int M = 128>
 struct Config
 {
-    using Problem  = typename test::Model<D, false, false, true, T, N, V>::Problem;
+    using Problem  = typename test::Model<D, false, false, true, T, N, V, M>::Problem;
     using Geometry = FmhaTdmSchedGeometryFor<Problem>;
     using Policy   = FmhaTdmSchedPolicyFor<Problem>;
 };
@@ -35,35 +33,6 @@ struct BiasProblem : Problem
     static constexpr auto BiasEnum = Bias;
 };
 
-// This fixture exercises only the max-policy predicate. Its mixed and FP8
-// types do not imply that the corresponding full kernel problem is supported.
-template <typename Q, typename K, typename V, bool Group, bool Mask, bool Lse>
-struct CompilerMaxProblem
-{
-    using QDataType                    = Q;
-    using KDataType                    = K;
-    using VDataType                    = V;
-    static constexpr bool kIsGroupMode = Group;
-    static constexpr bool kStoreLSE    = Lse;
-    struct FmhaMask
-    {
-        static constexpr bool IsMasking = Mask;
-    };
-};
-
-template <typename Policy, typename Q, typename K, typename V>
-void ExpectCompilerMaxFlagMatrix(const std::array<bool, 8>& expected, const char* type_case)
-{
-    SCOPED_TRACE(type_case);
-    static_for<0, 8, 1>{}([&](auto state) {
-        constexpr int s = decltype(state)::value;
-        using Problem   = CompilerMaxProblem<Q, K, V, (s & 4) != 0, (s & 2) != 0, (s & 1) != 0>;
-        EXPECT_EQ((Policy::template UseCompilerMax<Problem>()), expected[s])
-            << "group=" << Problem::kIsGroupMode << " mask=" << Problem::FmhaMask::IsMasking
-            << " lse=" << Problem::kStoreLSE;
-    });
-}
-
 template <typename Policy, bool Early>
 struct OutputRescalePolicy : Policy
 {
@@ -72,8 +41,14 @@ struct OutputRescalePolicy : Policy
 
 using Configs = ::testing::Types<Config<bf16_t, 64, 64, 64>,
                                  Config<half_t, 64, 64, 64>,
+                                 Config<bf16_t, 64, 128, 64>,
+                                 Config<half_t, 64, 128, 64>,
+                                 Config<bf16_t, 64, 128, 64, 64>,
+                                 Config<half_t, 64, 128, 64, 64>,
                                  Config<bf16_t, 128, 128, 128>,
                                  Config<half_t, 128, 128, 128>,
+                                 Config<bf16_t, 128, 128, 128, 64>,
+                                 Config<half_t, 128, 128, 128, 64>,
                                  Config<bf16_t, 192, 64, 128>,
                                  Config<half_t, 192, 64, 128>,
                                  Config<bf16_t, 192, 128, 128>,
@@ -92,18 +67,26 @@ TYPED_TEST(QrTdmSchedConfig, GeometryAndDerivedTails)
     using T = typename P::Tuning;
     EXPECT_EQ(G::kWaves, 4);
     EXPECT_EQ(G::kWaveSize, 32);
-    EXPECT_EQ(G::kQueryRowsPerWave, 32);
+    // M128: two 16-row WMMA row tiles per wave; M64: one.
+    EXPECT_EQ(G::kQueryRowsPerWave, G::kM == 64 ? 16 : 32);
+    EXPECT_EQ(G::kQkMIter, G::kM == 64 ? 1 : 2);
+    EXPECT_EQ(G::kPvMIter, G::kM == 64 ? 1 : 2);
     EXPECT_EQ(G::kQkStages, G::kN / 32);
     EXPECT_EQ(G::kPvStages, G::kN / 32);
     EXPECT_EQ(G::kKSuLoadCount, G::kHeadDimQK / 8);
     EXPECT_EQ(G::kVStageLoadCount, G::kDv / 8);
-    EXPECT_EQ(G::kQkWmmasPerWaveKvTile, G::kN * G::kHeadDimQK / 256);
-    EXPECT_EQ(G::kPvWmmasPerWaveKvTile, G::kN * G::kDv / 256);
+    // 16x16x32 WMMAs per wave and KV tile: row tiles x column tiles x K steps.
+    EXPECT_EQ(G::kQkWmmasPerWaveKvTile,
+              (G::kQueryRowsPerWave / 16) * (G::kN / 16) * (G::kHeadDimQK / 32));
+    EXPECT_EQ(G::kPvWmmasPerWaveKvTile, (G::kQueryRowsPerWave / 16) * (G::kDv / 16) * (G::kN / 32));
     EXPECT_TRUE(G::PRepackLayout::kInThread);
     EXPECT_EQ(T::kKWait, 1);
     EXPECT_EQ(T::kVWait, 1);
     EXPECT_TRUE(T::kTailDrain);
-    EXPECT_EQ(T::kBlockPerCu, G::kN == 128 ? 1 : G::kHeadDimQK == 64 ? 3 : 2);
+    EXPECT_EQ(T::kBlockPerCu,
+              G::kHeadDimQK == 64                   ? 3
+              : G::kHeadDimQK == 192 && G::kN == 64 ? 2
+                                                    : 1);
     static_for<0, G::kQkStages, 1>{}([&](auto stage) {
         constexpr int s = decltype(stage)::value;
         EXPECT_EQ(T::template GetQkTailDsCount<s>(),
@@ -165,22 +148,17 @@ TYPED_TEST(QrTdmSchedConfig, SelectedScheduleAndInvalidCounts)
     EXPECT_FALSE((FmhaTdmSchedMode<Problem, WrongCountPolicy<P>>::kIsLegal));
 }
 
-TYPED_TEST(QrTdmSchedConfig, CompilerMaxScopeAcrossFlagsAndTypes)
+TYPED_TEST(QrTdmSchedConfig, WmmaSourceKeepDepth)
 {
     using G = typename TypeParam::Geometry;
     using P = typename TypeParam::Policy;
-    // State order: batch dense, batch masked, group dense, group masked;
-    // each pair has LSE disabled then enabled. Pin the shipped scope directly.
-    constexpr std::array<bool, 8> d64_d128_scope{true, true, true, true, true, true, true, true};
-    constexpr std::array<bool, 8> d192_scope{true, true, false, false, false, false, false, false};
-    constexpr auto expected = G::kHeadDimQK == 192 ? d192_scope : d64_d128_scope;
-    ExpectCompilerMaxFlagMatrix<P, bf16_t, bf16_t, bf16_t>(expected, "BF16");
-    ExpectCompilerMaxFlagMatrix<P, half_t, half_t, half_t>(expected, "FP16");
-    ExpectCompilerMaxFlagMatrix<P, const bf16_t&, bf16_t, bf16_t>(expected, "BF16 Q cvref");
-    ExpectCompilerMaxFlagMatrix<P, fp8_t, fp8_t, fp8_t>(expected, "FP8 predicate only");
-    ExpectCompilerMaxFlagMatrix<P, half_t, bf16_t, bf16_t>(expected, "mixed Q predicate only");
-    ExpectCompilerMaxFlagMatrix<P, bf16_t, half_t, bf16_t>(expected, "mixed K predicate only");
-    ExpectCompilerMaxFlagMatrix<P, bf16_t, bf16_t, half_t>(expected, "mixed V predicate only");
+    // The D64 N64 and D192 N128 tiles keep no WMMA source alive, the D64 M64 tiles keep the last
+    // two, and D64 M128xN128, D128 N128 (M128 and M64) and D192 N64 keep the last three. Pin the
+    // shipped values.
+    constexpr bool keep_none =
+        (G::kHeadDimQK == 64 && G::kN == 64) || (G::kHeadDimQK == 192 && G::kN == 128);
+    constexpr bool keep_two = G::kHeadDimQK == 64 && G::kM == 64;
+    EXPECT_EQ(P::kWmmaSourceKeepDepth, keep_none ? 0 : keep_two ? 2 : 3);
 }
 
 TYPED_TEST(QrTdmSchedConfig, OutputRescaleModesRejectConflictingOwners)

@@ -196,7 +196,122 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
         LABELS "${TEST_NAME};CK_TILE_FMHA_TESTS;CK_TILE_FMHA_CODEGEN_TESTS"
         TIMEOUT 180)
 
+    # Check GenericAttentionMask compatibility across pipeline paths with one blob
+    # per path (device -fsyntax-only, no GPU); numerical coverage is separate below.
+    list(GET FMHA_QR_TDM_SCHED_GPU_TARGETS 0 FMHA_QR_TDM_SCHED_FIRST_GPU_TARGET)
+    # The blobs need the configure-level GPU feature macros (CK_USE_GFX1250, CK_TILE_USE_WMMA, ...).
+    get_directory_property(FMHA_QR_TDM_SCHED_DEFINITIONS COMPILE_DEFINITIONS)
+    string(REPLACE ";" "\n" FMHA_QR_TDM_SCHED_DEFINITIONS "${FMHA_QR_TDM_SCHED_DEFINITIONS}")
+    file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/qr_tdm_sched_generic_mask_defines.txt
+        "${FMHA_QR_TDM_SCHED_DEFINITIONS}\n")
+    add_test(NAME test_ck_tile_fmha_qr_tdm_sched_generic_mask
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/test_qr_tdm_sched_generic_mask.py
+            --compiler=${CMAKE_HIP_COMPILER}
+            --ck-root=${PROJECT_SOURCE_DIR}
+            --ck-build=${PROJECT_BINARY_DIR}
+            --gpu-target=${FMHA_QR_TDM_SCHED_FIRST_GPU_TARGET}
+            --defines-file=${CMAKE_CURRENT_BINARY_DIR}/qr_tdm_sched_generic_mask_defines.txt -v)
+    set_tests_properties(test_ck_tile_fmha_qr_tdm_sched_generic_mask PROPERTIES
+        LABELS "${TEST_NAME};CK_TILE_FMHA_TESTS;CK_TILE_FMHA_CODEGEN_TESTS"
+        TIMEOUT 1200)
+
+    # Numerical coverage uses the actual generated generic specializations and
+    # dispatcher, with the same compiler options as production. Keep these libraries
+    # separate from the default simplified-mask forward instances. Each set has its own
+    # generated fmha_fwd() API, so each set links into its own test executable.
+    if(TARGET ${FMHA_FWD_INSTANCES})
+        set(generic_fwd_example ${PROJECT_SOURCE_DIR}/example/ck_tile/01_fmha)
+        file(GLOB_RECURSE generic_fwd_codegen_scripts CONFIGURE_DEPENDS
+            ${generic_fwd_example}/codegen/*.py)
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+            ${generic_fwd_example}/generate.py ${generic_fwd_codegen_scripts})
+        get_target_property(generic_fwd_private_options ${FMHA_FWD_INSTANCES} COMPILE_OPTIONS)
+        get_target_property(generic_fwd_interface_options ${FMHA_FWD_INSTANCES}
+            INTERFACE_COMPILE_OPTIONS)
+        # Production applies the RDNA BF16 conversion definition per source.
+        get_target_property(production_fwd_blobs ${FMHA_FWD_INSTANCES} SOURCES)
+        foreach(blob IN LISTS production_fwd_blobs)
+            if(blob MATCHES "_gfx125\\.cpp$")
+                get_source_file_property(generic_fwd_definitions ${blob}
+                    TARGET_DIRECTORY ${FMHA_FWD_INSTANCES} COMPILE_DEFINITIONS)
+                break()
+            endif()
+        endforeach()
+        include(${generic_fwd_example}/cmake/fmha_fwd_source_flags.cmake)
+
+        # Generates the -m generic blobs matching filter into ${name}/ and builds them as the
+        # OBJECT library test_${name}_instances; expected_blobs counts the kernels plus the API.
+        function(add_qr_tdm_sched_generic_fwd_instances name description optdim filter
+                 expected_blobs)
+            set(dir ${CMAKE_CURRENT_BINARY_DIR}/${name})
+            set(list_file ${dir}/fwd_blob_list.txt)
+            set(codegen_args
+                ${generic_fwd_example}/generate.py
+                --targets ${FMHA_QR_TDM_SCHED_FIRST_GPU_TARGET}
+                --api fwd --optdim ${optdim} -m generic --filter ${filter})
+            file(MAKE_DIRECTORY ${dir})
+            execute_process(
+                COMMAND ${Python3_EXECUTABLE} ${codegen_args} --list_blobs ${list_file}
+                RESULT_VARIABLE result)
+            if(NOT result EQUAL 0)
+                message(FATAL_ERROR "Failed to list ${description} forward test instances")
+            endif()
+            file(STRINGS ${list_file} blobs)
+            list(LENGTH blobs blob_count)
+            if(NOT blob_count EQUAL expected_blobs)
+                message(FATAL_ERROR
+                    "Expected ${expected_blobs} ${description} blobs (kernels and API), got ${blob_count}")
+            endif()
+            add_custom_command(
+                OUTPUT ${blobs}
+                COMMAND ${Python3_EXECUTABLE} ${codegen_args} --output_dir ${dir}
+                DEPENDS ${generic_fwd_example}/generate.py ${generic_fwd_codegen_scripts}
+                VERBATIM)
+            set_source_files_properties(${blobs} PROPERTIES LANGUAGE HIP)
+            set(instances test_${name}_instances)
+            add_library(${instances} OBJECT EXCLUDE_FROM_ALL ${blobs})
+            target_include_directories(${instances} PRIVATE ${generic_fwd_example})
+            set_property(TARGET ${instances} PROPERTY HIP_ARCHITECTURES
+                ${FMHA_QR_TDM_SCHED_GPU_TARGETS})
+            if(generic_fwd_private_options)
+                target_compile_options(${instances} PRIVATE ${generic_fwd_private_options})
+            endif()
+            if(generic_fwd_interface_options)
+                target_compile_options(${instances} INTERFACE ${generic_fwd_interface_options})
+            endif()
+            foreach(blob IN LISTS blobs)
+                get_filename_component(blob_name ${blob} NAME)
+                if(blob_name MATCHES "_gfx125\\.cpp$" AND generic_fwd_definitions)
+                    set_property(SOURCE ${blob} APPEND PROPERTY COMPILE_DEFINITIONS
+                        ${generic_fwd_definitions})
+                endif()
+                ck_tile_fmha_fwd_get_source_compile_options(${blob_name} source_options)
+                set_property(SOURCE ${blob} APPEND PROPERTY COMPILE_OPTIONS ${source_options})
+            endforeach()
+        endfunction()
+
+        # Four kernels: BF16/FP16 x LSE off/on, plus the generated API.
+        add_qr_tdm_sched_generic_fwd_instances(qr_tdm_sched_generic_fwd
+            "generic mc D64 N128" 64
+            "fmha_fwd_d64_*_batch_b128x128x32x64x32x64_r4x1x1_r4x1x1_w16x16x32_w16x16x32_o3_qr_tdm_sched_vr_npad_nlogits_nbias_mc_*_ndropout_nskip_nqscale_ntrload_nsink"
+            5)
+        # The group-mode M64 tiles: D64 mc and D128 mc/mg, x BF16/FP16 x LSE off/on (12
+        # kernels), plus the generated API.
+        add_qr_tdm_sched_generic_fwd_instances(qr_tdm_sched_generic_m64_fwd
+            "generic group M64" "64,128"
+            "fmha_fwd_d*_*_group_b64x128x32x*_r4x1x1_r4x1x1_w16x16x32_w16x16x32_o*_qr_tdm_sched_vr_*_nlogits_nbias_m[cg]_*_ndropout_nskip_nqscale_ntrload_nsink"
+            13)
+    endif()
+
     foreach(dtype IN ITEMS bf16 fp16)
+        set(window_target test_ck_tile_fmha_qr_tdm_bhsd_window_${dtype})
+        add_qr_tdm_sched_gtest(${window_target} test_qr_tdm_bhsd_window.cpp)
+        if(dtype STREQUAL "fp16")
+            target_compile_definitions(${window_target} PRIVATE CK_TILE_FMHA_BHSD_WINDOW_FP16=1)
+        endif()
+        target_compile_options(${window_target} PRIVATE -Wno-float-equal
+            -mllvm -amdgpu-expert-scheduling-mode -fgpu-flush-denormals-to-zero)
         if(TARGET ${FMHA_FWD_INSTANCES})
             set(target test_ck_tile_fmha_qr_tdm_sched_fwd_${dtype})
             add_qr_tdm_sched_gtest(${target} test_qr_tdm_sched_fwd.cpp)
@@ -207,6 +322,18 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
                 target_compile_definitions(${target} PRIVATE DataTypeConfig=FmhaFwdBf16)
             endif()
             target_compile_options(${target} PRIVATE -Wno-float-equal)
+
+            foreach(suite IN ITEMS generic generic_m64)
+                set(target test_ck_tile_fmha_qr_tdm_sched_${suite}_fwd_${dtype})
+                add_qr_tdm_sched_gtest(${target} test_qr_tdm_sched_${suite}_fwd.cpp)
+                target_link_libraries(${target} PRIVATE test_qr_tdm_sched_${suite}_fwd_instances)
+                if(dtype STREQUAL "fp16")
+                    target_compile_definitions(${target} PRIVATE DataTypeConfig=FmhaFwdFp16)
+                else()
+                    target_compile_definitions(${target} PRIVATE DataTypeConfig=FmhaFwdBf16)
+                endif()
+                set_tests_properties(${target} PROPERTIES TIMEOUT 300)
+            endforeach()
         endif()
         set(target test_ck_tile_fmha_qr_tdm_sched_layout_${dtype})
         add_qr_tdm_sched_gtest(${target} test_qr_tdm_sched_layout.cpp)
@@ -262,6 +389,14 @@ list(APPEND FMHA_QR_TDM_SCHED_TEST_TARGETS test_ck_tile_fmha_reference)
 # without the edge below the binary is never built and ctest reports Not Run.
 # Keep the umbrella a superset of what the regex matches.
 add_dependencies(${TEST_NAME} test_ck_tile_fmha_reference)
+
+# Host test of the simplified attention mask's edge-tile check for partial query tiles.
+add_gtest_executable(test_ck_tile_fmha_mask_edge_tile test_fmha_mask_edge_tile.cpp)
+add_dependencies(${TEST_NAME} test_ck_tile_fmha_mask_edge_tile)
+get_test_property(test_ck_tile_fmha_mask_edge_tile LABELS FMHA_MASK_COMMON_LABELS)
+set_tests_properties(test_ck_tile_fmha_mask_edge_tile PROPERTIES
+    LABELS "${FMHA_MASK_COMMON_LABELS};${TEST_NAME};CK_TILE_FMHA_TESTS")
+list(APPEND FMHA_QR_TDM_SCHED_TEST_TARGETS test_ck_tile_fmha_mask_edge_tile)
 
 # Python integration test for the fmha_fwd codegen path.
 #

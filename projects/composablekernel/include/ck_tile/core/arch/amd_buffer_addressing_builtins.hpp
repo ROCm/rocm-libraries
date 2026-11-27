@@ -2981,7 +2981,8 @@ __device__ void amd_async_global_load_to_lds(CK_TILE_LDS_ADDR T* smem_ptr,
 // Keep s_wait_xcnt in the same asm as the stores so the compiler cannot reuse their address
 // operands before the wait. Eight per burst is a batching choice, not a hardware limit: an active
 // D128 wave issues two bursts (16 address operands per asm instead of 32); 4 and 16 were not
-// measured. No bounds check; the caller waits on DScnt before and on ASYNCcnt after.
+// measured. No bounds check; the caller waits on DScnt before, and calls
+// amd_async_global_store_from_lds_wait() before the LDS is reused or released.
 CK_TILE_DEVICE void amd_async_global_store_from_lds_b128_x8(const void* global_base,
                                                             const uint32_t (&global_offset)[8],
                                                             const uint32_t (&lds_addr)[8])
@@ -3019,6 +3020,16 @@ CK_TILE_DEVICE void amd_async_global_store_from_lds_b128_x8(const void* global_b
     ignore = global_base;
     ignore = global_offset;
     ignore = lds_addr;
+#endif
+}
+
+// Waits until the amd_async_global_store_from_lds_b128_x8 stores have read their LDS sources.
+// The stores are inline asm without an asyncmark, so s_wait_asynccnt() (wait_asyncmark() when
+// the compiler has the asyncmark builtins) does not wait for them; this waits on ASYNCcnt itself.
+CK_TILE_DEVICE void amd_async_global_store_from_lds_wait()
+{
+#if defined(__gfx125__)
+    __builtin_amdgcn_s_wait_asynccnt(0);
 #endif
 }
 
