@@ -24,19 +24,60 @@ Ninja, matching the MIOpen component CI naming check. Missing build tools,
 including `ninja-build`, are installed through `sudo apt-get`; the environment
 needs passwordless sudo and network access to the package repositories and GitHub.
 
-With matching non-ASAN artifacts unpacked into `build`, run:
+With matching non-ASAN artifacts unpacked into `build`, run once per family:
 
 ```sh
 AMDGPU_FAMILIES=gfx94X-dcgpu TEST_TYPE=standard \
   python3 build/share/miopen/bin/run_dbsync_rocjitsu.py
 ```
 
-Run separately with `AMDGPU_FAMILIES=gfx950-dcgpu` and that family's artifacts.
-The gfx942 run covers 304 and 228 CUs; the gfx950 run covers 256 CUs. Each artifact
-tree must contain `miopen_gtest`, the matching CK grouped-convolution plugin, and
-the SystemDBs. Require non-skipped `StaticFDBSync` results for every CU count:
-exit status zero alone does not prove coverage. The `quick` tier intentionally
-skips this runner.
+The artifact tree of a family must contain `miopen_gtest`, the SystemDBs, and the CK
+grouped-convolution plugin (`libMIOpenCKGroupedConv_<arch>.so`) of every target in its
+rows below. The runner stops if a plugin is missing. It emulates each target under
+rocjitsu at the CU count in the table and requires that exactly the named
+`StaticFDBSync` param ran and opened the named SystemDB:
+
+| `AMDGPU_FAMILIES` | CK plugin | CU | `StaticFDBSync` param | SystemDB |
+| --- | --- | --- | --- | --- |
+| `gfx94X-dcgpu` | `gfx942` | 304 | `gfx942_304` | `gfx942130` |
+| `gfx94X-dcgpu` | `gfx942` | 228 | `gfx942_228` | `gfx942e4` |
+| `gfx950-dcgpu` | `gfx950` | 256 | `gfx950_256` | `gfx950100` |
+| `gfx90a` | `gfx90a` | 104 | `gfx90a_104` | `gfx90a68` |
+| `gfx110X-all` | `gfx1100` | 96 | `gfx1100_0` | `gfx110060` |
+| `gfx110X-all` | `gfx1101` | 54 | `gfx1101_27` | `gfx110136` |
+| `gfx120X-all` | `gfx1200` | 32 | `gfx1200_0` | `gfx120020` |
+| `gfx120X-all` | `gfx1201` | 64 | `gfx1201_32` | `gfx120140` |
+| `gfx125X-dcgpu` | `gfx1250` | 256 | `gfx1250_256` | `gfx1250100` |
+
+The CU column is the physical CU count that the SystemDB name encodes. HIP reports
+WGPs on gfx11 and gfx12, so the gfx1101 and gfx1201 params carry half of it. The
+`gfx1100_0` and `gfx1200_0` params do not identify a SystemDB at all, which is why the
+runner also compares the basename of the find-db that `db_sync.cpp` prints for the run.
+
+Two shipped Navi SystemDBs are left out on purpose, and the runner prints
+`Not validating <arch>` for them:
+
+- `gfx1102` (`gfx110220`, in `gfx110X-all`): its find-db still has wrong workspace
+  sizes (the known issue in #14519), so `StaticFDBSync` fails on it.
+- `gfx1151` (`gfx115128`, family `gfx1151`): `StaticFDBSync` still reports wrong
+  workspace sizes for `GemmWrwUniversal` and `ConvWinoFuryRxS<2-3>`. The `gfx1151`
+  family therefore validates nothing and exits 0.
+
+Exit status zero alone does not prove coverage. The runner also exits 0 for a family
+that has no target and for the `quick` tier, which intentionally skips it. The JSON
+check only runs after the runner has selected a target, so look for one line per row
+of the family in the log:
+
+```
+StaticFDBSync gfx942 @ 228 CU: checked StaticFDBSync/gfx942_228 ("gfx942", 228) on gfx942e4.HIP.fdb.txt
+```
+
+A job whose `TEST_TYPE` is `quick` skips the runner and prints
+`TEST_TYPE=quick: skipping GPU-free dbsync`. Do not count such a job as coverage.
+
+The runner's own checks are tested without rocjitsu or a GPU by
+`dbsync/test_run_dbsync_rocjitsu.py`, which pre-commit runs when the runner or
+`db_sync.cpp` changes.
 
 ## hipDNN shim surface
 
