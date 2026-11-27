@@ -572,6 +572,17 @@ gfx1250 runner, but the CI configuration overlay this repository uses leaves it 
 skipped, and the emulation categories (`ffm-quick`, `emu-fast`, `emu-full`) are not selected by any
 TheRock job.
 
+The exception is `rocjitsu-quick`, which runs the gfx1250 `Tests/common` configs on a CPU runner under
+rocjitsu, AMD's open-source GPU emulator, so a pull request gets gfx1250 coverage without gfx1250
+hardware. TheRock's `tensilelite-rocjitsu` job (ROCm/TheRock#10154) runs it through
+`tensilelite/Tests/emulation/run_rocjitsu.py`. That launcher sizes the emulator for the runner: it
+splits the CPU cores and memory the job may use (its cgroup limits) between pytest-xdist workers and
+each worker's emulator threads, and kills every client process left over when the job's time runs out.
+Configs that take more than two hours each under the emulator carry the `rocjitsu_slow` marker and are
+left out; the rest take about 15 hours of test time (recorded on a 96-core host with an earlier
+rocjitsu), split across shards. The job runs only once the TheRock commit this repository pins includes
+it, and starts as advisory (an expected failure), so it does not gate a merge yet.
+
 Other Math CI jobs post checks without gating. The one worth knowing is
 `tensilelite-unit-codecov`, which runs the TensileLite Python and C++ coverage environments on gfx950
 and uploads to codecov under the `TensileLite-Unit` and `TensileLite-CPP` flags. It is two jobs in

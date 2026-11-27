@@ -192,6 +192,31 @@ test_categories:
     labels:
       - "emu-fast"
 
+  # Per-PR rocjitsu lane (TheRock tensilelite-rocjitsu job). Same configs as
+  # emu-full minus `rocjitsu_slow` ones (> 2 h each under emulation, the per-test
+  # cap). Run through tensilelite/Tests/emulation/run_rocjitsu.py, which sets
+  # the worker count, per-test timeout and the rocjitsu_pytest plugin's report
+  # directory; the plugin selects the job's shard from SHARD_INDEX/TOTAL_SHARDS.
+  rocjitsu-quick:
+    description: "Common GEMM tests under rocjitsu for pre-submit CI (no rocjitsu_slow)"
+    test_paths:
+      - "tensilelite/Tests/common"
+    pytest_markers:
+      - "{AMDGPU_TARGETS}"
+    exclude_markers:
+      - "rocjitsu_slow"
+    parallel_workers: 16
+    pytest_args:
+      - "-p"
+      - "rocjitsu_pytest"
+      - "--dist=worksteal"
+      - "--client-lock-scope=worker"
+      - "--prebuilt-client={ROCM_PATH}/libexec/hipblaslt/tensilelite/tensilelite-client"
+      - "--global-parameters=LibraryFormat='msgpack'"
+      - "--tensile-options=--cxx-compiler,{ROCM_PATH}/bin/amdclang++,--gpu-targets,{AMDGPU_TARGETS}"
+    labels:
+      - "rocjitsu-quick"
+
   # Arch-agnostic emulation nightly — runs ALL tests for the target arch.
   emu-full:
     description: "All common GEMM tests for emulation nightly"
