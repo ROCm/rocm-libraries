@@ -569,6 +569,32 @@ class TestFwdWmmaSpec(unittest.TestCase):
                 self.assertGreaterEqual(len(jobs), len(base), (arch, caps))
                 self.assertLessEqual(len(jobs), len(knobs), (arch, caps))
 
+    def test_pingpong_ring_cases_build(self):
+        """Every ping-pong + ring row of the GPU cases (stride 2 with split
+        halos included) builds in Python and is barrier-driven; the C++
+        twin is held to it by parity configs 51-54."""
+
+        def ops(body):
+            for op in body:
+                yield op
+                for region in op.regions:
+                    yield from ops(region.ops)
+
+        rows = [
+            (pkw, knobs)
+            for pkw, knobs in _CASES
+            if knobs.get("pingpong")
+            and (knobs.get("row_ring") or knobs.get("tap_ring"))
+        ]
+        self.assertTrue(any(k.get("phase_split") for _, k in rows))
+        for pkw, knobs in rows:
+            with self.subTest(problem=pkw, knobs=knobs):
+                spec = DirectFwdWmmaSpec(problem=_problem(**pkw), **knobs)
+                self.assertIsNone(fwd_wmma_reason(spec))
+                kernel = build_direct_fwd_wmma(spec, "gfx1250")
+                names = [op.name for op in ops(kernel.body.ops)]
+                self.assertTrue(any("barrier" in n for n in names))
+
     def test_spec_for_problem_filters_padding(self):
         from kernels.conv.direct_variants import direct_spec_for_problem
 

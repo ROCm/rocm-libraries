@@ -1244,6 +1244,36 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
 
     n_steps = b.mul(n_chunks, b.const_i32(NG))
 
+    def _ring_wait(u: Value, chunk_end: bool) -> None:
+        """Ring step ``u``: the weight issuer waits for its weights; at a
+        chunk's boundary (``chunk_end``) the halo issuers wait for the halo
+        (their only transfer in flight)."""
+        with b.scf_if(b.cmp_eq(wave_id, b.const_i32(NB))):
+            _tdm_ring_wait(b, u, NS, n_steps)
+        if chunk_end:
+            with b.scf_if(b.cmp_ne(wave_id, b.const_i32(NB))):
+                b.s_wait_tensorcnt(0)
+
+    def _ring_refill(kc: Value, u: Value, r: int) -> None:
+        """Issue the weights of ring step ``u + NS - 1`` (into the slot that
+        held step ``u - 1``) and, at a chunk's first row, the next chunk's
+        halo."""
+        nxt = b.add(u, b.const_i32(NS - 1))
+        with b.scf_if(b.cmp_lt(nxt, n_steps)):
+            nc = b.div(nxt, b.const_i32(NG))
+            _issue_wei(nc, b.mod(nxt, b.const_i32(NS)), b.mod(nxt, b.const_i32(NG)))
+        if r == 0:
+            nc = b.add(kc, c1)
+            with b.scf_if(b.cmp_lt(nc, n_chunks)):
+                _issue_halo(nc, b.mod(nc, c2))
+
+    def _ring_row_steps(r: int):
+        return [
+            (ks, t // KW, t % KW)
+            for ks in range(CK // WMMA_K)
+            for t in range(r * WTAPS, (r + 1) * WTAPS)
+        ]
+
     def _chunk_rr(kc: Value, accs: list[Value]) -> list[Value]:
         """``row_ring`` / ``tap_ring``: chunk ``kc`` as NG (tap group) steps,
         each on its own weight slot; the chunk's halo slot stays for all."""
@@ -1254,38 +1284,13 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
             # The weight issuer waits for step u's weights; at a chunk's first
             # row the halo issuers wait for its halo (their only transfer in
             # flight: the next chunk's goes out below, after the barrier).
-            with b.scf_if(b.cmp_eq(wave_id, b.const_i32(NB))):
-                _tdm_ring_wait(b, u, NS, n_steps)
-            if r == 0:
-                with b.scf_if(b.cmp_ne(wave_id, b.const_i32(NB))):
-                    b.s_wait_tensorcnt(0)
+            _ring_wait(u, r == 0)
             b.sync_lds_only()
-            nxt = b.add(u, b.const_i32(NS - 1))
-            with b.scf_if(b.cmp_lt(nxt, n_steps)):
-                nc = b.div(nxt, b.const_i32(NG))
-                _issue_wei(nc, b.mod(nxt, b.const_i32(NS)), b.mod(nxt, b.const_i32(NG)))
-            if r == 0:
-                nc = b.add(kc, c1)
-                with b.scf_if(b.cmp_lt(nc, n_chunks)):
-                    _issue_halo(nc, b.mod(nc, c2))
+            _ring_refill(kc, u, r)
             wslot = b.mod(u, b.const_i32(NS))
-            row_steps = [
-                (ks, t // KW, t % KW)
-                for ks in range(CK // WMMA_K)
-                for t in range(r * WTAPS, (r + 1) * WTAPS)
-            ]
+            row_steps = _ring_row_steps(r)
             accs = _multiply(row_steps, halo_base, b.mul(wslot, b.const_i32(WEI)), accs)
         return accs
-
-    def _pp_ring_wait(u: Value, chunk_end: bool) -> None:
-        """``pingpong`` with a ring: the weight issuer waits for ring step
-        ``u``; at a chunk boundary the halo issuers wait for the next halo
-        (their only transfer in flight)."""
-        with b.scf_if(b.cmp_eq(wave_id, b.const_i32(NB))):
-            _tdm_ring_wait(b, u, NS, n_steps)
-        if chunk_end:
-            with b.scf_if(b.cmp_ne(wave_id, b.const_i32(NB))):
-                b.s_wait_tensorcnt(0)
 
     def _chunk_pp_rr(kc: Value, accs: list[Value]) -> list[Value]:
         """``pingpong`` with ``row_ring`` / ``tap_ring``: chunk ``kc`` as NG
@@ -1297,26 +1302,15 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
         halo_base = b.mul(hslot, b.const_i32(HALO_STAGE))
         for r in range(NG):
             u = b.add(b.mul(kc, b.const_i32(NG)), b.const_i32(r))
-            nxt = b.add(u, b.const_i32(NS - 1))
-            with b.scf_if(b.cmp_lt(nxt, n_steps)):
-                nc = b.div(nxt, b.const_i32(NG))
-                _issue_wei(nc, b.mod(nxt, b.const_i32(NS)), b.mod(nxt, b.const_i32(NG)))
-            if r == 0:
-                nc = b.add(kc, c1)
-                with b.scf_if(b.cmp_lt(nc, n_chunks)):
-                    _issue_halo(nc, b.mod(nc, c2))
+            _ring_refill(kc, u, r)
             wslot = b.mod(u, b.const_i32(NS))
-            row_steps = [
-                (ks, t // KW, t % KW)
-                for ks in range(CK // WMMA_K)
-                for t in range(r * WTAPS, (r + 1) * WTAPS)
-            ]
+            row_steps = _ring_row_steps(r)
             accs = _pp_steps(
                 row_steps,
                 halo_base,
                 b.mul(wslot, b.const_i32(WEI)),
                 accs,
-                lambda u=u, r=r: _pp_ring_wait(b.add(u, c1), r == NG - 1),
+                lambda u=u, r=r: _ring_wait(b.add(u, c1), r == NG - 1),
             )
         return accs
 
@@ -1476,7 +1470,7 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
         b.s_barrier_signal(0xFFFFFFFF)
     if PP:
         if RR:
-            _pp_ring_wait(c0, True)
+            _ring_wait(c0, True)
         else:
             _wait_landed(c0)
         b.sync_lds_only()  # chunk 0 and the edge zeroing are visible

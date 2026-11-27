@@ -1124,25 +1124,26 @@ void pp_bar(fww_ctx& c)
     rocke_b_sched_barrier(c.b, 0);
 }
 
-/* _chunk_pp(kc, accs). */
-void chunk_pp(fww_ctx& c, V kc, std::vector<V>& accs)
+/* _pp_steps(st_list, halo_base, wei_base, accs, wait_next): the ping-pong
+ * phases of st_list (pp_group steps each) from one halo slot and one weight
+ * slot. wait_next runs after the last phase's WMMAs. */
+void pp_steps(fww_ctx& c,
+              const std::vector<fww_step>& st_list,
+              V halo_base,
+              V wei_base,
+              std::vector<V>& accs,
+              const std::function<void()>& wait_next)
 {
     rocke_ir_builder_t* b = c.b;
-    V nxt = addk(c, kc, c.NS - 1);
-    V cond = rocke_b_cmp_lt(b, nxt, c.n_chunks);
-    if_then(c, cond, [&]() { issue(c, nxt); });
-    V stage = modk(c, kc, c.NS);
-    V halo_base = mulk(c, stage, c.HALO_STAGE);
-    V wei_base = c.G == 1 ? mulk(c, stage, c.WEI) : c.c0;
     int PG = c.spec->pp_group;
-    int n_steps = (int)c.steps.size();
+    int n_steps = (int)st_list.size();
     int n_groups = (int)rocke_ceil_div(n_steps, PG);
     for(int j = 0; j < n_groups; ++j)
     {
         std::vector<std::vector<V>> fa, fb;
         for(int i = j * PG; i < std::min(n_steps, (j + 1) * PG); ++i)
         {
-            const fww_step& st = c.steps[i];
+            const fww_step& st = st_list[i];
             int64_t tap_off;
             if(c.PS)
             {
@@ -1179,72 +1180,31 @@ void chunk_pp(fww_ctx& c, V kc, std::vector<V>& accs)
                 }
         rocke_b_s_setprio(b, 0);
         if(last)
-        {
-            V n = add(c, kc, c.c1);
-            wait_landed(c, n);
-        }
+            wait_next();
         pp_bar(c);
     }
 }
 
-/* _chunk_rr(kc, accs): row_ring / tap_ring. */
-void chunk_rr(fww_ctx& c, V kc, std::vector<V>& accs)
+/* _chunk_pp(kc, accs). */
+void chunk_pp(fww_ctx& c, V kc, std::vector<V>& accs)
 {
     rocke_ir_builder_t* b = c.b;
-    V hslot = modv(c, kc, c.c2);
-    V halo_base = mulk(c, hslot, c.HALO_STAGE);
-    for(int r = 0; r < c.NG; ++r)
-    {
-        V u;
-        {
-            V x = mulk(c, kc, c.NG);
-            u = addk(c, x, r);
-        }
-        {
-            V x = ci(c, c.NB);
-            V cond = rocke_b_cmp_eq(b, c.wave_id, x);
-            if_then(c, cond, [&]() { rocke_fwd_tdm_ring_wait(b, u, c.NS, c.n_steps); });
-        }
-        if(r == 0)
-        {
-            V x = ci(c, c.NB);
-            V cond = rocke_b_cmp_ne(b, c.wave_id, x);
-            if_then(c, cond, [&]() { rocke_b_s_wait_tensorcnt(b, 0); });
-        }
-        rocke_b_sync_lds_only(b);
-        {
-            V nxt = addk(c, u, c.NS - 1);
-            V cond = rocke_b_cmp_lt(b, nxt, c.n_steps);
-            if_then(c, cond, [&]() {
-                V nc = divk(c, nxt, c.NG);
-                V slot = modk(c, nxt, c.NS);
-                V grp = modk(c, nxt, c.NG);
-                issue_wei(c, nc, slot, grp);
-            });
-        }
-        if(r == 0)
-        {
-            V nc = add(c, kc, c.c1);
-            V cond = rocke_b_cmp_lt(b, nc, c.n_chunks);
-            if_then(c, cond, [&]() {
-                V slot = modv(c, nc, c.c2);
-                issue_halo(c, nc, slot);
-            });
-        }
-        V wslot = modk(c, u, c.NS);
-        std::vector<fww_step> row_steps;
-        for(int ks = 0; ks < c.CK / ROCKE_FWD_WMMA_K; ++ks)
-            for(int t = r * c.WTAPS; t < (r + 1) * c.WTAPS; ++t)
-                row_steps.push_back(fww_step{ks, t / c.KW, t % c.KW});
-        V wb = mulk(c, wslot, c.WEI);
-        multiply(c, row_steps, halo_base, wb, accs, NULL);
-    }
+    V nxt = addk(c, kc, c.NS - 1);
+    V cond = rocke_b_cmp_lt(b, nxt, c.n_chunks);
+    if_then(c, cond, [&]() { issue(c, nxt); });
+    V stage = modk(c, kc, c.NS);
+    V halo_base = mulk(c, stage, c.HALO_STAGE);
+    V wei_base = c.G == 1 ? mulk(c, stage, c.WEI) : c.c0;
+    pp_steps(c, c.steps, halo_base, wei_base, accs, [&]() {
+        V n = add(c, kc, c.c1);
+        wait_landed(c, n);
+    });
 }
 
-/* _pp_ring_wait(u, chunk_end): pingpong with a ring. The weight issuer waits
- * for ring step u; at a chunk boundary the halo issuers wait for the next
+/* _ring_wait(u, chunk_end): ring step u. The weight issuer waits for its
+ * weights; at a chunk's boundary (chunk_end) the halo issuers wait for the
  * halo (their only transfer in flight). */
-void pp_ring_wait(fww_ctx& c, V u, bool chunk_end)
+void ring_wait(fww_ctx& c, V u, bool chunk_end)
 {
     rocke_ir_builder_t* b = c.b;
     V cond_nb = rocke_b_cmp_eq(b, c.wave_id, ci(c, c.NB));
@@ -1256,6 +1216,63 @@ void pp_ring_wait(fww_ctx& c, V u, bool chunk_end)
     }
 }
 
+/* _ring_refill(kc, u, r): issue the weights of ring step u + NS - 1 (into the
+ * slot that held step u - 1) and, at a chunk's first row, the next chunk's
+ * halo. */
+void ring_refill(fww_ctx& c, V kc, V u, int r)
+{
+    rocke_ir_builder_t* b = c.b;
+    {
+        V nxt = addk(c, u, c.NS - 1);
+        V cond = rocke_b_cmp_lt(b, nxt, c.n_steps);
+        if_then(c, cond, [&]() {
+            V nc = divk(c, nxt, c.NG);
+            V slot = modk(c, nxt, c.NS);
+            V grp = modk(c, nxt, c.NG);
+            issue_wei(c, nc, slot, grp);
+        });
+    }
+    if(r == 0)
+    {
+        V nc = add(c, kc, c.c1);
+        V cond = rocke_b_cmp_lt(b, nc, c.n_chunks);
+        if_then(c, cond, [&]() {
+            V slot = modv(c, nc, c.c2);
+            issue_halo(c, nc, slot);
+        });
+    }
+}
+
+/* _ring_row_steps(r). */
+std::vector<fww_step> ring_row_steps(const fww_ctx& c, int r)
+{
+    std::vector<fww_step> row_steps;
+    for(int ks = 0; ks < c.CK / ROCKE_FWD_WMMA_K; ++ks)
+        for(int t = r * c.WTAPS; t < (r + 1) * c.WTAPS; ++t)
+            row_steps.push_back(fww_step{ks, t / c.KW, t % c.KW});
+    return row_steps;
+}
+
+/* _chunk_rr(kc, accs): row_ring / tap_ring. */
+void chunk_rr(fww_ctx& c, V kc, std::vector<V>& accs)
+{
+    rocke_ir_builder_t* b = c.b;
+    V hslot = modv(c, kc, c.c2);
+    V halo_base = mulk(c, hslot, c.HALO_STAGE);
+    for(int r = 0; r < c.NG; ++r)
+    {
+        V x = mulk(c, kc, c.NG);
+        V u = addk(c, x, r);
+        ring_wait(c, u, r == 0);
+        rocke_b_sync_lds_only(b);
+        ring_refill(c, kc, u, r);
+        V wslot = modk(c, u, c.NS);
+        std::vector<fww_step> row_steps = ring_row_steps(c, r);
+        V wb = mulk(c, wslot, c.WEI);
+        multiply(c, row_steps, halo_base, wb, accs, NULL);
+    }
+}
+
 /* _chunk_pp_rr(kc, accs): pingpong with row_ring / tap_ring. Chunk kc is
  * processed as NG ring steps, each a run of ping-pong phases on its own
  * weight slot. A slot is refilled at the start of a step, after the barrier
@@ -1263,83 +1280,20 @@ void pp_ring_wait(fww_ctx& c, V u, bool chunk_end)
  * goes out at the chunk's first step. */
 void chunk_pp_rr(fww_ctx& c, V kc, std::vector<V>& accs)
 {
-    rocke_ir_builder_t* b = c.b;
     V hslot = modv(c, kc, c.c2);
     V halo_base = mulk(c, hslot, c.HALO_STAGE);
     for(int r = 0; r < c.NG; ++r)
     {
-        V u;
-        {
-            V x = mulk(c, kc, c.NG);
-            u = addk(c, x, r);
-        }
-        {
-            V nxt = addk(c, u, c.NS - 1);
-            V cond = rocke_b_cmp_lt(b, nxt, c.n_steps);
-            if_then(c, cond, [&]() {
-                V nc = divk(c, nxt, c.NG);
-                V slot = modk(c, nxt, c.NS);
-                V grp = modk(c, nxt, c.NG);
-                issue_wei(c, nc, slot, grp);
-            });
-        }
-        if(r == 0)
-        {
-            V nc = add(c, kc, c.c1);
-            V cond = rocke_b_cmp_lt(b, nc, c.n_chunks);
-            if_then(c, cond, [&]() {
-                V slot = modv(c, nc, c.c2);
-                issue_halo(c, nc, slot);
-            });
-        }
+        V x = mulk(c, kc, c.NG);
+        V u = addk(c, x, r);
+        ring_refill(c, kc, u, r);
         V wslot = modk(c, u, c.NS);
         V wei_base = mulk(c, wslot, c.WEI);
-        std::vector<fww_step> row_steps;
-        for(int ks = 0; ks < c.CK / ROCKE_FWD_WMMA_K; ++ks)
-            for(int t = r * c.WTAPS; t < (r + 1) * c.WTAPS; ++t)
-                row_steps.push_back(fww_step{ks, t / c.KW, t % c.KW});
-        int PG = c.spec->pp_group;
-        int n_steps = (int)row_steps.size();
-        int n_groups = (int)rocke_ceil_div(n_steps, PG);
-        for(int j = 0; j < n_groups; ++j)
-        {
-            std::vector<std::vector<V>> fa, fb;
-            for(int i = j * PG; i < std::min(n_steps, (j + 1) * PG); ++i)
-            {
-                const fww_step& st = row_steps[i];
-                int64_t tap_off = ((int64_t)st.r * c.DH * c.HALO_W + (int64_t)st.s * c.DW) * c.XP
-                                  + (int64_t)st.ks * ROCKE_FWD_WMMA_K;
-                std::vector<V> bf(c.TN), af(c.TM);
-                for(int tn = 0; tn < c.TN; ++tn)
-                    bf[tn] = read16(c, halo_base, c.px_off[tn], tap_off);
-                int tap = (st.r * c.KW + st.s) % c.WTAPS;
-                int64_t w_off = (int64_t)tap * c.BK * c.XP + (int64_t)st.ks * ROCKE_FWD_WMMA_K;
-                for(int m = 0; m < c.TM; ++m)
-                    af[m] = read16(c, wei_base, c.wei_off[m], w_off);
-                fa.push_back(af);
-                fb.push_back(bf);
-            }
-            bool last = j == n_groups - 1;
-            if(last)
-                rocke_b_s_waitcnt(b, -1, 0, -1);
-            pp_bar(c);
-            rocke_b_s_setprio(b, 1);
-            for(size_t f = 0; f < fa.size(); ++f)
-                for(int m = 0; m < c.TM; ++m)
-                    for(int tn = 0; tn < c.TN; ++tn)
-                    {
-                        int i = m * c.TN + tn;
-                        accs[i]
-                            = rocke_b_mma(b, c.wmma_op_id, fa[f][m], fb[f][tn], accs[i], NULL, 0);
-                    }
-            rocke_b_s_setprio(b, 0);
-            if(last)
-            {
-                V u_next = add(c, u, c.c1);
-                pp_ring_wait(c, u_next, r == c.NG - 1);
-            }
-            pp_bar(c);
-        }
+        std::vector<fww_step> row_steps = ring_row_steps(c, r);
+        pp_steps(c, row_steps, halo_base, wei_base, accs, [&]() {
+            V u_next = add(c, u, c.c1);
+            ring_wait(c, u_next, r == c.NG - 1);
+        });
     }
 }
 
@@ -2074,7 +2028,7 @@ rocke_kernel_def_t* rocke_build_direct_fwd_wmma(rocke_ir_builder_t* b,
     if(c.PP)
     {
         if(c.RR)
-            pp_ring_wait(c, c.c0, true);
+            ring_wait(c, c.c0, true);
         else
             wait_landed(c, c.c0);
         rocke_b_sync_lds_only(b);

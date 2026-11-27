@@ -75,6 +75,7 @@
 #  51  bf16, pingpong + row_ring, 2x4 waves, 4x4 tiles, tile_w 16, 2 stages
 #  52  fp16, pingpong + tap_ring, 2x4 waves, 4x4 tiles, tile_w 32, 2 stages
 #  53  bf16, pingpong + row_ring, pp_group 2, iterative-ilp
+#  54  bf16, stride 2, phase_split + pingpong + row_ring, iterative-ilp
 from _emit_common import run_emit
 from kernels.common.conv_direct_fwd_wmma import (
     DirectFwdWmmaSpec,
@@ -523,6 +524,26 @@ def _spec(idx: int):
                     pingpong=True,
                     row_ring=True,
                     pp_group=2,
+                    sched="iterative-ilp",
+                ),
+            ),
+            "gfx1250",
+        ),
+        54: (
+            S(
+                problem=_p(stride=2),
+                **_k(
+                    2,
+                    4,
+                    4,
+                    4,
+                    16,
+                    1,
+                    32,
+                    2,
+                    phase_split=True,
+                    pingpong=True,
+                    row_ring=True,
                     sched="iterative-ilp",
                 ),
             ),
