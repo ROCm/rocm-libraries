@@ -90,9 +90,7 @@ if(NOT USE_CUDA)
   if( amd_smi_FOUND )
     target_link_libraries( hipblas-bench PRIVATE amd_smi )
     target_compile_definitions( hipblas-bench PRIVATE HIPBLAS_HAVE_AMD_SMI )
-    # hipblas-bench then loads the amd-smi library at start, so its package depends on it
-    rocm_package_add_deb_dependencies( COMPONENT benchmarks DEPENDS "amd-smi-lib" )
-    rocm_package_add_rpm_dependencies( COMPONENT benchmarks DEPENDS "amd-smi-lib" )
+    # the benchmarks package dependency on amd-smi-lib is declared in the top-level CMakeLists.txt
   else()
     message( STATUS "amd_smi not found: hipblas-bench will not report GPU clocks" )
   endif()
