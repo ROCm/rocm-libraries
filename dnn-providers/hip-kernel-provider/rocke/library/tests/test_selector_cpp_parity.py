@@ -161,9 +161,18 @@ def _unported_d256_fast_route(problem: UnifiedAttentionProblem) -> bool:
     C++ tiled-2D twin cannot build the route's Q-direct-register path
     (``platform/dsl_docs/development/known_gaps.md``). Until both are ported,
     these problems must differ, so the check fails as soon as the C++ selector
-    starts matching and this exception can be deleted.
+    starts matching and this exception can be deleted. They may differ only in
+    :data:`_D256_FAST_ROUTE_FIELDS`.
     """
     return _au._d256_gfx950_fast(problem, ARCH)
+
+
+#: The fields the D256 fast route may set differently in the two selectors:
+#: the launch geometry the Python selector narrows beyond the tile size, and
+#: every knob of its override. Any other field must still match.
+_D256_FAST_ROUTE_FIELDS = frozenset(
+    {"num_warps", "block_m_per_warp", *_au._d256_gfx950_spec_overrides()}
+)
 
 
 def _check_parity(problems) -> dict:
@@ -177,6 +186,13 @@ def _check_parity(problems) -> dict:
         if _unported_d256_fast_route(problem):
             if not differences:
                 expected_divergence_now_matches.append(problem)
+            outside = {
+                name: values
+                for name, values in differences.items()
+                if name not in _D256_FAST_ROUTE_FIELDS
+            }
+            if outside:
+                unexpected.append((problem, outside))
         elif differences:
             unexpected.append((problem, differences))
     assert not unexpected, (
