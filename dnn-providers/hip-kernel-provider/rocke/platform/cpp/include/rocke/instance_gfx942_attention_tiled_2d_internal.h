@@ -88,10 +88,16 @@ extern "C" {
  * (16 N-tiles for HD=256/16 * 1) or HD=256 narrow (16 N-tiles * 2 atoms). 64
  * covers any buildable shape. */
 #define ROCKE_GFX942_ATTN2D_MAX_ACCS 64
-/* Online-softmax iter-args: 2*SOFTMAX_STATE_SLOTS (m,l per slot) + ACCS. */
-#define ROCKE_GFX942_ATTN2D_MAX_ITER_ARGS 96
+/* Pages per tile the loop carries page ids for (Python PAGE_PREFETCH bound). */
+#define ROCKE_GFX942_ATTN2D_MAX_PREFETCH_PAGES 16
 /* Per-lane register slots (REGS_PER_LANE): 4 (M=16), 8 (M=32), 16 (32x32). */
 #define ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE 16
+/* Loop carry: m and l per softmax state slot (at most REGS_PER_LANE slots), the
+ * accumulators, the K/V buffer slot and two tiles' carried page ids. Derived from
+ * the bounds above so every spec Python builds fits. */
+#define ROCKE_GFX942_ATTN2D_MAX_ITER_ARGS                                         \
+    (2 * ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE + ROCKE_GFX942_ATTN2D_MAX_ACCS + 1 \
+     + 2 * ROCKE_GFX942_ATTN2D_MAX_PREFETCH_PAGES)
 /* QK / PV K-iters: HD/16 or T/16 on the narrow atom, HD/8 on the 32x32x8 wide
  * atom; HD<=256, T<=128 -> <=32. */
 #define ROCKE_GFX942_ATTN2D_MAX_K_ITERS 32
@@ -290,9 +296,9 @@ typedef struct rocke_gfx942_attn2d_build_ctx
     rocke_value_t* seq_base; /* to_sgpr_u32(seq_idx*bt_stride)  */
     rocke_value_t* block_table_max_idx; /* to_sgpr_u32(seq_base + ceil(seq_len/BS)) */
     /* bf16/fp16 loaders addressing copies by page (Python page_copies,
-     * PAGE_COPIES; set up in emit_preloop). */
+     * KV_PAGES; set up in emit_preloop). */
     rocke_kv_page_copies_t page_copies;
-    bool PAGE_COPIES;
+    bool KV_PAGES;
     rocke_value_t* kv_block_bytes_c_v; /* one-block bound: kv_stride_blk_b_v, or its const */
     rocke_value_t* kv_stride_tok_b_v; /* num_kv_p*HD*KV_BYTES */
     rocke_value_t* kv_stride_blk_b_v; /* kv_stride_tok_b_v*BS */
@@ -305,6 +311,17 @@ typedef struct rocke_gfx942_attn2d_build_ctx
     rocke_value_t* k_rsrc; /* make_buffer_resource(K)         */
     rocke_value_t* v_rsrc; /* make_buffer_resource(V)         */
     rocke_value_t* out_rsrc;
+
+    /* ---- K/V page copies (Python PAGE_PREFETCH) ---- */
+    rocke_value_t* big_bytes_v; /* the whole-cache buffer bound, 0x7FFF0000 */
+    /* Page ids the loop carries (PAGE_PREFETCH): the first tile's and the one
+     * after it before the loop, the current and next tile's in the body. The
+     * K/V issue calls take them explicitly (rocke_gfx942_attn2d_carried). */
+    rocke_value_t* page_start[ROCKE_GFX942_ATTN2D_MAX_PREFETCH_PAGES];
+    rocke_value_t* page_start_next[ROCKE_GFX942_ATTN2D_MAX_PREFETCH_PAGES];
+    rocke_value_t* page_cur[ROCKE_GFX942_ATTN2D_MAX_PREFETCH_PAGES];
+    rocke_value_t* page_next[ROCKE_GFX942_ATTN2D_MAX_PREFETCH_PAGES];
+    rocke_value_t* page_after_next[ROCKE_GFX942_ATTN2D_MAX_PREFETCH_PAGES];
 
     /* ---- per-lane Q VGPR gather (lines 3426-3592) ---- *
      * The Q MFMA A-operand registers (one path: the legacy 16x16 gather; the
@@ -482,22 +499,31 @@ rocke_value_t* rocke_gfx942_attn2d_v_load1(rocke_gfx942_attn2d_build_ctx_t* ctx,
                                            rocke_value_t* v_n_col);
 
 /* ----- K/V async-DMA loaders (lines 2440-2620, 3347-3425) ----- */
+/* `pages`: the tile's page ids when the loop carries them, else NULL (read in
+ * place). */
 void rocke_gfx942_attn2d_issue_k_load_runtime(rocke_gfx942_attn2d_build_ctx_t* ctx,
                                               rocke_value_t* kv_tile_idx,
-                                              rocke_value_t* buf_idx);
+                                              rocke_value_t* buf_idx,
+                                              rocke_value_t* const* pages);
 void rocke_gfx942_attn2d_issue_k_slice_load_runtime(rocke_gfx942_attn2d_build_ctx_t* ctx,
                                                     rocke_value_t* kv_tile_idx,
                                                     int slice_idx,
                                                     int slot_idx);
 void rocke_gfx942_attn2d_issue_v_load_runtime(rocke_gfx942_attn2d_build_ctx_t* ctx,
                                               rocke_value_t* kv_tile_idx,
-                                              rocke_value_t* buf_idx);
+                                              rocke_value_t* buf_idx,
+                                              rocke_value_t* const* pages);
 void rocke_gfx942_attn2d_issue_k(rocke_gfx942_attn2d_build_ctx_t* ctx,
                                  rocke_value_t* tile_idx,
-                                 rocke_value_t* buf_idx);
+                                 rocke_value_t* buf_idx,
+                                 rocke_value_t* const* pages);
 void rocke_gfx942_attn2d_issue_v(rocke_gfx942_attn2d_build_ctx_t* ctx,
                                  rocke_value_t* tile_idx,
-                                 rocke_value_t* buf_idx);
+                                 rocke_value_t* buf_idx,
+                                 rocke_value_t* const* pages);
+/* `ids` when the loop carries page ids (PAGE_PREFETCH), else NULL. */
+rocke_value_t* const* rocke_gfx942_attn2d_carried(const rocke_gfx942_attn2d_build_ctx_t* ctx,
+                                                  rocke_value_t* const* ids);
 /* _read_k8_mfma_operand: per-lane K8 MFMA B operand for the 32x32x8 path. */
 rocke_value_t* rocke_gfx942_attn2d_read_k8_mfma_operand(rocke_gfx942_attn2d_build_ctx_t* ctx,
                                                         rocke_value_t* kv_tile_idx,
@@ -513,6 +539,14 @@ rocke_value_t** rocke_gfx942_attn2d_tile_page_ptrs(rocke_gfx942_attn2d_build_ctx
 
 /* PAGE_RSRC_I64: i64 K/V addressing through per-page pointers. */
 bool rocke_gfx942_attn2d_page_rsrc_i64(const rocke_gfx942_attn2d_build_ctx_t* ctx);
+
+/* PAGE_PREFETCH: the loop carries the page ids of the current and next tile. */
+bool rocke_gfx942_attn2d_page_prefetch(const rocke_gfx942_attn2d_build_ctx_t* ctx);
+
+/* _tile_page_ids: the tile's page ids into out[0..N_BLOCKS_PER_TILE-1]. */
+void rocke_gfx942_attn2d_tile_page_ids(rocke_gfx942_attn2d_build_ctx_t* ctx,
+                                       rocke_value_t* kv_tile_idx,
+                                       rocke_value_t** out);
 
 /* _kv_head_page_b: the kv head's byte offset within a page. */
 rocke_value_t* rocke_gfx942_attn2d_kv_head_page_b(rocke_gfx942_attn2d_build_ctx_t* ctx);

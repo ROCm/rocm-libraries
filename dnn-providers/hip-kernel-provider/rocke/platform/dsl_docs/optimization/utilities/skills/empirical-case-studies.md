@@ -371,6 +371,61 @@ model to the difference. Grep for `buffer_wbl2` / `buffer_inv` around atomics: a
 
 ---
 
+## Case Study 9: Paged K/V Copies, Carried Page Ids and a Serialized QK (gfx942)
+
+**Context**: gfx942 tiled 2D paged attention. Under i32 K/V addressing every K/V copy
+(`buffer_load ... lds`, one dword per lane on gfx942) read its own page id from the block
+table and built its own address; i64 addressing already read one page id per page of the
+tile and gave each page its own buffer resource. Decode at D128, page size 16, 64-token
+tiles (four pages per tile) read 192 page ids per loop where 12 suffice.
+
+### Levers
+
+Measured figures for each lever are in the description of the pull request that made
+these changes, with the method and numeric gate; this section records the direction only.
+
+- **One resource per page on i32 too**, with the copies of a page sharing it. Making i32 use
+  the i64 loader unchanged helped less, and a whole-cache resource with the page base in
+  `soffset` (gfx950's i32 design) was slower than per-page resources on gfx942.
+- **Carry the page ids in the loop.** The current and next tile's ids are loop-carried, and
+  the tile after next is read right after the iteration-start `s_waitcnt vmcnt(0)`, so the
+  scalar load has a whole iteration to land. Without the carry the per-page loader waits on
+  its page-id loads before the first copy, and most of the gain on both i32 and i64 is lost.
+- **A copy's own offset goes in `soffset` only for part-row copies.** Putting it in
+  `soffset` for every geometry slowed D128 decode (LLVM rescheduled QK and softmax with
+  more `lgkmcnt` waits); putting it in the lane VGPR for every geometry slowed D256 decode.
+
+### Bug signature (the D64 regression)
+
+With the carry in place, D64 page-64 decode on i64 ran slower than the old loader although
+it issued fewer instructions. A thread trace decoded per instruction put the extra time in
+waits: each of QK's eight K reads from LDS was followed by its own `s_waitcnt lgkmcnt(0)`
+before its MFMA, where the fast variant issued them in batches. The copies' extra loop
+carry changed LLVM's schedule, and LDS accesses through `inttoptr` into one pool carry no
+alias information, so the scheduler could not move reads past each other on its own.
+
+### Lever
+
+Emit every QK K operand read before the first QK MFMA (both engines). LLVM then batches the
+reads under one wait in every variant, D64 decode recovers, and D128 and D256 are
+unchanged. Against the staging branch, with the page copies on the shared `PagedKVCopies`
+helper, register use moved for several dispatched specs but occupancy for none: LDS already
+limits the one-warp decode specs to under one wave per SIMD, and the prefill specs to one.
+The largest move is D64 decode at page size 64 on i32, which runs out of VGPRs and spills to
+AGPRs (D64 page size 32 on i32 also grows); several D128 and D256 i64 specs stop spilling.
+Both D64 i32 specs still run faster than on staging. The PR description's resource table
+lists every spec.
+
+### Lesson
+
+A change that only adds loop-carried scalars can still reorder LDS reads elsewhere in the
+loop. When a kernel gets slower while issuing fewer instructions, count `s_waitcnt
+lgkmcnt(0)` between consecutive `ds_read`s in the hot loop before theorizing about memory
+latency; a thread trace attributes the stall to the wait directly. Emitting operand reads
+ahead of their consumers is a cheap, robust fix when the pool has no alias information.
+
+---
+
 ## Usage Guidelines
 
 ### Do:

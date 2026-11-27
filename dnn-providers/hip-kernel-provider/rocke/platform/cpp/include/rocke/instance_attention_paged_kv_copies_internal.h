@@ -41,16 +41,24 @@ typedef struct rocke_kv_page_copies
     rocke_value_t* zero_soff;
     bool i64;
     bool page_base_in_soffset;
+    /* One buffer resource per page also under 32-bit offsets; a page at or above the 32-bit
+     * whole-cache bound cache_bytes (NULL: none) then gets an empty resource, so its buffer
+     * copies read zeros. A copy through the page's pointer (global_load_lds) is not bounded. */
+    bool page_resources;
+    rocke_value_t* cache_bytes;
     /* derived by init */
     int wave_halves;
     bool wave_part_in_page;
     int copy_tokens;
     bool whole_row_copies;
     bool uniform_blocks;
+    bool resources; /* page_resources or i64 */
+    bool in_row_copies; /* a copy inside one row: its part of the offset in soffset */
     /* emitted by emit_offsets */
     rocke_value_t* lane_within_b;
     rocke_value_t** copy_tok_b; /* by the copy's first token in its page */
     rocke_value_t* page_stride_i64;
+    rocke_value_t* page_limit;
 } rocke_kv_page_copies_t;
 
 /* A tile's pages, per copy: its block (a constant, or -1 and a wave-uniform value), its page
@@ -90,9 +98,15 @@ static inline void rocke_kv_page_copies_init(rocke_kv_page_copies_t* pc)
           && (pc->block_size % pc->copy_tokens == 0 || pc->copy_tokens % pc->block_size == 0);
     pc->uniform_blocks = rocke_kv_page_copies_uniform_blocks(
         pc->block_size, pc->head_size, pc->halves_per_call, pc->blocks_per_tile);
+    pc->resources = pc->page_resources || pc->i64;
+    if(pc->i64)
+        pc->cache_bytes = NULL;
+    pc->in_row_copies = pc->page_resources && pc->halves_per_call < pc->head_size
+                        && pc->head_size % pc->halves_per_call == 0;
     pc->lane_within_b = NULL;
     pc->copy_tok_b = NULL;
     pc->page_stride_i64 = NULL;
+    pc->page_limit = NULL;
 }
 
 static inline void* rocke_kv_page_copies_calloc(rocke_ir_builder_t* b, size_t n, size_t size)
@@ -143,8 +157,26 @@ static inline bool rocke_kv_page_copies_emit_offsets(rocke_kv_page_copies_t* pc)
             pc->copy_tok_b[tok0] = rocke_b_mul(b, pc->token_stride_b, c_tok);
         }
     }
-    if(pc->i64)
+    else if(pc->in_row_copies)
+    {
+        rocke_value_t* c_hd0 = rocke_b_const_i32(b, pc->head_size);
+        rocke_value_t* lane_tok = rocke_b_div(b, pc->lane_half_base, c_hd0);
+        rocke_value_t* tok_b = rocke_b_mul(b, lane_tok, pc->token_stride_b);
+        rocke_value_t* c_h = rocke_b_const_i32(b, pc->head_stride_b);
+        rocke_value_t* head_b = rocke_b_mul(b, pc->kv_head, c_h);
+        rocke_value_t* tok_head = rocke_b_add(b, tok_b, head_b);
+        rocke_value_t* c_hd1 = rocke_b_const_i32(b, pc->head_size);
+        rocke_value_t* lane_dim = rocke_b_mod(b, pc->lane_half_base, c_hd1);
+        rocke_value_t* c_bytes = rocke_b_const_i32(b, pc->kv_bytes);
+        rocke_value_t* dim_b = rocke_b_mul(b, lane_dim, c_bytes);
+        pc->lane_within_b = rocke_b_add(b, tok_head, dim_b);
+    }
+    if(pc->resources)
+    {
         pc->page_stride_i64 = rocke_b_zext(b, pc->page_stride_b, rocke_i64());
+        if(pc->cache_bytes != NULL)
+            pc->page_limit = rocke_b_div(b, pc->cache_bytes, pc->page_stride_b);
+    }
     return true;
 }
 
@@ -235,6 +267,41 @@ static inline bool rocke_kv_page_copies_tile_pages(const rocke_kv_page_copies_t*
     return true;
 }
 
+/* _page_resource: the pointer and resource of the page of copy `call`, kept at the
+ * page's first copy. */
+static inline void rocke_kv_page_copies_page_resource(const rocke_kv_page_copies_t* pc,
+                                                      rocke_kv_tile_pages_t* tp,
+                                                      int call,
+                                                      rocke_value_t* src)
+{
+    rocke_ir_builder_t* b = pc->b;
+    const int first = tp->first[call];
+    rocke_value_t* page = tp->page[call];
+    rocke_value_t* page_i64 = rocke_b_zext(b, page, rocke_i64());
+    rocke_value_t* base_i64 = rocke_b_mul(b, page_i64, pc->page_stride_i64);
+    tp->ptr[first] = rocke_b_global_ptr_add(b, src, base_i64);
+    rocke_value_t* num_records = pc->page_bytes;
+    if(pc->page_limit != NULL)
+    {
+        rocke_value_t* in_cache = rocke_b_cmp_ult(b, page, pc->page_limit);
+        rocke_value_t* none = rocke_b_const_i32(b, 0);
+        num_records = rocke_b_select(b, in_cache, num_records, none);
+    }
+    tp->rsrc[first] = rocke_b_buffer_rsrc(b, tp->ptr[first], num_records);
+}
+
+/* build_resources: each page's pointer and resource (page_resources), built before the
+ * tile's copies: built at a page's first copy, between the copies, they measured slower on
+ * gfx942. rocke_kv_page_copies_copy then takes them from `tp`. */
+static inline void rocke_kv_page_copies_build_resources(const rocke_kv_page_copies_t* pc,
+                                                        rocke_kv_tile_pages_t* tp,
+                                                        rocke_value_t* src)
+{
+    for(int call = 0; call < tp->n_calls; ++call)
+        if(tp->rsrc[tp->first[call]] == NULL)
+            rocke_kv_page_copies_page_resource(pc, tp, call, src);
+}
+
 /* copy: (pointer, resource, voffset, soffset) of copy `call`. */
 static inline void rocke_kv_page_copies_copy(const rocke_kv_page_copies_t* pc,
                                              rocke_kv_tile_pages_t* tp,
@@ -250,12 +317,34 @@ static inline void rocke_kv_page_copies_copy(const rocke_kv_page_copies_t* pc,
     const int blk = tp->blk_const[call];
     rocke_value_t* page = tp->page[call];
     rocke_value_t* voff;
+    rocke_value_t* soff = pc->zero_soff;
     if(pc->whole_row_copies)
     {
         voff = pc->lane_within_b;
         const int tok0 = (call * pc->copy_tokens) % pc->block_size;
         if(tok0 != 0)
             voff = rocke_b_add(b, voff, pc->copy_tok_b[tok0]);
+    }
+    else if(pc->in_row_copies)
+    {
+        voff = pc->lane_within_b;
+        const int page_halves = pc->block_size * pc->head_size;
+        const int in_page = (call * pc->halves_per_call) % page_halves;
+        const int tok = in_page / pc->head_size;
+        const int dim = in_page % pc->head_size;
+        rocke_value_t* part = NULL;
+        if(tok != 0)
+        {
+            rocke_value_t* c_tok = rocke_b_const_i32(b, tok);
+            part = rocke_b_mul(b, pc->token_stride_b, c_tok);
+        }
+        if(dim != 0)
+        {
+            rocke_value_t* dim_b = rocke_b_const_i32(b, dim * pc->kv_bytes);
+            part = part == NULL ? dim_b : rocke_b_add(b, part, dim_b);
+        }
+        if(part != NULL)
+            soff = part;
     }
     else
     {
@@ -284,20 +373,15 @@ static inline void rocke_kv_page_copies_copy(const rocke_kv_page_copies_t* pc,
         voff = rocke_b_add(b, tok_head, dim_b);
     }
     *out_voff = voff;
-    if(pc->i64)
+    if(pc->resources)
     {
         /* One pointer and resource per page, shared by its copies. */
         const int first = tp->first[call];
         if(tp->rsrc[first] == NULL)
-        {
-            rocke_value_t* page_i64 = rocke_b_zext(b, page, rocke_i64());
-            rocke_value_t* base_i64 = rocke_b_mul(b, page_i64, pc->page_stride_i64);
-            tp->ptr[first] = rocke_b_global_ptr_add(b, src, base_i64);
-            tp->rsrc[first] = rocke_b_buffer_rsrc(b, tp->ptr[first], pc->page_bytes);
-        }
+            rocke_kv_page_copies_page_resource(pc, tp, call, src);
         *out_ptr = tp->ptr[first];
         *out_rsrc = tp->rsrc[first];
-        *out_soff = pc->zero_soff;
+        *out_soff = soff;
         return;
     }
     rocke_value_t* page_b = rocke_b_mul(b, page, pc->page_stride_b);
