@@ -2262,3 +2262,199 @@ def test_persistent_handoff_scope(assignment, tdma, tdmb, threads, drains, barri
     items = list(beforeReentry.flatitems())
     assert sum(isinstance(item, SWaitCnt) for item in items) == drains
     assert sum(isinstance(item, SBarrier) for item in items) == barriers
+
+
+# papShiftLocalReadAddrs only reads self.states.<tc>.numVgprLocalReadAddr, so it
+# can be driven directly with a duck-typed writer instead of a full KernelWriterAssembly.
+def _shift_local_read_addrs(num_addr_regs, *, tc="A", shift=0x8000):
+    writer = SimpleNamespace(states=SimpleNamespace(
+        **{tc.lower(): SimpleNamespace(numVgprLocalReadAddr=num_addr_regs)}))
+    module = kwa_module.KernelWriterAssembly.papShiftLocalReadAddrs(
+        writer, tc, shift, "shift to PAP bank")
+    return _module_items(module)
+
+
+def _shift_adds(items):
+    return [item for item in items if isinstance(item, kwa_module.VAddU32)]
+
+
+def _shift_dsts(items):
+    return [str(item.dst) for item in _shift_adds(items)]
+
+
+def _lra_symbol(operand):
+    """'v[vgprLocalReadAddrB+1]' -> 'LocalReadAddrB+1'; None for any other operand."""
+    m = re.fullmatch(r"v\[vgpr(LocalReadAddr\w+?(?:\+\d+)?)\]", str(operand))
+    return m.group(1) if m else None
+
+
+@pytest.mark.parametrize(
+    "tc, num_addr_regs, expected_suffixes",
+    [
+        ("A", 1, [""]),
+        ("A", 2, ["", "+1"]),
+        ("B", 2, ["", "+1"]),
+        ("MXSA", 2, ["", "+1"]),
+        # More than two is reachable (several 64K windows, several MX vectors per tile).
+        ("B", 4, ["", "+1", "+2", "+3"]),
+    ],
+)
+def test_pap_shift_patches_every_localreadaddr_alias(tc, num_addr_regs, expected_suffixes):
+    # A tensor whose LDS footprint exceeds maxLDSConstOffset, or B under LDS
+    # segment interleave (+64K window), gets extra "LocalReadAddr{tc}+N" VGPRs;
+    # every one indexes the same double-buffered region, so the shift has to
+    # reach all of them. Patching only the base register left the +1 copy
+    # reading the pre-swap bank on tile handoff and on tail entry.
+    #
+    # Assert the whole set in order -- "some dst carries +1" also passes an
+    # off-by-one that emits +1/+2 and never touches the base. The single-register
+    # case pins that the base is "LocalReadAddrA", not "LocalReadAddrA+0"; the
+    # MXSA case pins that the symbol and state are taken from the caller's
+    # tensorChar rather than hardcoded to A/B.
+    dsts = _shift_dsts(_shift_local_read_addrs(num_addr_regs, tc=tc))
+
+    expected = [f"LocalReadAddr{tc}{suffix}" for suffix in expected_suffixes]
+    # Compare whole symbols: a substring match would accept "+10" for "+1".
+    assert [_lra_symbol(dst) for dst in dsts] == expected
+
+
+@pytest.mark.parametrize("shift", [0x8000, "sgpr_operand"])
+def test_pap_shift_adds_the_bank_delta_in_place(shift):
+    # Each add has to be a read-modify-write of its own register by the caller's
+    # shift source, forwarded verbatim (TDM restore passes an immediate, DTL and
+    # the tail shift an SGPR). Losing either operand leaves the copy pointing
+    # into the pre-swap bank, which is the wrong-answer bug this path prevents.
+    if shift == "sgpr_operand":
+        from rocisa.container import sgpr
+
+        shift = sgpr("PapBank")
+
+    adds = _shift_adds(_shift_local_read_addrs(2, shift=shift))
+
+    assert len(adds) == 2
+    for add in adds:
+        assert str(add.srcs[0]) == str(add.dst)
+        assert str(add.srcs[1]) == str(shift)
+
+
+@pytest.mark.parametrize("num_addr_regs", [0, -1])
+def test_pap_shift_skips_tensors_without_local_read_address(num_addr_regs):
+    # A non-positive count means RegSet never emitted a vgprLocalReadAddr{tc}
+    # symbol, so shifting anyway assembles to "error: expected absolute
+    # expression". Zero is the allocated-but-zeroed case (DirectToVgpr); -1 is
+    # the ABMatrixInfo default that survives when allocation never runs. No
+    # PAP-valid config reaches either today -- Solution.py rejects PAP with
+    # DirectToVgpr and DirectToVgprMXS{A,B} follow DirectToVgpr{A,B} -- so this
+    # pins the defensive contract, not an observed failure.
+    assert _shift_local_read_addrs(num_addr_regs) == []
+
+
+@pytest.mark.parametrize("mx_a, mx_b, expected", [
+    (0, 0, ["A", "B"]),
+    (32, 0, ["A", "B", "MXSA"]),
+    (0, 32, ["A", "B", "MXSB"]),
+    (32, 32, ["A", "B", "MXSA", "MXSB"]),
+])
+def test_pap_local_read_tensors_include_mx_scales(mx_a, mx_b, expected):
+    # The entry, DTL and tail bank shifts all walk this list; an MX scale tensor
+    # missing from it keeps reading the pre-swap bank.
+    kernel = {"ProblemType": {"MXBlockA": mx_a, "MXBlockB": mx_b}}
+    tPA = {"tensorChar": "A", "MX": {"tensorChar": "MXSA"}}
+    tPB = {"tensorChar": "B", "MX": {"tensorChar": "MXSB"}}
+    tensors = kwa_module.KernelWriterAssembly.papLocalReadTensors(kernel, tPA, tPB)
+    assert [tP["tensorChar"] for tP in tensors] == expected
+
+
+class _PapDtlRestoreWriter:
+    """Just enough of KernelWriterAssembly to run papDtlRestoreLdsBank."""
+
+    def __init__(self, num_addr_regs, *, inc_lds_buf_switch, common_sgpr_swap):
+        self.labels = _StubLabels()
+        self._next_tmp_sgpr = 300
+        self.states = SimpleNamespace(
+            IncLdsBufSwitch=inc_lds_buf_switch, useCommonSgprSwap=common_sgpr_swap,
+            **{tc.lower(): SimpleNamespace(numVgprLocalReadAddr=n) for tc, n in num_addr_regs.items()})
+
+    @contextmanager
+    def allocTmpSgpr(self, size, alignment=1, tag=""):
+        base = self._next_tmp_sgpr
+        self._next_tmp_sgpr += size + alignment
+        yield SimpleNamespace(idx=base, size=size)
+
+    def papLocalReadTensors(self, kernel, tPA, tPB):
+        return kwa_module.KernelWriterAssembly.papLocalReadTensors(kernel, tPA, tPB)
+
+    def papShiftLocalReadAddrs(self, tc, src, comment):
+        return kwa_module.KernelWriterAssembly.papShiftLocalReadAddrs(self, tc, src, comment)
+
+
+@pytest.mark.parametrize("inc_lds_buf_switch, common_sgpr_swap", [
+    (False, False), (True, False), (False, True),
+], ids=["local_write_addr", "inc_lds_buf_switch", "common_sgpr_swap"])
+def test_pap_dtl_restore_shifts_every_local_read_address(inc_lds_buf_switch, common_sgpr_swap):
+    # DirectToLds PAP lands the next tile in the high bank and restores the read
+    # side here. Every LocalReadAddr{tc}+i of A, B and both MX scale tensors has
+    # to move once by the extracted bank, whichever swap mechanism the kernel
+    # uses; a missed copy keeps reading the pre-swap bank.
+    num_addr_regs = {"A": 2, "B": 3, "MXSA": 2, "MXSB": 1}
+    writer = _PapDtlRestoreWriter(num_addr_regs, inc_lds_buf_switch=inc_lds_buf_switch,
+                                  common_sgpr_swap=common_sgpr_swap)
+    kernel = {"LdsOffsetA_Blk": 0x10000, "ExpandPointerSwap": False,
+              "DirectToLdsA": True, "DirectToLdsB": True,
+              "ProblemType": {"MXBlockA": 32, "MXBlockB": 32}}
+    tPA = {"tensorChar": "A", "MX": {"tensorChar": "MXSA"}}
+    tPB = {"tensorChar": "B", "MX": {"tensorChar": "MXSB"}}
+
+    module = kwa_module.KernelWriterAssembly.papDtlRestoreLdsBank(writer, kernel, tPA, tPB)
+    items = list(module.flatitems())
+
+    bank = next(item for item in items if isinstance(item, kwa_module.SAndB32)
+                and "extract PAP DTL LDS bank" in item.comment)
+    adds = [item for item in items if isinstance(item, kwa_module.VAddU32)]
+    expected = [f"LocalReadAddr{tc}" + (f"+{i}" if i else "")
+                for tc, n in num_addr_regs.items() for i in range(n)]
+    assert [_lra_symbol(add.dst) for add in adds] == expected
+    for add in adds:
+        assert str(add.srcs[0]) == str(add.dst)
+        assert str(add.srcs[1]) == str(bank.dst)
+
+
+_PAP_READ_WINDOW_BF16 = {"DataType": "B", "DestDataType": "B", "MacDataTypeA": "B",
+                         "MacDataTypeB": "B", "TransposeA": False, "MXBlockA": 0, "MXBlockB": 0}
+
+
+@pytest.mark.parametrize("tc, overrides", [
+    # LDS segment interleave gives B a second read address 64K above the base.
+    ("B", dict(mi=[16, 16, 128, 1, 1, 1, 5, 2, 2],
+               ProblemType={"MacDataTypeB": "F8", "MXBlockA": 0, "MXBlockB": 0},
+               DepthU=512, LDSSegmentInterleave=1, LDSSegmentBRotate=0,
+               VectorWidthA=1, VectorWidthB=1)),
+    # An asymmetric wave tile overflows the DS offset range on its long side
+    # (A for [7,4] NN, B for [4,7] NT), which also needs a second read address.
+    ("A", dict(mi=[16, 16, 32, 1, 1, 7, 4, 2, 2],
+               ProblemType=dict(_PAP_READ_WINDOW_BF16, TransposeB=False),
+               DepthU=128, LDSTrInst=True, ClusterLocalRead=0)),
+    ("B", dict(mi=[16, 16, 32, 1, 1, 4, 7, 2, 2],
+               ProblemType=dict(_PAP_READ_WINDOW_BF16, TransposeB=True),
+               DepthU=128, LDSTrInst=True, ClusterLocalRead=0)),
+], ids=["segment_interleave_B", "wavetile_7x4_A", "wavetile_4x7_B"])
+def test_pap_bank_shifts_reach_every_local_read_address(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, tc, overrides):
+    """The PAP entry and tail-entry bank shifts must move every LocalReadAddr
+    register the kernel reads through, not only the base one."""
+    sol, asm = _emit_asm(gfx1250_iim, assembler, PrefetchAcrossPersistent=1,
+                         PrefetchGlobalRead=1, StreamKForceDPOnly=0, **overrides)
+    capsys.readouterr()
+    assert asm is not None, "PAP shape was rejected"
+
+    reg = re.compile(r"v\[vgprLocalReadAddr%s(?:\+(\d+))?\]" % tc)
+    used = {int(m.group(1) or 0) for m in reg.finditer(asm)}
+    assert used >= {0, 1}, "shape no longer needs a second %s read address: %s" % (tc, sorted(used))
+
+    for comment in ("shift LocalReadAddr%s to PAP bank" % tc,
+                    "shift tail LocalReadAddr%s to TDM write bank" % tc):
+        shifted = [int(m.group(1) or 0) for line in asm.splitlines() if line.rstrip().endswith(comment)
+                   for m in [reg.search(line)] if m]
+        assert sorted(shifted) == sorted(used), (
+            "%r shifts LocalReadAddr%s+%s but the kernel reads through +%s" %
+            (comment, tc, sorted(shifted), sorted(used)))

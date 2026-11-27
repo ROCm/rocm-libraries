@@ -1,0 +1,79 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# PrefetchAcrossPersistent with the unpaired LDS segment-interleave layout.
+# B's five-column wave tile reaches past 64 KiB, so LocalReadAddrB has a second
+# (+64K) register; the PAP entry and tail bank shifts must move it too.
+# K=512 primes the next tile into the high bank with no tail loop; K=544 adds a
+# tail; K=1024 lands the prefetch in bank 0. 2048x2048 and 768x2048 give every
+# workgroup more than one tile, 512x640 gives at most one. Without the fix the
+# DataParallel kernels fail at K=512/544 on the multi-tile sizes; the StreamK
+# kernels pass either way and are kept as coverage.
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250-strict] # not supported by arch
+
+GlobalParameters:
+  Architecture: gfx1250
+  NumElementsToValidate: -1
+  BoundsCheck: 0
+  KernelTime: False
+  SyncsPerBenchmark: 0
+  NumWarmups: 0
+  EnqueuesPerSync: 0
+  CpuThreads: 32
+  PrintSolutionRejectionReason: True
+  PrintLevel: 2
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 3
+  DataInitTypeD: 2
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      SupportUserArgs: True
+
+    - BenchmarkCommonParameters:
+        - KernelLanguage: [Assembly]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 1, 5, 2, 2]
+        - DepthU: [512]
+        - TDMInst: [3]
+        - TDMIterateMode: [-1]
+        - TileProcessingStrategy: [StreamK, DataParallel]
+        - WorkAssignment: [StaticGrid]
+        - PrefetchAcrossPersistent: [1]
+        - PrefetchGlobalRead: [1, 2]
+        - PrefetchLocalRead: [1]
+        - LDSSegmentInterleave: [1]
+        - LDSSegmentBRotate: [0]
+        - ScheduleIterAlg: [4]
+        - SourceSwap: [False]
+        - ExpandPointerSwap: [False]
+        - 1LDSBuffer: [0]
+        - GlobalSplitU: [0]
+        - StaggerU: [0]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - WavefrontSize: [32]
+        - ForceDisableShadowInit: [True]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [2048, 2048, 1, 512]
+          - Exact: [2048, 2048, 1, 544]
+          - Exact: [2048, 2048, 1, 1024]
+          - Exact: [768, 2048, 1, 544]
+          - Exact: [512, 640, 1, 544]
