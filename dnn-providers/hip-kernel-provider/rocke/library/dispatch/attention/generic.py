@@ -77,6 +77,14 @@ _UNIFIED_CAPABILITY = Capability(
 _UNIFIED_LSE_CAPABILITY = dataclasses.replace(
     _UNIFIED_CAPABILITY, supports_features=ATTENTION_FEATURES | {"lse"}
 )
+# Dropout exists on the tiled 2D path only; its gate refuses the arches without it.
+_UNIFIED_PATH_CAPABILITY = {
+    "2d": dataclasses.replace(
+        _UNIFIED_CAPABILITY,
+        supports_features=ATTENTION_FEATURES | {"lse", "dropout"},
+    ),
+    "3d": _UNIFIED_LSE_CAPABILITY,
+}
 
 # The two generic unified-path algorithms this module registers, named so a
 # caller outside this package (the SDPA gate) does not have to reconstruct
@@ -102,22 +110,19 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
         if not ok:
             return False, why
         problem = attention_problem(req)
-        # The scalar gate refuses LSE (the scalar kernel writes none), so coverage
-        # is asked with LSE off; the path's own gate rules on LSE below.
+        # The scalar gate refuses LSE and dropout (the scalar kernel has
+        # neither), so coverage is asked with both off; the path's own gate
+        # rules on them below.
         ok, why = supports_native_unified_attention_coverage(problem, arch=req.arch)
         if not ok:
             return False, why
-        # Split-KV also takes the LSE requests that ``select_path(arch)`` sends
-        # to tiled 2D but whose tiled 2D gate declines, as auto does
-        # (``select_auto_path``); the tiled 2D candidate keeps its gate's reason.
-        if problem.select_path(req.arch) != path and not (
-            path == "3d" and select_auto_path(problem, req.arch) == "3d"
-        ):
-            return False, (
-                f"problem routes to {problem.select_path(req.arch)!r} path, not {path!r}"
-            )
-        if problem.emit_lse:
-            # The path's own gate owns which arches and features can write LSE.
+        # A path also takes the rows auto moves onto it (``select_auto_path``):
+        # split-KV the LSE requests whose tiled 2D gate declines, tiled 2D every
+        # dropout row. The candidate ``select_path`` names keeps its gate's reason.
+        routed = problem.select_path(req.arch)
+        if path != routed and path != select_auto_path(problem, req.arch):
+            return False, f"problem routes to {routed!r} path, not {path!r}"
+        if problem.emit_lse or problem.dropout:
             ok, why = unified_lse_path_gate(path)(problem, arch=req.arch)
             if not ok:
                 return False, why
@@ -142,6 +147,7 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
             right_bound=problem.right_bound,
             sliding_window=problem.sliding_window,
             emit_lse=problem.emit_lse,
+            dropout=problem.dropout,
         )
 
     candidate = KernelCandidate(
@@ -151,7 +157,7 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
         spec_id=spec_id,
         abi_version=ATTENTION_ABI_VERSION,
         priority=priority,
-        capability=_UNIFIED_LSE_CAPABILITY,
+        capability=_UNIFIED_PATH_CAPABILITY[path],
         _supports=support,
         select_spec=select,
         signature=lambda _spec: (),

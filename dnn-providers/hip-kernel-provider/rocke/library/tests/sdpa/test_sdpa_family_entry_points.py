@@ -28,7 +28,7 @@ from dispatch.sdpa import (
 from dispatch.sdpa.bind_dense import sdpa_dense_candidates
 from dispatch.sdpa.bind_unified import sdpa_unified_candidates
 
-from tests.sdpa.request_cases import make_request, packed, paged
+from tests.sdpa.request_cases import make_request, packed, paged, seeded_dropout
 
 ARCHES = ("gfx942", "gfx950")
 
@@ -163,7 +163,12 @@ def _declined_by_both(arch):
     base = _ADMITTED[arch]
     return {
         "bias": replace(base, bias=SdpaBias(packed((2, 4, 8, 8)))),
-        "dropout": replace(base, dropout=SdpaDropout(0.1)),
+        "dropout_mask": replace(
+            base,
+            dropout=SdpaDropout(
+                0.1, mask=packed((2, 4, 8, 8), "uint8"), scale=packed((1,))
+            ),
+        ),
         "block_mask": replace(base, block_mask=packed((2, 4, 1, 1), "uint8")),
         "paged": paged(base),
     }
@@ -186,6 +191,18 @@ def test_all_three_are_empty_when_both_gates_decline(arch, feature):
     assert registered_sdpa_combos(req) == ()
     assert tuple(sdpa_sweep_space(req)) == ()
     assert dispatch_sdpa_all(req) == ()
+
+
+@pytest.mark.parametrize("arch", ARCHES)
+def test_seeded_dropout_reaches_only_dropout_specs(arch):
+    """Dropout off and on are distinct kernels: every combo a seeded dropout
+    request reaches builds the dropout one."""
+    req = replace(_ADMITTED[arch], dropout=seeded_dropout())
+    combos = registered_sdpa_combos(req)
+    assert combos
+    for _, spec in combos:
+        assert spec.kernel_spec.dropout, spec
+    assert len(dispatch_sdpa_all(req)) == len(combos)
 
 
 def test_all_three_are_empty_for_something_that_is_not_an_sdpa_request():

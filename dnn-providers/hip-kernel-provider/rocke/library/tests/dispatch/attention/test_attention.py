@@ -25,11 +25,15 @@ from dispatch.attention.common import ATTENTION_FEATURES
 # whose kernels write LSE (dense, RDNA WMMA, ``attention_unified_2d``,
 # ``attention_unified_3d`` and every unified tuning candidate except the gfx942
 # 4-warp GQA one) declare it, so every other candidate must keep declining it.
+# ``dropout`` follows the same pattern: the gfx942/gfx950 dense candidates,
+# ``attention_unified_2d`` and the gfx942/gfx950 tiled 2D tuning candidates
+# except the 4-warp GQA and non-transposed 32x32 ones.
 # The generated tuning candidates are not in this map; their feature set is
 # checked in the tuning-candidate test below.
 _GFX950_DENSE_FEATURES = {
     "band",
     "causal",
+    "dropout",
     "full_attention",
     "layout_dense",
     "lse",
@@ -79,6 +83,7 @@ EXPECTED_FEATURES = {
         "layout_dense",
         "layout_paged",
         "lse",
+        "dropout",
         "sinks",
         "sliding_window",
     },
@@ -87,6 +92,7 @@ EXPECTED_FEATURES = {
         "causal_bottom_right",
         "layout_dense",
         "lse",
+        "dropout",
         "sinks",
         "sliding_window",
     },
@@ -95,6 +101,7 @@ EXPECTED_FEATURES = {
         "causal_bottom_right",
         "layout_dense",
         "lse",
+        "dropout",
         "sinks",
         "sliding_window",
     },
@@ -103,6 +110,7 @@ EXPECTED_FEATURES = {
         "causal_bottom_right",
         "layout_dense",
         "lse",
+        "dropout",
         "sinks",
         "sliding_window",
     },
@@ -111,6 +119,7 @@ EXPECTED_FEATURES = {
         "causal_bottom_right",
         "layout_dense",
         "lse",
+        "dropout",
         "sinks",
         "sliding_window",
     },
@@ -144,6 +153,7 @@ EXPECTED_FEATURES = {
         "sinks",
         "sliding_window",
         "lse",
+        "dropout",
     },
     "attention_unified_3d": {
         "band",
@@ -611,11 +621,15 @@ class TestAttentionDispatch(unittest.TestCase):
         self.assertEqual(actual, EXPECTED_FEATURES)
         tuning = [c for c in attention_candidates() if c.algorithm == "unified_tuning"]
         self.assertTrue(tuning)
+        dropout_bodies = ("_u2d_narrow_", "_u2d_transposed")
         for candidate in tuning:
-            # Every unified geometry writes LSE except the gfx942 4-warp GQA one.
+            # Every unified geometry writes LSE except the gfx942 4-warp GQA one;
+            # dropout is on the 16x16 and transposed 32x32 tiled 2D bodies.
             expected = set(ATTENTION_FEATURES) | (
                 set() if "_u2d_gfx942_4warp_" in candidate.name else {"lse"}
             )
+            if any(body in candidate.name for body in dropout_bodies):
+                expected.add("dropout")
             with self.subTest(candidate=candidate.name):
                 self.assertEqual(set(candidate.capability.supports_features), expected)
 

@@ -260,15 +260,58 @@ def test_zero_dropout_probability_is_no_dropout(probability):
     assert req == _request()
 
 
-def test_zero_probability_with_dropout_tensors_is_still_dropout():
-    """The tensors configure dropout, so a candidate must still decline it."""
-    seed = [_tensor(10, (1,), "int32")]
+@pytest.mark.parametrize("probability", [0.0, 0])
+def test_zero_probability_with_seed_and_offset_is_no_dropout(probability):
+    """hipDNN's references compute probability 0 without a mask, dropout scale
+    or rng_dump as the graph without dropout fields (``isSdpaZeroProbabilityDropout``):
+    seed and offset are not read, so the request is the no-dropout one."""
+    rng = [_tensor(10, (1,), "int64"), _tensor(11, (1,), "int64")]
+    req = _request(
+        attributes={"dropout_probability": probability},
+        inputs={"seed_tensor_uid": 10, "offset_tensor_uid": 11},
+        tensors=rng,
+    )
+    assert req.dropout is None and "dropout" not in req.features()
+    assert req == _request()
+
+
+@pytest.mark.parametrize(
+    "inputs",
+    [
+        {"seed_tensor_uid": 10, "offset_tensor_uid": 11},
+        {"seed_tensor_uid": 10},
+        {"offset_tensor_uid": 11},
+    ],
+)
+def test_seed_or_offset_without_a_probability_stays_a_dropout_request(inputs):
+    """hipDNN declines a seed or offset named without a probability
+    (SdpaSemanticsRegister SEM-015), so the request keeps it for the gates."""
+    rng = [_tensor(10, (1,), "int64"), _tensor(11, (1,), "int64")]
+    req = _request(inputs=inputs, tensors=rng)
+    assert req.dropout is not None and req.dropout.probability is None
+    assert "dropout" in req.features()
+
+
+@pytest.mark.parametrize(
+    "where, key, dims, feature",
+    [
+        ("inputs", "dropout_mask_tensor_uid", (B, H, S, S), "dropout_mask"),
+        ("inputs", "dropout_scale_tensor_uid", (1,), "dropout_scale"),
+        ("outputs", "rng_dump_tensor_uid", (B, H, S, S), "rng_dump"),
+    ],
+)
+def test_zero_probability_with_a_mask_scale_or_dump_is_still_dropout(
+    where, key, dims, feature
+):
+    """Those tensors configure a dropout no kernel takes yet, so a candidate must
+    still decline it."""
     req = _request(
         attributes={"dropout_probability": 0.0},
-        inputs={"seed_tensor_uid": 10},
-        tensors=seed,
+        tensors=[_tensor(10, dims, "float")],
+        **{where: {key: 10}},
     )
-    assert req.dropout is not None and "dropout" in req.features()
+    assert req.dropout is not None
+    assert {"dropout", feature} <= req.features()
 
 
 def test_scale_tensor():
@@ -369,8 +412,8 @@ def test_stats_needs_generate_stats_and_a_tensor():
         ({"inputs": {"block_mask_tensor_uid": 10}}, "block_mask"),
         ({"inputs": {"sink_token_tensor_uid": 12}}, "sinks"),
         ({"attributes": {"dropout_probability": 0.1}}, "dropout"),
-        ({"inputs": {"seed_tensor_uid": 10}}, "dropout"),
-        ({"outputs": {"rng_dump_tensor_uid": 10}}, "dropout"),
+        ({"inputs": {"dropout_mask_tensor_uid": 10}}, "dropout_mask"),
+        ({"outputs": {"rng_dump_tensor_uid": 10}}, "rng_dump"),
         ({"inputs": {"descale_q_tensor_uid": 10}}, "fp8"),
         ({"inputs": {"scale_o_tensor_uid": 10}}, "fp8_s_o"),
         ({"outputs": {"amax_s_tensor_uid": 10}}, "fp8_s_o"),

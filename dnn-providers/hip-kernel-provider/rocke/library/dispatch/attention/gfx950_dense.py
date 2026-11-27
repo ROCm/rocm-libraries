@@ -54,7 +54,7 @@ _WINDOW_TILE = "bm128"
 _WINDOW_NUM_PERSISTENT = 2 * _DEFAULT_NUM_PERSISTENT
 _WINDOW_TILE_MAX_CTAS_PER_CU = 8
 _FEATURES = frozenset(
-    {"causal", "sliding_window", "full_attention", "band", "sinks", "lse"}
+    {"causal", "sliding_window", "full_attention", "band", "sinks", "lse", "dropout"}
 )
 
 
@@ -237,6 +237,8 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
         and not variant.persistent
         and not req.use_sinks
         and not req.emit_lse
+        # The KV split serves chunked prefill (inference); its spec refuses dropout.
+        and not req.dropout_p
     ):
         # A short query chunk over a long KV prefix launches few CTAs: halve the
         # query tile, then split each work item's KV range so the grid covers the
@@ -301,6 +303,7 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
         nonpersist_decode=variant.nonpersist_decode,
         causal_bottom_right=moving_bottom_right,
         emit_lse=bool(req.emit_lse),
+        dropout=req.dropout_p > 0.0,
         right_bound=right_bound,
         kv_segments=kv_segments,
         **dense_paged_fields(req),

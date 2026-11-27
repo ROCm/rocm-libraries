@@ -54,12 +54,14 @@ def max_kv_segments_for_extent(
 def kv_split_admits(spec) -> bool:
     """Whether ``spec``'s grid and features admit ``kv_segments > 1``: the default
     grid only, without a sliding window, sinks or LSE output (each would need its
-    own segment rule), ragged, varlen or paged."""
+    own segment rule), ragged, varlen or paged, and without dropout (the split
+    is an inference form)."""
     return not (
         spec.persistent
         or spec.sliding_window
         or spec.use_sinks
         or spec.emit_lse
+        or spec.dropout
         or spec.ragged
         or spec.varlen
         or spec.paged
@@ -74,7 +76,7 @@ def check_kv_segments(spec) -> tuple[bool, str]:
     if s > 1 and not kv_split_admits(spec):
         return False, (
             "kv_segments > 1 runs on the default grid only, without sliding window, "
-            "sinks, LSE output, ragged, varlen or paged"
+            "sinks, LSE output, dropout, ragged, varlen or paged"
         )
     extent = segment_extent(
         spec.batch, spec.seqlen_q, spec.num_query_heads, spec.head_size, s

@@ -839,19 +839,19 @@ def supports_native_unified_attention_coverage(
     arch: str,
 ) -> Tuple[bool, str]:
     """The scalar coverage gate (head size, block size, dtype, features), asked
-    about the LSE-off problem.
+    about the problem with LSE and dropout off.
 
-    The scalar kernel writes no LSE, so the scalar gate refuses ``emit_lse``. The
-    path's own gate (:func:`unified_lse_path_gate`) rules on LSE; this one never does.
+    The scalar kernel has neither, so the scalar gate refuses both. The path's
+    own gate (:func:`unified_lse_path_gate`) rules on them; this one never does.
     """
-    if problem.emit_lse:
-        problem = replace(problem, emit_lse=False)
+    if problem.emit_lse or problem.dropout:
+        problem = replace(problem, emit_lse=False, dropout=False)
     return supports_native_unified_attention(problem, arch=arch)
 
 
 def unified_lse_path_gate(path: str) -> Callable[..., Tuple[bool, str]]:
     """The gate of ``path`` (``"3d"`` split-KV, else tiled 2D). It owns which
-    arches and features can write LSE."""
+    arches and features can write LSE or take dropout."""
     if path == "3d":
         return supports_native_unified_attention_3d_tiled
     return supports_native_unified_attention_tiled
@@ -5396,7 +5396,12 @@ def select_auto_path(problem: UnifiedAttentionProblem, arch: str) -> str:
     left that can. Example: gfx942 D256 bf16 prefill at block size 32, whose
     LSE-off form runs on the 4-warp builder (no LSE store) and whose default
     tiled spec exceeds the LDS budget. LSE off, this is ``select_path(arch)``.
+
+    Dropout always tries tiled 2D, the one path with it: a row ``select_path``
+    sends to split-KV runs there if its gate admits it, else is declined.
     """
+    if problem.dropout:
+        return "2d"
     path = problem.select_path(arch)
     if (
         path == "2d"

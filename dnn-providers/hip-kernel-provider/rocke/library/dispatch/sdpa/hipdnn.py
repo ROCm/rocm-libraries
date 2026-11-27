@@ -314,15 +314,15 @@ def from_hipdnn(
         "scale": tensor(inputs, "dropout_scale_tensor_uid"),
         "rng_dump": tensor(outputs, "rng_dump_tensor_uid"),
     }
-    # An unset or zero probability with no dropout tensors is no dropout: the asm
-    # SDPA engine gates on "dropout_probability must be unset or zero". Treating
-    # 0.0 as a dropout request would decline a graph that null would dispatch.
+    # A zero probability is no dropout unless a mask, dropout scale or rng_dump
+    # is named (SdpaRequest drops the group then; seed and offset are not read):
+    # hipDNN's references compute that graph as the one without dropout fields,
+    # and the asm SDPA engine gates on "unset or zero". An unset probability with
+    # a seed or offset stays unset, since hipDNN declines that graph.
     probability = attrs.get("dropout_probability")
     has_probability = probability is not None and float(probability) != 0.0
     if has_probability or any(t is not None for t in dropout.values()):
-        kwargs["dropout"] = SdpaDropout(
-            probability=0.0 if probability is None else probability, **dropout
-        )
+        kwargs["dropout"] = SdpaDropout(probability=probability, **dropout)
 
     # An empty paged or fp8 group is normalized to None by SdpaRequest.
     kwargs["paged"] = SdpaPaged(

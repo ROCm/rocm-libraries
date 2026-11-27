@@ -107,6 +107,59 @@ def _scalar(dtype: str = "fp32") -> SdpaTensor:
     return packed((1,), dtype)
 
 
+def seeded_dropout(
+    p: float | None = 0.1,
+    *,
+    by_value: bool = False,
+    seed: str = "int64",
+    offset: str = "int64",
+) -> SdpaDropout:
+    """Dropout in the form the kernels take: probability, seed and offset."""
+    return SdpaDropout(
+        p,
+        seed=replace(_scalar(seed), by_value=by_value),
+        offset=replace(_scalar(offset), by_value=by_value),
+    )
+
+
+# Dropout groups in the served form's shape that the SDPA gates decline on a
+# value, with a fragment of the "dropout: ..." reason.
+DROPOUT_VALUE_REFUSALS = {
+    "probability_one": (seeded_dropout(1.0), "probability in [0, 1)"),
+    "probability_negative": (seeded_dropout(-0.1), "probability in [0, 1)"),
+    "probability_nan": (seeded_dropout(float("nan")), "probability in [0, 1)"),
+    "probability_unset": (seeded_dropout(None), "without a dropout probability"),
+    "seed_missing": (
+        SdpaDropout(0.1, offset=_scalar("int64")),
+        "the seed is missing",
+    ),
+    "offset_missing": (
+        SdpaDropout(0.1, seed=_scalar("int64")),
+        "the offset is missing",
+    ),
+    "seed_float": (
+        SdpaDropout(0.1, seed=_scalar(), offset=_scalar("int64")),
+        "seed must be one INT64 or INT32 element",
+    ),
+    "offset_two_elements": (
+        SdpaDropout(0.1, seed=_scalar("int64"), offset=packed((2,), "int64")),
+        "offset must be one INT64 or INT32 element",
+    ),
+    "seed_device_misaligned": (
+        SdpaDropout(
+            0.1,
+            seed=replace(_scalar("int64"), alignment=4),
+            offset=_scalar("int64"),
+        ),
+        "the device seed is 4-byte aligned",
+    ),
+    "seed_device_int32": (
+        seeded_dropout(seed="int32"),
+        "a device INT32 seed is not supported",
+    ),
+}
+
+
 def _lse(b: int = 2, h: int = 4, s: int = 8) -> SdpaTensor:
     return packed((b, h, s, 1), "fp32")
 
@@ -175,9 +228,48 @@ def _cases() -> dict[str, SdpaRequest]:
             v=_ragged(base.v),
             o=_ragged(base.o),
         ),
+        # The served form: probability plus device int64 seed and offset.
         "dropout": replace(
             base,
             dropout=SdpaDropout(0.1, seed=_scalar("int64"), offset=_scalar("int64")),
+        ),
+        "dropout_by_value": replace(
+            base,
+            dropout=SdpaDropout(
+                0.25,
+                seed=replace(_scalar("int64"), by_value=True),
+                offset=replace(_scalar("int32"), by_value=True),
+            ),
+        ),
+        "dropout_ragged": replace(
+            base,
+            q=_ragged(base.q),
+            k=_ragged(base.k),
+            v=_ragged(base.v),
+            o=_ragged(base.o),
+            dropout=SdpaDropout(0.5, seed=_scalar("int64"), offset=_scalar("int64")),
+        ),
+        # The forms no kernel takes yet: explicit mask, scale tensor, mask dump.
+        "dropout_mask": replace(
+            base,
+            dropout=SdpaDropout(
+                0.1, mask=packed((2, 4, 8, 8), "uint8"), scale=_scalar()
+            ),
+        ),
+        "dropout_scale": replace(
+            base,
+            dropout=SdpaDropout(
+                0.1, seed=_scalar("int64"), offset=_scalar("int64"), scale=_scalar()
+            ),
+        ),
+        "rng_dump": replace(
+            base,
+            dropout=SdpaDropout(
+                0.1,
+                seed=_scalar("int64"),
+                offset=_scalar("int64"),
+                rng_dump=packed((2, 4, 8, 8)),
+            ),
         ),
         # K/V are [num_blocks, H, block_size, D] containers: 6 blocks of 4 keys,
         # each batch's 8 keys addressed through 2 page-table entries.
@@ -268,6 +360,11 @@ def make_tensors(req: SdpaRequest, seed: int = 0) -> dict[str, np.ndarray]:
         tensors["scale"] = np.full(req.scale_tensor.dims, 0.25, np.float32)
     if req.bias is not None:
         tensors["bias"] = rng.standard_normal(req.bias.tensor.dims).astype(np.float32)
+    if req.dropout is not None:
+        # Host ints: the reference reads them; a binder wants the request's
+        # form (an int by value, else a device array).
+        for name in ("dropout_seed", "dropout_offset"):
+            tensors[name] = int(rng.integers(0, 2**31))
     if req.fp8 is not None:
         for name in ("descale_q", "descale_k", "descale_v"):
             t = getattr(req.fp8, name)

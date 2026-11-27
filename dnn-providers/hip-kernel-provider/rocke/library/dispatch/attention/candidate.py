@@ -53,19 +53,40 @@ DENSE_ALGORITHMS = frozenset(
 
 def _tuning_precheck(variant: AttentionGeometryVariant):
     """Coverage for one geometry variant. The scalar coverage check refuses LSE
-    (the scalar kernel writes none), so it is asked about the LSE-off problem
-    and an LSE request must also pass the gate of the variant's own path: the
-    split-KV or tiled 2D gate owns which arches and features can write LSE."""
+    and dropout (the scalar kernel has neither), so it is asked about the problem
+    with both off, and an LSE or dropout request must also pass the gate of the
+    variant's own path: the split-KV or tiled 2D gate owns which arches and
+    features can write LSE or take dropout."""
     path_gate = unified_lse_path_gate(variant.path)
 
     def precheck(req):
         problem = _tuning_problem(req)
         ok, why = supports_native_unified_attention_coverage(problem, arch=variant.arch)
-        if ok and problem.emit_lse:
+        if ok and (problem.emit_lse or problem.dropout):
             return path_gate(problem, arch=variant.arch)
         return ok, why
 
     return precheck
+
+
+# Codepaths whose spec refuses dropout: the non-transposed 32x32 bodies hold P
+# in a layout the mask does not follow.
+_NO_DROPOUT_CODEPATHS = frozenset({("gfx950", "wide32"), ("gfx942", "wide32x8")})
+
+
+def _tuning_features(variant: AttentionGeometryVariant) -> frozenset:
+    """The features one unified geometry serves; the gfx942 4-warp GQA builder
+    refuses LSE (see _GFX942_4WARP_LSE_REFUSAL)."""
+    if variant.builder_kind == "gfx942_4warp_gqa":
+        return ATTENTION_FEATURES
+    features = ATTENTION_FEATURES | {"lse"}
+    if (
+        variant.path == "2d"
+        and variant.arch in ("gfx942", "gfx950")
+        and (variant.arch, variant.codepath) not in _NO_DROPOUT_CODEPATHS
+    ):
+        features |= {"dropout"}
+    return features
 
 
 def make_tuning_candidate(variant: AttentionGeometryVariant) -> KernelCandidate:
@@ -121,13 +142,7 @@ def make_tuning_candidate(variant: AttentionGeometryVariant) -> KernelCandidate:
                 ShapeRange("hdim_q", allowed=UNIFIED_HEAD_SIZES),
                 ShapeRange("kv_block_size", allowed=UNIFIED_BLOCK_SIZES),
             ),
-            # Every unified variant writes LSE except the gfx942 4-warp GQA
-            # builder (see _GFX942_4WARP_LSE_REFUSAL).
-            supports_features=(
-                ATTENTION_FEATURES
-                if variant.builder_kind == "gfx942_4warp_gqa"
-                else ATTENTION_FEATURES | {"lse"}
-            ),
+            supports_features=_tuning_features(variant),
         ),
         space=unified_space(variant),
         base=_tuning_problem,

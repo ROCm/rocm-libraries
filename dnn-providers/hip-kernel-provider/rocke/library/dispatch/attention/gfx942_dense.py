@@ -167,7 +167,8 @@ def tuned_base_spec(req: AttentionRequest):
         _DENSE_BLOCK_N,
         persistent=head_size == 128 and not paged,
     )
-    if spec.causal_bottom_right:
+    # The KV split serves chunked prefill (inference); its spec refuses dropout.
+    if spec.causal_bottom_right and not spec.dropout:
         from kernels.common.attention_dense_kv_split import (
             max_kv_segments_for_extent,
         )
@@ -302,6 +303,7 @@ def _make_spec(
         use_sinks=bool(req.use_sinks),
         waves_per_eu=_tuned_waves_per_eu(head_size, dtype),
         emit_lse=bool(req.emit_lse),
+        dropout=req.dropout_p > 0.0,
         causal_bottom_right=bottom_right,
         causal_diag_split=diag_split,
         window_wave_skip=window_wave_skip,
@@ -342,8 +344,8 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
         base_spec=tuned_base_spec,
         supports=_supports,
         # Dense: causal (top-left or bottom-right), sliding-window and sinks (alone
-        # or combined), optional LSE output, paged K/V. Head size stays out: D64/D128
-        # coverage is ``supports_attention_dense``'s call.
+        # or combined), optional LSE output, dropout, paged K/V. Head size stays
+        # out: D64/D128 coverage is ``supports_attention_dense``'s call.
         features=frozenset(
             {
                 "causal",
@@ -351,6 +353,7 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
                 "sliding_window",
                 "sinks",
                 "lse",
+                "dropout",
                 "layout_paged",
             }
         ),
@@ -373,7 +376,14 @@ def _make_gfx942_attention_dense_qbminor_candidate() -> KernelCandidate:
         base_spec=_qbminor_base_spec,
         supports=_supports,
         features=frozenset(
-            {"causal", "causal_bottom_right", "sliding_window", "sinks", "lse"}
+            {
+                "causal",
+                "causal_bottom_right",
+                "sliding_window",
+                "sinks",
+                "lse",
+                "dropout",
+            }
         ),
         recorded=frozenset({"waves_per_eu"}),
     )
@@ -403,7 +413,14 @@ def _make_gfx942_attention_dense_aot_candidate(
         ),
         supports=_supports,
         features=frozenset(
-            {"causal", "causal_bottom_right", "sliding_window", "sinks", "lse"}
+            {
+                "causal",
+                "causal_bottom_right",
+                "sliding_window",
+                "sinks",
+                "lse",
+                "dropout",
+            }
         ),
         recorded=frozenset({"waves_per_eu"}),
         axis_names=None if persistent else frozenset(),

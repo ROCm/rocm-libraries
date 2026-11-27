@@ -14,6 +14,7 @@ from typing import Mapping, Optional, Tuple
 
 from kernels.common.attention_split_kv_reduce import split_kv_reduce_spec
 from kernels.common.attention_unified import (
+    _GFX942_4WARP_DROPOUT_REFUSAL,
     _GFX942_4WARP_LSE_REFUSAL,
     UnifiedAttentionProblem,
     _kv_block_bytes,
@@ -181,6 +182,7 @@ _SEMANTIC_FIELDS = frozenset(
         "right_bound",
         "emit_lse",
         "lse_layout",
+        "dropout",
     }
 )
 
@@ -213,6 +215,8 @@ def make_explicit_attention_2d_spec(
     )
     if problem.emit_lse and config.builder_kind == "gfx942_4warp_gqa":
         raise ValueError(_GFX942_4WARP_LSE_REFUSAL)
+    if problem.dropout and config.builder_kind == "gfx942_4warp_gqa":
+        raise ValueError(_GFX942_4WARP_DROPOUT_REFUSAL)
     if config.num_warps not in NUM_WARPS:
         raise ValueError(f"num_warps must be one of {NUM_WARPS}")
     if config.block_m_per_warp not in BLOCK_M_PER_WARP:
@@ -238,7 +242,9 @@ def make_explicit_attention_2d_spec(
         waves_per_eu=config.waves_per_eu,
         # The output the caller asked for, never a tuning knob (see
         # _SEMANTIC_FIELDS); passed only when on, so LSE-off specs are as before.
+        # Dropout likewise.
         **({"emit_lse": True} if problem.emit_lse else {}),
+        **({"dropout": True} if problem.dropout else {}),
         **knobs,
     )
 
@@ -290,6 +296,8 @@ def make_explicit_attention_3d_specs(
         )
     if problem.use_additive_bias:
         raise ValueError("explicit 3D attention tuning does not support additive bias")
+    if problem.dropout:
+        raise ValueError("dropout is not implemented on the split-KV attention path")
     validate_explicit_fp8_encoding(
         arch=arch, use_fp8=problem.use_fp8, fp8_fnuz=problem.fp8_fnuz
     )

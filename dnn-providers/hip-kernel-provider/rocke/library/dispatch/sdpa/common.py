@@ -22,8 +22,9 @@ The request is normalized on construction, so one meaning has one spelling and
   ``"value"``; a baked ``1.0`` is the default source, because hipDNN reads an
   unset scale as 1.0;
 - a bias is right-aligned to rank 4, and every size-1 bias dim has stride 0;
-- an empty ``SdpaPaged`` or ``SdpaFp8``, or a zero-probability ``SdpaDropout``
-  with no tensors, is ``None``.
+- an empty ``SdpaPaged`` or ``SdpaFp8`` is ``None``, and so is a zero-probability
+  ``SdpaDropout`` with no mask, dropout scale or rng_dump, whatever its seed and
+  offset: hipDNN computes that graph as no dropout (``isSdpaZeroProbabilityDropout``).
 
 Deprecated causal flags do not exist here: :func:`dispatch.sdpa.hipdnn.from_hipdnn`
 folds them into ``(diagonal, left_bound, right_bound)`` before construction.
@@ -133,6 +134,9 @@ SDPA_FEATURES = frozenset(
         "padded",
         "ragged",
         "dropout",
+        "dropout_mask",
+        "dropout_scale",
+        "rng_dump",
         "paged",
         "block_mask",
         "sinks",
@@ -281,7 +285,9 @@ class SdpaBias:
 class SdpaDropout:
     """Dropout: probability plus the RNG inputs, the explicit mask, and the debug dump."""
 
-    probability: float
+    # None: the graph names a seed or offset but no probability, which hipDNN
+    # declines rather than reading as 0 (SdpaSemanticsRegister SEM-015).
+    probability: float | None
     seed: SdpaTensor | None = None
     offset: SdpaTensor | None = None
     mask: SdpaTensor | None = None
@@ -289,7 +295,8 @@ class SdpaDropout:
     rng_dump: SdpaTensor | None = None
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "probability", float(self.probability))
+        if self.probability is not None:
+            object.__setattr__(self, "probability", float(self.probability))
 
 
 @dataclass(frozen=True)
@@ -467,10 +474,28 @@ class SdpaRequest(OperatorRequest):
         for name, empty in (
             ("paged", SdpaPaged()),
             ("fp8", SdpaFp8()),
-            ("dropout", SdpaDropout(0.0)),
         ):
             if getattr(self, name) == empty:
                 object.__setattr__(self, name, None)
+        # Seed and offset are not read at probability 0, so they request nothing
+        # either; a group with no field set at all is empty. A mask, dropout
+        # scale or rng_dump keeps the dropout request.
+        drop = self.dropout
+        if (
+            drop is not None
+            and (
+                drop.probability == 0.0
+                or (
+                    drop.probability is None
+                    and drop.seed is None
+                    and drop.offset is None
+                )
+            )
+            and drop.mask is None
+            and drop.scale is None
+            and drop.rng_dump is None
+        ):
+            object.__setattr__(self, "dropout", None)
 
     def _validate(self) -> None:
         """Frontend rules (``SdpaFwdNode::pre_validate_node``) plus Python-caller ones."""
@@ -762,6 +787,13 @@ class SdpaRequest(OperatorRequest):
             active.add("ragged")
         if self.dropout is not None:
             active.add("dropout")
+            for name, feature in (
+                ("mask", "dropout_mask"),
+                ("scale", "dropout_scale"),
+                ("rng_dump", "rng_dump"),
+            ):
+                if getattr(self.dropout, name) is not None:
+                    active.add(feature)
         if self.paged is not None:
             active.add("paged")
         if self.fp8 is not None or any(

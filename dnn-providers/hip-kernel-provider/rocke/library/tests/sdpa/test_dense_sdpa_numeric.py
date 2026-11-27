@@ -19,8 +19,13 @@ from rocke.tests.lanes import TICKET, arch_skip_reason, import_or_skip_until
 
 from dispatch.sdpa.bind_dense import sdpa_dense_admits, sdpa_dense_bind
 from tests.sdpa import cases as C
-from tests.sdpa.binding_harness import bind_and_check, torch_caller_cases
+from tests.sdpa.binding_harness import (
+    bind_and_check,
+    bind_and_check_request,
+    torch_caller_cases,
+)
 from tests.sdpa.request_bridge import request_from_case
+from tests.sdpa.request_cases import make_request, packed, seeded_dropout
 
 _ARCHES = ("gfx942", "gfx950")
 _FOUND, _ABSENCE = probe_device_arch()
@@ -64,3 +69,20 @@ def test_torch_callers_match_sdpa_reference(case):
     import_or_skip_until("torch", TICKET)
     req = request_from_case(case, ARCH)
     assert bind_and_check(sdpa_dense_bind, case, req, kind="torch") == []
+
+
+@pytest.mark.parametrize("by_value", [False, True], ids=["device", "by_value"])
+def test_seeded_dropout_matches_the_request_reference(by_value):
+    """Dispatch, bind and launch a seeded causal dropout request with LSE; O
+    against the SEM-015 mask, LSE pre-dropout."""
+    req = make_request(
+        arch=ARCH,
+        s_q=256,
+        s_kv=256,
+        d=128,
+        right_bound=0,
+        stats=packed((2, 4, 256, 1)),
+        dropout=seeded_dropout(0.2, by_value=by_value),
+    )
+    assert sdpa_dense_admits(req) == (True, "ok")
+    bind_and_check_request(sdpa_dense_bind, req, seed=7)

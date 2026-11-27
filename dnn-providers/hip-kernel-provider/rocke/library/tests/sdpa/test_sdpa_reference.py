@@ -8,7 +8,9 @@ delegates to: a scalar fp64 loop that transliterates hipDNN's
 ``CpuFpReferenceSdpa::forward`` (bias indexed the way its ``computeMaskIndex``
 does, band from its ``isMasked``, transliterated below as :func:`hipdnn_keep`
 rather than shared with the oracle's ``keep``), extended per batch the way
-hipDNN's golden generator runs GROUP mode.
+hipDNN's golden generator runs GROUP mode. Its dropout keep bit is a scalar
+Philox4x32-10 written from the SdpaSemanticsRegister SEM-015 text, not
+``rocke.numeric.philox_dropout``.
 """
 
 from __future__ import annotations
@@ -33,7 +35,9 @@ from tests.sdpa.request_cases import (
 
 NOT_IMPLEMENTED = {
     "alibi": "alibi",
-    "dropout": "dropout",
+    "dropout_mask": "dropout_mask",
+    "dropout_scale": "dropout_scale",
+    "rng_dump": "rng_dump",
     "paged": "paged",
     "block_mask": "block_mask",
     "sinks": "sinks",
@@ -55,6 +59,30 @@ def hipdnn_keep(q, k, s_q, s_kv, diagonal, left_bound, right_bound):
     if left_bound >= 0 and k <= q + off - left_bound:
         return False
     return True
+
+
+def philox_words(counter, seed):
+    """Philox4x32-10 of a 64-bit counter (words lo, hi, 0, 0) under a 64-bit
+    seed, as four uint32 Python ints."""
+    m = 0xFFFFFFFF
+    c = [counter & m, (counter >> 32) & m, 0, 0]
+    k0, k1 = seed & m, (seed >> 32) & m
+    for _ in range(10):
+        p0, p1 = c[0] * 0xD2511F53, c[2] * 0xCD9E8D57
+        c = [(p1 >> 32) ^ c[1] ^ k0, p1 & m, (p0 >> 32) ^ c[3] ^ k1, p0 & m]
+        k0, k1 = (k0 + 0x9E3779B9) & m, (k1 + 0xBB67AE85) & m
+    return c
+
+
+def philox_keep(b, h, i, j, *, h_q, s_q, s_kv, p, seed, offset):
+    """SEM-015's keep bit of element (b, h, i, j): word ``j mod 4`` at counter
+    ``offset + ((b Hq + h) Sq + i) ceil(Skv / 4) + floor(j / 4)``, kept iff it
+    exceeds ``int32(f32(p - 0.5) 2^32)`` read as int32."""
+    counter = offset + ((b * h_q + h) * s_q + i) * -(-s_kv // 4) + j // 4
+    word = philox_words(counter & (2**64 - 1), seed & (2**64 - 1))[j % 4]
+    signed = word - (1 << 32) if word >= 1 << 31 else word
+    threshold = int(np.float32(np.float32(p) - np.float32(0.5)) * np.float32(2**32))
+    return signed > threshold
 
 
 def _lengths(req, tensors, name, ragged_key, extent):
@@ -97,6 +125,16 @@ def loop_reference(req, tensors):
         else req.scale
     )
     bias = None if req.bias is None else np.asarray(tensors["bias"], np.float64)
+    drop = req.dropout
+    if drop is not None:
+        rng = {
+            "h_q": h_q,
+            "s_q": s_q,
+            "s_kv": s_kv,
+            "p": drop.probability,
+            "seed": int(tensors["dropout_seed"]),
+            "offset": int(tensors["dropout_offset"]),
+        }
 
     def descale(name, b, kv_head, heads):
         if req.fp8 is None or getattr(req.fp8, name) is None:
@@ -132,8 +170,15 @@ def loop_reference(req, tensors):
                     continue
                 p = [math.exp(s - m) for s in scores]
                 total = sum(p)
-                o[b, h, i] = sum(p[j] / total * v[b, vh, j] for j in range(skv)) * dv
                 lse[b, h, i, 0] = m + math.log(total)
+                if drop is not None:
+                    # Declared extents and in-sequence positions, also for a
+                    # padded or ragged batch.
+                    p = [
+                        x / (1 - rng["p"]) if philox_keep(b, h, i, j, **rng) else 0.0
+                        for j, x in enumerate(p)
+                    ]
+                o[b, h, i] = sum(p[j] / total * v[b, vh, j] for j in range(skv)) * dv
     return o, lse
 
 
@@ -500,3 +545,77 @@ def test_negative_strides_are_rejected():
     so a duck-typed request reaches this check."""
     with pytest.raises(ValueError, match="negative strides \\(-1,\\)"):
         strided_view("q", np.zeros(8, np.float32), 0, (2,), (-1,))
+
+
+# --- seeded dropout --------------------------------------------------------------
+
+
+def test_philox_matches_the_random123_known_answer():
+    """Anchors the loop oracle's Philox to the published Philox4x32-10 vector."""
+    assert philox_words(0, 0) == [0x6627E8D5, 0xE169C58D, 0xBC57AC4C, 0x9B00DBD8]
+
+
+@pytest.mark.parametrize("name", ["dropout", "dropout_by_value", "dropout_ragged"])
+def test_dropout_keeps_lse_and_drops_some_probabilities(name):
+    """O moves, LSE stays the pre-dropout one, and the case drops something (a
+    keep-all mask would pass the oracle comparison too)."""
+    req = CASES[name]
+    tensors = make_tensors(req, seed=5)
+    got = _check(req, tensors)
+    off = sdpa_reference_from_request(replace(req, dropout=None), tensors)
+    np.testing.assert_array_equal(got["stats"], off["stats"])
+    assert not np.allclose(got["o"], off["o"])
+
+
+def test_ragged_dropout_draws_the_padded_problems_mask():
+    """A ragged batch and its padded rewrite draw the same mask: SEM-015 counts
+    in-sequence positions over the declared extents, not packed tokens."""
+    ragged = CASES["dropout_ragged"]
+    tensors = make_tensors(ragged, seed=3)
+    seq = packed((2, 1, 1, 1), "int32")
+    dense = make_request(seq_len_q=seq, seq_len_kv=seq, dropout=ragged.dropout)
+    lq = np.diff(tensors["ragged_offset_q"])
+    lk = np.diff(tensors["ragged_offset_k"])
+    padded = {
+        n: _unpack(ragged, tensors, n, lq if n == "q" else lk).astype(np.float32)
+        for n in ("q", "k", "v")
+    }
+    padded.update(
+        seq_len_q=lq,
+        seq_len_kv=lk,
+        dropout_seed=tensors["dropout_seed"],
+        dropout_offset=tensors["dropout_offset"],
+    )
+    np.testing.assert_allclose(
+        sdpa_reference_from_request(dense, padded)["o"],
+        sdpa_reference_from_request(ragged, tensors)["o"],
+        atol=1e-6,
+    )
+
+
+def test_device_seed_and_offset_arrays_are_read_like_ints():
+    req = CASES["dropout"]
+    tensors = make_tensors(req, seed=2)
+    arrays = dict(
+        tensors,
+        dropout_seed=np.array([tensors["dropout_seed"]], np.int64),
+        dropout_offset=np.array([tensors["dropout_offset"]], np.int64),
+    )
+    np.testing.assert_array_equal(
+        sdpa_reference_from_request(req, arrays)["o"],
+        sdpa_reference_from_request(req, tensors)["o"],
+    )
+
+
+@pytest.mark.parametrize(
+    "group",
+    [
+        replace(CASES["dropout"].dropout, probability=1.0),
+        replace(CASES["dropout"].dropout, seed=None),
+    ],
+    ids=["probability_one", "seed_missing"],
+)
+def test_dropout_without_a_drawable_mask_is_rejected(group):
+    req = replace(CASES["dense_bshd"], dropout=group)
+    with pytest.raises(ValueError, match="dropout needs"):
+        sdpa_reference_from_request(req, make_tensors(req))

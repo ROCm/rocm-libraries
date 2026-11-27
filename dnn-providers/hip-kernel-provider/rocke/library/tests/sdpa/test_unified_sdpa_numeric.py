@@ -13,6 +13,8 @@ few cases also run with torch tensors, the production callers' kind.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 import pytest
 from rocke.runtime.device_array import DeviceArray, host_values
@@ -25,9 +27,13 @@ from dispatch.sdpa.bind_unified import (
     sdpa_unified_bind,
 )
 from tests.sdpa import cases as C
-from tests.sdpa.binding_harness import bind_and_check, torch_caller_cases
+from tests.sdpa.binding_harness import (
+    bind_and_check,
+    bind_and_check_request,
+    torch_caller_cases,
+)
 from tests.sdpa.request_bridge import request_from_case
-from tests.sdpa.request_cases import make_request
+from tests.sdpa.request_cases import make_request, packed, ragged_offset, seeded_dropout
 
 _ARCHES = ("gfx942", "gfx950")
 _FOUND, _ABSENCE = probe_device_arch()
@@ -71,6 +77,45 @@ def test_torch_callers_match_sdpa_reference(case):
     import_or_skip_until("torch", TICKET)
     req = request_from_case(case, ARCH)
     assert bind_and_check(sdpa_unified_bind, case, req, kind="torch") == []
+
+
+def _ragged(t):
+    return replace(
+        t, ragged_offset=ragged_offset(t.dims[0]), ragged_offset_multiplier=t.strides[2]
+    )
+
+
+def _dropout_request(length_mode, by_value):
+    """Lengths off the tile multiples, so masked tails and declared extents
+    larger than the sequences are both exercised; bottom-right causal, the
+    band both arches' unified kernels compute."""
+    req = make_request(
+        arch=ARCH,
+        s_q=24,
+        s_kv=40,
+        d=64,
+        right_bound=0,
+        diagonal="bottom_right",
+        dropout=seeded_dropout(0.2, by_value=by_value),
+    )
+    if length_mode == "padded":
+        lens = packed((2, 1, 1, 1), "int32")
+        return replace(req, padding_mask=True, seq_len_q=lens, seq_len_kv=lens)
+    if length_mode == "ragged":
+        return replace(
+            req, q=_ragged(req.q), k=_ragged(req.k), v=_ragged(req.v), o=_ragged(req.o)
+        )
+    return replace(req, stats=packed((2, 4, 24, 1)))
+
+
+@pytest.mark.parametrize("by_value", [False, True], ids=["device", "by_value"])
+@pytest.mark.parametrize("length_mode", ["dense", "padded", "ragged"])
+def test_seeded_dropout_matches_the_request_reference(length_mode, by_value):
+    """Dispatch, bind and launch a seeded dropout request; O against the SEM-015
+    mask over the declared extents, LSE pre-dropout."""
+    req = _dropout_request(length_mode, by_value)
+    assert sdpa_unified_admits(req) == (True, "ok")
+    bind_and_check_request(sdpa_unified_bind, req, seed=7)
 
 
 def _dense_device(req, name):

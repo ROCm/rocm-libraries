@@ -57,6 +57,7 @@ from .bind_shared import (
     band_text,
     check_dtype,
     declined_table,
+    dropout_launch_inputs,
     keeps_asked_keys,
     launch_stream,
     nonfinite_scale_reject,
@@ -111,6 +112,7 @@ SDPA_UNIFIED_FEATURES = frozenset(
         "padded",
         "ragged",
         "lse",
+        "dropout",
         "mma_core_mode",
         "implementation_hint",
     }
@@ -130,7 +132,9 @@ _DECLINED = declined_table(
         "bias_broadcast",
         "alibi",
         "sinks",
-        "dropout",
+        "dropout_mask",
+        "dropout_scale",
+        "rng_dump",
         "paged",
         "block_mask",
         "fp8",
@@ -254,7 +258,11 @@ def sdpa_unified_admits(req: SdpaRequest) -> tuple[bool, str]:
         return rejected
     if _unified_supported(req):
         return True, "ok"
-    path = "LSE " if req.stats is not None else ""
+    path = "".join(
+        f"{name} "
+        for name, on in (("LSE", req.stats is not None), ("dropout", req.dropout))
+        if on
+    )
     return False, (
         f"no unified {path}candidate covers arch={req.arch!r} "
         f"dtype={req.dtype!r} d_qk={req.d_qk} d_v={req.d_v} "
@@ -364,6 +372,9 @@ class _LaunchPlan:
         attn = to_attention_request(req)
         self.block = int(attn.kv_block_size)
         self.pages = max(1, -(-req.s_kv // self.block))
+        # max_seqlen_q/k stay the declared s_q/s_kv, not the longest sequence:
+        # a dropout launch takes them as the mask's extents (SEM-015), so the
+        # padded, ragged and dense forms of one problem draw the same mask.
         self.problem = dataclasses.replace(attention_problem(attn), total_q=cu[-1])
 
         self.q_packed = self.q.packed_view(cu)
@@ -508,7 +519,10 @@ def sdpa_unified_bind(req: SdpaRequest, tensors: Mapping[str, Any]) -> TorchBind
     gfx942/gfx950, so the launch defers to the kernel's own path selection
     rather than re-deciding it here.
 
-    Lengths and offsets are read once, here; rebind after changing them.
+    A dropout request also takes ``dropout_seed`` and ``dropout_offset``, read
+    at every launch (see
+    :func:`~dispatch.sdpa.bind_shared.dropout_launch_inputs`). Lengths and
+    offsets are read once, here; rebind after changing them.
     Raises ``ValueError`` with the admission reason for a declined request.
     ``launch(stream=...)`` accepts only the current stream; see
     :func:`~dispatch.sdpa.bind_shared.launch_stream`.
@@ -520,6 +534,8 @@ def sdpa_unified_bind(req: SdpaRequest, tensors: Mapping[str, Any]) -> TorchBind
     from dispatch.attention.bindings import validate_tuning_attention_tensors
     from kernels.common.attention_unified import run_unified_attention_torch
 
+    # Refuses missing or malformed seed/offset before anything is allocated.
+    dropout_launch_inputs(req, tensors)
     plan = _LaunchPlan(req, tensors)
     if plan.problem.total_q:
         validate_tuning_attention_tensors(plan.problem, plan.kernel_tensors())
@@ -529,6 +545,9 @@ def sdpa_unified_bind(req: SdpaRequest, tensors: Mapping[str, Any]) -> TorchBind
     def launch(*, stream: Any = None) -> None:
         """Pack, launch and unpack, all on the current stream."""
         launch_on = launch_stream(stream, device, "unified")
+        dropout = dropout_launch_inputs(req, tensors)
+        if dropout:
+            dropout["dropout_p"] = req.dropout.probability
         plan.pack(launch_on)
         if plan.problem.total_q:
             run_unified_attention_torch(
@@ -539,6 +558,7 @@ def sdpa_unified_bind(req: SdpaRequest, tensors: Mapping[str, Any]) -> TorchBind
                 backend="auto",
                 stream=launch_on,
                 lse=plan.lse,
+                **dropout,
             )
         plan.unpack(launch_on)
 

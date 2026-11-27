@@ -129,6 +129,9 @@ COVERAGE_ROWS = [
     ("Stats (LSE)", "lse", "lse"),
     ("Max, Sum_exp", "max_sum_exp", "max_sum_exp"),
     ("Dropout", "dropout", "dropout"),
+    ("Dropout mask", "dropout_mask", "dropout_mask"),
+    ("Dropout scale", "dropout_scale", "dropout_scale"),
+    ("RNG dump", "rng_dump", "rng_dump"),
     ("Paged KV", "paged", "paged"),
     ("Block mask", "block_mask", "block_mask"),
     ("Sink token", "sinks", "sinks"),
@@ -188,7 +191,7 @@ def test_arch_is_canonical(arch):
         (
             "dropout",
             SdpaDropout(0.0),
-            SdpaDropout(0.0, seed=packed((1,), "int64")),
+            SdpaDropout(0.0, mask=packed((2, 4, 8, 8), "uint8")),
             "dropout",
         ),
     ],
@@ -200,6 +203,28 @@ def test_empty_group_is_absent(field, empty, populated, feature):
     assert getattr(req, field) is None
     assert req == BASE and req.normalized() == BASE.normalized()
     assert feature in replace(BASE, **{field: populated}).features()
+
+
+@pytest.mark.parametrize("probability", [0.0, 0])
+def test_zero_probability_with_seed_and_offset_is_no_dropout(probability):
+    """hipDNN reads no seed or offset at probability 0 and computes the graph
+    without dropout (SdpaSemanticsRegister, "Probability 0"), so it is the same
+    request as the one without dropout."""
+    rng = packed((1,), "int64")
+    req = replace(BASE, dropout=SdpaDropout(probability, seed=rng, offset=rng))
+    assert req.dropout is None and req == BASE
+    assert req.normalized() == BASE.normalized()
+
+
+def test_dropout_group_with_nothing_set_is_absent():
+    assert replace(BASE, dropout=SdpaDropout(None)).dropout is None
+
+
+@pytest.mark.parametrize("form", ["mask", "scale", "rng_dump"])
+def test_zero_probability_with_a_mask_scale_or_dump_stays_dropout(form):
+    tensor = packed((2, 4, 8, 8)) if form != "scale" else packed((1,))
+    req = replace(BASE, dropout=SdpaDropout(0.0, **{form: tensor}))
+    assert req.dropout is not None and "dropout" in req.features()
 
 
 def test_empty_paged_group_is_absent():

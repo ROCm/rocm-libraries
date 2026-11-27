@@ -20,6 +20,7 @@ from typing import Any
 import numpy as np
 
 from dispatch.sdpa import SdpaRequest
+from rocke.numeric.philox_dropout import dropout_scale, philox_keep_mask
 from rocke.numeric.sdpa_reference import hipdnn_left_to_window, sdpa_reference
 from .helpers import strided_view
 
@@ -116,10 +117,37 @@ def _descale(
     return values.reshape(batch, heads_kv)[:, np.arange(h_q) // (h_q // heads_kv)]
 
 
+def _dropout(req: SdpaRequest, tensors: Mapping) -> tuple[Any, Any]:
+    """``(mask, scale)`` of the request's seeded dropout, or ``(None, None)``.
+
+    The mask is drawn over the declared ``s_q`` x ``s_kv`` with ``b`` the
+    sequence and in-sequence positions (SEM-015), which is where this oracle
+    places a padded or ragged batch's rows.
+    """
+    drop = req.dropout
+    if drop is None:
+        return None, None
+    p = drop.probability
+    if not 0.0 < p < 1.0 or drop.seed is None or drop.offset is None:
+        raise ValueError(
+            f"dropout needs a probability in (0, 1), a seed and an offset, got p={p}"
+        )
+
+    def value(key: str) -> int:
+        return int(np.asarray(tensors[key]).reshape(-1)[0])
+
+    seed, offset = value("dropout_seed"), value("dropout_offset")
+    batch, h_q, s_q, _ = req.q.dims
+    mask = philox_keep_mask(batch, h_q, s_q, req.s_kv, p, seed, offset)
+    return mask, dropout_scale(p)
+
+
 # Features this oracle does not model yet, by SdpaRequest.features() name. hipDNN's
 # CPU reference implements them; a kernel test that needs one compares against it.
 UNSUPPORTED_FEATURES = (
-    "dropout",
+    "dropout_mask",
+    "dropout_scale",
+    "rng_dump",
     "paged",
     "block_mask",
     "sinks",
@@ -140,6 +168,7 @@ def sdpa_reference_from_request(
         s    += bias[broadcast(b, h_q, q, k)]       # unscaled, by query head
         s     = -inf where not keep(q, k)
         p     = softmax(s)                          # fully masked row -> p = 0
+        p    *= keep_philox(b, h, q, k) / (1 - p_drop)  # seeded dropout
         O     = (p . V) * descale_v
         stats = max + ln(sum_exp)                   # -inf on a fully masked row
 
@@ -153,8 +182,9 @@ def sdpa_reference_from_request(
     ``scale`` when ``req.scale_source == "tensor"``; ``bias``; ``seq_len_q`` /
     ``seq_len_kv``; ``descale_q`` / ``descale_k`` / ``descale_v``; and
     ``ragged_offset_q`` / ``ragged_offset_k`` / ``ragged_offset_v`` (V defaults to
-    K's) for ragged operands. A dense operand, ``seq_len_*`` and the descales
-    included, is either its logical array or a 1-D buffer read through the
+    K's) for ragged operands; ``dropout_seed`` / ``dropout_offset`` (ints or
+    one-element arrays) for dropout, whose stats stay pre-dropout. A dense operand, ``seq_len_*`` and the
+    descales included, is either its logical array or a 1-D buffer read through the
     request's strides; a ragged one is the packed buffer, and ragged K and V
     must hold the same lengths. Pass fp8 and bf16 data as float32 values.
 
@@ -166,9 +196,9 @@ def sdpa_reference_from_request(
     golden generator; kernels may leave them unwritten, so compare only
     ``row_valid`` rows.
 
-    Raises ``NotImplementedError`` naming the feature for dropout, paged KV,
-    block masks, sinks, ALiBi, FP8 softmax/output scaling, and max/sum_exp
-    outputs, which this oracle does not model yet (hipDNN's CPU reference does).
+    Raises ``NotImplementedError`` naming the feature for an explicit dropout
+    mask, dropout scale tensor or rng_dump, paged KV, block masks, sinks, ALiBi,
+    FP8 softmax/output scaling, and max/sum_exp outputs, which this oracle does not model yet (hipDNN's CPU reference does).
     """
     features = req.features()
     unsupported = [name for name in UNSUPPORTED_FEATURES if name in features]
@@ -236,6 +266,7 @@ def sdpa_reference_from_request(
     bias = None
     if req.bias is not None:
         bias = _dense_operand("bias", tensors["bias"], req.bias.tensor)
+    keep, keep_scale = _dropout(req, tensors)
 
     out, lse = sdpa_reference(
         np.asarray(q, dtype=np.float64) * descale_qk[:, :, None, None],
@@ -248,6 +279,8 @@ def sdpa_reference_from_request(
         top_left=req.diagonal == "top_left",
         seq_len_q=q_eff,
         seq_len_kv=kv_eff,
+        dropout_mask=keep,
+        dropout_scale=keep_scale,
     )
     out = out * descale_v[:, :, None, None]
     row_valid = np.arange(s_q)[None, :] < q_eff[:, None]

@@ -17,6 +17,7 @@ import pytest
 
 from dispatch.sdpa.bind_dense import (
     _DECLINED,
+    _dense_served,
     SDPA_DENSE_FEATURES,
     sdpa_dense_admits,
     sdpa_dense_candidates,
@@ -28,12 +29,14 @@ from dispatch.sdpa.common import (
     SdpaFp8,
 )
 from tests.sdpa.request_cases import (
+    DROPOUT_VALUE_REFUSALS,
     bhsd,
     bshd,
     make_request,
     packed,
     paged,
     ragged_offset,
+    seeded_dropout,
 )
 
 ARCHES = ("gfx942", "gfx950")
@@ -109,7 +112,18 @@ _DECLINED_CASES = {
         v=_ragged(_BASE.v),
         o=_ragged(_BASE.o),
     ),
-    "dropout": replace(_BASE, dropout=SdpaDropout(0.1)),
+    "dropout_mask": replace(
+        _BASE,
+        dropout=SdpaDropout(
+            0.1, mask=packed((2, 4, S, S), "uint8"), scale=packed((1,))
+        ),
+    ),
+    "dropout_scale": replace(
+        _BASE, dropout=replace(seeded_dropout(), scale=packed((1,)))
+    ),
+    "rng_dump": replace(
+        _BASE, dropout=replace(seeded_dropout(), rng_dump=packed((2, 4, S, S)))
+    ),
     "paged": paged(_BASE),
     "block_mask": replace(_BASE, block_mask=packed((2, 4, 1, 1), "uint8")),
     "fp8": _dense_request(dtype="fp8_e4m3", fp8=SdpaFp8(descale_q=packed((1,)))),
@@ -145,7 +159,9 @@ _NOT_YET_IMPLEMENTED_FEATURES = {
     "bias_broadcast",
     "alibi",
     "sinks",
-    "dropout",
+    "dropout_mask",
+    "dropout_scale",
+    "rng_dump",
     "paged",
     "block_mask",
     "fp8",
@@ -341,3 +357,49 @@ def test_candidates_is_empty_exactly_when_admits_is_false():
     for req in cases:
         ok, _ = sdpa_dense_admits(req)
         assert bool(sdpa_dense_candidates(req)) == ok
+
+
+# --- dropout -----------------------------------------------------------------
+
+
+@pytest.mark.parametrize("arch", ARCHES)
+@pytest.mark.parametrize("by_value", [False, True], ids=["device", "by_value"])
+def test_seeded_dropout_is_served_by_a_dropout_spec(arch, by_value):
+    req = replace(_BASE, arch=arch, dropout=seeded_dropout(0.2, by_value=by_value))
+    _admitted(req)
+    served, _ = _dense_served(req)
+    for _, probe, spec in served:
+        assert probe.dropout_p == 0.2
+        assert spec.kernel_spec.dropout
+
+
+@pytest.mark.parametrize("arch", ARCHES)
+def test_seeded_dropout_with_lse_is_served(arch):
+    req = replace(
+        _BASE, arch=arch, stats=packed((2, 4, S, 1)), dropout=seeded_dropout()
+    )
+    _admitted(req)
+
+
+def test_by_value_int32_seed_and_offset_are_served():
+    """hipDNN's INT32 seed and offset: by value, the host widens them."""
+    req = replace(
+        _BASE, dropout=seeded_dropout(by_value=True, seed="int32", offset="int32")
+    )
+    _admitted(req)
+
+
+@pytest.mark.parametrize("why", sorted(DROPOUT_VALUE_REFUSALS))
+def test_dropout_the_kernels_cannot_take_is_declined(why):
+    group, fragment = DROPOUT_VALUE_REFUSALS[why]
+    reason = _declined(replace(_BASE, dropout=group))
+    assert reason.startswith("dropout: ") and fragment in reason, reason
+
+
+@pytest.mark.parametrize("length_mode", ["padded", "ragged"])
+def test_varlen_dropout_is_left_to_unified(length_mode):
+    """The dense candidates take one sequence length per batch, so a padded or
+    ragged dropout request is declined here for its lengths, not for dropout,
+    and the unified gate serves it (test_unified_sdpa_wiring.py)."""
+    req = replace(_DECLINED_CASES[length_mode], dropout=seeded_dropout())
+    assert _declined(req).startswith(f"{length_mode}: ")

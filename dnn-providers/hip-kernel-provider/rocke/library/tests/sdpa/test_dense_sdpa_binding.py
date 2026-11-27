@@ -28,7 +28,7 @@ from tests.sdpa import cases as C
 from tests.sdpa import helpers as H
 from tests.sdpa.binding_harness import bind_tensors, outputs, strided_tensor
 from tests.sdpa.request_bridge import request_from_case
-from tests.sdpa.request_cases import bhsd, make_request, packed
+from tests.sdpa.request_cases import bhsd, make_request, packed, seeded_dropout
 
 ARCH = "gfx950"
 
@@ -205,3 +205,56 @@ def test_stats_of_another_dtype_are_refused():
     tensors["stats"] = torch.zeros(req.stats.dims, dtype=torch.float16)
     with pytest.raises(ValueError, match="stats must be fp32"):
         _DensePlan(req, tensors)
+
+
+# --- dropout: what reaches the dense binding ------------------------------------
+
+
+def _bind_dropout(monkeypatch, req, tensors):
+    """``sdpa_dense_bind`` on CPU with the inner dense binding replaced by a
+    recorder of the probe it was bound with and each launch's keywords."""
+    from rocke.dispatch.core import TorchBinding
+
+    from dispatch.attention import bindings
+    from dispatch.sdpa import bind_shared
+
+    probes, calls = [], []
+
+    def bind(probe, spec, kernel_tensors, **kw):
+        probes.append((probe, spec, kernel_tensors))
+        return TorchBinding(
+            launch=lambda **kw: calls.append(kw), grid=(1, 1, 1), block=(1, 1, 1)
+        )
+
+    monkeypatch.setattr(bindings, "bind_dense_attention_torch", bind)
+    monkeypatch.setattr(bind_shared, "resolve_stream", lambda s, device=None: 0)
+    return sdpa_dense_bind(req, tensors), probes, calls
+
+
+def _dropout_tensors(req, **rng):
+    return {n: strided_tensor(getattr(req, n)) for n in ("q", "k", "v", "o")} | rng
+
+
+def test_dropout_probability_reaches_the_spec_and_seed_each_launch(monkeypatch):
+    req = make_request(d=64, dropout=seeded_dropout(0.3, by_value=True))
+    tensors = _dropout_tensors(req, dropout_seed=5, dropout_offset=6)
+    binding, probes, calls = _bind_dropout(monkeypatch, req, tensors)
+    probe, spec, kernel_tensors = probes[0]
+    assert probe.dropout_p == 0.3 and spec.kernel_spec.dropout
+    # Read per launch, so they are not bound into the kernel tensors.
+    assert not {"dropout_seed", "dropout_offset"} & set(kernel_tensors)
+    binding.launch()
+    tensors["dropout_seed"] = 9
+    binding.launch()
+    assert [(c["dropout_seed"], c["dropout_offset"]) for c in calls] == [(5, 6), (9, 6)]
+
+
+def test_device_dropout_offset_of_another_dtype_is_refused_at_bind(monkeypatch):
+    req = make_request(d=64, dropout=seeded_dropout())
+    tensors = _dropout_tensors(
+        req,
+        dropout_seed=torch.tensor([1], dtype=torch.int64),
+        dropout_offset=torch.tensor([2], dtype=torch.int32),
+    )
+    with pytest.raises(ValueError, match="dropout_offset must be i64"):
+        _bind_dropout(monkeypatch, req, tensors)

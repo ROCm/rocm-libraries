@@ -70,6 +70,11 @@ def validate_tuning_attention_contract(request, problem, spec) -> None:
             f"request.emit_lse={bool(request.emit_lse)} disagrees with "
             f"problem.emit_lse={problem.emit_lse}"
         )
+    if (request.dropout_p > 0.0) != problem.dropout:
+        raise ValueError(
+            f"request.dropout_p={request.dropout_p} disagrees with "
+            f"problem.dropout={problem.dropout}"
+        )
 
     kernel_spec = spec.kernel_spec
     for name, expected in (
@@ -97,6 +102,12 @@ def validate_tuning_attention_contract(request, problem, spec) -> None:
                 f"kernel_spec.emit_lse={spec_lse} disagrees with "
                 f"problem.emit_lse={problem.emit_lse}"
             )
+    spec_dropout = bool(getattr(kernel_spec, "dropout", False))
+    if spec_dropout != problem.dropout:
+        raise ValueError(
+            f"kernel_spec.dropout={spec_dropout} disagrees with "
+            f"problem.dropout={problem.dropout}"
+        )
 
     reduce_spec = spec.reduce_spec
     if reduce_spec is not None:
@@ -248,14 +259,52 @@ def validate_tuning_attention_tensors(
 
 # Declared runner contracts. Inferring them with inspect.signature drops
 # arguments the runner does not list and launches a different kernel.
+_DENSE_RUNNER_INPUTS = frozenset(
+    {
+        "cu_seqlens_q",
+        "cu_seqlens_kv",
+        "block_tables",
+        "kv_lens",
+        "sinks",
+        "lse",
+        "dropout_seed",
+        "dropout_offset",
+    }
+)
 _DENSE_OPTIONAL_INPUTS = {
-    "gfx942": frozenset(
-        {"cu_seqlens_q", "cu_seqlens_kv", "block_tables", "kv_lens", "sinks", "lse"}
-    ),
-    "gfx950": frozenset(
-        {"cu_seqlens_q", "cu_seqlens_kv", "block_tables", "kv_lens", "sinks", "lse"}
-    ),
+    "gfx942": _DENSE_RUNNER_INPUTS,
+    "gfx950": _DENSE_RUNNER_INPUTS,
 }
+# Read per launch as well as at bind time: a training step changes them every call.
+_DROPOUT_INPUTS = ("dropout_seed", "dropout_offset")
+
+
+def _dropout_inputs(request, given: Mapping[str, Any]) -> dict:
+    """``dropout_seed`` / ``dropout_offset`` from ``given`` (Python ints or
+    one-element device int64 arrays, checked by the runner) plus ``dropout_p``
+    from the request, or ``{}`` with dropout off. Missing inputs with dropout
+    on, or inputs with it off, are refused: the kernel's argument list follows
+    the request, so either would launch the wrong kernel or no mask."""
+    present = [name for name in _DROPOUT_INPUTS if given.get(name) is not None]
+    p = float(request.dropout_p)
+    if p == 0.0:
+        if present:
+            raise ValueError(
+                f"{', '.join(present)} given but request.dropout_p is 0 (dropout off)"
+            )
+        return {}
+    if len(present) != len(_DROPOUT_INPUTS):
+        raise ValueError(
+            f"request.dropout_p={p} requires dropout_seed and dropout_offset"
+        )
+    return {name: given[name] for name in _DROPOUT_INPUTS} | {"dropout_p": p}
+
+
+def _refuse_stray_dropout_inputs(request, tensors: Mapping[str, Any]) -> None:
+    """Bind-time half of :func:`_dropout_inputs`: seed/offset bound with
+    dropout off fail here. With dropout on they may still come per launch."""
+    if float(request.dropout_p) == 0.0:
+        _dropout_inputs(request, tensors)
 
 
 _DENSE_SCALAR_OPTIONS = frozenset({"scale", "stream"})
@@ -310,7 +359,9 @@ def bind_dense_attention_torch(
 
     Grid and block come from the spec, the same values the candidate reports.
     An ``emit_lse`` spec also needs ``tensors["lse"]``: a caller-owned FP32
-    buffer the kernel fills in place (the runner validates it). For a paged spec,
+    buffer the kernel fills in place (the runner validates it). A dropout
+    request takes ``dropout_seed`` / ``dropout_offset`` from ``tensors`` or the
+    launch kwargs (see :func:`_dropout_inputs`). For a paged spec,
     ``unsafe_skip_paged_value_validation=True`` skips the runner's synchronized
     block-table/kv_lens value checks (graph capture, hot paths), as for the
     unified binding; the structural checks stay. Only for callers that guarantee
@@ -340,6 +391,12 @@ def bind_dense_attention_torch(
             "unsafe_skip_paged_value_validation must be a bool, got "
             f"{type(unsafe_skip).__name__}"
         )
+    if bool(spec.dropout) != (request.dropout_p > 0.0):
+        raise ValueError(
+            f"kernel_spec.dropout={spec.dropout} disagrees with "
+            f"request.dropout_p={request.dropout_p}"
+        )
+    _refuse_stray_dropout_inputs(request, tensors)
     bind_k_scale = bind_v_scale = None
     if getattr(spec, "kv_storage_dtype", None) is not None:
         bind_k_scale = _resolve_fp8_scale("k_scale", kwargs, "fp8 dense")
@@ -379,6 +436,11 @@ def bind_dense_attention_torch(
                     f"{request.arch} dense runner does not accept {name!r}"
                 )
             call[name] = value
+        call.update(
+            _dropout_inputs(
+                request, {n: _kw.get(n, tensors.get(n)) for n in _DROPOUT_INPUTS}
+            )
+        )
         if spec.paged:
             call["validate_paged"] = not unsafe_skip
         return run(**call)
@@ -414,7 +476,8 @@ def bind_tuning_attention_torch(
     """Bind an explicit unified 2D/3D tuning spec to paged tensors.
 
     Metadata values are snapshotted once; callers must rebind after mutating
-    sequence lengths or block tables. Trusted callers that enforce those
+    sequence lengths or block tables (``dropout_seed`` / ``dropout_offset``, read
+    from ``tensors`` or the launch kwargs, are not). Trusted callers that enforce those
     invariants externally may pass
     ``unsafe_skip_paged_value_validation=True`` to skip the synchronized value
     check; structural ABI validation is never skipped.
@@ -444,6 +507,7 @@ def bind_tuning_attention_torch(
         raise ValueError("emit_lse=True requires tensors['lse']")
     if has_lse and not problem.emit_lse:
         raise ValueError("tensors['lse'] was given but emit_lse is off")
+    _refuse_stray_dropout_inputs(request, tensors)
     # Explicit specs are built without additive bias (the spec makers reject
     # it), so refuse a bias-on problem or bias inputs here instead of launching
     # a kernel that would silently ignore them.
@@ -504,6 +568,9 @@ def bind_tuning_attention_torch(
             stream=int(_kw.get("stream", stream)),
             tuning_spec=spec,
             lse=_kw.get("lse", tensors.get("lse")),
+            **_dropout_inputs(
+                request, {n: _kw.get(n, tensors.get(n)) for n in _DROPOUT_INPUTS}
+            ),
         )
 
     return TorchBinding(

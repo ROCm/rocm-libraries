@@ -49,6 +49,7 @@ from .bind_shared import (
     asked_band,
     band_text,
     declined_table,
+    dropout_launch_inputs,
     keeps_asked_keys,
     launch_stream,
     nonfinite_scale_reject,
@@ -95,6 +96,7 @@ SDPA_DENSE_FEATURES = frozenset(
         "window_br",
         "noncausal_window",
         "lse",
+        "dropout",
         "mma_core_mode",
         "implementation_hint",
     }
@@ -119,7 +121,9 @@ _DECLINED = declined_table(
         "sinks",
         "padded",
         "ragged",
-        "dropout",
+        "dropout_mask",
+        "dropout_scale",
+        "rng_dump",
         "paged",
         "block_mask",
         "fp8",
@@ -338,9 +342,11 @@ def sdpa_dense_bind(req: SdpaRequest, tensors: Mapping[str, Any]) -> TorchBindin
     runs the first dense candidate that serves the request, at its default
     spec, on the current stream (Torch's, or HIP's null stream without
     torch), with the request's scale. Every array's element type must be the
-    one its request descriptor names. Raises ``ValueError`` with the admission
-    reason for a declined request. ``launch(stream=...)`` accepts only the
-    current stream; see :func:`~dispatch.sdpa.bind_shared.launch_stream`.
+    one its request descriptor names. A dropout request also takes
+    ``dropout_seed`` and ``dropout_offset``, read at every launch (see
+    :func:`~dispatch.sdpa.bind_shared.dropout_launch_inputs`). Raises
+    ``ValueError`` with the admission reason for a declined request.
+    ``launch(stream=...)`` accepts only the current stream; see :func:`~dispatch.sdpa.bind_shared.launch_stream`.
     """
     served, reason = _dense_served(req)
     if not served:
@@ -349,6 +355,8 @@ def sdpa_dense_bind(req: SdpaRequest, tensors: Mapping[str, Any]) -> TorchBindin
     from dispatch.attention.bindings import bind_dense_attention_torch
 
     _, probe, spec = served[0]
+    # Refuses missing or malformed seed/offset before anything is allocated.
+    dropout_launch_inputs(req, tensors)
     plan = _DensePlan(req, tensors)
     binding = bind_dense_attention_torch(
         probe, spec, plan.kernel_tensors(), scale=float(req.scale)
@@ -358,8 +366,9 @@ def sdpa_dense_bind(req: SdpaRequest, tensors: Mapping[str, Any]) -> TorchBindin
     def launch(*, stream: Any = None) -> None:
         """Pack, launch and unpack, all on the current stream."""
         launch_on = launch_stream(stream, device, "dense")
+        dropout = dropout_launch_inputs(req, tensors)
         plan.pack(launch_on)
-        binding.launch(stream=launch_on)
+        binding.launch(stream=launch_on, **dropout)
         plan.unpack(launch_on)
 
     return TorchBinding(launch=launch, grid=binding.grid, block=binding.block)

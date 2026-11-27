@@ -33,7 +33,13 @@ from tests.sdpa import cases as C
 from tests.sdpa import helpers as H
 from tests.sdpa.binding_harness import bind_tensors, outputs, strided_tensor
 from tests.sdpa.request_bridge import request_from_case
-from tests.sdpa.request_cases import bhsd, make_request, packed, ragged_offset
+from tests.sdpa.request_cases import (
+    bhsd,
+    make_request,
+    packed,
+    ragged_offset,
+    seeded_dropout,
+)
 
 ARCH = "gfx950"
 
@@ -455,3 +461,89 @@ def test_the_cpu_table_binds_k_and_v_both_in_place_and_copied():
         if seen == {True, False}:
             return
     pytest.fail(f"the CPU case table binds K only with k_inplace in {seen}")
+
+
+# --- dropout: what reaches the kernel ------------------------------------------
+
+
+def _bind_dropout(monkeypatch, req, tensors):
+    """``sdpa_unified_bind`` on CPU with the kernel replaced by a recorder of
+    its keyword arguments."""
+    from dispatch.attention import bindings
+    from dispatch.sdpa import bind_shared
+    from kernels.common import attention_unified
+
+    monkeypatch.setattr(
+        bindings, "validate_tuning_attention_tensors", lambda problem, t, **kw: 1
+    )
+    monkeypatch.setattr(bind_shared, "resolve_stream", lambda s, device=None: 0)
+    calls = []
+    monkeypatch.setattr(
+        attention_unified, "run_unified_attention_torch", lambda **kw: calls.append(kw)
+    )
+    return sdpa_unified_bind(req, tensors), calls
+
+
+def _dropout_request(**dropout):
+    lens = packed((2, 1, 1, 1), "int32")
+    return make_request(
+        d=64,
+        s_q=8,
+        s_kv=12,
+        right_bound=0,
+        diagonal="bottom_right",
+        padding_mask=True,
+        seq_len_q=lens,
+        seq_len_kv=lens,
+        dropout=seeded_dropout(0.3, **dropout),
+    )
+
+
+def _dropout_tensors(req, **rng):
+    tensors = {n: strided_tensor(getattr(req, n)) for n in ("q", "k", "v", "o")}
+    tensors["seq_len_q"] = torch.tensor([5, 8], dtype=torch.int32)
+    tensors["seq_len_kv"] = torch.tensor([12, 3], dtype=torch.int32)
+    return tensors | rng
+
+
+def test_by_value_dropout_reaches_the_kernel_with_the_declared_extents(monkeypatch):
+    """The mask spans the declared s_q x s_kv, not the longest sequence, and
+    seed and offset are read again at every launch."""
+    req = _dropout_request(by_value=True, offset="int32")
+    tensors = _dropout_tensors(req, dropout_seed=2**40, dropout_offset=7)
+    binding, calls = _bind_dropout(monkeypatch, req, tensors)
+    binding.launch()
+    tensors["dropout_offset"] = 8
+    binding.launch()
+    assert [c["dropout_offset"] for c in calls] == [7, 8]
+    call = calls[0]
+    assert (call["dropout_seed"], call["dropout_p"]) == (2**40, 0.3)
+    problem = call["problem"]
+    assert problem.dropout
+    assert (problem.max_seqlen_q, problem.max_seqlen_k) == (8, 12)
+
+
+def test_device_dropout_seed_and_offset_reach_the_kernel_as_arrays(monkeypatch):
+    req = _dropout_request()
+    seed = torch.tensor([3], dtype=torch.int64)
+    offset = torch.tensor([4], dtype=torch.int64)
+    tensors = _dropout_tensors(req, dropout_seed=seed, dropout_offset=offset)
+    binding, calls = _bind_dropout(monkeypatch, req, tensors)
+    binding.launch()
+    assert calls[0]["dropout_seed"] is seed and calls[0]["dropout_offset"] is offset
+
+
+def test_dropout_without_its_seed_is_refused_at_bind(monkeypatch):
+    req = _dropout_request(by_value=True)
+    with pytest.raises(ValueError, match=r"dropout_seed: the request has dropout"):
+        _bind_dropout(monkeypatch, req, _dropout_tensors(req, dropout_offset=1))
+
+
+def test_no_dropout_launch_passes_no_dropout_arguments(monkeypatch):
+    """Seed and offset given for a request without dropout are not read."""
+    req = replace(_dropout_request(), dropout=None)
+    tensors = _dropout_tensors(req, dropout_seed=1, dropout_offset=2)
+    binding, calls = _bind_dropout(monkeypatch, req, tensors)
+    binding.launch()
+    assert not {"dropout_seed", "dropout_offset", "dropout_p"} & set(calls[0])
+    assert not calls[0]["problem"].dropout

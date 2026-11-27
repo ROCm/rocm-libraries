@@ -16,7 +16,15 @@ from dataclasses import replace
 import numpy as np
 import pytest
 
-from dispatch.sdpa.bind_shared import kept_keys
+from rocke.tests.host_arrays import HostArray
+
+from dispatch.attention import attention_problem
+from dispatch.sdpa.bind_dense import sdpa_dense_admits
+from dispatch.sdpa.bind_shared import (
+    dropout_launch_inputs,
+    kept_keys,
+    to_attention_request,
+)
 from dispatch.sdpa.bind_unified import (
     _DECLINED,
     _lengths,
@@ -31,12 +39,14 @@ from dispatch.sdpa.common import (
     SdpaFp8,
 )
 from tests.sdpa.request_cases import (
+    DROPOUT_VALUE_REFUSALS,
     bhsd,
     bshd,
     make_request,
     packed,
     paged,
     ragged_offset,
+    seeded_dropout,
 )
 
 UNIFIED_HEAD_SIZES = (64, 128, 256)
@@ -91,7 +101,18 @@ _DECLINED_CASES = {
     "bias_broadcast": replace(_BASE, bias=SdpaBias(packed((8, 8)))),
     "alibi": replace(_BASE, alibi=True),
     "sinks": replace(_BASE, sink_token=packed((1, 4, 1, 1))),
-    "dropout": replace(_BASE, dropout=SdpaDropout(0.1)),
+    "dropout_mask": replace(
+        _BASE,
+        dropout=SdpaDropout(
+            0.1, mask=packed((2, 4, 8, 8), "uint8"), scale=packed((1,))
+        ),
+    ),
+    "dropout_scale": replace(
+        _BASE, dropout=replace(seeded_dropout(), scale=packed((1,)))
+    ),
+    "rng_dump": replace(
+        _BASE, dropout=replace(seeded_dropout(), rng_dump=packed((2, 4, 8, 8)))
+    ),
     "paged": paged(_BASE),
     "block_mask": replace(_BASE, block_mask=packed((2, 4, 1, 1), "uint8")),
     "fp8": _unified_request(dtype="fp8_e4m3", fp8=SdpaFp8(descale_q=packed((1,)))),
@@ -124,7 +145,9 @@ _NOT_YET_IMPLEMENTED_FEATURES = {
     "bias_broadcast",
     "alibi",
     "sinks",
-    "dropout",
+    "dropout_mask",
+    "dropout_scale",
+    "rng_dump",
     "paged",
     "block_mask",
     "fp8",
@@ -551,3 +574,131 @@ def test_candidates_are_unified_route_candidates_in_priority_order():
     priorities = [by_name[n].priority for n in names]
     assert priorities == sorted(priorities)
     assert all(by_name[n].algorithm != "unified_tuning" for n in names)
+
+
+# --- dropout -----------------------------------------------------------------
+
+# Bottom-right causal: the one band gfx942's unified kernels compute.
+_CAUSAL = replace(_BASE, right_bound=0, diagonal="bottom_right")
+_LENS = packed((2, 1, 1, 1), "int32")
+_VARLEN = {
+    "padded": replace(_CAUSAL, padding_mask=True, seq_len_q=_LENS, seq_len_kv=_LENS),
+    "ragged": replace(
+        _CAUSAL,
+        q=_ragged(_BASE.q),
+        k=_ragged(_BASE.k),
+        v=_ragged(_BASE.v),
+        o=_ragged(_BASE.o),
+    ),
+}
+
+
+@pytest.mark.parametrize("arch", ARCHES)
+@pytest.mark.parametrize("by_value", [False, True], ids=["device", "by_value"])
+def test_seeded_dropout_is_admitted(arch, by_value):
+    req = replace(_CAUSAL, arch=arch, dropout=seeded_dropout(0.2, by_value=by_value))
+    _admitted(req)
+    attn = to_attention_request(req)
+    assert attn.dropout_p == 0.2
+    assert attention_problem(attn).dropout
+
+
+@pytest.mark.parametrize("arch", ARCHES)
+def test_seeded_dropout_with_lse_is_admitted(arch):
+    req = _unified_request(
+        arch=arch, right_bound=0, stats=packed((2, 4, 8, 1)), dropout=seeded_dropout()
+    )
+    _admitted(req)
+
+
+@pytest.mark.parametrize("arch", ARCHES)
+@pytest.mark.parametrize("length_mode", sorted(_VARLEN))
+def test_varlen_dropout_is_admitted_here_and_declined_by_dense(arch, length_mode):
+    """Dense SDPA takes one length per batch, so unified serves padded and
+    ragged dropout, with the mask over the declared extents."""
+    req = replace(_VARLEN[length_mode], arch=arch, dropout=seeded_dropout())
+    _admitted(req)
+    ok, reason = sdpa_dense_admits(req)
+    assert not ok and reason.startswith(f"{length_mode}: ")
+    problem = attention_problem(to_attention_request(req))
+    assert (problem.max_seqlen_q, problem.max_seqlen_k) == (req.s_q, req.s_kv)
+
+
+@pytest.mark.parametrize("why", sorted(DROPOUT_VALUE_REFUSALS))
+def test_dropout_the_kernels_cannot_take_is_declined(why):
+    group, fragment = DROPOUT_VALUE_REFUSALS[why]
+    reason = _declined(replace(_BASE, dropout=group))
+    assert reason.startswith("dropout: ") and fragment in reason, reason
+
+
+def test_no_dropout_request_translates_to_dropout_off():
+    assert to_attention_request(_BASE).dropout_p == 0.0
+
+
+# --- dropout_launch_inputs: what a launch reads ------------------------------
+
+
+def _launch_inputs(group, **given):
+    return dropout_launch_inputs(replace(_BASE, dropout=group), given)
+
+
+def test_by_value_seed_and_offset_are_ints_and_int32_widens():
+    group = seeded_dropout(by_value=True, seed="int64", offset="int32")
+    got = _launch_inputs(group, dropout_seed=2**40 + 3, dropout_offset=-5)
+    assert got == {"dropout_seed": 2**40 + 3, "dropout_offset": -5}
+    assert all(type(v) is int for v in got.values())
+
+
+def test_device_seed_and_offset_pass_through_as_arrays():
+    seed, offset = HostArray((1,), "i64"), HostArray((1,), "i64")
+    got = _launch_inputs(seeded_dropout(), dropout_seed=seed, dropout_offset=offset)
+    assert got["dropout_seed"] is seed and got["dropout_offset"] is offset
+
+
+def test_no_dropout_ignores_seed_and_offset():
+    """At probability 0 hipDNN reads neither, so they may still be passed."""
+    assert dropout_launch_inputs(_BASE, {"dropout_seed": 1, "dropout_offset": 2}) == {}
+
+
+@pytest.mark.parametrize(
+    "group, given, match",
+    [
+        (
+            seeded_dropout(by_value=True),
+            {"dropout_seed": 1},
+            "dropout_offset: the request has dropout",
+        ),
+        (
+            seeded_dropout(by_value=True),
+            {"dropout_seed": 1.0, "dropout_offset": 2},
+            "must be an int, got float",
+        ),
+        (
+            seeded_dropout(by_value=True),
+            {"dropout_seed": True, "dropout_offset": 2},
+            "must be an int, got bool",
+        ),
+        (
+            seeded_dropout(by_value=True, seed="int32"),
+            {"dropout_seed": 2**31, "dropout_offset": 2},
+            "does not fit the request's INT32",
+        ),
+        (
+            seeded_dropout(by_value=True),
+            {"dropout_seed": 2**63, "dropout_offset": 2},
+            "does not fit the request's INT64",
+        ),
+        (
+            seeded_dropout(),
+            {
+                "dropout_seed": HostArray((1,), "i32"),
+                "dropout_offset": HostArray((1,), "i64"),
+            },
+            "dropout_seed must be i64",
+        ),
+    ],
+    ids=["missing", "float", "bool", "int32_range", "int64_range", "device_dtype"],
+)
+def test_launch_inputs_the_request_does_not_describe_are_refused(group, given, match):
+    with pytest.raises(ValueError, match=match):
+        _launch_inputs(group, **given)

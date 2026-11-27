@@ -51,6 +51,8 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, fields, is_dataclass, replace
 from enum import IntEnum
+import math
+import numbers
 from operator import index
 from typing import Any, Tuple, get_type_hints
 
@@ -210,6 +212,9 @@ class AttentionRequest(OperatorRequest):
     # count. Reported as the ``runtime_head_dims`` feature, so only candidates
     # whose kernels implement it (RDNA WMMA) admit it.
     runtime_head_dims: bool = False
+    # 0 = off. Seed and offset are launch inputs, not request fields: a training
+    # step changes them every call while the kernel stays the same.
+    dropout_p: float = 0.0
     # Query-side options of a packed request (hipDNN's paged SDPA graphs).
     # ``dense_q`` (paged only): Q / O (and LSE) are batch-strided
     # ``[B, seqlen_q, Hq, D]`` with no ``cu_seqlens_q``. ``seqused_q`` (ragged
@@ -249,6 +254,20 @@ class AttentionRequest(OperatorRequest):
                 f"attn_bias_dtype={self.attn_bias_dtype!r}, "
                 f"expected one of {ATTN_BIAS_DTYPES}"
             )
+        # A bool is an int: ``True`` would pass the range check as p = 1. Real
+        # takes numpy scalars too.
+        p = self.dropout_p
+        if (
+            isinstance(p, bool)
+            or not isinstance(p, numbers.Real)
+            or not math.isfinite(p)
+            or not 0.0 <= p < 1.0
+        ):
+            raise ValueError(
+                "AttentionRequest rejected - "
+                f"dropout_p={p!r}, expected a finite number in [0, 1)"
+            )
+        object.__setattr__(self, "dropout_p", float(p))
 
     def normalized(self) -> dict:
         d = asdict(self)
@@ -257,6 +276,9 @@ class AttentionRequest(OperatorRequest):
         for name in QUERY_SIDE_OPTIONS:
             if d[name] is False:
                 del d[name]
+        # Likewise dropout: every dropout-off request keeps its request_hash.
+        if d["dropout_p"] == 0.0:
+            del d["dropout_p"]
         d["dtype"] = self.dtype.lower()
         # IntEnum and raw-int callers describe the same request/cache identity.
         d["mask_type"] = _parse_attention_mask_type(self.mask_type).value
@@ -343,6 +365,8 @@ class AttentionRequest(OperatorRequest):
             active.add("lse")
         if self.runtime_head_dims:
             active.add("runtime_head_dims")
+        if self.dropout_p > 0.0:
+            active.add("dropout")
         active.update(
             name for name in QUERY_SIDE_OPTIONS if getattr(self, name) is True
         )
@@ -841,6 +865,7 @@ def _problem_with_num_cus(
         causal_top_left=band.top_left,
         right_bound=band.kernel_right_bound,
         emit_lse=bool(req.emit_lse),
+        dropout=req.dropout_p > 0.0,
     )
 
 
@@ -916,18 +941,24 @@ class AttentionSpec:
     # spec_hash either. LSE-off leaves both exactly as before the field existed
     # (see :meth:`identity`).
     emit_lse: bool = False
+    # Dropout adds kernel arguments: a distinct kernel, kept out of the identity
+    # while off like ``emit_lse``.
+    dropout: bool = False
 
     def __post_init__(self) -> None:
-        # identity() and kernel_name() branch on emit_lse, so a truthy non-bool
-        # (1, "yes") would silently produce an LSE identity: refuse it instead.
+        # identity() and kernel_name() branch on emit_lse and dropout, so a truthy
+        # non-bool (1, "yes") would silently produce their identity: refuse it.
         require_bool("emit_lse", self.emit_lse)
+        require_bool("dropout", self.dropout)
 
     def identity(self) -> dict:
-        """``spec_hash`` payload: every field, except ``emit_lse`` when it is off,
-        so an LSE-off spec keeps the hash that stored caches already hold."""
+        """``spec_hash`` payload: every field, except ``emit_lse`` and ``dropout``
+        when they are off, so such a spec keeps the hash that stored caches
+        already hold."""
         payload = asdict(self)
-        if not self.emit_lse:
-            del payload["emit_lse"]
+        for name in ("emit_lse", "dropout"):
+            if not payload[name]:
+                del payload[name]
         return payload
 
     def kernel_name(self) -> str:
@@ -953,6 +984,8 @@ class AttentionSpec:
             parts.append(f"sw{self.sliding_window}")
         if self.emit_lse:
             parts.append("lse")
+        if self.dropout:
+            parts.append("do")
         return kernel_name_join(*parts)
 
 
@@ -1047,15 +1080,16 @@ class AttentionTuningSpec:
             if not is_dataclass(spec):
                 raise TypeError(f"tuning kernel spec must be a dataclass, got {spec!r}")
             # LSE fields at their defaults are left out (emit_lse off, lse_layout
-            # token-major), so those keys and the spec_hash taken over them are the
-            # ones stored before the fields existed. The RDNA WMMA prefill
+            # token-major), as is dropout off, so those keys and the spec_hash
+            # taken over them are the ones stored before the fields existed. The
+            # RDNA WMMA prefill
             # ``dense_q`` / ``seqused_q`` layout options (from the request's fields
             # of the same names) are left out the same way while they are off.
             return tuple(
                 (f.name, repr(getattr(spec, f.name)))
                 for f in fields(spec)
                 if not (
-                    f.name in ("emit_lse", *QUERY_SIDE_OPTIONS)
+                    f.name in ("emit_lse", "dropout", *QUERY_SIDE_OPTIONS)
                     and not getattr(spec, f.name)
                 )
                 and not (f.name == "lse_layout" and spec.lse_layout == "token_major")

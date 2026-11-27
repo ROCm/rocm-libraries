@@ -16,6 +16,7 @@ describes -- a torch tensor or a :class:`~rocke.runtime.device_array.DeviceArray
 from __future__ import annotations
 
 import math
+import numbers
 from collections.abc import Mapping, Sequence
 from itertools import pairwise
 from typing import TYPE_CHECKING, Any
@@ -44,6 +45,7 @@ __all__ = [
     "band_text",
     "check_dtype",
     "declined_table",
+    "dropout_launch_inputs",
     "host_ints",
     "keeps_asked_keys",
     "kept_keys",
@@ -94,6 +96,9 @@ def to_attention_request(req: SdpaRequest) -> AttentionRequest:
         mask_type = AttentionMaskType.NO_MASK
 
     is_window = mask_type == AttentionMaskType.SLIDING_WINDOW
+    # The gates decline every dropout form but probability + seed + offset before
+    # translating, so only that form reaches the attention request.
+    dropout_p = 0.0 if req.dropout is None else req.dropout.probability or 0.0
     return AttentionRequest(
         batch=req.batch,
         nhead_q=req.h_q,
@@ -113,6 +118,7 @@ def to_attention_request(req: SdpaRequest) -> AttentionRequest:
         use_sinks=req.sink_token is not None,
         use_alibi=req.alibi,
         emit_lse=req.stats is not None,
+        dropout_p=dropout_p,
     )
 
 
@@ -213,7 +219,9 @@ _SHARED_DECLINE_REASONS = {
     "bias_broadcast": "NOT_YET_IMPLEMENTED: no {family} candidate declares additive-bias support",
     "alibi": "NOT_YET_IMPLEMENTED: no {family} candidate declares alibi support",
     "sinks": "NOT_YET_IMPLEMENTED: no reference oracle for sink tokens",
-    "dropout": "NOT_YET_IMPLEMENTED: the {family} kernels have no dropout",
+    "dropout_mask": "NOT_YET_IMPLEMENTED: the {family} kernels take no explicit dropout mask",
+    "dropout_scale": "NOT_YET_IMPLEMENTED: the {family} kernels take no dropout scale tensor",
+    "rng_dump": "NOT_YET_IMPLEMENTED: the {family} kernels do not write the dropout mask",
     "paged": "NOT_YET_IMPLEMENTED: the page-table format is not mapped (see SdpaPaged)",
     "block_mask": "NOT_YET_IMPLEMENTED: the {family} kernels take no block mask",
     "fp8": "NOT_YET_IMPLEMENTED: the {family} kernels take no descale/scale tensors",
@@ -282,6 +290,56 @@ def value_rejects(req: SdpaRequest, family: str) -> tuple[bool, str] | None:
         )
     if req.padding_mask and req.seq_len_q is None and req.seq_len_kv is None:
         return False, "padded: padding_mask is set but no seq_len tensor is given"
+    return _dropout_rejects(req, family)
+
+
+# hipDNN's seed and offset dtypes; the kernels take an int64 of each.
+_DROPOUT_RNG_DTYPES = ("int64", "int32")
+
+
+def _dropout_rejects(req: SdpaRequest, family: str) -> tuple[bool, str] | None:
+    """The probability + seed + offset form the kernels draw their mask from.
+
+    A device INT32 seed or offset is declined rather than copied: the kernels
+    read 8 bytes from a device pointer, and widening it would add a copy per
+    launch. A by-value one is widened on the host
+    (:func:`dropout_launch_inputs`).
+    """
+    drop = req.dropout
+    if drop is None:
+        return None
+    p = drop.probability
+    if p is None:
+        return False, (
+            "dropout: a seed or offset without a dropout probability is not a "
+            "dropout request hipDNN defines"
+        )
+    if not (math.isfinite(p) and 0.0 <= p < 1.0):
+        return False, (
+            f"dropout: the {family} kernels take a probability in [0, 1), got {p}"
+        )
+    for name in ("seed", "offset"):
+        t = getattr(drop, name)
+        if t is None:
+            return False, (
+                f"dropout: probability {p} needs both a seed and an offset tensor; "
+                f"the {name} is missing"
+            )
+        if t.dtype not in _DROPOUT_RNG_DTYPES or t.volume != 1 or t.ragged:
+            return False, (
+                f"dropout: the {name} must be one INT64 or INT32 element, got "
+                f"{t.dtype} of dims {t.dims}"
+            )
+        if t.dtype == "int32" and not t.by_value:
+            return False, (
+                f"dropout: the {family} kernels read a device {name} as int64; "
+                f"a device INT32 {name} is not supported"
+            )
+        if t.dtype == "int64" and not t.by_value and t.alignment < 8:
+            return False, (
+                f"dropout: the device {name} is {t.alignment}-byte aligned; the "
+                f"{family} kernels declare an 8-byte aligned pointer"
+            )
     return None
 
 
@@ -309,6 +367,45 @@ def launch_stream(stream: Any, device: Any, family: str) -> int:
         "to it; make the stream current (`with torch.cuda.stream(s):`) around "
         "launch() instead"
     )
+
+
+def dropout_launch_inputs(req: SdpaRequest, tensors: Mapping[str, Any]) -> dict:
+    """``dropout_seed`` / ``dropout_offset`` for one launch, or ``{}`` without
+    dropout.
+
+    Read from ``tensors`` on every launch, not once at bind: a training step
+    changes them every call. A by-value seed or offset is a Python int (an
+    INT32 one widened to int64), a device one a one-element int64 array the
+    kernel reads (the runner checks its shape and device). Keys given for a
+    request without dropout are ignored: at probability 0 hipDNN does not read
+    them either.
+    """
+    drop = req.dropout
+    if drop is None:
+        return {}
+    out = {}
+    for name in ("seed", "offset"):
+        key = f"dropout_{name}"
+        desc = getattr(drop, name)
+        if tensors.get(key) is None:
+            raise ValueError(f"{key}: the request has dropout; pass tensors[{key!r}]")
+        value = tensors[key]
+        if not desc.by_value:
+            check_dtype(key, value, desc)
+            out[key] = value
+            continue
+        if isinstance(value, bool) or not isinstance(value, numbers.Integral):
+            raise ValueError(
+                f"{key}: the request passes the {name} by value, so it must be an "
+                f"int, got {type(value).__name__}"
+            )
+        value = int(value)
+        if desc.dtype == "int32" and not -(1 << 31) <= value < (1 << 31):
+            raise ValueError(f"{key}={value} does not fit the request's INT32")
+        if desc.dtype == "int64" and not -(1 << 63) <= value < (1 << 63):
+            raise ValueError(f"{key}={value} does not fit the request's INT64")
+        out[key] = value
+    return out
 
 
 # --- operands ------------------------------------------------------------------

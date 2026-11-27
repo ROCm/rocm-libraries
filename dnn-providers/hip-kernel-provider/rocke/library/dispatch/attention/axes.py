@@ -159,6 +159,9 @@ DENSE_PROBLEM_FIELDS = frozenset(
         "num_kv_blocks",
         "use_sinks",
         "causal_bottom_right",
+        # Set from the request's dropout_p: a tuning point never adds or drops it,
+        # and it stays out of the defaults behind every config_key.
+        "dropout",
         # A fact of the target GPU, not a tuning choice: the base spec keeps
         # its default (8 XCDs).
         "chiplet_num_xcds",

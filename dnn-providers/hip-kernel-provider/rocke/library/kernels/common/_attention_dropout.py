@@ -23,8 +23,6 @@ from __future__ import annotations
 import numbers
 from dataclasses import dataclass
 
-import numpy as np
-
 from rocke.core.ir import F32, I32, I64, PtrType
 from rocke.helpers.attention_dropout import (
     dropout_keep,
@@ -32,7 +30,6 @@ from rocke.helpers.attention_dropout import (
     dropout_words,
 )
 from rocke.helpers.rng import philox_counter_add
-from rocke.numeric.philox_dropout import dropout_scale, dropout_threshold
 
 #: Keys per Philox call: SEM-015 uses the four words of a call for four
 #: consecutive keys, so counters advance once per four keys.
@@ -212,6 +209,8 @@ def _seed_or_offset(name: str, value, q) -> tuple[object, int]:
     An integer (as u64 or i64) goes by value; an array (``DeviceArray`` or
     torch tensor) of one int64 element on ``q``'s device is read by the kernel.
     """
+    import numpy as np
+
     from rocke.runtime.device_array import array_info
 
     if isinstance(value, (bool, np.bool_)):
@@ -249,6 +248,8 @@ def dropout_launch_args(
     ``(B, Hq, max_sq, max_sk)``. Inputs that disagree with the spec raise
     rather than launch a kernel whose ABI has (or lacks) the dropout params.
     """
+    from rocke.numeric.philox_dropout import dropout_scale, dropout_threshold
+
     named = (
         ("dropout_seed", dropout_seed),
         ("dropout_offset", dropout_offset),

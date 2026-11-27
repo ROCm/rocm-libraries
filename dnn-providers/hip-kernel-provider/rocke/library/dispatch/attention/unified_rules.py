@@ -153,7 +153,7 @@ def _variant_axes(variant: AttentionGeometryVariant):
     return tuning_axes(variant.arch, variant.path)
 
 
-_LSE_OUTPUT_FIELDS = frozenset({"emit_lse", "lse_layout"})
+_CALLER_FIELDS = frozenset({"emit_lse", "lse_layout", "dropout"})
 
 
 @lru_cache(maxsize=None)
@@ -356,14 +356,14 @@ class UnifiedSpace(WavesPerEuSpace):
         recorded = self.recorded(base)
         return {
             "codepath": dict(self.fixed(base)),
-            # The LSE output fields are outputs the caller selects, not defaults
-            # that knobs are a delta against: keeping them out of the kernel and
-            # the split-KV reduce defaults leaves every config_key, and so every
-            # stored pin, as before the fields existed.
+            # The LSE output and dropout fields are what the caller selects, not
+            # defaults that knobs are a delta against: keeping them out of the
+            # kernel and the split-KV reduce defaults leaves every config_key, and
+            # so every stored pin, as before the fields existed.
             "kernel": {
                 name: value
                 for name, value in _declared_defaults(type(kernel.kernel_spec))
-                if name not in recorded and name not in _LSE_OUTPUT_FIELDS
+                if name not in recorded and name not in _CALLER_FIELDS
             },
             "reduce": (
                 None
@@ -371,7 +371,7 @@ class UnifiedSpace(WavesPerEuSpace):
                 else {
                     name: value
                     for name, value in _declared_defaults(type(reduce))
-                    if name not in _LSE_OUTPUT_FIELDS
+                    if name not in _CALLER_FIELDS
                 }
             ),
         }
