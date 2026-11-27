@@ -1,6 +1,12 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <cstddef>
+#include <deque>
+#include <memory>
+#include <thread>
+#include <vector>
+
 #include <flatbuffers/flatbuffers.h>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
@@ -89,4 +95,49 @@ TEST_F(TestHipblasltHipdnnEnginePluginHandle, SetStreamStoresStream)
 
     EXPECT_NO_THROW(_handle->setStream(fakeStream));
     EXPECT_EQ(_handle->getStream(), fakeStream);
+}
+
+// Engine-details buffers are stored and removed from every thread that queries engine details
+// through one handle. Fails (the map is corrupted and the test crashes under this load) if that
+// access is not synchronized.
+TEST_F(TestHipblasltHipdnnEnginePluginHandle, ConcurrentStoreAndRemoveOfDistinctBuffers)
+{
+    constexpr int NUM_THREADS = 8;
+    constexpr int NUM_PAIRS = 2000;
+    // Removal trails the store by a window so the map holds entries (and rehashes) while the
+    // other threads insert and erase.
+    constexpr size_t WINDOW = 16;
+
+    std::vector<std::thread> threads;
+    threads.reserve(NUM_THREADS);
+    for(int t = 0; t < NUM_THREADS; ++t)
+    {
+        threads.emplace_back([this]() {
+            // Keyed by the buffer's own address, as the engine does.
+            std::deque<const void*> pending;
+            for(int i = 0; i < NUM_PAIRS; ++i)
+            {
+                flatbuffers::FlatBufferBuilder builder;
+                builder.Finish(builder.CreateString("test"));
+                auto buffer = std::make_unique<flatbuffers::DetachedBuffer>(builder.Release());
+                const void* key = buffer->data();
+                _handle->storeEngineDetailsDetachedBuffer(key, std::move(buffer));
+                pending.push_back(key);
+
+                if(pending.size() > WINDOW)
+                {
+                    _handle->removeEngineDetailsDetachedBuffer(pending.front());
+                    pending.pop_front();
+                }
+            }
+            for(const void* key : pending)
+            {
+                _handle->removeEngineDetailsDetachedBuffer(key);
+            }
+        });
+    }
+    for(auto& thread : threads)
+    {
+        thread.join();
+    }
 }

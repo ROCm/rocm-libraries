@@ -85,6 +85,31 @@ namespace hiptensor
         return std::accumulate(lengths.begin(), lengths.end(), T{1}, std::multiplies<T>());
     }
 
+    // Get the number of elements a tensor's lengths and strides can address: one past its
+    // largest offset. This is the element count of the buffer that holds the tensor, which
+    // exceeds elementsFromLengths when the strides are not packed. Returns 0 when any length is
+    // 0, and the packed element count when lengths and strides disagree in size.
+    template <typename T>
+    static inline T elementSpaceFromLengthsAndStrides(std::vector<T> const& lengths,
+                                                      std::vector<T> const& strides)
+    {
+        if(strides.size() != lengths.size())
+        {
+            return elementsFromLengths(lengths);
+        }
+
+        T space = 1;
+        for(std::size_t i = 0; i < lengths.size(); i++)
+        {
+            if(lengths[i] == 0)
+            {
+                return 0;
+            }
+            space += (lengths[i] - 1) * strides[i];
+        }
+        return space;
+    }
+
     inline std::vector<std::size_t> getTensorLengths(const hiptensorTensorDescriptor_t desc)
     {
         return desc ? desc->mLengths : std::vector<std::size_t>{};

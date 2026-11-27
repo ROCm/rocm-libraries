@@ -5,7 +5,7 @@
       "id": "2_3_16_128_bfp16_nchw_1c496e",
       "values": {
         "io_data_type": "bfloat16",
-        "intermediate_data_type": "bfloat16",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -21,7 +21,7 @@
               128,
               1
             ],
-            "data_type": "bfloat16"
+            "data_type": "float"
           },
           {
             "uid": 1,
@@ -103,7 +103,7 @@
       "id": "2_3_16_128_bfp16_nchw_ebe6f3",
       "values": {
         "io_data_type": "bfloat16",
-        "intermediate_data_type": "bfloat16",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -119,7 +119,7 @@
               128,
               1
             ],
-            "data_type": "bfloat16"
+            "data_type": "float"
           },
           {
             "uid": 1,
@@ -201,7 +201,7 @@
       "id": "2_3_16_128_bfp16_nchw_d9a8d3",
       "values": {
         "io_data_type": "bfloat16",
-        "intermediate_data_type": "bfloat16",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -217,7 +217,7 @@
               128,
               1
             ],
-            "data_type": "bfloat16"
+            "data_type": "float"
           },
           {
             "uid": 1,
@@ -299,7 +299,7 @@
       "id": "2_3_16_128_fp16_nchw_f6a485",
       "values": {
         "io_data_type": "half",
-        "intermediate_data_type": "half",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -315,7 +315,7 @@
               128,
               1
             ],
-            "data_type": "half"
+            "data_type": "float"
           },
           {
             "uid": 1,
@@ -397,7 +397,7 @@
       "id": "2_3_16_128_fp16_nchw_5a1fba",
       "values": {
         "io_data_type": "half",
-        "intermediate_data_type": "half",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -413,7 +413,7 @@
               128,
               1
             ],
-            "data_type": "half"
+            "data_type": "float"
           },
           {
             "uid": 1,
@@ -495,7 +495,7 @@
       "id": "2_3_16_128_fp16_nchw_e437b4",
       "values": {
         "io_data_type": "half",
-        "intermediate_data_type": "half",
+        "intermediate_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -511,7 +511,7 @@
               128,
               1
             ],
-            "data_type": "half"
+            "data_type": "float"
           },
           {
             "uid": 1,

@@ -1,0 +1,49 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --NumWaves=2 --GirFencePlacementPass --print-output
+#
+# A workgroup barrier is a rendezvous, so it cannot stand where only some agents arrive. `^seam`
+# holds a conditionally-issued movement, and the fence whose deadline is that movement must be
+# hoisted ahead of the branch that does the skipping -- otherwise the waves taking the bypass run
+# one signal fewer per trip than the rest and the workgroup hangs.
+#
+# CHECK-LABEL: @gir_fence_rendezvous_hoist
+# CHECK: ^loop:
+# CHECK-NEXT: "st.s_barrier_signal"(-1)
+# CHECK-NEXT: "st.s_barrier_wait"(-1)
+# CHECK-NEXT: "st.ds_load_b64"(v10)
+# CHECK-NEXT: "st.ds_load_b64"(v12)
+#
+# THE POINT. The seam's fence lands here, BEFORE the branch, not next to the movement it covers.
+# CHECK-NEXT: "st.s_barrier_signal"(-1)
+# CHECK-NEXT: "st.s_barrier_wait"(-1)
+# CHECK-NEXT: "st.s_cbranch_scc1"(join, SCC0)
+# CHECK: ^seam:
+# CHECK-NEXT: "st.tensor_load_to_lds"
+# CHECK-NEXT: Successors: ^join
+
+st.metadata "gir.frame_contract" {
+gir-frame-contract
+
+gen 0  ring=2 entry=0
+incoming  dst=4 src=0 gen=0 value=0
+incoming  dst=4 src=4 gen=0 value=1 relative=1
+}
+
+st.func @gir_fence_rendezvous_hoist() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { mod.gir_action = { action = 0, anchor = 0, kind = tensor, access0_write = 1, access0_operand = 0, access0_ring = 2, access0_abs = 0, access0_cross = 1 } }
+  "st.tensor_load_to_lds"(s[8:11], s[10:17]) { mod.gir_action = { action = 2, anchor = 0, kind = tensor, access0_write = 1, access0_operand = 0, access0_ring = 2, access0_abs = 1, access0_cross = 1 } }
+  "st.s_branch"("loop")
+  Successors: ^loop
+^loop:
+  v[0:1] = "st.ds_load_b64"(v10) { mod.ds = { na = 1, offset = 0, gds = false }, mod.gir_action = { action = 4, anchor = 4, kind = ds, access0_write = 0, access0_operand = 0, access0_ring = 2, access0_gen = 0, access0_gdelta = 1, access0_cross = 1 } }
+  v[4:5] = "st.ds_load_b64"(v12) { mod.ds = { na = 1, offset = 0, gds = false }, mod.gir_action = { action = 5, anchor = 4, kind = ds, access0_write = 0, access0_operand = 0, access0_ring = 2, access0_gen = 0, access0_gdelta = 0, access0_cross = 1 } }
+  "st.s_cbranch_scc1"("join", SCC0)
+  Successors: ^seam, ^join
+^seam:
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { mod.gir_action = { action = 6, anchor = 4, kind = tensor, access0_write = 1, access0_operand = 0, access0_ring = 2, access0_gen = 0, access0_gdelta = 1, access0_cross = 1 } }
+  Successors: ^join
+^join:
+  "st.s_cbranch_scc1"("loop", SCC0)
+  Successors: ^loop, ^exit
+^exit:
+}

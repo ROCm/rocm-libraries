@@ -115,3 +115,43 @@ TEST(TestHipblasltMatmulDesc, CloneIsIndependentOfOriginal)
     EXPECT_EQ(getDescAttribute<const void*>(desc, HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER), origPtr);
     EXPECT_EQ(getDescAttribute<const void*>(copy, HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER), newPtr);
 }
+
+// clone() reproduces the epilogue and the bias data type; dropping either would
+// silently run the clone without its fused bias or activation. The activation
+// arguments cannot be read back from the descriptor; their replay is covered by the GPU test
+// IntegrationGpuMatmulApplicability.ClampedReluFusedOutputMatchesReference, which executes a
+// ReLU clamp with non-zero lower and upper clips through execute()'s clone.
+TEST(TestHipblasltMatmulDesc, CloneReproducesEpilogueConfiguration)
+{
+    HipblasltMatmulDesc desc(HIPBLAS_OP_N, HIPBLAS_OP_N, HIPBLAS_COMPUTE_32F, HIP_R_32F);
+    desc.setEpilogue(HIPBLASLT_EPILOGUE_GELU_BIAS);
+    desc.setEpilogueActArg0(0.25f);
+    desc.setEpilogueActArg1(0.75f);
+    desc.setBiasDataType(HIP_R_16F);
+
+    HipblasltMatmulDesc const copy = desc.clone();
+
+    EXPECT_EQ(getDescAttribute<hipblasLtEpilogue_t>(copy, HIPBLASLT_MATMUL_DESC_EPILOGUE),
+              HIPBLASLT_EPILOGUE_GELU_BIAS);
+    EXPECT_EQ(getDescAttribute<hipDataType>(copy, HIPBLASLT_MATMUL_DESC_BIAS_DATA_TYPE), HIP_R_16F);
+}
+
+// The per-call bias pointer is not copied and setting it on the clone leaves the
+// original untouched, so concurrent execute() calls never share a bias pointer.
+TEST(TestHipblasltMatmulDesc, CloneBiasPointerIsIndependentOfOriginal)
+{
+    HipblasltMatmulDesc desc(HIPBLAS_OP_N, HIPBLAS_OP_N, HIPBLAS_COMPUTE_32F, HIP_R_32F);
+    desc.setEpilogue(HIPBLASLT_EPILOGUE_BIAS);
+    desc.setBiasDataType(HIP_R_32F);
+    const void* origPtr = reinterpret_cast<const void*>(0x1111);
+    desc.setBiasPointer(origPtr);
+
+    HipblasltMatmulDesc copy = desc.clone();
+    EXPECT_NE(getDescAttribute<const void*>(copy, HIPBLASLT_MATMUL_DESC_BIAS_POINTER), origPtr);
+
+    const void* newPtr = reinterpret_cast<const void*>(0x2222);
+    copy.setBiasPointer(newPtr);
+
+    EXPECT_EQ(getDescAttribute<const void*>(desc, HIPBLASLT_MATMUL_DESC_BIAS_POINTER), origPtr);
+    EXPECT_EQ(getDescAttribute<const void*>(copy, HIPBLASLT_MATMUL_DESC_BIAS_POINTER), newPtr);
+}

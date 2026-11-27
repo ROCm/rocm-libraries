@@ -208,6 +208,16 @@ TEST_F(TestAsmSdpaEngine, GetDetailsReportsGraphCaptureSupport)
         ::testing::Contains(static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE)));
 }
 
+TEST_F(TestAsmSdpaEngine, GetDetailsLeavesNumericalNotesAbsent)
+{
+    // numericalNotes does not depend on which graph is passed in (or on whether any
+    // builder claims it), so a device-free batchnorm graph is enough here too.
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_EQ(details(graph).numericalNotes(), std::nullopt);
+}
+
 TEST_F(TestAsmSdpaEngine, IsApplicableReturnsFalseForNonSdpaGraph)
 {
     // Create a batchnorm inference graph - this does not use SDPA attributes

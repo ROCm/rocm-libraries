@@ -1,8 +1,9 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Stream-K on the gfx1250 TDM pipelines (comp_tdm and comp_tdm_v2). The CShuffle epilogue serves
-// every reduction strategy; the TDM epilogue overwrites C, so it pairs with Linear and Tree only.
+// Stream-K on the gfx1250 TDM pipelines (comp_tdm, comp_tdm_v2 and comp_tdm_ra). The CShuffle
+// epilogue serves every reduction strategy; the TDM epilogue overwrites C, so it pairs with Linear
+// and Tree only.
 
 #include <cstdint>
 
@@ -18,6 +19,21 @@ struct CompTDMV2
 {
     template <typename Problem>
     using pipeline = ck_tile::GemmPipelineAgBgCrCompTDMV2<Problem>;
+};
+
+// The run-ahead pipeline with its default ring (4 slots, 3 steps ahead) and the smallest one.
+struct CompTDMRunAhead
+{
+    template <typename Problem>
+    using pipeline = ck_tile::GemmPipelineAgBgCrCompTDMRunAhead<Problem>;
+};
+
+struct CompTDMRunAheadS2R1
+{
+    template <typename Problem>
+    using pipeline = ck_tile::GemmPipelineAgBgCrCompTDMRunAhead<
+        Problem,
+        ck_tile::GemmPipelineAgBgCrCompTDMRunAheadPolicy<2, 1>>;
 };
 
 // Wave layouts (M x N x K waves); comp_tdm_v2 needs exactly four.
@@ -93,7 +109,23 @@ using Gfx1250StreamKTdmTypes = ::testing::Types<
     TdmStreamKEightWaves<Linear, CShuffleStore, NonPersistent, Waves4x2>,
     TdmStreamKEightWaves<Tree, TdmStore, Persistent, Waves4x2>,
     TdmStreamKEightWaves<Atomic, CShuffleStore, Persistent, Waves2x4>,
-    TdmStreamKEightWaves<Linear, TdmStore, NonPersistent, Waves2x4>>;
+    TdmStreamKEightWaves<Linear, TdmStore, NonPersistent, Waves2x4>,
+    // comp_tdm_ra: every reduction and persistence mode, both epilogues, every A/B layout, the
+    // 64 tile (K = 64 is two warp tiles: the pipeline's even sub-tile path) and a two-slot ring.
+    TdmStreamKParams<CompTDMRunAhead, BF16, Atomic, CShuffleStore, NonPersistent>,
+    TdmStreamKParams<CompTDMRunAhead, BF16, Linear, TdmStore, NonPersistent>,
+    TdmStreamKParams<CompTDMRunAhead, BF16, Tree, TdmStore, NonPersistent>,
+    TdmStreamKParams<CompTDMRunAhead, BF16, Linear, CShuffleStore, Persistent>,
+    TdmStreamKParams<CompTDMRunAhead, BF16, Tree, TdmStore, Persistent>,
+    TdmStreamKParams<CompTDMRunAhead, BF16, Atomic, CShuffleStore, Persistent>,
+    TdmStreamKParams<CompTDMRunAhead, F16, Linear, TdmStore, Persistent>,
+    TdmStreamKParams<CompTDMRunAhead, BF16, Tree, TdmStore, NonPersistent, 64>,
+    TdmStreamKParams<CompTDMRunAhead, BF16, Linear, TdmStore, NonPersistent, 128, Row, Row>,
+    TdmStreamKParams<CompTDMRunAhead, BF16, Tree, TdmStore, Persistent, 128, Col, Row>,
+    TdmStreamKParams<CompTDMRunAhead, BF16, Linear, TdmStore, NonPersistent, 128, Col, Col>,
+    TdmStreamKParams<CompTDMRunAheadS2R1, BF16, Tree, TdmStore, Persistent>,
+    TdmStreamKParams<CompTDMRunAheadS2R1, BF16, Linear, TdmStore, NonPersistent, 128, Row, Row>,
+    TdmStreamKParams<CompTDMRunAhead, BF16, Linear, TdmStore, Persistent, 128, Row, Col, Waves4x2>>;
 #endif
 
 template <typename Params>

@@ -502,6 +502,9 @@ def build_ued(config: IngestorConfig, ids: dict) -> dict:
         ued["knobs"] = list(config.engine.knobs)
     if config.engine.behavior_notes:
         ued["behavior_notes"] = list(config.engine.behavior_notes)
+    # `is not None`, never truthiness: an explicit `[]` is a claim and is emitted.
+    if config.engine.numerical_notes is not None:
+        ued["numerical_notes"] = list(config.engine.numerical_notes)
     # `promote` appends a new role at the end of the document.
     for role, arches in bindings.items():
         if role != "sort_kernel_catalog":
@@ -534,6 +537,9 @@ def _build_slotted_ued(config: IngestorConfig, ids: dict) -> dict:
     ued["slots"] = slots
     if config.engine.behavior_notes:
         ued["behavior_notes"] = list(config.engine.behavior_notes)
+    # `is not None`, never truthiness: an explicit `[]` is a claim and is emitted.
+    if config.engine.numerical_notes is not None:
+        ued["numerical_notes"] = list(config.engine.numerical_notes)
     return ued
 
 
