@@ -9,6 +9,7 @@
 #include <iomanip>
 #include <iostream>
 #include <numeric>
+#include <optional>
 #include <stdexcept>
 #include <tuple>
 #include <vector>
@@ -315,6 +316,50 @@ size_t round_elements_to_NB(size_t elements,
 /* ---------------------------------------------------------------------------------------- */
 /* Misc. functions                                                                          */
 /* ---------------------------------------------------------------------------------------- */
+// The workgroup mapping ContractionSolution::calculateAutoWGM launches a TensileLite kernel
+// with, decided in the same order: WGM 1 / WGMXCC 1 for a spatial-cluster StreamK kernel;
+// std::nullopt where it asks select_workgroup_mapping per problem (a persistent kernel with
+// WGM 0 and WGMXCC -1 on a nonzero launch grid); otherwise the kernel's WGM
+// (ceil(sqrt(N_CU / NUM_XCD)) for 0) and WGMXCC (NUM_XCD for -1).
+static std::optional<workgroup_mapping_t> calculate_auto_wgm(const problem_t& problem,
+                                                             const hardware_t& hardware,
+                                                             const config_t& config,
+                                                             size_t grid_m,
+                                                             size_t grid_n,
+                                                             size_t splitting_factor) {
+  const tensile_params_t& tp = tparams(config);
+  if (tp.stream_k_spatial_cluster) return workgroup_mapping_t{0, 0, 1, 1};
+
+  // The launch grid is nonzero exactly when the problem has tiles.
+  const bool grid_nonzero = grid_m * grid_n * splitting_factor * problem.batch != 0;
+  const bool persistent   = tp.persistent || config.stream_k > 0;
+  if (persistent && grid_nonzero && config.workgroup_mapping == 0 &&
+      tp.workgroup_mapping_xcc == -1)
+    return std::nullopt;
+
+  const size_t num_xcd = std::max<size_t>(hardware.NUM_XCD, 1);
+  const int wgm        = (config.workgroup_mapping != 0)
+                             ? config.workgroup_mapping
+                             : static_cast<int>(std::ceil(
+                                   std::sqrt(static_cast<double>(hardware.N_CU / num_xcd))));
+  const size_t wgmxcc  = (tp.workgroup_mapping_xcc == -1)
+                             ? num_xcd
+                             : static_cast<size_t>(std::max(tp.workgroup_mapping_xcc, 0));
+  return workgroup_mapping_t{0, 0, wgmxcc, wgm};
+}
+
+static bool is_gfx115X(const hardware_t& hardware) {
+  switch (hardware.arch) {
+    case hardware_t::architecture_t::gfx1150:
+    case hardware_t::architecture_t::gfx1151:
+    case hardware_t::architecture_t::gfx1152:
+    case hardware_t::architecture_t::gfx1153:
+      return true;
+    default:
+      return false;
+  }
+}
+
 // WGM a gfx1250 launch without clusters walks tiles with, as
 // ContractionSolution::calculateAutoWGM picks it: a fixed config.workgroup_mapping if set; a
 // StreamK auto mapping (WGM 0, WGMXCC -1) on a nonzero launch grid takes
@@ -368,6 +413,15 @@ workgroup_mapping_t predict_workgroup_mapping(const problem_t& problem,
   if (hardware.is_cdna5())
     return predict_workgroup_mapping_cdna5(
         problem, hardware, config, grid_m, grid_n, splitting_factor);
+
+  // A TensileLite kernel launches with the mapping calculateAutoWGM decides; only where that
+  // asks select_workgroup_mapping per problem is the mapping predicted below.
+  // TODO: Also use for other architectures
+  if (is_gfx115X(hardware) && config.has_tensile_params()) {
+    if (const auto launch =
+            calculate_auto_wgm(problem, hardware, config, grid_m, grid_n, splitting_factor))
+      return *launch;
+  }
 
   // Extract parameters
   const size_t batch = problem.batch;

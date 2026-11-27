@@ -1629,6 +1629,8 @@ namespace TensileLite
         return numWorkGroupsX * numWorkGroupsY * numWorkGroupsZ;
     }
 
+    // Keep in sync with calculate_auto_wgm in shared/origami/src/origami/gemm.cpp, which
+    // models the mapping this picks.
     std::tuple<int32_t, size_t, size_t, size_t> ContractionSolution::calculateAutoWGM(
         Problem const& problem, Hardware const* hardware, uint32_t const skgrid) const
     {
