@@ -319,7 +319,8 @@ CTests. Legacy violations remain tracked as TESTING.md gap G9.
 Tests use the loaded compiler
 ([the test compiler rule](../dsl_docs/reference/env_flags.md#compiler-detection-and-provenance)).
 The compiler gate's resource thresholds keep the toolchain they were calibrated on
-until AICK-3320 unpins them: on any other LLVM flavor or comgr its preflight skips
+until AICK-3320 unpins them: on any other LLVM flavor (requested or run by the
+loaded compiler) or comgr its preflight skips
 every row, naming the difference, as its `rocke.tests.pending_lanes` record says,
 and the session ends with exit 77, which the installed entry reports as a skip; the
 source runner reports `INCOMPLETE`, never plain `GREEN`, or a failure when passed

@@ -503,8 +503,8 @@ def main() -> int:
         "--require-compiler-gate",
         action="store_true",
         help="fail when the counted ISA gate cannot run (no llvm-objdump, a comgr "
-        "without a target, or a compiler other than its reference toolchain, "
-        "until AICK-3320); the default local run reports that gate as skipped",
+        "without a target, or, until AICK-3320, a compiler other than its "
+        "reference toolchain); the default local run reports that gate as skipped",
     )
     parser.add_argument(
         "--allow-partial-gate",
@@ -723,7 +723,10 @@ def main() -> int:
             except (OSError, ValueError):
                 attestation = {}
             if skipped_for := attestation.get("skipped_for"):
-                print(f"rocke library gate: {name}: skipped for: {skipped_for}")
+                print(
+                    f"rocke library gate: {name}: skipped for: {skipped_for}",
+                    flush=True,
+                )
             if (
                 gate_result.code == 0
                 and not gate_result.skipped

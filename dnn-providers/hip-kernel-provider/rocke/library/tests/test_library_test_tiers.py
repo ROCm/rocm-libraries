@@ -405,7 +405,7 @@ def test_compiler_preflight_accepts_reference_toolchain():
     "requested,active,comgr,match",
     [
         ("llvm24", "llvm24", "comgr3.5/rocm10.3", "requires LLVM flavor llvm22"),
-        ("llvm22", "llvm23", "comgr3.0/rocm7.2", "does not match"),
+        ("llvm22", "llvm23", "comgr3.0/rocm7.2", "loaded compiler of LLVM flavor"),
         ("llvm22", "llvm22", "comgr3.5/rocm10.3", "requires ROCm 7.2 comgr"),
         ("llvm22", "llvm22", None, "requires ROCm 7.2"),
     ],
@@ -441,20 +441,34 @@ def test_a_broken_toolchain_fails_the_gate(active, targets, match):
 
 
 @pytest.mark.parametrize(
-    "requested,comgr,gap",
+    "requested,active,comgr,gap",
     [
-        ("llvm22", "comgr3.0/rocm7.2", None),
-        ("llvm24", "comgr3.0/rocm7.2", "requires LLVM flavor llvm22, got 'llvm24'"),
+        ("llvm22", "llvm22", "comgr3.0/rocm7.2", None),
         (
+            "llvm24",
+            "llvm22",
+            "comgr3.0/rocm7.2",
+            "requires LLVM flavor llvm22, got 'llvm24'",
+        ),
+        (
+            "llvm22",
+            "llvm23",
+            "comgr3.0/rocm7.2",
+            "requires a loaded compiler of LLVM flavor llvm22, got 'llvm23'",
+        ),
+        (
+            "llvm22",
             "llvm22",
             "comgr3.5/rocm10.3",
             "requires ROCm 7.2 comgr, got comgr3.5/rocm10.3",
         ),
-        ("llvm22", None, "requires ROCm 7.2 comgr, got None"),
+        ("llvm22", "llvm22", None, "requires ROCm 7.2 comgr, got None"),
     ],
 )
-def test_the_reference_toolchain_gap_names_the_pinned_part(requested, comgr, gap):
-    found = gate_config._reference_toolchain_gap(requested, comgr)
+def test_the_reference_toolchain_gap_names_the_pinned_part(
+    requested, active, comgr, gap
+):
+    found = gate_config._reference_toolchain_gap(requested, active, comgr)
     assert found == (gap if gap is None else f"resource gate {gap}")
 
 
@@ -503,7 +517,7 @@ def test_a_required_compiler_gate_skips_off_its_reference_toolchain(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "required, code, verdict", [(False, 0, "INCOMPLETE"), (True, 77, "RED")]
+    "required,code,verdict", [(False, 0, "INCOMPLETE"), (True, 77, "RED")]
 )
 def test_source_runner_judges_a_gate_that_skipped_its_cases(
     required, code, verdict, monkeypatch, capsys

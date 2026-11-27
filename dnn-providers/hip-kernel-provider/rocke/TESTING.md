@@ -708,10 +708,8 @@ existing attention CTest. Tests use the loaded compiler
 ([the test compiler rule](platform/dsl_docs/reference/env_flags.md#compiler-detection-and-provenance)).
 The backward resource gate is the one exception left: its thresholds keep the
 toolchain they were calibrated on until AICK-3320 unpins it, so on any other
-compiler the compiler gate's preflight skips every row, as its
-`rocke.tests.pending_lanes` record says, and the source runner reports
-INCOMPLETE. A missing target or `llvm-objdump` still stops the gate before any
-rows compile. Exact installed
+compiler the compiler gate skips every row
+([how](platform/tests/README.md#library-unit-and-explicit-host-gates)). Exact installed
 CTest names and scopes live in the
 [rocKE test inventory](platform/tests/README.md#library-unit-and-explicit-host-gates).
 

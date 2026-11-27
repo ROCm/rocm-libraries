@@ -50,15 +50,23 @@ def _unanswered_query(
     return None
 
 
-def _reference_toolchain_gap(requested_flavor: str, comgr: str | None) -> str | None:
-    """Why the loaded compiler is not the toolchain the gate's thresholds were
-    calibrated on (``GATE_FLAVOR`` with the ``GATE_COMGR_ROCM`` comgr), or
-    ``None`` when it is. Tests use the compiler rocKE's discovery loads, so on
-    any other one the gate skips; the pin stays here until AICK-3320 unpins it."""
+def _reference_toolchain_gap(
+    requested_flavor: str, active_flavor: str, comgr: str | None
+) -> str | None:
+    """Why the toolchain is not the one the gate's thresholds were calibrated on
+    (``GATE_FLAVOR`` requested and run by the loaded compiler, with the
+    ``GATE_COMGR_ROCM`` comgr), or ``None`` when it is. Tests use the compiler
+    rocKE's discovery loads, so on any other one the gate skips; the pin stays
+    here until AICK-3320 unpins it."""
     if requested_flavor != GATE_FLAVOR:
         return (
             f"resource gate requires LLVM flavor {GATE_FLAVOR}, "
             f"got {requested_flavor!r}"
+        )
+    if active_flavor != GATE_FLAVOR:
+        return (
+            f"resource gate requires a loaded compiler of LLVM flavor "
+            f"{GATE_FLAVOR}, got {active_flavor!r}"
         )
     if not comgr_is_production(comgr):
         return f"resource gate requires ROCm {GATE_COMGR_ROCM} comgr, got {comgr}"
@@ -82,13 +90,8 @@ def _preflight_outcome(
     that is not the reference one, or ``None`` for the reference toolchain."""
     if failed := _unanswered_query(active_flavor, targets):
         return _STOP, failed
-    if gap := _reference_toolchain_gap(requested_flavor, comgr):
+    if gap := _reference_toolchain_gap(requested_flavor, active_flavor, comgr):
         return _SKIP, gap
-    if requested_flavor != active_flavor:
-        return _SKIP, (
-            f"requested flavor {requested_flavor} does not match active comgr "
-            f"flavor {active_flavor}"
-        )
     missing = [arch for arch in arches if arch not in targets]
     if missing:
         return _STOP, f"comgr {comgr} does not support {', '.join(missing)}"
