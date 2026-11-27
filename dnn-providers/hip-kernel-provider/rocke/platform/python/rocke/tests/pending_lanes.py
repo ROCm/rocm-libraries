@@ -37,7 +37,7 @@ The entry takes its lane, issue and expiry from the ticket:
 
     _GFX1250_RUNNERS.waiting(
         "library/tests/test_example.py",  # relative to the rocke directory
-        "its device cases need gfx1250, which no CI GPU stage has",
+        "its device cases need gfx1250, which no pull-request runner has",
         _LIBRARY,
     )
 
@@ -710,9 +710,9 @@ _TORCH_CASES = LaneTicket("AICK-3408", TICKET, "2027-01-08")
 _RUNTIME_TORCH_INTEROP = LaneTicket("AICK-3409", TICKET, "2027-01-08")
 # The device cases that need a gfx950 GPU.
 _GFX950_RUNNERS = LaneTicket("AICK-3411", RUNNER_HARDWARE, "2027-02-09")
-# The device cases that need another GPU no CI stage has: gfx1250, gfx1151,
-# gfx1200, gfx1201, gfx90a, or a second GPU; also the files whose cases need
-# gfx950 and one of those, re-decided when the last of their GPUs lands.
+# The device cases that need another GPU no pull-request runner has: gfx1250,
+# gfx1151, gfx1200, gfx1201, gfx90a, or a second GPU; also the files whose cases
+# need gfx950 and one of those, re-decided when the last of their GPUs lands.
 _OTHER_RUNNERS = LaneTicket("AICK-3469", RUNNER_HARDWARE, "2027-02-16")
 # The cases that need what CI's build or test step lacks: the C++ engine's
 # Python modules or shared library, the LLVM tools, optional packages.
@@ -1312,7 +1312,7 @@ PENDING: tuple[PendingTest, ...] = (
     ),
     *_waiting(
         _GFX950_RUNNERS,
-        "its device cases need gfx950, which no CI GPU stage has",
+        "its device cases need gfx950, which no pull-request runner has",
         _LIBRARY,
         "library/tests/test_attention_additive_bias_gfx950_numeric.py",
         "library/tests/test_attention_dense_gfx950_numeric.py",
@@ -1342,8 +1342,9 @@ PENDING: tuple[PendingTest, ...] = (
     ),
     *_waiting(
         _OTHER_RUNNERS,
-        "its device cases need gfx950, which no CI GPU stage has (AICK-3411); its "
-        "device cases need gfx1250, which no CI GPU stage has",
+        "its device cases need gfx950, which no pull-request runner has "
+        "(AICK-3411); its device cases need gfx1250, which no pull-request "
+        "runner has",
         _LIBRARY,
         "library/tests/test_conv_dgrad_correctness.py",
         "library/tests/test_conv_dgrad_depthwise_windowed.py",
@@ -1370,7 +1371,7 @@ PENDING: tuple[PendingTest, ...] = (
     ),
     *_waiting(
         _OTHER_RUNNERS,
-        "its device cases need gfx1250, which no CI GPU stage has",
+        "its device cases need gfx1250, which no pull-request runner has",
         _LIBRARY,
         "library/tests/test_conv_fwd_correctness.py",
         "library/tests/test_conv_winograd_dispatch_gpu.py",
@@ -1418,7 +1419,8 @@ PENDING: tuple[PendingTest, ...] = (
     ),
     *_waiting(
         _OTHER_RUNNERS,
-        "its device cases need gfx1151, gfx1200 or gfx1201, which no CI GPU stage has",
+        "its device cases need gfx1151, gfx1200 or gfx1201, which no "
+        "pull-request runner has",
         _LIBRARY,
         "library/tests/dispatch/attention/test_gfx1151_attention_dispatch_numeric.py",
         "library/tests/test_wmma_fmha_fwd_v2_features.py",
@@ -1426,8 +1428,9 @@ PENDING: tuple[PendingTest, ...] = (
     ),
     *_waiting(
         _OTHER_RUNNERS,
-        "its device cases need gfx950, which no CI GPU stage has (AICK-3411); its "
-        "device cases need gfx1250, which no CI GPU stage has",
+        "its device cases need gfx950, which no pull-request runner has "
+        "(AICK-3411); its device cases need gfx1250, which no pull-request "
+        "runner has",
         _PLATFORM,
         "platform/python/rocke/tests/helpers/tiling/mma/test_mma_k_coupling.py",
     ),
@@ -1446,7 +1449,7 @@ PENDING: tuple[PendingTest, ...] = (
     ),
     *_waiting(
         _OTHER_RUNNERS,
-        "its device cases need gfx1250, which no CI GPU stage has",
+        "its device cases need gfx1250, which no pull-request runner has",
         _PLATFORM,
         "platform/tests/core/test_gpu_checked_value.py",
         "platform/tests/instances/test_gfx1250_mixed_scaled_gemm_numeric.py",
@@ -1459,7 +1462,8 @@ PENDING: tuple[PendingTest, ...] = (
     ),
     *_waiting(
         _OTHER_RUNNERS,
-        "its device case runs on gfx1151 or gfx1201 only, which no CI GPU stage has",
+        "its device case runs on gfx1151 or gfx1201 only, which no pull-request "
+        "runner has",
         _PLATFORM,
         "platform/tests/instances/test_matmul_nbits_numeric.py",
     ),
@@ -1483,7 +1487,7 @@ PENDING: tuple[PendingTest, ...] = (
     ),
     *_waiting(
         _GFX950_RUNNERS,
-        "its device cases need gfx950, which no CI GPU stage has",
+        "its device cases need gfx950, which no pull-request runner has",
         _PLATFORM,
         "platform/tests/instances/test_flatmm_numeric.py",
         "platform/tests/instances/test_gfx950_grouped_gemm.py",
@@ -1491,7 +1495,8 @@ PENDING: tuple[PendingTest, ...] = (
     ),
     *_waiting(
         _OTHER_RUNNERS,
-        "its device cases need gfx1151, gfx1200 or gfx1201, which no CI GPU stage has",
+        "its device cases need gfx1151, gfx1200 or gfx1201, which no "
+        "pull-request runner has",
         _PLATFORM,
         "platform/tests/instances/test_attention_fwd_ext_numeric.py",
     ),
@@ -1503,7 +1508,7 @@ PENDING: tuple[PendingTest, ...] = (
     ),
     *_waiting(
         _OTHER_RUNNERS,
-        "its gfx1151 cases need a gfx1151 GPU, which no CI GPU stage has",
+        "its gfx1151 cases need a gfx1151 GPU, which no pull-request runner has",
         _PLATFORM,
         "platform/tests/instances/test_rocke_numeric.py",
     ),
