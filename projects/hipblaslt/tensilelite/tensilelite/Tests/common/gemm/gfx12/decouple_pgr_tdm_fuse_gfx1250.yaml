@@ -58,7 +58,7 @@ BenchmarkProblems:
           - [16, 16, 128, 1,  1,  2,  4,  2, 2]   # 64x128, waves [2,2]
           - [16, 16, 128, 1,  1,  4,  4,  1, 4]   # 64x256, waves [1,4]
           - [16, 16, 128, 1,  1,  1, 32,  4, 1]   # 64x512, waves [4,1]
-        - DepthU: [256, 512, 1024]
+        - DepthU: [256]
         - TDMInst: [3]
         - TDMSplit: [False]
         # PrefetchGlobalReadA/B=-1 selects auto; scalar PrefetchGlobalRead stays concrete.
@@ -66,9 +66,9 @@ BenchmarkProblems:
         - PrefetchGlobalReadA: [-1, 1, 2]
         - PrefetchGlobalReadB: [-1, 1, 2]
         - TDMFuse: [0, 1, 2, 3]
-        - HalfPLR: [0, 1, 2, 3]
-        - ScheduleIterAlg: [0, 3, 4]
-        - StaggerU: [0, 16, 32]
+        - HalfPLR: [0, 1, 2]
+        - ScheduleIterAlg: [4]
+        - StaggerU: [0, 32]
         - InitCIterWmma: [0, 1]
         - TransposeLDS: [-1]
         - LdsPadA: [-1]
@@ -95,13 +95,14 @@ BenchmarkProblems:
         - DirectToVgprB: [False]
         - WavefrontSize: [32]
         - ExpandPointerSwap: [False]
-        - ClusterDim: [[1, 1], [2, 4], [4, 2], [4, 4]]
-        - LDSSegmentInterleave: [-1, 0, 1]
+        - ClusterDim: [[1, 1], [2, 4], [4, 2]]
+        - LDSSegmentInterleave: [0, 1]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
+          - Exact: [1024, 512, 1, 128]
           - Exact: [1024, 512, 1, 256]
           - Exact: [1024, 512, 1, 384]
           - Exact: [1024, 512, 1, 512]
@@ -144,7 +145,7 @@ BenchmarkProblems:
         - TDMSplit: [False]
         - PrefetchGlobalRead: [2]
         - TDMFuse: [0, 1, 2, 3]
-        - HalfPLR: [0, 1, 2, 3]
+        - HalfPLR: [0, 1, 2]
         - ScheduleIterAlg: [4]
         - StaggerU: [0]
         - TransposeLDS: [-1]

@@ -3060,7 +3060,7 @@ def _get_schedule_240x256x64_16bit(kernel, useLDSTr, TLDS):
         numMfma = 120
         nglshift = nllshift = len(optSchedule["GRA"][0])/2 + len(optSchedule["GRB"][0])/2
         opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
-    elif isNT(kernel) and TLDS==0:
+    elif isNT(kernel) and TLDS==0 and useLDSTr:
         optSchedule = {
             'SYNC': [[-1,24,24,59,59]],
             'LRA0': [[0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13,14,14,15]],

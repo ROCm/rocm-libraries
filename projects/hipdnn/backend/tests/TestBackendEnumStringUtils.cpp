@@ -125,6 +125,8 @@ TEST(TestBackendEnumStringUtils, GetBackendAttributeName)
                  "HIPDNN_ATTR_ENGINEHEUR_SM_COUNT_TARGET");
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_ENGINEHEUR_DEVICEPROP),
                  "HIPDNN_ATTR_ENGINEHEUR_DEVICEPROP");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT),
+                 "HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT");
 
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_ENGINECFG_ENGINE),
                  "HIPDNN_ATTR_ENGINECFG_ENGINE");
@@ -295,6 +297,8 @@ TEST(TestBackendEnumStringUtils, GetBackendAttributeName)
                  "HIPDNN_ATTR_TENSOR_VALUE_EXT");
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_TENSOR_IS_BY_VALUE),
                  "HIPDNN_ATTR_TENSOR_IS_BY_VALUE");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT),
+                 "HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT");
 
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_W),
                  "HIPDNN_ATTR_OPERATION_CONVOLUTION_FORWARD_W");
@@ -533,6 +537,10 @@ TEST(TestBackendEnumStringUtils, GetBackendAttributeName)
                  "HIPDNN_ATTR_SDPA_FWD_IMPLEMENTATION_EXT");
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_SDPA_FWD_COMP_TYPE_EXT),
                  "HIPDNN_ATTR_SDPA_FWD_COMP_TYPE_EXT");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_SDPA_FWD_CU_SEQ_LEN_QDESC),
+                 "HIPDNN_ATTR_OPERATION_SDPA_FWD_CU_SEQ_LEN_QDESC");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_SDPA_FWD_CU_SEQ_LEN_KVDESC),
+                 "HIPDNN_ATTR_OPERATION_SDPA_FWD_CU_SEQ_LEN_KVDESC");
 
     // SDPA bwd operation attributes
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATION_SDPA_BWD_Q_EXT),
@@ -991,6 +999,8 @@ TEST(TestBackendEnumStringUtils, GetAttributeTypeString)
                  "HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT");
     EXPECT_STREQ(hipdnnGetAttributeTypeString(HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT),
                  "HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT");
+    EXPECT_STREQ(hipdnnGetAttributeTypeString(HIPDNN_TYPE_OPERATION_TYPE_EXT),
+                 "HIPDNN_TYPE_OPERATION_TYPE_EXT");
     EXPECT_STREQ(hipdnnGetAttributeTypeString(HIPDNN_TYPE_REDUCTION_OPERATOR_TYPE),
                  "HIPDNN_TYPE_REDUCTION_OPERATOR_TYPE");
 
@@ -1020,6 +1030,34 @@ TEST(TestBackendEnumStringUtils, GetBehaviorNoteString)
                  "HIPDNN_BEHAVIOR_NOTE_TYPE_COUNT");
     EXPECT_STREQ(hipdnnGetBehaviorNoteString(static_cast<hipdnnBackendBehaviorNote_t>(-1)),
                  "HIPDNN_BEHAVIOR_NOTE_UNKNOWN");
+}
+
+TEST(TestBackendEnumStringUtils, GetNumericalNoteString)
+{
+    EXPECT_STREQ(hipdnnGetNumericalNoteString(HIPDNN_NUMERICAL_NOTE_TENSOR_CORE),
+                 "HIPDNN_NUMERICAL_NOTE_TENSOR_CORE");
+    EXPECT_STREQ(hipdnnGetNumericalNoteString(HIPDNN_NUMERICAL_NOTE_DOWN_CONVERT_INPUTS),
+                 "HIPDNN_NUMERICAL_NOTE_DOWN_CONVERT_INPUTS");
+    EXPECT_STREQ(hipdnnGetNumericalNoteString(HIPDNN_NUMERICAL_NOTE_REDUCED_PRECISION_REDUCTION),
+                 "HIPDNN_NUMERICAL_NOTE_REDUCED_PRECISION_REDUCTION");
+    EXPECT_STREQ(hipdnnGetNumericalNoteString(HIPDNN_NUMERICAL_NOTE_FFT),
+                 "HIPDNN_NUMERICAL_NOTE_FFT");
+    EXPECT_STREQ(hipdnnGetNumericalNoteString(HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC),
+                 "HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC");
+    EXPECT_STREQ(hipdnnGetNumericalNoteString(HIPDNN_NUMERICAL_NOTE_WINOGRAD),
+                 "HIPDNN_NUMERICAL_NOTE_WINOGRAD");
+    EXPECT_STREQ(hipdnnGetNumericalNoteString(HIPDNN_NUMERICAL_NOTE_WINOGRAD_TILE_4x4),
+                 "HIPDNN_NUMERICAL_NOTE_WINOGRAD_TILE_4x4");
+    EXPECT_STREQ(hipdnnGetNumericalNoteString(HIPDNN_NUMERICAL_NOTE_WINOGRAD_TILE_6x6),
+                 "HIPDNN_NUMERICAL_NOTE_WINOGRAD_TILE_6x6");
+    EXPECT_STREQ(hipdnnGetNumericalNoteString(HIPDNN_NUMERICAL_NOTE_WINOGRAD_TILE_13x13),
+                 "HIPDNN_NUMERICAL_NOTE_WINOGRAD_TILE_13x13");
+    EXPECT_STREQ(hipdnnGetNumericalNoteString(HIPDNN_NUMERICAL_NOTE_STRICT_NAN_PROP),
+                 "HIPDNN_NUMERICAL_NOTE_STRICT_NAN_PROP");
+    EXPECT_STREQ(hipdnnGetNumericalNoteString(HIPDNN_NUMERICAL_NOTE_TYPE_COUNT),
+                 "HIPDNN_NUMERICAL_NOTE_TYPE_COUNT");
+    EXPECT_STREQ(hipdnnGetNumericalNoteString(static_cast<hipdnnBackendNumericalNote_t>(-1)),
+                 "HIPDNN_NUMERICAL_NOTE_UNKNOWN");
 }
 
 TEST(TestBackendEnumStringUtils, GetPluginLoadingModeString)

@@ -253,6 +253,14 @@ namespace
             log_error(__func__, "grouped GEMM does not support epilogues or scaling other than MX");
             return rocblaslt_status_invalid_value;
         }
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+        RocblasltFusionInfo fusedInfo;
+        if(rocblaslt_resolve_fused_a2a(*desc, fusedInfo) || fusedInfo.misattached)
+        {
+            log_error(__func__, "grouped GEMM does not support a fused all-to-all");
+            return rocblaslt_status_invalid_value;
+        }
+#endif
         if(mx && kIsUniform(desc, matA) && uniformK(desc, matA) % mxBlock(desc) != 0)
         {
             log_error(__func__, "MX grouped GEMM needs K to be a multiple of the scale block size");
@@ -986,27 +994,28 @@ rocblaslt_status rocblaslt_grouped_matmul(rocblaslt_handle             handle,
             args.betaPtr   = beta;
         }
 
-        unsigned block = 256;
-        unsigned grid  = (static_cast<unsigned>(groups) + block - 1) / block;
-        if(mx)
-            hipLaunchKernelGGL(packGroupedRecords<GroupedRecordMX>,
-                               dim3(grid),
-                               dim3(block),
-                               0,
-                               stream,
-                               mxTemplate(launch->templ),
-                               args,
-                               static_cast<GroupedRecordMX*>(workspace));
-        else
-            hipLaunchKernelGGL(packGroupedRecords<GroupedRecord>,
-                               dim3(grid),
-                               dim3(block),
-                               0,
-                               stream,
-                               launch->templ,
-                               args,
-                               static_cast<GroupedRecord*>(workspace));
-        if(hipGetLastError() != hipSuccess)
+        // The launch's own status: hipGetLastError would also return an error the
+        // caller left pending, and fail a matmul that ran.
+        unsigned         block = 256;
+        unsigned         grid  = (static_cast<unsigned>(groups) + block - 1) / block;
+        const hipError_t packed
+            = mx ? rocblaslt_launch_kernel(&packGroupedRecords<GroupedRecordMX>,
+                                           dim3(grid),
+                                           dim3(block),
+                                           0,
+                                           stream,
+                                           mxTemplate(launch->templ),
+                                           args,
+                                           static_cast<GroupedRecordMX*>(workspace))
+                 : rocblaslt_launch_kernel(&packGroupedRecords<GroupedRecord>,
+                                           dim3(grid),
+                                           dim3(block),
+                                           0,
+                                           stream,
+                                           launch->templ,
+                                           args,
+                                           static_cast<GroupedRecord*>(workspace));
+        if(packed != hipSuccess)
         {
             log_error(__func__, "failed to launch the grouped record pack kernel");
             return rocblaslt_status_internal_error;

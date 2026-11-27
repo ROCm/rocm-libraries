@@ -35,6 +35,7 @@ import math
 import numpy as np
 import pytest
 from rocke.core.ir import I32, IRBuilder
+from rocke.helpers.grid import xcd_remap
 
 from kernels.common._attention_bwd_worklist import (
     LB_INTERLEAVE,
@@ -54,7 +55,6 @@ from kernels.common._attention_bwd_worklist import (
     worklist_store_item,
     worklist_tiles,
     worklist_words,
-    xcd_remap_id,
 )
 
 from ._attention_bwd_int_eval import IntEvalBuilder, i32
@@ -242,14 +242,15 @@ def _chiplet_reference(wgid, num_wgs, n, chunk):
 
 @pytest.mark.parametrize("num_wgs", [1, 7, 16, 40, 64, 100, 513])
 @pytest.mark.parametrize("n,chunk", [(8, 1), (8, 4), (2, 3), (4, 16), (8, 64)])
-def test_xcd_remap_id_is_the_chiplet_transform(num_wgs, n, chunk):
+def test_gated_xcd_remap_is_the_chiplet_transform(num_wgs, n, chunk):
     b = IntEvalBuilder()
     got = [
-        xcd_remap_id(
-            b, i32(b, L), num_wgs=i32(b, num_wgs), n=i32(b, n), chunk=i32(b, chunk)
+        xcd_remap(
+            b, i32(b, L), num_wgs=i32(b, num_wgs), num_xcds=i32(b, n),
+            chunk=i32(b, chunk), mode="gated",
         ).v
         for L in range(num_wgs)
-    ]
+    ]  # fmt: skip
     assert got == [_chiplet_reference(L, num_wgs, n, chunk) for L in range(num_wgs)]
     assert sorted(got) == list(range(num_wgs))  # a bijection
     for x in range(n):  # the i-th CTA of an XCD gets an increasing logical id
@@ -257,7 +258,7 @@ def test_xcd_remap_id_is_the_chiplet_transform(num_wgs, n, chunk):
         assert ids == sorted(ids)
 
 
-def test_xcd_remap_id_matches_the_platform_helper():
+def test_gated_xcd_remap_matches_the_compile_time_chunk_helper():
     from rocke.helpers.grid import chiplet_transform_chunked_dynamic
 
     b = IntEvalBuilder()
@@ -266,19 +267,21 @@ def test_xcd_remap_id_matches_the_platform_helper():
             ref = chiplet_transform_chunked_dynamic(
                 b, i32(b, L), num_wgs=i32(b, num_wgs), num_xcds=4, chunk_size=6
             )
-            ours = xcd_remap_id(
-                b, i32(b, L), num_wgs=i32(b, num_wgs), n=i32(b, 4), chunk=i32(b, 6)
-            )
+            ours = xcd_remap(
+                b, i32(b, L), num_wgs=i32(b, num_wgs), num_xcds=i32(b, 4),
+                chunk=i32(b, 6), mode="gated",
+            )  # fmt: skip
             assert ours.v == ref.v
 
 
 @pytest.mark.parametrize("n,chunk", [(0, 0), (0, 64), (8, 0)])
-def test_xcd_remap_id_off_is_the_identity(n, chunk):
+def test_gated_xcd_remap_off_is_the_identity(n, chunk):
     b = IntEvalBuilder()
     for L in range(50):
-        out = xcd_remap_id(
-            b, i32(b, L), num_wgs=i32(b, 50), n=i32(b, n), chunk=i32(b, chunk)
-        )
+        out = xcd_remap(
+            b, i32(b, L), num_wgs=i32(b, 50), num_xcds=i32(b, n),
+            chunk=i32(b, chunk), mode="gated",
+        )  # fmt: skip
         assert out.v == L
 
 

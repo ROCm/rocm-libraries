@@ -16,7 +16,9 @@
 #include <iterator>
 #include <map>
 #include <memory>
+#include <new>
 #include <optional>
+#include <regex>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -34,6 +36,7 @@
 #include <hipdnn_data_sdk/utilities/RankingMetrics.hpp>
 #include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
 #include <hipdnn_plugin_sdk/BehaviorNote.h>
+#include <hipdnn_plugin_sdk/NumericalNote.h>
 #include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/EnginePredictor.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp>
@@ -44,6 +47,22 @@
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 
 #include "KernelIngestorTestFixtures.hpp"
+
+#ifdef __linux__
+#include <sys/resource.h>
+#include <unistd.h>
+#endif
+
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
+
 /**
  * @file TestDescriptorLoader.cpp
  * @brief The descriptor loader against real files on disk.
@@ -2539,22 +2558,33 @@ TEST(TestDescriptorLoader, MissingDefaultModelPreservesDeclaredOrderSelection)
 namespace
 {
 
-/// Turns the set's UHD into a tree_data one naming @p artifact and writes the tree; the
-/// artifact itself is left to the caller.
+/// Turns the set's UHD into a data-artifact one (tree_data unless @p adapter says otherwise)
+/// naming @p artifact and writes the tree; the artifact itself is left to the caller.
 std::filesystem::path writeModelHeuristicSet(const std::filesystem::path& root,
                                              const std::string& engineName,
-                                             const std::string& artifact)
+                                             const std::string& artifact,
+                                             const std::string& adapter = "tree_data")
 {
     auto documents = makeSetDocuments('1', engineName);
     auto& heuristic = documentOfType(documents, ".uhd.json");
-    heuristic["adapter"] = "tree_data";
+    heuristic["adapter"] = adapter;
     heuristic.erase("native");
     heuristic["features_signature"] = nlohmann::json::array({"$kernel.block_size"});
     heuristic["features_hash"]
         = hipdnn_plugin_sdk::uhd::FeatureExtractor::computeHash({"$kernel.block_size"});
     heuristic["trained_against"] = provenanceOf(documents);
     heuristic["objective"] = "max";
-    heuristic["tree_data"] = {{"artifact", artifact}};
+    if(adapter == "linear_data")
+    {
+        // A within-catalog ranker: a log slowdown, lower is better, estimating no metric.
+        heuristic["objective"] = "min";
+    }
+    else if(adapter == "mlp_data")
+    {
+        // An engine estimate: the log of a registered metric.
+        heuristic["score"] = {{"metric", "tflops"}, {"calibrated", true}, {"transform", "log"}};
+    }
+    heuristic[adapter] = {{"artifact", artifact}};
     writeDocuments(root, documents);
     return root;
 }
@@ -2588,6 +2618,34 @@ TEST(TestDescriptorLoader, LoadsAnEngineWhoseModelArtifactIsPresent)
     // absolute.
     EXPECT_EQ(std::filesystem::path(sets.front().heuristic->modelArtifactPath).filename().string(),
               "model.bin");
+}
+
+/// Each data-artifact adapter a descriptor can name loads as its own UhdAdapter: a spelling the
+/// loader does not map would drop the engine's model.
+TEST(TestDescriptorLoader, ReadsEachDataArtifactAdapterAsItsOwn)
+{
+    const ScopedSymbols symbols;
+    const std::vector<std::pair<std::string, UhdAdapter>> adapters = {
+        {"tree_data", UhdAdapter::TREE_DATA},
+        {"linear_data", UhdAdapter::LINEAR_DATA},
+        {"mlp_data", UhdAdapter::MLP_DATA},
+    };
+    for(const auto& [name, expected] : adapters)
+    {
+        SCOPED_TRACE(name);
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("adapter_" + name));
+        writeModelHeuristicSet(dir.path(), "test:adapter_" + name, "model.bin", name);
+        writeArtifact(dir.path() / "model.bin");
+
+        const auto sets = validatedSetsFrom(dir.path());
+
+        ASSERT_EQ(sets.size(), 1u);
+        ASSERT_TRUE(sets.front().heuristic.has_value());
+        EXPECT_EQ(sets.front().heuristic->adapter, expected);
+        EXPECT_EQ(
+            std::filesystem::path(sets.front().heuristic->modelArtifactPath).filename().string(),
+            "model.bin");
+    }
 }
 
 /// The packer copies a shared model UHD and its artifact into every arch shard. Each copy
@@ -2898,6 +2956,56 @@ TEST(TestDescriptorLoader, DisablesAPredictionModelWhoseArtifactEscapesTheTree)
     EXPECT_EQ(firstBlockSize(sets.front()), 256);
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "inside the descriptor's directory"))
         << recorder.getRecordedLogsAsString();
+}
+
+/// `trained_against.codegen_revision` is read beside the selector revision, from a UHD 1.2. It
+/// only qualifies the model, so the declared path, whose engine revision is opaque provider text,
+/// still binds on the selector revision alone.
+TEST(TestDescriptorLoader, ReadsARecordedCodegenRevision)
+{
+    const ScopedL1Scorer scorer;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("declared_l1_codegen"));
+    const auto modelId = testUuid('e', '1');
+    auto document = declaredL1Document(modelId);
+    document["version"] = "1.2";
+    document["trained_against"]["codegen_revision"] = "codegen-old";
+    writeDocument(dir.path(), {".uhd.json", document});
+
+    const auto resolved = resolveDeclaredEnginePredictions(loadDescriptorCatalog(dir.path()),
+                                                           "test:opaque",
+                                                           L1_SELECTOR_REVISION,
+                                                           declaration({{"default", modelId}}));
+
+    EXPECT_TRUE(resolved.refused.empty());
+    ASSERT_EQ(resolved.byMetric.count("tflops"), 1u);
+    const auto& model = resolved.byMetric.at("tflops").at("default");
+    EXPECT_EQ(model.trainedAgainstSelectorRevision, L1_SELECTOR_REVISION);
+    EXPECT_EQ(model.trainedAgainstCodegenRevision, "codegen-old");
+}
+
+/// UHD 1.2 is the first version that carries `codegen_revision`: a 1.1 document recording it is
+/// refused as malformed, naming the version it needs, and a 1.3 one is skipped at the version
+/// gate, as a newer toolchain's file is.
+TEST(TestDescriptorLoader, ReadsACodegenRevisionOnlyFromAUhd12)
+{
+    const auto expectSkipped
+        = [](const std::string& version, hipdnnSeverity_t severity, const std::string& expected) {
+              SCOPED_TRACE(version);
+              auto recorder
+                  = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(severity);
+              const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+                  uniqueDirectory("declared_l1_codegen_version"));
+              auto document = declaredL1Document(testUuid('e', '1'));
+              document["version"] = version;
+              document["trained_against"]["codegen_revision"] = "codegen-old";
+              writeDocument(dir.path(), {".uhd.json", document});
+
+              EXPECT_TRUE(loadDescriptorCatalog(dir.path()).heuristics.empty());
+              EXPECT_TRUE(recorder.hasLogContaining(severity, expected))
+                  << recorder.getRecordedLogsAsString();
+          };
+    expectSkipped("1.1", HIPDNN_SEV_ERROR, "which requires UHD version 1.2");
+    expectSkipped("1.3", HIPDNN_SEV_WARN, "declares version 1.3; this build reads 1.2");
 }
 
 /// RFC 0019 Open Question 7: an engine with no UED declares its L1 model's UUID in code.
@@ -3865,21 +3973,89 @@ TEST(TestDescriptorLoader, DropsAnEngineWhoseNameIsNotScoped)
     EXPECT_TRUE(loadFrom(dir.path()).empty());
 }
 
-/// Optional per RFC 0020 §4.2 and mapped to no hipDNN enum, so what is under test is that
-/// a conforming UED carrying them still loads -- the field used to be an unknown key.
-TEST(TestDescriptorLoader, AcceptsAnEngineDeclaringNumericalNotes)
+/// Every cuDNN numerical-note name is authorable and maps to its transport value.
+TEST(TestDescriptorLoader, MapsEveryNumericalNoteName)
 {
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("numerical_notes"));
-    auto documents = makeSetDocuments('1', "test:numerical");
-    documentOfType(documents, ".ued.json")["numerical_notes"]
-        = nlohmann::json::array({"tensor_core", "reduced_precision_reduction"});
+    const std::vector<std::pair<const char*, int32_t>> names
+        = {{"tensor_core", HIPDNN_NUMERICAL_NOTE_TENSOR_CORE},
+           {"down_convert_inputs", HIPDNN_NUMERICAL_NOTE_DOWN_CONVERT_INPUTS},
+           {"reduced_precision_reduction", HIPDNN_NUMERICAL_NOTE_REDUCED_PRECISION_REDUCTION},
+           {"fft", HIPDNN_NUMERICAL_NOTE_FFT},
+           {"nondeterministic", HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC},
+           {"winograd", HIPDNN_NUMERICAL_NOTE_WINOGRAD},
+           {"winograd_tile_4x4", HIPDNN_NUMERICAL_NOTE_WINOGRAD_TILE_4x4},
+           {"winograd_tile_6x6", HIPDNN_NUMERICAL_NOTE_WINOGRAD_TILE_6x6},
+           {"winograd_tile_13x13", HIPDNN_NUMERICAL_NOTE_WINOGRAD_TILE_13x13},
+           {"strict_nan_prop", HIPDNN_NUMERICAL_NOTE_STRICT_NAN_PROP}};
+
+    for(const auto& [name, value] : names)
+    {
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("numerical_notes"));
+        auto documents = makeSetDocuments('1', "test:numerical");
+        documentOfType(documents, ".ued.json")["numerical_notes"] = nlohmann::json::array({name});
+        writeDocuments(dir.path(), documents);
+
+        const auto sets = loadFrom(dir.path());
+
+        ASSERT_EQ(sets.size(), 1u) << name;
+        ASSERT_TRUE(sets.front().engine.numericalNotes.has_value()) << name;
+        EXPECT_EQ(*sets.front().engine.numericalNotes, (std::vector<int32_t>{value})) << name;
+    }
+}
+
+/// An absent key is "no claim" and an authored empty list is an explicit claim of no
+/// notes; the two must stay distinguishable.
+TEST(TestDescriptorLoader, DistinguishesAnAbsentNumericalNotesKeyFromAnEmptyList)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory absentDir(uniqueDirectory("notes_absent"));
+    writeDocuments(absentDir.path(), makeSetDocuments('1', "test:absent"));
+    const auto absent = loadFrom(absentDir.path());
+    ASSERT_EQ(absent.size(), 1u);
+    EXPECT_FALSE(absent.front().engine.numericalNotes.has_value());
+
+    const hipdnn_test_sdk::utilities::ScopedDirectory emptyDir(uniqueDirectory("notes_empty"));
+    auto documents = makeSetDocuments('1', "test:empty");
+    documentOfType(documents, ".ued.json")["numerical_notes"] = nlohmann::json::array();
+    writeDocuments(emptyDir.path(), documents);
+    const auto empty = loadFrom(emptyDir.path());
+    ASSERT_EQ(empty.size(), 1u);
+    ASSERT_TRUE(empty.front().engine.numericalNotes.has_value());
+    EXPECT_TRUE(empty.front().engine.numericalNotes->empty());
+}
+
+/// One engine carries both note lists; each lands in its own field.
+TEST(TestDescriptorLoader, ParsesBehaviorAndNumericalNotesOnTheSameEngine)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("both_note_lists"));
+    auto documents = makeSetDocuments('1', "test:both_notes");
+    auto& ued = documentOfType(documents, ".ued.json");
+    ued["behavior_notes"] = nlohmann::json::array({"runtime_compilation"});
+    ued["numerical_notes"] = nlohmann::json::array({"nondeterministic"});
     writeDocuments(dir.path(), documents);
 
     const auto sets = loadFrom(dir.path());
 
     ASSERT_EQ(sets.size(), 1u);
-    EXPECT_EQ(sets.front().engine.numericalNotes,
-              (std::vector<std::string>{"tensor_core", "reduced_precision_reduction"}));
+    EXPECT_EQ(sets.front().engine.behaviorNotes,
+              (std::vector<int32_t>{HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION}));
+    ASSERT_TRUE(sets.front().engine.numericalNotes.has_value());
+    EXPECT_EQ(*sets.front().engine.numericalNotes,
+              (std::vector<int32_t>{HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC}));
+}
+
+/// Any name outside the closed vocabulary is rejected, including a known name in the
+/// wrong case.
+TEST(TestDescriptorLoader, DropsAnEngineDeclaringAnUnknownNumericalNote)
+{
+    for(const char* name : {"ftz", "NONDETERMINISTIC", "tensor-core"})
+    {
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("unknown_note"));
+        auto documents = makeSetDocuments('1', "test:unknown");
+        documentOfType(documents, ".ued.json")["numerical_notes"] = nlohmann::json::array({name});
+        writeDocuments(dir.path(), documents);
+
+        EXPECT_TRUE(loadFrom(dir.path()).empty()) << name;
+    }
 }
 
 /// A note repeated is reported twice downstream, so it is an authoring mistake rather
@@ -3889,7 +4065,7 @@ TEST(TestDescriptorLoader, DropsAnEngineRepeatingANumericalNote)
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("repeated_note"));
     auto documents = makeSetDocuments('1', "test:repeated");
     documentOfType(documents, ".ued.json")["numerical_notes"]
-        = nlohmann::json::array({"tensor_core", "tensor_core"});
+        = nlohmann::json::array({"nondeterministic", "nondeterministic"});
     writeDocuments(dir.path(), documents);
 
     EXPECT_TRUE(loadFrom(dir.path()).empty());
@@ -4004,6 +4180,22 @@ TEST(TestDescriptorLoader, DropsAnEngineWhoseSdkVersionIsMalformed)
     writeDocuments(dir.path(), documents);
 
     EXPECT_TRUE(loadFrom(dir.path()).empty());
+}
+
+/// A sign is not part of the version grammar: "-1.2.0" names no schema, so the engine
+/// drops rather than claiming a negative major that compares below every floor.
+TEST(TestDescriptorLoader, DropsAnEngineWhoseSdkVersionIsSigned)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("signed_sdk_version"));
+    auto documents = makeSetDocuments('1', "test:signed_version");
+    documentOfType(documents, ".ued.json")["sdk_version"] = "-1.2.0";
+    writeDocuments(dir.path(), documents);
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "key 'sdk_version'"));
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "is not a version"));
 }
 
 /// The inverse of the UED case: `version` is required on every type, with no absence-safe
@@ -4620,7 +4812,7 @@ TEST(TestDescriptorLoader, SkipsAnInlineKernelDeclaringANewerUkdVersion)
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("inline_newer_version"));
     auto documents = makeSetDocuments('1', "test:valid");
-    documentOfType(documents, ".kdp.json").at("kernelDescriptors").front()["version"] = "1.2";
+    documentOfType(documents, ".kdp.json").at("kernelDescriptors").front()["version"] = "1.3";
     writeDocuments(dir.path(), documents);
 
     const auto sets = loadFrom(dir.path());
@@ -4629,7 +4821,7 @@ TEST(TestDescriptorLoader, SkipsAnInlineKernelDeclaringANewerUkdVersion)
     ASSERT_EQ(sets.front().packs.size(), 1u);
     const auto& kernels = sets.front().packs.front().kernels;
     ASSERT_EQ(kernels.size(), 2u);
-    // Which two, not merely how many: the gate has to drop the entry that declared 1.2.
+    // Which two, not merely how many: the gate has to drop the entry that declared 1.3.
     EXPECT_EQ(toString(kernels[0].id), testUuid('1', '9'));
     EXPECT_EQ(toString(kernels[1].id), testUuid('1', 'a'));
     // The locator names the pack file; "a 'kernelDescriptors' entry" alone names nothing,
@@ -4651,7 +4843,7 @@ TEST(TestDescriptorLoader, SkewOnAnInlineKernelSupersedesItsOtherViolations)
     auto& pack = documentOfType(documents, ".kdp.json");
     pack["arch"] = nlohmann::json::array({"gfx942"});
     auto& skewed = pack.at("kernelDescriptors").front();
-    skewed["version"] = "1.2";
+    skewed["version"] = "1.3";
     skewed["arch"] = nlohmann::json::array({"gfx90a"});
     writeDocuments(dir.path(), documents);
 
@@ -4662,7 +4854,7 @@ TEST(TestDescriptorLoader, SkewOnAnInlineKernelSupersedesItsOtherViolations)
     ASSERT_EQ(sets.size(), 1u);
     ASSERT_EQ(sets.front().packs.size(), 1u);
     EXPECT_EQ(sets.front().packs.front().kernels.size(), 2u);
-    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "declares version 1.2"))
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "declares version 1.3"))
         << recorder.getRecordedLogsAsString();
 }
 
@@ -4703,7 +4895,7 @@ TEST(TestDescriptorLoader, DropsAPackReferencingAStandaloneKernelOfANewerUkdVers
 
     auto broken = makeSetDocuments('2', "test:broken");
     referenceLastKernel(broken);
-    documentOfType(broken, ".ukd.json")["version"] = "1.2";
+    documentOfType(broken, ".ukd.json")["version"] = "1.3";
     writeDocuments(dir.path(), broken);
 
     const auto sets = loadFrom(dir.path());
@@ -4756,7 +4948,7 @@ TEST_P(TestDescriptorLoaderPackReadings, WarnsOncePerReadingOfThePack)
     auto& pack = documentOfType(documents, ".kdp.json");
     pack["x-pack-note"] = "header";
     auto& kernels = pack.at("kernelDescriptors");
-    kernels[0]["version"] = "1.2";
+    kernels[0]["version"] = "1.3";
     kernels[1]["x-kernel-note"] = "kernel";
     writeDocuments(dir.path(), documents);
     overwritePack(dir.path(), documents, GetParam().spell(pack));
@@ -4768,7 +4960,7 @@ TEST_P(TestDescriptorLoaderPackReadings, WarnsOncePerReadingOfThePack)
     EXPECT_EQ(sets.front().packs.front().kernels.size(), 2u);
     const auto& param = GetParam();
     for(const std::string warning :
-        {"extension key 'x-pack-note'", "declares version 1.2", "extension key 'x-kernel-note'"})
+        {"extension key 'x-pack-note'", "declares version 1.3", "extension key 'x-kernel-note'"})
     {
         const auto count = countLogsContaining(recorder, warning);
         if(param.exactly)
@@ -5198,7 +5390,7 @@ std::vector<OracleCase> oracleCases()
          loads,
          [] {
              auto skewed = oracleKernel(2);
-             skewed["version"] = "1.2";
+             skewed["version"] = "1.3";
              return oraclePackText(oracleHeader(),
                                    nlohmann::json::array({oracleKernel(1), skewed}));
          }},
@@ -5764,9 +5956,10 @@ TEST(TestDescriptorLoader, AcceptsTwoLaunchNamesNamingOneKernelInline)
     EXPECT_EQ(kernel.sources.at("merge").tocKey, kernel.sources.at("decode").tocKey);
 }
 
-/// The selector revision digests every launch's code object, so a pack whose launch is
-/// rebuilt does not keep a revision a ranker was trained against. Each launch carries its
-/// own symbol, toc_key and sha256, and each of them counts on its own.
+/// The selector revision digests every launch's code identity, which is its sha256 for a launch
+/// that carries no `identity` (as these do not), so a pack whose launch is rebuilt does not keep
+/// a revision a ranker was trained against. Each launch carries its own symbol, toc_key and
+/// sha256, and each of them counts on its own.
 TEST(TestDescriptorLoader, ChangingALaunchCodeObjectChangesTheEngineSelectorRevision)
 {
     const auto revisionWith
@@ -5851,37 +6044,67 @@ TEST(TestDescriptorLoader, RefusesAKernelWithBothOrNeitherOfKernelSourceAndSourc
 namespace
 {
 
-/// Writes a packaged kernel whose only departure from the shape above is `sha256`, so a
-/// rejection can only be the digest and not some other part of the document.
-void writePackagedKernelWithSha256(const std::filesystem::path& where, const std::string& digest)
+/// The conforming packaged `kernel_source` of the shape above; a test changes only the key it
+/// is about.
+nlohmann::json packagedKernelSource()
 {
-    auto packaged = makeSetDocuments('1', "test:sha256");
-    documentOfType(packaged, ".kdp.json").at("kernelDescriptors").front()["kernel_source"]
-        = {{"kind", "kpack"},
-           {"library", "kpack/hip_kernel_provider_gfx942.kpack"},
-           {"toc_key", "PointwiseAdd/block64"},
-           {"symbol", "PointwiseAdd"},
-           {"sha256", digest},
-           {"signature", packagedSignature()}};
+    return {{"kind", "kpack"},
+            {"library", "kpack/hip_kernel_provider_gfx942.kpack"},
+            {"toc_key", "PointwiseAdd/block64"},
+            {"symbol", "PointwiseAdd"},
+            {"sha256", std::string(64, 'a')},
+            {"signature", packagedSignature()}};
+}
+
+/// Writes a UKD 1.2 packaged kernel whose only departure from packagedKernelSource() is @p key
+/// (`sha256`, or the `identity` 1.2 admits) set to @p digest, so a rejection can only be that
+/// digest and not some other part of the document.
+void writePackagedKernelWithDigest(const std::filesystem::path& where,
+                                   const std::string& key,
+                                   const std::string& digest)
+{
+    auto packaged = makeSetDocuments('1', "test:" + key);
+    auto& kernel = documentOfType(packaged, ".kdp.json").at("kernelDescriptors").front();
+    kernel["version"] = "1.2";
+    kernel["kernel_source"] = packagedKernelSource();
+    kernel["kernel_source"][key] = digest;
     writeDocuments(where, packaged);
 }
 
 /// Asserts the digest is refused and that the message can be acted on: it names the key, the
 /// locator, and the text that was wrong. A rejection whose message carries none of the three
 /// sends the reader to grep the loader rather than to their own descriptor.
-void expectSha256Rejected(const std::string& digest, const std::string& scratchLabel)
+void expectDigestRejected(const std::string& key,
+                          const std::string& digest,
+                          const std::string& scratchLabel)
 {
     auto recorder
         = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory(scratchLabel));
-    writePackagedKernelWithSha256(dir.path(), digest);
+    writePackagedKernelWithDigest(dir.path(), key, digest);
 
     EXPECT_TRUE(loadFrom(dir.path()).empty());
-    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "key 'sha256' in"))
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "key '" + key + "' in"))
         << recorder.getRecordedLogsAsString();
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "kernel_source"))
         << recorder.getRecordedLogsAsString();
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "'" + digest + "'"))
+        << recorder.getRecordedLogsAsString();
+}
+
+/// Asserts an empty digest is refused as an empty string, before its shape is read, so the
+/// message names the key and quotes no value.
+void expectEmptyDigestRejected(const std::string& key, const std::string& scratchLabel)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory(scratchLabel));
+    writePackagedKernelWithDigest(dir.path(), key, "");
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "key '" + key + "' in"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "must not be empty"))
         << recorder.getRecordedLogsAsString();
 }
 
@@ -5891,38 +6114,29 @@ TEST(TestDescriptorLoader, RejectsASha256ThatIsTooShort)
 {
     // One character short is what a truncated copy-paste produces, and it is the case a plain
     // non-empty check cannot see.
-    expectSha256Rejected(std::string(63, 'a'), "sha256_short");
+    expectDigestRejected("sha256", std::string(63, 'a'), "sha256_short");
 }
 
 TEST(TestDescriptorLoader, RejectsASha256ThatIsTooLong)
 {
-    expectSha256Rejected(std::string(65, 'a'), "sha256_long");
+    expectDigestRejected("sha256", std::string(65, 'a'), "sha256_long");
 }
 
 TEST(TestDescriptorLoader, RejectsASha256WithUppercaseHex)
 {
     // Rejected rather than folded: the packer emits `hexdigest()` and nothing else, and two
     // spellings of one digest compare unequal wherever the field is compared as text.
-    expectSha256Rejected(std::string(64, 'A'), "sha256_upper");
+    expectDigestRejected("sha256", std::string(64, 'A'), "sha256_upper");
 }
 
 TEST(TestDescriptorLoader, RejectsASha256WithANonHexCharacter)
 {
-    expectSha256Rejected(std::string(63, 'a') + "z", "sha256_nonhex");
+    expectDigestRejected("sha256", std::string(63, 'a') + "z", "sha256_nonhex");
 }
 
 TEST(TestDescriptorLoader, RejectsASha256ThatIsEmpty)
 {
-    // requireString already refuses an empty value; the length rule must own the case anyway,
-    // in case requireString ever softens.
-    auto recorder
-        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("sha256_empty"));
-    writePackagedKernelWithSha256(dir.path(), "");
-
-    EXPECT_TRUE(loadFrom(dir.path()).empty());
-    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "sha256"))
-        << recorder.getRecordedLogsAsString();
+    expectEmptyDigestRejected("sha256", "sha256_empty");
 }
 
 TEST(TestDescriptorLoader, AcceptsAConformingSha256)
@@ -5931,7 +6145,7 @@ TEST(TestDescriptorLoader, AcceptsAConformingSha256)
     // is ever tightened past "64 of [0-9a-f]".
     const std::string digest = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("sha256_ok"));
-    writePackagedKernelWithSha256(dir.path(), digest);
+    writePackagedKernelWithDigest(dir.path(), "sha256", digest);
 
     const auto sets = loadFrom(dir.path());
 
@@ -5939,6 +6153,79 @@ TEST(TestDescriptorLoader, AcceptsAConformingSha256)
     ASSERT_EQ(sets.front().packs.size(), 1u);
     ASSERT_FALSE(sets.front().packs.front().kernels.empty());
     EXPECT_EQ(sets.front().packs.front().kernels.front().source.sha256, digest);
+}
+
+/// The packager stamps `identity` beside `sha256` on a code object it compiled itself, on the
+/// kernel's single source and on each launch of a multi-launch kernel; it is read verbatim.
+TEST(TestDescriptorLoader, CarriesAPackagedCodeObjectIdentity)
+{
+    const std::string identity(64, 'c');
+    {
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("identity_ok"));
+        writePackagedKernelWithDigest(dir.path(), "identity", identity);
+
+        const auto sets = loadFrom(dir.path());
+
+        ASSERT_EQ(sets.size(), 1u);
+        const auto& kernels = sets.front().packs.front().kernels;
+        EXPECT_EQ(kernels.front().source.identity, identity);
+    }
+    {
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+            uniqueDirectory("identity_launch_ok"));
+        auto documents = makeSetDocuments('1', "test:identity_launch");
+        auto& document = spellAsMultiLaunch(documents);
+        document["version"] = "1.2";
+        document.at("sources").at("decode")["identity"] = identity;
+        writeDocuments(dir.path(), documents);
+
+        const auto sets = loadFrom(dir.path());
+
+        ASSERT_EQ(sets.size(), 1u);
+        const auto& kernel = sets.front().packs.front().kernels.front();
+        EXPECT_EQ(kernel.sources.at("decode").identity, identity);
+        EXPECT_TRUE(kernel.sources.at("merge").identity.empty());
+    }
+}
+
+/// `identity` arrived with UKD 1.2: a kernel that carries one under an older version is refused,
+/// on its single source and on a launch alike, as `sources` under 1.0 is.
+TEST(TestDescriptorLoader, RefusesAnIdentityUnderAVersionBeforeItsMinor)
+{
+    for(const bool multiLaunch : {false, true})
+    {
+        SCOPED_TRACE(multiLaunch ? "launch" : "single source");
+        auto recorder
+            = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("identity_1_1"));
+        auto documents = makeSetDocuments('1', "test:identity_1_1");
+        auto& kernel = documentOfType(documents, ".kdp.json").at("kernelDescriptors").front();
+        if(multiLaunch)
+        {
+            spellAsMultiLaunch(documents).at("sources").at("decode")["identity"]
+                = std::string(64, 'c');
+        }
+        else
+        {
+            kernel["version"] = "1.1";
+            kernel["kernel_source"] = packagedKernelSource();
+            kernel["kernel_source"]["identity"] = std::string(64, 'c');
+        }
+        writeDocuments(dir.path(), documents);
+
+        EXPECT_TRUE(loadFrom(dir.path()).empty());
+        EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "needs UKD 1.2"))
+            << recorder.getRecordedLogsAsString();
+    }
+}
+
+/// `identity` is held to the sha256 shape, so a truncated or mis-cased digest fails at load
+/// with the key, the locator and the value, not as a silent selector change.
+TEST(TestDescriptorLoader, RejectsAnIdentityThatIsNotASha256Digest)
+{
+    expectDigestRejected("identity", std::string(63, 'c'), "identity_short");
+    expectDigestRejected("identity", std::string(64, 'C'), "identity_upper");
+    expectEmptyDigestRejected("identity", "identity_empty");
 }
 
 namespace
@@ -5950,13 +6237,10 @@ void writePackagedKernelWithSignature(const std::filesystem::path& where,
                                       const nlohmann::json& signature)
 {
     auto packaged = makeSetDocuments('1', "test:signature");
-    documentOfType(packaged, ".kdp.json").at("kernelDescriptors").front()["kernel_source"]
-        = {{"kind", "kpack"},
-           {"library", "kpack/hip_kernel_provider_gfx942.kpack"},
-           {"toc_key", "PointwiseAdd/block64"},
-           {"symbol", "PointwiseAdd"},
-           {"sha256", std::string(64, 'a')},
-           {"signature", signature}};
+    auto& source
+        = documentOfType(packaged, ".kdp.json").at("kernelDescriptors").front()["kernel_source"];
+    source = packagedKernelSource();
+    source["signature"] = signature;
     writeDocuments(where, packaged);
 }
 
@@ -6590,6 +6874,30 @@ TEST(TestDescriptorLoader, LoadsAThreeSlotSetWithPerSlotState)
     EXPECT_TRUE(set.heuristicsByMetric.empty());
     EXPECT_EQ(set.matchers.size(), 2u);
     EXPECT_EQ(set.dispatches.size(), 1u);
+}
+
+TEST(TestDescriptorLoader, ParsesASlottedUedToOneDescriptorWhateverItsStorageHeld)
+{
+    // Per-arch shards ship byte-identical copies of one slotted UED, and the loader keeps
+    // them only while their parsed descriptors compare equal. A compared member the slotted
+    // branch leaves unassigned would carry whatever its storage held, so each parse lands in
+    // storage pre-filled with a different pattern (the parser's result is constructed in
+    // place where the compiler elides the copy).
+    auto documents = makeSlottedDocuments('1', "test:slotted_storage");
+    const auto& ued = documentOfType(documents, ".ued.json");
+    const auto parseOver = [&ued](unsigned char fill, unsigned char* storage) {
+        std::fill_n(storage, sizeof(EngineDescriptor), fill);
+        return new(storage) EngineDescriptor(detail::parseEngineDescriptor(ued, "slotted ued"));
+    };
+    alignas(EngineDescriptor) std::array<unsigned char, sizeof(EngineDescriptor)> first{};
+    alignas(EngineDescriptor) std::array<unsigned char, sizeof(EngineDescriptor)> second{};
+    auto* lhs = parseOver(0xAA, first.data());
+    auto* rhs = parseOver(0x55, second.data());
+
+    const bool equal = *lhs == *rhs;
+    lhs->~EngineDescriptor();
+    rhs->~EngineDescriptor();
+    EXPECT_TRUE(equal);
 }
 
 TEST(TestDescriptorLoader, UnslottedFilesLoadWithEmptySlotState)
@@ -7259,5 +7567,288 @@ INSTANTIATE_TEST_SUITE_P(
             "trained_against names a single slot, but a slotted engine's predict_engine model must "
             "name every slot's KMD in kmds"}),
     [](const ::testing::TestParamInfo<SlottedEstimateRefusal>& info) { return info.param.name; });
+
+#ifdef __linux__
+
+namespace
+{
+
+constexpr int WALK_DEPTH = 100;
+
+std::string levelFilename(int level)
+{
+    return "level_" + std::to_string(level) + ".ued.json";
+}
+
+/// Creates WALK_DEPTH nested levels under @p root. Each level holds the subdirectory `d`
+/// and an empty descriptor file; collectDescriptorFiles matches by suffix and never opens
+/// it. Each level adds two path characters, so the tree stays well inside PATH_MAX.
+void buildNestedLevels(const std::filesystem::path& root)
+{
+    std::filesystem::path level = root;
+    for(int i = 0; i < WALK_DEPTH; ++i)
+    {
+        const std::filesystem::path next = level / "d";
+        std::filesystem::create_directory(next);
+        std::ofstream(level / levelFilename(i)).close();
+        level = next;
+    }
+}
+
+/// Runs in the death-test child. Lowers the descriptor limit to the handles open now plus
+/// 30, walks @p root, and exits 0 only if every level's file was found: 1 when some were
+/// found but not all of them, 2 when the walk stopped short of WALK_DEPTH files.
+[[noreturn]] void walkWithTightHandleLimit(const std::filesystem::path& root)
+{
+    // Counting /proc/self/fd opens a handle of its own, which is gone by the time the limit
+    // is set, hence the subtraction.
+    rlim_t openHandles = 0;
+    {
+        std::error_code error;
+        for(std::filesystem::directory_iterator it("/proc/self/fd", error);
+            !error && it != std::filesystem::directory_iterator();
+            it.increment(error))
+        {
+            ++openHandles;
+        }
+        --openHandles;
+    }
+    const rlimit limit{openHandles + 30, openHandles + 30};
+    if(setrlimit(RLIMIT_NOFILE, &limit) != 0)
+    {
+        std::exit(3);
+    }
+
+    std::vector<std::pair<std::filesystem::path, const detail::FileType*>> files;
+    detail::collectDescriptorFiles(root, files);
+
+    std::set<std::string> names;
+    for(const auto& file : files)
+    {
+        names.insert(file.first.filename().string());
+    }
+    std::set<std::string> expected;
+    for(int i = 0; i < WALK_DEPTH; ++i)
+    {
+        expected.insert(levelFilename(i));
+    }
+    if(names == expected && files.size() == expected.size())
+    {
+        std::exit(0);
+    }
+    std::exit(files.size() < expected.size() ? 2 : 1);
+}
+
+/// Makes a directory readable again on scope exit so ScopedDirectory can delete it.
+class ScopedPermissions
+{
+    std::filesystem::path _path;
+
+public:
+    explicit ScopedPermissions(std::filesystem::path path)
+        : _path(std::move(path))
+    {
+    }
+    ~ScopedPermissions()
+    {
+        std::error_code error;
+        std::filesystem::permissions(_path, std::filesystem::perms::owner_all, error);
+    }
+    ScopedPermissions(const ScopedPermissions&) = delete;
+    ScopedPermissions& operator=(const ScopedPermissions&) = delete;
+};
+
+} // namespace
+
+// The suite name ends in Death rather than DeathTest because hipDNN's test-name validator
+// reserves "Test" for the leading keyword.
+// A walk that keeps one directory handle open per level runs out of descriptors a few
+// dozen levels down. The limit is the handles open at the start of the child plus 30, and
+// the tree is 100 levels deep: that walk is cut short, while one that holds a single
+// handle at a time needs base + 1. Descriptors inherited above base + 30 raise the
+// effective limit, so the depth leaves room for dozens of them.
+TEST(TestDescriptorLoaderDeath, WalkIsNotBoundedByOpenDirectoryHandles)
+{
+    GTEST_FLAG_SET(death_test_style, "fast");
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("deep_walk"));
+    buildNestedLevels(dir.path());
+
+    // EXPECT_EXIT expands to a switch over AssumeRole() carrying no default label. The
+    // diagnostic is attributed to this expansion site rather than to the GoogleTest
+    // header, so -isystem does not suppress it and -Werror makes it fatal.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wswitch-default"
+    EXPECT_EXIT(walkWithTightHandleLimit(dir.path()), ::testing::ExitedWithCode(0), "");
+#pragma clang diagnostic pop
+}
+
+// A directory that cannot be opened costs its own subtree and nothing beside it.
+TEST(TestDescriptorLoader, UnreadableDirectoryCostsOnlyItsSubtree)
+{
+    if(geteuid() == 0)
+    {
+        GTEST_SKIP() << "root reads a mode 0000 directory";
+    }
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("unreadable"));
+    for(const auto& [folder, level] :
+        {std::pair<const char*, int>{"a", 0}, {"blocked", 1}, {"c", 2}})
+    {
+        std::filesystem::create_directory(dir.path() / folder);
+        std::ofstream(dir.path() / folder / levelFilename(level)).close();
+    }
+    const ScopedPermissions restore(dir.path() / "blocked");
+    std::filesystem::permissions(dir.path() / "blocked", std::filesystem::perms::none);
+    const auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+
+    std::vector<std::pair<std::filesystem::path, const detail::FileType*>> files;
+    detail::collectDescriptorFiles(dir.path(), files);
+
+    std::vector<std::string> names;
+    names.reserve(files.size());
+    for(const auto& file : files)
+    {
+        names.push_back(file.first.filename().string());
+    }
+    std::sort(names.begin(), names.end());
+    EXPECT_EQ(names, (std::vector<std::string>{levelFilename(0), levelFilename(2)}));
+    EXPECT_EQ(countLogsContaining(recorder, "cannot read"), 1u);
+}
+
+// Directory links are not followed: a link back up the tree and a link to a sibling
+// tree each leave every descriptor listed exactly once.
+TEST(TestDescriptorLoader, DirectoryLinksAreNotFollowed)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("links"));
+    std::filesystem::create_directories(dir.path() / "a" / "b");
+    std::filesystem::create_directories(dir.path() / "sib");
+    std::ofstream(dir.path() / "a" / levelFilename(0)).close();
+    std::ofstream(dir.path() / "a" / "b" / levelFilename(1)).close();
+    std::ofstream(dir.path() / "sib" / levelFilename(2)).close();
+    std::filesystem::create_directory_symlink("..", dir.path() / "a" / "b" / "up");
+    std::filesystem::create_directory_symlink(std::filesystem::path("..") / "sib",
+                                              dir.path() / "a" / "sib");
+
+    std::vector<std::pair<std::filesystem::path, const detail::FileType*>> files;
+    detail::collectDescriptorFiles(dir.path(), files);
+
+    std::vector<std::string> names;
+    names.reserve(files.size());
+    for(const auto& file : files)
+    {
+        names.push_back(file.first.filename().string());
+    }
+    std::sort(names.begin(), names.end());
+    EXPECT_EQ(names,
+              (std::vector<std::string>{levelFilename(0), levelFilename(1), levelFilename(2)}));
+}
+
+#endif // __linux__
+
+#ifdef _WIN32
+
+namespace
+{
+
+/// Removes the \\?\ tree on scope exit; the error_code overload keeps cleanup from throwing.
+struct RemoveTreeOnExit
+{
+    std::filesystem::path path;
+
+    ~RemoveTreeOnExit()
+    {
+        std::error_code failed;
+        std::filesystem::remove_all(path, failed);
+    }
+};
+
+std::string levelFilename(int level)
+{
+    return "level_" + std::to_string(level) + ".ued.json";
+}
+
+} // namespace
+
+// The test executable gets its manifest from the build's long-path manifest post-pass.
+TEST(TestDescriptorLoader, ExecutableIsLongPathAware)
+{
+    // 24 is RT_MANIFEST; the RT_MANIFEST macro is narrow or wide by the UNICODE setting.
+    const HRSRC resource = FindResourceW(nullptr, MAKEINTRESOURCEW(1), MAKEINTRESOURCEW(24));
+    ASSERT_NE(resource, nullptr);
+    const HGLOBAL loaded = LoadResource(nullptr, resource);
+    ASSERT_NE(loaded, nullptr);
+    const void* bytes = LockResource(loaded);
+    ASSERT_NE(bytes, nullptr);
+    const DWORD size = SizeofResource(nullptr, resource);
+    ASSERT_GT(size, 0u);
+
+    const std::string manifest(static_cast<const char*>(bytes), size);
+    EXPECT_TRUE(std::regex_search(manifest, std::regex(R"(longPathAware[^>]*>\s*true\s*<)")))
+        << manifest;
+}
+
+// Unlike the data SDK test (data_sdk/tests/utilities/TestPlatformUtils.cpp), which uses
+// \\?\ paths and needs no policy, this test exercises the plain-path policy on purpose:
+// the walk is handed an ordinary root and must reach descriptors beyond MAX_PATH.
+TEST(TestDescriptorLoader, WalkReachesDescriptorsBeyondMaxPath)
+{
+    DWORD longPathsEnabled = 0;
+    DWORD valueSize = sizeof(longPathsEnabled);
+    const LONG status = RegGetValueW(HKEY_LOCAL_MACHINE,
+                                     L"SYSTEM\\CurrentControlSet\\Control\\FileSystem",
+                                     L"LongPathsEnabled",
+                                     RRF_RT_REG_DWORD,
+                                     nullptr,
+                                     &longPathsEnabled,
+                                     &valueSize);
+    if(status != ERROR_SUCCESS || longPathsEnabled != 1)
+    {
+        GTEST_SKIP() << "HKLM\\SYSTEM\\CurrentControlSet\\Control\\FileSystem "
+                        "LongPathsEnabled is not 1; plain paths beyond MAX_PATH are unavailable";
+    }
+
+    std::filesystem::path plainRoot = std::filesystem::temp_directory_path();
+    plainRoot /= L"hipdnn_walk_" + std::to_wstring(GetCurrentProcessId());
+    const std::wstring verbatimPrefix = L"\\\\?\\";
+    const RemoveTreeOnExit cleanup{std::filesystem::path(verbatimPrefix + plainRoot.wstring())};
+
+    // The \\?\ prefix builds the tree regardless of policy; the walk below gets the plain root.
+    std::wstring directory = cleanup.path.wstring();
+    const std::wstring segment(120, L'p');
+    std::error_code failed;
+    std::filesystem::create_directories(std::filesystem::path(directory), failed);
+    ASSERT_FALSE(failed) << failed.message();
+    int levels = 0;
+    do
+    {
+        std::ofstream(std::filesystem::path(directory) / levelFilename(levels)).close();
+        ++levels;
+        directory += L'\\';
+        directory += segment;
+        std::filesystem::create_directory(std::filesystem::path(directory), failed);
+        ASSERT_FALSE(failed) << failed.message();
+    } while(directory.size() - verbatimPrefix.size() < static_cast<size_t>(MAX_PATH) + 64);
+    std::ofstream(std::filesystem::path(directory) / levelFilename(levels)).close();
+    ++levels;
+    ASSERT_GT(directory.size() - verbatimPrefix.size(), static_cast<size_t>(MAX_PATH));
+
+    std::vector<std::pair<std::filesystem::path, const detail::FileType*>> files;
+    detail::collectDescriptorFiles(plainRoot, files);
+
+    std::set<std::string> names;
+    for(const auto& file : files)
+    {
+        names.insert(file.first.filename().string());
+    }
+    std::set<std::string> expected;
+    for(int i = 0; i < levels; ++i)
+    {
+        expected.insert(levelFilename(i));
+    }
+    EXPECT_EQ(files.size(), static_cast<size_t>(levels));
+    EXPECT_EQ(names, expected);
+}
+
+#endif // _WIN32
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

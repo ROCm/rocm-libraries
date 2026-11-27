@@ -98,8 +98,8 @@ def _tdm_plr0_config(prefetch_global_read):
         {"ScheduleIterAlg": [3]},
     ]
     if prefetch_global_read == 1:
-        # LDSTrInst with PGR1 is only supported with one LDS buffer and no pointer swap.
-        fork_parameters += [{"1LDSBuffer": [1]}, {"ExpandPointerSwap": [False]}]
+        # TDM requires 1LDSBuffer=0, and LDSTrInst with 1LDSBuffer=0 needs ExpandPointerSwap off.
+        fork_parameters += [{"1LDSBuffer": [0]}, {"ExpandPointerSwap": [False]}]
     return {
         "GlobalParameters": {"Architecture": "gfx1250", "PrintLevel": 0},
         "BenchmarkProblems": [[
@@ -150,3 +150,131 @@ def test_tdm_plr0_loop_body_waits_for_tensor_load(tmp_path, prefetch_global_read
         assert "s_barrier_signal" in loop_top
         assert re.search(r"s_wait_tensorcnt 0\b(?:.*\n)*?s_barrier_signal", loop_top), \
             "main-loop body syncs before its tensor loads have landed in LDS:\n" + loop_top
+
+
+def _bf16_tn_pgr2_config(prefetch_local_read):
+    # tdm_gfx1250.yaml loop-skip block: bf16 TN, TDM + SIA4 + PGR2, DepthU 128.
+    fork_parameters = [
+        {"MatrixInstruction": [[16, 16, 32, 1, 1, 1, 1, 2, 1]]},
+        {"WorkGroup": [[32, 1, 1]]},
+        {"DepthU": [128]},
+        {"LdsBlockSizePerPadA": [256]},
+        {"LdsBlockSizePerPadB": [256]},
+        {"PrefetchLocalRead": [prefetch_local_read]},
+        {"PrefetchGlobalRead": [2]},
+        {"ScheduleIterAlg": [4]},
+        {"TDMInst": [3]},
+        {"TransposeLDS": [1]},
+        {"LdsPadA": [8]},
+        {"LdsPadB": [8]},
+        {"ClusterLocalRead": [1]},
+        {"GlobalReadVectorWidthA": [1]},
+        {"GlobalReadVectorWidthB": [1]},
+        {"VectorWidthA": [1]},
+        {"VectorWidthB": [1]},
+        {"LocalReadVectorWidth": [8]},
+        {"StoreVectorWidth": [1]},
+        {"SourceSwap": [True]},
+        {"MIArchVgpr": [True]},
+        {"InitCIterWmma": [1]},
+        {"WavefrontSize": [32]},
+        {"ExpandPointerSwap": [False]},
+    ]
+    return {
+        "GlobalParameters": {"Architecture": "gfx1250", "PrintLevel": 0},
+        "BenchmarkProblems": [[
+            {
+                "OperationType": "GEMM",
+                "DataType": "b",
+                "DestDataType": "b",
+                "ComputeDataType": "s",
+                "HighPrecisionAccumulate": True,
+                "TransposeA": True,
+                "TransposeB": False,
+                "UseBeta": True,
+                "Batched": True,
+                "SupportUserArgs": True,
+            },
+            {
+                "InitialSolutionParameters": None,
+                "BenchmarkCommonParameters": [{"KernelLanguage": ["Assembly"]}],
+                "ForkParameters": fork_parameters,
+                "BenchmarkFinalParameters": [{"ProblemSizes": [{"Exact": [720, 432, 1, 256]}]}],
+            },
+        ]],
+    }
+
+
+def _emit_one(tmp_path, config, name):
+    path = tmp_path / name
+    path.write_text(yaml.safe_dump(config))
+    results = emit_kernels_from_config(path, limit=1, arch="gfx1250")
+    assert len(results) == 1
+    _, assembly, error = results[0]
+    assert error == 0
+    return assembly
+
+
+def test_sia4_loop_skip_sync_drains_second_prefetched_tile(tmp_path):
+    # With PGR2, a counter of 2 skips the unroll loop and enters the first NGLL
+    # straight from the prologue, whose second tensor load is still in flight.
+    # With PrefetchLocalRead >= 2 the NGLL reads it before any planner barrier.
+    assembly = _emit_one(tmp_path, _bf16_tn_pgr2_config(2), "sia4_loop_skip_plr2.yaml")
+    assert re.search(
+        r"s_cbranch_scc0 label_AfterLoopSkipPGRSync_\d+.*\n"
+        r"(?:.*\n)*?s_wait_tensorcnt 0.*\n"
+        r"(?:.*\n)*?s_barrier_wait -1.*loop-skip PGR bypass sync.*\n"
+        r"s_branch label_LoopEnd\w*.*\n"
+        r"label_AfterLoopSkipPGRSync_\d+:",
+        assembly,
+    ), "the loop-skip edge into the first NGLL does not drain the prefetched TDM tile"
+
+
+@pytest.mark.parametrize("prefetch_local_read", [0, 1], ids=["plr0", "plr1"])
+def test_sia4_loop_skip_keeps_loop_exit_drain(tmp_path, prefetch_local_read):
+    # With PrefetchLocalRead < 2 the first NGLL opens with a planner barrier whose
+    # tensorcnt drain covers the skip edge. That drain also covers the loop exit
+    # and the NLL behind the OptNLL dispatch, so the skip edge must stay a plain
+    # branch: draining it separately lets the wait pass drop the shared drain.
+    assembly = _emit_one(tmp_path, _bf16_tn_pgr2_config(prefetch_local_read),
+                         "sia4_loop_skip_plr%u.yaml" % prefetch_local_read)
+    assert "AfterLoopSkipPGRSync" not in assembly
+    assert re.search(r"s_cbranch_scc1 label_LoopEnd\w*.*do not enter Loop", assembly)
+    loop_exit = assembly[assembly.index("label_LoopEndL:"):]
+    first_barrier = loop_exit[:loop_exit.index("s_barrier_signal -1")]
+    assert re.search(r"s_wait_tensorcnt 0\b", first_barrier), \
+        "the loop exit no longer drains the last tensor load before its barrier:\n" + first_barrier
+
+
+@pytest.mark.parametrize("num_iters_plr, expected", [(0, False), (1, False), (2, True), (3, True)])
+def test_sia4_loop_skip_sync_needs_two_prefetched_local_reads(num_iters_plr, expected):
+    writer = SimpleNamespace(
+        states=SimpleNamespace(numItersPLR=num_iters_plr),
+        _usesMainLoopTokenBarrierPlanner=lambda kernel: True,
+    )
+    kernel = {"PrefetchGlobalRead": 2, "SuppressNoLoadLoop": False}
+
+    assert KernelWriter._needsLoopSkipPGRSync(writer, kernel) is expected
+
+
+def test_sia4_loop_skip_sync_survives_disable_asm_comments(tmp_path):
+    # The planner keeps the PGR bypass barriers by their comment, and the hipblaslt build
+    # passes --disable-asm-comments, which drops comments from str(): the sync must not.
+    from rocisa import rocIsa
+    ri = rocIsa.getInstance()
+    opts = ri.getOutputOptions()
+    previous = opts.outputNoComment
+    opts.outputNoComment = True
+    ri.setOutputOptions(opts)
+    try:
+        assembly = _emit_one(tmp_path, _bf16_tn_pgr2_config(2), "sia4_loop_skip_plr2_nocomment.yaml")
+    finally:
+        opts = ri.getOutputOptions()
+        opts.outputNoComment = previous
+        ri.setOutputOptions(opts)
+    edge = re.search(
+        r"s_cbranch_scc0 label_AfterLoopSkipPGRSync_\d+.*\n((?:.*\n)*?)s_branch label_LoopEnd\w*",
+        assembly)
+    assert edge, "no loop-skip edge"
+    body = [l.split("//")[0].strip() for l in edge.group(1).splitlines() if l.split("//")[0].strip()]
+    assert "s_wait_tensorcnt 0" in body and body[-2:] == ["s_barrier_signal -1", "s_barrier_wait -1"], body

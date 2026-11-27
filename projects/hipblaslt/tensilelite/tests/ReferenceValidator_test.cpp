@@ -19,6 +19,7 @@
 
 #include <hip/hip_runtime.h>
 
+#include <algorithm>
 #include <map>
 #include <memory>
 #include <string>
@@ -65,7 +66,7 @@ namespace
         setOption(args, "mx-a-type", rocisa::DataType::E8);
         setOption(args, "mx-b-type", rocisa::DataType::E8);
         setOption(args, "mx-scale-format", 0);
-        setOption(args, "fused-gemm-a2a", false);
+        setOption(args, "fused-a2a", FusedA2A::Disabled);
         setOption(args, "metadata-layout", 0);
         setOption(args, "a-ops", TensorOps{});
         setOption(args, "b-ops", TensorOps{});
@@ -126,6 +127,30 @@ namespace
         std::map<std::string, std::string> strings;
     };
 
+    class ReferenceInputWriter : public DataInitialization
+    {
+    public:
+        using DataInitialization::DataInitialization;
+
+        void initializeUnitInputs()
+        {
+            for(int tensor : {ContractionProblemGemm::TENSOR::A, ContractionProblemGemm::TENSOR::B})
+            {
+                auto& pristine = m_vdata[tensor].pristine.at(rocisa::DataType::Float);
+                std::fill_n(
+                    static_cast<float*>(pristine.cpuInput.valid.get()), pristine.maxElements, 1.0f);
+            }
+        }
+
+        void rewriteFirstA(float value, bool publishEpoch)
+        {
+            // A real host write lets the tests distinguish stale reuse from recomputation.
+            static_cast<float*>(m_cpuPtrs[ContractionProblemGemm::TENSOR::A])[0] = value;
+            if(publishEpoch)
+                ++m_inputEpoch;
+        }
+    };
+
     class ReferenceValidatorTest : public ::testing::Test
     {
     protected:
@@ -135,7 +160,7 @@ namespace
             if(hipGetDeviceCount(&n) != hipSuccess || n < 1)
                 GTEST_SKIP() << "needs a device";
             factory          = std::make_unique<ClientProblemFactory>(args);
-            dataInit         = std::make_shared<DataInitialization>(args, *factory);
+            dataInit         = std::make_shared<ReferenceInputWriter>(args, *factory);
             problem          = factory->problems()[0].get();
             device           = std::make_shared<DeviceContext>(0, true);
             device->dataInit = dataInit;
@@ -147,6 +172,10 @@ namespace
             auto validator = std::make_unique<ReferenceValidator>(args);
             validator->setDevices(&devices);
             validator->setReporter(reporter);
+            // DataInitialization is registered before the validator, as in main: the
+            // validator reads the input epoch of a solution DataInitialization has seen.
+            dataInit->preProblem(problem);
+            dataInit->preSolution(&solution);
             validator->preProblem(problem);
             validator->preSolution(&solution);
             gpu = std::dynamic_pointer_cast<ContractionInputs>(dataInit->prepareGPUInputs(problem));
@@ -171,7 +200,7 @@ namespace
 
         po::variables_map                     args = makeValidatorArgs();
         std::unique_ptr<ClientProblemFactory> factory;
-        std::shared_ptr<DataInitialization>   dataInit;
+        std::shared_ptr<ReferenceInputWriter>       dataInit;
         std::shared_ptr<DeviceContext>        device;
         std::vector<std::shared_ptr<DeviceContext>> devices;
         ContractionProblem*                   problem = nullptr;
@@ -180,6 +209,90 @@ namespace
         std::shared_ptr<ContractionInputs>    gpu;
         std::shared_ptr<ContractionInputs>    ref;
     };
+}
+
+TEST_F(ReferenceValidatorTest, VerificationRejectsHostWriteWithoutEpochAdvance)
+{
+    dataInit->initializeUnitInputs();
+    setOption(args, "verify-reference-reuse", true);
+    auto       validator = start();
+    auto const epoch     = dataInit->inputEpoch(&solution);
+    dataInit->rewriteFirstA(static_cast<float const*>(ref->a)[0] + 16.0f, false);
+    dataInit->preSolution(&solution);
+    EXPECT_EQ(dataInit->inputEpoch(&solution), epoch);
+    try
+    {
+        validator->preSolution(&solution);
+        FAIL() << "verification accepted a stale reference";
+    }
+    catch(std::runtime_error const& error)
+    {
+        EXPECT_NE(std::string(error.what()).find("Stale CPU reference"), std::string::npos);
+    }
+}
+
+TEST_F(ReferenceValidatorTest, HostWriteWithEpochAdvanceRecomputesBeforeReuse)
+{
+    dataInit->initializeUnitInputs();
+    setOption(args, "verify-reference-reuse", true);
+    auto       validator = start();
+    auto const before    = static_cast<float const*>(ref->d)[0];
+    auto const epoch     = dataInit->inputEpoch(&solution);
+    dataInit->rewriteFirstA(static_cast<float const*>(ref->a)[0] + 16.0f, true);
+    dataInit->preSolution(&solution);
+    EXPECT_GT(dataInit->inputEpoch(&solution), epoch);
+    ASSERT_NO_THROW(validator->preSolution(&solution));
+    EXPECT_NE(static_cast<float const*>(ref->d)[0], before);
+    dataInit->preSolution(&solution);
+    EXPECT_NO_THROW(validator->preSolution(&solution));
+    ::testing::internal::CaptureStdout();
+    validator->finalizeReport();
+    EXPECT_NE(::testing::internal::GetCapturedStdout().find("REFERENCE_REUSE_VERIFIED:2"),
+              std::string::npos);
+}
+
+TEST(ReferenceValidatorSplit, RecomputeAndVerificationUseEachDevicesProblem)
+{
+    auto args = makeValidatorArgs();
+    setOption(args, "split-devices", 2);
+    setOption(args, "split-dim", std::string("N"));
+    setOption(args, "verify-reference-reuse", true);
+    ClientProblemFactory                               factory(args);
+    auto*                                              problem = factory.problems()[0].get();
+    std::vector<std::shared_ptr<DeviceContext>>        devices;
+    std::vector<std::shared_ptr<ReferenceInputWriter>> writers;
+    // Both contexts can use one HIP device: only host references and allocation are tested.
+    for(size_t d = 0; d < 2; d++)
+    {
+        auto writer = std::make_shared<ReferenceInputWriter>(args, factory.sliceFactory(d));
+        writer->initializeUnitInputs();
+        writer->preProblem(factory.sliceProblem(problem, d));
+        auto device      = std::make_shared<DeviceContext>(0, true);
+        device->dataInit = writer;
+        writers.push_back(writer);
+        devices.push_back(device);
+    }
+    ReferenceValidator validator(args);
+    validator.setSplit(&factory);
+    validator.setDevices(&devices);
+    validator.preProblem(problem);
+    ContractionSolution solution;
+    for(auto& writer : writers)
+        writer->preSolution(&solution);
+    ASSERT_NO_THROW(validator.preSolution(&solution));
+    auto       first  = std::dynamic_pointer_cast<ContractionInputs>(validator.referenceInputs(0));
+    auto       second = std::dynamic_pointer_cast<ContractionInputs>(validator.referenceInputs(1));
+    auto const beforeFirst  = static_cast<float const*>(first->d)[0];
+    auto const beforeSecond = static_cast<float const*>(second->d)[0];
+    writers[1]->rewriteFirstA(17.0f, true);
+    for(auto& writer : writers)
+        writer->preSolution(&solution);
+    ASSERT_NO_THROW(validator.preSolution(&solution));
+    EXPECT_EQ(static_cast<float const*>(first->d)[0], beforeFirst);
+    EXPECT_NE(static_cast<float const*>(second->d)[0], beforeSecond);
+    for(auto& writer : writers)
+        writer->preSolution(&solution);
+    EXPECT_NO_THROW(validator.preSolution(&solution));
 }
 
 TEST_F(ReferenceValidatorTest, OneShotValidatesOnlyTheFirstRun)
@@ -206,7 +319,7 @@ TEST(ReferenceValidatorFusedA2A, RotatedReceiveBufferIsAligned)
 
     auto args = makeValidatorArgs();
     setOption(args, "problem-size", std::vector<std::vector<size_t>>{{64, 63, 1, 65}});
-    setOption(args, "fused-gemm-a2a", true);
+    setOption(args, "fused-a2a", FusedA2A::GemmA2A);
     setOption(args, "world", std::vector<int>{1});
     setOption(args, "fused-a2a-extent", std::vector<int>{64});
     setOption(args, "rotating-buffer-size", 1);
@@ -229,7 +342,7 @@ TEST(ReferenceValidatorFusedA2A, RotatedReceiveBufferUsesItsOwnAllocationSize)
         GTEST_SKIP() << "needs a device";
 
     auto args = makeValidatorArgs();
-    setOption(args, "fused-gemm-a2a", true);
+    setOption(args, "fused-a2a", FusedA2A::GemmA2A);
     setOption(args, "world", std::vector<int>{1});
     setOption(args, "fused-a2a-extent", std::vector<int>{64});
     setOption(args, "bounds-check", BoundsCheckMode::NaN);
@@ -244,9 +357,13 @@ TEST(ReferenceValidatorFusedA2A, RotatedReceiveBufferUsesItsOwnAllocationSize)
     ReferenceValidator                          validator(args);
     validator.setDevices(&devices);
     validator.setReporter(reporter);
-    validator.preProblem(problem);
     ContractionSolution solution;
-    solution.problemType.fusedGemmA2A = true;
+    solution.problemType.fusedA2A = FusedA2A::GemmA2A;
+    // DataInitialization is registered before the validator, as in main: the validator reads the
+    // input epoch of a solution DataInitialization has seen.
+    dataInit->preProblem(problem);
+    dataInit->preSolution(&solution);
+    validator.preProblem(problem);
     validator.preSolution(&solution);
 
     auto inputs      = dataInit->prepareGPUInputs(problem);
@@ -268,6 +385,7 @@ TEST(ReferenceValidatorFusedA2A, RotatedReceiveBufferUsesItsOwnAllocationSize)
     EXPECT_EQ(reporter->strings.at(ResultKey::Validation), "PASSED");
     EXPECT_EQ(validator.error(), 0);
 
+    dataInit->preSolution(&solution);
     validator.preSolution(&solution);
     float bad = static_cast<float const*>(reference.d)[recv.totalLogicalElements() - 1] + 100.0f;
     HIP_CHECK_EXC(hipMemcpy(static_cast<float*>(rotated.a2aBuf) + recv.totalLogicalElements() - 1,

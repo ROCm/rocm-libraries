@@ -48,7 +48,7 @@ from collections import Counter
 
 import pytest
 
-from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+from rocisa_test_state import preserve_rocisa_kernel_state
 from toolchain_test_helpers import shared_assembler, toolchain_for
 
 # Reuse the logic-driven harness for: assembler/toolchain construction, the
@@ -170,6 +170,7 @@ def _solutions_from_config_unguarded(
     problem_index=0,
     problem_fingerprint=None,
     expected_fork_count=None,
+    size_group_index=0,
 ):
     """Build ``Solution`` objects from one selected BenchmarkProblems entry.
 
@@ -182,7 +183,8 @@ def _solutions_from_config_unguarded(
     generation (keeps the rocisa per-process footprint bounded for big sweeps).
     ``problem_fingerprint`` selects an entry by content and takes precedence
     over ``problem_index``. ``expected_fork_count`` checks the complete
-    permutation count before the cap is applied.
+    permutation count before the cap is applied. ``size_group_index`` selects
+    the ProblemSizeGroup within the entry.
     """
     from tensilelite.BenchmarkProblems import _generateForkedSolutions
     from tensilelite.BenchmarkStructs import BenchmarkProcess, constructForkPermutations
@@ -196,8 +198,9 @@ def _solutions_from_config_unguarded(
     if selected_problem is None:
         return []
 
-    # Each BenchmarkProblems entry is [ProblemTypeConfig, ProblemSizeGroupConfig].
-    problemTypeConfig, problemSizeGroupConfig = selected_problem[:2]
+    # Each BenchmarkProblems entry is [ProblemTypeConfig, ProblemSizeGroupConfig, ...].
+    problemTypeConfig = selected_problem[0]
+    problemSizeGroupConfig = selected_problem[1 + size_group_index]
 
     debugConfig = makeDebugConfig(config.get("GlobalParameters", {}))
 
@@ -257,7 +260,8 @@ def solutions_from_config(
 
 def emit_kernels_from_config(config_path, limit=8, arch=_DEFAULT_ARCH, canonical=True,
                              splitGSU=False, cluster_dim=None, problem_index=0,
-                             problem_fingerprint=None, expected_fork_count=None):
+                             problem_fingerprint=None, expected_fork_count=None,
+                             size_group_index=0):
     """Emit assembly for the kernels of a ``BenchmarkProblems`` config.
 
     Drives ``config -> BenchmarkProcess -> constructForkPermutations ->
@@ -278,7 +282,8 @@ def emit_kernels_from_config(config_path, limit=8, arch=_DEFAULT_ARCH, canonical
     time (the kernel name is a hash, so the shape is not recoverable from it).
 
     ``problem_fingerprint`` selects a stable problem-group identity and takes
-    precedence over the positional ``problem_index``.
+    precedence over the positional ``problem_index``. ``size_group_index``
+    selects the ProblemSizeGroup within that entry.
     """
     from tensilelite.create_library.run import generateKernelObjectsFromSolutions
     from tensilelite.KernelWriterAssembly import KernelWriterAssembly
@@ -296,6 +301,7 @@ def emit_kernels_from_config(config_path, limit=8, arch=_DEFAULT_ARCH, canonical
             problem_index=problem_index,
             problem_fingerprint=problem_fingerprint,
             expected_fork_count=expected_fork_count,
+            size_group_index=size_group_index,
         )
         kernels = generateKernelObjectsFromSolutions(sols)
         if cluster_dim is not None:
@@ -381,6 +387,103 @@ def assert_cluster_barrier_balanced(src, base):
         f"{'signal' if per_tile_arrive else 'signal + 1'}, "
         "both counted outside cloned bodies)"
     )
+
+
+_SET_RE = re.compile(r"^\.set (\w+), (.+?)\s*$")
+_ANY_LABEL_RE = re.compile(r"^([\w.]+):$")
+_INST_RE = re.compile(r"^([a-z][a-z0-9_]*)\b(.*)$")
+_VMEM_PREFIXES = ("buffer_", "global_", "flat_", "scratch_")
+
+
+def _sum(expr, sets):
+    """Value of a sum of integers and .set names; None if a term is neither."""
+    total = 0
+    for term in expr.split("+"):
+        term = term.strip()
+        if term.isdigit():
+            total += int(term)
+        elif term in sets:
+            total += sets[term]
+        else:
+            return None
+    return total
+
+
+def _sgprs(operand, sets):
+    """SGPR numbers of an `sN` or `s[expr]` / `s[expr:expr]` operand, expr a sum of integers and
+    .set names; empty for any other operand, None if expr does not resolve."""
+    m = re.fullmatch(r"s(\d+)", operand)
+    if m:
+        return {int(m.group(1))}
+    m = re.fullmatch(r"s\[([^\]]+)\]", operand)
+    if not m:
+        return set()
+    ends = [_sum(part, sets) for part in m.group(1).split(":")]
+    if None in ends:
+        return None
+    return set(range(ends[0], ends[-1] + 1))
+
+
+def sgpr_hazards(src):
+    """(line, writer, line, reader, wait states) for each read of an SGPR written by a
+    v_readfirstlane or v_readlane with fewer wait states than gfx950 requires, along the fall-through
+    path and into s_branch / s_cbranch targets. Raises ValueError on an SGPR operand that does not
+    resolve."""
+    sets, insts, labels = {}, [], {}
+    for lineno, line in enumerate(src.splitlines(), 1):
+        line = line.strip()
+        code = line.split("//")[0].strip()
+        m = _SET_RE.match(code)
+        if m:
+            value = _sum(m.group(2), sets)
+            if value is None:
+                sets.pop(m.group(1), None)
+            else:
+                sets[m.group(1)] = value
+        elif m := _ANY_LABEL_RE.match(code):
+            labels[m.group(1)] = len(insts)
+        elif m := _INST_RE.match(code):
+            ops = [o.strip().split()[0] for o in m.group(2).split(",") if o.strip()]
+            regs = [_sgprs(o, sets) for o in ops]
+            if None in regs:
+                raise ValueError(f"line {lineno}: unresolved SGPR operand in {line!r}")
+            insts.append((lineno, m.group(1), regs, ops, line))
+    hits = set()
+    for n, inst in enumerate(insts):
+        if inst[1] not in ("v_readfirstlane_b32", "v_readlane_b32") or not inst[2][0]:
+            continue
+        paths, seen = [(n + 1, 0)], set()
+        while paths:
+            i, waits = paths.pop()
+            while i < len(insts) and waits < 5 and (i, waits) not in seen:
+                seen.add((i, waits))
+                lineno, mn, regs, ops, line = insts[i]
+                if mn.startswith(_VMEM_PREFIXES):
+                    needs = [5] * len(regs)
+                elif mn in ("v_readlane_b32", "v_writelane_b32"):
+                    needs = [0, 2, 4]
+                else:
+                    needs = [0] + [2 if mn.startswith("v_") else 0] * (len(regs) - 1)
+                if any(r & inst[2][0] and waits < need for r, need in zip(regs, needs)):
+                    hits.add((inst[0], inst[4], lineno, line, waits))
+                waits += int(ops[0], 0) + 1 if mn == "s_nop" else 1
+                target = labels.get(ops[0]) if ops else None
+                if mn.startswith("s_cbranch") and target is not None:
+                    paths.append((target, waits))
+                if mn == "s_branch":
+                    if target is None:
+                        break
+                    i = target
+                elif mn in ("s_endpgm", "s_setpc_b64"):
+                    break
+                else:
+                    i += 1
+    return sorted(hits)
+
+
+def assert_no_sgpr_hazards(src, base):
+    hazards = sgpr_hazards(src)
+    assert not hazards, f"Kernel {base!r}: SGPR read too soon after a VALU write {hazards}"
 
 
 def derive_states(config_path, arch=_DEFAULT_ARCH, limit_solutions=8):

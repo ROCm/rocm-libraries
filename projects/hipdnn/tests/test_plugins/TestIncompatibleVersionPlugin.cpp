@@ -23,7 +23,7 @@ public:
 
     const char* getPluginApiVersion() const override
     {
-        return "-1.0.0";
+        return "999.0.0";
     }
 
     int64_t getEngineId() const override

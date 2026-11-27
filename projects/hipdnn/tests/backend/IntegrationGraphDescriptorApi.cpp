@@ -76,7 +76,7 @@ TEST_F(IntegrationGraphDescriptorApi, SetOperationGraph)
 {
     SKIP_IF_NO_DEVICES();
     // Any valid graph — tests exercise the API, not a specific operation type
-    auto graphBuilder = hipdnn_test_sdk::utilities::createValidReductionGraph();
+    auto graphBuilder = hipdnn_test_sdk::utilities::createReductionGraph();
     flatbuffers::DetachedBuffer serializedGraph = graphBuilder.Release();
 
     hipdnnBackendDescriptor_t descriptor = nullptr;
@@ -118,6 +118,33 @@ TEST_F(IntegrationGraphDescriptorApi, FinalizeInvalidOperationGraph)
     EXPECT_EQ(status, HIPDNN_STATUS_SUCCESS);
 }
 
+TEST_F(IntegrationGraphDescriptorApi, SetOperationsRejectsNegativeCountAndKeepsState)
+{
+    hipdnnBackendDescriptor_t descriptor = nullptr;
+    ASSERT_EQ(hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR, &descriptor),
+              HIPDNN_STATUS_SUCCESS);
+
+    std::array<hipdnnBackendDescriptor_t, 1> ops = {nullptr};
+    EXPECT_EQ(hipdnnBackendSetAttribute(descriptor,
+                                        HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                        -1,
+                                        static_cast<const void*>(ops.data())),
+              HIPDNN_STATUS_BAD_PARAM);
+
+    int64_t opCount = -1;
+    EXPECT_EQ(hipdnnBackendGetAttribute(descriptor,
+                                        HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                        0,
+                                        &opCount,
+                                        nullptr),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_EQ(opCount, 0);
+
+    EXPECT_EQ(hipdnnBackendDestroyDescriptor(descriptor), HIPDNN_STATUS_SUCCESS);
+}
+
 TEST_F(IntegrationGraphDescriptorApi, GetSerializedGraphSucceedsWithoutFinalization)
 {
     hipdnnBackendDescriptor_t desc = nullptr;
@@ -153,7 +180,7 @@ TEST_F(IntegrationGraphDescriptorApi, GetSerializedGraphFailsWithNullSizeParam)
 
 TEST_F(IntegrationGraphDescriptorApi, GetSerializedGraphSizeQueryMatchesCopySize)
 {
-    auto graphBuilder = hipdnn_test_sdk::utilities::createValidReductionGraph();
+    auto graphBuilder = hipdnn_test_sdk::utilities::createReductionGraph();
     flatbuffers::DetachedBuffer serializedGraph = graphBuilder.Release();
 
     hipdnnBackendDescriptor_t desc = nullptr;
@@ -196,7 +223,7 @@ TEST_F(IntegrationGraphDescriptorApi, GetSerializedGraphSizeQueryMatchesCopySize
 
 TEST_F(IntegrationGraphDescriptorApi, SerializedGraphRoundTripPreservesGraphProperties)
 {
-    auto graphBuilder = hipdnn_test_sdk::utilities::createValidReductionGraph();
+    auto graphBuilder = hipdnn_test_sdk::utilities::createReductionGraph();
     flatbuffers::DetachedBuffer serializedGraph = graphBuilder.Release();
 
     // Deserialize, set handle, finalize
@@ -245,7 +272,7 @@ TEST_F(IntegrationGraphDescriptorApi, SerializedGraphRoundTripPreservesGraphProp
 
 TEST_F(IntegrationGraphDescriptorApi, GetSerializedGraphFailsWithInsufficientBuffer)
 {
-    auto graphBuilder = hipdnn_test_sdk::utilities::createValidReductionGraph();
+    auto graphBuilder = hipdnn_test_sdk::utilities::createReductionGraph();
     flatbuffers::DetachedBuffer serializedGraph = graphBuilder.Release();
 
     hipdnnBackendDescriptor_t desc = nullptr;
@@ -282,7 +309,7 @@ TEST_F(IntegrationGraphDescriptorApi, GetSerializedGraphFailsWithInsufficientBuf
 
 TEST_F(IntegrationGraphDescriptorApi, GetSerializedGraphSucceedsWithOversizedBuffer)
 {
-    auto graphBuilder = hipdnn_test_sdk::utilities::createValidReductionGraph();
+    auto graphBuilder = hipdnn_test_sdk::utilities::createReductionGraph();
     flatbuffers::DetachedBuffer serializedGraph = graphBuilder.Release();
 
     hipdnnBackendDescriptor_t desc = nullptr;
@@ -328,7 +355,7 @@ TEST_F(IntegrationGraphDescriptorApi, GetGraphNameViaCApi)
 {
     SKIP_IF_NO_DEVICES();
 
-    auto graphBuilder = hipdnn_test_sdk::utilities::createValidReductionGraph();
+    auto graphBuilder = hipdnn_test_sdk::utilities::createReductionGraph();
     flatbuffers::DetachedBuffer serializedGraph = graphBuilder.Release();
 
     // Deserialize into a backend descriptor
@@ -377,9 +404,9 @@ TEST_F(IntegrationGraphDescriptorApi, GetGraphNameViaCApi)
 //
 // deserializeGraph() must reject a serialized Graph whose
 // min_required_engine_api_version exceeds what this build understands
-// (the ceiling is K_MAX_SUPPORTED_API_VERSION == "1.4.0", the highest
+// (the ceiling is K_MAX_SUPPORTED_API_VERSION == "1.6.0", the highest
 // version constant any graph feature can currently gate on), and must accept
-// the baseline "1.0.0" and the ceiling "1.4.0". An unstamped field (a graph a
+// the baseline "1.0.0" and the ceiling "1.6.0". An unstamped field (a graph a
 // writer never populated, e.g. a hand-built fixture) is treated as "1.0.0".
 // Exercised through the public C API hipdnnBackendCreateAndDeserializeGraph_ext,
 // which surfaces the guard's HipdnnException as HIPDNN_STATUS_NOT_SUPPORTED.
@@ -387,7 +414,8 @@ TEST_F(IntegrationGraphDescriptorApi, GetGraphNameViaCApi)
 // Complementary contract: a graph built via the backend API stamps
 // min_required_engine_api_version to the highest feature floor it triggers --
 // "1.2.0" for a runtime pass-by-value tensor, "1.3.0" for a non-default tensor
-// alignment, "1.4.0" for a non-default ragged offset multiplier, else "1.0.0" --
+// alignment, "1.4.0" for a non-default ragged offset multiplier, "1.6.0" for SDPA
+// cumulative sequence lengths, else "1.0.0" --
 // see hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(), the single
 // shared graph -> required-version mapping used by both this guard and
 // EnginePluginResourceManager's plugin applicability filter.
@@ -401,7 +429,7 @@ namespace
 flatbuffers::DetachedBuffer
     serializeReductionGraphWithVersion(uint32_t major, uint32_t minor, uint32_t patch)
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidReductionGraph();
+    auto builder = hipdnn_test_sdk::utilities::createReductionGraph();
     const auto* graphFb
         = hipdnn_flatbuffers_sdk::data_objects::GetGraph(builder.GetBufferPointer());
     hipdnn_flatbuffers_sdk::data_objects::GraphT graphT;
@@ -419,7 +447,7 @@ flatbuffers::DetachedBuffer
 // left unstamped (null), simulating a writer that never populated the field.
 flatbuffers::DetachedBuffer serializeReductionGraphWithUnstampedVersion()
 {
-    auto builder = hipdnn_test_sdk::utilities::createValidReductionGraph();
+    auto builder = hipdnn_test_sdk::utilities::createReductionGraph();
     const auto* graphFb
         = hipdnn_flatbuffers_sdk::data_objects::GetGraph(builder.GetBufferPointer());
     hipdnn_flatbuffers_sdk::data_objects::GraphT graphT;
@@ -554,11 +582,11 @@ hipdnn_data_sdk::utilities::Version buildAndReadStampedVersion(bool runtimePassB
 } // namespace
 
 // A serialized graph demanding a newer engine plugin API version than this
-// build's ceiling (K_MAX_SUPPORTED_API_VERSION == "1.4.0") must be rejected, not
-// silently accepted. "1.5.0" is used as a version strictly above that ceiling.
+// build's ceiling (K_MAX_SUPPORTED_API_VERSION == "1.6.0") must be rejected, not
+// silently accepted. "1.7.0" is used as a version strictly above that ceiling.
 TEST_F(IntegrationGraphDescriptorApi, DeserializeRejectsFutureApiVersion)
 {
-    const flatbuffers::DetachedBuffer serialized = serializeReductionGraphWithVersion(1, 5, 0);
+    const flatbuffers::DetachedBuffer serialized = serializeReductionGraphWithVersion(1, 7, 0);
 
     hipdnnBackendDescriptor_t descriptor = nullptr;
     EXPECT_EQ(hipdnnBackendCreateAndDeserializeGraph_ext(
@@ -567,10 +595,10 @@ TEST_F(IntegrationGraphDescriptorApi, DeserializeRejectsFutureApiVersion)
     EXPECT_EQ(descriptor, nullptr);
 }
 
-// "1.4.0" sits at this build's ceiling (K_MAX_SUPPORTED_API_VERSION) and must deserialize.
+// "1.6.0" sits at this build's ceiling (K_MAX_SUPPORTED_API_VERSION) and must deserialize.
 TEST_F(IntegrationGraphDescriptorApi, DeserializeAcceptsCeilingApiVersion)
 {
-    const flatbuffers::DetachedBuffer serialized = serializeReductionGraphWithVersion(1, 4, 0);
+    const flatbuffers::DetachedBuffer serialized = serializeReductionGraphWithVersion(1, 6, 0);
 
     hipdnnBackendDescriptor_t descriptor = nullptr;
     EXPECT_EQ(hipdnnBackendCreateAndDeserializeGraph_ext(

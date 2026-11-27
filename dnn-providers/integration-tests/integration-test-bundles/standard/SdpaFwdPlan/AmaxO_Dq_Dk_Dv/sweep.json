@@ -1,0 +1,1256 @@
+{
+  "version": 2,
+  "import_mode": {
+    "grouping": [
+      "skeleton-value-form",
+      "superset-templates",
+      "template-alignment",
+      "template-attributes"
+    ],
+    "format": "compact"
+  },
+  "cases": [
+    {
+      "id": "fp8_e4m3_6868b7f12ce75b8a",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 0, "dims": [1, 1, 1, 1], "strides": [1, 1, 1, 1], "data_type": "float"},
+          {"uid": 1, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e4m3"},
+          {"uid": 5, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e4m3"},
+          {"uid": 6, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e4m3"}
+        ],
+        "alignment": {"0": 16, "1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "6868b7f12ce75b8a", "csv_case_id": "lv-9348", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 557672539}, "4": {"seed": 676844393}, "7": {"seed": 1025203927}, "2": {"kind": "values", "repeat": true, "seed": 3159657809, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 3922720391, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 843198675, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 1751693297}
+    },
+    {
+      "id": "fp8_e4m3_8c6ee1fb8a4fd93e",
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 0, "dims": [1, 1, 1, 1], "strides": [1, 1, 1, 1], "data_type": "float"},
+          {"uid": 1, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e4m3"},
+          {"uid": 5, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e4m3"},
+          {"uid": 6, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e4m3"}
+        ],
+        "alignment": {"0": 16, "1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "8c6ee1fb8a4fd93e", "csv_case_id": "lv-5556", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 354399329}, "4": {"seed": 3497096270}, "7": {"seed": 3084065940}, "2": {"kind": "values", "repeat": true, "seed": 2224400498, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 483241330, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 2423561108, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 208593403}
+    },
+    {
+      "id": "fp8_e5m2_01df46f338caec01",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e5m2"},
+          {"uid": 5, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 0, 1], "data_type": "fp8_e5m2"},
+          {"uid": 6, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e5m2"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "01df46f338caec01", "csv_case_id": "lv-9357", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 3558857625}, "4": {"seed": 2650270025}, "7": {"seed": 2952411136}, "2": {"kind": "values", "repeat": true, "seed": 1555754543, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 3214703511, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 2608250354, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 31409907}
+    },
+    {
+      "id": "fp8_e5m2_10d8eaf36215b3fa",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "half",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e5m2"},
+          {"uid": 5, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e5m2"},
+          {"uid": 6, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e5m2"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": null, "compute_data_type": "half"}
+      },
+      "metadata": {"case_key": "10d8eaf36215b3fa", "csv_case_id": "lv-5568", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 3289101885}, "4": {"seed": 3463316854}, "7": {"seed": 1996497396}, "2": {"kind": "values", "repeat": true, "seed": 3579074947, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 2395677965, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 313625405, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 282651379}
+    },
+    {
+      "id": "fp8_e5m2_1465b05ba1f4f520",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e5m2"},
+          {"uid": 5, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e5m2"},
+          {"uid": 6, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e5m2"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "fp8_e5m2", "attributes__padding_mask": false, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "1465b05ba1f4f520", "csv_case_id": "lv-5550", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 2117021756}, "4": {"seed": 435402816}, "7": {"seed": 318165344}, "2": {"kind": "values", "repeat": true, "seed": 3973672934, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 736302248, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 360991673, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 342208603}
+    },
+    {
+      "id": "fp8_e5m2_fnuz_18662929a6d7775c",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e5m2_fnuz"},
+          {"uid": 5, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e5m2_fnuz"},
+          {"uid": 6, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e5m2_fnuz"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "18662929a6d7775c", "csv_case_id": "lv-5334", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 3934847945}, "4": {"seed": 4259370918}, "7": {"seed": 4095169939}, "2": {"kind": "values", "repeat": true, "seed": 3486022271, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 1679143351, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 1023624504, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 409348393}
+    },
+    {
+      "id": "fp8_e4m3_209dee94e6d28940",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [3, 2, 1, 1], "strides": [2, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [3, 2, 1, 1], "strides": [2, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [3, 2, 1, 1], "strides": [2, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [3, 2, 127, 128], "strides": [32512, 16256, 128, 1], "data_type": "fp8_e4m3"},
+          {"uid": 5, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e4m3"},
+          {"uid": 6, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [3, 2, 127, 128], "strides": [32512, 16256, 128, 1], "data_type": "fp8_e4m3"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "209dee94e6d28940", "csv_case_id": "lv-2692", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 2507561783}, "4": {"seed": 866022675}, "7": {"seed": 1213738537}, "2": {"kind": "values", "repeat": true, "seed": 1282514271, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 2973046655, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 1533602442, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 547221140}
+    },
+    {
+      "id": "fp8_e4m3_2357e68285da2326",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e4m3"},
+          {"uid": 5, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e4m3"},
+          {"uid": 6, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e4m3"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": 1, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": 64, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "2357e68285da2326", "csv_case_id": "lv-5573", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 2240609626}, "4": {"seed": 3396800213}, "7": {"seed": 4222116138}, "2": {"kind": "values", "repeat": true, "seed": 1729909596, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 1218727402, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 4217570894, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 592963202}
+    },
+    {
+      "id": "fp8_e4m3_fnuz_264d35a8a7f8deba",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 3, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e4m3_fnuz"},
+          {"uid": 5, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e4m3_fnuz"},
+          {"uid": 6, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e4m3_fnuz"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 1},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "264d35a8a7f8deba", "csv_case_id": "lv-2559", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 917978931}, "4": {"seed": 158855048}, "7": {"seed": 1819516867}, "2": {"kind": "values", "repeat": true, "seed": 1323126623, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 820902722, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 2885183648, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 642594216, "start_offsets": [{"start_offset": 1, "uid": 7}]}
+    },
+    {
+      "id": "fp8_e5m2_275ce6b4a8f8cbbd",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [3, 2, 1, 1], "strides": [2, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [3, 2, 1, 1], "strides": [2, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [3, 2, 127, 128], "strides": [32512, 16256, 128, 1], "data_type": "fp8_e5m2"},
+          {"uid": 5, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e5m2"},
+          {"uid": 6, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e5m2"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "275ce6b4a8f8cbbd", "csv_case_id": "lv-10152", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 107024727}, "4": {"seed": 3209842620}, "7": {"seed": 851551094}, "2": {"kind": "values", "repeat": true, "seed": 3746554561, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 483734266, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 2132933041, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 660399796}
+    },
+    {
+      "id": "fp8_e4m3_29c158ed86068b2b",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e4m3"},
+          {"uid": 5, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e4m3"},
+          {"uid": 6, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e4m3"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": true, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": 1, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": 0, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "29c158ed86068b2b", "csv_case_id": "lv-10213", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 4085250475}, "4": {"seed": 2134862447}, "7": {"seed": 2858467069}, "2": {"kind": "values", "repeat": true, "seed": 3652777358, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 1471647228, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 3226822811, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 700537069}
+    },
+    {
+      "id": "fp8_e4m3_312ab113b7ac500a",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [2, 32, 1, 1], "strides": [32, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [2, 32, 1, 1], "strides": [32, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [2, 32, 1, 1], "strides": [32, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [2, 32, 1, 128], "strides": [4096, 128, 128, 1], "data_type": "fp8_e4m3"},
+          {"uid": 5, "dims": [2, 32, 1, 128], "strides": [4096, 128, 128, 1], "data_type": "fp8_e4m3"},
+          {"uid": 6, "dims": [2, 32, 1, 128], "strides": [4096, 128, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [2, 32, 1, 128], "strides": [4096, 128, 128, 1], "data_type": "fp8_e4m3"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "312ab113b7ac500a", "csv_case_id": "lv-2828", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 3004345115}, "4": {"seed": 3752507032}, "7": {"seed": 1011757665}, "2": {"kind": "values", "repeat": true, "seed": 3683994524, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 418815354, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 665606325, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 824881427}
+    },
+    {
+      "id": "fp8_e5m2_3a985d65ccb8fbb3",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [2, 6, 1, 1], "strides": [6, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [2, 6, 1, 1], "strides": [6, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [2, 6, 1, 1], "strides": [6, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [2, 6, 64, 128], "strides": [49152, 8192, 128, 1], "data_type": "fp8_e5m2"},
+          {"uid": 5, "dims": [2, 6, 64, 128], "strides": [49152, 8192, 128, 1], "data_type": "fp8_e5m2"},
+          {"uid": 6, "dims": [2, 6, 64, 128], "strides": [49152, 8192, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [2, 6, 64, 128], "strides": [49152, 8192, 128, 1], "data_type": "fp8_e5m2"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": true, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": 1, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": 0, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "3a985d65ccb8fbb3", "csv_case_id": "lv-6445", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 2812756916}, "4": {"seed": 1659698796}, "7": {"seed": 4210138570}, "2": {"kind": "values", "repeat": true, "seed": 1759423682, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 1515197085, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 3389212713, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 983063909}
+    },
+    {
+      "id": "fp8_e5m2_fnuz_41c9f846c33ecc80",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e5m2_fnuz"},
+          {"uid": 5, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 64, 1], "data_type": "fp8_e5m2_fnuz"},
+          {"uid": 6, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e5m2_fnuz"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "41c9f846c33ecc80", "csv_case_id": "lv-9374", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 848534406}, "4": {"seed": 1172543677}, "7": {"seed": 1549622199}, "2": {"kind": "values", "repeat": true, "seed": 4128564609, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 2154915236, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 208386834, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 1103755334}
+    },
+    {
+      "id": "fp8_e4m3_fnuz_46d34a20a3b10a33",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [3, 8, 65, 128], "strides": [66560, 8320, 128, 1], "data_type": "fp8_e4m3_fnuz"},
+          {"uid": 5, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e4m3_fnuz"},
+          {"uid": 6, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [3, 8, 65, 128], "strides": [66560, 8320, 128, 1], "data_type": "fp8_e4m3_fnuz"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "46d34a20a3b10a33", "csv_case_id": "lv-2579", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 3717170276}, "4": {"seed": 3176659788}, "7": {"seed": 1261015126}, "2": {"kind": "values", "repeat": true, "seed": 1993977162, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 2900911714, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 1147921500, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 1188252192}
+    },
+    {
+      "id": "fp8_e5m2_fnuz_497cbe8088b1770f",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [2, 8, 64, 1], "strides": [512, 64, 1, 1], "data_type": "fp8_e5m2_fnuz"},
+          {"uid": 5, "dims": [2, 8, 64, 1], "strides": [512, 64, 1, 1], "data_type": "fp8_e5m2_fnuz"},
+          {"uid": 6, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e5m2_fnuz"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 1.0, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "497cbe8088b1770f", "csv_case_id": "lv-5688", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 1287769342}, "4": {"seed": 3629630706}, "7": {"seed": 1165012761}, "2": {"kind": "values", "repeat": true, "seed": 2369302398, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 1442123885, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 209864196, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 1232912000}
+    },
+    {
+      "id": "fp8_e4m3_4c85439bf4f361fd",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e4m3"},
+          {"uid": 5, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e4m3"},
+          {"uid": 6, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 0, 1], "data_type": "fp8_e4m3"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "4c85439bf4f361fd", "csv_case_id": "lv-9341", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 2540006748}, "4": {"seed": 2400729136}, "7": {"seed": 2166496671}, "2": {"kind": "values", "repeat": true, "seed": 2982234108, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 3987815009, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 1309551386, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 1283802011}
+    },
+    {
+      "id": "fp8_e4m3_fnuz_535c9d43f5961224",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e4m3_fnuz"},
+          {"uid": 5, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e4m3_fnuz"},
+          {"uid": 6, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e4m3_fnuz"},
+          {"uid": 7, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e4m3_fnuz"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "535c9d43f5961224", "csv_case_id": "lv-9355", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 3392111988}, "4": {"seed": 1019690473}, "7": {"seed": 2085494947}, "2": {"kind": "values", "repeat": true, "seed": 1667219454, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 2513697952, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 182375789, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 1398578499}
+    },
+    {
+      "id": "fp8_e5m2_fnuz_5795ddfaf6b70336",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [3, 8, 127, 1], "strides": [1016, 127, 1, 1], "data_type": "fp8_e5m2_fnuz"},
+          {"uid": 5, "dims": [3, 8, 127, 1], "strides": [1016, 127, 1, 1], "data_type": "fp8_e5m2_fnuz"},
+          {"uid": 6, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e5m2_fnuz"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 1.0, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "5795ddfaf6b70336", "csv_case_id": "lv-9457", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 2398776077}, "4": {"seed": 2105620362}, "7": {"seed": 1595500129}, "2": {"kind": "values", "repeat": true, "seed": 3746259572, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 2282709818, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 4050867080, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 1469439482}
+    },
+    {
+      "id": "fp8_e4m3_674e7b49d8fd74ae",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [2, 8, 64, 96], "strides": [49152, 6144, 96, 1], "data_type": "fp8_e4m3"},
+          {"uid": 5, "dims": [2, 8, 64, 96], "strides": [49152, 6144, 96, 1], "data_type": "fp8_e4m3"},
+          {"uid": 6, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e4m3"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.10206206887960434, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "674e7b49d8fd74ae", "csv_case_id": "lv-5543", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 1697339729}, "4": {"seed": 1120300106}, "7": {"seed": 1164892089}, "2": {"kind": "values", "repeat": true, "seed": 1731175832, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 1603764256, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 897355243, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 1733196617}
+    },
+    {
+      "id": "fp8_e5m2_67a469d4489b5a55",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e5m2"},
+          {"uid": 5, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e5m2"},
+          {"uid": 6, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e5m2"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "67a469d4489b5a55", "csv_case_id": "lv-5335", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 4233364708}, "4": {"seed": 2750203094}, "7": {"seed": 3844663904}, "2": {"kind": "values", "repeat": true, "seed": 3867766312, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 1443360040, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 3362006086, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 1738828244}
+    },
+    {
+      "id": "fp8_e4m3_6866c89b10d24143",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e4m3"},
+          {"uid": 5, "dims": [3, 8, 127, 128], "strides": [260096, 32512, 128, 1], "data_type": "fp8_e4m3"},
+          {"uid": 6, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e4m3"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "6866c89b10d24143", "csv_case_id": "lv-2573", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 1123379484}, "4": {"seed": 255115529}, "7": {"seed": 3166705184}, "2": {"kind": "values", "repeat": true, "seed": 622826723, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 128599491, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 115564293, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 1751566491}
+    },
+    {
+      "id": "fp8_e5m2_fnuz_739197c7cdfe0d96",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e5m2_fnuz"},
+          {"uid": 5, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e5m2_fnuz"},
+          {"uid": 6, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e5m2_fnuz"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "739197c7cdfe0d96", "csv_case_id": "lv-9127", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 1772307559}, "4": {"seed": 2693907237}, "7": {"seed": 3188623642}, "2": {"kind": "values", "repeat": true, "seed": 3973759971, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 3857360615, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 3528747227, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 1938921415}
+    },
+    {
+      "id": "fp8_e5m2_768c6d3cf5309b81",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [3, 6, 1, 1], "strides": [6, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [3, 6, 1, 1], "strides": [6, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [3, 6, 1, 1], "strides": [6, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [3, 6, 127, 128], "strides": [97536, 16256, 128, 1], "data_type": "fp8_e5m2"},
+          {"uid": 5, "dims": [3, 6, 127, 128], "strides": [97536, 16256, 128, 1], "data_type": "fp8_e5m2"},
+          {"uid": 6, "dims": [3, 6, 127, 128], "strides": [97536, 16256, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [3, 6, 127, 128], "strides": [97536, 16256, 128, 1], "data_type": "fp8_e5m2"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": true, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": 1, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": 0, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "768c6d3cf5309b81", "csv_case_id": "lv-10169", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 1201408839}, "4": {"seed": 4149694268}, "7": {"seed": 2705340841}, "2": {"kind": "values", "repeat": true, "seed": 1159598093, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 2548245901, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 2822037670, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 1988914492}
+    },
+    {
+      "id": "fp8_e5m2_fnuz_78afdec02806029e",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e5m2_fnuz"},
+          {"uid": 5, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 64, 1], "data_type": "fp8_e5m2_fnuz"},
+          {"uid": 6, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e5m2_fnuz"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "78afdec02806029e", "csv_case_id": "lv-5586", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 2175842021}, "4": {"seed": 1820688833}, "7": {"seed": 3132596683}, "2": {"kind": "values", "repeat": true, "seed": 895402129, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 3019394558, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 4046533572, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 2024791744}
+    },
+    {
+      "id": "fp8_e5m2_947c098620c20019",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e5m2"},
+          {"uid": 5, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e5m2"},
+          {"uid": 6, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 64, 1], "data_type": "fp8_e5m2"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "947c098620c20019", "csv_case_id": "lv-9437", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 4097967303}, "4": {"seed": 2254750298}, "7": {"seed": 984608966}, "2": {"kind": "values", "repeat": true, "seed": 1555085387, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 2637625048, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 441282770, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 343673222}
+    },
+    {
+      "id": "fp8_e5m2_96920699ac331145",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e5m2"},
+          {"uid": 5, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e5m2"},
+          {"uid": 6, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 64, 1], "data_type": "fp8_e5m2"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "96920699ac331145", "csv_case_id": "lv-5662", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 1184196633}, "4": {"seed": 1050701800}, "7": {"seed": 3321704142}, "2": {"kind": "values", "repeat": true, "seed": 233608796, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 328212925, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 2802823577, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 378668697}
+    },
+    {
+      "id": "fp8_e4m3_fnuz_a41f0e16e218f81c",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e4m3_fnuz"},
+          {"uid": 5, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e4m3_fnuz"},
+          {"uid": 6, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e4m3_fnuz"},
+          {"uid": 7, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e4m3_fnuz"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "a41f0e16e218f81c", "csv_case_id": "lv-5563", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 1164479353}, "4": {"seed": 1717847734}, "7": {"seed": 4220387191}, "2": {"kind": "values", "repeat": true, "seed": 51089699, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 1338928381, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 2725118460, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 606014998}
+    },
+    {
+      "id": "fp8_e5m2_a86eb842e86bd8ec",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e5m2"},
+          {"uid": 5, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e5m2"},
+          {"uid": 6, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e5m2"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "a86eb842e86bd8ec", "csv_case_id": "lv-9128", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 3535668885}, "4": {"seed": 1221233889}, "7": {"seed": 2287982027}, "2": {"kind": "values", "repeat": true, "seed": 1113378582, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 1143901180, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 929982220, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 678344770}
+    },
+    {
+      "id": "fp8_e5m2_a8a875e5142e94d2",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e5m2"},
+          {"uid": 5, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e5m2"},
+          {"uid": 6, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e5m2"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "fp8_e5m2", "attributes__padding_mask": false, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "a8a875e5142e94d2", "csv_case_id": "lv-9342", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 879333944}, "4": {"seed": 744288131}, "7": {"seed": 1634294693}, "2": {"kind": "values", "repeat": true, "seed": 2364631837, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 2052236118, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 1999298858, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 682128869}
+    },
+    {
+      "id": "fp8_e4m3_a8ea41ca371f52b4",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e4m3"},
+          {"uid": 5, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e4m3"},
+          {"uid": 6, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e4m3"},
+          {"uid": 7, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e4m3"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "a8ea41ca371f52b4", "csv_case_id": "lv-5564", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 2069091719}, "4": {"seed": 3984173815}, "7": {"seed": 3808981194}, "2": {"kind": "values", "repeat": true, "seed": 1614871796, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 624034016, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 3783763391, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 686440906}
+    },
+    {
+      "id": "fp8_e5m2_fnuz_b0cee27879af38fa",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e5m2_fnuz"},
+          {"uid": 5, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e5m2_fnuz"},
+          {"uid": 6, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e5m2_fnuz"},
+          {"uid": 7, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e5m2_fnuz"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "b0cee27879af38fa", "csv_case_id": "lv-5523", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 3337375432}, "4": {"seed": 507543839}, "7": {"seed": 1845166148}, "2": {"kind": "values", "repeat": true, "seed": 2352272184, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 1364935195, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 4049505371, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 818864760}
+    },
+    {
+      "id": "fp8_e4m3_b30b2b98aeb8243c",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [3, 8, 127, 96], "strides": [97536, 12192, 96, 1], "data_type": "fp8_e4m3"},
+          {"uid": 5, "dims": [3, 8, 127, 96], "strides": [97536, 12192, 96, 1], "data_type": "fp8_e4m3"},
+          {"uid": 6, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e4m3"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.10206206887960434, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "b30b2b98aeb8243c", "csv_case_id": "lv-9335", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 3821173912}, "4": {"seed": 3807230009}, "7": {"seed": 2540775696}, "2": {"kind": "values", "repeat": true, "seed": 210474778, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 523348960, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 4133115907, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 856370072}
+    },
+    {
+      "id": "fp8_e4m3_b58def88fc3d78d5",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e4m3"},
+          {"uid": 5, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e4m3"},
+          {"uid": 6, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e4m3"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "b58def88fc3d78d5", "csv_case_id": "lv-2422", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 829625970}, "4": {"seed": 1426810191}, "7": {"seed": 4205938202}, "2": {"kind": "values", "repeat": true, "seed": 3993956926, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 1416800534, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 1973458493, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 898494344}
+    },
+    {
+      "id": "fp8_e4m3_b6a021cbbf1eed5d",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e4m3"},
+          {"uid": 5, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e4m3"},
+          {"uid": 6, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e4m3"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": -0.125, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "b6a021cbbf1eed5d", "csv_case_id": "lv-9431", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 1711248905}, "4": {"seed": 1496434746}, "7": {"seed": 1876751815}, "2": {"kind": "values", "repeat": true, "seed": 2071843120, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 249204252, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 1926629990, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 916464075}
+    },
+    {
+      "id": "fp8_e4m3_fnuz_b6dedc06eafda0cf",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e4m3_fnuz"},
+          {"uid": 5, "dims": [3, 8, 127, 128], "strides": [146304, 18288, 144, 1], "data_type": "fp8_e4m3_fnuz"},
+          {"uid": 6, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e4m3_fnuz"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "b6dedc06eafda0cf", "csv_case_id": "lv-2563", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 2646241940}, "4": {"seed": 2255603334}, "7": {"seed": 344806554}, "2": {"kind": "values", "repeat": true, "seed": 2499900530, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 4011167809, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 3158922928, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 920574982}
+    },
+    {
+      "id": "fp8_e5m2_bd99882b74b961c5",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e5m2"},
+          {"uid": 5, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e5m2"},
+          {"uid": 6, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [3, 8, 127, 128], "strides": [130048, 1, 1024, 8], "data_type": "fp8_e5m2"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "bd99882b74b961c5", "csv_case_id": "lv-9324", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 4259611870}, "4": {"seed": 277684942}, "7": {"seed": 1462059339}, "2": {"kind": "values", "repeat": true, "seed": 32484755, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 976236072, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 79599521, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 1033472043}
+    },
+    {
+      "id": "fp8_e4m3_fnuz_be6c693908c59a46",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e4m3_fnuz"},
+          {"uid": 5, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e4m3_fnuz"},
+          {"uid": 6, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e4m3_fnuz"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "be6c693908c59a46", "csv_case_id": "lv-2499", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 1204406098}, "4": {"seed": 892827765}, "7": {"seed": 3528924342}, "2": {"kind": "values", "repeat": true, "seed": 916424676, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 581725347, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 2264740399, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 1047292217}
+    },
+    {
+      "id": "fp8_e4m3_c126a31aed9e5ad4",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e4m3"},
+          {"uid": 5, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e4m3"},
+          {"uid": 6, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e4m3"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": true, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": 1, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": 0, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "c126a31aed9e5ad4", "csv_case_id": "lv-6490", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 858691359}, "4": {"seed": 1437621625}, "7": {"seed": 1658518926}, "2": {"kind": "values", "repeat": true, "seed": 3309837024, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 3352610665, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 3944903131, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 1093051162}
+    },
+    {
+      "id": "fp8_e4m3_c1f5cc853b72d92e",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 3, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e4m3"},
+          {"uid": 5, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e4m3"},
+          {"uid": 6, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e4m3"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 1, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "c1f5cc853b72d92e", "csv_case_id": "lv-2598", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 2461721755}, "4": {"seed": 3838671274}, "7": {"seed": 2362439846}, "2": {"kind": "values", "repeat": true, "seed": 198949184, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 4021944994, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 1606998321, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 1106627717, "start_offsets": [{"start_offset": 1, "uid": 5}]}
+    },
+    {
+      "id": "fp8_e5m2_c5e2ea58d0ed72ac",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "half",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e5m2"},
+          {"uid": 5, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e5m2"},
+          {"uid": 6, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e5m2"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": null, "compute_data_type": "half"}
+      },
+      "metadata": {"case_key": "c5e2ea58d0ed72ac", "csv_case_id": "lv-9360", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 3184971019}, "4": {"seed": 1180731974}, "7": {"seed": 2490470887}, "2": {"kind": "values", "repeat": true, "seed": 373573216, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 1245034665, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 47405403, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 1172499032}
+    },
+    {
+      "id": "fp8_e4m3_fnuz_d2dcf0ebad221fe0",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e4m3_fnuz"},
+          {"uid": 5, "dims": [3, 8, 65, 128], "strides": [66560, 8320, 128, 1], "data_type": "fp8_e4m3_fnuz"},
+          {"uid": 6, "dims": [3, 8, 65, 128], "strides": [66560, 8320, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e4m3_fnuz"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "d2dcf0ebad221fe0", "csv_case_id": "lv-2584", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 668318427}, "4": {"seed": 793616001}, "7": {"seed": 1793157448}, "2": {"kind": "values", "repeat": true, "seed": 3467765360, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 3972295689, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 2759981513, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 1390211307}
+    },
+    {
+      "id": "fp8_e4m3_dd1e4f6f33d5a812",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e4m3"},
+          {"uid": 5, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e4m3"},
+          {"uid": 6, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e4m3"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": 1, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": 127, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "dd1e4f6f33d5a812", "csv_case_id": "lv-9365", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 2679164605}, "4": {"seed": 1071251380}, "7": {"seed": 1396928326}, "2": {"kind": "values", "repeat": true, "seed": 4047191610, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 175376368, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 1908634169, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 1562267503}
+    },
+    {
+      "id": "fp8_e4m3_fnuz_dfd0b5d84e6ef75f",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e4m3_fnuz"},
+          {"uid": 5, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e4m3_fnuz"},
+          {"uid": 6, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [2, 8, 64, 128], "strides": [131072, 16384, 256, 2], "data_type": "fp8_e4m3_fnuz"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "dfd0b5d84e6ef75f", "csv_case_id": "lv-5567", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 2312638888}, "4": {"seed": 950229228}, "7": {"seed": 3694022533}, "2": {"kind": "values", "repeat": true, "seed": 3346859789, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 301546056, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 1777828488, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 1607513560}
+    },
+    {
+      "id": "fp8_e5m2_e070a910e5f39b15",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e5m2"},
+          {"uid": 5, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 0, 1], "data_type": "fp8_e5m2"},
+          {"uid": 6, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e5m2"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "e070a910e5f39b15", "csv_case_id": "lv-5565", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 4232038154}, "4": {"seed": 99802385}, "7": {"seed": 3572776236}, "2": {"kind": "values", "repeat": true, "seed": 2410726671, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 82324049, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 1512041990, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 1617996048}
+    },
+    {
+      "id": "fp8_e4m3_e30780a9bea72465",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e4m3"},
+          {"uid": 5, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e4m3"},
+          {"uid": 6, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e4m3"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": -0.125, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "e30780a9bea72465", "csv_case_id": "lv-5655", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 1682800673}, "4": {"seed": 2810361949}, "7": {"seed": 3303430551}, "2": {"kind": "values", "repeat": true, "seed": 2355997733, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 3543066755, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 1955593635, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 1661436073}
+    },
+    {
+      "id": "fp8_e5m2_fnuz_e351b9a9f2585701",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e5m2_fnuz"},
+          {"uid": 5, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e5m2_fnuz"},
+          {"uid": 6, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e5m2_fnuz"},
+          {"uid": 7, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e5m2_fnuz"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "e351b9a9f2585701", "csv_case_id": "lv-9316", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 1160512585}, "4": {"seed": 3925036170}, "7": {"seed": 937886663}, "2": {"kind": "values", "repeat": true, "seed": 1980288501, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 3819806402, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 623693214, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 1666300329}
+    },
+    {
+      "id": "fp8_e4m3_e8478b93709936b3",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e4m3"},
+          {"uid": 5, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e4m3"},
+          {"uid": 6, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e4m3"},
+          {"uid": 7, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e4m3"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "e8478b93709936b3", "csv_case_id": "lv-9356", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 3416531671}, "4": {"seed": 1781941242}, "7": {"seed": 1735776115}, "2": {"kind": "values", "repeat": true, "seed": 1999002055, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 529209672, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 1785480679, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 1749519251}
+    },
+    {
+      "id": "fp8_e4m3_efa054dbafb63610",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [3, 8, 1, 128], "strides": [1024, 128, 128, 1], "data_type": "fp8_e4m3"},
+          {"uid": 5, "dims": [3, 8, 1, 128], "strides": [1024, 128, 128, 1], "data_type": "fp8_e4m3"},
+          {"uid": 6, "dims": [3, 8, 1, 128], "strides": [1024, 128, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [3, 8, 1, 128], "strides": [1024, 128, 128, 1], "data_type": "fp8_e4m3"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "efa054dbafb63610", "csv_case_id": "lv-2687", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 3655844294}, "4": {"seed": 1075193705}, "7": {"seed": 1424923260}, "2": {"kind": "values", "repeat": true, "seed": 1069774601, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 310684703, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 2312622782, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 1872778459}
+    },
+    {
+      "id": "fp8_e4m3_f3d952098072f299",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e4m3"},
+          {"uid": 5, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e4m3"},
+          {"uid": 6, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 0, 1], "data_type": "fp8_e4m3"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "f3d952098072f299", "csv_case_id": "lv-5549", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 2317290850}, "4": {"seed": 1888851553}, "7": {"seed": 1631887007}, "2": {"kind": "values", "repeat": true, "seed": 1602910096, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 4174273466, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 2737019663, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 1943622153}
+    },
+    {
+      "id": "fp8_e5m2_fac2ae32bd1ccaf5",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e5m2"},
+          {"uid": 5, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e5m2"},
+          {"uid": 6, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [2, 8, 64, 128], "strides": [65536, 1, 1024, 8], "data_type": "fp8_e5m2"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "fac2ae32bd1ccaf5", "csv_case_id": "lv-5532", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 231300881}, "4": {"seed": 2482965221}, "7": {"seed": 2664657587}, "2": {"kind": "values", "repeat": true, "seed": 2621876175, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 3564068392, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 3719657157, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 2059578930}
+    },
+    {
+      "id": "fp8_e5m2_fcb771d53bd01663",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [2, 2, 1, 1], "strides": [2, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [2, 2, 1, 1], "strides": [2, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [2, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [2, 2, 64, 128], "strides": [16384, 8192, 128, 1], "data_type": "fp8_e5m2"},
+          {"uid": 5, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e5m2"},
+          {"uid": 6, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [2, 8, 64, 128], "strides": [65536, 8192, 128, 1], "data_type": "fp8_e5m2"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "fcb771d53bd01663", "csv_case_id": "lv-6428", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 4032565278}, "4": {"seed": 3942420793}, "7": {"seed": 2502884580}, "2": {"kind": "values", "repeat": true, "seed": 2946848834, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 1317055539, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 2221928769, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 2092397013}
+    },
+    {
+      "id": "fp8_e4m3_fnuz_fcce05ec7bdeb786",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e4m3_fnuz"},
+          {"uid": 5, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e4m3_fnuz"},
+          {"uid": 6, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [3, 8, 127, 128], "strides": [260096, 32512, 256, 2], "data_type": "fp8_e4m3_fnuz"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "TOP_LEFT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": null, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": null, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "fcce05ec7bdeb786", "csv_case_id": "lv-9359", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 3140709813}, "4": {"seed": 3839425062}, "7": {"seed": 1304337883}, "2": {"kind": "values", "repeat": true, "seed": 4105634434, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 1136429522, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 2241507566, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 2093876716}
+    },
+    {
+      "id": "fp8_e4m3_fnuz_fd4f2a45652077be",
+      "absent_tensors": [0],
+      "values": {
+        "io_data_type": "float",
+        "intermediate_data_type": "float",
+        "compute_data_type": "float",
+        "is_override_shape_enabled": false,
+        "min_required_engine_api_version": {"major": 1, "minor": 0, "patch": 0},
+        "tensors": [
+          {"uid": 1, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 2, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 3, "dims": [3, 8, 1, 1], "strides": [8, 1, 1, 1], "data_type": "float"},
+          {"uid": 4, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e4m3_fnuz"},
+          {"uid": 5, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e4m3_fnuz"},
+          {"uid": 6, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "bfloat16"},
+          {"uid": 7, "dims": [3, 8, 127, 128], "strides": [130048, 16256, 128, 1], "data_type": "fp8_e4m3_fnuz"}
+        ],
+        "alignment": {"1": 16, "2": 16, "3": 16, "4": 16, "5": 16, "6": 16, "7": 16},
+        "attributes": {"attributes__alibi_mask": false, "attributes__attn_scale_value": 0.0883883461356163, "attributes__causal_mask": false, "attributes__causal_mask_bottom_right": false, "attributes__diagonal_alignment": "BOTTOM_RIGHT", "attributes__dropout_probability": null, "attributes__generate_stats": null, "attributes__implementation": "AUTO", "attributes__left_bound": 128, "attributes__max_seq_len_kv": null, "attributes__mma_core_mode": "unset", "attributes__padding_mask": false, "attributes__right_bound": 0, "compute_data_type": "float"}
+      },
+      "metadata": {"case_key": "fd4f2a45652077be", "csv_case_id": "lv-2539", "format_version": 2, "generated_from_sha256": "4c7e4621b20689d1c353ea41cad59fa65a8158d9f86fe0692881da130848bc81", "generator": "hipdnn_sdpa_case_flow_runner", "generator_version": "d3c2d5e0b593", "inputs": {"5": {"seed": 1244553348}, "4": {"seed": 1964531183}, "7": {"seed": 2499555470}, "2": {"kind": "values", "repeat": true, "seed": 12533838, "values": [0.5, 1.0]}, "1": {"kind": "values", "repeat": true, "seed": 3111564718, "values": [0.25, 0.5]}, "3": {"kind": "values", "repeat": true, "seed": 3264487517, "values": [2.0, 4.0]}}, "reference_source": "hipDNN GPU and CPU SDPA reference executors; the case is the row with this case_key in test-plans/sdpa-fwd/cases.csv", "seed": 2102340165}
+    }
+  ]
+}

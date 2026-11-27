@@ -63,17 +63,20 @@ class Pass;
 /// \p splitWaveLoop duplicates each Rule 3 loop. Wave 0 falls into the original
 /// body and posts a bare cluster signal; every other wave takes the copy, which
 /// keeps the wait and omits the signal. Off by default.
-/// \p reduceClusterBarrierPerLoop emits Rule 3 on the first trigger of each
-/// enclosing loop, then permits another handshake after each 2000 estimated
-/// cycles in a long fall-through loop body. Nearby HalfPLR /
-/// ExpandPointerSwap copies still share one handshake. Off handshakes every
-/// loop trigger. The backend passes the resolved knob; this default is the
+/// \p reduceClusterBarrierPerLoop gives each enclosing loop
+/// max(1, ceil(estimated loop cycles / 2000)) Rule 3 handshakes, on the triggers
+/// whose signal can lead its wait the furthest (capped at \p rule3SignalLeadCycles);
+/// later picks are spaced about 2000 cycles from the earlier ones. Off handshakes
+/// every loop trigger. The backend passes the resolved knob; this default is the
 /// static fallback.
 /// A Rule 3 or pre-loop cluster signal that lands right behind an `s_wait_dscnt`
 /// run goes in front of that run, so the drain stays next to the instruction it
 /// was inserted for.
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertClusterBarrierPass(
     bool streamKMulticast = false, int pgrValue = 1, int rule3SignalLeadCycles = 100,
-    bool splitWaveLoop = false, bool reduceClusterBarrierPerLoop = false);
+    bool splitWaveLoop = false, bool reduceClusterBarrierPerLoop = false,
+    // Rule 3's tensor-drain hard stop reads a FrameMap publication point, so it only
+    // applies under the GIR frame pipeline; off, legacy signal placement is unchanged.
+    bool girFramePipeline = false);
 
 }  // namespace stinkytofu

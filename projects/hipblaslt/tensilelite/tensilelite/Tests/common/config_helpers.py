@@ -93,35 +93,6 @@ def markNamed(name):
     return getattr(pytest.mark, name)
 
 
-def _usingStinkytofuBackend(availableArchs):
-    """Return True when kernels for this config will be built on stinkytofu.
-
-    Checked in order:
-      1. ``ROCISA_BACKEND`` set -> True iff it is ``stinkytofu``.
-      2. Unset + no gfx1250 target -> False (only gfx1250 routes to stinkytofu).
-      3. Unset + gfx1250 target -> True iff rocisa has swapped in the stinkytofu
-         adaptor (a native fallback stays native -> False).
-    """
-    backend = os.environ.get("ROCISA_BACKEND", "").strip().lower()
-    if backend:
-        return backend == "stinkytofu"
-
-    if not any("gfx1250" in arch for arch in availableArchs):
-        return False
-
-    try:
-        import rocisa
-    except Exception:
-        return False
-
-    # Read the already-loaded module instead of probing for the standalone
-    # stinkytofu binding: importing _stinkytofu.so alongside native _rocisa.so in
-    # one process registers the same nanobind types twice and aborts the process.
-    # When stinkytofu is unavailable rocisa never swaps the adaptor in, so the
-    # native fallback is already covered by this check returning False.
-    return "rocisa_stinkytofu_adaptor" in (getattr(rocisa, "__file__", "") or "")
-
-
 def configMarks(filepath, rootDir, availableArchs, deviceTags=()):
     """
     Returns a list of marks to add to a particular YAML config path.  Currently gets a mark for:
@@ -161,11 +132,18 @@ def configMarks(filepath, rootDir, availableArchs, deviceTags=()):
         marks.append(pytest.mark.syntax_error)
         return marks
 
-    # A TensileLite config is a mapping (GlobalParameters/BenchmarkProblems/...).
-    # Top-level sequences are library logic YAMLs (e.g. characterization data
-    # files), which are not standalone run.py configs. Signal the caller to
-    # skip them rather than crashing on doc["BenchmarkProblems"].
+    # A TensileLite config is a mapping with BenchmarkProblems. Top-level
+    # sequences are library logic YAMLs, and mappings with neither
+    # BenchmarkProblems nor GlobalParameters are unit-test data; both are
+    # skipped. A mapping that has GlobalParameters but no BenchmarkProblems
+    # is a config whose key is missing or misspelled, so it must not vanish.
     if not isinstance(doc, dict):
+        return None
+    if "BenchmarkProblems" not in doc:
+        if "GlobalParameters" in doc:
+            raise ValueError(
+                "%s: mapping has GlobalParameters but no BenchmarkProblems"
+                % filepath)
         return None
 
     if "TestParameters" in doc:
@@ -204,10 +182,6 @@ def configMarks(filepath, rootDir, availableArchs, deviceTags=()):
     for tag in deviceTags:
         if markNamed("skip-%s" % tag) in marks:
             marks.append(pytest.mark.skip(reason="Known bug on %s; see the ROCM ticket in the YAML" % tag))
-
-    # Backend-specific skip (e.g. subtile tests not yet supported on stinkytofu)
-    if markNamed("skip-stinkytofu") in marks and _usingStinkytofuBackend(availableArchs):
-        marks.append(pytest.mark.skip(reason="Not yet supported in stinkytofu backend"))
 
     # FFM-specific xfail: a config marked ``ffm_fail`` passes on real HW but
     # fails under FFM emulation only. Turn it into an xfail only when running 
@@ -278,7 +252,7 @@ def findAvailableArchs(gpu_targets=None):
         # stepping-specific mark; left intact it is rejected as unknown instead.
         return [t.strip() for t in gpu_targets.split(";") if t.strip()]
 
-    from tensilelite.Tests.gpu_detection import get_available_archs
+    from gpu_detection import get_available_archs
     return get_available_archs()
 
 
@@ -287,7 +261,7 @@ def findDeviceTags():
 
     TENSILE_TEST_DEVICE_TAGS (semicolon-separated) replaces detection.
     """
-    from tensilelite.Tests.gpu_detection import get_available_device_tags
+    from gpu_detection import get_available_device_tags
     return get_available_device_tags()
 
 

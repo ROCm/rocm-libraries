@@ -3,6 +3,7 @@
 #pragma once
 
 #include "Node.hpp"
+#include <array>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
@@ -40,6 +41,10 @@ public:
         // Band domain (SdpaSemanticsRegister SEM-005): left_bound -1 or >= 1, right_bound >= -1.
         HIPDNN_CHECK_ERROR(detail::validateSdpaDiagonalBand(
             attributes.left_bound, attributes.right_bound, "SdpaFwdNode"));
+
+        // The deprecated causal flags name different alignments; both set is invalid (SEM-002).
+        HIPDNN_CHECK_ERROR(detail::validateSdpaDeprecatedCausalFlags(
+            attributes.causal_mask, attributes.causal_mask_bottom_right, "SdpaFwdNode"));
 
         const auto q = attributes.get_q();
         const auto k = attributes.get_k();
@@ -211,6 +216,101 @@ public:
         {
             HIPDNN_CHECK_ERROR(detail::validateScalarParameter(scale, "SCALE tensor"));
         }
+
+        // Rule 6c: cu_seq_len_q / cu_seq_len_kv (cuDNN 9.24+; the mixed per-side form 9.25+).
+        // - Each side (Q, KV) uses either seq_len_* or cu_seq_len_*, never both. The sides may
+        //   differ (cuDNN 9.24 required cu on both).
+        // - If either side is cumulative: padding_mask is required, both sides need a length
+        //   tensor, and each cu tensor is INT32 (B+1,1,1,1) prefix sums starting at 0.
+        // - A 1-D (B+1) tensor is promoted to that shape here, so the setter call order does
+        //   not matter (cuDNN promotes later, in infer_properties_node).
+        const auto cuSeqLenQ = attributes.get_cu_seq_len_q();
+        const auto cuSeqLenKv = attributes.get_cu_seq_len_kv();
+        detail::promoteIndexTensorTo4d(cuSeqLenQ);
+        detail::promoteIndexTensorTo4d(cuSeqLenKv);
+        const auto seqLenQ = attributes.get_seq_len_q();
+        const auto seqLenKv = attributes.get_seq_len_kv();
+        HIPDNN_RETURN_IF_TRUE(cuSeqLenQ && seqLenQ,
+                              ErrorCode::INVALID_VALUE,
+                              "SdpaFwdNode: seq_len_q and cu_seq_len_q cannot both be set");
+        HIPDNN_RETURN_IF_TRUE(cuSeqLenKv && seqLenKv,
+                              ErrorCode::INVALID_VALUE,
+                              "SdpaFwdNode: seq_len_kv and cu_seq_len_kv cannot both be set");
+        if(cuSeqLenQ || cuSeqLenKv)
+        {
+            HIPDNN_RETURN_IF_FALSE(
+                attributes.padding_mask,
+                ErrorCode::INVALID_VALUE,
+                std::string("SdpaFwdNode: cu_seq_len_q/kv require padding_mask=true"));
+            HIPDNN_RETURN_IF_TRUE(
+                static_cast<bool>(cuSeqLenQ || seqLenQ)
+                    != static_cast<bool>(cuSeqLenKv || seqLenKv),
+                ErrorCode::INVALID_VALUE,
+                "SdpaFwdNode: a Q-side and a KV-side sequence length tensor must be provided "
+                "together (each side via seq_len_* or cu_seq_len_*)");
+
+            const auto expectedFirstDim = qDims[0] + 1;
+            if(cuSeqLenQ)
+            {
+                HIPDNN_CHECK_ERROR(detail::validateIndexTensor(
+                    cuSeqLenQ, "SdpaFwdNode", "cu_seq_len_q", expectedFirstDim, "batch + 1"));
+            }
+            if(cuSeqLenKv)
+            {
+                HIPDNN_CHECK_ERROR(detail::validateIndexTensor(
+                    cuSeqLenKv, "SdpaFwdNode", "cu_seq_len_kv", expectedFirstDim, "batch + 1"));
+            }
+        }
+
+        // Rule 6d: the dropout mask comes either from dropout_probability (Philox, drawn from
+        // the seed and offset tensors) or from a custom dropout mask with its scale, never
+        // both: cuDNN rejects a custom mask with any dropout_probability. A positive
+        // probability needs seed and offset; cuDNN builds no RNG at probability 0.
+        HIPDNN_RETURN_IF_TRUE(
+            attributes.dropout_probability.has_value() && attributes.get_dropout_mask(),
+            ErrorCode::ATTRIBUTE_NOT_SET,
+            "SdpaFwdNode: using both a custom dropout mask and dropout_probability is "
+            "ill-formed");
+        HIPDNN_RETURN_IF_TRUE(attributes.dropout_probability.has_value()
+                                  && attributes.dropout_probability.value() > 0.0f
+                                  && (!attributes.get_seed() || !attributes.get_offset()),
+                              ErrorCode::ATTRIBUTE_NOT_SET,
+                              "SdpaFwdNode: dropout_probability requires seed and offset tensors");
+
+        // Rule 6e: the ATTN_MASK leading dims, right-aligned to the score [B, H_q, S_q, S_kv],
+        // broadcast: batch is B or 1, heads is H_q or 1 (cuDNN's pointwise broadcast).
+        if(attnMask)
+        {
+            const auto& maskDims = attnMask->get_dim();
+            const auto maskRank = maskDims.size();
+            if(maskRank == reqRank)
+            {
+                HIPDNN_RETURN_IF_TRUE(maskDims[0] != qDims[0] && maskDims[0] != 1,
+                                      ErrorCode::INVALID_VALUE,
+                                      "SdpaFwdNode: ATTN_MASK batch dim must equal batch ("
+                                          + std::to_string(qDims[0]) + ") or 1, got "
+                                          + std::to_string(maskDims[0]));
+            }
+            if(maskRank >= 3)
+            {
+                const auto maskHeads = maskDims[maskRank - 3];
+                HIPDNN_RETURN_IF_TRUE(maskHeads != numHeads && maskHeads != 1,
+                                      ErrorCode::INVALID_VALUE,
+                                      "SdpaFwdNode: ATTN_MASK num_heads dim must equal num_heads ("
+                                          + std::to_string(numHeads) + ") or 1, got "
+                                          + std::to_string(maskHeads));
+            }
+        }
+
+        // Rule 6f: padding_mask needs a Q-side length (seq_len_q or cu_seq_len_q) and a KV-side
+        // length (seq_len_kv or cu_seq_len_kv), as cuDNN does. A ragged Q also supplies the
+        // Q side: its offsets give the query lengths (SdpaSemanticsRegister SEM-028).
+        const bool hasQLengths = seqLenQ || cuSeqLenQ || q->has_ragged_offset();
+        const bool hasKvLengths = seqLenKv || cuSeqLenKv;
+        HIPDNN_RETURN_IF_TRUE(attributes.padding_mask && (!hasQLengths || !hasKvLengths),
+                              ErrorCode::ATTRIBUTE_NOT_SET,
+                              "SdpaFwdNode: padding_mask requires seq_len_q and seq_len_kv (or "
+                              "cu_seq_len_q/cu_seq_len_kv; a ragged Q supplies the query lengths)");
 
         // Rule 7: If O has dims already set, validate them
         const auto& oDims = o->get_dim();

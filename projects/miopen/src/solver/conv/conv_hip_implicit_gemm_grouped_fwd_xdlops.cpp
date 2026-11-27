@@ -216,8 +216,8 @@ bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::RunParameterPredictionModel
 bool PerformanceConfigHipImplicitGemmGroupFwdXdlops::IsModelApplicable(
     const ExecutionContext& ctx, const ProblemDescription& problem) const
 {
-    if(ctx.GetStream().GetDeviceName() != "gfx90a" && ctx.GetStream().GetDeviceName() != "gfx942" &&
-       ctx.GetStream().GetDeviceName() != "gfx950")
+    const auto arch = ai::common::NormalizeArch(ctx.GetStream().GetDeviceName());
+    if(arch != "gfx90a" && arch != "gfx942" && arch != "gfx950" && arch != "gfx1250")
         return false;
     if(problem.GetInDataType() != miopenFloat && problem.GetInDataType() != miopenHalf &&
        problem.GetInDataType() != miopenBFloat16)
@@ -340,24 +340,21 @@ void PerformanceConfigHipImplicitGemmGroupFwdXdlops::HeuristicInit(
         ScopedTimeLogger ai_timer("GrpConvFwdXdlops::HeuristicInit.RunAIHeuristics");
         bool mode_use_tf32 = (problem.GetInDataType() == miopenFloat) && problem.UseTF32();
 
-        auto fill_valid_kernels = [&loader](const ProblemDescription& p, bool try_tf32) {
-            return loader.FillValidKernels(
-                CKSolverType::GrpConvFwd, p, p.GetInDataType(), try_tf32);
-        };
-
         auto ktn_runner = [this](const ExecutionContext& c, const ProblemDescription& p) {
             return RunKTNGeneric(*this, c, p);
         };
 
-        auto ck_val_creator = MakeCKValidatorCreator(
-            loader, CKSolverType::GrpConvFwd, problem.GetInDataType(), mode_use_tf32);
+        auto ck_val_creator = MakeCKValidatorCreator(loader,
+                                                     CKSolverType::GrpConvFwd,
+                                                     problem.GetInDataType(),
+                                                     mode_use_tf32,
+                                                     k2DFwdSolverConfig.uses_split_k);
 
         if(RunAIHeuristics(k2DFwdSolverConfig,
                            state,
                            ctx,
                            problem,
                            false,
-                           fill_valid_kernels,
                            ktn_runner,
                            ck_val_creator,
                            mode_use_tf32))

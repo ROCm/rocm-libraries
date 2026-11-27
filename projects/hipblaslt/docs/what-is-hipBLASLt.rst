@@ -258,8 +258,9 @@ pass requires values the forward pass has to save.
   **bias gradient**, this layer's contribution to updating the bias, and ``BGRADA`` and ``BGRADB``
   produce that sum with respect to ``A`` or ``B``.
 
-The two directions are meant to be paired. Choose an ``_AUX`` epilogue on the forward pass so the
-matching ``D``-prefixed epilogue can consume its output on the backward pass.
+The two directions are meant to be paired. Choose an ``_AUX`` epilogue on the forward pass to save
+the activation input. On the backward pass, use a matching ``D``-prefixed epilogue when one is
+available; otherwise, callers must compute the activation derivative from the saved auxiliary tensor.
 
 Running many GEMMs at once
 ==========================
@@ -327,7 +328,10 @@ library build and architecture that produced it. Don't carry indices across rele
 Two descriptor attributes deliberately constrain this selection.
 ``HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT``, or the equivalent setting on the handle,
 restricts hipBLASLt to kernels that add up their partial results in a consistent order across the
-``M`` dimension. Identical input rows then yield bitwise identical output rows. Fewer kernels
+``M`` and ``N`` dimensions. Identical rows of op(A) then yield bitwise identical rows of D, and
+identical columns of op(B) yield bitwise identical columns of D, provided C, any bias or scale
+vectors, any block scales of op(A) (for rows) or op(B) (for columns), and the auxiliary buffer a
+gradient epilogue reads are uniform along the same dimension. Fewer kernels
 qualify, which can cost performance, and the call returns an error rather than quietly giving you a
 non-uniform result. ``HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET`` steers selection and grid sizing
 toward a compute-unit budget, which is useful when a GEMM has to share the device with other work.
