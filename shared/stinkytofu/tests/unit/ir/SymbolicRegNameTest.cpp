@@ -64,6 +64,31 @@ TEST(SymbolicRegNameTest, ParsesNegativeOffset) {
     EXPECT_EQ(parsed->start.terms[0], -512);
 }
 
+TEST(SymbolicRegNameTest, ParsesPlusNegativeOffset) {
+    // rocisa getCompleteRegName() emits "base+-N" for a negative offset
+    // (unconditional '+' join followed by std::to_string(-N)). The epilogue
+    // acc->arch rearrange produces these when the staging reg sits below ValuC.
+    const auto parsed = parseSymbolicRegName("vgprValuC+-34");
+    ASSERT_TRUE(parsed.has_value());
+    EXPECT_EQ(parsed->start.base, "vgprValuC");
+    ASSERT_EQ(parsed->start.terms.size(), 1u);
+    EXPECT_EQ(parsed->start.terms[0], -34);
+}
+
+TEST(SymbolicRegNameTest, ParsesPlusNegativeThenPositive) {
+    const auto parsed = parseSymbolicRegName("vgprValuC+-34+2");
+    ASSERT_TRUE(parsed.has_value());
+    EXPECT_EQ(parsed->start.base, "vgprValuC");
+    ASSERT_EQ(parsed->start.terms.size(), 2u);
+    EXPECT_EQ(parsed->start.terms[0], -34);
+    EXPECT_EQ(parsed->start.terms[1], 2);
+}
+
+TEST(SymbolicRegNameTest, ResolvePlusNegativeOffsetMatchesSetMap) {
+    // ValuC base 45, offset -34 -> 11 (the raw vN the lazy path resolves to).
+    EXPECT_EQ(resolveNamedIndex("vgprValuC+-34", {{"vgprValuC", 45}}), 11);
+}
+
 TEST(SymbolicRegNameTest, ParsesExplicitRange) {
     const auto parsed = parseSymbolicRegName("vgprFoo+0:vgprFoo+3");
     ASSERT_TRUE(parsed.has_value());

@@ -69,9 +69,19 @@ std::optional<SymbolicRegEndpoint> parseEndpoint(std::string_view text) {
 
     std::string_view remainder = text.substr(split);
     while (!remainder.empty()) {
-        const char sign = remainder.front();
-        if (sign != '+' && sign != '-') return std::nullopt;
-        remainder.remove_prefix(1);
+        // rocisa's RegisterContainer::getCompleteRegName() joins the base and each
+        // offset with a literal '+', then appends std::to_string(offset); a negative
+        // offset therefore serializes as "base+-34" (a '+' immediately followed by a
+        // '-' sign). Fold any run of consecutive signs into one multiplier so "+-34"
+        // parses as -34 (and "--4" as +4), matching the index rocisa resolves to.
+        int64_t signMul = 1;
+        bool sawSign = false;
+        while (!remainder.empty() && (remainder.front() == '+' || remainder.front() == '-')) {
+            if (remainder.front() == '-') signMul = -signMul;
+            remainder.remove_prefix(1);
+            sawSign = true;
+        }
+        if (!sawSign) return std::nullopt;
         size_t termEnd = 0;
         while (termEnd < remainder.size() &&
                std::isdigit(static_cast<unsigned char>(remainder[termEnd])))
@@ -79,8 +89,7 @@ std::optional<SymbolicRegEndpoint> parseEndpoint(std::string_view text) {
         if (termEnd == 0) return std::nullopt;
         int64_t term = 0;
         if (!parseSignedTerm(remainder.substr(0, termEnd), term)) return std::nullopt;
-        if (sign == '-') term = -term;
-        endpoint.terms.push_back(term);
+        endpoint.terms.push_back(signMul * term);
         remainder.remove_prefix(termEnd);
     }
     return endpoint;

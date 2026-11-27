@@ -23,11 +23,13 @@
 from rocisa import countInstruction, countGlobalRead, countLocalWrite, \
                    countDSStoreB192, countDSStoreB128, countVMovB32
 from rocisa.base import Item
-from rocisa.code import Module, TextBlock
+from rocisa.code import Module, TextBlock, LogicalLeaf
 from rocisa.container import DSModifiers, HolderContainer, replaceHolder
 
-from rocisa.instruction import SWaitCnt, SWaitAlu, DSStoreB128, DSStoreB64, DSStoreB32, TensorLoadToLds
+from rocisa.instruction import SWaitCnt, SWaitAlu, DSStoreB128, DSStoreB64, DSStoreB32
 
+from ..ir import sched_is_tensor_load_to_lds, sched_is_ds_store_b128, sched_is_waitcnt
+from ..ir import sched_is_module, sched_rocisa_view
 from ..Common import roundUp, print2
 from ..Common.MxScaleLayout import splatFirst
 from ..Component import SIA
@@ -532,8 +534,8 @@ def _splitTdmLoad(grCode):
     nonTdmMod = Module()
     grAItems = grCode.items() if hasattr(grCode, 'items') else []
     for item in grAItems:
-        hasTdm = isinstance(item, TensorLoadToLds) or \
-                 (hasattr(item, 'flatitems') and any(isinstance(f, TensorLoadToLds) for f in item.flatitems()))
+        hasTdm = sched_is_tensor_load_to_lds(item) or \
+                 (hasattr(item, 'flatitems') and any(sched_is_tensor_load_to_lds(f) for f in item.flatitems()))
         if hasTdm:
             tdmLoadMod.add(item)
         else:
@@ -1208,7 +1210,7 @@ def splitDSInstructionIntoSmaller(writer, kernel, item, numLocalWritesPerSched, 
         return None, 0, 0
 
     itemList = item.flatitems()
-    instruction = next(filter(lambda inst: isinstance(inst, DSStoreB128), itemList))
+    instruction = next(filter(lambda inst: sched_is_ds_store_b128(inst), itemList))
     miLatency = writer.states.miLatency
     div       = 1
     dsOffset  = 0
@@ -1254,6 +1256,20 @@ def splitDSInstructionIntoSmaller(writer, kernel, item, numLocalWritesPerSched, 
         # no enough cycles before barrier
         return None, 0, 0
 
+    # logical-IR migration: this split rewrites a rocisa ds_store_b128 into
+    # several smaller rocisa stores via getParams()/.ds -- rocisa-only surgery a
+    # LogicalLeaf cannot answer. It is dormant for large-MI configs (bf16_gfx1250:
+    # DSStoreB128.issueLatency()=5 < miLatency-1=7 -> the early "no need to split"
+    # return above fires first), so local-write can be flipped to leaves today.
+    # If a small-MI config ever reaches here with a leaf, fail loud: this
+    # arch-specific split must move into a LogicalIR lowering pass before a leaf
+    # ds_store can be split (see migration doc §10.7).
+    if isinstance(instruction, LogicalLeaf):
+        raise RuntimeError(
+            "splitDSInstructionIntoSmaller reached a LogicalLeaf ds_store_b128 "
+            "(opcode %s): the b128->smaller-store split is arch-specific and must "
+            "move into a LogicalIR lowering pass before local-write leaves can be "
+            "split. See migration doc section 10.7." % getattr(instruction, "name", "?"))
     addr = instruction.getParams()[0]
     srcr = instruction.getParams()[1]
     offs = instruction.getParams()[2]
@@ -1282,16 +1298,20 @@ def splitDSInstructionIntoSmaller(writer, kernel, item, numLocalWritesPerSched, 
 def hasHolderInWaitCnt(module: Item):
     wcList = []
     hasHolder = False
-    if isinstance(module, Module):
+    if sched_is_module(module):
         for item in module.items():
             tmpHasHolder, tmpList = hasHolderInWaitCnt(item)
             hasHolder = hasHolder or tmpHasHolder
             wcList.extend(tmpList)
-    elif isinstance(module, SWaitCnt):
+    elif sched_is_waitcnt(module):
         wcList.append(module)
-        if isinstance(module.dscnt, HolderContainer) or \
-           isinstance(module.kmcnt, HolderContainer) or \
-           isinstance(module.vlcnt, HolderContainer) or \
-           isinstance(module.vscnt, HolderContainer):
+        # A flipped fixed-value SWaitCnt leaf has no count attrs; inspect its
+        # rocisa view for Holder operands (no-op for a rocisa waitcnt). A leaf
+        # only carries concrete counts, so it never reports a Holder here.
+        mv = sched_rocisa_view(module)
+        if isinstance(mv.dscnt, HolderContainer) or \
+           isinstance(mv.kmcnt, HolderContainer) or \
+           isinstance(mv.vlcnt, HolderContainer) or \
+           isinstance(mv.vscnt, HolderContainer):
            hasHolder = True
     return hasHolder, wcList

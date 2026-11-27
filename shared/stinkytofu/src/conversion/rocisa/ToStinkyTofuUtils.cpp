@@ -87,6 +87,210 @@ namespace stinkytofu {
 static GirActionData girActionOf(const rocisa::GirActionData& src);
 }
 
+namespace rocisa {
+// Scheduler-introspection seam for logical leaves (logical-IR migration).
+//
+// A LogicalLeaf classifies itself from its own logical opcode via the three
+// opcode -> classification tables below. This is the end-state source of truth:
+// the scheduler asks the logical IR "what are you?" and the logical IR answers
+// from its opcode alone -- no rocisa instruction required. The tables are grown
+// one region's opcodes at a time as emission is flipped to leaves; makeLogicalLeaf
+// cross-checks every entry against the rocisa instruction the leaf replaces (see
+// the oracle there), so a wrong or missing entry is caught immediately, and the
+// tables can be trusted to subsume rocisa before the rocisa classes retire.
+//
+// Mismatch inventory (logical opcode name != rocisa class, so a table entry must
+// be added explicitly when those regions are flipped) is recorded in the
+// migration doc §10.5; none of those opcodes occur on the local-read path.
+// A `logical_region` flips *every* dispatcher-built instruction in it to a leaf,
+// not just the one op the region targets (e.g. localReadDo also emits SMovB32 /
+// VMovB32 leaves). So these tables mirror rocisa's *whole* classification scheme:
+// the default is the rocisa Instruction base answer (Other / None / 1), and only
+// opcodes whose rocisa class overrides the base are listed. That way any plain
+// Other instruction that incidentally becomes a leaf matches rocisa for free,
+// while a genuinely special category the table is still missing (e.g. a stray
+// LocalWrite / GlobalRead) trips the makeLogicalLeaf oracle instead of silently
+// diverging. Enumerators are fully qualified because this namespace (rocisa) also
+// has struct types of the same names, which would otherwise shadow the opcode.
+static SchedCategory schedCategoryForOpcode(stinkytofu::logical::Opcode op) {
+    namespace Logical = stinkytofu::logical;
+    switch (op) {
+        // --- local-read region: every LDS (DS) read -> LocalRead ---
+        case Logical::DSLoadU8:
+        case Logical::DSLoadI8:
+        case Logical::DSLoadU16:
+        case Logical::DSLoadI16:
+        case Logical::DSLoadB16:
+        case Logical::DSLoadB32:
+        case Logical::DSLoadB64:
+        case Logical::DSLoadB96:
+        case Logical::DSLoadB128:
+        case Logical::DSLoadB192:
+        case Logical::DSLoad2B32:
+        case Logical::DSLoad2B64:
+        case Logical::DSLoadB96TrB6:
+        case Logical::DSLoadB64TrB4:
+        case Logical::DSLoadB64TrB8:
+        case Logical::DSLoadB64TrB16:
+        case Logical::DSLoadB128TrB16:
+        case Logical::DSLoadD16HIU8:
+        case Logical::DSLoadD16HIU16:
+            return SchedCategory::LocalRead;
+        // --- local-write region: every LDS (DS) write -> LocalWrite ---
+        case Logical::DSStoreB8:
+        case Logical::DSStoreB16:
+        case Logical::DSStoreU16:
+        case Logical::DSStoreB32:
+        case Logical::DSStoreB64:
+        case Logical::DSStoreB96:
+        case Logical::DSStoreB128:
+        case Logical::DSStoreB192:
+        case Logical::DSStoreB256:
+        case Logical::DSStore2B32:
+        case Logical::DSStore2B64:
+        case Logical::DSStoreB8HID16:
+        case Logical::DSStoreD16HIB16:
+        // ds_bpermute_b32 ([G] epilogue edge-shift, ShiftVectorComponentsMFMA):
+        //     rocisa DSBPermuteB32 derives from DSStoreInstruction, so its
+        //     schedCategory() is LocalWrite (LocalWriteInstruction base). It is a
+        //     lane-cross permute, not a real LDS store, but the scheduler counts
+        //     it as LocalWrite; mirror that here so the makeLogicalLeaf oracle
+        //     matches when the edge-shift math is flipped. schedExactKind/
+        //     schedWeight use the Instruction base (None/1) on both sides.
+        case Logical::DSBPermuteB32:
+            return SchedCategory::LocalWrite;
+        // --- mfma region: matrix ops -> MFMA (matches rocisa
+        //     {MFMA,SMFMA,MXMFMA}Instruction::schedCategory). All three rocisa
+        //     classes override only schedCategory; schedExactKind/schedWeight use
+        //     the Instruction base, so no entry is needed in those tables. ---
+        case Logical::MFMA:
+        case Logical::MXMFMA:
+        case Logical::SMFMA:
+            return SchedCategory::MFMA;
+        // --- global-read region ([C3] non-TDM buffer-load): every MUBUF
+        //     buffer_load -> GlobalRead, matching rocisa
+        //     GlobalReadInstruction::schedCategory() which MUBUFReadInstruction
+        //     inherits. (SMemLoad / flat GlobalLoad* are also GlobalRead in rocisa
+        //     but are not flipped to leaves yet, so they need no case here.)
+        //     GlobalReadInstruction overrides only schedCategory; schedExactKind/
+        //     schedWeight use the Instruction base, so no entry in those tables. ---
+        case Logical::BufferLoadB32:
+        case Logical::BufferLoadB64:
+        case Logical::BufferLoadB96:
+        case Logical::BufferLoadB128:
+        case Logical::BufferLoadD16U8:
+        case Logical::BufferLoadD16HIU8:
+        case Logical::BufferLoadD16B16:
+        case Logical::BufferLoadD16HIB16:
+            return SchedCategory::GlobalRead;
+        default:
+            // rocisa Instruction::schedCategory() base answer. GlobalRead
+            // opcodes get explicit cases as their regions flip.
+            return SchedCategory::Other;
+    }
+}
+
+static SchedExactKind schedExactKindForOpcode(stinkytofu::logical::Opcode op) {
+    namespace Logical = stinkytofu::logical;
+    switch (op) {
+        // Metadata v_mov_b32 count (matches rocisa VMovB32::schedExactKind).
+        case Logical::VMovB32:
+            return SchedExactKind::VMovB32;
+        // Exact DS-write widths the scheduler counts separately
+        // (countDSStoreB128 / countDSStoreB192), matching rocisa
+        // DSStoreB128/B192::schedExactKind.
+        case Logical::DSStoreB128:
+            return SchedExactKind::DSStoreB128;
+        case Logical::DSStoreB192:
+            return SchedExactKind::DSStoreB192;
+        default:
+            return SchedExactKind::None;
+    }
+}
+
+static int schedWeightForOpcode(stinkytofu::logical::Opcode op) {
+    namespace Logical = stinkytofu::logical;
+    switch (op) {
+        // b192/b256 ds ops lower to two physical ops -> weighted local-read /
+        // local-write count 2 (matches rocisa DSLoadB192 / DSStoreB192 /
+        // DSStoreB256::schedWeight).
+        case Logical::DSLoadB192:
+        case Logical::DSStoreB192:
+        case Logical::DSStoreB256:
+            return 2;
+        default:
+            return 1;
+    }
+}
+
+SchedCategory LogicalLeaf::schedCategory() const {
+    if (!logicalInst) return SchedCategory::None;
+    return schedCategoryForOpcode(logicalInst->getOpcode());
+}
+
+SchedExactKind LogicalLeaf::schedExactKind() const {
+    if (!logicalInst) return SchedExactKind::None;
+    return schedExactKindForOpcode(logicalInst->getOpcode());
+}
+
+int LogicalLeaf::schedWeight() const {
+    if (!logicalInst) return 1;
+    return schedWeightForOpcode(logicalInst->getOpcode());
+}
+
+std::string LogicalLeaf::schedOpcodeName() const {
+    if (!logicalInst) return "";
+    return stinkytofu::logical::getOpcodeName(logicalInst->getOpcode());
+}
+
+// LDS mem-token forwarding (Phase 3 §10.2 A): mirror rocisa Instruction's
+// setMemToken/getMemToken onto the wrapped logical instruction's memtoken field
+// so a leaf is a drop-in for the post-construction inst.setMemToken(...) call in
+// Component._emitLdsRead, and so getMemToken-based passes (postMainLoopBarrier...
+// _getTokenList) read the leaf's tokens.
+void LogicalLeaf::setMemToken(const std::shared_ptr<MemTokenData>& token) {
+    if (!logicalInst) return;
+    if (token)
+        logicalInst->memtoken = token->tokens;
+    else
+        logicalInst->memtoken = std::nullopt;
+}
+
+std::shared_ptr<MemTokenData> LogicalLeaf::getMemToken() const {
+    if (!logicalInst || !logicalInst->memtoken) return nullptr;
+    return std::make_shared<MemTokenData>(*logicalInst->memtoken);
+}
+
+// Mutable waitcnt accessors (logical-IR migration, §7.5 -- first mutable leaf).
+// swaitcnt is {vlcnt,vscnt,dlcnt,dscnt,kmcnt,maxLgkmcnt,maxVmcnt}; dscnt is [3].
+// Writes update the logical form (what the lowering emits) and mirror onto the
+// rocisa instruction so clone()/sched_rocisa_view see the rewritten value.
+int LogicalLeaf::getWaitDscnt() const {
+    if (logicalInst && logicalInst->swaitcnt) return (*logicalInst->swaitcnt)[3];
+    if (const auto* w = dynamic_cast<const SWaitCnt*>(rocisaInst.get())) return w->dscnt;
+    return -1;
+}
+
+void LogicalLeaf::setWaitDscnt(int v) {
+    if (logicalInst) {
+        if (!logicalInst->swaitcnt)
+            logicalInst->swaitcnt = std::array<int, 7>{-1, -1, -1, -1, -1, -1, -1};
+        (*logicalInst->swaitcnt)[3] = v;
+    }
+    if (auto* w = dynamic_cast<SWaitCnt*>(rocisaInst.get())) w->dscnt = v;
+}
+
+std::string LogicalLeaf::getLeafComment() const {
+    if (logicalInst) return logicalInst->comment;
+    return rocisaInst ? rocisaInst->comment : std::string();
+}
+
+void LogicalLeaf::setLeafComment(const std::string& c) {
+    if (logicalInst) logicalInst->comment = c;
+    if (rocisaInst) rocisaInst->comment = c;
+}
+}  // namespace rocisa
+
 namespace {
 using namespace rocisa;
 using namespace stinkytofu;
@@ -844,6 +1048,28 @@ void addModifiersToInstruction(StinkyInstruction* stinkyInst, const rocisa::Inst
     }
 }
 
+// Transitional (logical-IR migration): set while a LogicalLeaf is built eagerly
+// at emission time (see DeferLeafVgprSymbolicGuard). A leaf's symbolic VGPR
+// operand has no final index yet --- the `.set` that binds its name is replayed
+// positionally only during the later lowering walk, so resolving it here (via
+// RegName::getTotalIdx() -> rocisa's per-thread vgprIdx map) would bake a stale
+// base. Instead we emit the all-ones placeholder (rocisa regIdx == -1) and keep
+// the symbolic name, letting resolveSymbolicOperands(resolveUnresolvedSentinel=
+// true) in LowerLogicalModulePipeline fill in the stream-correct index --- the
+// same path named SGPR leaf operands already take. Drop once LogicalIR owns
+// symbolic registers resolved only at final lowering.
+static thread_local bool g_deferLeafVgprSymbolic = false;
+
+struct DeferLeafVgprSymbolicGuard {
+    bool prev;
+    DeferLeafVgprSymbolicGuard() : prev(g_deferLeafVgprSymbolic) {
+        g_deferLeafVgprSymbolic = true;
+    }
+    ~DeferLeafVgprSymbolicGuard() {
+        g_deferLeafVgprSymbolic = prev;
+    }
+};
+
 /// Convert a rocisa::Container to StinkyRegister
 ///
 /// This function takes a rocisa::Container pointer and converts it to a
@@ -868,7 +1094,12 @@ StinkyRegister toStinkyRegister(const rocisa::Container* container, bool hasVgpr
 
         int physicalIdx = regCont->regIdx;
         if (regCont->regName && regType == RegType::V) {
-            physicalIdx = regCont->regName->getTotalIdx();
+            // Inside eager leaf construction, leave the all-ones placeholder (-1)
+            // instead of resolving now: the binding `.set` is replayed positionally
+            // only during the later lowering walk, so resolveSymbolicOperands fixes
+            // this in stream order (see g_deferLeafVgprSymbolic). The symbolic name
+            // is still recorded below, which is what the resolver keys on.
+            physicalIdx = g_deferLeafVgprSymbolic ? -1 : regCont->regName->getTotalIdx();
         }
 
         StinkyRegister reg{regType, static_cast<uint32_t>(physicalIdx),
@@ -1351,6 +1582,31 @@ bool itemContainsPrefetchLoad(const rocisa::Item* item) {
         dynamic_cast<const rocisa::TensorLoadToLds*>(item)) {
         return true;
     }
+    // logical-IR migration: a prefetch load emitted as a LogicalLeaf (e.g. the
+    // gfx1250 TDM tensor_load_to_lds) is not any rocisa load type, so the
+    // dynamic_casts above miss it. This introspection decides pgrStart -> the
+    // loopWithPrefetch group boundary that drives software-pipeline/prefetch
+    // placement; missing the leaf shifts that boundary and diverges the asm.
+    // Recognize the leaf by its logical opcode, mirroring the Python seam's
+    // sched_is_tensor_load_to_lds. The gfx1250 TDM load is TensorLoadToLds; the
+    // [C3] non-TDM path flips the MUBUF buffer_load opcodes below (kept in sync with
+    // schedCategoryForOpcode's BufferLoad* -> GlobalRead cases and ir._MIGRATED).
+    // NOTE: opcode, not is(InstFlag::IF_MUBUFLoad): createLogicalFromRocisa builds a
+    // leaf's logical node via createIR<LogicalInstruction>(opcode), which does NOT
+    // apply the tablegen per-opcode flag factory, so flags_ is empty on a converted
+    // leaf and is(IF_MUBUFLoad) would always be false. getOpcode() is reliable (it is
+    // what schedCategoryForOpcode / the makeLogicalLeaf oracle use). Extend further as
+    // GLOBAL / FLAT reads are flipped to leaves.
+    if (const auto* leaf = dynamic_cast<const rocisa::LogicalLeaf*>(item)) {
+        namespace Logical = stinkytofu::logical;
+        if (!leaf->logical()) return false;
+        const auto op = leaf->logical()->getOpcode();
+        return op == Logical::TensorLoadToLds || op == Logical::BufferLoadB32 ||
+               op == Logical::BufferLoadB64 || op == Logical::BufferLoadB96 ||
+               op == Logical::BufferLoadB128 || op == Logical::BufferLoadD16U8 ||
+               op == Logical::BufferLoadD16HIU8 || op == Logical::BufferLoadD16B16 ||
+               op == Logical::BufferLoadD16HIB16;
+    }
     if (const auto* mod = dynamic_cast<const rocisa::Module*>(item)) {
         for (const auto& child : mod->itemList) {
             if (itemContainsPrefetchLoad(child.get())) return true;
@@ -1464,6 +1720,20 @@ void appendLogicalItem(PyLogicalModule& lm, const rocisa::Item* item, const Logi
         if (!sub->name.empty()) lm.endGroup(sub->name);
         return;
     }
+    // Carrier leaf: the logical instruction is already built, so pass it straight
+    // through instead of converting a rocisa instruction. This is what makes a
+    // mixed rocisa/logical tree lower correctly on the logical-IR path.
+    //
+    // A leaf's symbolic VGPR operands intentionally carry the all-ones placeholder
+    // index rather than an eagerly-resolved one (see g_deferLeafVgprSymbolic at
+    // toStinkyRegister): the .set that binds the name is replayed positionally
+    // only later in the lowering pipeline, so resolveSymbolicOperands(migration)
+    // in LowerLogicalModulePipeline fills in the stream-correct index before any
+    // consumer (e.g. SetMatrixReusePass) keys on it.
+    if (const auto* leaf = dynamic_cast<const rocisa::LogicalLeaf*>(item)) {
+        lm.add(leaf->logical());
+        return;
+    }
     const auto* inst = dynamic_cast<const rocisa::Instruction*>(item);
     if (inst == nullptr) {
         throw std::runtime_error("rocisa item has no logical-IR form: " + item->toString());
@@ -1489,6 +1759,48 @@ std::shared_ptr<StinkyAsmModule> lowerRocisaModuleViaLogical(
 }
 
 }  // anonymous namespace
+
+namespace rocisa {
+using namespace stinkytofu;
+
+// Deep copy of a logical leaf (logical-IR migration). See LogicalLeaf::clone() in
+// code.hpp for why a shared logicalInst is unsafe: it is an intrusive-list node
+// (IRBase) that can occupy only one list position, so two copies sharing it make
+// the lowering drop the instruction from the earlier copy. Rebuild an INDEPENDENT
+// logical form from the leaf's own rocisa instruction via the exact makeLogicalLeaf
+// path (createLogicalFromRocisa under DeferLeafVgprSymbolicGuard) so the clone
+// lowers byte-identically to the original.
+static LogicalLeaf* cloneLeafDeep(const LogicalLeaf& self) {
+    if (!self.rocisaInst) {
+        // No rocisa origin to rebuild from: keep the prior shallow behaviour
+        // (shared logical form). Leaves built this way are not replicated on the
+        // flipped gfx1250 path, so the sharing hazard does not arise for them.
+        return new LogicalLeaf(self);
+    }
+    const auto asmCaps = rocisa::rocIsa::getInstance().getAsmCaps();
+    const bool hasVgprMsb = asmCap(asmCaps, "HasVgprMSB") != 0;
+    const GfxArchID archId = resolveArchId(self.leafArch, self.leafArchName);
+    // Mirror makeLogicalLeaf exactly: defer symbolic VGPR resolution so the clone's
+    // operands stay as the all-ones placeholder and are bound positionally later.
+    DeferLeafVgprSymbolicGuard deferLeafVgprSymbolic;
+    auto clonedRocisa = std::dynamic_pointer_cast<rocisa::Instruction>(self.rocisaInst->clone());
+    auto freshLogical = createLogicalFromRocisa(*clonedRocisa, asmCaps, hasVgprMsb, archId);
+    // Carry across post-construction state the lowering relies on but that the
+    // rocisa instruction does not encode: the LDS mem token (set via setMemToken
+    // after the leaf was built, see Component._emitLdsRead).
+    if (self.logicalInst && self.logicalInst->memtoken)
+        freshLogical->memtoken = self.logicalInst->memtoken;
+    auto* leaf = new LogicalLeaf(freshLogical, self.name);
+    leaf->rocisaInst = clonedRocisa;
+    leaf->leafArch = self.leafArch;
+    leaf->leafArchName = self.leafArchName;
+    return leaf;
+}
+
+std::shared_ptr<Item> LogicalLeaf::clone() const {
+    return std::shared_ptr<Item>(cloneLeafDeep(*this));
+}
+}  // namespace rocisa
 
 namespace stinkytofu {
 
@@ -1770,6 +2082,22 @@ static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
         [&](const rocisa::Item* item) -> bool {
         if (const auto* inst = dynamic_cast<const rocisa::Instruction*>(item))
             return isPrefetchLoadInst(inst);
+        // logical-IR migration: a prefetch load emitted as a LogicalLeaf is not a
+        // rocisa Instruction; recognize it by logical opcode so the auto-detected
+        // loopWithPrefetch region is unchanged. Mirror of itemContainsPrefetchLoad
+        // in the sibling lowerer -- keep both opcode sets in sync (TDM
+        // TensorLoadToLds + [C3] non-TDM MUBUF buffer_load). Opcode, not
+        // is(IF_MUBUFLoad): a converted leaf's logical flags_ is empty (see the
+        // sibling for the full rationale), so the flag check would never match.
+        if (const auto* leaf = dynamic_cast<const rocisa::LogicalLeaf*>(item)) {
+            if (!leaf->logical()) return false;
+            const auto op = leaf->logical()->getOpcode();
+            return op == logical::TensorLoadToLds || op == logical::BufferLoadB32 ||
+                   op == logical::BufferLoadB64 || op == logical::BufferLoadB96 ||
+                   op == logical::BufferLoadB128 || op == logical::BufferLoadD16U8 ||
+                   op == logical::BufferLoadD16HIU8 || op == logical::BufferLoadD16B16 ||
+                   op == logical::BufferLoadD16HIB16;
+        }
         if (const auto* mod = dynamic_cast<const rocisa::Module*>(item)) {
             for (const auto& child : mod->itemList)
                 if (containsPrefetchLoad(child.get())) return true;
@@ -2359,18 +2687,92 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
     // logical IR the same way ENABLE_DEBUG_STINKYTOFU_ASM dumps the emitted asm.
     m.def(
         "dumpLogicalModuleText",
-        [](const rocisa::Module& module, nb::object arch_obj, const std::string& moduleName) {
+        [](const rocisa::Module& module, nb::object arch_obj, const std::string& moduleName,
+           const std::string& archName) {
             std::array<int, 3> archArray = convertArch(arch_obj);
             const std::map<std::string, int> asmCaps = rocisa::rocIsa::getInstance().getAsmCaps();
+            // Resolve archId with the concrete stepping (StinkyTofuArchName), same as
+            // the real lowering and makeLogicalLeaf, so the dumped logical IR faithfully
+            // represents what is lowered for arch-sensitive opcodes (and so eager-leaf
+            // and lazy trees dump identically). Empty falls back to the base triple.
             const LogicalLowerCtx ctx{asmCaps, asmCap(asmCaps, "HasVgprMSB") != 0,
-                                      resolveArchId(archArray, "")};
+                                      resolveArchId(archArray, archName)};
             PyLogicalModule logical(moduleName.empty() ? module.name : moduleName);
             appendLogicalModule(logical, module, true, ctx);
             std::ostringstream oss;
             logical.dump(oss);
             return oss.str();
         },
-        nb::arg("module"), nb::arg("arch"), nb::arg("moduleName") = "",
+        nb::arg("module"), nb::arg("arch"), nb::arg("moduleName") = "", nb::arg("archName") = "",
         "Build the StinkyTofu logical IR for a rocisa.Module and return it as text "
-        "(debug helper for ENABLE_DEBUG_STINKYTOFU_LOGICAL).");
+        "(debug helper for ENABLE_DEBUG_STINKYTOFU_LOGICAL). archName is the concrete "
+        "stepping (StinkyTofuArchName) so the dump matches the real lowering.");
+
+    // Lower a single freshly built rocisa instruction to StinkyTofu logical IR and
+    // wrap it in a rocisa.LogicalLeaf carrier, so a codegen region can emit logical
+    // IR while still handing a rocisa.Item back into the rocisa module tree. The
+    // lowering reuses the exact createLogicalFromRocisa() path the lazy converter
+    // runs at toStinkyTofuModule() time, so a leaf is byte-identical to converting
+    // the same rocisa instruction later. asmCaps / HasVgprMSB are read from the
+    // global rocIsa; archId is resolved from the caller-supplied archName so it
+    // matches the lazy converter's resolveArchId(arch, moduleOptions.ArchName).
+    m.def(
+        "makeLogicalLeaf",
+        [](const rocisa::Instruction& inst, nb::object arch_obj,
+           const std::string& archName) -> std::shared_ptr<rocisa::Item> {
+            const std::array<int, 3> archArray = convertArch(arch_obj);
+            const std::map<std::string, int> asmCaps = rocisa::rocIsa::getInstance().getAsmCaps();
+            const bool hasVgprMsb = asmCap(asmCaps, "HasVgprMSB") != 0;
+            // Resolve archId with the SAME concrete stepping name the lazy converter
+            // (toStinkyTofuModule / ToStinkyAsmPass) uses, so an arch-sensitive opcode
+            // (e.g. MFMA/WMMA on a colliding gfx1250 stepping) lowers identically to
+            // the rocisa it replaces. An empty name falls back to the base triple.
+            auto archId = resolveArchId(archArray, archName);
+            // Leaf-only: symbolic VGPR operands must stay unresolved (all-ones
+            // placeholder) so resolveSymbolicOperands binds them positionally in the
+            // lowering pipeline, instead of baking a stale index from the global
+            // vgprIdx map at emission time (see g_deferLeafVgprSymbolic).
+            DeferLeafVgprSymbolicGuard deferLeafVgprSymbolic;
+            auto logicalInst = createLogicalFromRocisa(inst, asmCaps, hasVgprMsb, archId);
+            auto leaf = std::make_shared<rocisa::LogicalLeaf>(logicalInst, rocisaClassName(inst));
+            // Remember the arch this leaf was built for so LogicalLeaf::clone()
+            // can rebuild an independent logical form from rocisaInst (see
+            // cloneLeafDeep). archArray + archName are exactly what resolveArchId
+            // keyed on above, so the rebuilt leaf is byte-identical.
+            leaf->leafArch = archArray;
+            leaf->leafArchName = archName;
+            // Transitional: keep the rocisa instruction this leaf replaced, so
+            // rocisa in-tree passes that predate the logical IR (insertDelayAlu)
+            // can treat the leaf as that instruction and stay byte-identical to
+            // the lazy path (see rocisa::LogicalLeaf::rocisaInst). The Python caller
+            // drops its reference once this returns, so own a clone.
+            leaf->rocisaInst = std::dynamic_pointer_cast<rocisa::Instruction>(inst.clone());
+            // Oracle (logical-IR migration): the leaf classifies itself from its
+            // own logical opcode (schedCategoryForOpcode et al.). While the rocisa
+            // classes still exist, cross-check that self-classification against the
+            // rocisa instruction the leaf replaces. A mismatch means the opcode is
+            // missing from the table (or is one of the §10.5 non-identity cases) --
+            // fail loudly with the exact opcode so the entry can be added, instead
+            // of silently diverging in the scheduler. Once every flipped region's
+            // opcodes are in the tables and this never fires, the oracle (and the
+            // rocisa classification it checks against) can be removed.
+            const std::string opName = stinkytofu::logical::getOpcodeName(logicalInst->getOpcode());
+            if (leaf->schedCategory() != inst.schedCategory() ||
+                leaf->schedExactKind() != inst.schedExactKind() ||
+                leaf->schedWeight() != inst.schedWeight()) {
+                throw std::runtime_error(
+                    "LogicalLeaf scheduler-classification table disagrees with rocisa for opcode "
+                    "'" +
+                    opName + "' (rocisa class " + rocisaClassName(inst) +
+                    "): add it to schedCategoryForOpcode/schedExactKindForOpcode/"
+                    "schedWeightForOpcode (see migration doc §10.5).");
+            }
+            return leaf;
+        },
+        nb::arg("inst"), nb::arg("arch"), nb::arg("archName") = "",
+        "Lower a rocisa instruction to StinkyTofu logical IR and wrap it in a "
+        "rocisa.LogicalLeaf carrier (byte-identical to converting it lazily). Lets a "
+        "codegen region build logical IR while still returning a rocisa.Item into the tree. "
+        "archName is the concrete stepping (StinkyTofuArchName) so archId matches the lazy "
+        "converter for arch-sensitive opcodes.");
 }

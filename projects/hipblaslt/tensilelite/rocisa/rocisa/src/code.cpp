@@ -154,6 +154,63 @@ void init_code(nb::module_ m)
                  self.name = std::get<0>(state);
              });
 
+    // Scheduler-introspection seam category (logical-IR migration). Exposed so
+    // the Python scheduler's sched_is_* predicates can classify a LogicalLeaf.
+    nb::enum_<rocisa::SchedCategory>(m_code, "SchedCategory")
+        .value("NONE", rocisa::SchedCategory::None)
+        .value("Other", rocisa::SchedCategory::Other)
+        .value("GlobalRead", rocisa::SchedCategory::GlobalRead)
+        .value("SMemLoad", rocisa::SchedCategory::SMemLoad)
+        .value("LocalRead", rocisa::SchedCategory::LocalRead)
+        .value("LocalWrite", rocisa::SchedCategory::LocalWrite)
+        .value("MFMA", rocisa::SchedCategory::MFMA);
+
+    // Carrier leaf for StinkyTofu logical-IR instructions inside a rocisa Module
+    // tree. Instances are built on the C++ side (the conversion glue); Python only
+    // needs the type registered so isinstance/downcast work once leaves appear in
+    // a tree. No constructor is exposed here on purpose. schedCategory() /
+    // schedOpcodeName() let the scheduler classify the leaf (see ir.py).
+    nb::class_<rocisa::LogicalLeaf, rocisa::Item>(m_code, "LogicalLeaf")
+        .def("__str__", &rocisa::LogicalLeaf::toString)
+        // Lifecycle (logical-IR migration, Phase 2 §7.5): the scheduler deep-copies
+        // items it moves between iteration buckets (deepcopy(item) / deepcopy(src)),
+        // and a deepcopy'd Module clones each child item via clone(). Route both to
+        // LogicalLeaf::clone(), which deep-copies the wrapped LogicalInstruction
+        // (rebuilt from rocisaInst). Sharing the logicalInst by shared_ptr is NOT
+        // safe: it is an intrusive-list node that can occupy only one list position,
+        // so two copies that share it make the lowering drop the instruction from
+        // the earlier copy (see LogicalLeaf::clone() / cloneLeafDeep).
+        .def("__deepcopy__",
+             [](const rocisa::LogicalLeaf& self, nb::dict&) { return self.clone(); })
+        .def("schedCategory", &rocisa::LogicalLeaf::schedCategory)
+        .def("schedOpcodeName", &rocisa::LogicalLeaf::schedOpcodeName)
+        // Transitional rocisa view (logical-IR migration): the original rocisa
+        // instruction this leaf replaced (or None). Exposed so the Python
+        // scheduler's in-path rocisa passes that still read an instruction's raw
+        // shape -- type(x).__name__ / .dst / .srcs / str(x) / isinstance(x, SomeRocisaClass)
+        // -- can unwrap a leaf to the exact instruction it stands in for and stay
+        // byte-identical to the pre-flip rocisa tree (ir.sched_rocisa_view). Mirrors
+        // how the C++ insertDelayAlu pass already consumes rocisaInst. Removed once
+        // those passes move onto the logical IR and the rocisa classes retire.
+        .def_prop_ro("rocisaInst",
+                     [](const rocisa::LogicalLeaf& self) { return self.rocisaInst; })
+        // LDS mem-token forwarding (Phase 3 §10.2 A): same signature as rocisa
+        // Instruction so a leaf is a drop-in for inst.setMemToken(...).
+        .def("setMemToken", &rocisa::LogicalLeaf::setMemToken, nb::arg("token").none())
+        .def("getMemToken", &rocisa::LogicalLeaf::getMemToken)
+        // Mutable waitcnt properties (logical-IR migration, §7.5 -- first mutable
+        // leaf). The scheduler rewrites waitCode.dscnt and appends to
+        // waitCode.comment after the leaf is built, so expose them as read/write
+        // properties forwarding to the wrapped logical instruction (and mirrored
+        // onto rocisaInst). A waitcnt leaf is then a drop-in for the rocisa
+        // SWaitCnt at KernelWriter._makeSubIterSchedule's .dscnt / .comment sites.
+        .def_prop_rw("dscnt",
+                     &rocisa::LogicalLeaf::getWaitDscnt,
+                     &rocisa::LogicalLeaf::setWaitDscnt)
+        .def_prop_rw("comment",
+                     &rocisa::LogicalLeaf::getLeafComment,
+                     &rocisa::LogicalLeaf::setLeafComment);
+
     nb::class_<rocisa::Module, rocisa::Item>(m_code, "Module")
         .def(nb::init<const std::string&>(), nb::arg("name") = "")
         .def_rw("isCallable", &rocisa::Module::isCallable)

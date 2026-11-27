@@ -108,6 +108,8 @@ from .Common import roundUp, log2, ceilDivide, choose_multiplier, wmmaV3InputVgp
 from .OccupancyMeasure import compute_occupancy_from_asm_source, _arch_caps_for_kernel
 from .Common.DebugInstrMask import applyDebugDisableInstrMask
 from .ir import ECvtF16toF32, ECvtF32toF16, ECvtPkFP8toF32
+from .ir import logical_region, maybe_logical_leaf, sched_rocisa_view
+from .ir import Instruction as _LogicalFlipInstruction
 from .Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection, isSubtileMultiDU, plsinBlockSchedTile, isMxf4SubtilePath, isSubtileSwizzledTensor
 from .Components.NonTemporal import decodeNonTemporal, forceCoherentNonTemporal, tdmCacheModifiers
 from .Common.DataType import DataType
@@ -139,6 +141,30 @@ from .ir import ReadWriteInstruction as _RWInstruction, \
 # op is ever relocated into the LDS-synchronized NLL loop (byte-equivalent to the
 # old startswith('ds')/'waitcnt'/'barrier'/'load'/'store'/'buffer'/'atomic' scan for
 # every instruction that can actually appear in the store-init stream).
+
+def _logical_region_method(regionName):
+  """Decorator for KernelWriter(Assembly) methods that build a self-contained,
+  zero-mutation instruction block (no deferred Holder/memToken/label mutation on
+  the opcodes it emits directly or via facade-routed callees).
+
+  Step 1 (gfx1250 logical-IR migration): wraps the method body in an
+  ir.logical_region() so that migrated opcodes (those listed in ir._MIGRATED)
+  build logical-IR leaves on a logical ISA (gfx1250 + TENSILELITE_LOGICALIR_TRIAL);
+  everywhere else they stay byte-identical rocisa. The region is suppressed on the
+  subtile path, which emits pure rocisa via str(module) and never runs the
+  logical->asm converter (a leaf reaching str() would be garbage).
+
+  The decorated method must take (self, kernel, ...)."""
+  def deco(fn):
+    @wraps(fn)
+    def wrapper(self, kernel, *args, **kwargs):
+      if kernel["UseSubtileImpl"]:
+        return fn(self, kernel, *args, **kwargs)
+      with logical_region(regionName):
+        return fn(self, kernel, *args, **kwargs)
+    return wrapper
+  return deco
+
 _PLSIN_STOREINIT_MEM_INSTS = (
   _RWInstruction, SWaitCnt, SBarrier, _SBarrierSignalIsFirst, _TensorLoadToLds,
 )
@@ -217,7 +243,7 @@ from math import ceil, floor, log, prod
 from contextlib import contextmanager
 from copy import copy as shallowCopy, deepcopy
 from dataclasses import dataclass, field
-from functools import lru_cache
+from functools import lru_cache, wraps
 from typing import List, Mapping, NamedTuple, Optional, Tuple, Union
 
 import contextlib
@@ -11551,6 +11577,7 @@ class KernelWriterAssembly(KernelWriter):
     module.add(skip)
     return module
 
+  @_logical_region_method("endSummation")
   def endSummation(self, kernel, tPA, tPB, noSkipLoad = True, label = None, isOptNLL = False):
     module = Module("endSummation")
 
@@ -12461,6 +12488,7 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   # MFMA Iteration
   ##############################################################################
+  @_logical_region_method("mfma")
   def mfmaIter(self, kernel, tPA, tPB, u, innerUnroll, vregSetIdx, unrollLoopIdx = 0, unrollIdx = 0, tail = False, firstIter = False, postShiftK = Module()):
     imod = Module("mi")
     shiftK = Module("shiftK")
@@ -13985,6 +14013,7 @@ class KernelWriterAssembly(KernelWriter):
                     comment="gra += inc%s%s (upper)"%(tP["tensorChar"], loopChar)))
               graIdx += self.states.rpga
 
+  @_logical_region_method("globalReadIncrementAB")
   def globalReadIncrementAB(self, kernel, tPA, tPB, loopIdx, prefetchIndex):
     imod = Module("globalReadIncrementAB")
     tdmA: bool = kernel["enableTDMA"]
@@ -16688,6 +16717,11 @@ class KernelWriterAssembly(KernelWriter):
             # Attach LDS memory token to local write instructions so downstream
             # StinkyTofu passes can track local write dependencies.
             writeInst.setMemToken(MemTokenData(localWriteMemToken))
+            # logical-IR migration (Phase 3): inside the localWrite logical_region
+            # on a logical ISA, lower this ds_store to a LogicalLeaf (trial-gated).
+            # Mem token is already set, so the eager lowering captures it. Outside a
+            # region (and on the subtile path) this is a no-op and stays pure rocisa.
+            writeInst = maybe_logical_leaf(writeInst)
             if self.do["LocalWriteCVT"]:
               localWriteCode.add(localWriteCVTCode)
             if self.do["LocalWrite%s"%tc]:
@@ -16723,16 +16757,20 @@ class KernelWriterAssembly(KernelWriter):
         localWriteCode.add(SBarrier(comment="dump LDS"))
         localWriteCode.add(self.getCmpAssert(self.asmAssert.ne, sgpr("WorkGroup0"),1))
 
-    # Enable local write if not DTL or using nonDTL loads in tail loop
-    if (not kernel["DirectToLds%s"%tc]) or \
-       ((tc in ("A","B","MXSA","MXSB") and kernel["NonDTLTailLoop%s"%tc]) and self.states.inTailLoop):
-      # Skip local write if DTVA or DTVB
-      if not ((tP["isA"] or tP["isB"]) and kernel["DirectToVgpr%s"%tc]):
-        localWriteBody(tP)
-    if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"] and \
-      (not kernel["DirectToLdsMetadata"] or (kernel["NonDTLTailLoopMetadata"] and self.states.inTailLoop)):
-      if tP["is_sparse"]:
-        localWriteBody(tP["tpsMetadata"])
+    # Enable local write if not DTL or using nonDTL loads in tail loop.
+    # logical-IR migration (Phase 3 Slice: local-write): mark the ds_store
+    # emission as a logical region so localWriteBody's ds_store lowers to a
+    # LogicalLeaf on a logical ISA (trial-gated). Same shape as localReadDo.
+    with logical_region("localWrite%s" % tc):
+      if (not kernel["DirectToLds%s"%tc]) or \
+         ((tc in ("A","B","MXSA","MXSB") and kernel["NonDTLTailLoop%s"%tc]) and self.states.inTailLoop):
+        # Skip local write if DTVA or DTVB
+        if not ((tP["isA"] or tP["isB"]) and kernel["DirectToVgpr%s"%tc]):
+          localWriteBody(tP)
+      if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"] and \
+        (not kernel["DirectToLdsMetadata"] or (kernel["NonDTLTailLoopMetadata"] and self.states.inTailLoop)):
+        if tP["is_sparse"]:
+          localWriteBody(tP["tpsMetadata"])
 
     return imod
 
@@ -17207,7 +17245,14 @@ class KernelWriterAssembly(KernelWriter):
 
     component = Component.LocalRead.find(self)
     if component:
-      return component(self, kernel, bufferIdx, iui, epsi, tP)
+      # logical-IR migration (Phase 3 §10.3 Slice 3.3): mark the local-read
+      # emission as a logical region so Component._emitLdsRead lowers its ds_load
+      # to a LogicalLeaf on a logical ISA (trial-gated). Only the ds_load is
+      # affected -- pack/convert code is built from concrete rocisa classes, not
+      # dispatched names, so it stays rocisa. The subtile local-read path uses a
+      # separate emitter and never reaches here, so it is unaffected.
+      with logical_region("localRead%s" % tP["tensorChar"]):
+        return component(self, kernel, bufferIdx, iui, epsi, tP)
 
   ##############################################################################
   # Save the local read pointers, for example when creating a duplicated
@@ -17275,7 +17320,9 @@ class KernelWriterAssembly(KernelWriter):
   def shiftVectorComponents(self, kernel, tP):
     component = Component.ShiftVectorComponents.find(self)
     if component:
-      return component(self, kernel, tP)
+      # [G] edge-shift Phase-3 flip: VALU math -> LogicalLeaf, branches/labels
+      # stay rocisa (gated/no-op off gfx1250+trial; subtile-guarded internally).
+      return self._logicalizeShiftVector(component(self, kernel, tP))
 
   ##############################################################################
   # computeStoreSrd
@@ -17633,6 +17680,7 @@ class KernelWriterAssembly(KernelWriter):
 
     return module
 
+  @_logical_region_method("globalWriteWorkGroupInit")
   def globalWriteWorkGroupInit(self, kernel, skipUndefine=False, channels=None, labelSuffix="", noMultipleBuffer=False):
     # PLSIN emits this store-init twice: an early copy hoisted into the fused
     # NLL and the usual post-loop one. The runtime SRD compute is idempotent, so
@@ -18870,6 +18918,7 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   # Not LocalSplitU: Global Write Indices
   ##############################################################################
+  @_logical_region_method("notLocalSplitUGlobalWriteIndices")
   def notLocalSplitUGlobalWriteIndices(self, kernel):
     #print "GlobalWriteIndices"
     if not self.do["PostLoop"]: return ""
@@ -22440,19 +22489,28 @@ class KernelWriterAssembly(KernelWriter):
         else:
           assert 0, "%s\nchooseGlobalRead: bad bpl %u"%(self.states.kernelName,bpl)
 
-      # buffer_load offset field is 12-bit.
-      # if offset >= 4096, use soffset instead
-      if offset >= 4096:
-        if soffset in (0, "0"):
-          mubuf = MUBUFModifiers(offen=True, offset12=0, glc=glc, slc=slc, nt=nt, lds=lds, scope=scope, th=th, nv=nv)
-          with self.allocTmpSgpr(1, tag="chooseGlobalRead_tmpSgprInfo") as tmpSgprInfo:
-            soffset = sgpr(tmpSgprInfo.idx)
-            rv.add(SMovB32(dst=soffset, src=offset, comment="large offset"))
-            bufferLoadImpl(soffset)
+      # logical-IR migration (Phase 3, [C3] non-TDM buffer-load): flip the MUBUF
+      # buffer_load emission to eager logical leaves on the logical ISA (gfx1250 +
+      # TENSILELITE_LOGICALIR_TRIAL); everywhere else it stays byte-identical rocisa.
+      # These loads carry no post-construction memToken (vmcnt-tracked into VGPR/LDS),
+      # so an eager leaf built here needs no resolve-then-flip. Subtile keeps pure
+      # rocisa because its scheduler still introspects rocisa load types.
+      _bufRegion = (contextlib.nullcontext() if self.states.kernel["UseSubtileImpl"]
+                    else logical_region("globalReadBuffer"))
+      with _bufRegion:
+        # buffer_load offset field is 12-bit.
+        # if offset >= 4096, use soffset instead
+        if offset >= 4096:
+          if soffset in (0, "0"):
+            mubuf = MUBUFModifiers(offen=True, offset12=0, glc=glc, slc=slc, nt=nt, lds=lds, scope=scope, th=th, nv=nv)
+            with self.allocTmpSgpr(1, tag="chooseGlobalRead_tmpSgprInfo") as tmpSgprInfo:
+              soffset = sgpr(tmpSgprInfo.idx)
+              rv.add(SMovB32(dst=soffset, src=offset, comment="large offset"))
+              bufferLoadImpl(soffset)
+          else:
+            assert 0, "offset too large and soffset set"
         else:
-          assert 0, "offset too large and soffset set"
-      else:
-        bufferLoadImpl(soffset)
+          bufferLoadImpl(soffset)
 
       return rv
     elif tr:
@@ -22702,6 +22760,7 @@ class KernelWriterAssembly(KernelWriter):
     return self.addVecGlobalLoad(dataType, kernel, biasVgpr, addr0, addr1, addrCalc.biasOffset[factorDim], gwvw, comment="Load Bias")
 
   ##############################################################################
+  @_logical_region_method("globalWriteStore")
   def addStore(self, kernel, ss, tc: str, addrCalc, sumIdx, tmpS01, edge, elementIdx=None, batchIdx=None,
                wsOffset=0, overrideAfterPrimerRows=0, comment="addStore", forceSlc: bool = False,
                peerD: bool = False):
@@ -23274,10 +23333,14 @@ class KernelWriterAssembly(KernelWriter):
     if scaleBDataType:
       scaleBShiftOffset = self.getGlobalShiftOffset(kernel, scaleBDataType, gwvw)
       globalLoadsModule.addModuleAsFlatItems(self.addVectorGlobalLoad(kernel, "ScaleB", scaleBOffsetVgpr, scaleBShiftOffset, scaleBDataType, scaleBBpe, gwvw, tmpVgpr1Res, scaleBDstVgpr, 1))
-    # Count global loads (covers both buffer loads and flat loads)
+    # Count global loads (covers both buffer loads and flat loads). On gfx1250 the
+    # buffer_load may be an eager logical leaf (chooseGlobalRead's globalReadBuffer
+    # region), which is not a GlobalReadInstruction; sched_rocisa_view unwraps the
+    # leaf to its transitional rocisa clone so the count is byte-identical to the
+    # pure-rocisa pass that drives the SWaitCnt(vlcnt=0) drain below.
     vlcnt = 0
     for item in globalLoadsModule.items():
-      if isinstance(item, GlobalReadInstruction):
+      if isinstance(sched_rocisa_view(item), GlobalReadInstruction):
         vlcnt = vlcnt + 1
     module.add(globalLoadsModule)
     assert vlcnt > 0
@@ -24021,6 +24084,106 @@ class KernelWriterAssembly(KernelWriter):
         result = True
     return result
 
+  def _logicalizeActivationMath(self, module):
+    """[G] epilogue activation Phase-3 flip (approach i): convert the fully-built
+    activation math to LogicalLeaf.
+
+    Activation.py builds the activation stream as rocisa and runs its build-time
+    *mutating* passes on it -- CombineInstructions/FuseInstruction (peephole
+    const-folding), ConvertCoeffToHex (float immediate -> hex) and
+    assignGpr/HolderToGpr (symbolic Holder -> physical GPR). Those passes
+    reconstruct/mutate instructions by concrete rocisa type and read .dst/.srcs,
+    so the stream must stay rocisa *through* them. We therefore flip only here, at
+    the return of getActivation{DestDataType,ActivationComputeType} -- i.e. after
+    getModule()+assignGpr() have fully resolved the module. The leaf's rocisaInst
+    clone is then byte-identical to what the lazy converter would lower at
+    toStinkyTofuModule time (eager == lazy); ValuC-relative symbolic VGPRs stay
+    symbolic and resolve at StinkyTofu lowering, same on both A/B passes.
+
+    The build-time passes move into logical lowering in Phase 4 -- the C++
+    LogicalPeepholePass (ported from Activation.py, shared/stinkytofu/src/
+    transforms/logical) is the landing for CombineInstructions/FuseInstruction.
+
+    No _MIGRATED entry and no C++ seam are needed: maybe_logical_leaf lowers via
+    the exact createLogicalFromRocisa path the lazy converter already runs on
+    these opcodes, and every activation opcode (pure VALU/SALU) is Other / None /
+    weight-1 in both rocisa and the logical schedCategory tables, so the
+    makeLogicalLeaf oracle matches by default. Subtile-guarded: subtile activation
+    stays pure rocisa (its own emitter + LogicalScheduler introspect concrete
+    types). maybe_logical_leaf is itself gated on gfx1250 + active region + trial +
+    not _kernel_logical_disabled, so this is a no-op everywhere else."""
+    if self.states.kernel["UseSubtileImpl"]:
+      return module
+    with logical_region("activation"):
+      self._flipInstructionsToLeaves(module)
+    return module
+
+  def _logicalizeShiftVector(self, module):
+    """[G] epilogue edge-shift Phase-3 flip (approach i, same shape as
+    _logicalizeActivationMath): convert the VALU/scalar math of a
+    shiftVectorComponents module to LogicalLeaf, leaving branches / labels /
+    placeholder Modules as rocisa.
+
+    shiftVectorComponents (ShiftVectorComponentsMFMA for gfx1250) builds a
+    self-contained edge-shift block: VALU/scalar math (v_mov_b32 / v_mul_i32_i24 /
+    v_add_co_u32 / v_cmp* / v_cndmask_b32 / v_and_b32 / v_lshlrev_b32 / v_sub_u32 /
+    ds_bpermute_b32 / s_mov_b32) interleaved with inline SCBranchVCCNZ branches,
+    Labels, *_placeholder Modules (resolved into branches *later* by
+    updateBranchPlaceHolder), and scheduling/sync boundaries (s_waitcnt / s_nop /
+    s_or_saveexec). We flip only the math: _flipInstructionsToLeaves skips
+    BranchInstruction + the skipExtra boundary set (SWaitCnt/SNop/SOrSaveExec*) +
+    Labels, and the placeholder Modules are still empty at flip time so recursing
+    them is a no-op -- the branches/waits that get added or legalized afterwards
+    stay rocisa, matching the branch/label-as-boundary rule.
+
+    The boundary skips are required for correctness: a flipped SWaitCnt loses its
+    waitData through the leaf round-trip, so legalizeWaitCnt would create no wait
+    and abort; s_nop carries wait-state semantics; s_or_saveexec carries the exec-
+    mask dependency the shift relies on. Everything flipped is Other/None/weight-1
+    in both rocisa and the C++ schedCategory tables except ds_bpermute_b32
+    (DSBPermuteB32), which rocisa categorises LocalWrite via its DSStoreInstruction
+    base; schedCategoryForOpcode has a matching DSBPermuteB32 -> LocalWrite case so
+    the makeLogicalLeaf oracle matches. The explicit s_waitcnt(dscnt=0) that guards
+    the ds_bpermute result stays rocisa, so the dscnt dependency is unaffected by
+    flipping the permute. The leaf's rocisaInst clone is byte-identical to what the
+    lazy converter would lower (eager == lazy); ValuC-relative symbolic VGPRs stay
+    symbolic and resolve identically on both A/B passes. Subtile-guarded (subtile
+    has its own store/scheduler path that introspects concrete types);
+    maybe_logical_leaf is itself gated on gfx1250 + active region + trial, so this
+    is a no-op everywhere else."""
+    if self.states.kernel["UseSubtileImpl"]:
+      return module
+    with logical_region("shiftVector"):
+      self._flipInstructionsToLeaves(module,
+                                     skipExtra=(SWaitCnt, SNop, SOrSaveExecB32, SOrSaveExecB64))
+    return module
+
+  def _flipInstructionsToLeaves(self, module, skipExtra=()):
+    """Recursively replace each leaf instruction item in *module* with its
+    LogicalLeaf (via maybe_logical_leaf). Recurses into nested Modules; Labels /
+    TextBlocks (non-Instruction items) and BranchInstructions are left untouched.
+
+    Branches stay rocisa as control-flow boundaries: the logical passes treat
+    labels/branches as region boundaries anyway, and edge-shift branch
+    placeholders (empty *_placeholder Modules at flip time) are resolved into real
+    branches *after* this flip by updateBranchPlaceHolder -- so those too remain
+    rocisa. Activation (the other caller) has no branches, so the skip is inert
+    there.
+
+    *skipExtra* is an additional tuple of instruction types left as rocisa. Edge-
+    shift passes the scheduling/sync boundaries that must NOT become leaves --
+    SWaitCnt (its waitData does not survive the leaf round-trip, so legalizeWaitCnt
+    would create no wait and abort), SNop (wait-state semantics), and SOrSaveExec*
+    (exec-mask dependency). Activation passes nothing, so its behaviour is
+    unchanged."""
+    for idx, item in enumerate(module.items()):
+      if isinstance(item, Module):
+        self._flipInstructionsToLeaves(item, skipExtra)
+      elif isinstance(item, BranchInstruction) or (skipExtra and isinstance(item, skipExtra)):
+        continue
+      elif isinstance(item, _LogicalFlipInstruction):
+        module.setItem(idx, maybe_logical_leaf(item))
+
   def getActivationDestDataType(self, kernel, activation, activationTypeStr: str, gwvw, \
   elementSumIdxIn, elementSumIdxOut, tmpVgpr, tmpSgpr):
     module = Module("ActivationAfterPack")
@@ -24061,7 +24224,7 @@ class KernelWriterAssembly(KernelWriter):
       actModule = activation.getModule(self.states.kernel["ProblemType"]["DestDataType"], activationTypeStr, vgprIn, vgprOut)
       module.add(activation.assignGpr(actModule, tmpVgpr, tmpSgpr))
       activation.setUsePK(True)
-    return module
+    return self._logicalizeActivationMath(module)
 
   def getActivationActivationComputeType(self, kernel, activation, activationTypeStr: str, gwvw, \
     elementSumIdxIn, elementSumIdxOut, tmpVgpr, tmpSgpr, satInt8=False, enableValuCPrefix=False):
@@ -24078,7 +24241,7 @@ class KernelWriterAssembly(KernelWriter):
       module.add(activation.assignGpr(actModule, tmpVgpr, tmpSgpr))
     activation.setSaturationForInt8(False)
     activation.setVgprPrefixFormat("")
-    return module
+    return self._logicalizeActivationMath(module)
 
   ##############################################################################
   # Prefetch across persistent: prefetch next tile's data during the NLL.
@@ -25289,6 +25452,7 @@ class KernelWriterAssembly(KernelWriter):
         kernel, tc, f"{group0Name}+2", tmpSgprResource, True))
     return mod
 
+  @_logical_region_method("initTDMDescriptor")
   def initTDMDescriptor(self, kernel: Mapping, tP: Mapping) -> Module:
     comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
     tc: str = tP['tensorChar']
@@ -26145,6 +26309,7 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(emitFor(tP))
     return mod
 
+  @_logical_region_method("initTDMDescriptorWaveSeparated")
   def initTDMDescriptorWaveSeparated(self, kernel, tPA, tPB, waveIdxSgpr: int | str = "WaveIdx") -> Module:
     #TODO: TDM implement
     mod = Module("TDM Init Wave Separated")
@@ -26183,6 +26348,7 @@ class KernelWriterAssembly(KernelWriter):
     mod.add(tdmInitLblEnd)
     return mod
 
+  @_logical_region_method("tdmGlobalOffset")
   def tdmGlobalOffset(self, kernel: Mapping, tP: Mapping,
                       useDescriptor: bool = False) -> Module:
     comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
@@ -26190,6 +26356,7 @@ class KernelWriterAssembly(KernelWriter):
     address = f"tdm{tc}Group0+2" if useDescriptor else f"Address{tc}"
     return comp.calculateStartAddr(self, kernel, tP, address)
 
+  @_logical_region_method("tdmGlobalOffsetWaveSeparated")
   def tdmGlobalOffsetWaveSeparated(self, kernel: Mapping, tPA: Mapping, tPB: Mapping, waveIdxSgpr: int | str = "WaveIdx") -> Module:
     mod = Module("TDM Global Offset Wave Separated")
     comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)

@@ -26,6 +26,7 @@
 #include "format.hpp"
 #include "instruction/instruction.hpp"
 
+#include <array>
 #include <cassert>
 #include <cmath>
 #include <cstdint>
@@ -37,8 +38,23 @@
 #include <variant>
 #include <vector>
 
+// Carried by rocisa::LogicalLeaf below. Only a forward declaration: core rocisa
+// headers stay decoupled from stinkytofu, and a shared_ptr to an incomplete type
+// is fine for storage/copy/destroy. The full type is only needed where a leaf is
+// actually built/consumed (the rocisa<->stinkytofu conversion glue).
+namespace stinkytofu
+{
+    class LogicalInstruction;
+}
+
 namespace rocisa
 {
+    // Forward declaration so LogicalLeaf can keep a shared_ptr to the rocisa
+    // instruction it replaced (transitional, see LogicalLeaf::rocisaInst). The
+    // full definition lives in instruction/instruction.hpp, which includes this
+    // header; a shared_ptr to an incomplete type is fine for storage/copy.
+    struct Instruction;
+
     struct Label : public Item
     {
         std::variant<std::string, int> label;
@@ -156,6 +172,124 @@ namespace rocisa
             if(!rocIsa::getInstance().getOutputOptions().outputNoComment)
                 return text;
             return "";
+        }
+    };
+
+    /*
+    Carrier leaf for an already-built StinkyTofu logical-IR instruction living
+    inside a rocisa Module tree (the "mixed tree" of the rocisa -> logical IR
+    migration).
+
+    It is a real rocisa::Item, so the tree can hold it and the usual structural
+    surgery (reorder / insert / remove / regroup) keeps working via the existing
+    rocisa API. The rocisa -> logical converter recognizes it and passes the
+    payload straight through instead of converting a rocisa instruction.
+
+    A LogicalLeaf has ONLY a logical form: a tree that contains one must be
+    lowered through the logical-IR path (LowerViaLogicalIR), never the direct
+    rocisa -> asm path.
+    */
+    struct LogicalLeaf : public Item
+    {
+        std::shared_ptr<stinkytofu::LogicalInstruction> logicalInst;
+
+        // Transitional (logical-IR migration): the original rocisa instruction
+        // this leaf replaced. Kept ONLY so rocisa in-tree passes that predate the
+        // logical IR -- notably insertDelayAlu -- can still treat a leaf as the
+        // rocisa instruction it stands in for (reading preStr()/dst/src registers),
+        // byte-identically to the lazy rocisa->logical path. Set by makeLogicalLeaf;
+        // may be null for leaves built another way, in which case such passes skip
+        // the leaf as before. Removed once those passes move onto the logical IR
+        // and the rocisa instruction classes retire.
+        std::shared_ptr<Instruction> rocisaInst;
+
+        // Arch the leaf was built for (logical-IR migration). Needed so a deep
+        // copy (clone()) can rebuild an INDEPENDENT logical form from rocisaInst
+        // via the same makeLogicalLeaf path -- see clone() below and cloneLeafDeep
+        // in ToStinkyTofuUtils.cpp. Set by makeLogicalLeaf alongside rocisaInst;
+        // the ISA triple plus the concrete stepping name (StinkyTofuArchName) that
+        // resolveArchId() keys on, so arch-sensitive opcodes rebuild identically.
+        std::array<int, 3> leafArch{};
+        std::string        leafArchName;
+
+        LogicalLeaf(std::shared_ptr<stinkytofu::LogicalInstruction> inst,
+                    const std::string&                              name = "LogicalLeaf")
+            : Item(name)
+            , logicalInst(std::move(inst))
+        {
+        }
+
+        LogicalLeaf(const LogicalLeaf& other) = default;
+
+        // Deep clone (logical-IR migration). The wrapped LogicalInstruction is an
+        // intrusive-list node (stinkytofu IRBase): a single node can live in only
+        // ONE list position. The default copy ctor shares logicalInst by
+        // shared_ptr, so two copies of a leaf (e.g. an unrolled loop body that is
+        // deepcopy'd) would share one node; lowering links that node into each
+        // copy's block and the second link steals it from the first, silently
+        // dropping the instruction from the EARLIER copy (observed: the staggerU
+        // wrapIter s_cmp_eq_u32 / s_cselect_b32 chain vanished from the first loop
+        // body). clone() therefore gives the copy its own logical form, rebuilt
+        // from rocisaInst via the makeLogicalLeaf path. Defined out-of-line in
+        // ToStinkyTofuUtils.cpp because the rebuild needs the stinkytofu converter,
+        // whose types are only forward-declared here.
+        std::shared_ptr<Item> clone() const override;
+
+        const std::shared_ptr<stinkytofu::LogicalInstruction>& logical() const
+        {
+            return logicalInst;
+        }
+
+        // Scheduler-introspection seam (logical-IR migration, Phase 2/3). The
+        // leaf classifies itself from its own logical opcode via the opcode ->
+        // classification table in ToStinkyTofuUtils.cpp (schedCategoryForOpcode,
+        // etc.) -- the end-state source of truth, no rocisa needed. Defined
+        // out-of-line there, where stinkytofu::LogicalInstruction is complete.
+        // makeLogicalLeaf cross-checks each entry against the rocisa instruction
+        // the leaf replaces (the oracle) until the table fully subsumes rocisa.
+        SchedCategory  schedCategory() const override;
+        SchedExactKind schedExactKind() const override;
+        int            schedWeight() const override;
+
+        // Logical opcode name of the wrapped instruction (e.g. "DSLoadB128",
+        // "SWaitCnt", "SNop"), or "" if none. Exposed to Python so the
+        // scheduler's fine-grained sched_is_* predicates can recognise a leaf
+        // the same way they recognise the rocisa class it replaces. Defined
+        // out-of-line in ToStinkyTofuUtils.cpp.
+        std::string schedOpcodeName() const;
+
+        // LDS memory-token accessors (logical-IR migration, Phase 3 §10.2 A).
+        // An LDS read/write's mem token is set *after* construction
+        // (Component._emitLdsRead: inst = LocalReadX(...); inst.setMemToken(...)),
+        // and the token drives LDS dependency / barrier placement. A leaf must
+        // accept that post-construction set and report it back, so these forward
+        // to the wrapped logical instruction's ``memtoken`` field. rocisa
+        // Instruction exposes the same setMemToken/getMemToken signature, so a
+        // leaf is a drop-in for the ``inst.setMemToken(...)`` call site. Defined
+        // out-of-line in ToStinkyTofuUtils.cpp (LogicalInstruction is complete there).
+        void                          setMemToken(const std::shared_ptr<MemTokenData>& token);
+        std::shared_ptr<MemTokenData> getMemToken() const;
+
+        // Mutable waitcnt accessors (logical-IR migration, §7.5 -- first MUTABLE
+        // leaf). The hot-loop s_waitcnt is built with a placeholder dscnt, then
+        // the scheduler rewrites waitCode.dscnt and appends to waitCode.comment
+        // AFTER the leaf exists (KernelWriter._makeSubIterSchedule: KW:2002/2408/
+        // 3054/3051). Every leaf before this was read-only; a waitcnt leaf must
+        // instead accept post-construction mutation. Writes update the wrapped
+        // logical instruction's swaitcnt[3] / comment (what the logical lowering
+        // emits) AND mirror onto rocisaInst so clone() (cloneLeafDeep rebuilds
+        // from rocisaInst) and sched_rocisa_view stay faithful. Defined
+        // out-of-line in ToStinkyTofuUtils.cpp (LogicalInstruction is complete
+        // there). Exposed to Python as the ``.dscnt`` / ``.comment`` properties so
+        // a leaf is a drop-in for the rocisa SWaitCnt at those mutation sites.
+        int         getWaitDscnt() const;
+        void        setWaitDscnt(int v);
+        std::string getLeafComment() const;
+        void        setLeafComment(const std::string& c);
+
+        std::string toString() const override
+        {
+            return name;
         }
     };
 

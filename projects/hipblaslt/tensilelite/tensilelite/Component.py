@@ -73,6 +73,8 @@ from collections.abc import Mapping
 import inspect
 from dataclasses import dataclass
 
+from .ir import maybe_logical_leaf
+
 @dataclass
 class LraTileProperties:
     """
@@ -256,6 +258,12 @@ class LocalRead(Component):
         fullComment = "%s %s" % (comment, syncComment) if comment else syncComment
         inst = LocalReadX(dst=dst, src=src, ds=ds, comment=fullComment)
         inst.setMemToken(ldsMemToken)
+        # logical-IR migration (Phase 3 §10.3 Slice 3.3): inside a local-read
+        # logical_region() on a logical ISA, lower this ds_load to a LogicalLeaf.
+        # The mem token is already set above, so the eager lowering captures it.
+        # Outside a region (and on the subtile path, which never opens one) this
+        # is a no-op and the ds_load stays pure rocisa.
+        inst = maybe_logical_leaf(inst)
         module.add(inst)
 
 class SumUnroll(Component):

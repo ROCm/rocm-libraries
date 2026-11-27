@@ -4,9 +4,14 @@ from ..Common import INDEX_CHARS
 from .TDMFuse import tdmWaveComponents
 from typing import Mapping, Optional
 from rocisa.code import Module, Label
-from rocisa.instruction import SMovB32, SMovB64, SOrB32, SAndB32, SLShiftLeftB32, SLShiftLeftB64, \
+# Instructions are imported via the ir facade (see ../ir.py): a pure passthrough
+# to rocisa except for names in ir._MIGRATED, which become call-time dispatchers
+# so the TDM address/descriptor block can build logical-IR leaves inside a
+# logical_region() on gfx1250. Non-migrated names here stay the real rocisa class.
+from ..ir import SMovB32, SMovB64, SOrB32, SAndB32, SLShiftLeftB32, SLShiftLeftB64, \
     SLShiftRightB32, SAddU32, SAddCU32, SMulI32, SBranch, SCBranchSCC1, SCSelectB32, TensorLoadToLds, \
     VReadfirstlaneB32, SSubU32
+from ..ir import logical_region, maybe_logical_leaf
 from rocisa.container import sgpr, vgpr, RegisterContainer, ContinuousRegister, MemTokenData, TENSORModifiers
 from rocisa.functions import scalarMultiply64Bpe
 from math import log2, ceil, prod
@@ -395,6 +400,19 @@ class TensorDataMoverLoad(TensorDataMover):
 
         if self.mem_token is not None:
             tensorLoadToLds.setMemToken(MemTokenData(self.mem_token))
+
+        # logical-IR migration (Phase 3 Slice: global-read): the TDM
+        # tensor_load_to_lds IS the gfx1250 global-read instruction. Lower it to a
+        # LogicalLeaf (trial-gated) so global read joins local read/write on
+        # logical IR. The mem token set above is captured by the eager lowering.
+        # The in-path _splitTdmLoad pass routes it via sched_is_tensor_load_to_lds
+        # (the seam, leaf-aware), not getParams(), so it keeps working. The C++
+        # converter's prefetch-region grouping (itemContainsPrefetchLoad) is also
+        # leaf-aware so the loopWithPrefetch boundary -- hence software-pipeline
+        # placement -- is unchanged. Tight region keeps the blast radius to
+        # exactly this instruction.
+        with logical_region("globalReadTdmLoad"):
+            tensorLoadToLds = maybe_logical_leaf(tensorLoadToLds)
 
         mod.add(tensorLoadToLds)
         return mod

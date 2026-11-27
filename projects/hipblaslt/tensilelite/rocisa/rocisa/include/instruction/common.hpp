@@ -6084,6 +6084,12 @@ namespace rocisa
         {
             return std::make_shared<VMovB32>(*this);
         }
+
+        // Scheduler seam: exact v_mov_b32 (countVMovB32, MetadataWrite detect).
+        SchedExactKind schedExactKind() const override
+        {
+            return SchedExactKind::VMovB32;
+        }
     };
 
     // v_movrelsd_2_b32: like v_mov_b32 but the dst VGPR index is offset by M0 at

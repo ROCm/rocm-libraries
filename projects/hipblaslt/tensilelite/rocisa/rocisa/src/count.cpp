@@ -70,16 +70,75 @@ namespace rocisa
         return 1;
     }
 
+    // Scheduler-introspection seam (logical-IR migration, Phase 1):
+    // the in-path scheduler counts below ask each leaf its SchedCategory /
+    // SchedExactKind / schedWeight instead of dynamic_cast/typeid, so a logical
+    // leaf (Phase 2) is counted the same way the rocisa instruction it replaces
+    // is. rocisa reports the exact classification today's casts produce, so
+    // these stay byte-identical while rocisa is still the only thing emitted.
+
+    // Sum over schedulable leaves in the tree whose category == cat.
+    int countCategory(const std::shared_ptr<Item>& item, SchedCategory cat)
+    {
+        if(auto ptr = std::dynamic_pointer_cast<Module>(item))
+        {
+            int count = 0;
+            for(const auto& i : ptr->itemList)
+                count += countCategory(i, cat);
+            return count;
+        }
+        return item->schedCategory() == cat ? 1 : 0;
+    }
+
+    // Like countCategory, but each matching leaf contributes schedWeight()
+    // (e.g. ds_*_b192 counts as two physical ops).
+    int countWeightedCategory(const std::shared_ptr<Item>& item, SchedCategory cat)
+    {
+        if(auto ptr = std::dynamic_pointer_cast<Module>(item))
+        {
+            int count = 0;
+            for(const auto& i : ptr->itemList)
+                count += countWeightedCategory(i, cat);
+            return count;
+        }
+        return item->schedCategory() == cat ? item->schedWeight() : 0;
+    }
+
+    // Sum over schedulable leaves whose exact kind == kind.
+    int countExactKind(const std::shared_ptr<Item>& item, SchedExactKind kind)
+    {
+        if(auto ptr = std::dynamic_pointer_cast<Module>(item))
+        {
+            int count = 0;
+            for(const auto& i : ptr->itemList)
+                count += countExactKind(i, kind);
+            return count;
+        }
+        return item->schedExactKind() == kind ? 1 : 0;
+    }
+
     int countInstruction(const std::shared_ptr<Item>& item)
     {
-        return countX<Instruction>(item);
+        if(auto ptr = std::dynamic_pointer_cast<Module>(item))
+        {
+            int count = 0;
+            for(const auto& i : ptr->itemList)
+                count += countInstruction(i);
+            return count;
+        }
+        // Every rocisa Instruction reports a non-None category (Other at least);
+        // Module / TextBlock report None -> not counted, as before.
+        return item->schedCategory() != SchedCategory::None ? 1 : 0;
     }
 
     int countGlobalRead(const std::shared_ptr<Item>& item)
     {
-        return countX<GlobalReadInstruction>(item);
+        return countCategory(item, SchedCategory::GlobalRead);
     }
 
+    // countSMemLoad stays type-based: SMemLoad is a GlobalRead subtree, so it has
+    // category GlobalRead and cannot be distinguished by category alone. It is
+    // not called from the in-path scheduler, so it is left on countX for now.
     int countSMemLoad(const std::shared_ptr<Item>& item)
     {
         return countX<SMemLoadInstruction>(item);
@@ -87,41 +146,37 @@ namespace rocisa
 
     int countLocalRead(const std::shared_ptr<Item>& item)
     {
-        return countX<LocalReadInstruction>(item);
+        return countCategory(item, SchedCategory::LocalRead);
     }
 
     int countLocalWrite(const std::shared_ptr<Item>& item)
     {
-        return countX<LocalWriteInstruction>(item);
+        return countCategory(item, SchedCategory::LocalWrite);
     }
 
-    // "countWeighted" functions apply type-based weights to count instructions accurately.
+    // "countWeighted" functions apply per-op weights to count instructions accurately.
     int countWeightedLocalRead(const std::shared_ptr<Item>& item)
     {
-        return countX<LocalReadInstruction>(item, {
-            {typeid(DSLoadB192), 2}, // DSLoadB192 is composed by two instructions
-        });
+        return countWeightedCategory(item, SchedCategory::LocalRead);
     }
 
     int countWeightedLocalWrite(const std::shared_ptr<Item>& item)
     {
-        return countX<LocalWriteInstruction>(item, {
-            {typeid(DSStoreB192), 2}, // DSStoreB192 is composed by two instructions
-            {typeid(DSStoreB256), 2}, // DSStoreB256 is composed by two instructions
-        });
+        return countWeightedCategory(item, SchedCategory::LocalWrite);
     }
 
-    // Exact types
+    // Exact kinds
     int countDSStoreB128(const std::shared_ptr<Item>& item)
     {
-        return item->countExactType(typeid(DSStoreB128));
+        return countExactKind(item, SchedExactKind::DSStoreB128);
     }
 
     int countDSStoreB192(const std::shared_ptr<Item>& item)
     {
-        return item->countExactType(typeid(DSStoreB192));
+        return countExactKind(item, SchedExactKind::DSStoreB192);
     }
 
+    // countDSStoreB256 is not called from the in-path scheduler; left type-based.
     int countDSStoreB256(const std::shared_ptr<Item>& item)
     {
         return item->countExactType(typeid(DSStoreB256));
@@ -129,30 +184,13 @@ namespace rocisa
 
     int countVMovB32(const std::shared_ptr<Item>& item)
     {
-        return item->countExactType(typeid(VMovB32));
+        return countExactKind(item, SchedExactKind::VMovB32);
     }
 
-    // Counts all MFMA-family instructions (MFMA, SMFMA, MXMFMA) in the item tree
-    // using exact typeid matching.
+    // Counts all MFMA-family instructions (MFMA, SMFMA, MXMFMA) in the item tree.
     int countMFMA(const std::shared_ptr<Item>& item)
     {
-        if(auto module = std::dynamic_pointer_cast<Module>(item))
-        {
-            int count = 0;
-            for(const auto& i : module->itemList)
-            {
-                count += countMFMA(i);
-            }
-            return count;
-        }
-
-        const auto& tid = typeid(*item);
-        if(tid == typeid(MFMAInstruction) || tid == typeid(SMFMAInstruction)
-           || tid == typeid(MXMFMAInstruction))
-        {
-            return 1;
-        }
-        return 0;
+        return countCategory(item, SchedCategory::MFMA);
     }
 
     // Helper functions
@@ -167,9 +205,7 @@ namespace rocisa
                 mfmaList.insert(mfmaList.end(), mfm.begin(), mfm.end());
             }
         }
-        else if(std::dynamic_pointer_cast<MFMAInstruction>(item)
-                || std::dynamic_pointer_cast<SMFMAInstruction>(item)
-                || std::dynamic_pointer_cast<MXMFMAInstruction>(item))
+        else if(item->schedCategory() == SchedCategory::MFMA)
         {
             mfmaList.push_back(item);
         }

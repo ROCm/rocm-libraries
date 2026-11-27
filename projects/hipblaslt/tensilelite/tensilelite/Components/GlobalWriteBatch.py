@@ -56,6 +56,7 @@ from ..AsmAddressCalculation import AddrCalculation
 from ..Components.PackData import formatting, PackData_F16, PackData_BF16, PackData_FLOAT8, PackData_FLOAT8_fnuz
 from rocisa.instruction import ECvtF16toF32, ECvtPkFP8toF32, ECvtPkBF8toF32
 from ..KernelWriterModules import hasSequentialValuC, accToArchMapper, getAccToArchLen
+from ..ir import logical_region, maybe_logical_leaf
 # NOTE: fusedA2AKernArgLayout / FUSED_A2A_MAX_RANKS are imported lazily inside the
 # fused-A2A methods (from .Signature) to avoid a circular import at module load time
 # (Component.py does `from .Components import *`, which re-enters this module).
@@ -1171,6 +1172,14 @@ class GlobalWriteBatchWriter:
               if (self.kernel["GlobalSplitU"] == 1) and (self.kernel["ProblemType"]["ComputeDataType"].isSingle() and self.kernel["ProblemType"]["DataType"].isInt8()):
                 srcRegName = rh.getParams()[2].getCompleteRegName()
                 module.add(VCvtI32toF32(dst=vgpr(srcRegName), src=vgpr(srcRegName), comment="Convert MI out reg to fp32"))
+              # epilogue [G] acc->arch resolve-then-flip (LB-1): the Holder is
+              # resolved above by replaceHolder on the rocisa inst (leaf-blind
+              # dynamic_cast), so lower the *resolved* inst to a LogicalLeaf here.
+              # maybe_logical_leaf is a no-op off region/gfx1250/trial; gated off
+              # subtile (which emits pure rocisa via str()).
+              if not self.kernel["UseSubtileImpl"]:
+                with logical_region("epilogueMulAlpha"):
+                  rh = maybe_logical_leaf(rh)
               module.add(rh)
 
 
@@ -1562,7 +1571,14 @@ class GlobalWriteBatchWriter:
         for vi in range(self.gwvw):
           # loop over registers within one scalar
           for rIdx in range(0, regsPerScalar):
-            module.add(replaceHolder(self.codeAccVgprRead.popFirstItem(), self._epilogueStagingReg(elementIdx, vi, rIdx)))
+            # upstream refactored the staging-reg index into _epilogueStagingReg;
+            # keep the epilogue [G] acc->arch resolve-then-flip (LB-1) on top of it.
+            rh = replaceHolder(self.codeAccVgprRead.popFirstItem(), self._epilogueStagingReg(elementIdx, vi, rIdx))
+            # see codeMulAlpha above.
+            if not self.kernel["UseSubtileImpl"]:
+              with logical_region("epilogueAccVgprRead"):
+                rh = maybe_logical_leaf(rh)
+            module.add(rh)
 
       if self.kernel["MIArchVgpr"] and self.kernel["LocalSplitU"] > 1:
         self.parentWriter.states.c.startVgprValu = tmpStartVgprValuC
@@ -1647,6 +1663,10 @@ class GlobalWriteBatchWriter:
               if (self.kernel["GlobalSplitU"] == 1) and (self.kernel["ProblemType"]["ComputeDataType"].isSingle() and self.kernel["ProblemType"]["DataType"].isInt8()):
                 srcRegName = rh.getParams()[2].getCompleteRegName()
                 elementAlpha.add(VCvtI32toF32(dst=vgpr(srcRegName), src=vgpr(srcRegName), comment="Convert MI out reg to fp32"))
+              # epilogue [G] acc->arch resolve-then-flip (LB-1): see codeMulAlpha above.
+              if not self.kernel["UseSubtileImpl"]:
+                with logical_region("epilogueMulAlpha"):
+                  rh = maybe_logical_leaf(rh)
               elementAlpha.add(rh)
             if interleaveAlpha:
               self._alphaPerElement[elementIdx] = elementAlpha

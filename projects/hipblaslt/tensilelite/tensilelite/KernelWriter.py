@@ -44,8 +44,15 @@ from .ir import BranchInstruction, BufferLoadB128, BufferLoadB192, BufferLoadB32
   MFMAInstruction, MXMFMAInstruction, SAddU32, SAndB32, SBarrier, SBranch, SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpEQU32, SCmpEQU64, SCmpGeU32, SCmpLeU32, \
   SCSelectB32, SLShiftLeftB32, SLShiftRightB32, SMFMAInstruction, SMovB32, SMovB64, SNop, SEndpgm, SOrB32, SSetPrior, SSetRegIMM32B32, SSubU32, SWaitCnt, SWaitAlu, \
   SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32, VAndB32, VCmpEQU32, VCndMaskB32, VMovB64, VNop, VReadfirstlaneB32, TensorLoadToLds, SCMovB32, SCMovB64, t16
+from .ir import sched_is_mfma, sched_is_smfma, sched_is_mxmfma, sched_is_tensor_load_to_lds
+from .ir import sched_is_ds_load, sched_is_ds_load_b128, sched_is_ds_store, sched_is_waitcnt, sched_is_barrier
+from .ir import sched_is_nop, sched_is_instruction, sched_is_module, sched_is_register_container
+from .ir import sched_rocisa_view
+from .ir import logical_region, maybe_logical_leaf
 from .ir import SSchedulingFence
 from .ir import set_active_version as _set_active_ir_version
+from .ir import set_active_arch_name as _set_active_ir_arch_name
+from .ir import set_kernel_logical_disabled as _set_kernel_logical_disabled
 from rocisa.register import RegisterPool
 from rocisa.enum import RegisterType, DataTypeEnum, HighBitSel
 
@@ -920,7 +927,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     if ((self.codes.globalReadA is None or not self.codes.globalReadA.middle.itemsSize())
         and (self.codes.globalReadB is None or not self.codes.globalReadB.middle.itemsSize())):
       return
-    assert any(isinstance(item, TensorLoadToLds) for item in src.flatitems()), \
+    assert any(sched_is_tensor_load_to_lds(item) for item in src.flatitems()), \
       "decoupled PGR: the fill group to re-slot carries no tensor_load_to_lds"
 
     assert self.isTdmWaveSeparated(kernel), \
@@ -1104,7 +1111,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
             # if nop, pop
             if srcPackItems:
               item = srcPackItems.pop(0)
-              if isinstance(item, SNop):
+              if sched_is_nop(item):
                 # add nop. Do not count nop
                 dstPackItems.append(item)
               else:
@@ -1119,7 +1126,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
   ##############################################################################
   def isMFMAIn(self,items):
     for inst in items:
-      if isinstance(inst, MFMAInstruction):
+      if sched_is_mfma(inst):
         return True
     return False
   def countAfter2ndMFMA(self,items):
@@ -1130,7 +1137,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     for inst in items:
       if after2ndMfmaCountStart:
         after2ndMfma += 1
-      if isinstance(inst, MFMAInstruction):
+      if sched_is_mfma(inst):
         mfmaCount += 1
       if mfmaBlockCount == 0 and mfmaCount == 2:
         # ater reaching the first 2 mfma, start counting after2ndMfma
@@ -1163,7 +1170,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           if mfmaBlockCount == 0 and mfmaCount == 2:
             # ater reaching the first 2 mfma, start counting after2ndMfma
             after2ndMfmaCountStart = True
-          if isinstance(item, MFMAInstruction):
+          if sched_is_mfma(item):
             mfmaCount += 1
           else:
             if mfmaCount > 0:
@@ -1315,7 +1322,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
             name = getattr(it, "name", "") or ""
             if name.startswith("packMXSA") or name.startswith("packMXSB"):
               continue
-            leftover = it.flatitems() if isinstance(it, Module) else [it]
+            leftover = it.flatitems() if sched_is_module(it) else [it]
             assert len(leftover) == 0, "A/B pack code should be empty for half PLR case"
         if kernel["PrefetchGlobalRead"] < 2:
           iterCode.add(globalReadCode)
@@ -1496,7 +1503,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
       macIterItems = macIterCode.flatitems()
       # pop the first code which is s_nop 1 for packing
-      item = macIterItems.pop(0) if isinstance(macIterItems[0], SNop) else None
+      item = macIterItems.pop(0) if sched_is_nop(macIterItems[0]) else None
 
       numMfmaPerIter = self.states.numMfmaPerIter
       curPackIdx = 0
@@ -1602,7 +1609,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       lenPointerLRCode = 0
       # count number of PointerLRCode (excluding comment)
       for item in PointerLRCodeItems:
-        if isinstance(item, Instruction):
+        if sched_is_instruction(item):
           lenPointerLRCode += 1
       #####
       # Prepare localReadCode
@@ -1974,7 +1981,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       # remove s_nop for packing
       # we will add s_nop if needed
       if macIterItems:
-        if isinstance(macIterItems[0], SNop):
+        if sched_is_nop(macIterItems[0]):
           macIterItems.pop(0)
 
       ####
@@ -1984,8 +1991,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         for vacancy in self.localReadsVacancy:
           # {"items","latencyLeft","atIter","atMfmaIndex","noReadsAtThisIter"}
           for localRead in list(localReadItemsThisLoop):
-            if vacancy["latencyLeft"] >= localRead.issueLatency() * 2:
-              vacancy["latencyLeft"] -= localRead.issueLatency() * 2
+            if vacancy["latencyLeft"] >= sched_rocisa_view(localRead).issueLatency() * 2:
+              vacancy["latencyLeft"] -= sched_rocisa_view(localRead).issueLatency() * 2
               vacancy["items"].add(localRead)
               localReadItemsThisLoop.remove(localRead)
               if vacancy["atMfmaIndex"] > self.states.sync1LdsMfmaIndex and oneBufferScheduling:
@@ -1995,7 +2002,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                 for readsIter in range(vacancy["atIter"], iteration + self.states.numItersPLR):
                   if (vacancy["atMfmaIndex"] % numMfmaPerIter == 0 or readsIter != vacancy["atIter"]) and \
                       (vacancy["noReadsAtThisIter"] or readsIter <= vacancy["atIter"] + self.states.numItersPLR):
-                    if isinstance(self.localReadsWait[readsIter], SWaitCnt):
+                    if sched_is_waitcnt(self.localReadsWait[readsIter]):
                       self.localReadsWait[readsIter].dscnt += 1
             else:
               # make sure the localread sequence remain the same
@@ -2019,7 +2026,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
             if len(lrItems) <= n:
               break
             item = lrItems[n]
-            if not isinstance(item, DSLoadB128):
+            if not sched_is_ds_load_b128(item):
               continue
             if len(fifo) < (16 / numWaves):
               fifo.append(currentMFMA)
@@ -2032,7 +2039,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           if len(lrItems) <= n:
             break
           item = lrItems[n]
-          if not isinstance(item, DSLoadB128):
+          if not sched_is_ds_load_b128(item):
             numToBeIssued += 1
             continue
           # The FIFO length is 16 so that each wave has 16/numWaves buffer.
@@ -2054,13 +2061,19 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       insertedPackM = 0
 
       def hasDependency(lr: DSLoadInstruction, inst: Instruction) -> bool:
+        # Either operand may be a LogicalLeaf inside a flipped region (ds_load /
+        # mfma are migrated); read the rocisa view so .dst / .a / .b / .srcs resolve
+        # byte-identically to the pre-flip tree instead of AttributeError-ing or
+        # silently reporting no operands (sched_rocisa_view).
+        lr = sched_rocisa_view(lr)
+        inst = sched_rocisa_view(inst)
         lrDataReg = lr.dst
 
-        if isinstance(inst, MFMAInstruction):
+        if sched_is_mfma(inst):
           srcRegs = [inst.a, inst.b,]
-        elif isinstance(inst, SMFMAInstruction):
+        elif sched_is_smfma(inst):
           srcRegs = [inst.a, inst.b, inst.metadata]
-        elif isinstance(inst, MXMFMAInstruction):
+        elif sched_is_mxmfma(inst):
           srcRegs = [inst.a, inst.b, inst.mxsa, inst.mxsb,]
         else:
           if hasattr(inst, 'srcs'):
@@ -2068,7 +2081,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           else:
             srcRegs = []
 
-        return any((lrDataReg & r) for r in srcRegs if isinstance(r, RegisterContainer))
+        return any((lrDataReg & r) for r in srcRegs if sched_is_register_container(r))
 
       def hasAnyDependency(lr: DSLoadInstruction, insts: List[Instruction]):
         return any(hasDependency(lr, inst) for inst in insts)
@@ -2109,7 +2122,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                   latencyLeft -= (tPA["localWriteInstruction"].issueLatency*2)
             readLeftLROPT = 0
             for j in range(len(localReadItemsThisLoop)):
-              latencyLeft -= localReadItemsThisLoop[j].issueLatency()*2
+              latencyLeft -= sched_rocisa_view(localReadItemsThisLoop[j]).issueLatency()*2
               readLeftLROPT += 1 if latencyLeft >= 0 else 0
             # at least 1 instruction
             readLeftLROPT = max(readLeftLROPT,1)
@@ -2150,9 +2163,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
               latencyLeft -= readLeft * tPA["localWriteInstruction"].issueLatency * 2
             else:
               readLeft = len(localReadItemsThisLoop)
-              latencyLeft -= sum(j.issueLatency()*2 for j in localReadItemsThisLoop)
+              latencyLeft -= sum(sched_rocisa_view(j).issueLatency()*2 for j in localReadItemsThisLoop)
           else:
-            latencyLeft -= sum(j.issueLatency()*2 for j in localReadItemsThisLoop)
+            latencyLeft -= sum(sched_rocisa_view(j).issueLatency()*2 for j in localReadItemsThisLoop)
 
         # force to schedule all remaining localreads before start to schedule localwrite.
         if mfmaIndex == self.states.sync1LdsMfmaIndex and oneBufferScheduling:
@@ -2296,7 +2309,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
               while PointerLRCodeItems:
                 item = PointerLRCodeItems.pop(0)
                 iterCode.add(item)
-                if isinstance(item, Instruction):
+                if sched_is_instruction(item):
                   break
             if i == numMfmaPerIter - 1:
               while PointerLRCodeItems:
@@ -2325,7 +2338,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         if self.states.numItersPLR and iteration >= isBarrier:
           readLeftLROPT = 0
           for j in range(len(localReadItemsNextLoop)):
-            latencyLeft -= localReadItemsNextLoop[j].issueLatency()*2
+            latencyLeft -= sched_rocisa_view(localReadItemsNextLoop[j]).issueLatency()*2
             readLeftLROPT += 1 if latencyLeft >= 0 else 0
           # at least 1 instruction
           readLeftLROPT = max(readLeftLROPT,1)
@@ -2370,15 +2383,19 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           instsToCheck = mfma + packItems
           numDsInsts = 0
           lastDsCnt = -1
-          for ds in filter(lambda j: isinstance(j, (DSLoadInstruction, DSStoreInstruction, SWaitCnt)), reversed(prevIterCode.flatitems() + iterCode.flatitems())):
-            if isinstance(ds, DSLoadInstruction) and hasAnyDependency(ds, instsToCheck):
+          for ds in filter(lambda j: sched_is_ds_load(j) or sched_is_ds_store(j) or sched_is_waitcnt(j), reversed(prevIterCode.flatitems() + iterCode.flatitems())):
+            if sched_is_ds_load(ds) and hasAnyDependency(ds, instsToCheck):
               break
 
-            if isinstance(ds, DSLoadInstruction) and not hasAnyDependency(ds, instsToCheck) or isinstance(ds, DSStoreInstruction):
+            if sched_is_ds_load(ds) and not hasAnyDependency(ds, instsToCheck) or sched_is_ds_store(ds):
               numDsInsts += 1
-            elif isinstance(ds, SWaitCnt):
-              if ds.dscnt >= 0 and lastDsCnt == -1:
-                lastDsCnt = ds.dscnt + numDsInsts
+            elif sched_is_waitcnt(ds):
+              # ds may be a fixed-value SWaitCnt leaf (e.g. the flipped
+              # syncThreads force-waitcnt0 / navi wait), which has no .dscnt;
+              # read the count off its rocisa view (no-op for a rocisa waitcnt).
+              dsView = sched_rocisa_view(ds)
+              if dsView.dscnt >= 0 and lastDsCnt == -1:
+                lastDsCnt = dsView.dscnt + numDsInsts
 
           if lastDsCnt != numDsInsts:
             if lastDsCnt == -1 or (lastDsCnt >= 0 and lastDsCnt > numDsInsts):
@@ -2424,7 +2441,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           numInst = numPackPreInstPerMfma + adjust
           while packPreItems and count < numInst:
             inst = packPreItems.pop(0)
-            if isinstance(inst, MFMAInstruction):
+            if sched_is_mfma(inst):
               mfmaCount += 1
             else:
               mfmaCount = 0
@@ -2434,7 +2451,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
               #  case 2: numInst == 1, add all continuous mfma + 1 inst
               if mfmaCount == 0 and packPreItems:
                 instNext = packPreItems.pop(0)
-                if isinstance(instNext, MFMAInstruction):
+                if sched_is_mfma(instNext):
                   if numInst > 1:
                     # push back next
                     packPreItems.insert(0, instNext)
@@ -2456,7 +2473,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
               while mfmaCount > 0:
                 iterCode.add(inst)
                 inst = packPreItems.pop(0)
-                if isinstance(inst, MFMAInstruction):
+                if sched_is_mfma(inst):
                   mfmaCount += 1
                 else:
                   # pop 1 more
@@ -2544,7 +2561,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                       instPerPackA -= num
                   firstDone = True
                   for n in tmp:
-                    isLastNop = isinstance(n, SNop)
+                    isLastNop = sched_is_nop(n)
                     iterCode.add(n)
               else:
                 # we put 2 pack in each mfma
@@ -2580,7 +2597,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                         instPerPackB -= num
                     firstDone = True
                     for n in tmp:
-                      isLastNop = isinstance(n, SNop)
+                      isLastNop = sched_is_nop(n)
                       iterCode.add(n)
                 else:
                   for j in range(instPerPackB):
@@ -2885,7 +2902,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     else:
       assert 0, "Unsupported scheduleIterAlg=%u"%scheduleIterAlg
 
-    if isinstance(waitCode, SWaitCnt):
+    if sched_is_waitcnt(waitCode):
 
       # Set the waitCount, based on the new iter schedule
       dscnt = waitCode.dscnt
@@ -4416,9 +4433,14 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
             pointerLRCode.add(self.localReadSwapOffsets(kernel, internalPointerSwap, tPM))
 
       # we initiate dscnt to 0, then assigning it correct value in makeSubIterSchedule()
-      waitCode = self._wait(kernel, tensorParametersA, tensorParametersB, \
-          -1, 0, 0, \
-          "wait for prior local read local write")
+      # Flip this non-TDM hot-loop s_waitcnt to a mutable LogicalLeaf (its .dscnt
+      # is rewritten by the scheduler later via the leaf's property, see §7.5).
+      # _wait here always returns a bare SWaitCnt (skipGlobalRead=-1 never routes
+      # to tdmWait); maybe_logical_leaf flips it only while the region is active.
+      with logical_region("hotLoopWait"):
+        waitCode = maybe_logical_leaf(self._wait(kernel, tensorParametersA, tensorParametersB, \
+            -1, 0, 0, \
+            "wait for prior local read local write"))
       # DirectToVgpr case, wait for global read as well as local read/write
       if kernel["DirectToVgprA"] or kernel["DirectToVgprB"]:
         # not generate wait here
@@ -4529,7 +4551,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       localWriteMemToken = MemTokenData([self.states.ldsWriteTokenIdx])
       for _, localWriteCode in self.codes.perIterLocalWrite:
         for item in localWriteCode.flatitems():
-          if isinstance(item, DSStoreInstruction):
+          if sched_is_ds_store(item):
             item.setMemToken(localWriteMemToken)
             # Keep debug/comment text aligned with the actual updated memory token.
             if isinstance(item.comment, str):
@@ -5355,9 +5377,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         pointerLRCode.addComment1("local read init pointers b")
         pointerLRCode.add(self.localReadInitPointers(kernel, tensorParametersA, tensorParametersB))
       if self.getConditionToSkipLocalReadWriteWait(kernel, u):
-        waitCode = self._wait(kernel, tensorParametersA, tensorParametersB, \
-            -1, 0, 0, \
-            "wait for prior local read local write")
+        # Flip the non-TDM hot-loop s_waitcnt to a mutable LogicalLeaf (see the
+        # matching site in noLoadLoopBody); scheduler rewrites .dscnt afterwards.
+        with logical_region("hotLoopWait"):
+          waitCode = maybe_logical_leaf(self._wait(kernel, tensorParametersA, tensorParametersB, \
+              -1, 0, 0, \
+              "wait for prior local read local write"))
 
       luIdx = u % self.states.numVgprBuffer # local to use for MACs
       if kernel["EnableMatrixInstruction"]:
@@ -6906,16 +6931,29 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         names["ValuMXS%s_X%u_I%u" % (tc, bi, iui)] = plan["piece"][tc]
     def visit(mod):
       for item in mod.items():
-        if isinstance(item, Module):
+        if sched_is_module(item):
           visit(item)
           continue
-        if not isinstance(item, Instruction):
+        if not sched_is_instruction(item):
           continue
+        # logical-IR migration: this pass rewrites register operands
+        # (getParams()/mxsa/mxsb/regName) -- rocisa-only surgery a LogicalLeaf
+        # cannot answer. kernelBody disables logical leaves for mxsInterleave
+        # kernels, so we should never see one here; if the gate is ever missed,
+        # fail loud instead of AttributeError. This pass must move into a
+        # LogicalIR lowering pass before MX kernels can emit leaves (doc §10.7).
+        if not hasattr(item, "getParams"):
+          raise RuntimeError(
+            "remapMXScaleInterleave reached a non-rocisa instruction (%s): MX "
+            "scale interleave rewrites register operands and must move into a "
+            "LogicalIR lowering pass before this kernel can emit LogicalLeaves. "
+            "kernelBody should have disabled logical leaves for mxsInterleave "
+            "kernels; see migration doc §10.7." % type(item).__name__)
         # MX WMMAs keep their scale operands in mxsa/mxsb, outside getParams().
         params = list(item.getParams()) + [getattr(item, attr, None) for attr in ("mxsa", "mxsb")]
         seen = set()
         for param in params:
-          if not isinstance(param, RegisterContainer) or param.regName is None or id(param) in seen:
+          if not sched_is_register_container(param) or param.regName is None or id(param) in seen:
             continue
           seen.add(id(param))
           name = param.regName.name
@@ -6939,6 +6977,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     # recompute) can access both A and B outside their own call context.
     self.tPA = tensorParametersA
     self.tPB = tensorParametersB
+    # logical-IR migration: a kernel that still runs an in-path pass doing
+    # rocisa-specific surgery on emitted instructions (remapMXScaleInterleave's
+    # register rewrite when mxsInterleave is set; the ds_store_b128 split) must
+    # stay pure rocisa until that pass is lowered (Phase 4). Force it off here so
+    # no region produces LogicalLeaves -> byte-identical to pre-facade. _initKernel
+    # has already computed self.states.mxsInterleave by now.
+    _set_kernel_logical_disabled(bool(getattr(self.states, "mxsInterleave", None)))
     expand = kernel["ExpandPointerSwap"]
     self.dontAppendCode = False
     self._mx2dSplatGen = {}
@@ -7493,7 +7538,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           if mValue < mEnd and mValue % self.states.numReadsIterCoalescedB == 0:
             module.addComment1("local read inc b")
             module.add(self.localReadInc(kernel, iuiParam, tensorParametersB))
-        module.add(self._wait(kernel, tensorParametersA, tensorParametersB, -1, -1, 0, "4wait for local read"))
+        # [E] tail-loop per-iteration local-read wait: flip to a LogicalLeaf like
+        # the main/NGLL hot loop (hotLoopWait). skipGlobalRead=-1 so _wait always
+        # returns a bare SWaitCnt (never tdmWait); this is an inline emit (not
+        # scheduled), so its .dscnt is never rewritten -- byte-identical SWaitCnt
+        # leaf lowering (§10.11 2b). No-op off region/gfx1250/trial.
+        with logical_region("tailLoopWait"):
+          module.add(maybe_logical_leaf(self._wait(kernel, tensorParametersA, tensorParametersB, -1, -1, 0, "4wait for local read")))
         self.states.SubTileIdx = (self.states.SubTileIdx + 1) % kernel["numSubTiles"]
 
         module.add(pack[0])
@@ -7709,6 +7760,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                                 or not globalParameters.get("DisableSTWaitCnt", True))
       # Set StinkyTofu module options
       stinky_module_options = {"OptLevel": stinky_opt_level,
+                               # gfx1250 logical-IR migration: forward the same removeDupAssign
+                               # verdict rocIsaPass uses (above) so StinkyTofu's Step-B dedup of
+                               # leaf-carried duplicate s_mov_b32 runs exactly when the native
+                               # rocisa removeDuplicateAssignment would, and is skipped in lockstep
+                               # for ActivationType=="all".
+                               "RemoveDupAssign": bool(ripo.removeDupAssign),
                                # rocisa native tree -> logical IR -> ToStinkyAsmPass.
                                # import rocisa stays the native module; only this
                                # conversion target changes.
@@ -7879,7 +7936,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       if debugLogical:
         t_logical_start = time.perf_counter()
         logical_ir_str = rocisa.dumpLogicalModuleText(moduleKernelBody.body,
-                                                      self.states.version, "kernel_name")
+                                                      self.states.version, "kernel_name",
+                                                      str(globalParameters.get("StinkyTofuArchName") or ""))
         t_logical_end = time.perf_counter()
         print2(f"StinkyTofu dumpLogicalModuleText: {t_logical_end - t_logical_start:.4f}s")
 
@@ -8005,6 +8063,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     # later setKernel calls (e.g. activation codegen); see rocIsa::setForceScaledWMMA.
     _stArchName = globalParameters.get("StinkyTofuArchName") or ""
     ti.setForceScaledWMMA(_stArchName == "gfx1250-strict")
+    # Record the concrete stepping for the instruction facade too, so logical
+    # leaves built during emission (makeLogicalLeaf) resolve the same archId as
+    # the lazy converter (toStinkyTofuModule uses moduleOptions.ArchName, which is
+    # this same StinkyTofuArchName). Without this an arch-sensitive opcode (MFMA/
+    # WMMA on a colliding stepping) lowers differently as a leaf than as rocisa.
+    _set_active_ir_arch_name(_stArchName)
 
     self.consts = ConstValues()
     self.states = StateValues(version=version, kernel=kernel, kernelName=getKernelNameMin(kernel, self.debugConfig.splitGSU))
@@ -12234,9 +12298,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         if isinstance(item, Module):
           modulesToScan.append(item)
           keptItems.append(item)
-        elif isinstance(item, SBarrier) \
-             and "-3" not in str(item).split("//", 1)[0] \
-             and "PGR bypass sync" not in item.comment:
+        elif sched_is_barrier(item) \
+             and "-3" not in str(sched_rocisa_view(item)).split("//", 1)[0] \
+             and "PGR bypass sync" not in sched_rocisa_view(item).comment:
           # Pass-2 rebuilds only workgroup-scope barriers from token-state
           # transitions, so only those are cleared here. Cluster-scope split
           # barriers (s_barrier_signal/wait -3), e.g. the StreamKMulticast
@@ -12258,12 +12322,17 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       return isinstance(labelName, str) and "OptNLL_End" in labelName
 
     def _classifyTokenAccess(inst: Instruction):
-      # tensor_load / ds_write => write, ds_read => read
-      if isinstance(inst, DSStoreInstruction):
+      # tensor_load / ds_write => write, ds_read => read.
+      # Routed through the scheduler seam (not raw isinstance) so this pass,
+      # which runs on the mixed rocisa/logical tree before toStinkyTofuModule,
+      # classifies a logical-IR ds_load/ds_store/tensor_load leaf the same way
+      # it classifies the rocisa instruction it replaces (logical-IR migration
+      # Phase 3 §10.2 B). Byte-identical for a pure-rocisa tree.
+      if sched_is_ds_store(inst):
         return "write"
-      if isinstance(inst, TensorLoadToLds):
+      if sched_is_tensor_load_to_lds(inst):
         return "write"
-      if isinstance(inst, DSLoadInstruction):
+      if sched_is_ds_load(inst):
         return "read"
       return None
 
@@ -12354,11 +12423,17 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       "SBranch", "SLongBranch", "SLongBranchPositive", "SLongBranchNegative",
     )
 
+    # A flipped region may feed this SCC/sgpr dataflow analysis LogicalLeaf items;
+    # read each item's rocisa view so type-name / .dst / .srcs introspection matches
+    # the rocisa instruction it replaced, instead of being silently blind to the leaf
+    # (sched_rocisa_view). Byte-identical for a pure-rocisa tree.
     def _isConditionalBranch(leaf):
+      leaf = sched_rocisa_view(leaf)
       return isinstance(leaf, BranchInstruction) and \
              type(leaf).__name__ not in unconditionalBranchClassNames
 
     def _writtenSgprNumbers(leaf):
+      leaf = sched_rocisa_view(leaf)
       dst = getattr(leaf, "dst", None)
       if not isinstance(dst, RegisterContainer) or dst.regType != "s" or \
          dst.regName is not None or dst.regIdx < 0:
@@ -12366,6 +12441,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       return range(dst.regIdx, dst.regIdx + max(dst.regNum, 1))
 
     def _readsAnySgprNumber(leaf, numbers):
+      leaf = sched_rocisa_view(leaf)
       for src in (getattr(leaf, "srcs", None) or []):
         if isinstance(src, RegisterContainer) and src.regType == "s" and \
            src.regName is None and src.regIdx >= 0 and \
@@ -12379,18 +12455,20 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     guardEndByIndex = {}
     sccIsWaveDivergent = False
     for idx, (leaf, _leafMod, _leafPos) in enumerate(flatLeaves):
-      if not isinstance(leaf, Instruction):
+      if not sched_is_instruction(leaf):
         continue
+      # rocisa view of the (possibly leaf) item for all raw type/text introspection.
+      leafView = sched_rocisa_view(leaf)
       if _isConditionalBranch(leaf):
-        endIdx = labelDefIndex.get(getattr(leaf, "labelName", None))
+        endIdx = labelDefIndex.get(getattr(leafView, "labelName", None))
         # A backward branch is a loop back-edge, and a target this tree does not
         # define is not a region that closes at a known point either.
         if sccIsWaveDivergent and endIdx is not None and endIdx > idx:
           guardEndByIndex[idx] = endIdx
         continue
-      className = type(leaf).__name__
+      className = type(leafView).__name__
       if className.startswith(sccCompareClassPrefixes):
-        text = str(leaf)
+        text = str(leafView)
         # ArgType bits 8+ are the released WaveIdx; domain tests mask into a temp, naming it in a comment only.
         sccIsWaveDivergent = "WaveIdx" in text or "sgprArgType" in text or \
             any(int(n) in waveIdSgprs for n in sgprNumberPattern.findall(text))
@@ -12401,7 +12479,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       # v_readfirstlane_b32(vgprSerial) and the parity compare that consumes them.
       written = _writtenSgprNumbers(leaf)
       if written:
-        if isinstance(leaf, VReadfirstlaneB32) and "vgprSerial" in str(leaf):
+        if isinstance(leafView, VReadfirstlaneB32) and "vgprSerial" in str(leafView):
           waveIdSgprs.update(written)
         elif not _readsAnySgprNumber(leaf, waveIdSgprs):
           waveIdSgprs.difference_update(written)
@@ -12417,7 +12495,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         info = {}
         for k in range(beginIdx, branchIdx + 1):
           leaf = flatLeaves[k][0]
-          if not isinstance(leaf, Instruction):
+          if not sched_is_instruction(leaf):
             continue
           access = _classifyTokenAccess(leaf)
           tokens = _getTokenList(leaf)
@@ -12534,17 +12612,19 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                                     "auto token transition barrier (loop prologue)"))
         continue
 
-      if not isinstance(item, Instruction):
+      if not sched_is_instruction(item):
         continue
 
-      branchLabelName = getattr(item, "labelName", None)
-      if isinstance(item, BranchInstruction) and branchLabelName is not None and \
+      # rocisa view for raw type/label introspection on a possibly-leaf item.
+      itemView = sched_rocisa_view(item)
+      branchLabelName = getattr(itemView, "labelName", None)
+      if isinstance(itemView, BranchInstruction) and branchLabelName is not None and \
          labelDefIndex.get(branchLabelName, -1) > idx:
         if branchLabelName not in forwardBranchStates:
           forwardBranchStates[branchLabelName] = dict(tokenState)
         else:
           _mergeBranchStates(forwardBranchStates[branchLabelName], tokenState)
-      fallthroughDead = type(item).__name__ in unconditionalEndClassNames
+      fallthroughDead = type(itemView).__name__ in unconditionalEndClassNames
       if _isOptNllEndLabelName(branchLabelName) and branchLabelName not in branchTokenStateSnapshot:
         # Save token state at the first branch to OptNLL_End.
         branchTokenStateSnapshot[branchLabelName] = deepcopy(tokenState)
@@ -12558,7 +12638,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       access = _classifyTokenAccess(item)
       tokens = _getTokenList(item)
       if access is None and tokens:
-        print2(f"[postMainLoopBarrierCheckAndReset] WARNING: instruction {type(item).__name__} has tokens {tokens} but no classified access — barrier may be missing")
+        print2(f"[postMainLoopBarrierCheckAndReset] WARNING: instruction {type(sched_rocisa_view(item)).__name__} has tokens {tokens} but no classified access — barrier may be missing")
       if access is None or not tokens:
         continue
 

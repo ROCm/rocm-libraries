@@ -27,6 +27,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <iomanip>
+#include <iostream>
 #include <optional>
 #include <ostream>
 #include <unordered_set>
@@ -86,6 +87,16 @@ bool parseAsmSetNumericToken(const std::string& s, int64_t& out) {
     return true;
 }
 
+/// Resolve a `.set` right-hand side to an integer. Three forms are accepted:
+///   * a bare decimal/hex literal (optionally signed),
+///   * a single identifier referring to another `.set` symbol (resolved
+///     recursively, with cycle detection), and
+///   * a sum/difference of the above, e.g. `vgprBase+34` or `A-B+2`.
+/// rocisa defines VGPR bases two levels deep with offset arithmetic
+/// (`.set vgprValuB_X0_I0, vgprValuB_X0_I0_BASE+0`, `.set ..._BASE, vgprBase+34`),
+/// so symbol+offset support is required to resolve VGPR names; SGPR `.set` are
+/// plain literals and keep resolving via the first fast path. Returns false if
+/// any term is unresolvable, which (as before) leaves the symbol unresolved.
 bool resolveAsmSetRhs(const std::string& valstr,
                       const std::unordered_map<std::string, std::string>& raw,
                       std::unordered_set<std::string>& expanding, int depth, int64_t& out) {
@@ -93,15 +104,47 @@ bool resolveAsmSetRhs(const std::string& valstr,
     if (depth > kMaxDepth) return false;
     const std::string t = trimAsmToken(valstr);
     if (t.empty()) return false;
+
+    // Fast path: a bare literal (handles its own leading sign and hex).
     if (parseAsmSetNumericToken(t, out)) return true;
-    if (!isAsmSetIdentifier(t)) return false;
-    if (expanding.contains(t)) return false;
-    auto it = raw.find(t);
-    if (it == raw.end()) return false;
-    expanding.insert(t);
-    const bool ok = resolveAsmSetRhs(it->second, raw, expanding, depth + 1, out);
-    expanding.erase(t);
-    return ok;
+
+    // Fast path: a single symbol reference, resolved recursively.
+    if (isAsmSetIdentifier(t)) {
+        if (expanding.contains(t)) return false;
+        auto it = raw.find(t);
+        if (it == raw.end()) return false;
+        expanding.insert(t);
+        const bool ok = resolveAsmSetRhs(it->second, raw, expanding, depth + 1, out);
+        expanding.erase(t);
+        return ok;
+    }
+
+    // General case: a sum/difference of terms, each a literal or a symbol.
+    // Identifiers never contain '+'/'-' and a literal carries no interior sign,
+    // so splitting on top-level '+'/'-' is unambiguous; each term's own leading
+    // sign (if any) is consumed here and reapplied, then the unsigned remainder
+    // is resolved recursively.
+    int64_t total = 0;
+    size_t i = 0;
+    const size_t n = t.size();
+    while (i < n) {
+        int sign = 1;
+        if (t[i] == '+') {
+            ++i;
+        } else if (t[i] == '-') {
+            sign = -1;
+            ++i;
+        }
+        const size_t start = i;
+        while (i < n && t[i] != '+' && t[i] != '-') ++i;
+        const std::string term = trimAsmToken(t.substr(start, i - start));
+        if (term.empty()) return false;  // dangling or doubled operator
+        int64_t termVal = 0;
+        if (!resolveAsmSetRhs(term, raw, expanding, depth + 1, termVal)) return false;
+        total += sign * termVal;
+    }
+    out = total;
+    return true;
 }
 
 static int32_t int64ToInt32ForValuLiteral(int64_t v) {
@@ -150,7 +193,11 @@ void collectAsmSetSymbolInfo(const Function& func,
 
 /// Walks the function in emission order, tracking `.set` bindings as they come
 /// into force, and rewrites each symbolically-named operand's index to match.
-size_t resolveSymbolicOperands(Function& func, std::vector<SymbolicOperandFix>& fixes) {
+size_t resolveSymbolicOperands(Function& func, std::vector<SymbolicOperandFix>& fixes,
+                               bool resolveUnresolvedSentinel) {
+    // The all-ones placeholder a rocisa regIdx == -1 widens to (static_cast<uint32_t>(-1)).
+    // Distinct from a real virtual register, which carries kVirtualBit over a small index.
+    static constexpr uint32_t kUnresolvedSentinelIdx = 0xFFFFFFFFu;
     std::unordered_map<std::string, std::string> raw;
     std::unordered_map<std::string, int64_t> live;
     bool liveIsStale = true;
@@ -181,15 +228,52 @@ size_t resolveSymbolicOperands(Function& func, std::vector<SymbolicOperandFix>& 
             auto materialise = [&](bool isDest, size_t operand) {
                 const StinkyRegister& reg = isDest ? instruction->getDestRegs()[operand]
                                                    : instruction->getSrcRegs()[operand];
-                // Virtual registers are not yet indices, so a name cannot contradict them.
-                if (!reg.isRegister() || reg.isVirtualReg() || !reg.hasSymbolicName()) return;
+                if (!reg.isRegister() || !reg.hasSymbolicName()) return;
+                if (resolveUnresolvedSentinel) {
+                    // Migration mode: resolve only the all-ones placeholder left by an
+                    // eagerly-converted logical leaf (rocisa regIdx == -1). Native operands
+                    // already carry a resolved index and real virtual registers carry a
+                    // small low-bit index, so neither matches and both are left untouched.
+                    if (reg.reg.idx != kUnresolvedSentinelIdx) return;
+                } else {
+                    // Virtual registers are not yet indices, so a name cannot contradict them.
+                    if (reg.isVirtualReg()) return;
+                }
                 refreshLive();
                 // Read before the write below, which lands in `reg`.
                 const std::string symbol = reg.getSymbolicName();
                 const uint32_t oldIdx = reg.reg.idx;
                 const std::optional<int64_t> named = resolveNamedIndex(symbol, live, reg.reg.num);
-                // An unresolvable name says nothing about the index; leave it be.
-                if (!named.has_value() || *named < 0) return;
+                if (!named.has_value() || *named < 0) {
+                    // Fail closed only for VGPR sentinels. A VGPR -1 placeholder is one
+                    // DeferLeafVgprSymbolicGuard deferred on purpose (it sets -1 for regType
+                    // V only), so it MUST resolve to a stream-correct index; leaving it be
+                    // would emit a garbage (all-ones) register and silently diverge the asm
+                    // -- the exact failure mode the rocisa "+-N" negative-offset name once
+                    // caused. Fail loud (abort(); the core lib is -fno-exceptions) so any
+                    // still-uncovered VGPR name serialization is caught at build/validation
+                    // time. Only runs in migration mode (resolveUnresolvedSentinel, set
+                    // during the logical-IR A/B trial), so it never fires on the native path.
+                    //
+                    // A non-VGPR sentinel is a name-only SGPR. Resolvable ones (sgprtdmAGroup,
+                    // sgprSrdD, ... whose `.set` is in this function's scope) are rewritten
+                    // above -- the index the dedup/scheduler passes key on. An UNresolvable
+                    // one is a symbol whose `.set` is out of this function's scope, e.g. a
+                    // kernarg coefficient like sgpractivationBeta that a *callable* activation
+                    // module references but whose `.set` lives in the main kernel. The native
+                    // path leaves exactly these symbolic and lets the assembler bind them, so
+                    // leave the name in place (the emitter prints "s[sgpractivationBeta]") and
+                    // do NOT abort -- matching native, byte-for-byte.
+                    if (resolveUnresolvedSentinel && reg.reg.type == RegType::V) {
+                        std::cerr << "logical-IR migration: could not resolve symbolic register "
+                                     "operand '"
+                                  << symbol
+                                  << "' left by an eager logical leaf (-1 placeholder); the "
+                                     ".set-derived name did not map to a valid index\n";
+                        std::abort();
+                    }
+                    return;
+                }
                 if (*named == static_cast<int64_t>(oldIdx)) return;
 
                 StinkyRegister updated = reg;
