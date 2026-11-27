@@ -3,8 +3,9 @@
 #
 # PAP LDS-bank swap with asymmetric MIWaveTile shapes (e.g. [7,4]/[4,7]),
 # whose LocalReadAddr{A,B}+1 overflow register must be shifted with the base;
-# symmetric shapes are included as a control. Do not shrink ProblemSizes
-# without re-validating -- the wrong answer did not reproduce at smaller K.
+# symmetric shapes are included as a control. Coverage only: this config also
+# passes without the fix. The regression guards are sk_f8gemm_tdm_seginterleave_pap
+# and test_pap_bank_shifts_reach_every_local_read_address in the PAP unit tests.
 TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250-strict] # not supported by arch
 GlobalParameters:

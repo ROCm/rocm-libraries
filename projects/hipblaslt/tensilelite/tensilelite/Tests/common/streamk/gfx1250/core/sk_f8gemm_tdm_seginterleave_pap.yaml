@@ -6,7 +6,9 @@
 # (+64K) register; the PAP entry and tail bank shifts must move it too.
 # K=512 primes the next tile into the high bank with no tail loop; K=544 adds a
 # tail; K=1024 lands the prefetch in bank 0. 2048x2048 and 768x2048 give every
-# workgroup more than one tile, 512x640 gives at most one.
+# workgroup more than one tile, 512x640 gives at most one. Without the fix the
+# DataParallel kernels fail at K=512/544 on the multi-tile sizes; the StreamK
+# kernels pass either way and are kept as coverage.
 
 TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250-strict] # not supported by arch
