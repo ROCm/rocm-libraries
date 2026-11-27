@@ -7,7 +7,6 @@
 #include "ck_tile/ops/fmha/block/block_attention_bias_enum.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_quant_scale_enum.hpp"
 #include "ck_tile/ops/fmha/block/block_masking.hpp"
-#include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_tdm_pingpong.hpp"
 #include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_tdm_policy.hpp"
 #include "ck_tile/ops/reduce/block/block_reduce.hpp"
 
@@ -1147,82 +1146,6 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdm
             return run(-numeric<float>::infinity(), sink_v);
         else
             return run(sink_v, nullptr);
-    }
-};
-
-// The problem qr_tdm_pingpong reads for one split of a split-KV problem: its
-// mask limits the K tile range to the split.
-template <typename Problem_>
-struct BlockFmhaFwdSplitKVPingPongProblem : Problem_
-{
-    using FmhaMask =
-        SplitKVAttentionMask<typename Problem_::FmhaMask, Problem_::kMergeNumHeadGroupsSeqLenQ>;
-    using RandValOutputDataType = uint8_t;
-
-    static constexpr bool kHasDropout     = false;
-    static constexpr auto QScaleEnum      = BlockAttentionQuantScaleEnum::NO_SCALE;
-    static constexpr bool kSkipMinSeqlenQ = false;
-};
-
-template <typename Problem_, typename Policy_ = BlockFmhaPipelineQRKSVSTdmPingPongPolicy>
-struct BlockFmhaFwdSplitKVPipelineQRKSVSTdmPingPong
-    : BlockFmhaPipelineQRKSVSTdmPingPong<BlockFmhaFwdSplitKVPingPongProblem<Problem_>, Policy_>
-{
-    using Base =
-        BlockFmhaPipelineQRKSVSTdmPingPong<BlockFmhaFwdSplitKVPingPongProblem<Problem_>, Policy_>;
-
-    // what FmhaFwdSplitKVKernel reads: the split-KV problem and its mask
-    using Problem  = remove_cvref_t<Problem_>;
-    using FmhaMask = remove_cvref_t<typename Problem::FmhaMask>;
-
-    // qr_tdm_pingpong reads K and V through one tensor view each, and would fold
-    // the sink logit into the softmax of every split.
-    static_assert(!Problem::kIsPagedKV && !Problem::kHasSink && !Problem::kDoFp8StaticQuant,
-                  "qr_tdm_pingpong split-kv supports neither paged kv, sink nor fp8");
-
-    template <typename QDramBlockWindowTmp,
-              typename KDramBlockWindowLengths,
-              typename KPageBlockNavigator,
-              typename VDramBlockWindowLengths,
-              typename VPageBlockNavigator,
-              typename BiasDramBlockWindowTmp,
-              typename LSEaccDramBlockWindowTmp,
-              typename PositionEncoding,
-              typename AttentionVariantParams,
-              typename BlockIndices>
-    CK_TILE_HOST_DEVICE auto operator()(const QDramBlockWindowTmp& q_dram_block_window_tmp,
-                                        const KDramBlockWindowLengths& k_dram_block_window_lengths,
-                                        const KPageBlockNavigator& k_page_block_navigator,
-                                        const VDramBlockWindowLengths& v_dram_block_window_lengths,
-                                        const VPageBlockNavigator& v_page_block_navigator,
-                                        const BiasDramBlockWindowTmp& bias_dram_block_window_tmp,
-                                        LSEaccDramBlockWindowTmp& lse_acc_dram_block_window_tmp,
-                                        index_t num_splits,
-                                        index_t i_split,
-                                        FmhaMask mask,
-                                        PositionEncoding position_encoding,
-                                        float scale_s,
-                                        const typename Base::AttentionVariant&,
-                                        const AttentionVariantParams&,
-                                        const BlockIndices&,
-                                        index_t, // kv_l2p_offset, 0 without paged kv
-                                        void* smem_ptr,
-                                        float sink_v) const
-    {
-        // without paged kv, each navigator holds one tensor view
-        return Base::operator()(
-            q_dram_block_window_tmp,
-            k_page_block_navigator.make_tile_window(k_dram_block_window_lengths, {0, 0})
-                .at(number<1>{}),
-            v_page_block_navigator.make_tile_window(v_dram_block_window_lengths, {0, 0})
-                .at(number<1>{}),
-            bias_dram_block_window_tmp,
-            lse_acc_dram_block_window_tmp,
-            typename Base::FmhaMask{mask, num_splits, i_split},
-            position_encoding,
-            scale_s,
-            smem_ptr,
-            sink_v);
     }
 };
 

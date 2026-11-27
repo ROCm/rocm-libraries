@@ -322,6 +322,9 @@ struct GenericAttentionMask
 
     // the key sequence length, i.e. one past the last valid X index
     CK_TILE_HOST_DEVICE constexpr index_t GetXTotal() const { return x_total; }
+    // in-window elements satisfy -y < i_x - i_y < x (the left bound only where IsLocal)
+    CK_TILE_HOST_DEVICE constexpr index_t GetWindowY() const { return y; }
+    CK_TILE_HOST_DEVICE constexpr index_t GetWindowX() const { return x; }
 
     private:
     index_t y, x, sink;
@@ -631,6 +634,7 @@ struct SimplifiedGenericAttentionMask
 
     // the key sequence length, i.e. one past the last valid X index
     CK_TILE_HOST_DEVICE constexpr index_t GetXTotal() const { return x_total; }
+    // the query sequence length, i.e. one past the last valid Y index
     CK_TILE_HOST_DEVICE constexpr index_t GetYTotal() const { return y_total; }
     // in-window elements satisfy -y < i_x - i_y < x
     CK_TILE_HOST_DEVICE constexpr index_t GetWindowY() const { return y; }
@@ -654,62 +658,6 @@ struct SimplifiedGenericAttentionMask
 
     index_t y, x, sink;
     index_t y_total, x_total;
-};
-
-// A SimplifiedGenericAttentionMask seen by one split of the split-KV kernel: the tile range
-// along X is the split's share of the mask range. With kMergedRows, the rows are the q heads of
-// one kv head at query position 0 (seqlen_q == 1), so every row takes the mask of row 0.
-template <typename Mask_, bool kMergedRows_>
-struct SplitKVAttentionMask
-{
-    using Mask = remove_cvref_t<Mask_>;
-
-    static constexpr bool IsMasking   = Mask::IsMasking;
-    static constexpr bool kMergedRows = kMergedRows_;
-
-    static constexpr const char* name = Mask::name;
-
-    CK_TILE_HOST_DEVICE
-    SplitKVAttentionMask(const Mask& mask_, index_t num_splits_, index_t i_split_)
-        : mask(mask_), num_splits(num_splits_), i_split(i_split_)
-    {
-    }
-
-    template <index_t YTile, index_t XTile>
-    CK_TILE_HOST_DEVICE constexpr auto
-    GetTileRangeAlongX(index_t i_y, number<YTile>, number<XTile>) const
-    {
-        if constexpr(kMergedRows)
-            return mask.GetSplitTileRangeAlongX(
-                0, number<1>{}, number<XTile>{}, num_splits, i_split);
-        else
-            return mask.GetSplitTileRangeAlongX(
-                i_y, number<YTile>{}, number<XTile>{}, num_splits, i_split);
-    }
-
-    CK_TILE_HOST_DEVICE constexpr auto IsOutOfBound(index_t i_y, index_t i_x) const
-    {
-        return mask.IsOutOfBound(kMergedRows ? 0 : i_y, i_x);
-    }
-
-    template <index_t TileHeight, index_t TileWidth>
-    CK_TILE_HOST_DEVICE constexpr auto
-    IsEdgeTile(index_t i_y, index_t i_x, number<TileHeight>, number<TileWidth>) const
-    {
-        if constexpr(kMergedRows)
-            return mask.IsEdgeTile(0, i_x, number<1>{}, number<TileWidth>{});
-        else if constexpr(IsMasking)
-            return mask.IsEdgeTileForValidRows(i_y, i_x, number<TileHeight>{}, number<TileWidth>{});
-        else
-            return mask.IsEdgeTile(i_y, i_x, number<TileHeight>{}, number<TileWidth>{});
-    }
-
-    CK_TILE_HOST_DEVICE constexpr index_t GetXTotal() const { return mask.GetXTotal(); }
-
-    private:
-    Mask mask;
-    index_t num_splits;
-    index_t i_split;
 };
 
 // clang-format off

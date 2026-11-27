@@ -123,7 +123,14 @@ auto create_args(int argc, char* argv[])
                 "Comma-separated list of length 'b'. If empty, no override.")
         .insert("init_sink", "0", "value to init the output tensor sink value for validation")
         .insert(
-            "pack_gqa", "1", "1: enable Pack-GQA (fold GQA Q heads into seqlen for non-causal)");
+            "block_scale_q", "0", "block scales (-qscale=bs): query rows per q descale; 0 is 128")
+        .insert("block_scale_kv",
+                "0",
+                "block scales (-qscale=bs): keys per k/v descale; 0 is the instances' alignment")
+        .insert("pack_gqa",
+                "1",
+                "1: enable Pack-GQA (fold GQA Q heads into seqlen for non-causal; on gfx125 "
+                "not for up to 16 query rows on a small grid, see pack_gqa_costs_parallelism)");
 
     bool result = arg_parser.parse(argc, argv);
     return std::make_tuple(result, arg_parser);
@@ -167,6 +174,8 @@ auto run(const ck_tile::ArgParser& arg_parser)
     std::string init_method          = arg_parser.get_str("init");
     uint32_t seed                    = arg_parser.get_uint32("seed");
     int init_sink_value              = arg_parser.get_int("init_sink");
+    ck_tile::index_t block_scale_q   = arg_parser.get_int("block_scale_q");
+    ck_tile::index_t block_scale_kv  = arg_parser.get_int("block_scale_kv");
     int pack_gqa                     = arg_parser.get_int("pack_gqa");
 
     ck_tile::stream_config stream_config{nullptr,
@@ -217,7 +226,10 @@ auto run(const ck_tile::ArgParser& arg_parser)
                                         init_sink_value,
                                         pack_gqa,
                                         stream_config,
-                                        json);
+                                        json,
+                                        nullptr,
+                                        block_scale_q,
+                                        block_scale_kv);
 }
 
 int main(int argc, char* argv[])

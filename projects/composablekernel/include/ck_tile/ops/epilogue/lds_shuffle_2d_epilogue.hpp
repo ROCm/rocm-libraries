@@ -20,7 +20,8 @@ template <typename AccDataType_,
           index_t kMPerBlock_,
           index_t kNPerBlock_,
           bool kPadM_,
-          bool kPadN_>
+          bool kPadN_,
+          index_t kPadNAlignment_ = 8>
 struct LdsShuffle2DEpilogueProblem
 {
     using AccDataType                   = remove_cvref_t<AccDataType_>;
@@ -30,7 +31,9 @@ struct LdsShuffle2DEpilogueProblem
     static constexpr index_t kNPerBlock = kNPerBlock_;
     static constexpr bool kPadM         = kPadM_;
     static constexpr bool kPadN         = kPadN_;
-    static constexpr index_t NumDTensor = 0;
+    // a padded N is a whole number of this many elements
+    static constexpr index_t kPadNAlignment = kPadNAlignment_;
+    static constexpr index_t NumDTensor     = 0;
 };
 
 /**
@@ -42,8 +45,8 @@ struct LdsShuffle2DEpilogueProblem
  *          tile through LDS lets every store instruction cover whole rows. CShuffleEpilogue
  *          does the same for the XDL C layout, which this layout does not fit.
  *
- *          Row widths whose vectors cannot tile a wavefront (e.g. d = 96, 160, 192) keep
- *          the direct store of Default2DEpilogue and need no LDS.
+ *          Row widths whose vectors cannot tile a wavefront (e.g. d = 96, 160, 192 at a
+ *          vector of 8) keep the direct store of Default2DEpilogue and need no LDS.
  */
 template <typename Problem_, typename Policy_ = void>
 struct LdsShuffle2DEpilogue
@@ -65,9 +68,9 @@ struct LdsShuffle2DEpilogue
     static constexpr index_t kVectorMax = 16 / static_cast<index_t>(sizeof(ODataType));
 
     // A vector store carries one out-of-bounds flag, taken from its first element. A padded
-    // N is only guaranteed to be a multiple of kPadNAlignment (the qr_tdm dvcheck in
-    // fmha_fwd.py), so the vector must divide it or the tail spills into the next row.
-    static constexpr index_t kPadNAlignment = 8;
+    // N is only guaranteed to be a multiple of kPadNAlignment, so the vector must divide it or
+    // the tail spills into the next row.
+    static constexpr index_t kPadNAlignment = Problem::kPadNAlignment;
     static constexpr index_t kVector =
         kPadN ? (kVectorMax < kPadNAlignment ? kVectorMax : kPadNAlignment) : kVectorMax;
 
@@ -105,6 +108,42 @@ struct LdsShuffle2DEpilogue
             constexpr index_t y1 = warp_size / x0;
             return x0 * y1 == warp_size && kNPerBlock % (x0 * x1) == 0 &&
                    kMPerBlock % (y1 * kNumWarps) == 0;
+        }
+    }
+
+    /**
+     * @brief Distribution of the LDS re-read and the global store: thread-raked rows of
+     *        kVector-wide vectors.
+     *
+     * @details When a row is longer than a wavefront of vectors (X2 > 1, e.g. 512 bf16
+     *          columns on wave32), the thread_raked pattern orders a row's X lengths as
+     *          (lanes X0, vector X1, iterations X2), so a "vector" strides by the
+     *          iteration count and the store splits into 4-byte pieces. Here they are
+     *          (iterations X2, lanes X0, vector X1): the vector stays innermost and, in each
+     *          store, adjacent lanes write adjacent vectors of the row.
+     */
+    CK_TILE_HOST_DEVICE static constexpr auto MakeODramTileDistribution()
+    {
+        using Pattern =
+            tile_distribution_encoding_pattern_2d<kNumWarps * get_warp_size(),
+                                                  kMPerBlock,
+                                                  kNPerBlock,
+                                                  kVector,
+                                                  tile_distribution_pattern::thread_raked>;
+        if constexpr(Pattern::X2 == 1)
+        {
+            return Pattern::make_2d_static_tile_distribution();
+        }
+        else
+        {
+            return make_static_tile_distribution(
+                tile_distribution_encoding<sequence<1>,
+                                           tuple<sequence<Pattern::Y0, Pattern::Y1, Pattern::Y2>,
+                                                 sequence<Pattern::X2, Pattern::X0, Pattern::X1>>,
+                                           tuple<sequence<1>, sequence<1, 2>>,
+                                           tuple<sequence<0>, sequence<1, 1>>, // -> <Y0>, <Y1, X0>
+                                           sequence<1, 2, 2>,
+                                           sequence<2, 0, 2>>{}); // -> <Y2, X2, X1>
         }
     }
 
@@ -166,14 +205,7 @@ struct LdsShuffle2DEpilogue
             store_tile(in_lds_window, cast_tile<ODataType>(o_acc_tile));
             block_sync_lds();
 
-            using TileEncodingPattern =
-                tile_distribution_encoding_pattern_2d<kNumWarps * get_warp_size(),
-                                                      kMPerBlock,
-                                                      kNPerBlock,
-                                                      kVector,
-                                                      tile_distribution_pattern::thread_raked>;
-
-            constexpr auto dram_dist = TileEncodingPattern::make_2d_static_tile_distribution();
+            constexpr auto dram_dist = MakeODramTileDistribution();
 
             auto out_lds_window = make_tile_window(
                 o_lds, make_tuple(number<kMPerBlock>{}, number<kNPerBlock>{}), {0, 0}, dram_dist);

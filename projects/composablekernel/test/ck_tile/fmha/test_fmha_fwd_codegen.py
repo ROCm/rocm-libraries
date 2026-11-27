@@ -3,7 +3,6 @@
 
 """FMHA codegen and real rendered-dispatch regression tests (CPU only)."""
 
-import itertools
 import json
 import os
 import re
@@ -14,7 +13,7 @@ import unittest
 from collections import Counter
 from fnmatch import fnmatch
 from pathlib import Path
-from dataclasses import fields, replace
+from dataclasses import replace
 import sys
 
 _CK_ROOT = Path(__file__).resolve().parents[3]
@@ -27,60 +26,89 @@ from codegen.ops.fmha_fwd import (  # noqa: E402
     FMHA_FWD_API_FOOTER,
     FMHA_FWD_API_HEADER,
     FmhaFwdApiPool,
+    FmhaFwdTileSize,
+    GFX125_QR_TDM_PINGPONG_HDIMS,
+    gfx125_qr_tdm_pingpong_hdims,
+    GFX125_QR_TDM_PINGPONG_MX_64_KEY_TRIPS,
+    GFX125_QR_TDM_SCHED_SMALL_GRID,
     KernelComponentFactoryGfx125,
     KernelContext,
     ProblemContext,
+    _gfx125_qr_tdm_pingpong_tiles,
+    _validate_gfx125_tile_dispatch_order,
     get_fwd_blobs,
     write_fwd_api,
 )
 
 
-def _is_plain_fp8_sched(k):
-    return k.F_pipeline.tag == "qr_tdm_fp8_sched" and k.F_pipeline.F_packgqa == "f"
-
-
-def _fp8_sched_kind(k):
-    # Plain sched, or packed GQA on the full tile or on the 32-row one-wavefront tile.
-    if k.F_pipeline.F_packgqa == "f":
-        return k.F_pipeline.tag
-    return "packgqa_32row" if k.F_tile.F_bm0 == 32 else "packgqa"
-
-
-def _fp8_sched_dispatch_order(api):
-    # (bm0, packed GQA) of each scheduled FP8 trait in dispatch order.
-    pattern = (
-        r"using trait_ = fmha_fwd_traits_<\d+, \w+, \w+, (\d+), "
-        r"[^;]*?QRKSVS_TDM_SCHED_FP8,[^;]*?(, true)?>;"
+def _short_q_bn0(keys, hdim_pair=(128, 128), dtype="bf16"):
+    """bn0 (keys a trip) of the qr_tdm_pingpong 16-row tile dispatch takes for `keys` keys a
+    sequence: the longest trip they fill, else the shortest."""
+    trips = sorted(
+        t.F_bn0
+        for t in _gfx125_qr_tdm_pingpong_tiles(
+            hdim_pair, fp8=dtype in ("fp8", "fp8bf16"), mx=dtype.startswith("mx")
+        )
+        if t.F_bm0 == 16
     )
-    return [(int(m[1]), m[2] is not None) for m in re.finditer(pattern, api)]
+    return max([b for b in trips[1:] if keys >= b] or trips[:1])
 
 
 _SUPPORTED_FEATURE_FILTER = (
     "fmha_fwd_d*_bf16_*_nlogits*_nbias*_nmask*_nlse*_ndropout*_nskip*_nqscale*"
 )
-_D192_PIPELINE = "qr_tdm_sched"
+_SCHED_PIPELINE = "qr_tdm_sched"
+# The scheduled pipelines: d128 only, at their input types, for small grids.
+# gfx125's scheduled pipelines: qr_tdm_fp8_sched at fp8 (d128 small grids) and MX (prefill at
+# d64/d128/d256); fp16/bf16 run qr_tdm_pingpong only
+_SCHED_DTYPES = {
+    "qr_tdm_fp8_sched": ("fp8", "fp8bf16", "mxfp8", "mxfp8bf16"),
+}
+_SCHED_HDIMS = {
+    "fp8": {128},
+    "fp8bf16": {128},
+    "mxfp8": {64, 128, 256},
+    "mxfp8bf16": {64, 128, 256},
+}
+_GFX125_DTYPES = ("fp16", "bf16", "fp8", "fp8bf16", "mxfp8", "mxfp8bf16")
+_D192_PIPELINE = "qr_tdm_pingpong"
 _HOST_CXX = shutil.which("c++")
-_ROCM_ROOT = Path(os.environ.get("ROCM_PATH", "/opt/rocm"))
-_HIP_HOST_CXX = _ROCM_ROOT / "llvm" / "bin" / "clang++"
 _RENDERED_CALL = re.compile(
     r"using trait_ = (fmha_fwd_traits_<[^;\n]+>);\s*"
     r"return fmha_fwd_<trait_, ([^>]+)>\(s, a\);"
 )
-_D192_ESM2_FILENAME = re.compile(r"^fmha_fwd_d192_bf16_.*_qr_tdm_sched_.*_gfx125\.cpp$")
+_D192_ESM2_FILENAME = re.compile(
+    r"^fmha_fwd_d192_bf16_.*_qr_tdm_pingpong_.*_gfx125\.cpp$"
+)
 _D192_BATCH_NMASK_FILENAME = (
     "fmha_fwd_d192_bf16_batch_b128x64x32x128x32x192_"
-    "r4x1x1_r4x1x1_w16x16x32_w16x16x32_o2_qr_tdm_sched_"
-    "vr_pddv_nlogits_nbias_nmask_nlse_ndropout_nskip_nqscale_"
-    "ntrload_nsink_gfx125.cpp"
+    "r4x1x1_r4x1x1_w16x16x32_w16x16x32_qr_tdm_pingpong_"
+    "vr_npad_nlogits_nbias_nmask_nlse_ndropout_nskip_nqscale_"
+    "ntrload_sp64_vbs128_nsink_gfx125.cpp"
 )
 _D192_BATCH_MASK_FILENAME = _D192_BATCH_NMASK_FILENAME.replace("_nmask_", "_mask_")
-_D192_GROUP_NMASK_FILENAME = _D192_BATCH_NMASK_FILENAME.replace("_batch_", "_group_")
-_D192_BATCH_N128_FILENAME = _D192_BATCH_NMASK_FILENAME.replace(
-    "b128x64x32", "b128x128x32"
-).replace("_o2_", "_o1_")
-_D192_SELECTOR = (
-    "a.hdim_q == 192 && a.hdim_v == 128 && a.sink_ptr == nullptr && "
-    "a.max_seqlen_q >= 128"
+_D192_GROUP_NMASK_FILENAME = _D192_BATCH_NMASK_FILENAME.replace(
+    "_batch_", "_group_"
+).replace("_npad_", "_pssk_")
+# The 16-row tile runs neither part of the LDS read schedule, so its name has none.
+_D192_BATCH_M16_FILENAME = (
+    _D192_BATCH_NMASK_FILENAME.replace("b128x64x32", "b16x64x32")
+    .replace("r4x1x1_r4x1x1", "r1x4x1_r1x4x1")
+    .replace("_sp64_vbs128", "")
+)
+# The d192 qr_tdm_sched selector (exact head dims) that no generated API carries now.
+_D192_SCHED_SELECTOR = "a.hdim_q == 192 && a.hdim_v == 128"
+# The features qr_tdm_sched and qr_tdm_pingpong took before they also took the logits
+# soft cap, biases, dropout, sink tokens and (pingpong) col-major V.
+_BASE_FEATURES = dict(
+    logits="f",
+    bias="no",
+    dropout="f",
+    sink="f",
+    vlayout="row",
+    qscale="no",
+    skip="f",
+    packgqa="f",
 )
 
 
@@ -94,8 +122,15 @@ def _generate(receipt, optdim_list=None):
     )
 
 
-def _is_family_kernel(kernel):
-    return kernel.F_pipeline.tag == _D192_PIPELINE
+def _is_sched_kernel(kernel):
+    return kernel.F_pipeline.tag == _SCHED_PIPELINE
+
+
+def _has_base_features(kernel):
+    return all(
+        getattr(kernel.F_pipeline, "F_" + name) == value
+        for name, value in _BASE_FEATURES.items()
+    )
 
 
 # These stubs provide types and unique launch IDs only. All selection predicates,
@@ -135,6 +170,9 @@ enum class quant_scale_enum { no_scale, pertensor, blockscale, kv_blockscale, mx
 struct FmhaFwdBf16 {};
 struct FmhaFwdFp8 {};
 struct FmhaFwdFp16 {};
+struct FmhaFwdFp8Bf16 {};
+struct FmhaFwdMxFp8 {};
+struct FmhaFwdMxFp8Bf16 {};
 struct FmhaMasks {
     struct NoMask {};
     struct GenericMask {};
@@ -166,9 +204,23 @@ struct fmha_fwd_args {
     const void* o_ptr = nullptr;
     int stride_o = 1024, nhead_stride_o = 128, batch_stride_o = 262144;
     int block_scale_size_q = 0, block_scale_size_kv = 0;
+    // MX E8M0 descales (qr_tdm_fp8_sched's alignment checks): aligned by default
+    const void* q_descale_ptr = nullptr;
+    const void* k_descale_ptr = nullptr;
+    int stride_q_descale = 4, stride_k_descale = 4;
+    int nhead_stride_q_descale = 512, nhead_stride_k_descale = 512;
+    int batch_stride_q_descale = 4096, batch_stride_k_descale = 4096;
 };
-inline bool fmha_fwd_can_merge_head_groups(const fmha_fwd_args&, int, bool, bool, bool = false) {
-    return false;
+@PACK_GQA_COSTS_PARALLELISM@
+// fmha_fwd.hpp's check, on the fields modelled here (no cu_seqlen_q, foldable LSE/descales)
+inline bool fmha_fwd_can_merge_head_groups(const fmha_fwd_args& a, int max_rows, bool, bool,
+                                           bool allow_one_group = false) {
+    if(a.nhead_k <= 0 || a.nhead_q < a.nhead_k || a.nhead_q % a.nhead_k != 0) return false;
+    if(!allow_one_group && a.nhead_q == a.nhead_k) return false;
+    if(a.cu_seqlen_k_ptr != nullptr) return false;
+    const int s = a.seqlen_q;
+    if(s != a.max_seqlen_q || s * (a.nhead_q / a.nhead_k) > max_rows) return false;
+    return s == 1 || (a.nhead_stride_q == s * a.stride_q && a.nhead_stride_o == s * a.stride_o);
 }
 template <typename Trait, typename Arch> struct dispatch_id;
 template <typename Trait, typename Arch>
@@ -176,6 +228,16 @@ float fmha_fwd_(const ck_tile::stream_config&, const fmha_fwd_args&) {
     return dispatch_id<Trait, Arch>::value;
 }
 """
+
+# The real dispatch rule, taken from fmha_fwd.hpp (it uses only ck_tile::index_t).
+_HOST_FMHA_STUB = _HOST_FMHA_STUB.replace(
+    "@PACK_GQA_COSTS_PARALLELISM@",
+    re.search(
+        r"^inline bool fmha_fwd_pack_gqa_costs_parallelism\(.*?^\}\n",
+        (_FMHA_EXAMPLE_DIR / "fmha_fwd.hpp").read_text(),
+        re.M | re.S,
+    ).group(0),
+)
 
 _HOST_MAIN = """
 #include <iostream>
@@ -274,6 +336,28 @@ class _CompiledDispatcher:
                 return kernel.F_pipeline.tag
             return getattr(kernel.F_pipeline, "F_" + name)
 
+        # Unless a field says otherwise, expect the base-feature variant.
+        fields = {**_BASE_FEATURES, **fields}
+        # qr_tdm_pingpong's bias / ALiBi, sink tokens and FP8 descales but per-tensor come
+        # with the sequence padding only (qr_tdm_pingpong_tile_takes), which serves aligned
+        # lengths too
+        rare = (
+            fields["bias"] != "no"
+            or fields["sink"] == "t"
+            or (
+                fields.get("dtype") in ("fp8", "fp8bf16")
+                and fields["qscale"] != "pertensor"
+            )
+            or fields["qscale"] in ("perhead", "blockscale")
+        )
+        if (
+            rare
+            and fields.get("pipeline", "qr_tdm_pingpong") == "qr_tdm_pingpong"
+            and fields["packgqa"] != "t"
+        ):
+            for key in ("spad", "skpad"):
+                if fields.get(key) == "f":
+                    fields[key] = "t"
         matches = {
             index
             for kernel, index in self.kernel_ids
@@ -354,6 +438,9 @@ class TestGfx125D192Codegen(unittest.TestCase):
             "vr_npad_nlogits_nbias_nmask_nlse_ndropout_nskip_nqscale_"
             "ntrload_nsink_gfx125.cpp"
         )
+        # qr_tdm_pingpong instances storing the LSE use expert scheduling too; plain qr
+        # (d256_source) keeps the default.
+        d192_lse_source = _D192_BATCH_NMASK_FILENAME.replace("_nlse_", "_lse_")
         fp8_sched_source = (
             "fmha_fwd_d128_fp8bf16_batch_b128x128x128x128x128x128_"
             "r4x1x1_r4x1x1_w16x16x128_w16x16x128_o2_qr_tdm_fp8_sched_"
@@ -368,9 +455,9 @@ class TestGfx125D192Codegen(unittest.TestCase):
         )
         sources = (
             _D192_BATCH_NMASK_FILENAME,
-            _D192_BATCH_N128_FILENAME,
-            _D192_BATCH_N128_FILENAME.replace("_bf16_", "_fp16_"),
-            _D192_BATCH_NMASK_FILENAME.replace("_nlse_", "_lse_"),
+            _D192_BATCH_M16_FILENAME,
+            _D192_BATCH_NMASK_FILENAME.replace("_bf16_", "_fp16_"),
+            d192_lse_source,
             _D192_BATCH_MASK_FILENAME,
             _D192_GROUP_NMASK_FILENAME,
             d256_source,
@@ -437,19 +524,38 @@ endforeach()
 
     @unittest.skipUnless(shutil.which("cmake"), "cmake is required")
     def test_cmake_fp8_sched_rule_scope(self):
-        # Filenames come from codegen so a naming change cannot silently disable a rule.
+        # The qr_tdm_fp8_sched-only flags must reach none of the qr_tdm_pingpong fp8
+        # sources codegen emits for gfx125, and follow their rules on the qr_tdm_fp8_sched
+        # ones. Codegen emits qr_tdm_fp8_sched at d128 only (no MX), so the rules for the
+        # other head dims and MX are checked on codegen's pingpong names with the pipeline
+        # tag swapped: a naming change in the rest of the name cannot silently disable one.
         helper = (_FMHA_EXAMPLE_DIR / "cmake") / "fmha_fwd_source_flags.cmake"
         _, kernels = get_fwd_blobs(
             ["gfx1250"], "*fp8*", 0, [64, 128, 192, 256], "simplified"
         )
-
-        def sched(k):
-            return k.F_pipeline.tag == "qr_tdm_fp8_sched"
+        self.assertEqual(
+            {k.F_pipeline.tag for k in kernels}, {"qr_tdm_pingpong", "qr_tdm_fp8_sched"}
+        )
+        sources = [
+            (
+                k,
+                k.filename,
+                "sched" if k.F_pipeline.tag == "qr_tdm_fp8_sched" else "pingpong",
+            )
+            for k in kernels
+        ] + [
+            (
+                k,
+                k.filename.replace("_qr_tdm_pingpong_", "_qr_tdm_fp8_sched_"),
+                "renamed",
+            )
+            for k in kernels
+            if k.F_pipeline.tag == "qr_tdm_pingpong"
+        ]
 
         rules = {
             "-amdgpu-codegenprepare-force-break-large-phis": lambda k: (
-                sched(k)
-                and k.F_pipeline.F_trload == "f"
+                k.F_pipeline.F_trload == "f"
                 and (
                     k.F_pipeline.F_qscale == "blockscale"
                     or (
@@ -459,10 +565,10 @@ endforeach()
                 )
             ),
             "-structurizecfg-skip-uniform-regions": lambda k: (
-                sched(k) and k.F_hdim in (128, 256) and k.F_dtype.startswith("mxfp8")
+                k.F_hdim in (128, 256) and k.F_dtype.startswith("mxfp8")
             ),
             "-regalloc-enable-priority-advisor=dummy": lambda k: (
-                sched(k) and k.F_hdim == 256 and k.F_dtype.startswith("fp8")
+                k.F_hdim == 256 and k.F_dtype.startswith("fp8")
             ),
         }
         with tempfile.TemporaryDirectory() as directory:
@@ -470,9 +576,9 @@ endforeach()
             script.write_text(
                 f'include("{helper}")\n'
                 + "\n".join(
-                    f'ck_tile_fmha_fwd_get_source_compile_options("{k.filename}" flags)\n'
+                    f'ck_tile_fmha_fwd_get_source_compile_options("{name}" flags)\n'
                     f'message("{i}:${{flags}}")'
-                    for i, k in enumerate(kernels)
+                    for i, (_, name, _) in enumerate(sources)
                 )
             )
             process = subprocess.run(
@@ -480,25 +586,28 @@ endforeach()
                 capture_output=True,
                 text=True,
                 check=True,
-                timeout=120,
+                timeout=240,
             )
         lines = process.stderr.strip().splitlines()
-        self.assertEqual(len(lines), len(kernels))
+        self.assertEqual(len(lines), len(sources))
         for flag, expected in rules.items():
             seen = Counter()
-            for i, (k, line) in enumerate(zip(kernels, lines)):
+            for i, ((k, name, kind), line) in enumerate(zip(sources, lines)):
                 self.assertTrue(line.startswith(f"{i}:"))
-                want = expected(k)
-                seen[(_fp8_sched_kind(k), want)] += 1
-                with self.subTest(flag=flag, source=k.filename):
+                want = kind != "pingpong" and expected(k)
+                seen[(kind, want)] += 1
+                with self.subTest(flag=flag, source=name):
                     self.assertEqual(flag in line.split(";"), want)
-            # Each rule has positive and negative codegen names, packed GQA on both tiles included.
-            for tag in ("qr_tdm_fp8_sched", "packgqa", "packgqa_32row"):
-                for want in (True, False):
-                    with self.subTest(flag=flag, tag=tag, positive=want):
-                        self.assertGreater(seen[(tag, want)], 0)
-            self.assertEqual(seen[("qr_tdm", True)], 0)
-            self.assertGreater(seen[("qr_tdm", False)], 0)
+            # Each rule has positive and negative qr_tdm_fp8_sched names, and no
+            # qr_tdm_pingpong source takes it.
+            for want in (True, False):
+                with self.subTest(flag=flag, positive=want):
+                    self.assertGreater(
+                        seen[("sched", want)] + seen[("renamed", want)], 0
+                    )
+            self.assertGreater(seen[("sched", False)], 0)
+            self.assertEqual(seen[("pingpong", True)], 0)
+            self.assertGreater(seen[("pingpong", False)], 0)
 
     @unittest.skipUnless(shutil.which("cmake"), "cmake is required")
     def test_cmake_source_flags_follow_gfx125_family_targets(self):
@@ -543,74 +652,109 @@ message(\"options:${{options}}\")
                 ):
                     self.assertEqual(flag in options[1].split(";"), applied)
 
-    def test_receipts_emit_d192_sched_and_fallback_tiles(self):
+    def test_receipts_emit_d192_pingpong_tiles_only(self):
         for receipt in (100, 200, 600):
             with self.subTest(receipt=receipt):
                 _, kernels = _generate(receipt)
-                candidates = [
+                # qr_tdm_sched emits no d192 instances any more.
+                self.assertFalse(any(_is_sched_kernel(k) for k in kernels))
+                # the unpacked instances (packed-GQA decode: test_pingpong_packgqa_decode)
+                family = [
                     kernel
                     for kernel in kernels
                     if kernel.F_pipeline.tag == _D192_PIPELINE
+                    and kernel.F_hdim == 192
+                    and kernel.F_pipeline.F_packgqa == "f"
                 ]
+                candidates = [k for k in family if _has_base_features(k)]
 
                 self.assertTrue(candidates)
-                for kernel in candidates:
+                # The kernel filter leaves the sink tokens as the only extra feature: every
+                # sequence-padded base instance on the decode and general tiles has a sink
+                # twin, the 64-row tile's none (qr_tdm_pingpong_tile_takes).
+                with_sink = [
+                    k
+                    for k in candidates
+                    if k.F_tile.F_bm0 != 64
+                    and (k.F_pipeline.F_spad, k.F_pipeline.F_skpad) == ("t", "t")
+                ]
+                self.assertTrue(with_sink)
+                self.assertEqual(
+                    Counter(k.F_pipeline.F_sink for k in family)["t"], len(with_sink)
+                )
+                self.assertEqual(len(family), len(candidates) + len(with_sink))
+                for kernel in family:
                     self.assertEqual(kernel.F_arch.name, "gfx125")
                     self.assertEqual(kernel.F_dtype, "bf16")
-                    self.assertEqual(kernel.F_hdim, 192)
                     self.assertIn(
-                        (kernel.F_tile.F_bn0, kernel.F_tile.F_occupancy),
-                        ((64, 2), (128, 1)),
+                        (kernel.F_tile.F_bm0, kernel.F_tile.F_bn0),
+                        {(16, 128), (64, 64), (128, 64)},
                     )
-                    if kernel.F_tile.F_bn0 == 128:
-                        self.assertEqual(
-                            kernel.F_pipeline.F_spad,
-                            "t" if kernel.F_mode == "group" else "f",
-                        )
                     self.assertEqual(kernel.F_tile.F_bn1, 128)
                     self.assertEqual(kernel.F_tile.F_bk0max, 192)
+                    if kernel.F_mode == "group":
+                        self.assertEqual(kernel.F_pipeline.F_spad, "t")
                     self.assertEqual(kernel.F_pipeline.F_vlayout, "row")
                     self.assertEqual(kernel.F_pipeline.F_logits, "f")
                     self.assertEqual(kernel.F_pipeline.F_bias, "no")
                     self.assertEqual(kernel.F_pipeline.F_dropout, "f")
                     self.assertEqual(kernel.F_pipeline.F_qscale, "no")
                     self.assertEqual(kernel.F_pipeline.F_skip, "f")
-                    self.assertEqual(kernel.F_pipeline.F_sink, "f")
                     self.assertRegex(kernel.filename, _D192_ESM2_FILENAME)
 
                 for kernel in kernels:
-                    if kernel not in candidates:
+                    if kernel not in family and kernel.F_pipeline.F_packgqa == "f":
                         self.assertNotRegex(kernel.filename, _D192_ESM2_FILENAME)
 
-                self.assertTrue(
-                    any(
-                        kernel.F_hdim == 192
-                        and kernel.F_tile.F_bn1 == 128
-                        and kernel.F_pipeline.tag == "qr_tdm"
-                        for kernel in kernels
-                    )
+                # qr_tdm_pingpong is all gfx125 generates: no qr_tdm or generic qr
+                # fallback is left behind it.
+                self.assertEqual(
+                    {k.F_pipeline.tag for k in kernels}, {"qr_tdm_pingpong"}
                 )
                 self.assertEqual(
-                    sum(kernel.F_tile.F_bn0 == 128 for kernel in candidates),
-                    2 if receipt == 600 else 1,
+                    {k.F_mode for k in candidates},
+                    {100: {"batch"}, 200: {"group"}, 600: {"batch", "group"}}[receipt],
+                )
+                # Each mode has its 16-, 64- and 128-row tile; the 64-row one has no
+                # head-dim-padded instances (the general 128-row and the decode tile take
+                # those: qr_tdm_pingpong_tile_takes).
+                by_tile = Counter(k.F_tile.F_bm0 for k in candidates)
+                self.assertEqual(set(by_tile), {16, 64, 128})
+                self.assertEqual(by_tile[16], by_tile[128])
+                self.assertGreater(by_tile[128], by_tile[64])
+                self.assertFalse(
+                    [
+                        k
+                        for k in candidates
+                        if k.F_tile.F_bm0 == 64 and k.F_pipeline.F_dpad == "t"
+                    ]
                 )
 
-    def test_d128_retains_short_query_fallback_tiles(self):
+    def test_d128_emits_only_pingpong_tiles(self):
+        # fp16/bf16 d128: qr_tdm_pingpong's tiles take every query, the short-query ones (128
+        # or 256 keys a trip), the 64-row one, the 128-row 128-key-trip one (long rows without
+        # a left window) and the 128-row one; no qr_tdm_sched (small grids included) and no
+        # qr_tdm instance.
+        tiles = {(t.F_bm0, t.F_bn0) for t in _gfx125_qr_tdm_pingpong_tiles((128, 128))}
+        self.assertEqual(tiles, {(16, 128), (16, 256), (64, 64), (128, 128), (128, 64)})
         for receipt in (100, 200, 600):
             with self.subTest(receipt=receipt):
                 _, kernels = _generate(receipt, [128])
-                self.assertTrue(any(_is_family_kernel(k) for k in kernels))
-                fallback = [k for k in kernels if not _is_family_kernel(k)]
-                self.assertTrue(fallback)
-                self.assertTrue(all(k.F_hdim == 128 for k in fallback))
-                self.assertTrue(any(k.F_tile.F_bm0 < 128 for k in fallback))
-                self.assertTrue(all(k.F_tile.F_bn0 == 64 for k in fallback))
-                self.assertTrue(any(k.F_pipeline.tag == "qr_tdm" for k in fallback))
+                self.assertTrue(kernels)
+                self.assertEqual(
+                    {k.F_pipeline.tag for k in kernels}, {"qr_tdm_pingpong"}
+                )
+                self.assertTrue(all(k.F_hdim == 128 for k in kernels))
+                self.assertEqual(
+                    {(k.F_tile.F_bm0, k.F_tile.F_bn0) for k in kernels}, tiles
+                )
                 self.assertEqual(len(kernels), len({k.filename for k in kernels}))
-                for kernel in fallback:
-                    self.assertNotIn("QRKSVS_TDM_SCHED", kernel.render())
+                for kernel in kernels:
+                    source = kernel.render()
+                    self.assertNotIn("QRKSVS_TDM_SCHED", source)
+                    self.assertIn("QRKSVS_TDM_PINGPONG", source)
 
-    def test_generated_api_places_exact_candidate_before_legacy_entries(self):
+    def test_generated_api_renders_only_pingpong_entries(self):
         for receipt in (100, 200, 600):
             with self.subTest(receipt=receipt):
                 api_pool, kernels = _generate(receipt)
@@ -619,42 +763,40 @@ message(\"options:${{options}}\")
                     write_fwd_api(api_pool, output_path)
                     api = (output_path / "fmha_fwd_api.cpp").read_text()
 
-                self.assertIn("QRKSVS_TDM_SCHED", api)
-                self.assertIn(_D192_SELECTOR, api)
-                if receipt != 200:
-                    self.assertIn(
-                        "a.seqlen_k >= 512LL * (t.is_group_mode ? a.batch : 1)",
-                        api,
-                    )
-                    self.assertIn("a.seqlen_k_ptr == nullptr", api)
-                    self.assertIn("get_num_blocks(128) <= num_cus", api)
-                self.assertNotIn(f"!({_D192_SELECTOR})", api)
-                self.assertLess(api.index("t.hdim_q <= 192"), api.index(_D192_SELECTOR))
-                self.assertLess(api.index(_D192_SELECTOR), api.index("t.hdim_q <= 256"))
-                self.assertLess(
-                    api.index("QRKSVS_TDM_SCHED", api.index("t.hdim_q <= 192")),
-                    api.index(
-                        "BlockFmhaPipelineEnum::QRKSVS_TDM,",
-                        api.index("t.hdim_q <= 192"),
-                    ),
+                # Neither the d192 qr_tdm_sched selector nor its N128 long-K one is
+                # rendered any more.
+                self.assertNotIn("QRKSVS_TDM_SCHED", api)
+                self.assertNotIn(_D192_SCHED_SELECTOR, api)
+                self.assertNotIn(
+                    "a.seqlen_k >= 512LL * (t.is_group_mode ? a.batch : 1)", api
                 )
+                self.assertNotIn("get_num_blocks(128) <= num_cus", api)
+                self.assertIn("QRKSVS_TDM_PINGPONG", api)
+                # qr_tdm_pingpong's entries are all there is: no generic qr or qr_tdm
+                # entry follows them.
+                self.assertNotIn("BlockFmhaPipelineEnum::QRKSVS,", api)
+                self.assertNotIn("BlockFmhaPipelineEnum::QRKSVS_TDM,", api)
+                d192 = api[api.index("t.hdim_q <= 192") : api.index("t.hdim_q <= 256")]
+                self.assertIn("QRKSVS_TDM_PINGPONG", d192)
                 self.assertNotIn("is_gfx125_tdm_v128_enabled", api)
 
                 candidate = next(
                     kernel
                     for kernel in kernels
                     if kernel.F_pipeline.tag == _D192_PIPELINE
+                    and kernel.F_hdim == 192
+                    and kernel.F_tile.F_bm0 == 128
+                    and _has_base_features(kernel)
                 )
                 self.assertEqual((candidate.F_hdim, candidate.F_tile.F_bn1), (192, 128))
                 source = candidate.render()
-                self.assertIn("BlockFmhaPipelineQRKSVSTdmSched", source)
-                self.assertIn(
-                    "FmhaTdmSchedPolicyFor<fmha_pipeline_problem>, false", source
-                )
-                self.assertIn("QRKSVS_TDM_SCHED", source)
+                self.assertIn("BlockFmhaPipelineQRKSVSTdmPingPong", source)
+                # The 128-row tile runs both parts of d192's LDS read schedule.
+                self.assertIn("QrTdmPingPongLdsReadSchedule<64, 128>", source)
+                self.assertIn("QRKSVS_TDM_PINGPONG", source)
                 self.assertIn(_D192_PIPELINE, candidate.name)
 
-    def test_filtered_unsupported_feature_keeps_ungated_generic_fallback(self):
+    def test_filtered_feature_emits_pingpong_only(self):
         filters = {
             "logits": "fmha_fwd_d*_bf16_*_logits*_nbias*_nmask*_nlse*_ndropout*_nskip*_nqscale*",
             "bias": "fmha_fwd_d*_bf16_*_nlogits*_bias*_nmask*_nlse*_ndropout*_nskip*_nqscale*",
@@ -677,11 +819,33 @@ message(\"options:${{options}}\")
                     api = (output_path / "fmha_fwd_api.cpp").read_text()
 
                 self.assertTrue(kernels)
-                self.assertFalse(
-                    any(kernel.F_pipeline.tag == _D192_PIPELINE for kernel in kernels)
+                self.assertFalse(any(_is_sched_kernel(k) for k in kernels))
+                family = [
+                    k
+                    for k in kernels
+                    if k.F_pipeline.tag == _D192_PIPELINE and k.F_hdim == 192
+                ]
+                # d192 qr_tdm_pingpong takes the soft cap, sink tokens, an elementwise
+                # bias and (group mode) skip_min_seqlen_q; d192 has no dropout instances
+                # at all, d256's pingpong takes it.
+                self.assertEqual(
+                    bool(family), feature in ("logits", "sink", "bias", "skip")
+                )
+                for kernel in family:
+                    self.assertEqual(
+                        getattr(kernel.F_pipeline, "F_" + feature),
+                        "bias" if feature == "bias" else "t",
+                    )
+                    if feature == "skip":
+                        self.assertEqual(kernel.F_mode, "group")
+                if feature == "dropout":
+                    self.assertTrue(all(k.F_hdim == 256 for k in kernels))
+                # No other pipeline is generated next to it.
+                self.assertEqual(
+                    {k.F_pipeline.tag for k in kernels}, {"qr_tdm_pingpong"}
                 )
                 self.assertNotIn("QRKSVS_TDM_SCHED", api)
-                self.assertNotIn(_D192_SELECTOR, api)
+                self.assertNotIn(_D192_SCHED_SELECTOR, api)
 
         _, qscale_kernels = get_fwd_blobs(
             targets=["gfx1250"],
@@ -694,7 +858,7 @@ message(\"options:${{options}}\")
 
     def test_filters_select_only_matching_sources(self):
         for receipt in (100, 200, 600):
-            for kernel_filter in ("*d192_bf16*", f"*{_D192_PIPELINE}*"):
+            for kernel_filter in ("*d192_bf16*", f"*d192_bf16*_{_D192_PIPELINE}_*"):
                 with self.subTest(receipt=receipt, kernel_filter=kernel_filter):
                     api_pool, kernels = get_fwd_blobs(
                         targets=["gfx1250"],
@@ -711,81 +875,143 @@ message(\"options:${{options}}\")
                         all(fnmatch(kernel.name, kernel_filter) for kernel in kernels)
                     )
                     self.assertTrue(all(kernel.F_hdim == 192 for kernel in kernels))
-                    if kernel_filter == f"*{_D192_PIPELINE}*":
+                    self.assertFalse(any(_is_sched_kernel(k) for k in kernels))
+                    if kernel_filter != "*d192_bf16*":
                         self.assertEqual(candidate_count, len(kernels))
 
                     with tempfile.TemporaryDirectory() as output_dir:
                         output_path = Path(output_dir)
                         write_fwd_api(api_pool, output_path)
                         api = (output_path / "fmha_fwd_api.cpp").read_text()
-                    self.assertIn(_D192_SELECTOR, api)
-                    self.assertNotIn(f"!({_D192_SELECTOR})", api)
+                    self.assertIn("QRKSVS_TDM_PINGPONG", api)
+                    self.assertNotIn(_D192_SCHED_SELECTOR, api)
 
-    def test_only_gfx125_targets_emit_the_scheduled_pipeline(self):
-        for target in ("gfx942", "gfx950"):
-            with self.subTest(target=target):
+            with self.subTest(receipt=receipt, kernel_filter="sched"):
                 _, kernels = get_fwd_blobs(
-                    targets=[target],
-                    kernel_filter=f"*{_D192_PIPELINE}*",
-                    receipt=100,
-                    optdim_list=[192],
+                    targets=["gfx1250"],
+                    kernel_filter=f"*{_SCHED_PIPELINE}*",
+                    receipt=receipt,
+                    optdim_list=[192, 256],
                     mask_impl="simplified",
                 )
                 self.assertFalse(kernels)
 
+    def test_scheduled_pipelines_are_gfx125_only(self):
+        # qr_tdm_fp8_sched: gfx125 family targets only, at fp8 (d128) and MX (d64/d128/d256),
+        # no packed GQA; no qr_tdm_sched at all; the other targets have no pingpong.
+        for target in ("gfx1250", "gfx1251", "gfx1252"):
+            with self.subTest(target=target, tag="qr_tdm_sched"):
+                _, kernels = get_fwd_blobs(
+                    targets=[target],
+                    kernel_filter="*_qr_tdm_sched_*",
+                    receipt=0,
+                    optdim_list=[-1],
+                    mask_impl="simplified",
+                )
+                self.assertFalse(kernels)
+        for target in ("gfx942", "gfx950", "gfx1250", "gfx1251", "gfx1252"):
+            for tag, dtypes in _SCHED_DTYPES.items():
+                with self.subTest(target=target, tag=tag):
+                    _, kernels = get_fwd_blobs(
+                        targets=[target],
+                        kernel_filter=f"*_{tag}_*",
+                        receipt=0,
+                        optdim_list=[-1],
+                        mask_impl="simplified",
+                    )
+                    if not target.startswith("gfx125"):
+                        self.assertFalse(kernels)
+                        continue
+                    self.assertTrue(kernels)
+                    self.assertEqual({k.F_pipeline.tag for k in kernels}, {tag})
+                    self.assertEqual({k.F_dtype for k in kernels}, set(dtypes))
+                    for dtype in dtypes:
+                        self.assertEqual(
+                            {
+                                (k.F_hdim, k.F_tile.F_bn1)
+                                for k in kernels
+                                if k.F_dtype == dtype
+                            },
+                            {(h, h) for h in _SCHED_HDIMS[dtype]},
+                        )
+                    self.assertEqual({k.F_pipeline.F_packgqa for k in kernels}, {"f"})
+                    self.assertEqual({k.F_pipeline.F_skip for k in kernels}, {"f"})
+                    self.assertEqual({k.F_pipeline.F_vlayout for k in kernels}, {"row"})
+        for target in ("gfx942", "gfx950"):
+            with self.subTest(target=target):
+                _, kernels = get_fwd_blobs(
+                    targets=[target],
+                    kernel_filter="*_qr_tdm_pingpong_*",
+                    receipt=100,
+                    optdim_list=[128, 192],
+                    mask_impl="simplified",
+                )
+                self.assertFalse(kernels)
         for target in ("gfx1250", "gfx1251", "gfx1252"):
             with self.subTest(target=target):
                 _, kernels = get_fwd_blobs(
                     targets=[target],
-                    kernel_filter=f"*{_D192_PIPELINE}*",
+                    kernel_filter="*_bf16_*",
                     receipt=100,
-                    optdim_list=[192],
+                    optdim_list=[128, 192],
                     mask_impl="simplified",
                 )
-                self.assertTrue(
-                    any(kernel.F_pipeline.tag == _D192_PIPELINE for kernel in kernels)
+                self.assertTrue(kernels)
+                self.assertEqual({k.F_hdim for k in kernels}, {128, 192})
+                self.assertEqual(
+                    {k.F_pipeline.tag for k in kernels if k.F_hdim == 192},
+                    {"qr_tdm_pingpong"},
+                )
+                self.assertEqual(
+                    {k.F_pipeline.tag for k in kernels if k.F_hdim == 128},
+                    {"qr_tdm_pingpong"},
                 )
 
-    def test_n128_emits_batch_and_group_without_generic_windows(self):
+    def test_d192_m128_emits_batch_and_group_for_every_mask(self):
         mask_options = {
-            "simplified": ("s_no", "s_mask"),
-            "generic": ("no", "causal"),
+            "simplified": {
+                (mask, lse)
+                for mask in ("s_no", "s_mask", "causal")
+                for lse in ("f", "t")
+            },
+            "generic": {
+                (mask, lse)
+                for mask in ("no", "causal", "generic")
+                for lse in ("f", "t")
+            },
         }
         for dtype in ("fp16", "bf16"):
             for mask_impl, masks in mask_options.items():
                 with self.subTest(dtype=dtype, mask_impl=mask_impl):
-                    self.check_n128_masks(dtype, mask_impl, masks)
+                    self.check_m128_masks(dtype, mask_impl, masks)
 
-    def check_n128_masks(self, dtype, mask_impl, masks):
+    def check_m128_masks(self, dtype, mask_impl, masks):
         _, kernels = get_fwd_blobs(
             targets=["gfx1250"],
-            kernel_filter=f"*{dtype}*{_D192_PIPELINE}*",
+            kernel_filter=f"*d192_{dtype}*",
             receipt=600,
             optdim_list=[192],
             mask_impl=mask_impl,
         )
-        n128 = [
+        self.assertFalse(any(_is_sched_kernel(k) for k in kernels))
+        m128 = [
             kernel
             for kernel in kernels
-            if kernel.F_pipeline.tag == _D192_PIPELINE and kernel.F_tile.F_bn0 == 128
+            if kernel.F_pipeline.tag == _D192_PIPELINE
+            and kernel.F_tile.F_bm0 == 128
+            and _has_base_features(kernel)
         ]
-        actual = Counter(
-            (kernel.F_mode, kernel.F_pipeline.F_mask, kernel.F_pipeline.F_lse)
-            for kernel in n128
-        )
-        expected = Counter(
+        self.assertEqual(
             {
-                (mode, mask, lse): 1
-                for mode in ("batch", "group")
-                for mask in masks
-                for lse in ("f", "t")
-            }
+                (kernel.F_mode, kernel.F_pipeline.F_mask, kernel.F_pipeline.F_lse)
+                for kernel in m128
+            },
+            {(mode, mask, lse) for mode in ("batch", "group") for mask, lse in masks},
         )
-        self.assertEqual(actual, expected)
-        for kernel in n128:
-            required_pad = "t" if kernel.F_mode == "group" else "f"
-            self.assertEqual(kernel.F_pipeline.F_spad, required_pad)
-            self.assertEqual(kernel.F_pipeline.F_skpad, required_pad)
+        for kernel in m128:
+            if kernel.F_mode == "group":
+                self.assertEqual(kernel.F_pipeline.F_spad, "t")
+                self.assertEqual(kernel.F_pipeline.F_skpad, "t")
 
 
 @unittest.skipUnless(_HOST_CXX, "a C++17 host compiler is required")
@@ -811,139 +1037,112 @@ class TestCompiledGfx125D192Dispatch(unittest.TestCase):
         return _CompiledDispatcher(self, pool, kernels, filter_fn, mutate), kernels
 
     @staticmethod
-    def candidate_id(dispatch, mode, mask="s_no", lse="f", bn0=64, dtype="bf16"):
+    def candidate_id(
+        dispatch,
+        mode,
+        mask="s_no",
+        lse="f",
+        bm0=128,
+        dtype="bf16",
+        sink="f",
+        dpad="f",
+        packgqa="f",
+    ):
+        # qr_tdm_pingpong serves every d192 query.
         return dispatch.expected_id(
+            packgqa=packgqa,
             mode=mode,
             dtype=dtype,
             hdim=192,
-            pipeline=_D192_PIPELINE,
-            mask=mask,
-            lse=lse,
-            bn0=bn0,
-            sink="f",
-        )
-
-    @staticmethod
-    def fallback_id(dispatch, mode, mask="s_no", lse="f", sink="f", bm0=128):
-        return dispatch.expected_id(
-            mode=mode,
-            hdim=192,
-            pipeline="qr_tdm",
+            pipeline="qr_tdm_pingpong",
             bm0=bm0,
             mask=mask,
             lse=lse,
-            spad="t" if mode == "group" else "f",
-            dpad="t",
+            # (a padded head dim takes the fully padded instance: qr_tdm_pingpong_tile_takes)
+            spad="t" if mode == "group" or dpad == "t" else "f",
+            dpad=dpad,
             sink=sink,
         )
 
     @staticmethod
-    def head_tail_id(dispatch, mode, mask="s_no", lse="f", padded="t", sink="f"):
+    def d256_id(dispatch, mode, dpad):
         return dispatch.expected_id(
             mode=mode,
             hdim=256,
-            pipeline="qr_tdm",
-            mask=mask,
-            lse=lse,
-            spad="t" if mode == "group" else "f",
-            dpad=padded,
-            sink=sink,
+            pipeline="qr_tdm_pingpong",
+            bm0=64,
+            mask="s_no",
+            lse="f",
+            spad="t" if mode == "group" or dpad == "t" else "f",
+            dpad=dpad,
+            sink="f",
         )
 
     def test_real_dispatch_priority_exact_shape_and_short_q(self):
         dispatch, _ = self.compile()
         for mode, group in (("batch", 0), ("group", 1)):
             candidate = self.candidate_id(dispatch, mode)
-            fallback = self.fallback_id(dispatch, mode)
             self.assertEqual(dispatch.run(group=group), [candidate])
-            for length in (128, 129, 257):
+            for length in (128, 129, 257, 2048):
                 self.assertEqual(
                     dispatch.run(group=group, seqlen_q=length), [candidate]
                 )
-            for length in (0, 1, 64, 127):
+            # Shorter queries take qr_tdm_pingpong's 16- and 64-row tiles.
+            for length, bm0 in ((0, 16), (1, 16), (16, 16), (17, 64), (127, 64)):
+                # one query per head packs the 4 query heads of a KV head
+                packgqa = "t" if length == 1 and not group else "f"
                 self.assertEqual(
                     dispatch.run(group=group, seqlen_q=length),
-                    [self.fallback_id(dispatch, mode, bm0=64)],
+                    [self.candidate_id(dispatch, mode, bm0=bm0, packgqa=packgqa)],
                 )
             self.assertEqual(
-                dispatch.run(group=group, hdim_q=160, hdim_v=128), [fallback]
+                dispatch.run(group=group, hdim_q=160, hdim_v=128),
+                [self.candidate_id(dispatch, mode, dpad="t")],
             )
+            # Head dims off the 8-element vector take its padded instance too (O is
+            # stored an element at a time); past 192 the d256 bucket's padded one.
             for q, v in ((191, 128), (192, 127)):
                 with self.subTest(mode=mode, shape=(q, v)):
                     self.assertEqual(
                         dispatch.run(group=group, hdim_q=q, hdim_v=v),
-                        [
-                            dispatch.expected_id(
-                                mode=mode,
-                                hdim=192,
-                                pipeline="qr_tdm",
-                                bm0=128,
-                                mask="s_no",
-                                lse="f",
-                                spad="t" if group else "f",
-                                dpad="t",
-                                sink="f",
-                            )
-                        ],
+                        [self.candidate_id(dispatch, mode, dpad="t")],
                     )
             self.assertEqual(
                 dispatch.run(group=group, hdim_q=193, hdim_v=128),
-                [self.head_tail_id(dispatch, mode)],
+                [self.d256_id(dispatch, mode, dpad="t")],
             )
             self.assertEqual(
                 dispatch.run(group=group, hdim_q=192, hdim_v=192),
-                [
-                    dispatch.expected_id(
-                        mode=mode,
-                        hdim=256,
-                        pipeline="qr_tdm",
-                        bm0=64,
-                        mask="s_no",
-                        lse="f",
-                        spad="t" if group else "f",
-                        dpad="t",
-                        sink="f",
-                    )
-                ],
-            )
-            generic256 = dispatch.expected_id(
-                mode=mode,
-                hdim=256,
-                pipeline="qr_tdm",
-                bm0=64,
-                mask="s_no",
-                lse="f",
-                spad="t" if group else "f",
-                dpad="f",
-                sink="f",
+                [self.d256_id(dispatch, mode, dpad="t")],
             )
             self.assertEqual(
-                dispatch.run(group=group, hdim_q=256, hdim_v=256), [generic256]
+                dispatch.run(group=group, hdim_q=256, hdim_v=256),
+                [self.d256_id(dispatch, mode, dpad="f")],
             )
 
-    def test_n128_long_k_one_wave_selector_and_n64_fallback(self):
-        dispatch, _ = self.compile(
+    def test_long_k_and_masks_stay_on_pingpong(self):
+        # No scheduled pipeline is generated: qr_tdm_pingpong's 128-row tile takes
+        # every d192 query from 128 rows on, whatever the key length, grid or mask.
+        dispatch, kernels = self.compile(
             kernel_filter=(
                 "fmha_fwd_d*_bf16_*_nlogits*_nbias*_*lse*_ndropout*_nskip*_nqscale*"
             )
         )
-        n64 = self.candidate_id(dispatch, "batch")
-        n128 = self.candidate_id(dispatch, "batch", bn0=128)
+        self.assertFalse(any(_is_sched_kernel(k) and k.F_hdim == 192 for k in kernels))
+        candidate = self.candidate_id(dispatch, "batch")
 
-        for sk in (128, 192, 256, 511):
-            self.assertEqual(dispatch.run(seqlen_k=sk), [n64])
-        for sk in (512, 513, 2048):
-            self.assertEqual(dispatch.run(seqlen_k=sk), [n128])
-        self.assertEqual(dispatch.run(seqlen_k=512, has_cu_sk=1), [n64])
+        for sk in (128, 192, 256, 511, 512, 513, 2048):
+            self.assertEqual(dispatch.run(seqlen_k=sk), [candidate])
+        self.assertEqual(dispatch.run(seqlen_k=512, has_cu_sk=1), [candidate])
 
         grid256 = dict(batch=8, nhead_q=8, seqlen_q=512, seqlen_k=512)
-        self.assertEqual(dispatch.run(**grid256), [n128])
-        self.assertEqual(dispatch.run(num_cus=128, **grid256), [n64])
-        self.assertEqual(dispatch.run(**{**grid256, "batch": 16}), [n64])
-        self.assertEqual(dispatch.run(max_seqlen_q=1024, **grid256), [n64])
+        self.assertEqual(dispatch.run(**grid256), [candidate])
+        self.assertEqual(dispatch.run(num_cus=128, **grid256), [candidate])
+        self.assertEqual(dispatch.run(**{**grid256, "batch": 16}), [candidate])
+        self.assertEqual(dispatch.run(max_seqlen_q=1024, **grid256), [candidate])
         for device in ("gfx1251", "gfx1252"):
-            self.assertEqual(dispatch.run(device=device, **grid256), [n128])
-            self.assertEqual(dispatch.run(device=device, seqlen_k=511), [n64])
+            self.assertEqual(dispatch.run(device=device, **grid256), [candidate])
+            self.assertEqual(dispatch.run(device=device, seqlen_k=511), [candidate])
 
         for mask in (1, 2):
             causal = dict(
@@ -955,140 +1154,77 @@ class TestCompiledGfx125D192Dispatch(unittest.TestCase):
             )
             self.assertEqual(
                 dispatch.run(**causal),
-                [self.candidate_id(dispatch, "batch", mask="s_mask", bn0=128)],
+                [self.candidate_id(dispatch, "batch", mask="causal")],
             )
-            for disqualifier in (
-                {"window_size_left": 128},
-                {"window_size_right": 64},
-                {"seqlen_q": 256},
-            ):
+            self.assertEqual(
+                dispatch.run(**{**causal, "seqlen_q": 256}),
+                [self.candidate_id(dispatch, "batch", mask="causal")],
+            )
+            for window in ({"window_size_left": 128}, {"window_size_right": 64}):
                 self.assertEqual(
-                    dispatch.run(**{**causal, **disqualifier}),
+                    dispatch.run(**{**causal, **window}),
                     [self.candidate_id(dispatch, "batch", mask="s_mask")],
                 )
         self.assertEqual(
             dispatch.run(mask=3, seqlen_k=512),
             [self.candidate_id(dispatch, "batch", mask="s_mask")],
         )
-        self.assertEqual(
-            dispatch.run(group=1, seqlen_k=512),
-            [self.candidate_id(dispatch, "group")],
-        )
-        self.assertEqual(
-            dispatch.run(group=1, seqlen_k=1024),
-            [self.candidate_id(dispatch, "group", bn0=128)],
-        )
-        self.assertEqual(
-            dispatch.run(group=1, seqlen_k=1024, has_cu_sk=1),
-            [self.candidate_id(dispatch, "group")],
-        )
-        self.assertEqual(
-            dispatch.run(group=1, seqlen_k=1024, has_sk_ptr=1),
-            [self.candidate_id(dispatch, "group")],
-        )
-        self.assertEqual(
-            dispatch.run(group=1, batch=4, seqlen_k=2047),
-            [self.candidate_id(dispatch, "group")],
-        )
-        self.assertEqual(
-            dispatch.run(group=1, batch=4, seqlen_k=2048),
-            [self.candidate_id(dispatch, "group", bn0=128)],
-        )
+        group = self.candidate_id(dispatch, "group")
+        for changes in (
+            dict(seqlen_k=512),
+            dict(seqlen_k=1024),
+            dict(seqlen_k=1024, has_cu_sk=1),
+            dict(seqlen_k=1024, has_sk_ptr=1),
+            dict(batch=4, seqlen_k=2047),
+            dict(batch=4, seqlen_k=2048),
+        ):
+            self.assertEqual(dispatch.run(group=1, **changes), [group])
         self.assertEqual(
             dispatch.run(lse=1, seqlen_k=512),
-            [self.candidate_id(dispatch, "batch", lse="t", bn0=128)],
-        )
-
-    def test_fp16_scheduled_dispatch_for_d128_and_d192(self):
-        dispatch, kernels = self.compile(kernel_filter="*qr_tdm_sched*")
-        self.assertEqual(
-            {(k.F_dtype, k.F_hdim, k.F_tile.F_bn0) for k in kernels},
-            {
-                (dtype, hdim, bn0)
-                for dtype in ("fp16", "bf16")
-                for hdim, bn0 in ((128, 128), (192, 64), (192, 128))
-            },
-        )
-
-        for mode, group in (("batch", 0), ("group", 1)):
-            for hdim, short_bn0 in ((128, 128), (192, 64)):
-                with self.subTest(mode=mode, hdim=hdim, length="short"):
-                    expected = dispatch.expected_id(
-                        dtype="fp16",
-                        mode=mode,
-                        hdim=hdim,
-                        bn0=short_bn0,
-                        pipeline="qr_tdm_sched",
-                        mask="s_no",
-                        lse="f",
-                        sink="f",
-                    )
-                    self.assertEqual(
-                        dispatch.run(
-                            dtype="fp16", group=group, hdim_q=hdim, seqlen_k=128
-                        ),
-                        [expected],
-                    )
-
-            long_k = 1024 if group else 512
-            n128 = self.candidate_id(dispatch, mode, bn0=128, dtype="fp16")
-            self.assertEqual(
-                dispatch.run(
-                    dtype="fp16",
-                    group=group,
-                    hdim_q=192,
-                    seqlen_q=long_k,
-                    seqlen_k=long_k,
-                ),
-                [n128],
-            )
-
-    def test_n64_only_filtered_inventory_still_dispatches_long_k(self):
-        dispatch, _ = self.compile(
-            filter_fn=lambda trait: (
-                trait.pipeline_tag != _D192_PIPELINE or trait.bn0 == 64
-            )
-        )
-        self.assertEqual(
-            dispatch.run(seqlen_k=512), [self.candidate_id(dispatch, "batch")]
+            [self.candidate_id(dispatch, "batch", lse="t")],
         )
 
     def test_n128_generic_no_mask_and_causal_dispatch(self):
-        dispatch, _ = self.compile(kernel_filter="*qr_tdm_sched*", mask_impl="generic")
+        dispatch, _ = self.compile(
+            kernel_filter=(
+                "fmha_fwd_d*_bf16_*_nlogits*_nbias*_*lse*_ndropout*_nskip*_nqscale*"
+            ),
+            mask_impl="generic",
+        )
         for mode, group in (("batch", 0), ("group", 1)):
             with self.subTest(mode=mode):
                 length = 1024 if group else 512
-                self.assertEqual(
-                    dispatch.run(group=group, seqlen_q=length, seqlen_k=length),
-                    [self.candidate_id(dispatch, mode, mask="no", bn0=128)],
-                )
-                causal = dict(
-                    group=group,
-                    mask=1,
-                    seqlen_q=length,
-                    seqlen_k=length,
-                    window_size_left=-1,
-                    window_size_right=0,
-                )
-                n128 = self.candidate_id(dispatch, mode, mask="causal", bn0=128)
-                self.assertEqual(dispatch.run(**causal), [n128])
-                self.assertEqual(dispatch.run(**{**causal, "mask": 2}), [n128])
-                generic = self.candidate_id(dispatch, mode, mask="generic")
-                self.assertEqual(
-                    dispatch.run(**{**causal, "mask": 3, "window_size_left": 64}),
-                    [generic],
-                )
+                dense = dict(group=group, seqlen_q=length, seqlen_k=length)
+                causal = dict(dense, mask=1, window_size_left=-1, window_size_right=0)
+                window = dict(causal, mask=3, window_size_left=64)
+                for arguments, mask in (
+                    (dense, "no"),
+                    (causal, "causal"),
+                    (dict(causal, mask=2), "causal"),
+                    (window, "generic"),
+                ):
+                    self.assertEqual(
+                        dispatch.run(**arguments),
+                        [self.candidate_id(dispatch, mode, mask=mask)],
+                    )
 
     def test_family_only_and_empty_filtered_dispatch(self):
         family, _ = self.compile(
             filter_fn=lambda trait: (
-                trait.pipeline_tag == _D192_PIPELINE and str(trait.hdim) == "192"
+                trait.pipeline_tag == "qr_tdm_pingpong" and str(trait.hdim) == "192"
             )
         )
-        candidate = self.candidate_id(family, "batch")
-        self.assertEqual(family.run(), [candidate])
-        for arguments in ({"seqlen_q": 127}, {"hdim_q": 128}):
-            self.assertEqual(family.run(**arguments), [-1])
+        self.assertEqual(family.run(), [self.candidate_id(family, "batch")])
+        self.assertEqual(
+            family.run(seqlen_q=127), [self.candidate_id(family, "batch", bm0=64)]
+        )
+        # Narrower heads, of whole vectors or not, take its padded instance; a wider
+        # one is left to the (filtered out) d256 bucket.
+        for arguments in ({"hdim_q": 128}, {"hdim_q": 191}):
+            self.assertEqual(
+                family.run(**arguments), [self.candidate_id(family, "batch", dpad="t")]
+            )
+        self.assertEqual(family.run(hdim_q=193), [-1])
         empty, _ = self.compile(filter_fn=lambda trait: False)
         self.assertEqual(empty.run(), [-1])
 
@@ -1102,6 +1238,7 @@ class TestCompiledGfx125D192Dispatch(unittest.TestCase):
                 dict(hdim_v=256, arg_v=128),
                 dict(arg_q=128),
                 dict(arg_v=256),
+                dict(arg_v=192),
             ):
                 with self.subTest(mode=mode, dimensions=dimensions):
                     self.assertNotEqual(
@@ -1110,86 +1247,69 @@ class TestCompiledGfx125D192Dispatch(unittest.TestCase):
 
     def test_real_dispatch_d128_priority_and_sequence_boundary(self):
         dispatch, kernels = self.compile()
-        self.assertTrue(
-            [
-                kernel
-                for kernel in kernels
-                if kernel.F_hdim == 128 and _is_family_kernel(kernel)
-            ]
+        self.assertEqual(
+            {k.F_pipeline.tag for k in kernels if k.F_hdim == 128}, {"qr_tdm_pingpong"}
         )
         for mode, group in (("batch", 0), ("group", 1)):
-            for length, bm0 in ((1, 64), (127, 64), (128, 64), (2047, 64), (2048, 128)):
-                expected = dispatch.expected_id(
+            # qr_tdm_pingpong takes every d128 query, small grids included: up to 16 rows
+            # its 16-row tile, below 128 its 64-row one, else (no left window) its 128-row
+            # 128-key-trip one at any key length.
+            for length, seqlen_k, bm0, bn0 in (
+                (1, 128, 16, None),
+                (16, 128, 16, None),
+                (17, 128, 64, 64),
+                (127, 128, 64, 64),
+                (128, 128, 128, 128),
+                (2047, 128, 128, 128),
+                (4095, 4096, 128, 128),
+                (4096, 128, 128, 128),
+                (4096, 8192, 128, 128),
+                (32768, 128, 128, 128),
+            ):
+                extra = {"bn0": bn0}
+                if bm0 == 16:
+                    # group mode compares the total keys against the batch's
+                    extra["bn0"] = _short_q_bn0(seqlen_k // 2 if group else seqlen_k)
+                # one query per head: the 4 query heads of a KV head pack into a tile
+                if length == 1 and not group:
+                    extra["packgqa"] = "t"
+                selected = dispatch.expected_id(
                     mode=mode,
                     hdim=128,
-                    pipeline="qr_tdm",
+                    pipeline="qr_tdm_pingpong",
                     bm0=bm0,
+                    **extra,
                     spad="t" if group else "f",
                     mask="s_no",
                     lse="f",
                     sink="f",
                     dpad="f",
                 )
-                selected = expected
-                if length >= 128:
-                    selected = dispatch.expected_id(
-                        mode=mode,
-                        hdim=128,
-                        pipeline="qr_tdm_sched",
-                        mask="s_no",
-                        lse="f",
-                        sink="f",
-                    )
                 self.assertEqual(
                     dispatch.run(
                         group=group,
                         hdim_q=128,
                         hdim_v=128,
                         seqlen_q=length,
+                        seqlen_k=seqlen_k,
                     ),
                     [selected],
+                    (mode, length, seqlen_k),
                 )
-
-    def test_real_dispatch_d128_o_layout_fallback(self):
-        dispatch, _ = self.compile()
-        for mode, group in (("batch", 0), ("group", 1)):
-            sched = dispatch.expected_id(
-                mode=mode,
-                hdim=128,
-                pipeline="qr_tdm_sched",
-                mask="s_no",
-                lse="f",
-                sink="f",
-            )
-            fallback = dispatch.expected_id(
-                mode=mode,
-                hdim=128,
-                pipeline="qr_tdm",
-                bm0=128,
-                spad="t" if group else "f",
-                mask="s_no",
-                lse="f",
-                sink="f",
-                dpad="f",
-            )
-            rejected = [
-                dict(o_offset=2),
-                dict(stride_o=1028),
-                dict(nhead_stride_o=132),
-                dict(stride_o=-1024),
-                dict(stride_o=16909320),
-            ]
-            accepted = [dict(stride_o=16909312)]
-            (rejected if group == 0 else accepted).append(dict(batch_stride_o=262148))
-            for changes in rejected + accepted:
-                selected = fallback if changes in rejected else sched
-                self.assertEqual(
-                    dispatch.run(
-                        group=group, hdim_q=128, hdim_v=128, seqlen_q=2048, **changes
-                    ),
-                    [selected],
-                    changes,
-                )
+        # 32 query heads per KV head overflow the 16-row tile: packed GQA moves to the
+        # 64-row tile once the unpacked heads fill the grid twice over (batch x nhead_q >=
+        # 2 x num_cus), else the heads stay unpacked on the 16-row tile.
+        mqa = dict(hdim_q=128, hdim_v=128, seqlen_q=1, nhead_q=64, nhead_k=2)
+        features = dict(mode="batch", hdim=128, pipeline="qr_tdm_pingpong", mask="s_no")
+        features.update(lse="f", sink="f", dpad="f", spad="f")
+        self.assertEqual(
+            dispatch.run(batch=8, **mqa),
+            [dispatch.expected_id(bm0=64, packgqa="t", **features)],
+        )
+        self.assertEqual(
+            dispatch.run(batch=7, **mqa),
+            [dispatch.expected_id(bm0=16, bn0=_short_q_bn0(128), **features)],
+        )
 
     def test_real_dispatch_mask_lse_and_unsupported_features(self):
         kernel_filter = (
@@ -1206,7 +1326,7 @@ class TestCompiledGfx125D192Dispatch(unittest.TestCase):
                     self.assertEqual(
                         dispatch.run(group=group, mask=mask, lse=lse), [candidate]
                     )
-            sink = self.fallback_id(dispatch, mode, sink="t")
+            sink = self.candidate_id(dispatch, mode, sink="t")
             self.assertEqual(dispatch.run(group=group, sink=1), [sink])
         for changes in (
             dict(row=0),
@@ -1235,6 +1355,8 @@ class TestCompiledGfx125D192Dispatch(unittest.TestCase):
                     )
 
     def test_real_dispatch_missing_candidate_does_not_gate_generic(self):
+        # Without d192 instances (filtered at render time or at generation) a d192 query
+        # falls through to the next bucket that takes it, d256's padded instance.
         for render_filter in (True, False):
             with self.subTest(render_filter=render_filter):
                 dispatch, _ = self.compile(
@@ -1244,46 +1366,77 @@ class TestCompiledGfx125D192Dispatch(unittest.TestCase):
                         else _SUPPORTED_FEATURE_FILTER.replace("d*_", "d256_", 1)
                     ),
                     filter_fn=(
-                        (lambda trait: trait.pipeline_tag != _D192_PIPELINE)
+                        (lambda trait: str(trait.hdim) != "192")
                         if render_filter
                         else None
                     ),
                 )
                 for mode, group in (("batch", 0), ("group", 1)):
-                    fallback = (
-                        self.fallback_id(dispatch, mode)
-                        if render_filter
-                        else dispatch.expected_id(
-                            mode=mode,
-                            hdim=256,
-                            pipeline="qr_tdm",
-                            bm0=64,
-                            mask="s_no",
-                            lse="f",
-                            spad="t" if group else "f",
-                            dpad="t",
-                            sink="f",
-                        )
+                    self.assertEqual(
+                        dispatch.run(group=group),
+                        [self.d256_id(dispatch, mode, dpad="t")],
                     )
-                    self.assertEqual(dispatch.run(group=group), [fallback])
 
     def test_real_dispatch_candidate_only_filter_is_strict(self):
         for receipt in (0, 100, 200, 600):
             with self.subTest(receipt=receipt):
                 dispatch, kernels = self.compile(
-                    receipt=receipt, kernel_filter=f"*{_D192_PIPELINE}*"
+                    receipt=receipt, kernel_filter="*d192_bf16*_qr_tdm_pingpong_*"
                 )
                 self.assertTrue(kernels)
-                self.assertTrue(all(_is_family_kernel(kernel) for kernel in kernels))
+                self.assertTrue(
+                    all(
+                        kernel.F_pipeline.tag == "qr_tdm_pingpong"
+                        and kernel.F_hdim == 192
+                        for kernel in kernels
+                    )
+                )
                 self.assertEqual(len({kernel.name for kernel in kernels}), len(kernels))
-                for mode in sorted({kernel.F_mode for kernel in kernels}):
+                modes = sorted({kernel.F_mode for kernel in kernels})
+                for mode in modes:
                     group = int(mode == "group")
                     self.assertEqual(
                         dispatch.run(group=group), [self.candidate_id(dispatch, mode)]
                     )
-                    self.assertEqual(dispatch.run(group=group, seqlen_q=127), [-1])
-                    self.assertEqual(dispatch.run(group=group, hdim_q=160), [-1])
-                    self.assertEqual(dispatch.run(group=group, logits=1), [-1])
+                    self.assertEqual(
+                        dispatch.run(group=group, seqlen_q=127),
+                        [self.candidate_id(dispatch, mode, bm0=64)],
+                    )
+                    self.assertEqual(
+                        dispatch.run(group=group, hdim_q=191),
+                        [self.candidate_id(dispatch, mode, dpad="t")],
+                    )
+                    self.assertEqual(dispatch.run(group=group, hdim_q=193), [-1])
+                    # skip takes effect in group mode only, on pingpong's skip
+                    # instances; batch mode reuses the instances without it
+                    self.assertEqual(
+                        dispatch.run(group=group, skip=1),
+                        [
+                            dispatch.expected_id(
+                                mode=mode,
+                                hdim=192,
+                                pipeline="qr_tdm_pingpong",
+                                bm0=128,
+                                mask="s_no",
+                                lse="f",
+                                spad="t",
+                                dpad="f",
+                                sink="f",
+                                skip="t",
+                            )
+                        ]
+                        if group
+                        else dispatch.run(group=group),
+                    )
+                # fp16/bf16 have no scheduled pipeline left to filter on
+                _, sched_kernels = get_fwd_blobs(
+                    ["gfx1250"],
+                    f"*bf16*{_SCHED_PIPELINE}*",
+                    receipt,
+                    [-1],
+                    "simplified",
+                )
+                self.assertFalse(sched_kernels)
 
     def test_real_dispatch_receipt_and_optdim_baseline(self):
         cmake = (_FMHA_EXAMPLE_DIR / "CMakeLists.txt").read_text()
@@ -1299,32 +1452,25 @@ class TestCompiledGfx125D192Dispatch(unittest.TestCase):
                 with self.subTest(receipt=receipt, optdims=optdims):
                     dispatch, kernels = self.compile(receipt=receipt, optdims=optdims)
                     modes = sorted({kernel.F_mode for kernel in kernels})
-                    family = [kernel for kernel in kernels if _is_family_kernel(kernel)]
-                    expected_family_dims = (
-                        {64, 128, 192}
-                        if optdims == [-1]
-                        else {64, 128, 192}.intersection(optdims)
-                    )
+                    # qr_tdm_pingpong only (fp16/bf16 have no scheduled pipeline), at
+                    # every requested head dim it serves
                     self.assertEqual(
-                        {kernel.F_hdim for kernel in family}, expected_family_dims
+                        {k.F_pipeline.tag for k in kernels}, {"qr_tdm_pingpong"}
+                    )
+                    all_dims = {h for h, _ in GFX125_QR_TDM_PINGPONG_HDIMS}
+                    self.assertEqual(
+                        {kernel.F_hdim for kernel in kernels},
+                        all_dims if optdims == [-1] else all_dims.intersection(optdims),
                     )
                     for mode in modes:
                         group = int(mode == "group")
                         if optdims == [128]:
                             self.assertEqual(dispatch.run(group=group), [-1])
                         elif optdims == [256]:
-                            fallback = dispatch.expected_id(
-                                mode=mode,
-                                hdim=256,
-                                pipeline="qr_tdm",
-                                bm0=64,
-                                mask="s_no",
-                                lse="f",
-                                spad="t" if group else "f",
-                                dpad="t",
-                                sink="f",
+                            self.assertEqual(
+                                dispatch.run(group=group),
+                                [self.d256_id(dispatch, mode, dpad="t")],
                             )
-                            self.assertEqual(dispatch.run(group=group), [fallback])
                         else:
                             self.assertEqual(
                                 dispatch.run(group=group),
@@ -1338,10 +1484,12 @@ class TestCompiledGfx125D192Dispatch(unittest.TestCase):
             self.assertIn("a.max_seqlen_q >= 128", api)
             return api.replace("a.max_seqlen_q >= 128", "a.max_seqlen_q >= 0")
 
+        # Below 128 rows the 64-row qr_tdm_pingpong tile takes the query; the broken
+        # gate shuts it out and the unconditional 128-row tile behind it takes over.
         dispatch, _ = self.compile(mutate=mutate)
         actual = dispatch.run(seqlen_q=127)
-        self.assertNotEqual(actual, [self.fallback_id(dispatch, "batch")])
-        self.assertEqual(actual, [self.candidate_id(dispatch, "batch")])
+        self.assertNotEqual(actual, [self.candidate_id(dispatch, "batch", bm0=64)])
+        self.assertEqual(actual, [self.candidate_id(dispatch, "batch", bm0=128)])
 
 
 _SUPPORTED_DISPATCH_FILTER = (
@@ -1367,24 +1515,6 @@ class TestGfx125V128Codegen(unittest.TestCase):
             [int(value) for value in default_dims.group(1).split(",")],
         ]
 
-    def test_sched_respects_requested_dimensions(self):
-        for dimensions, expected in (
-            ([-1], {64, 128, 192}),
-            ([128], {128}),
-            ([192], {192}),
-            ([256], set()),
-            ([128, 192], {128, 192}),
-            ([32, 64, 80, 128, 256], {64, 128}),
-            ([], set()),
-            ([64], {64}),
-        ):
-            with self.subTest(dimensions=dimensions):
-                _, kernels = get_fwd_blobs(
-                    ["gfx1250"], "*_qr_tdm_sched_*", 100, dimensions, "simplified"
-                )
-                actual = {kernel.F_hdim for kernel in kernels}
-                self.assertEqual(actual, expected)
-
     def test_dimension_filter_preserves_full_inventory(self):
         for targets in (["gfx1250"], ["gfx942", "gfx950", "gfx1250"]):
             for receipt in (0, 100, 200, 600):
@@ -1403,42 +1533,6 @@ class TestGfx125V128Codegen(unittest.TestCase):
                             if dimensions == [-1] or k.F_hdim in dimensions
                         ]
                         self.assertEqual([k.filename for k in kernels], expected)
-
-    def test_sched_filter_emits_only_matching_kernels(self):
-        for dtype in ("fp16", "bf16"):
-            for receipt, count in ((0, 8), (100, 4), (200, 4), (600, 8)):
-                for dimensions in self.dimension_cases():
-                    with self.subTest(dtype=dtype, receipt=receipt, dims=dimensions):
-                        self.check_sched_filter(dtype, receipt, count, dimensions)
-
-    def check_sched_filter(self, dtype, receipt, count, dimensions):
-        _, kernels = get_fwd_blobs(
-            ["gfx1250"], f"*{dtype}*_qr_tdm_sched_*", receipt, dimensions, "simplified"
-        )
-        selected_dims = (
-            {64, 128, 192}
-            if dimensions == [-1]
-            else {64, 128, 192}.intersection(dimensions)
-        )
-        self.assertEqual({k.F_hdim for k in kernels}, selected_dims)
-        self.assertEqual(
-            len(kernels),
-            sum(
-                (
-                    {0: 12, 100: 8, 200: 4, 600: 12}[receipt]
-                    if dim == 64
-                    else count * (2 if dim == 192 else 1)
-                )
-                for dim in selected_dims
-            ),
-        )
-        self.assertTrue(
-            all(
-                kernel.F_pipeline.tag == "qr_tdm_sched"
-                and fnmatch(kernel.name, f"*{dtype}*_qr_tdm_sched_*")
-                for kernel in kernels
-            )
-        )
 
     def test_dimension_generic_and_unsupported_filters_are_deterministic(self):
         for targets in (["gfx1250"], ["gfx942", "gfx950", "gfx1250"]):
@@ -1469,131 +1563,134 @@ class TestGfx125V128Codegen(unittest.TestCase):
     def test_d64_geometry_and_padding(self):
         for dtype in ("fp16", "bf16"):
             pool, kernels = get_fwd_blobs(
-                ["gfx1250"], f"*d64_{dtype}*_qr_tdm_sched_*", 600, [64], "simplified"
+                ["gfx1250"], f"*d64_{dtype}*", 600, [64], "simplified"
             )
-            self.assertEqual(len(kernels), 12)
-            for kernel in kernels:
-                self.assertEqual(kernel.F_tile.F_bm0, 128)
-                self.assertEqual(kernel.F_tile.F_bn0, 64)
+            # qr_tdm_pingpong serves every d64 query, skip (group mode) and head dims
+            # off the vector included; no qr_tdm, qr_tdm_sched or generic qr is
+            # generated.
+            self.assertEqual({k.F_pipeline.tag for k in kernels}, {"qr_tdm_pingpong"})
+            self.assertEqual(
+                {k.F_mode for k in kernels if k.F_pipeline.F_skip == "t"}, {"group"}
+            )
+            pingpong = [
+                k
+                for k in kernels
+                if k.F_pipeline.tag == "qr_tdm_pingpong" and _has_base_features(k)
+            ]
+            self.assertEqual({k.F_tile.F_bm0 for k in pingpong}, {16, 64, 128})
+            self.assertEqual({k.F_mode for k in pingpong}, {"batch", "group"})
+            for kernel in pingpong:
+                # the short-query tile's trips of 128 or 512 keys (test_pingpong_decode_tiles)
+                self.assertIn(
+                    kernel.F_tile.F_bn0,
+                    (128, 512) if kernel.F_tile.F_bm0 == 16 else (64,),
+                )
                 self.assertEqual(kernel.F_tile.F_bn1, 64)
-                self.assertEqual(kernel.F_tile.F_occupancy, 3)
-                self.assertEqual(kernel.F_pipeline.F_dpad, "f")
-                self.assertEqual(kernel.F_pipeline.F_dvpad, "f")
+                self.assertEqual(kernel.F_tile.F_bk0max, 64)
                 trait = kernel.api_trait()
-                if kernel.F_mode == "batch" and trait.skpad == "f":
-                    self.assertIn("a.seqlen_k % 64 == 0", trait.skcheck)
-                    self.assertIn("a.seqlen_k != 0", trait.skcheck)
-                    self.assertIn("a.cu_seqlen_k_ptr == nullptr", trait.skcheck)
-                else:
+                if kernel.F_mode == "group":
                     self.assertEqual(trait.spad, "t")
                     self.assertEqual(trait.skpad, "t")
+                elif trait.skpad == "f":
+                    # The unpadded batch instances take any K length.
+                    self.assertEqual(trait.skcheck, "true")
+                # the padded fp16/bf16 instances take any head dim
+                self.assertEqual(
+                    trait.dcheck,
+                    "a.hdim_q % 64 == 0" if trait.dpad == "f" else "true",
+                )
+                self.assertEqual(
+                    trait.dvcheck, "a.hdim_v == 64" if trait.dvpad == "f" else "true"
+                )
             self.assertIn("a.hdim_v == 64", pool.render("test"))
 
-    def test_fp16_bf16_d128_sched_emission(self):
-        for dtype in ("fp16", "bf16"):
-            for receipt, count in ((0, 8), (100, 4), (200, 4), (600, 8)):
-                with self.subTest(dtype=dtype, receipt=receipt):
-                    self.check_d128_emission(dtype, receipt, count)
-
-    def test_fp8_sched_dispatched_before_qr_tdm(self):
-        pool, kernels = get_fwd_blobs(
-            ["gfx1250"], "*d128_fp8bf16_batch*", 0, [128], "simplified"
-        )
-        self.assertTrue(any(_is_plain_fp8_sched(k) for k in kernels))
-        api = pool.render("test")
-        self.assertLess(
-            api.rindex("QRKSVS_TDM_SCHED_FP8"),
-            api.index("BlockFmhaPipelineEnum::QRKSVS_TDM,"),
-        )
-        # No seqlen_q condition gates qr_tdm_fp8_sched.
-        for k in kernels:
-            if _is_plain_fp8_sched(k):
-                self.assertNotIn("max_seqlen_q", str(k.F_pipeline.F_constraint))
-        self.assertIn("a.block_scale_size_q > 0 && a.block_scale_size_kv > 0", api)
-        self.assertIn("a.block_scale_size_q % 128 == 0", api)
-        self.assertIn("a.block_scale_size_kv % 32 == 0", api)
-        # The FP8 sched tile runs two workgroups per CU, one with an elementwise bias.
-        for k in kernels:
-            if _is_plain_fp8_sched(k):
-                self.assertEqual(
-                    k.F_tile.F_occupancy, 1 if k.F_pipeline.F_bias == "bias" else 2
-                )
-        # BLOCKSCALE qr_tdm and qr_tdm_fp8_sched share one kv-scale row via the lcm.
-        self.assertIn("ck_tile::lcm(", pool.render_block_scale_size_kv())
-
-    def test_mxfp8_emits_only_fp8_sched(self):
-        pool, kernels = get_fwd_blobs(
-            ["gfx1250"], "*d128_mxfp8*", 0, [128], "simplified"
-        )
-        self.assertTrue(kernels)
-        self.assertEqual({k.F_mode for k in kernels}, {"batch", "group"})
-        for k in kernels:
-            with self.subTest(kernel=k.name):
-                self.assertEqual(k.F_pipeline.tag, "qr_tdm_fp8_sched")
-                self.assertEqual(k.F_pipeline.F_vlayout, "row")
-                self.assertEqual(k.F_pipeline.F_qscale, "mx")
-                self.assertEqual(k.F_tile.F_occupancy, 2)
-        api = pool.render("test")
-        self.assertIn("reinterpret_cast<uintptr_t>(a.q_descale_ptr) % 4 == 0", api)
-        self.assertIn("a.batch_stride_k_descale % 4 == 0", api)
-        # No seqlen_q condition gates qr_tdm_fp8_sched.
-        for k in kernels:
-            self.assertNotIn("max_seqlen_q", str(k.F_pipeline.F_constraint))
-
-    def test_fp8_sched_packgqa_decode_instances(self):
-        # Packed-GQA decode on the full tile: batch only, no bias, dispatched ahead of plain sched.
-        cases = (
-            ("fp8bf16", {"no", "pertensor", "perhead", "blockscale"}),
-            ("mxfp8bf16", {"mx"}),
-        )
-        for (dtype, qscales), hdim in itertools.product(cases, (64, 128, 256)):
-            with self.subTest(dtype=dtype, hdim=hdim):
-                pool, kernels = get_fwd_blobs(
-                    ["gfx1250"], f"*d{hdim}_{dtype}_*", 0, [hdim], "simplified"
-                )
-                packed = [k for k in kernels if _fp8_sched_kind(k) == "packgqa"]
-                self.assertEqual(len(packed), len(qscales) * 8)
-                for k in packed:
-                    self.assertEqual(k.F_mode, "batch")
-                    self.assertEqual(k.F_pipeline.F_bias, "no")
-                    self.assertIn(k.F_pipeline.F_qscale, qscales)
-                    self.assertIn("_packgqa_", k.name)
-                    constraint = str(k.api_trait().constraint)
-                    self.assertRegex(
-                        constraint,
-                        r"fmha_fwd_can_merge_head_groups\(a, 128, \w+, \w+\)",
-                    )
-                    self.assertIn(
-                        "ck_tile::TileFmhaMergeHeadsTraits<ck_tile::TileFmhaTraits<",
-                        k.render(),
-                    )
-                order = _fp8_sched_dispatch_order(pool.render("test"))
-                self.assertLess(order.index((128, True)), order.index((128, False)))
-
-    def test_fp8_sched_packgqa_one_wave_decode_instances(self):
-        # Packed-GQA decode on the 32-row one-wavefront tile: batch only, dispatched first.
-        for dtype, count in (("fp8bf16", 32), ("mxfp8bf16", 8)):
+    def test_inventory_is_pingpong_and_fp8_sched_for_every_dtype(self):
+        # gfx125 generates qr_tdm_pingpong at every input type and every head-dim pair it
+        # serves, and besides it only qr_tdm_fp8_sched (fp8 d128, MX d64/d128/d256; none at
+        # 16 bits): no qr_tdm or generic qr.
+        factory = KernelComponentFactoryGfx125
+        self.assertEqual(set(factory.supported_dtypes()), set(_GFX125_DTYPES))
+        qscales = {
+            "fp16": {"no"},
+            "bf16": {"no"},
+            "fp8": {"no", "pertensor", "perhead", "blockscale"},
+            "fp8bf16": {"no", "pertensor", "perhead", "blockscale"},
+            "mxfp8": {"mx"},
+            "mxfp8bf16": {"mx"},
+        }
+        for dtype in _GFX125_DTYPES:
+            sched_tags = {tag for tag, dts in _SCHED_DTYPES.items() if dtype in dts}
+            sched_hdims = {(h, h) for h in _SCHED_HDIMS.get(dtype, ())}
             with self.subTest(dtype=dtype):
-                pool, kernels = get_fwd_blobs(
-                    ["gfx1250"], f"*d64_{dtype}_*", 0, [64], "simplified"
+                tiles = factory.get_hdim_tile_size_dict(dtype)
+                self.assertEqual(set(tiles), set(gfx125_qr_tdm_pingpong_hdims(dtype)))
+                for hdim_pair, hdim_tiles in tiles.items():
+                    owned = [
+                        t for t in hdim_tiles if t.F_pipeline_tag == "qr_tdm_pingpong"
+                    ]
+                    others = [t for t in hdim_tiles if t not in owned]
+                    # pingpong's tiles first, then the scheduled ones
+                    self.assertEqual(hdim_tiles[: len(owned)], owned)
+                    self.assertEqual(bool(others), hdim_pair in sched_hdims)
+                    for t in others:
+                        self.assertIsNone(t.F_pipeline_tag)
+                        self.assertTrue(factory.is_sched_tile(dtype, t, hdim_pair[0]))
+                    # pingpong's last tile takes every query left (no range clause)
+                    self.assertEqual(str(owned[-1].F_constraint), "true")
+                    pipelines = factory.get_pipelines(
+                        dtype, *hdim_pair, 0, "simplified"
+                    )
+                    self.assertTrue(pipelines)
+                    self.assertEqual(
+                        {p.tag for p in pipelines},
+                        {"qr_tdm_pingpong"}
+                        | (sched_tags if hdim_pair in sched_hdims else set()),
+                    )
+                    self.assertEqual({p.F_qscale for p in pipelines}, qscales[dtype])
+                    # skip_min_seqlen_q variants (group mode): pingpong's only
+                    self.assertEqual(
+                        {p.F_skip for p in pipelines if p.tag == "qr_tdm_pingpong"},
+                        {"f", "t"},
+                    )
+                    self.assertEqual(
+                        {p.F_skip for p in pipelines if p.tag != "qr_tdm_pingpong"},
+                        {"f"} if others else set(),
+                    )
+                _, kernels = get_fwd_blobs(
+                    ["gfx1250"], f"*_{dtype}_*", 0, [-1], "simplified"
                 )
-                packed = [k for k in kernels if _fp8_sched_kind(k) == "packgqa_32row"]
-                self.assertEqual(len(packed), count)
-                for k in packed:
-                    self.assertEqual(k.F_mode, "batch")
-                    self.assertEqual((k.F_tile.F_bm0, k.F_tile.F_rm0), (32, 1))
-                    self.assertIn("_packgqa_", k.name)
-                    constraint = str(k.api_trait().constraint)
-                    self.assertRegex(
-                        constraint,
-                        r"fmha_fwd_can_merge_head_groups\(a, 32, \w+, \w+, true\)",
+                # ("_fp8_" also matches fp8bf16's "_qr_tdm_fp8_sched_" names)
+                kernels = [k for k in kernels if k.F_dtype == dtype]
+                self.assertTrue(kernels)
+                for hdim_pair in gfx125_qr_tdm_pingpong_hdims(dtype):
+                    self.assertEqual(
+                        {
+                            k.F_pipeline.tag
+                            for k in kernels
+                            if (k.F_hdim, k.F_tile.F_bn1) == hdim_pair
+                        },
+                        {"qr_tdm_pingpong"}
+                        | (sched_tags if hdim_pair in sched_hdims else set()),
                     )
-                    self.assertIn(
-                        "ck_tile::TileFmhaMergeHeadsTraits<ck_tile::TileFmhaTraits<",
-                        k.render(),
-                    )
-                order = _fp8_sched_dispatch_order(pool.render("test"))
-                self.assertLess(order.index((32, True)), order.index((128, True)))
+                self.assertEqual(
+                    {(k.F_hdim, k.F_tile.F_bn1) for k in kernels},
+                    set(gfx125_qr_tdm_pingpong_hdims(dtype)),
+                )
+                self.assertEqual(
+                    {k.F_pipeline.F_qscale for k in kernels}, qscales[dtype]
+                )
+                self.assertEqual(
+                    {k.F_mode for k in kernels if k.F_pipeline.F_skip == "t"}, {"group"}
+                )
+                # fp8 sched: d128 small grids; MX sched: its prefill (more than 16 rows)
+                for k in kernels:
+                    if k.F_pipeline.tag in sched_tags:
+                        constraint = str(k.api_trait().constraint)
+                        if dtype.startswith("mx"):
+                            self.assertIn("a.max_seqlen_q > 16", constraint)
+                            self.assertNotIn(GFX125_QR_TDM_SCHED_SMALL_GRID, constraint)
+                        else:
+                            self.assertIn(GFX125_QR_TDM_SCHED_SMALL_GRID, constraint)
 
     def test_mxfp8bf16_mirrors_mxfp8(self):
         def key(k):
@@ -1622,623 +1719,285 @@ class TestGfx125V128Codegen(unittest.TestCase):
         self.assertTrue(traits["mxfp8bf16"])
         self.assertEqual(traits["mxfp8bf16"], traits["mxfp8"])
 
-    def test_fp8_and_fp8bf16_emit_fp8_sched(self):
-        for dtype in ("fp8", "fp8bf16"):
-            with self.subTest(dtype=dtype):
-                pool, kernels = get_fwd_blobs(
-                    ["gfx1250"], f"*d128_{dtype}_batch*", 0, [128], "simplified"
-                )
-                sched = [k for k in kernels if _is_plain_fp8_sched(k)]
-                self.assertEqual(
-                    sorted({k.F_pipeline.F_qscale for k in sched}),
-                    ["blockscale", "no", "perhead", "pertensor"],
-                )
-                for k in sched:
-                    self.assertEqual(k.F_dtype, dtype)
-                    self.assertEqual(
-                        k.F_tile.F_occupancy, 1 if k.F_pipeline.F_bias == "bias" else 2
-                    )
-                api = pool.render("test")
-                self.assertLess(
-                    api.rindex("QRKSVS_TDM_SCHED_FP8"),
-                    api.index("BlockFmhaPipelineEnum::QRKSVS_TDM,"),
-                )
-
-    def test_fp8_sched_emits_lse_variants(self):
-        for dtype in ("fp8", "fp8bf16", "mxfp8"):
-            with self.subTest(dtype=dtype):
-                _, kernels = get_fwd_blobs(
-                    ["gfx1250"], f"*d128_{dtype}_batch*", 0, [128], "simplified"
-                )
-                sched = [k for k in kernels if _is_plain_fp8_sched(k)]
-                per_lse = 2 if dtype == "mxfp8" else 16
-                self.assertEqual(
-                    Counter((k.F_pipeline.F_mask, k.F_pipeline.F_lse) for k in sched),
-                    Counter(
-                        {
-                            (mask, lse): per_lse
-                            for mask in ("s_no", "s_mask")
-                            for lse in ("f", "t")
-                        }
-                    ),
-                )
-
-    def test_fp8_sched_emits_mask_variants(self):
-        for mask_impl, masks in (
-            ("simplified", ("s_no", "s_mask")),
-            ("generic", ("no", "causal", "generic")),
-        ):
-            for dtype in ("fp8", "fp8bf16", "mxfp8"):
-                with self.subTest(dtype=dtype, mask_impl=mask_impl):
-                    pool, kernels = get_fwd_blobs(
-                        ["gfx1250"], f"*d128_{dtype}_batch*", 0, [128], mask_impl
-                    )
-                    sched = [k for k in kernels if _is_plain_fp8_sched(k)]
-                    per_mask = 4 if dtype == "mxfp8" else 32
-                    self.assertEqual(
-                        Counter(k.F_pipeline.F_mask for k in sched),
-                        Counter({mask: per_mask for mask in masks}),
-                    )
-                    if dtype != "mxfp8":
-                        api = pool.render("test")
-                        self.assertLess(
-                            api.rindex("QRKSVS_TDM_SCHED_FP8"),
-                            api.index("BlockFmhaPipelineEnum::QRKSVS_TDM,"),
-                        )
-
-    def test_fp8_sched_emits_sink_variants(self):
-        for dtype in ("fp8", "fp8bf16", "mxfp8"):
-            with self.subTest(dtype=dtype):
-                _, kernels = get_fwd_blobs(
-                    ["gfx1250"], f"*d128_{dtype}_*", 0, [128], "simplified"
-                )
-                sched = [k for k in kernels if _is_plain_fp8_sched(k)]
-
-                def key(k):
-                    return (
-                        k.F_mode,
-                        k.F_pipeline.F_qscale,
-                        k.F_pipeline.F_mask,
-                        k.F_pipeline.F_lse,
-                    )
-
-                by_sink = {
-                    sink: Counter(key(k) for k in sched if k.F_pipeline.F_sink == sink)
-                    for sink in ("f", "t")
-                }
-                self.assertTrue(by_sink["t"])
-                self.assertEqual(by_sink["t"], by_sink["f"])
-                for k in sched:
-                    sink = k.F_pipeline.F_sink == "t"
-                    constraint = str(k.F_pipeline.F_constraint)
-                    # The virtual sink is compiled in exactly for the F_sink instances.
-                    self.assertIn(
-                        "FmhaTdmSchedFp8PolicyFor<fmha_pipeline_problem>, "
-                        + ("true" if sink else "false"),
-                        k.render(),
-                    )
-                    self.assertEqual("a.sink_ptr == nullptr" in constraint, not sink)
-                    # Mask sink tokens are handled in-kernel, MX included.
-                    self.assertNotIn("sink_size", constraint)
-
-    def test_fp8_sched_emits_elementwise_bias_variants(self):
-        for dtype in ("fp8", "fp8bf16", "mxfp8"):
-            with self.subTest(dtype=dtype):
-                pool, kernels = get_fwd_blobs(
-                    ["gfx1250"], f"*d128_{dtype}_*", 0, [128], "simplified"
-                )
-                sched = [k for k in kernels if _is_plain_fp8_sched(k)]
-
-                def key(k):
-                    return (
-                        k.F_mode,
-                        k.F_pipeline.F_qscale,
-                        k.F_pipeline.F_mask,
-                        k.F_pipeline.F_lse,
-                        k.F_pipeline.F_sink,
-                    )
-
-                by_bias = {
-                    bias: Counter(key(k) for k in sched if k.F_pipeline.F_bias == bias)
-                    for bias in ("no", "bias", "alibi")
-                }
-                self.assertTrue(by_bias["no"])
-                self.assertFalse(by_bias["alibi"])
-                # MX + bias is not implemented; the other dtypes mirror the no-bias set.
-                if dtype == "mxfp8":
-                    self.assertFalse(by_bias["bias"])
-                else:
-                    self.assertEqual(by_bias["bias"], by_bias["no"])
-                    self.assertIn("bias_enum::elementwise_bias", pool.render("test"))
-                for k in sched:
-                    if k.F_pipeline.F_bias == "bias":
-                        self.assertEqual(k.F_tile.F_occupancy, 1)
-                        self.assertIn("_o1_qr_tdm_fp8_sched_", k.name)
-
-    def test_fp8_sched_d64_mirrors_d128(self):
-        def key(k):
-            return (
-                k.F_mode,
-                k.F_pipeline.F_qscale,
-                k.F_pipeline.F_mask,
-                k.F_pipeline.F_lse,
-                k.F_pipeline.F_sink,
-                k.F_pipeline.F_bias,
-                k.F_tile.F_occupancy,
-            )
-
-        for dtype in ("fp8", "fp8bf16", "mxfp8", "mxfp8bf16"):
-            with self.subTest(dtype=dtype):
-                traits = {}
-                for hdim in (64, 128):
-                    pool, kernels = get_fwd_blobs(
+    def test_mx_on_pingpong_at_fp8_head_dims(self):
+        """MX takes qr_tdm_pingpong at its every head dim: PV on 128-deep warp gemms (the
+        scaled WMMA's K; the 16-row tile's trip is one per key warp), 64-deep ones zero
+        padded in registers on the prefill tiles of GFX125_QR_TDM_PINGPONG_MX_64_KEY_TRIPS,
+        whose trips take 64 keys; QK on the widest WMMA K
+        dividing the Q/K row (64-deep slices zero padded in registers), rows padded to
+        whole 64-deep slices, or 128-deep ones where that takes fewer scaled WMMAs (d192:
+        2 for 3); prefill at d64/d128/d256 also has qr_tdm_fp8_sched."""
+        for dtype in ("mxfp8", "mxfp8bf16"):
+            for hdim, hdim_v in gfx125_qr_tdm_pingpong_hdims(dtype):
+                with self.subTest(dtype=dtype, hdim=hdim):
+                    _, kernels = get_fwd_blobs(
                         ["gfx1250"], f"*d{hdim}_{dtype}_*", 0, [hdim], "simplified"
                     )
-                    sched = [k for k in kernels if _is_plain_fp8_sched(k)]
-                    traits[hdim] = Counter(key(k) for k in sched)
-                    if hdim == 64:
-                        api = pool.render("test")
-                        # MXFP8 has no other D64 pipeline.
-                        if dtype in ("mxfp8", "mxfp8bf16"):
-                            self.assertEqual(
-                                len(sched),
-                                sum(k.F_pipeline.F_packgqa == "f" for k in kernels),
-                            )
-                        else:
-                            self.assertLess(
-                                api.rindex("QRKSVS_TDM_SCHED_FP8"),
-                                api.index("BlockFmhaPipelineEnum::QRKSVS_TDM,"),
-                            )
-                        for k in sched:
-                            # M128 N128 tile, K64 QK WMMA, K128 PV WMMA.
-                            t = k.F_tile
-                            self.assertEqual(
-                                (
-                                    t.F_bm0,
-                                    t.F_bn0,
-                                    t.F_bk0,
-                                    t.F_bn1,
-                                    t.F_bk1,
-                                    t.F_bk0max,
-                                ),
-                                (128, 128, 64, 64, 128, 64),
-                            )
-                            self.assertEqual((t.F_wk0, t.F_wk1), (64, 128))
-                        if dtype.startswith("mx"):
-                            # A D64 MX scale row is two bytes.
-                            self.assertIn(
-                                "reinterpret_cast<uintptr_t>(a.q_descale_ptr) % 2 == 0",
-                                api,
-                            )
-                            self.assertNotIn("% 4 == 0", api)
-                self.assertTrue(traits[64])
-                self.assertEqual(traits[64], traits[128])
-                # The D64 branch must come first, or the D128 branch shadows it.
-                pool, _ = get_fwd_blobs(
-                    ["gfx1250"], f"*_{dtype}_*", 0, [64, 128], "simplified"
-                )
-                api = pool.render("test")
-                self.assertLess(
-                    api.index("t.hdim_q <= 64 && t.hdim_v <= 64"),
-                    api.index("t.hdim_q <= 128 && t.hdim_v <= 128"),
-                )
-
-    def test_fp8_sched_d256_mirrors_d128_at_occupancy_one(self):
-        def key(k):
-            return (
-                k.F_mode,
-                k.F_pipeline.F_qscale,
-                k.F_pipeline.F_mask,
-                k.F_pipeline.F_lse,
-                k.F_pipeline.F_sink,
-                k.F_pipeline.F_bias,
-            )
-
-        for dtype in ("fp8", "fp8bf16", "mxfp8", "mxfp8bf16"):
-            with self.subTest(dtype=dtype):
-                traits = {}
-                for hdim in (128, 256):
-                    pool, kernels = get_fwd_blobs(
-                        ["gfx1250"], f"*d{hdim}_{dtype}_*", 0, [hdim], "simplified"
-                    )
-                    sched = [k for k in kernels if _is_plain_fp8_sched(k)]
-                    # One D128 tile per bias choice; D256 has a single tile.
-                    traits[hdim] = Counter(
-                        key(k)
-                        for k in sched
-                        if hdim == 256
-                        or k.F_tile.F_occupancy
-                        == (1 if k.F_pipeline.F_bias == "bias" else 2)
-                    )
-                    if hdim == 256:
-                        self.assertEqual(
-                            len(sched),
-                            sum(k.F_pipeline.F_packgqa == "f" for k in kernels),
-                        )
-                        for k in sched:
-                            t = k.F_tile
-                            self.assertEqual(
-                                (
-                                    t.F_bm0,
-                                    t.F_bn0,
-                                    t.F_bk0,
-                                    t.F_bn1,
-                                    t.F_bk1,
-                                    t.F_bk0max,
-                                ),
-                                (128, 128, 256, 256, 128, 256),
-                            )
-                            self.assertEqual(
-                                (t.F_wk0, t.F_wk1, t.F_occupancy), (128, 128, 1)
-                            )
-                        if dtype.startswith("mx"):
-                            # D256 scale rows are read as int32s.
-                            self.assertIn(
-                                "reinterpret_cast<uintptr_t>(a.q_descale_ptr) % 4 == 0",
-                                pool.render("test"),
-                            )
-                self.assertTrue(traits[256])
-                self.assertEqual(traits[256], traits[128])
-                pool, _ = get_fwd_blobs(
-                    ["gfx1250"], f"*_{dtype}_*", 0, [64, 128, 256], "simplified"
-                )
-                api = pool.render("test")
-                self.assertLess(
-                    api.index("t.hdim_q <= 128 && t.hdim_v <= 128"),
-                    api.index("t.hdim_q <= 256 && t.hdim_v <= 256"),
-                )
-
-    def test_fp8_sched_d192_mirrors_d128(self):
-        def key(k):
-            return (
-                _fp8_sched_kind(k),
-                k.F_mode,
-                k.F_pipeline.F_qscale,
-                k.F_pipeline.F_mask,
-                k.F_pipeline.F_lse,
-                k.F_pipeline.F_sink,
-                k.F_pipeline.F_bias,
-            )
-
-        for dtype in ("fp8", "fp8bf16", "mxfp8", "mxfp8bf16"):
-            with self.subTest(dtype=dtype):
-                _, d128 = get_fwd_blobs(
-                    ["gfx1250"], f"*d128_{dtype}_*", 0, [128], "simplified"
-                )
-                pool, d192 = get_fwd_blobs(
-                    ["gfx1250"], f"*d192_{dtype}_*", 0, [192], "simplified"
-                )
-                # D192/V128 runs only the scheduled FP8 pipelines, with D128's variants.
-                self.assertTrue(d192)
-                fp8_sched = "qr_tdm_fp8_sched"
-                self.assertTrue(all(k.F_pipeline.tag == fp8_sched for k in d192))
-                self.assertEqual(
-                    Counter(key(k) for k in d192),
-                    Counter(key(k) for k in d128 if k.F_pipeline.tag == fp8_sched),
-                )
-                for k in d192:
-                    t = k.F_tile
-                    one_wave = _fp8_sched_kind(k) == "packgqa_32row"
+                    kernels = [k for k in kernels if k.F_hdim == hdim]
                     self.assertEqual(
-                        (t.F_bm0, t.F_bn0, t.F_bk0, t.F_bn1, t.F_bk1, t.F_bk0max),
-                        (32 if one_wave else 128, 128, 192, 128, 128, 192),
+                        {k.F_pipeline.tag for k in kernels},
+                        {"qr_tdm_pingpong"}
+                        | (
+                            {"qr_tdm_fp8_sched"}
+                            if hdim in _SCHED_HDIMS[dtype]
+                            else set()
+                        ),
                     )
-                    # MX, bias and the packed-GQA LDS/VGPR outliers run one workgroup per CU.
-                    packed_one = _fp8_sched_kind(k) == "packgqa" and (
+                    pingpong = [
+                        k for k in kernels if k.F_pipeline.tag == "qr_tdm_pingpong"
+                    ]
+                    variants = {
                         (
-                            dtype == "fp8"
-                            and k.F_pipeline.F_qscale in ("perhead", "blockscale")
+                            k.F_mode,
+                            k.F_pipeline.F_mask,
+                            k.F_pipeline.F_lse,
+                            k.F_pipeline.F_sink,
                         )
-                        or (
-                            k.F_pipeline.F_sink == "t"
-                            and k.F_pipeline.F_mask not in ("no", "s_no")
-                        )
-                    )
-                    occupancy = (
-                        1
-                        if not one_wave
-                        and (
-                            k.F_pipeline.F_qscale == "mx"
-                            or k.F_pipeline.F_bias == "bias"
-                            or packed_one
-                        )
-                        else 2
-                    )
+                        for k in pingpong
+                        if k.F_pipeline.F_packgqa == "f"
+                    }
+                    # packed-GQA decode: mask (none, causal, window) x lse x sink
                     self.assertEqual(
-                        (t.F_wk0, t.F_wk1, t.F_occupancy), (64, 128, occupancy)
+                        len(
+                            {
+                                (
+                                    k.F_pipeline.F_mask,
+                                    k.F_pipeline.F_lse,
+                                    k.F_pipeline.F_sink,
+                                )
+                                for k in pingpong
+                                if k.F_pipeline.F_packgqa == "t"
+                            }
+                        ),
+                        12,
                     )
-                api = pool.render("test")
-                self.assertIn("a.hdim_q == 192 && a.hdim_v == 128", api)
-                self.assertIn("a.hdim_v % 128 == 0", api)
-                self.assertNotIn("a.hdim_v % 192 == 0", api)
-                if dtype.startswith("mx"):
-                    # D192 Q/K scale rows are read as one int16 per K64 step.
-                    self.assertIn(
-                        "reinterpret_cast<uintptr_t>(a.q_descale_ptr) % 2 == 0", api
-                    )
-                pool, _ = get_fwd_blobs(
-                    ["gfx1250"], f"*_{dtype}_*", 0, [128, 192, 256], "simplified"
-                )
-                api = pool.render("test")
-                self.assertLess(
-                    api.index("t.hdim_q <= 128 && t.hdim_v <= 128"),
-                    api.index("t.hdim_q <= 192 && t.hdim_v <= 128"),
-                )
-                self.assertLess(
-                    api.index("t.hdim_q <= 192 && t.hdim_v <= 128"),
-                    api.index("t.hdim_q <= 256 && t.hdim_v <= 256"),
-                )
+                    # the causal band variants have no sink (the generic mask serves it)
+                    self.assertEqual(len(variants), 2 * 3 * 2 * 2 - 2 * 2)
+                    k_row = -(-hdim // 64) * 64
+                    if -(-hdim // 128) < k_row // 64:
+                        k_row = -(-hdim // 128) * 128
+                    qk_k = 128 if k_row % 128 == 0 else 64
+                    for k in pingpong:
+                        t = k.F_tile
+                        pv_k = 128
+                        if t.F_bm0 > 16 and (hdim, hdim_v) in (
+                            GFX125_QR_TDM_PINGPONG_MX_64_KEY_TRIPS
+                        ):
+                            pv_k = 64
+                        self.assertEqual(k.F_pipeline.F_qscale, "mx")
+                        self.assertEqual(
+                            (t.F_bk0, t.F_wk0, t.F_wk1), (qk_k, qk_k, pv_k)
+                        )
+                        self.assertEqual(t.F_bk1, t.F_bn0 if t.F_bm0 == 16 else pv_k)
+                        self.assertEqual(t.F_bk1, pv_k * t.F_rk1)
+                        self.assertEqual(t.F_bk0max, k_row)
+                        self.assertEqual(t.F_bn0 % pv_k, 0)
+            # the narrower head dims' branches first, or a wider one shadows them
+            pool, _ = get_fwd_blobs(
+                ["gfx1250"],
+                f"*_{dtype}_*",
+                0,
+                [h for h, _ in gfx125_qr_tdm_pingpong_hdims(dtype)],
+                "simplified",
+            )
+            api = pool.render("test")
+            at = [
+                api.index(f"t.hdim_q <= {h} && t.hdim_v <= {hv}")
+                for h, hv in gfx125_qr_tdm_pingpong_hdims(dtype)
+            ]
+            self.assertEqual(at, sorted(at))
 
-    def test_d192_bias_exception_is_fp8_sched_only(self):
-        # (192, 128) emits bias for the FP8 scheduled pipeline only; other dtypes keep none.
+    def test_d192_bias_exception_is_tdm_pingpong(self):
+        # (192, 128) emits an elementwise bias for qr_tdm_pingpong at either width; no
+        # other bias, no dropout.
         for dtype in ("fp16", "bf16", "fp8", "fp8bf16"):
             with self.subTest(dtype=dtype):
                 _, kernels = get_fwd_blobs(
                     ["gfx1250"], f"*d192_{dtype}_*", 0, [192], "simplified"
                 )
                 biased = [k for k in kernels if k.F_pipeline.F_bias != "no"]
-                if dtype.startswith("fp8"):
-                    self.assertTrue(biased)
-                self.assertTrue(all(_is_plain_fp8_sched(k) for k in biased))
-
-    def test_fp8_sched_group_mode_mirrors_batch(self):
-        for dtype in ("fp8", "fp8bf16", "mxfp8"):
-            with self.subTest(dtype=dtype):
-                _, kernels = get_fwd_blobs(
-                    ["gfx1250"], f"*d128_{dtype}_*", 0, [128], "simplified"
+                self.assertTrue(
+                    any(k.F_pipeline.tag == "qr_tdm_pingpong" for k in biased)
                 )
-                traits = {
-                    mode: Counter(
-                        (k.F_pipeline.F_qscale, k.F_pipeline.F_mask, k.F_pipeline.F_lse)
-                        for k in kernels
-                        if _is_plain_fp8_sched(k) and k.F_mode == mode
-                    )
-                    for mode in ("batch", "group")
-                }
-                self.assertTrue(traits["group"])
-                self.assertEqual(traits["group"], traits["batch"])
+                for k in biased:
+                    self.assertEqual(k.F_pipeline.tag, "qr_tdm_pingpong")
+                    self.assertEqual(k.F_pipeline.F_bias, "bias")
+                self.assertFalse(any(k.F_pipeline.F_dropout == "t" for k in kernels))
 
-    def check_d128_emission(self, dtype, receipt, count):
-        pool, kernels = get_fwd_blobs(
-            ["gfx1250"], f"*d128_{dtype}*_qr_tdm_sched_*", receipt, [128], "simplified"
-        )
-        family = [k for k in kernels if k.F_pipeline.tag == "qr_tdm_sched"]
-        self.assertEqual(len(family), count)
-        self.assertEqual(len(family), len(kernels))
-        self.assertEqual(len({k.filename for k in kernels}), len(kernels))
-        for kernel in family:
-            self.assertEqual(kernel.F_hdim, 128)
-            self.assertEqual(kernel.F_tile.F_bn0, 128)
-            self.assertEqual(kernel.F_tile.F_bn1, 128)
-            self.assertEqual(kernel.F_tile.F_bk0max, 128)
-            self.assertEqual(kernel.F_tile.F_occupancy, 1)
-            self.assertIn("BlockFmhaPipelineQRKSVSTdmSched", kernel.render())
-            self.assertIn("QRKSVS_TDM_SCHED", kernel.render())
-        api = pool.render("test")
-        self.assertIn("a.hdim_q == 128", api)
-        self.assertIn("a.max_seqlen_q >= 128", api)
-
-    def test_family_padding_matches_validated_specializations(self):
-        kernels = []
-        for dtype in ("fp16", "bf16"):
-            _, selected = get_fwd_blobs(
-                ["gfx1250"], f"*{dtype}*", 600, [128, 192], "simplified"
-            )
-            kernels.extend(selected)
-        family = [k for k in kernels if k.F_pipeline.tag == "qr_tdm_sched"]
-        self.assertEqual(len(family), 48)
-        rule = KernelComponentFactoryGfx125.get_rules()[-1]
-        for kernel in family:
-            with self.subTest(shape=kernel.F_hdim, name=kernel.filename):
-                expected = (
-                    "t" if kernel.F_hdim == 128 or kernel.F_mode == "group" else "f"
-                )
-                self.assertEqual(kernel.F_pipeline.F_spad, expected)
-                self.assertEqual(kernel.F_pipeline.F_skpad, expected)
-                problem = ProblemContext(
-                    dtype=kernel.F_dtype,
-                    mode=kernel.F_mode,
-                    hdim=kernel.F_hdim,
-                    hdim_v=128,
-                )
-                for qpad in ("f", "t"):
-                    for kpad in ("f", "t"):
-                        context = KernelContext(
-                            tile=kernel.F_tile,
-                            pipeline=replace(
-                                kernel.F_pipeline, F_spad=qpad, F_skpad=kpad
-                            ),
-                            mask_impl="simplified",
-                        )
-                        self.assertEqual(
-                            rule(problem, context),
-                            qpad == expected and kpad == expected,
-                        )
-
-    def test_new_tag_is_not_emitted_for_other_shapes_or_architectures(self):
-        _, kernels = get_fwd_blobs(
-            ["gfx942", "gfx950"], "*_qr_tdm_sched_*", 600, [-1], "simplified"
-        )
-        self.assertFalse(kernels)
-        _, kernels = get_fwd_blobs(
-            ["gfx1250"], "*fp32*_qr_tdm_sched_*", 600, [-1], "simplified"
-        )
-        self.assertFalse(kernels)
-        for target in ("gfx1250", "gfx1251", "gfx1252"):
-            _, kernels = get_fwd_blobs(
-                [target], "*_qr_tdm_sched_*", 600, [-1], "simplified"
-            )
-            self.assertTrue(
-                any(kernel.F_pipeline.tag == "qr_tdm_sched" for kernel in kernels)
-            )
-
-    def test_family_and_legacy_entries_use_the_same_arch_check(self):
+    def test_generated_entries_use_the_compile_time_arch_check(self):
         _, kernels = get_fwd_blobs(
             ["gfx1250"], "*bf16*_qr_tdm*", 100, [128, 192], "simplified"
         )
-        family = [k for k in kernels if k.F_pipeline.tag == "qr_tdm_sched"]
-        legacy = [k for k in kernels if k.F_pipeline.tag != "qr_tdm_sched"]
+        self.assertTrue(kernels)
+        # (bf16 and fp8bf16)
         self.assertEqual(
-            {k.F_pipeline.tag for k in family},
-            {"qr_tdm_sched"},
+            {k.F_pipeline.tag for k in kernels},
+            {"qr_tdm_pingpong", "qr_tdm_fp8_sched"},
         )
-        self.assertTrue(legacy)
-        for kernel in family + legacy:
+        for kernel in kernels:
             with self.subTest(kernel=kernel.name):
                 source = kernel.render()
                 self.assertIn("defined(__gfx125__)", source)
                 self.assertNotIn("ck_tile::get_device_name()", source)
 
-    def test_family_tile_and_pipeline_compatibility_is_symmetric(self):
+    def test_pingpong_tile_and_pipeline_ownership_is_symmetric(self):
         _, kernels = get_fwd_blobs(["gfx1250"], "*d128_bf16*", 100, [128], "simplified")
-        candidate = next(k for k in kernels if k.F_pipeline.tag == "qr_tdm_sched")
-        legacy = next(k for k in kernels if k.F_pipeline.tag == "qr_tdm")
-        rule = KernelComponentFactoryGfx125.get_rules()[-1]
+        candidate = next(
+            k
+            for k in kernels
+            if k.F_tile.F_bm0 == 128
+            and k.F_pipeline.F_packgqa == "f"
+            and k.F_pipeline.F_dpad == "f"
+        )
+        rules = {r.__name__: r for r in KernelComponentFactoryGfx125.get_rules()}
+        rule = rules["check_tile_owner"]
         problem = ProblemContext(dtype="bf16", mode="batch", hdim=128, hdim_v=128)
         context = KernelContext(
             tile=candidate.F_tile, pipeline=candidate.F_pipeline, mask_impl="simplified"
         )
+        unowned_tile = replace(candidate.F_tile, F_pipeline_tag=None)
+        other_pipeline = replace(candidate.F_pipeline, tag="qr_tdm")
         self.assertTrue(rule(problem, context))
         self.assertTrue(rule(replace(problem, dtype="fp16"), context))
-        self.assertFalse(rule(problem, replace(context, tile=legacy.F_tile)))
-        self.assertFalse(rule(problem, replace(context, pipeline=legacy.F_pipeline)))
-        for changes in (dict(dtype="fp32"), dict(hdim=192), dict(hdim_v=192)):
-            self.assertFalse(rule(replace(problem, **changes), context))
-
-    def test_sched_tile_geometry_identity_and_inventory_isolation(self):
-        factory = KernelComponentFactoryGfx125
-        for dtype in ("fp16", "bf16"):
-            inventory = factory.get_hdim_tile_size_dict(dtype)
-            for hdim in (128, 192):
-                tiles = [
-                    tile
-                    for tile in inventory[(hdim, 128)]
-                    if factory.is_tile_supported_by_qr_tdm_sched(tile, hdim)
-                ]
-                self.assertEqual(len(tiles), 1 if hdim == 128 else 2)
-                for tile in tiles:
-                    # Runtime selection does not change tile compatibility.
-                    self.assertTrue(
-                        factory.is_tile_supported_by_qr_tdm_sched(
-                            replace(tile, F_constraint=CppConstraint("false")), hdim
-                        )
-                    )
-                    # Every geometry/occupancy change must reject this pairing.
-                    for descriptor in fields(tile):
-                        value = getattr(tile, descriptor.name)
-                        if isinstance(value, int):
-                            with self.subTest(
-                                dtype=dtype, tile=tile.name, field=descriptor.name
-                            ):
-                                self.assertFalse(
-                                    factory.is_tile_supported_by_qr_tdm_sched(
-                                        replace(tile, **{descriptor.name: value + 1}),
-                                        hdim,
-                                    )
-                                )
-                # Callers can tune their inventory without changing later calls.
-                tile = tiles[0]
-                original_name = tile.name
-                tile.F_bm0 += 1
-                tile.F_constraint.bool_expr = "false"
-                fresh = factory.get_hdim_tile_size_dict(dtype)[(hdim, 128)]
-                restored = next(t for t in fresh if t.name == original_name)
-                self.assertNotEqual(str(restored.F_constraint), "false")
-
-    @unittest.skipUnless(
-        _HIP_HOST_CXX.is_file() and (_ROCM_ROOT / "include").is_dir(),
-        "ROCm clang and HIP headers are required for generated TU host syntax",
-    )
-    def test_sched_generated_occupancy_contract(self):
-        _, kernels = get_fwd_blobs(["gfx1250"], "*", 200, [-1], "simplified")
-        candidates = {}
-        diagnostic = "qr_tdm_sched codegen occupancy must match policy tuning"
-        for kernel in kernels:
-            if kernel.F_pipeline.tag == "qr_tdm_sched":
-                key = (
-                    kernel.F_dtype,
-                    kernel.F_hdim,
-                    kernel.F_tile.F_bn0,
-                    kernel.F_tile.F_bn1,
-                )
-                candidates.setdefault(key, kernel)
-            else:
-                self.assertNotIn(diagnostic, kernel.render())
-        self.assertEqual(
-            set(candidates),
-            {
-                (dtype, head, n, v)
-                for dtype in ("bf16", "fp16")
-                for head, n, v in (
-                    (64, 64, 64),
-                    (128, 128, 128),
-                    (192, 64, 128),
-                    (192, 128, 128),
-                )
-            },
+        # pingpong runs on its own tiles only, and its tiles take no other pipeline
+        self.assertFalse(rule(problem, replace(context, tile=unowned_tile)))
+        self.assertFalse(rule(problem, replace(context, pipeline=other_pipeline)))
+        self.assertTrue(
+            rule(problem, replace(context, tile=unowned_tile, pipeline=other_pipeline))
         )
-        with tempfile.TemporaryDirectory(
-            prefix="fmha-occupancy-contract-"
-        ) as directory:
-            root = Path(directory)
-            for key, kernel in candidates.items():
-                for changed in (False, True):
-                    with self.subTest(config=key, changed_occupancy=changed):
-                        rendered = (
-                            replace(
-                                kernel,
-                                F_tile=replace(
-                                    kernel.F_tile,
-                                    F_occupancy=kernel.F_tile.F_occupancy + 1,
-                                ),
-                            )
-                            if changed
-                            else kernel
-                        ).render()
-                        self.assertIn(diagnostic, rendered)
-                        source = root / "generated.cpp"
-                        source.write_text(rendered)
-                        result = subprocess.run(
-                            [
-                                str(_HIP_HOST_CXX),
-                                "-x",
-                                "hip",
-                                "--offload-host-only",
-                                "-nogpuinc",
-                                "-nogpulib",
-                                "-include",
-                                "__clang_hip_runtime_wrapper.h",
-                                "-std=c++20",
-                                "-DUSE_NEW_UNIFIED_FRAMEWORK=0",
-                                "-DCK_TILE_FMHA_FWD_FAST_EXP2=1",
-                                "-I",
-                                str(_CK_ROOT / "include"),
-                                "-I",
-                                str(_CK_ROOT),
-                                "-I",
-                                str(_CK_ROOT / "library" / "include"),
-                                "-I",
-                                str(_FMHA_EXAMPLE_DIR),
-                                "-I",
-                                str(_ROCM_ROOT / "include"),
-                                "-fsyntax-only",
-                                str(source),
-                            ],
-                            capture_output=True,
-                            text=True,
-                            timeout=60,
-                        )
-                        if changed:
-                            self.assertNotEqual(result.returncode, 0)
-                            self.assertIn(diagnostic, result.stderr)
-                        else:
-                            self.assertEqual(result.returncode, 0, result.stderr)
+        # Q/K rows staged past the head dim are read by the padded instances only
+        narrow = replace(problem, hdim=96)
+        self.assertFalse(rule(narrow, context))
+        self.assertTrue(
+            rule(
+                narrow,
+                replace(context, pipeline=replace(candidate.F_pipeline, F_dpad="t")),
+            )
+        )
+        # packed GQA: batch mode, tiles up to 64 rows
+        packed = replace(context, pipeline=replace(candidate.F_pipeline, F_packgqa="t"))
+        self.assertFalse(rule(problem, packed))
+
+        # The scheduled pipeline and its tile pair with each other only (fp8 d128).
+        sched_rule = rules["check_sched_tiles"]
+        _, fp8_kernels = get_fwd_blobs(
+            ["gfx1250"], "*d128_fp8bf16*", 100, [128], "simplified"
+        )
+        sched = next(k for k in fp8_kernels if k.F_pipeline.tag == "qr_tdm_fp8_sched")
+        problem = replace(problem, dtype="fp8bf16")
+        sched_context = KernelContext(
+            tile=sched.F_tile, pipeline=sched.F_pipeline, mask_impl="simplified"
+        )
+        self.assertTrue(sched_rule(problem, sched_context))
+        self.assertTrue(rule(problem, sched_context))
+        self.assertTrue(sched_rule(replace(problem, dtype="fp8"), sched_context))
+        self.assertFalse(
+            sched_rule(problem, replace(sched_context, tile=candidate.F_tile))
+        )
+        self.assertFalse(sched_rule(problem, replace(context, tile=sched.F_tile)))
+        # no scheduled tiles at 16 bits or at d192
+        for changes in (dict(dtype="bf16"), dict(hdim=192)):
+            self.assertFalse(sched_rule(replace(problem, **changes), sched_context))
+        for pipeline_changes in (
+            dict(F_vlayout="col"),
+            dict(F_packgqa="t"),
+        ):
+            self.assertFalse(
+                sched_rule(
+                    problem,
+                    replace(
+                        sched_context,
+                        pipeline=replace(sched.F_pipeline, **pipeline_changes),
+                    ),
+                )
+            )
+        self.assertFalse(
+            sched_rule(
+                problem,
+                replace(
+                    sched_context,
+                    tile=replace(
+                        sched.F_tile, F_occupancy=sched.F_tile.F_occupancy + 1
+                    ),
+                ),
+            )
+        )
+
+    def test_tile_dispatch_order_validator(self):
+        def tile(bm0, constraint=None, owner=None):
+            return FmhaFwdTileSize(
+                bm0, 64, 32, 64, 32, 64, 4, 1, 1, 4, 1, 1, 16, 16, 32, 16, 16, 32, -1,
+                CppConstraint(constraint), owner,
+            )  # fmt: skip
+
+        pp = "qr_tdm_pingpong"
+        valid = {
+            # an owner's unconditional last tile, then another owner's tiles
+            (64, 64): [tile(64, "a.max_seqlen_q < 128", pp), tile(128, "true", pp),
+                       tile(128)],
+            (128, 128): [tile(64, "a.max_seqlen_q < 128"), tile(128, None, pp),
+                         tile(128)],
+        }  # fmt: skip
+        self.assertIs(_validate_gfx125_tile_dispatch_order(valid), valid)
+        for tiles in (
+            [tile(64), tile(128)],
+            [tile(64, "true"), tile(128, "a.max_seqlen_q >= 128")],
+            [tile(64, None, pp), tile(128, None, pp), tile(128)],
+        ):
+            with self.subTest(tiles=[(t.F_bm0, str(t.F_constraint)) for t in tiles]):
+                with self.assertRaises(AssertionError):
+                    _validate_gfx125_tile_dispatch_order({(64, 64): tiles})
+        # The generated inventory passes it.
+        for dtype in ("fp16", "bf16"):
+            KernelComponentFactoryGfx125.get_hdim_tile_size_dict(dtype)
+
+    def test_dropout_skips_tiles_with_qk_warps_on_n(self):
+        _, kernels = get_fwd_blobs(
+            ["gfx1250"], "*_dropout*", 600, [64, 512], "simplified"
+        )
+        self.assertTrue(kernels)
+        # BlockDropout needs the QK gemm warps on M (rn0 == 1): the short-query tiles,
+        # with their warps on N, take no dropout.
+        self.assertTrue(all(k.F_tile.F_rn0 == 1 for k in kernels))
+        self.assertTrue(
+            any(
+                k.F_pipeline.tag == "qr_tdm_pingpong"
+                for k in kernels
+                if k.F_hdim == 512
+            )
+        )
+
+    def test_tile_inventory_isolation(self):
+        # Callers can tune their inventory (pingpong's tiles and the scheduled ones)
+        # without changing later calls.
+        factory = KernelComponentFactoryGfx125
+        for dtype in _GFX125_DTYPES:
+            with self.subTest(dtype=dtype):
+                expected = [
+                    t.name
+                    for t in _gfx125_qr_tdm_pingpong_tiles(
+                        (128, 128),
+                        fp8=dtype in ("fp8", "fp8bf16"),
+                        mx=dtype.startswith("mx"),
+                    )
+                ] + [t.name for t in factory._sched_tiles(dtype).get((128, 128), ())]
+                tiles = factory.get_hdim_tile_size_dict(dtype)[(128, 128)]
+                self.assertEqual([t.name for t in tiles], expected)
+                constraints = [str(t.F_constraint) for t in tiles]
+                for tile in tiles:
+                    tile.F_bm0 += 1
+                    tile.F_constraint.bool_expr = "false"
+                fresh = factory.get_hdim_tile_size_dict(dtype)[(128, 128)]
+                self.assertEqual([t.name for t in fresh], expected)
+                self.assertEqual([str(t.F_constraint) for t in fresh], constraints)
 
     @unittest.skipUnless(shutil.which("cmake"), "cmake is required")
     def test_cmake_family_esm2_exact_scope(self):
         helper = (_FMHA_EXAMPLE_DIR / "cmake") / "fmha_fwd_source_flags.cmake"
         d128 = "fmha_fwd_d128_bf16_batch_b128_qr_tdm_sched_vr_nmask_nlse_gfx125.cpp"
-        d192 = "fmha_fwd_d192_bf16_batch_b128_qr_tdm_sched_vr_nmask_nlse_gfx125.cpp"
+        # qr_tdm_pingpong serves d64 and d192; only d128 keeps qr_tdm_sched.
+        d192 = "fmha_fwd_d192_bf16_batch_b128_qr_tdm_pingpong_vr_nmask_nlse_gfx125.cpp"
+        d64 = d192.replace("d192", "d64")
         sources = [
             d128,
             d128.replace("batch", "group"),
@@ -2252,13 +2011,18 @@ class TestGfx125V128Codegen(unittest.TestCase):
             d128 + ".backup",
             "fmha_fwd_api.cpp",
             "mha_fwd.cu",
-            # All supported scheduled head dimensions use expert scheduling mode.
-            d128.replace("d128", "d64"),
-            d128.replace("d128", "d64").replace("bf16", "fp16"),
-            # qr_tdm_pingpong without LSE too, while plain qr_tdm (4) and the
-            # qr_tdm_pingpong LSE instances keep the default
+            # Every head dimension the tuned pipelines serve uses expert scheduling.
+            d64,
+            d64.replace("bf16", "fp16"),
+            # every qr_tdm_pingpong instance, with or without LSE, at any head dimension
+            # and input width, while plain qr_tdm (4) and qr_tdm_sched outside
+            # d64/d128/d192 (6) keep the default
             d128.replace("qr_tdm_sched", "qr_tdm_pingpong"),
             d128.replace("qr_tdm_sched", "qr_tdm_pingpong").replace("_nlse_", "_lse_"),
+            d192.replace("d192", "d256"),
+            d192.replace("d192", "d32").replace("_nlse_", "_lse_"),
+            d128.replace("qr_tdm_sched", "qr_tdm_pingpong").replace("bf16", "fp8bf16"),
+            d192.replace("d192", "d512").replace("bf16", "fp8"),
         ]
         with tempfile.TemporaryDirectory() as directory:
             script = Path(directory) / "flags.cmake"
@@ -2283,7 +2047,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
                 self.assertTrue(line.startswith(f"{i}:"))
                 self.assertEqual(
                     "-amdgpu-expert-scheduling-mode" in line,
-                    i in (0, 1, 2, 3, 5, 12, 13, 14),
+                    i in (0, 1, 2, 3, 5, 12, 13, 14, 15, 16, 17, 18, 19),
                 )
                 self.assertNotIn("-wwm-regalloc=fast", line)
 
@@ -2342,7 +2106,7 @@ int main() {
                     )
                     self.assertEqual(result.stdout, expected)
 
-    def test_d64_sequence_padding_and_short_q_fallback(self):
+    def test_d64_sequence_padding_and_pingpong_tiles(self):
         for dtype in ("fp16", "bf16"):
             pool, kernels = get_fwd_blobs(
                 ["gfx1250"],
@@ -2351,44 +2115,65 @@ int main() {
                 [64],
                 "simplified",
             )
+            self.assertEqual({k.F_pipeline.tag for k in kernels}, {"qr_tdm_pingpong"})
             dispatch = _CompiledDispatcher(self, pool, kernels)
-            for sq, sk, has_cu_sk, group in (
-                (127, 128, 0, 0),
-                (128, 128, 0, 0),
-                (129, 129, 0, 0),
-                (255, 255, 0, 0),
-                (128, 0, 0, 0),
-                (128, 128, 1, 0),
-                (255, 255, 0, 1),
+            # qr_tdm_pingpong takes every d64 query; its unpadded batch instances take
+            # any K length. Its 128-row tile takes 128 query rows on, at any key length,
+            # but under a sliding window of fewer than 512 keys (left + right + 1).
+            for sq, sk, has_cu_sk, group, mask, wl, wr, bm0 in (
+                (16, 128, 0, 0, 0, -1, -1, 16),
+                (127, 128, 0, 0, 0, -1, -1, 64),
+                (128, 128, 0, 0, 0, -1, -1, 128),
+                (129, 129, 0, 0, 0, -1, -1, 128),
+                (255, 255, 0, 0, 0, -1, -1, 128),
+                (128, 0, 0, 0, 0, -1, -1, 128),
+                (128, 128, 1, 0, 0, -1, -1, 128),
+                (255, 255, 0, 1, 0, -1, -1, 128),
+                (127, 1024, 0, 0, 0, -1, -1, 64),
+                (600, 600, 0, 0, 0, -1, -1, 128),
+                (127, 600, 0, 0, 1, -1, -1, 64),
+                (128, 128, 0, 0, 1, -1, -1, 128),
+                (600, 600, 0, 0, 1, -1, -1, 128),
+                (600, 600, 1, 0, 1, -1, -1, 128),
+                (600, 600, 0, 1, 1, -1, -1, 128),
+                (600, 600, 0, 0, 3, 100, 0, 64),
+                (600, 600, 0, 0, 3, 200, 310, 64),
+                (600, 600, 0, 0, 3, 200, 311, 128),
+                (600, 600, 0, 0, 3, 511, 0, 128),
+                (600, 600, 0, 0, 3, 100, -1, 128),
+                (600, 600, 0, 1, 3, 100, 0, 64),
             ):
                 candidate = dispatch.expected_id(
                     dtype=dtype,
                     hdim=64,
                     mode="group" if group else "batch",
-                    pipeline="qr_tdm" if sq < 128 else "qr_tdm_sched",
-                    bm0=64 if sq < 128 else 128,
-                    mask="s_no",
+                    pipeline="qr_tdm_pingpong",
+                    bm0=bm0,
+                    mask="s_mask" if mask else "s_no",
                     lse="t",
                     dpad="f",
                     dvpad="f",
                     sink="f",
-                    spad="t" if group or has_cu_sk or sk == 0 or sk % 64 else "f",
+                    spad="t" if group else "f",
+                    # 128 keys are too few for the 16-row tile's long trips
+                    **({"bn0": _short_q_bn0(sk, (64, 64))} if bm0 == 16 else {}),
                 )
-                self.assertEqual(
-                    dispatch.run(
-                        dtype=dtype,
-                        hdim_q=64,
-                        hdim_v=64,
-                        seqlen_q=sq,
-                        seqlen_k=sk,
-                        has_cu_sk=has_cu_sk,
-                        group=group,
-                        lse=1,
-                    ),
-                    [candidate],
+                args = dict(
+                    dtype=dtype,
+                    hdim_q=64,
+                    hdim_v=64,
+                    seqlen_q=sq,
+                    seqlen_k=sk,
+                    has_cu_sk=has_cu_sk,
+                    group=group,
+                    mask=mask,
+                    window_size_left=wl,
+                    window_size_right=wr,
+                    lse=1,
                 )
+                self.assertEqual(dispatch.run(**args), [candidate], args)
 
-    def test_fp8_head_dims_below_d64_reach_qr_tdm(self):
+    def test_fp8_padded_head_dims_reach_pingpong(self):
         pool, kernels = get_fwd_blobs(
             ["gfx1250"],
             "fmha_fwd_d*_fp8_[bg]*_nlogits_nbias_nmask_nlse_ndropout_nskip_*_nsink*",
@@ -2400,32 +2185,56 @@ int main() {
             self, pool, kernels, filter_fn=lambda trait: True
         )
         pertensor, blockscale = 1, 2
-        for hdim_q, hdim_v, qscale, block_scale_size, pipeline, padded in (
-            (32, 32, pertensor, 0, "qr_tdm", True),
-            (48, 48, pertensor, 0, "qr_tdm", True),
-            (64, 32, pertensor, 0, "qr_tdm", True),
-            (64, 64, pertensor, 0, "qr_tdm_fp8_sched", False),
-            (64, 64, blockscale, 64, "qr_tdm", False),
-            (64, 64, blockscale, 128, "qr_tdm_fp8_sched", False),
+        # d64 fp8 takes qr_tdm_pingpong's tiles at any query length, as fp16/bf16 do: 16
+        # rows (decode, 256-key trips under 512 keys), 64 rows below 128, the 128-row tile
+        # from 128 dense rows on; the smaller head dims of whole 8-element vectors on its
+        # general tile's fully padded instances; block scales of any q block and whole
+        # 32-key k/v blocks on its general and decode tiles (qr_tdm_pingpong_tile_takes).
+        for (
+            hdim_q,
+            hdim_v,
+            qscale,
+            block_scale_size,
+            padded,
+            seqlen_q,
+            tile,
+        ) in (
+            (32, 32, pertensor, 0, True, 128, dict(bm0=128)),
+            (48, 48, pertensor, 0, True, 128, dict(bm0=128)),
+            (64, 32, pertensor, 0, True, 128, dict(bm0=128)),
+            (64, 64, pertensor, 0, False, 128, dict(bm0=128)),
+            (64, 64, pertensor, 0, False, 127, dict(bm0=64)),
+            (64, 64, pertensor, 0, False, 64, dict(bm0=64)),
+            (64, 64, pertensor, 0, False, 1, dict(bm0=16, bn0=256)),
+            (64, 64, blockscale, 64, False, 128, dict(bm0=128)),
+            (64, 64, blockscale, 128, False, 128, dict(bm0=128)),
+            (64, 64, blockscale, 96, False, 64, dict(bm0=128)),
         ):
-            with self.subTest(hdim_q=hdim_q, hdim_v=hdim_v, qscale=qscale):
+            with self.subTest(
+                hdim_q=hdim_q,
+                hdim_v=hdim_v,
+                qscale=qscale,
+                block=block_scale_size,
+                seqlen_q=seqlen_q,
+            ):
                 features = dict(
                     dtype="fp8",
                     hdim=64,
                     mode="batch",
-                    pipeline=pipeline,
+                    pipeline="qr_tdm_pingpong",
                     qscale="pertensor" if qscale == pertensor else "blockscale",
                     dpad="t" if padded else "f",
                     dvpad="t" if padded else "f",
-                    spad="f" if pipeline == "qr_tdm" else "t",
+                    spad="t" if padded else "f",
                 )
-                if pipeline == "qr_tdm_fp8_sched":
-                    features["packgqa"] = "f"
+                features.update(tile)
                 self.assertEqual(
                     dispatch.run(
                         dtype="fp8",
                         hdim_q=hdim_q,
                         hdim_v=hdim_v,
+                        seqlen_q=seqlen_q,
+                        max_seqlen_q=seqlen_q,
                         qscale=qscale,
                         block_scale_size_q=block_scale_size,
                         block_scale_size_kv=block_scale_size,
@@ -2434,22 +2243,158 @@ int main() {
                     [dispatch.expected_id(**features)],
                 )
 
-    def test_batch_sched_only_dispatch(self):
+    def test_fp8_pingpong_takes_the_fp16_bf16_features(self):
+        # qr_tdm_pingpong's fp8 instances take bias, sink tokens and a runtime sink logit as
+        # the fp16/bf16 ones do, and block scales with k/v blocks of whole 32-key chunks;
+        # nothing serves other block sizes
         pool, kernels = get_fwd_blobs(
-            ["gfx1250"], "*d128_bf16*_qr_tdm_sched_*", 600, [128], "simplified"
+            ["gfx1250"],
+            "fmha_fwd_d*_fp8_batch_*_nlogits_*_nmask_nlse_ndropout_nskip_*",
+            0,
+            [64, 128],
+            "simplified",
         )
-        dispatch = _CompiledDispatcher(self, pool, kernels)
-        for mask, lse in ((0, 0), (0, 1), (1, 0), (1, 1)):
-            features = dict(
-                mode="batch",
-                hdim=128,
-                mask="s_mask" if mask else "s_no",
-                lse="t" if lse else "f",
-                sink="f",
-            )
-            candidate = dispatch.expected_id(pipeline="qr_tdm_sched", **features)
-            args = dict(hdim_q=128, group=0, mask=mask, lse=lse)
-            self.assertEqual(dispatch.run(**args), [candidate])
+        dispatch = _CompiledDispatcher(
+            self, pool, kernels, filter_fn=lambda trait: True
+        )
+        tag = {index: kernel.F_pipeline.tag for kernel, index in dispatch.kernel_ids}
+        self.assertEqual(set(tag.values()), {"qr_tdm_pingpong", "qr_tdm_fp8_sched"})
+        pertensor, blockscale = 1, 2
+        for hdim in (64, 128):
+            for qscale, block, bias, sink, has_sink_ptr, pingpong in (
+                (pertensor, 0, 0, 0, 0, True),
+                (pertensor, 0, 1, 0, 0, True),
+                (pertensor, 0, 0, 1, 1, True),
+                (pertensor, 0, 0, 0, 1, True),
+                (blockscale, 256, 0, 0, 0, True),
+                (blockscale, 128, 0, 0, 0, True),
+                (blockscale, 32, 0, 0, 0, True),
+                (blockscale, 96, 0, 0, 0, True),
+                (blockscale, 48, 0, 0, 0, False),
+                (blockscale, 16, 0, 0, 0, False),
+            ):
+                with self.subTest(
+                    hdim=hdim,
+                    qscale=qscale,
+                    block=block,
+                    bias=bias,
+                    sink=sink,
+                    sink_ptr=has_sink_ptr,
+                ):
+                    got = dispatch.run(
+                        dtype="fp8",
+                        hdim_q=hdim,
+                        hdim_v=hdim,
+                        seqlen_q=1024,
+                        max_seqlen_q=1024,
+                        seqlen_k=1024,
+                        batch=64,  # past d128's small grids (qr_tdm_fp8_sched's)
+                        qscale=qscale,
+                        block_scale_size_q=block,
+                        block_scale_size_kv=block,
+                        bias=bias,
+                        sink=sink,
+                        has_sink_ptr=has_sink_ptr,
+                        nhead_k=8,
+                    )
+                    self.assertEqual(len(got), 1)
+                    self.assertEqual(
+                        got[0] != -1 and tag[got[0]] == "qr_tdm_pingpong", pingpong
+                    )
+                    if not pingpong:
+                        self.assertEqual(got, [-1])
+
+    def test_causal_takes_no_window(self):
+        # Top-left/bottom-right masks also describe finite windows (`t:l,r`). With the
+        # generic mask_impl the causal mask (GenericAttentionMask<true, false>) bounds keys
+        # on the right only, so a left window dispatches to the generic (local) mask; with
+        # the simplified one, pingpong's causal (band-mask) instances take no window.
+        api = FmhaFwdApiPool()
+        _, kernels = get_fwd_blobs(
+            ["gfx1250"], "*d128_bf16_*pingpong*", 0, [128], "generic"
+        )
+        for k in kernels:
+            api.register_traits(k.api_trait())
+        rendered = api.render("x")
+        self.assertIn(
+            "(t.mask_type == mask_enum::mask_top_left || t.mask_type == "
+            "mask_enum::mask_bottom_right) && a.window_size_left < 0",
+            rendered,
+        )
+        self.assertIn(
+            "(t.mask_type == mask_enum::window_generic) || ((t.mask_type == "
+            "mask_enum::mask_top_left || t.mask_type == mask_enum::mask_bottom_right) && "
+            "a.window_size_left >= 0)",
+            rendered,
+        )
+        for dtype in ("bf16", "fp8bf16"):
+            with self.subTest(dtype=dtype):
+                _, kernels = get_fwd_blobs(
+                    ["gfx1250"], f"*d128_{dtype}_*pingpong*", 0, [128], "simplified"
+                )
+                causal = [
+                    k
+                    for k in kernels
+                    if k.F_pipeline.F_mask == "causal" and k.F_pipeline.F_packgqa == "f"
+                ]
+                self.assertTrue(causal)
+                for k in causal:
+                    self.assertIn(
+                        "a.window_size_left < 0 && a.window_size_right == 0",
+                        str(k.api_trait().constraint),
+                    )
+
+    def test_pingpong_packgqa_decode(self):
+        # GQA decode folds a KV head's query heads into one pingpong tile, for both widths:
+        # no mask, or one query per head under a bottom-right causal mask or any window
+        # (the mask's one query row serves every merged row); merged rows take
+        # their heads' q descales and sink logits but no bias; batch only, so no sequence
+        # padding. The
+        # packed variants of every tile dispatch ahead of the unpacked pingpong ones.
+        for dtype, qscales in (
+            ("bf16", {"no"}),
+            ("fp8bf16", {"no", "pertensor", "perhead", "blockscale"}),
+        ):
+            with self.subTest(dtype=dtype):
+                pool, kernels = get_fwd_blobs(
+                    ["gfx1250"], f"*d128_{dtype}_*pingpong*", 0, [128], "simplified"
+                )
+                packed = [k for k in kernels if k.F_pipeline.F_packgqa == "t"]
+                # the tiles up to 64 rows (a 128-row tile's merged rows never fit it)
+                self.assertEqual(
+                    {k.F_tile.name for k in packed},
+                    {k.F_tile.name for k in kernels if k.F_tile.F_bm0 <= 64},
+                )
+                for k in packed:
+                    p = k.F_pipeline
+                    self.assertEqual(k.F_mode, "batch")
+                    self.assertEqual((p.F_bias, p.F_dropout), ("no", "f"))
+                    self.assertIn(p.F_qscale, qscales)
+                    self.assertIn(p.F_mask, ("s_no", "causal", "s_mask"))
+                    self.assertEqual((p.F_spad, p.F_skpad), ("f", "f"))
+                    constraint = str(k.api_trait().constraint)
+                    self.assertIn(
+                        f"fmha_fwd_can_merge_head_groups(a, {k.F_tile.F_bm0},",
+                        constraint,
+                    )
+                    if p.F_mask == "causal":
+                        self.assertIn("mask_enum::mask_bottom_right", constraint)
+                    if p.F_mask != "s_no":
+                        self.assertIn("a.seqlen_q == 1", constraint)
+                    self.assertIn("ck_tile::TileFmhaMergeHeadsTraits<", k.render())
+                # dispatch tries the rendered traits in order
+                order = [
+                    trait.endswith(", true>")  # the packed-GQA trait flag
+                    for trait in re.findall(
+                        r"using trait_ = (.*);", pool.render("fmha_fwd_v2")
+                    )
+                    if "QRKSVS_TDM_PINGPONG" in trait
+                ]
+                self.assertIn(True, order)
+                self.assertLess(
+                    max(i for i, packed in enumerate(order) if packed),
+                    min(i for i, packed in enumerate(order) if not packed),
+                )
 
     def test_group_max_q_is_independent_of_member_length_and_head_ratio(self):
         pool, kernels = get_fwd_blobs(
@@ -2468,12 +2413,14 @@ int main() {
                     lse="t" if lse else "f",
                     sink="f",
                 )
-                candidate = dispatch.expected_id(
-                    hdim=dim,
-                    pipeline="qr_tdm_sched",
-                    bn0=64 if dim == 192 else 128,
-                    **features,
+                pingpong = dict(
+                    hdim=dim, pipeline="qr_tdm_pingpong", spad="t", dpad="f", **features
                 )
+                # From 128 rows on pingpong's 128-row tile (d128: its 128-key trips).
+                candidate = dispatch.expected_id(
+                    bm0=128, **({"bn0": 128} if dim == 128 else {}), **pingpong
+                )
+                fallback = dispatch.expected_id(bm0=64, **pingpong)
                 for heads, kv_heads in ((1, 1), (8, 8), (8, 2), (8, 1)):
                     for member_q, max_q in (
                         (0, 128),
@@ -2483,14 +2430,6 @@ int main() {
                         (0, 127),
                         (127, 127),
                     ):
-                        fallback = dispatch.expected_id(
-                            hdim=dim,
-                            bm0=64 if max_q < 128 else 128,
-                            pipeline="qr_tdm",
-                            dpad="f" if dim == 128 else "t",
-                            spad="t",
-                            **features,
-                        )
                         args = dict(
                             hdim_q=dim,
                             group=1,
@@ -2513,17 +2452,14 @@ int main() {
             "simplified",
         )
         dispatch = _CompiledDispatcher(self, pool, kernels)
-        family_ids = {
-            value
-            for kernel, value in dispatch.kernel_ids
-            if kernel.F_pipeline.tag == "qr_tdm_sched"
-        }
-        fallback_ids = {
-            value
-            for kernel, value in dispatch.kernel_ids
-            if kernel.F_pipeline.tag == "qr_tdm"
-        }
         for dim in (128, 192):
+            # d128 and d192 alike: qr_tdm_pingpong (no fp16/bf16 scheduled pipeline)
+            family = "qr_tdm_pingpong"
+            family_ids = {
+                value
+                for kernel, value in dispatch.kernel_ids
+                if kernel.F_pipeline.tag == family and kernel.F_hdim == dim
+            }
             for mode, group in (("batch", 0), ("group", 1)):
                 for mask in (0, 1, 2, 3):
                     for lse in (0, 1):
@@ -2533,17 +2469,26 @@ int main() {
                             lse="t" if lse else "f",
                             sink="f",
                         )
-                        candidate = dispatch.expected_id(
+                        # pingpong's 128-row tile, at any mask (no sliding window; d128 its
+                        # 128-key trips), on small and big grids
+                        pingpong = dispatch.expected_id(
                             hdim=dim,
-                            pipeline="qr_tdm_sched",
-                            bn0=64 if dim == 192 else 128,
+                            pipeline="qr_tdm_pingpong",
+                            bm0=128,
+                            **({"bn0": 128} if dim == 128 else {}),
+                            spad="t" if group else "f",
+                            dpad="f",
                             **features,
                         )
+                        candidate = pingpong
                         args = dict(hdim_q=dim, group=group, mask=mask, lse=lse)
                         self.assertEqual(dispatch.run(**args), [candidate])
-                        sink_fallback = dispatch.run(**args, has_sink_ptr=1)[0]
-                        self.assertGreater(sink_fallback, 0)
-                        self.assertIn(sink_fallback, fallback_ids)
+                        # pingpong keeps a sink pointer without sink tokens
+                        self.assertEqual(
+                            dispatch.run(**args, has_sink_ptr=1), [pingpong]
+                        )
+                        # a big grid: pingpong
+                        self.assertEqual(dispatch.run(**args, batch=256), [pingpong])
                         for changes in (
                             dict(seqlen_q=127),
                             dict(arg_q=160),
@@ -2554,8 +2499,8 @@ int main() {
                             dict(device="gfx942"),
                         ):
                             rejected_args = dict(args, **changes)
-                            self.assertNotIn(
-                                dispatch.run(**rejected_args)[0], family_ids
+                            self.assertNotEqual(
+                                dispatch.run(**rejected_args), [candidate]
                             )
                         for device in ("gfx1251", "gfx1252"):
                             self.assertEqual(
@@ -2581,7 +2526,7 @@ int main() {
                                     dispatch.run(**args, **rejected)[0], family_ids
                                 )
 
-    def test_d128_filtered_priority_and_fallback(self):
+    def test_d128_filtered_tile_priority(self):
         pool, kernels = get_fwd_blobs(
             ["gfx1250"],
             _SUPPORTED_DISPATCH_FILTER,
@@ -2589,6 +2534,7 @@ int main() {
             [128],
             "simplified",
         )
+        self.assertEqual({k.F_pipeline.tag for k in kernels}, {"qr_tdm_pingpong"})
         dispatch = _CompiledDispatcher(self, pool, kernels)
         for mode, group in (("batch", 0), ("group", 1)):
             for mask in (0, 1, 2, 3):
@@ -2600,15 +2546,39 @@ int main() {
                         lse="t" if lse else "f",
                         sink="f",
                     )
-                    candidate = dispatch.expected_id(
-                        pipeline="qr_tdm_sched", **features
-                    )
-                    for size in (1, 127, 128, 129, 2047, 2048, 32768):
-                        fallback = dispatch.expected_id(
-                            pipeline="qr_tdm",
+                    # qr_tdm_pingpong: up to 16 rows its 16-row tile, below 128 its 64-row
+                    # one, else its 128-row 128-key-trip one (masked too: no left window)
+                    for size in (
+                        1,
+                        16,
+                        17,
+                        127,
+                        128,
+                        129,
+                        2047,
+                        2048,
+                        4095,
+                        4096,
+                        8192,
+                    ):
+                        bm0 = 16 if size <= 16 else 64 if size < 128 else 128
+                        extra = (
+                            {"bn0": _short_q_bn0(64 if group else 128)}
+                            if bm0 == 16
+                            else {"bn0": 128}
+                            if bm0 == 128
+                            else {}
+                        )
+                        # one query per head packs the 4 query heads of a KV head
+                        # (any mask: the windowed packed-GQA decode takes one query a head)
+                        if size == 1 and not group:
+                            extra["packgqa"] = "t"
+                        expected = dispatch.expected_id(
+                            pipeline="qr_tdm_pingpong",
                             spad="t" if group else "f",
-                            bm0=64 if size < 128 else 128,
+                            bm0=bm0,
                             dpad="f",
+                            **extra,
                             **features,
                         )
                         args = dict(
@@ -2619,17 +2589,21 @@ int main() {
                             mask=mask,
                             lse=lse,
                         )
-                        self.assertEqual(
-                            dispatch.run(**args),
-                            [candidate if size >= 128 else fallback],
-                        )
+                        self.assertEqual(dispatch.run(**args), [expected], size)
             candidate = dispatch.expected_id(
                 mode=mode,
                 hdim=128,
-                pipeline="qr_tdm_sched",
+                pipeline="qr_tdm_pingpong",
+                bm0=128,
+                bn0=128,
+                spad="t" if group else "f",
+                dpad="f",
                 mask="s_no",
                 lse="f",
                 sink="f",
+            )
+            self.assertEqual(
+                dispatch.run(group=group, hdim_q=128, hdim_v=128), [candidate]
             )
             for changes in (
                 dict(arg_q=192),
@@ -2661,38 +2635,11 @@ int main() {
                         dispatch.run(group=group, hdim_q=128, **changes), [-1]
                     )
 
-    def test_missing_d128_candidate_does_not_disable_generic(self):
-        pool, kernels = get_fwd_blobs(
-            ["gfx1250"],
-            _SUPPORTED_DISPATCH_FILTER,
-            600,
-            [128],
-            "simplified",
-        )
-        dispatch = _CompiledDispatcher(
-            self,
-            pool,
-            kernels,
-            filter_fn=lambda trait: trait.pipeline_tag != "qr_tdm_sched",
-        )
-        for mode, group in (("batch", 0), ("group", 1)):
-            fallback = dispatch.expected_id(
-                mode=mode,
-                hdim=128,
-                bm0=128,
-                pipeline="qr_tdm",
-                spad="t" if group else "f",
-                mask="s_no",
-                lse="f",
-                sink="f",
-                dpad="f",
-            )
-            self.assertEqual(dispatch.run(group=group, hdim_q=128), [fallback])
-
-    def test_d128_pingpong_tiles(self):
-        # qr_tdm_pingpong runs on its own d128 fp16/bf16 bm0=64 tile only, which no
-        # other pipeline takes; it alone uses the LDS-shuffle epilogue.
-        _, kernels = get_fwd_blobs(["gfx1250"], "*", 600, [128, 192], "simplified")
+    def test_pingpong_tiles(self):
+        # qr_tdm_pingpong runs on its own tiles only, which no other pipeline (d128's
+        # scheduled ones included) takes; it alone uses the LDS-shuffle epilogue.
+        dims = [32, 128, 192, 256, 512]
+        _, kernels = get_fwd_blobs(["gfx1250"], "*", 600, dims, "simplified")
         pingpong = [k for k in kernels if k.F_pipeline.tag == "qr_tdm_pingpong"]
         self.assertTrue(pingpong)
         for kernel in kernels:
@@ -2703,11 +2650,152 @@ int main() {
             self.assertEqual(
                 "LdsShuffle2DEpilogue" in kernel.render(), owned, kernel.name
             )
+        # 16-bit d256/d512 (Q/K rows of 512 bytes or more) have no 128-row tile.
+        # Pingpong stages Q/K at their own row rounded up to whole K slices (d32 does
+        # not pad to 64 at 16 bits), and the parts of the LDS read schedule that take
+        # effect on a tile show in its instance name: slice prefetch from 64 rows on, V
+        # before the softmax on the 128-row tiles here.
+        row_tiles = {
+            32: {16, 64, 128},
+            128: {16, 64, 128},
+            192: {16, 64, 128},
+            256: {16, 64},
+            512: {16, 64},
+        }
+        schedule = {
+            (32, 64): "_sp64",
+            (32, 128): "_sp64_vbs128",
+            (128, 64): "_sp64",
+            (128, 128): "_sp64_vbs128",
+            (192, 64): "_sp64",
+            (192, 128): "_sp64_vbs128",
+        }
+        self.assertEqual(
+            {(k.F_hdim, k.F_tile.F_bm0) for k in pingpong},
+            {(hdim, bm0) for hdim, tiles in row_tiles.items() for bm0 in tiles},
+        )
         for kernel in pingpong:
-            self.assertIn(kernel.F_dtype, ("fp16", "bf16"))
-            self.assertEqual(kernel.F_hdim, 128)
-            self.assertIn(kernel.F_tile.F_bm0, (16, 64))
-            self.assertIn("BlockFmhaPipelineQRKSVSTdmPingPong", kernel.render())
+            with self.subTest(kernel=kernel.name):
+                self.assertIn(kernel.F_dtype, ("fp16", "bf16", "fp8", "fp8bf16"))
+                # 32 bytes of K per WMMA lane: 16x16x32 at 16 bits, 16x16x64 at fp8; the
+                # fp8 short-query tiles take up to 16x16x128
+                fp8 = kernel.F_dtype in ("fp8", "fp8bf16")
+                t = kernel.F_tile
+                decode = t.F_bm0 == 16
+                wk = 64 if fp8 else 32
+                k_row = -(-kernel.F_hdim // wk) * wk
+                if fp8 and decode:
+                    # 128-deep where the slices divide the row (d192 keeps 64)
+                    wk = 128 if k_row % 128 == 0 else 64
+                self.assertEqual(t.F_wk0, wk)
+                # the decode tile's trip is one PV slice over its key warps
+                # (test_pingpong_decode_tiles), on the widest WMMA K a key warp's keys
+                # fill; the others' PV slices are as deep as their QK's
+                if decode:
+                    self.assertEqual(t.F_bk1, t.F_bn0)
+                    self.assertEqual(
+                        t.F_wk1, min(128 if fp8 else 32, t.F_bn0 // t.F_rk1)
+                    )
+                else:
+                    self.assertEqual(t.F_wk1, wk)
+                self.assertEqual(t.F_bk0max, k_row)
+                self.assertEqual(
+                    kernel.F_tile.F_bn1, 128 if kernel.F_hdim == 192 else kernel.F_hdim
+                )
+                suffix = schedule.get((kernel.F_hdim, kernel.F_tile.F_bm0), "")
+                packgqa = "_packgqa" if kernel.F_pipeline.F_packgqa == "t" else ""
+                self.assertTrue(
+                    kernel.name.endswith("_ntrload" + suffix + packgqa + "_nsink")
+                    or kernel.name.endswith("_ntrload" + suffix + packgqa + "_sink")
+                )
+                # The rendered schedule is the one the name gives.
+                sp = re.search(r"_sp(\d+)", suffix)
+                vbs = re.search(r"_vbs(\d+)", suffix)
+                self.assertIn(
+                    "QrTdmPingPongLdsReadSchedule<"
+                    f"{sp[1] if sp else 0}, {vbs[1] if vbs else 0}>",
+                    kernel.render(),
+                )
+                # The short-query tile does not keep dropout's P layout.
+                if kernel.F_tile.F_bm0 == 16:
+                    self.assertEqual(kernel.F_pipeline.F_dropout, "f")
+                trait = kernel.api_trait()
+                if trait.dvpad == "f":
+                    self.assertEqual(
+                        trait.dvcheck, f"a.hdim_v == {kernel.F_tile.F_bn1}"
+                    )
+                self.assertIn("BlockFmhaPipelineQRKSVSTdmPingPong", kernel.render())
+        self.assertTrue(
+            any(k.F_pipeline.F_dropout == "t" for k in pingpong if k.F_tile.F_bm0 > 16)
+        )
+
+    def test_pingpong_decode_tiles(self):
+        # The 16-row (decode) tiles per head dim and input type: (keys a trip, warps on the
+        # trip's keys), the long trip first. Four warps split the keys while a warp's O and
+        # V operand fit 192 VGPRs and a trip's K and V 128 KB of LDS on the shortest trip
+        # (a PV warp gemm per key warp: 32 keys at 16 bits, 64 at fp8, 128 for MX), else
+        # two; d512 splits none (its warps on gemm_0's N exchange S). Long trips: up to
+        # 512 keys and 64 KB of K within the same budgets.
+        expected = {
+            "bf16": {
+                32: ((512, 4), (128, 4)),
+                64: ((512, 4), (128, 4)),
+                96: ((256, 4), (128, 4)),
+                128: ((256, 4), (128, 4)),
+                160: ((128, 4),),
+                192: ((128, 4),),
+                256: ((128, 2), (64, 2)),
+                512: ((32, 1),),
+            },
+            "fp8": {
+                32: ((512, 4), (256, 4)),
+                64: ((512, 4), (256, 4)),
+                96: ((512, 4), (256, 4)),
+                128: ((512, 4), (256, 4)),
+                160: ((256, 4),),
+                192: ((256, 4),),
+                256: ((256, 2), (128, 2)),
+                512: ((64, 1),),
+            },
+            "mx": {
+                32: ((512, 4),),
+                64: ((512, 4),),
+                96: ((512, 4),),
+                128: ((512, 4),),
+                160: ((256, 2),),
+                192: ((256, 2),),
+                256: ((256, 2),),
+                512: ((128, 1),),
+            },
+        }
+        for kind, dims in expected.items():
+            for hdim_pair in GFX125_QR_TDM_PINGPONG_HDIMS:
+                with self.subTest(kind=kind, hdim=hdim_pair):
+                    tiles = _gfx125_qr_tdm_pingpong_tiles(
+                        hdim_pair, fp8=kind == "fp8", mx=kind == "mx"
+                    )
+                    decode = [t for t in tiles if t.F_bm0 == 16]
+                    self.assertEqual(
+                        tuple((t.F_bn0, t.F_rk1) for t in decode), dims[hdim_pair[0]]
+                    )
+                    # dispatched ahead of the longer query tiles, the long trip ahead of
+                    # the shortest one, which takes every short query
+                    self.assertEqual(list(tiles[: len(decode)]), decode)
+                    for t in decode[:-1]:
+                        self.assertIn("a.seqlen_k >=", str(t.F_constraint))
+                    self.assertNotIn("a.seqlen_k >=", str(decode[-1].F_constraint))
+                    for t in decode:
+                        # kw warps on the keys (gemm_0's N, gemm_1's K) times 4 / kw on
+                        # V's columns (gemm_1's N); one trip a PV slice
+                        # (kw = 1: gemm_0's warps on N, one per 16 keys up to four, and
+                        # as many on gemm_1's N)
+                        kw = t.F_rk1
+                        nw = 4 // kw if kw > 1 else min(4, t.F_bn0 // 16)
+                        self.assertEqual(
+                            (t.F_rm0, t.F_rn0, t.F_rk0), (1, kw if kw > 1 else nw, 1)
+                        )
+                        self.assertEqual((t.F_rm1, t.F_rn1), (1, nw))
+                        self.assertEqual(t.F_bk1, t.F_bn0)
 
     def test_d128_pingpong_dispatch(self):
         pool, kernels = get_fwd_blobs(
@@ -2717,14 +2805,20 @@ int main() {
             [128],
             "simplified",
         )
+        self.assertEqual({k.F_pipeline.tag for k in kernels}, {"qr_tdm_pingpong"})
         dispatch = _CompiledDispatcher(self, pool, kernels)
 
-        def kernel(pipeline, bm0, mask="s_no", skpad="f", bias="no", sink="f"):
+        def kernel(bm0, mask="s_no", skpad="f", bias="no", sink="f", bn0=None):
+            # the calls below with a 16-row tile have >= 512 keys (its long trips); the
+            # 128-row tile takes 128-key trips without a left window, else 64-key ones
+            if bn0 is None:
+                bn0 = _short_q_bn0(512) if bm0 == 16 else 128 if bm0 == 128 else None
             return dispatch.expected_id(
                 hdim=128,
                 mode="batch",
-                pipeline=pipeline,
+                pipeline="qr_tdm_pingpong",
                 bm0=bm0,
+                **({"bn0": bn0} if bn0 is not None else {}),
                 mask=mask,
                 skpad=skpad,
                 dpad="f",
@@ -2736,70 +2830,348 @@ int main() {
         def run(**changes):
             return dispatch.run(hdim_q=128, hdim_v=128, **changes)
 
-        sched_ids = {
-            index
-            for k, index in dispatch.kernel_ids
-            if k.F_pipeline.tag == "qr_tdm_sched"
-        }
         square = dict(seqlen_q=532, seqlen_k=532)
         causal = dict(mask=1, window_size_left=-1, window_size_right=0)
         # 1280 x 2 (batch, head) pairs: 10 per num_cus (256).
         big = dict(batch=1280, nhead_q=2, nhead_k=2)
 
-        # On a big grid below 640 rows. The unpadded instance serves any seqlen_k,
-        # except with an elementwise bias, which still needs a tile multiple.
-        self.assertEqual(run(**square, **big), [kernel("qr_tdm_pingpong", 64)])
-        # Up to 16 rows the 16-row tile, under the same grid condition (one m-tile:
-        # 1280 x 2 blocks, and 1792 x 1 at 32 rows).
-        for length, bm0 in ((8, 16), (16, 16), (17, 64)):
+        # qr_tdm_pingpong on any grid: its 128-row tile from 128 rows on at any key length
+        # and mask, with 128-key trips but under a left window (64-key trips; a narrow one
+        # takes the 64-row tile).
+        for grid in ({}, big):
+            self.assertEqual(run(**square, **grid), [kernel(128)])
             self.assertEqual(
-                run(seqlen_q=length, seqlen_k=532, **big),
-                [kernel("qr_tdm_pingpong", bm0)],
+                run(**square, **causal, **grid), [kernel(128, mask="causal")]
             )
+        self.assertEqual(run(seqlen_q=640, seqlen_k=640, **big), [kernel(128)])
+        window = dict(mask=3, window_size_left=255, window_size_right=0)
+        self.assertEqual(run(**square, **window, **big), [kernel(64, mask="s_mask")])
+        self.assertEqual(
+            run(**square, **dict(window, window_size_left=511), **big),
+            [kernel(128, mask="s_mask", bn0=64)],
+        )
+        # no grid threshold: 16 x 16 heads of 255 or 256 rows alike
+        grid = dict(batch=16, nhead_q=16, nhead_k=16)
+        self.assertEqual(run(seqlen_q=256, seqlen_k=256, **grid), [kernel(128)])
+        self.assertEqual(run(seqlen_q=255, seqlen_k=255, **grid), [kernel(128)])
+        # Below 128 rows: up to 16 rows the 16-row tile, else the 64-row one.
+        for length, bm0 in ((8, 16), (16, 16), (17, 64), (100, 64), (127, 64)):
+            self.assertEqual(run(seqlen_q=length, seqlen_k=512), [kernel(bm0)])
+            self.assertEqual(run(seqlen_q=length, seqlen_k=532, **big), [kernel(bm0)])
         self.assertEqual(
             run(seqlen_q=32, seqlen_k=200, batch=1792, nhead_q=1, nhead_k=1),
-            [kernel("qr_tdm_pingpong", 64)],
+            [kernel(64)],
         )
-        self.assertEqual(run(seqlen_q=8, seqlen_k=512), [kernel("qr_tdm", 64)])
+        # The unpadded instance serves any seqlen_k, except with an elementwise bias,
+        # which still needs a tile multiple. Bias, ALiBi and sink tokens run on the
+        # general 128-row tile (64-key trips: qr_tdm_pingpong_tile_takes).
         self.assertEqual(
-            run(**square, **big, bias=1),
-            [kernel("qr_tdm_pingpong", 64, skpad="t", bias="bias")],
+            run(**square, **big, bias=1), [kernel(128, skpad="t", bias="bias", bn0=64)]
         )
         self.assertEqual(
             run(seqlen_q=532, seqlen_k=512, bias=1, **big),
-            [kernel("qr_tdm_pingpong", 64, bias="bias")],
+            [kernel(128, bias="bias", bn0=64)],
         )
         self.assertEqual(
-            run(**square, **causal, **big),
-            [kernel("qr_tdm_pingpong", 64, mask="causal")],
+            run(**square, **big, bias=2), [kernel(128, bias="alibi", bn0=64)]
         )
-        # qr_tdm_sched below 640 rows on small grids and from 640 rows on any grid;
-        # where it does not apply (a sink), qr_tdm.
-        self.assertIn(run(**square)[0], sched_ids)
-        # The grid threshold, 2 (batch, head) pairs per num_cus: 256 x 2 >= 2 x 256.
-        self.assertEqual(
-            run(**square, batch=256, nhead_q=2, nhead_k=2),
-            [kernel("qr_tdm_pingpong", 64)],
-        )
-        self.assertIn(run(**square, batch=255, nhead_q=2, nhead_k=2)[0], sched_ids)
-        # Not a block count: 16 x 16 heads of 512 rows (2048 bm0=64 blocks) stay on
-        # qr_tdm_sched.
-        self.assertIn(
-            run(seqlen_q=512, seqlen_k=512, batch=16, nhead_q=16, nhead_k=16)[0],
-            sched_ids,
-        )
-        self.assertIn(run(seqlen_q=640, seqlen_k=640, **big)[0], sched_ids)
-        self.assertEqual(
-            run(**square, **causal, has_sink_ptr=1),
-            [kernel("qr_tdm", 128, mask="causal", skpad="t")],
-        )
-        # Below 128 rows qr_tdm_pingpong needs the big grid too; on a small one qr_tdm
-        # keeps its bm0=64 tile.
-        self.assertEqual(
-            run(seqlen_q=100, seqlen_k=512, **big), [kernel("qr_tdm_pingpong", 64)]
-        )
-        self.assertEqual(run(seqlen_q=100, seqlen_k=512), [kernel("qr_tdm", 64)])
+        # sink tokens (their instances also take a sink pointer), and a sink pointer alone
+        for grid in ({}, big):
+            self.assertEqual(
+                run(**square, sink=1, **grid), [kernel(128, sink="t", bn0=64)]
+            )
+            self.assertEqual(
+                run(**square, sink=1, has_sink_ptr=1, **grid),
+                [kernel(128, sink="t", bn0=64)],
+            )
+            self.assertEqual(run(**square, has_sink_ptr=1, **grid), [kernel(128)])
+            self.assertEqual(
+                run(**square, **causal, has_sink_ptr=1, **grid),
+                [kernel(128, mask="causal")],
+            )
 
+    def check_d128_grid_dispatch(self, small):
+        # d128 at 1024 query rows: fp8 on a small grid (fewer than 256 x num_cus query
+        # rows over the (batch, head) pairs) and MX prefill on any grid run
+        # qr_tdm_fp8_sched; everything else pingpong's first 128-row tile (fp16/bf16: its
+        # 128-key trips).
+        grid = dict(batch=1, nhead_q=8, nhead_k=8) if small else dict(batch=64)
+        for dtype, qscale, qscale_name, sched_tag, sched_here in (
+            ("bf16", 0, "no", None, False),
+            ("fp16", 0, "no", None, False),
+            ("fp8", 1, "pertensor", "qr_tdm_fp8_sched", small),
+            ("fp8bf16", 1, "pertensor", "qr_tdm_fp8_sched", small),
+            ("mxfp8", 4, "mx", "qr_tdm_fp8_sched", True),
+        ):
+            with self.subTest(dtype=dtype, small=small):
+                pool, kernels = get_fwd_blobs(
+                    ["gfx1250"],
+                    f"fmha_fwd_d128_{dtype}_batch_*_nlogits_nbias_nmask_nlse_ndropout_"
+                    "nskip_*_nsink*",
+                    0,
+                    [128],
+                    "simplified",
+                )
+                self.assertEqual(
+                    {k.F_pipeline.tag for k in kernels},
+                    {"qr_tdm_pingpong"} | ({sched_tag} if sched_tag else set()),
+                )
+                dispatch = _CompiledDispatcher(
+                    self, pool, kernels, filter_fn=lambda trait: True
+                )
+                m128 = next(
+                    t
+                    for t in _gfx125_qr_tdm_pingpong_tiles(
+                        (128, 128), fp8=dtype.startswith("fp8"), mx=qscale_name == "mx"
+                    )
+                    if t.F_bm0 == 128
+                )
+                features = dict(dtype=dtype, hdim=128, mode="batch", qscale=qscale_name)
+                if sched_here:
+                    expected = dispatch.expected_id(pipeline=sched_tag, **features)
+                else:
+                    expected = dispatch.expected_id(
+                        pipeline="qr_tdm_pingpong",
+                        bm0=128,
+                        bn0=m128.F_bn0,
+                        dpad="f",
+                        spad="f",
+                        **features,
+                    )
+                for seqlen_k in (1024, 2048):
+                    for num_cus in (256, 128):
+                        self.assertEqual(
+                            dispatch.run(
+                                dtype=dtype,
+                                hdim_q=128,
+                                hdim_v=128,
+                                seqlen_q=1024,
+                                seqlen_k=seqlen_k,
+                                qscale=qscale,
+                                num_cus=num_cus,
+                                **grid,
+                            ),
+                            [expected],
+                            (seqlen_k, num_cus),
+                        )
+
+    def test_d128_small_grid_dispatches_fp8_and_mx_to_sched(self):
+        self.check_d128_grid_dispatch(small=True)
+
+    def test_d128_big_grid_dispatches_to_pingpong_but_mx(self):
+        self.check_d128_grid_dispatch(small=False)
+
+    def test_group_mode_skip_dispatches_to_pingpong_skip_instances(self):
+        pool, kernels = get_fwd_blobs(
+            ["gfx1250"],
+            "fmha_fwd_d*_bf16_*_nlogits_nbias_nmask_nlse_ndropout_*_nqscale_*_nsink*",
+            600,
+            [64, 128, 192],
+            "simplified",
+        )
+        skip = [k for k in kernels if k.F_pipeline.F_skip == "t"]
+        self.assertTrue(skip)
+        # skip_min_seqlen_q instances are group mode only, on every pingpong tile (the
+        # scheduled pipeline has none)
+        self.assertEqual({k.F_mode for k in skip}, {"group"})
+        self.assertEqual({k.F_pipeline.tag for k in skip}, {"qr_tdm_pingpong"})
+        self.assertEqual(
+            {(k.F_hdim, k.F_tile.name) for k in skip},
+            {
+                (k.F_hdim, k.F_tile.name)
+                for k in kernels
+                if k.F_mode == "group"
+                and k.F_pipeline.F_skip == "f"
+                and k.F_pipeline.tag == "qr_tdm_pingpong"
+            },
+        )
+        dispatch = _CompiledDispatcher(self, pool, kernels)
+        for hdim, hdim_v in ((64, 64), (128, 128), (192, 128)):
+            for seqlen_q, bm0 in ((16, 16), (100, 64), (512, 128)):
+                with self.subTest(hdim=hdim, seqlen_q=seqlen_q):
+                    args = dict(
+                        hdim_q=hdim, hdim_v=hdim_v, seqlen_q=seqlen_q, seqlen_k=512
+                    )
+                    features = dict(
+                        hdim=hdim, pipeline="qr_tdm_pingpong", bm0=bm0, dpad="f"
+                    )
+                    if bm0 == 16:
+                        features["bn0"] = _short_q_bn0(256, (hdim, hdim_v))
+                    elif hdim == 128:
+                        # 64-row tile: 64-key trips; 128-row: 128-key trips
+                        features["bn0"] = 128 if bm0 == 128 else 64
+                    self.assertEqual(
+                        dispatch.run(group=1, skip=1, **args),
+                        [
+                            dispatch.expected_id(
+                                mode="group", spad="t", skip="t", **features
+                            )
+                        ],
+                    )
+                    # without skip, the same tiles' instances without it
+                    no_skip = dispatch.expected_id(mode="group", spad="t", **features)
+                    self.assertEqual(dispatch.run(group=1, **args), [no_skip])
+                    # batch mode reuses the instances without skip
+                    self.assertEqual(
+                        dispatch.run(group=0, skip=1, **args),
+                        dispatch.run(group=0, **args),
+                    )
+
+    def test_padded_head_dims_off_the_vector(self):
+        # Padded fp16/bf16 pingpong instances take any head dim (O is stored element by
+        # element); fp8 ones still need whole 8-element rows.
+        pool, kernels = get_fwd_blobs(
+            ["gfx1250"],
+            "fmha_fwd_d*_[bf]*_batch_*_nlogits_nbias_nmask_nlse_ndropout_nskip_*_nsink*",
+            0,
+            [96, 128],
+            "simplified",
+        )
+        kernels = [k for k in kernels if k.F_dtype in ("bf16", "fp8")]
+        self.assertEqual({k.F_dtype for k in kernels}, {"bf16", "fp8"})
+        dispatch = _CompiledDispatcher(
+            self, pool, kernels, filter_fn=lambda trait: trait.dtype in ("bf16", "fp8")
+        )
+        for dtype, qscale, hdim_q, hdim_v, padded in (
+            ("bf16", 0, 100, 100, True),
+            ("bf16", 0, 100, 128, True),
+            ("bf16", 0, 128, 100, True),
+            ("bf16", 0, 128, 128, False),
+            ("fp8", 1, 104, 104, True),
+            ("fp8", 1, 128, 128, False),
+            ("fp8", 1, 100, 100, None),
+            ("fp8", 1, 128, 100, None),
+        ):
+            with self.subTest(dtype=dtype, hdim=(hdim_q, hdim_v)):
+                got = dispatch.run(
+                    dtype=dtype,
+                    hdim_q=hdim_q,
+                    hdim_v=hdim_v,
+                    qscale=qscale,
+                    nhead_k=8,
+                    batch=64,  # past d128's small grids (fp8's scheduled pipeline)
+                )
+                if padded is None:
+                    self.assertEqual(got, [-1])
+                    continue
+                self.assertEqual(
+                    got,
+                    [
+                        dispatch.expected_id(
+                            dtype=dtype,
+                            hdim=128,
+                            mode="batch",
+                            pipeline="qr_tdm_pingpong",
+                            bm0=128,
+                            # fp16/bf16 d128: 128-key trips; a padded head dim takes the
+                            # general tile's fully padded instance
+                            # (qr_tdm_pingpong_tile_takes)
+                            bn0=128 if dtype == "bf16" and not padded else 64,
+                            qscale="pertensor" if qscale else "no",
+                            spad="t" if padded else "f",
+                            dpad="t" if padded else "f",
+                            dvpad="t" if padded else "f",
+                        )
+                    ],
+                )
+        for k in kernels:
+            if k.F_pipeline.tag != "qr_tdm_pingpong":
+                continue
+            trait = k.api_trait()
+            if trait.dpad == "t":
+                self.assertEqual(
+                    trait.dcheck, "true" if k.F_dtype == "bf16" else "a.hdim_q % 8 == 0"
+                )
+            if trait.dvpad == "t":
+                self.assertEqual(
+                    trait.dvcheck,
+                    "true" if k.F_dtype == "bf16" else "a.hdim_v % 8 == 0",
+                )
+
+    def test_fp8_block_scale_sizes(self):
+        # fp8 pingpong block scales: any q block, k/v blocks of whole 32-key chunks, on
+        # its general and decode tiles (no per-tile clause; qr_tdm_pingpong_tile_takes).
+        # On d128's small grids qr_tdm_fp8_sched takes q blocks of whole 128-row tiles
+        # first; pingpong the ones it refuses.
+        pool, kernels = get_fwd_blobs(
+            ["gfx1250"],
+            "fmha_fwd_d128_fp8_batch_*_nlogits_nbias_nmask_nlse_ndropout_nskip_"
+            "blockscale_*_nsink*",
+            0,
+            [128],
+            "simplified",
+        )
+        self.assertEqual(
+            {k.F_pipeline.tag for k in kernels}, {"qr_tdm_pingpong", "qr_tdm_fp8_sched"}
+        )
+        for k in kernels:
+            constraint = str(k.api_trait().constraint)
+            self.assertIn("a.block_scale_size_kv % 32 == 0", constraint)
+            self.assertEqual(constraint.count("a.block_scale_size_kv %"), 1)
+            self.assertEqual(
+                "a.block_scale_size_q % 128 == 0" in constraint,
+                k.F_pipeline.tag == "qr_tdm_fp8_sched",
+            )
+        # (render only the dispatch: the host stub has no block-scale align table)
+        dispatch = _CompiledDispatcher(
+            self, pool, kernels, filter_fn=lambda trait: True
+        )
+        big, small = 64, 2
+        for q_block, kv_block, seqlen_q, batch, expected in (
+            (128, 96, 1024, big, 128),
+            (48, 96, 1024, big, 128),
+            (16, 32, 100, big, 128),
+            (128, 96, 16, big, 16),
+            (128, 48, 1024, big, None),
+            (128, 48, 100, big, None),
+            (128, 16, 1024, big, None),
+            (0, 96, 1024, big, None),
+            (128, 96, 1024, small, "sched"),
+            (256, 32, 1024, small, "sched"),
+            (48, 96, 1024, small, 128),
+            (128, 48, 1024, small, None),
+        ):
+            with self.subTest(
+                q_block=q_block, kv_block=kv_block, seqlen_q=seqlen_q, batch=batch
+            ):
+                got = dispatch.run(
+                    dtype="fp8",
+                    hdim_q=128,
+                    hdim_v=128,
+                    seqlen_q=seqlen_q,
+                    seqlen_k=1024,
+                    qscale=2,
+                    block_scale_size_q=q_block,
+                    block_scale_size_kv=kv_block,
+                    batch=batch,
+                    nhead_k=8,
+                )
+                features = dict(
+                    dtype="fp8", hdim=128, mode="batch", qscale="blockscale"
+                )
+                if expected is None:
+                    self.assertEqual(got, [-1])
+                elif expected == "sched":
+                    self.assertEqual(
+                        got,
+                        [dispatch.expected_id(pipeline="qr_tdm_fp8_sched", **features)],
+                    )
+                else:
+                    self.assertEqual(
+                        got,
+                        [
+                            dispatch.expected_id(
+                                pipeline="qr_tdm_pingpong",
+                                bm0=expected,
+                                bn0=_short_q_bn0(1024, dtype="fp8")
+                                if expected == 16
+                                else 64,
+                                spad="f",
+                                dpad="f",
+                                **features,
+                            )
+                        ],
+                    )
 
 
 class SplitKVQrTdmTiles(unittest.TestCase):
@@ -2832,6 +3204,48 @@ class SplitKVQrTdmTiles(unittest.TestCase):
             sorted({kernel.F_hdim for kernel in self._tdm_kernels()}),
             [32, 64, 128, 256],
         )
+
+    def test_pingpong_only_buckets_fall_back_on_the_next_qr_tdm_bucket(self):
+        # the split-KV buckets 96/160/192 hold qr_tdm_pingpong's instances, then dispatch the
+        # next qr_tdm bucket up's padded instances (no copies compiled for them)
+        from codegen.ops.fmha_fwd_splitkv import write_blobs
+
+        with tempfile.TemporaryDirectory() as out:
+            write_blobs(["gfx1250"], Path(out), "@*bf16_batch*", 0, [-1], "simplified")
+            api = (Path(out) / "fmha_fwd_splitkv_api.cpp").read_text()
+            files = {p.name for p in Path(out).glob("fmha_fwd_splitkv_d*.cpp")}
+        # each dtype's head-dim buckets: "if(t.hdim_q <= h && t.hdim_v <= h) {"
+        cases = re.split(r"if\(t\.hdim_q <= ", api)
+        bucket = {}
+        for case in cases[1:]:
+            h = int(re.match(r"\d+", case).group(0))
+            bucket[h] = bucket.get(h, "") + case
+        for h, up in ((96, 128), (160, 256), (192, 256)):
+            with self.subTest(bucket=h):
+                traits = re.findall(
+                    r"fmha_fwd_splitkv_traits_<(\d+), FmhaFwdBf16, [^;]*?BlockFmhaPipelineEnum::(\w+),",
+                    bucket[h],
+                )
+                tags = [tag for _, tag in traits]
+                self.assertIn("QRKSVS_TDM_PINGPONG", tags)
+                self.assertIn("QRKSVS_TDM", tags)
+                # pingpong's own instances first, then the aliases of bucket `up`
+                last_pp = max(
+                    i for i, t in enumerate(tags) if t == "QRKSVS_TDM_PINGPONG"
+                )
+                first_tdm = min(i for i, t in enumerate(tags) if t == "QRKSVS_TDM")
+                self.assertLess(last_pp, first_tdm)
+                self.assertEqual({int(d) for d, t in traits if t == "QRKSVS_TDM"}, {up})
+                # d192's pingpong tile is 192/128: d192/192 takes d256's padded pingpong
+                # instances, ahead of qr_tdm's
+                pp_dims = {int(d) for d, t in traits if t == "QRKSVS_TDM_PINGPONG"}
+                self.assertEqual(pp_dims, {h, up} if h == 192 else {h})
+                self.assertFalse(
+                    any(
+                        f.startswith(f"fmha_fwd_splitkv_d{h}_") and "qr_tdm_v" in f
+                        for f in files
+                    )
+                )
 
     def test_qr_tdm_owns_logits_soft_cap(self):
         # The soft cap entries that dispatch on an exact head dim must be
@@ -2872,7 +3286,8 @@ class SplitKVDecodeDispatch(unittest.TestCase):
 
     def test_only_tdm_pipelines_merge_heads_with_a_sink(self):
         # A merged row reads the sink logit of its own q head only in the TDM
-        # pipelines; the others read one per kv head.
+        # pipelines; the others read one per kv head. qr_tdm_pingpong's split-KV (the
+        # forward kernel) merges in batch mode without a bias, in its own kernel body.
         for target in ("gfx1250", "gfx942"):
             sink = [
                 k
@@ -2881,31 +3296,58 @@ class SplitKVDecodeDispatch(unittest.TestCase):
             ]
             self.assertTrue(sink, target)
             for kernel in sink:
+                if kernel.F_pipeline.tag == "qr_tdm_pingpong":
+                    self.assertIn(
+                        "constexpr bool kCanMergeHeads_",
+                        kernel.template,
+                        kernel.filename,
+                    )
+                    continue
                 self.assertEqual(
                     "(!true || true)" in kernel.template,
-                    kernel.F_pipeline.tag in ("qr_tdm", "qr_tdm_pingpong"),
+                    kernel.F_pipeline.tag == "qr_tdm",
                     kernel.filename,
                 )
 
     def test_pingpong_takes_up_to_16_rows_ahead_of_qr_tdm(self):
+        # qr_tdm_pingpong's split-KV (the forward kernel): its 16-row decode tile and its
+        # 64-row one; the plain call on whole head dims in batch mode, the features (soft cap,
+        # bias / ALiBi, group mode) on padded ones, those with sinks as a runtime value and the
+        # masking kernel for any mask; never paged KV
         kernels = self._kernels("gfx1250", 0)
         pingpong = [k for k in kernels if k.F_pipeline.tag == "qr_tdm_pingpong"]
         self.assertTrue(pingpong)
         for kernel in pingpong:
-            self.assertEqual(
-                (kernel.F_hdim, kernel.F_mode, kernel.F_tile.F_bm0), (128, "batch", 16)
-            )
-            self.assertEqual(
-                (
-                    kernel.F_pipeline.F_sink,
-                    kernel.F_pipeline.F_bias,
-                    kernel.F_pipeline.F_logits,
-                    kernel.F_pipeline.F_pagedkv,
-                ),
-                ("f", "no", "f", "f"),
-                kernel.filename,
-            )
-            self.assertIn("<= 16", str(kernel.F_tile.F_constraint), kernel.filename)
+            p = kernel.F_pipeline
+            self.assertIn(kernel.F_tile.F_bm0, (16, 64), kernel.filename)
+            self.assertEqual(p.F_pagedkv, "f", kernel.filename)
+            padded = (p.F_dpad, p.F_dvpad) == ("t", "t")
+            if p.F_logits == "t" or p.F_bias != "no" or kernel.F_mode == "group":
+                self.assertTrue(padded, kernel.filename)
+            if padded:
+                # the masking kernel takes no mask too; sinks alone keep a no-mask one
+                if p.F_mask == "s_no":
+                    self.assertEqual(
+                        (p.F_logits, p.F_bias, p.F_sink),
+                        ("f", "no", "t"),
+                        kernel.filename,
+                    )
+                else:
+                    self.assertEqual(p.F_mask, "s_mask", kernel.filename)
+            else:
+                self.assertEqual(p.F_sink, "f", kernel.filename)
+        for mode in ("batch", "group"):
+            for bm0 in (16, 64):
+                self.assertTrue(
+                    [k for k in pingpong if (k.F_mode, k.F_tile.F_bm0) == (mode, bm0)]
+                )
+        self.assertTrue(
+            [
+                k
+                for k in pingpong
+                if (k.F_pipeline.F_logits, k.F_pipeline.F_bias) == ("t", "bias")
+            ]
+        )
         # Dispatch takes the first hit in emission order: rows 17 and up fall
         # through to the b64 qr_tdm entries behind the 16-row ones.
         for dtype in ("fp16", "bf16"):
@@ -2917,18 +3359,6 @@ class SplitKVDecodeDispatch(unittest.TestCase):
             last_pingpong = max(i for i, tag, _ in d128 if tag == "qr_tdm_pingpong")
             first_b64 = min(i for i, tag, bm0 in d128 if tag == "qr_tdm" and bm0 == 64)
             self.assertLess(last_pingpong, first_b64, dtype)
-        self.assertFalse(
-            [k for k in kernels if k.F_hdim != 128 and k.F_tile.F_bm0 == 16]
-        )
-        for receipt in (2, 100, 200, 600):
-            self.assertFalse(
-                [
-                    k
-                    for k in self._kernels("gfx1250", receipt)
-                    if k.F_pipeline.tag == "qr_tdm_pingpong"
-                ],
-                receipt,
-            )
 
 
 if __name__ == "__main__":

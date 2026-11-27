@@ -503,14 +503,15 @@ TEST_P(BatchXCDRemap, DataTypeConfig)
     CHECK_RESULT(result);
 }
 
-// d128 runs qr_tdm_pingpong below 640 rows with at least 2 (batch, head) pairs per
-// multiprocessor (GFX125_QR_TDM_PINGPONG_RANGE in fmha_fwd.py), so each case sizes its
-// grid to reach it on this device: the batch in batch mode; in group mode, where this
-// runner passes the packed total length as max_seqlen_q (kept below 640), the head
-// count for a given number of sequences (12 by default). The unpadded instance serves
-// any seqlen_k except with an elementwise bias; causal masks take its causal kernel
-// ("_mc_", without LSE, bias or sink). ALiBi without a mask makes every K tile raise the
-// row maxima of the steep heads past the rebase threshold, so those cases take the
+// d128 runs qr_tdm_pingpong on every query but a small grid of 128-row query blocks
+// (max_seqlen_q >= 128 and batch * nhead_q * max_seqlen_q < 256 * num_cus, which goes to
+// qr_tdm_sched; _gfx125_qr_tdm_pingpong_range in fmha_fwd.py). With at least 2 (batch,
+// head) pairs per multiprocessor, 128 or more rows always make the grid large enough, so
+// each case sizes its grid to that on this device: the batch in batch mode; in group mode
+// the head count for a given number of sequences (12 by default). The unpadded instance
+// serves any seqlen_k except with an elementwise bias; causal masks take its causal
+// kernel ("_mc_", without bias or sink; with or without LSE). ALiBi without a mask makes every K
+// tile raise the row maxima of the steep heads past the rebase threshold, so those cases take the
 // finite-to-finite rescale of o_acc and l on every trip, with and without LSE.
 std::pair<int, int> PingPongGrid(mode_enum mode, int nhead, int group_batch = 12)
 {
@@ -592,7 +593,8 @@ TEST_P(QrTdmShortQuery, DataTypeConfig)
                                                    &selected_kernel);
         ASSERT_EQ(result, fwd_result::success);
         EXPECT_NE(selected_kernel.find("_qr_tdm_pingpong_"), std::string::npos) << selected_kernel;
-        EXPECT_NE(selected_kernel.find("_b16x64"), std::string::npos) << selected_kernel;
+        // the 16-row tile (128 or 256 keys a trip)
+        EXPECT_NE(selected_kernel.find("_b16x"), std::string::npos) << selected_kernel;
     }
 }
 
@@ -610,7 +612,8 @@ INSTANTIATE_TEST_SUITE_P(
     Values(std::tuple{mode_enum::batch, 4, 64, 64, "0", "n", true, "_npad_", false},
            std::tuple{mode_enum::batch, 4, 64, 100, "0", "n", true, "_npad_", false},
            std::tuple{mode_enum::batch, 4, 64, 100, "0", "e", true, "_pssk_", false},
-           std::tuple{mode_enum::batch, 4, 64, 128, "0", "e", true, "_npad_", false},
+           // a bias comes with the sequence padding only, aligned lengths too
+           std::tuple{mode_enum::batch, 4, 64, 128, "0", "e", true, "_pssk_", false},
            std::tuple{mode_enum::batch, 8, 64, 192, "0", "a", true, "_alibi_", false},
            std::tuple{mode_enum::batch, 8, 64, 192, "0", "a", false, "_alibi_", false},
            std::tuple{mode_enum::batch, 4, 232, 232, "t:50,64", "n", true, "_mask_", false},
@@ -667,7 +670,11 @@ TEST_P(QrTdmPingPong, DataTypeConfig)
                                                    std::nullopt,
                                                    &selected_kernel);
         ASSERT_EQ(result, fwd_result::success);
-        EXPECT_NE(selected_kernel.find("_b64x"), std::string::npos) << selected_kernel;
+        // the 64-row tile; bias and ALiBi run on the general 128-row tile (codegen's
+        // qr_tdm_pingpong_tile_takes)
+        EXPECT_NE(selected_kernel.find(std::string(bias_str) == "n" ? "_b64x" : "_b128x"),
+                  std::string::npos)
+            << selected_kernel;
         EXPECT_NE(selected_kernel.find("_qr_tdm_pingpong_"), std::string::npos) << selected_kernel;
         EXPECT_NE(selected_kernel.find(tag), std::string::npos) << selected_kernel;
     }
@@ -685,7 +692,9 @@ INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
                          // hdim_q, hdim_v, mask, bias, init_sink, name part
                          Values(std::tuple{128, 128, "0", "n", 1, "_sink"},
                                 std::tuple{128, 128, "t:50,64", "n", 1, "_sink"},
-                                std::tuple{120, 120, "2", "n", 0, "_pddv_"},
+                                // a padded head dim: the fully padded instance
+                                // (codegen's qr_tdm_pingpong_tile_takes)
+                                std::tuple{120, 120, "2", "n", 0, "_psskddv_"},
                                 std::tuple{128, 120, "0", "e", 0, "_psskddv_"}));
 
 TEST_P(QrTdmPingPongEdges, DataTypeConfig)
@@ -867,11 +876,9 @@ class QrTdmLargeHeadDim
 // seqlen-padded instances; seqlen_k > seqlen_q and seqlen_q > seqlen_k are both
 // represented, as are top-left, bottom-right and a live sliding window.
 //
-// lse is a parameter rather than def_lse because the simplified-mask causal
-// specialisation (_mc, see get_pipelines in fmha_fwd.py) is only emitted for
-// bias == "no" && lse == "f" && sink == "f". Pinning lse to def_lse (true for
-// fp16/bf16) would route every causal row to the generic _mask instance and
-// leave _mc with no coverage at these head dims at all.
+// lse is a parameter rather than def_lse so that the causal rows run the simplified-
+// mask causal specialisation (_mc, see get_pipelines in fmha_fwd.py) both with and
+// without the LSE.
 INSTANTIATE_TEST_SUITE_P(
     TestCkTileFmhaFwd,
     QrTdmLargeHeadDim,
@@ -880,7 +887,7 @@ INSTANTIATE_TEST_SUITE_P(
                    std::tuple{512, 128, 256, "0", "n", false, true}, // tile-multiple seqlen_q
                    std::tuple{512, 99, 256, "1", "n", false, true},  // causal top-left -> _mc
                    std::tuple{512, 256, 256, "2", "n", false, true}, // causal bottom-r -> _mc
-                   std::tuple{512, 99, 256, "1", "n", true, true},   // lse -> generic _mask
+                   std::tuple{512, 99, 256, "1", "n", true, true},   // causal with lse -> _mc
                    std::tuple{512, 200, 520, "t:128,30", "n", false, true}, // window -> _mask
                    std::tuple{512, 127, 509, "0", "e", true, true},         // elementwise bias
                    std::tuple{512, 99, 256, "1", "a", false, true}, // alibi -> generic _mask
@@ -944,24 +951,23 @@ TEST_P(QrTdmLargeHeadDim, DataTypeConfig)
             << "no instance for d" << adjusted_hdim << "; check that --optdim in "
             << "example/ck_tile/01_fmha/CMakeLists.txt still lists this head dim";
 
-        EXPECT_NE(selected_kernel.find("_qr_tdm_"), std::string::npos) << selected_kernel;
+        // d256/d512 run qr_tdm_pingpong on every call here (no skip, head dims whole
+        // multiples of its 8-element vectors).
+        EXPECT_NE(selected_kernel.find("_qr_tdm_pingpong_"), std::string::npos) << selected_kernel;
         EXPECT_NE(selected_kernel.find("_d" + std::to_string(adjusted_hdim) + "_"),
                   std::string::npos)
             << selected_kernel;
         // Single tile: bm0 is 64 regardless of seqlen_q and of batch vs group,
         // unlike the head dims QrTdmNewHeadDim covers.
         EXPECT_NE(selected_kernel.find("_b64x"), std::string::npos) << selected_kernel;
-        EXPECT_NE(selected_kernel.find("_nkvlp_"), std::string::npos) << selected_kernel;
-        EXPECT_NE(selected_kernel.find("_plk_"), std::string::npos) << selected_kernel;
 
         // Mask variant: no mask stays _nmask_; causal takes the _mc specialisation
-        // only when nothing else forces the generic path (see the INSTANTIATE
-        // comment); windows and causal+bias/+lse fall back to generic _mask.
+        // unless a bias forces the generic path (qr_tdm_pingpong's _mc also stores the
+        // LSE, see get_pipelines in fmha_fwd.py); windows fall back to generic _mask.
         const bool is_causal      = mask_str == std::string("1") || mask_str == std::string("2");
-        const char* expected_mask = mask_str == std::string("0") ? "_nmask_"
-                                    : (is_causal && bias_str == std::string("n") && !lse)
-                                        ? "_mc_"
-                                        : "_mask_";
+        const char* expected_mask = mask_str == std::string("0")                  ? "_nmask_"
+                                    : (is_causal && bias_str == std::string("n")) ? "_mc_"
+                                                                                  : "_mask_";
         EXPECT_NE(selected_kernel.find(expected_mask), std::string::npos)
             << "expected " << expected_mask << " in " << selected_kernel;
         EXPECT_NE(selected_kernel.find(lse ? "_lse_" : "_nlse_"), std::string::npos)
@@ -969,7 +975,7 @@ TEST_P(QrTdmLargeHeadDim, DataTypeConfig)
     }
     else
     {
-        GTEST_SKIP() << "qr_tdm large head dims (256/512) are fp16/bf16 only";
+        GTEST_SKIP() << "qr_tdm_pingpong large head dims (256/512) are fp16/bf16 only";
     }
 }
 
