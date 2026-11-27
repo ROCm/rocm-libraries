@@ -34,11 +34,11 @@
 # registration checks fail a quick entry that is over its budgets or
 # registered as GPU work. The quick category below is the one list of quick
 # entries and the only thing that puts an entry in quick: no registration
-# carries the quick label itself
-# (rocke/platform/tests/tools/test_quick_tier.py checks it). The golden,
-# parity, GPU numeric and pinned GPU reference entries start at standard (the
-# python-standard, gpu-standard and pinned-reference-standard categories),
-# where CI splits their tests across its shards. The tier rule gives a
+# carries the quick label itself (rocke/platform/tests/tools/test_quick_tier.py
+# checks it). The golden, parity, GPU numeric and pinned GPU reference entries
+# start at standard (the python-standard, gpu-standard and
+# pinned-reference-standard categories), where CI splits their tests across its
+# shards. The tier rule gives a
 # category whose name is not a tier only its own name as a label, so those
 # categories list the standard, comprehensive and full labels themselves.
 #

@@ -686,12 +686,12 @@ if(ROCKE_INSTALL_TESTS)
     # the MMA catalog cross-check unit tests (load tools/ from the source tree),
     # the tree-wide checks of rocke.tests.torch_uses and
     # rocke.tests.toolchain_pins and their allowlists (they list the source
-    # checkout), the compliance-pattern test (reads rocke/tools/ and lists
-    # the source checkout), the registration checks of rocke_pending_lanes_check
+    # checkout), the compliance-pattern test (reads rocke/tools/ and lists the
+    # source checkout), the registration checks of rocke_pending_lanes_check
     # (they configure the source tree), and the arch-domain artifact/probe unit
-    # tests. The host-only support-policy
-    # units are installed with the rest of tests/tools; the full regeneration
-    # sweep has its own CTest timeout and resource policy.
+    # tests. The host-only support-policy units are installed with the rest of
+    # tests/tools; the full regeneration sweep has its own CTest timeout and
+    # resource policy.
     # Include run_all.py: installed runner unit tests import it as a dependency.
     # Linux detector fixtures link a stdin wrapper against the production archive.
     # Keep it with the pytest assets so TheRock's test artifact captures it even

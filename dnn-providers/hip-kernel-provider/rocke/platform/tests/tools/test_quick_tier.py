@@ -94,7 +94,7 @@ def registration(tmp_path_factory: pytest.TempPathFactory) -> _Registration:
     )
 
 
-def _quick_labels_in_registration(
+def _entries_registered_as_quick(
     registered: Sequence[check.RegisteredEntry],
 ) -> list[str]:
     """The entries whose own registration carries the quick label: they would
@@ -105,7 +105,7 @@ def _quick_labels_in_registration(
 def test_no_registration_bakes_in_the_quick_label(registration) -> None:
     """The provider categories' quick list is the one place that puts an entry
     in quick."""
-    baked = _quick_labels_in_registration(
+    baked = _entries_registered_as_quick(
         [*registration.registered_installed, *registration.registered_build_tree]
     )
     assert not baked, (
@@ -115,9 +115,11 @@ def test_no_registration_bakes_in_the_quick_label(registration) -> None:
 
 
 def test_a_registration_with_the_quick_label_is_found(registration) -> None:
+    """The check above finds an entry whose own registration carries the quick
+    label, so its empty result means none does."""
     [entry, *_] = registration.registered_installed
     planted = dataclasses.replace(entry, labels=entry.labels | {QUICK.label})
-    assert _quick_labels_in_registration([planted]) == [entry.name]
+    assert _entries_registered_as_quick([planted]) == [entry.name]
 
 
 def _quick_tier_breaches(installed: Sequence[check.RegisteredEntry]) -> list[str]:
