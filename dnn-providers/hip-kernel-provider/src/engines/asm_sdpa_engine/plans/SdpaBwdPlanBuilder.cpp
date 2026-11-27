@@ -328,8 +328,8 @@ bool wouldBwdDimsFitKernargFields(const hipdnn_flatbuffers_sdk::data_objects::Te
 // Declines all but a batch-mode graph, the only mode the engine serves: it passes no
 // sequence offsets to the kernels and sizes the stats, D and dq_acc buffers
 // from B x S_q. Group mode (Q ragged; getBatchMode) would also need the total
-// sequence lengths, which the backward graph does not carry. In batch mode no
-// tensor may be ragged.
+// sequence lengths (max_total_seq_len_q/kv), which this engine does not read yet.
+// In batch mode no tensor may be ragged.
 Rejection checkBatchModeGraph(const plan_utils::TensorMap& tensorMap,
                               const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q)
 {
@@ -942,6 +942,19 @@ static Rejection checkBwdUnsupportedFeatures(
     HIP_KERNEL_REJECT_IF(attrs.dropout_scale_inv_tensor_uid(),
                          "dropout_scale_inv tensor not supported");
     HIP_KERNEL_REJECT_IF(attrs.dbias_tensor_uid(), "dbias tensor not supported");
+    // sink_token without dsink_token is served: dQ/dK/dV depend on the sink only through the
+    // forward Stats (LSE), and the kernels read the caller's sink-inclusive Stats buffer without
+    // recomputing it, so the sink tensor itself is never read.
+    HIP_KERNEL_REJECT_IF(attrs.dsink_token_tensor_uid(),
+                         "dsink_token tensor not supported (no dSink output in the kernels)");
+    HIP_KERNEL_REJECT_IF(attrs.rng_dump_tensor_uid(),
+                         "rng_dump tensor not supported (the kernels write no dropout dump)");
+    HIP_KERNEL_REJECT_IF(attrs.is_deterministic_algorithm(),
+                         "is_deterministic_algorithm must be false (the default a32 kernels "
+                         "accumulate dQ with atomic adds, so the result is not bitwise "
+                         "reproducible)");
+    // max_total_seq_len_q/kv give the physical token span of a packed (ragged) Q/K/V buffer. They
+    // only apply to ragged graphs, which checkBatchModeGraph declines, so nothing is read here.
     return std::nullopt;
 }
 

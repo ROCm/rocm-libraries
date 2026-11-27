@@ -192,6 +192,13 @@ struct FlydslSdpaBwdSplitLaunchDump
     /// kernel (the prep slot only); see FlydslSdpaBwdMergedLaunchDump.
     bool seedUploaded = false;
     std::vector<uint32_t> seedWords;
+    /// Set on the prep slot of a graph with dSink (a sink twin row): the dsink_reduce launch
+    /// that follows the twin, and the memset of the workspace's dSink term ahead of it.
+    bool dsink = false;
+    std::vector<unsigned char> dsinkKernarg;
+    std::array<unsigned int, 3> dsinkGrid{};
+    unsigned int dsinkBlock = 0;
+    bool sinktermZeroed = false;
 };
 
 /// The launch of @p slot's @p kernel on the graph of @p context, with the tokens @p bound that

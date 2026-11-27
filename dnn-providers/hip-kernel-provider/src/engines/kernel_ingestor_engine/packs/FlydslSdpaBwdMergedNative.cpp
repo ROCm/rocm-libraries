@@ -69,8 +69,13 @@
  *
  * The graph contract is the shared backward matcher's (FlydslSdpaBwdCommon.hpp) with its
  * default options: an f32 bias beside a 16-bit query declines [attn_mask] and V heads that
- * differ from K's decline [shape], each logged with its cause (the split engine opts into
- * both). The merged engine adds what only it knows: a row serves the head sizes its
+ * differ from K's decline [shape], and a dSink declines [sink] (SK-0), each logged with its
+ * cause (the split engine opts into all four). A sink without a dSink is accepted: the kernel
+ * reads the caller's LSE, which already holds the sink, so the plan passes no sink to it. The
+ * matcher also declines rng_dump on
+ * every engine (RN-1) and accepts is_deterministic_algorithm (DE-1; this kernel has one
+ * writer per output) and max_total_seq_len_q/kv (MT-1). The merged engine adds what only it
+ * knows: a row serves the head sizes its
  * tile covers, every bias object stages the bias through LDS, and `gqa_pack` rows serve only
  * grouped-query graphs.
  *

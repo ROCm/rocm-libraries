@@ -335,31 +335,48 @@ inline std::optional<std::string> stringMetadata(const KernelDefinition& kernel,
     return text == nullptr ? std::nullopt : std::optional<std::string>(*text);
 }
 
+/// A servable attention sink: its head stride in elements of its own dtype, and whether it is
+/// FLOAT (two 16-bit halves per element) rather than a 16-bit element in the query's dtype.
+struct ServableSink
+{
+    int64_t stride = 0;
+    bool floatSink = false;
+};
+
 /**
- * @brief The attention sink's element stride across query heads, or nullopt for a sink the
- *        kernels cannot read.
+ * @brief The attention sink's head stride and dtype, or nullopt for a sink the kernels cannot
+ *        read.
  *
- * One FLOAT logit per query head (cuDNN's sink, SEM-022), as a rank-1 [Hq] tensor or a rank-4
- * [1, Hq, 1, 1] one; a device operand aligned to its element, its head stride positive unless
- * there is one head, and every head's offset in 16-bit units inside int32: the kernels read the
- * logit as two 16-bit halves at h * stride, scaled to the dtype's width, in 32 bits (kernel
- * modifications 31, 11 and 36). A sink in any other dtype declines: the kernels could read a
- * 16-bit one, but hipDNN's sink is FLOAT, as cuDNN's.
+ * One logit per query head (SEM-022), as a rank-1 [Hq] tensor or a rank-4 [1, Hq, 1, 1] one:
+ * FLOAT, or BFLOAT16 or HALF equal to the query's dtype @p queryType. A device operand
+ * aligned to its element, its head stride positive unless there is one head, and every head's
+ * offset in 16-bit units inside int32: the kernels read a FLOAT logit as two 16-bit halves and
+ * a 16-bit one as one, at h * stride, in 32 bits (kernel modifications 31, 11, 33, 12, 36 and
+ * 41). A sink in any other dtype, including a 16-bit one that is not the query's, declines.
  */
-inline std::optional<int64_t>
-    servableSinkStride(const MatchContext& context, int64_t uid, int64_t numHeads)
+inline std::optional<ServableSink> servableSink(const MatchContext& context,
+                                                int64_t uid,
+                                                int64_t numHeads,
+                                                data_objects::DataType queryType)
 {
     const auto* sink = findTensor(context, uid);
-    if(sink == nullptr || sink->dims() == nullptr || sink->strides() == nullptr
-       || sink->data_type() != data_objects::DataType::FLOAT || sink->virtual_()
+    if(sink == nullptr || sink->dims() == nullptr || sink->strides() == nullptr || sink->virtual_()
        || hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(sink)
        || sink->ragged_offset_tensor_uid().has_value())
     {
         return std::nullopt;
     }
-    // Each element is two 16-bit halves.
-    constexpr int64_t HALVES = 2;
-    if(!declaresAlignment(*sink, BYTES_PER_ELEMENT * HALVES))
+    const bool floatSink = sink->data_type() == data_objects::DataType::FLOAT;
+    const bool queryTypeSink = (queryType == data_objects::DataType::BFLOAT16
+                                || queryType == data_objects::DataType::HALF)
+                               && sink->data_type() == queryType;
+    if(!floatSink && !queryTypeSink)
+    {
+        return std::nullopt;
+    }
+    // A FLOAT element is two 16-bit halves.
+    const int64_t halves = floatSink ? 2 : 1;
+    if(!declaresAlignment(*sink, BYTES_PER_ELEMENT * halves))
     {
         return std::nullopt;
     }
@@ -383,21 +400,21 @@ inline std::optional<int64_t>
     }
     const int64_t stride = numHeads == 1 ? 0 : sink->strides()->Get(headAxis);
     if(stride < 0
-       || (numHeads > 1 && (stride == 0 || stride > INT32_LIMIT / ((numHeads - 1) * HALVES))))
+       || (numHeads > 1 && (stride == 0 || stride > INT32_LIMIT / ((numHeads - 1) * halves))))
     {
         return std::nullopt;
     }
-    return stride;
+    return ServableSink{stride, floatSink};
 }
 
 /// The RDNA and aiw kernels' sink_stride argument: the head stride in elements, with bit
-/// SINK_FLOAT_STRIDE_BIT set when the graph has a sink, which is FLOAT (kernel modifications 31
-/// and 11); a launch without a sink passes the stride (0) alone.
+/// SINK_FLOAT_STRIDE_BIT set when the graph's sink is FLOAT (kernel modifications 31 and 11);
+/// a 16-bit sink in the query's dtype, and a launch without a sink, pass the stride alone.
 inline constexpr int64_t SINK_FLOAT_STRIDE_BIT = 32;
 
-inline int64_t rdnaSinkStrideArgument(int64_t stride, bool hasSink)
+inline int64_t rdnaSinkStrideArgument(int64_t stride, bool floatSink)
 {
-    return hasSink ? stride | (int64_t{1} << SINK_FLOAT_STRIDE_BIT) : stride;
+    return floatSink ? stride | (int64_t{1} << SINK_FLOAT_STRIDE_BIT) : stride;
 }
 
 /// A graph's mask bounds in the kernels' terms: key j is hidden from query row i when

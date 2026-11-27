@@ -33,6 +33,7 @@ inline void to_json(nlohmann::json& sdpaJson, const SdpaBackwardAttributes& sdpa
     inputs["dropout_mask_tensor_uid"] = sdpa.dropout_mask_tensor_uid();
     inputs["dropout_scale_tensor_uid"] = sdpa.dropout_scale_tensor_uid();
     inputs["dropout_scale_inv_tensor_uid"] = sdpa.dropout_scale_inv_tensor_uid();
+    inputs["sink_token_tensor_uid"] = sdpa.sink_token_tensor_uid();
 
     // Required output tensor UIDs
     outputs["dq_tensor_uid"] = sdpa.dq_tensor_uid();
@@ -41,18 +42,23 @@ inline void to_json(nlohmann::json& sdpaJson, const SdpaBackwardAttributes& sdpa
 
     // Optional output tensor UIDs
     outputs["dbias_tensor_uid"] = sdpa.dbias_tensor_uid();
+    outputs["dsink_token_tensor_uid"] = sdpa.dsink_token_tensor_uid();
+    outputs["rng_dump_tensor_uid"] = sdpa.rng_dump_tensor_uid();
 
     // Boolean flags
     params["alibi_mask"] = sdpa.alibi_mask();
     params["padding_mask"] = sdpa.padding_mask();
     params["causal_mask"] = sdpa.causal_mask();
     params["causal_mask_bottom_right"] = sdpa.causal_mask_bottom_right();
+    params["is_deterministic_algorithm"] = sdpa.is_deterministic_algorithm();
 
     // Scalar attributes
     params["dropout_probability"] = sdpa.dropout_probability();
     params["attn_scale_value"] = sdpa.attn_scale_value();
     params["left_bound"] = sdpa.left_bound();
     params["right_bound"] = sdpa.right_bound();
+    params["max_total_seq_len_q"] = sdpa.max_total_seq_len_q();
+    params["max_total_seq_len_kv"] = sdpa.max_total_seq_len_kv();
 
     // Enum attributes
     params["diagonal_alignment"] = sdpa.diagonal_alignment();
@@ -68,6 +74,15 @@ inline auto to<data_objects::SdpaBackwardAttributes>(flatbuffers::FlatBufferBuil
     auto& inputs = entry.at("inputs");
     auto& outputs = entry.at("outputs");
     auto& params = entry.at("parameters");
+
+    // Reads an optional int64 key that older bundle JSONs do not carry: absent or null yields nullopt.
+    auto optionalInt64 = [](const nlohmann::json& obj, const char* key) -> std::optional<int64_t> {
+        if(!obj.contains(key) || obj.at(key).is_null())
+        {
+            return std::nullopt;
+        }
+        return obj.at(key).get<int64_t>();
+    };
 
     return data_objects::CreateSdpaBackwardAttributes(
         builder,
@@ -105,7 +120,15 @@ inline auto to<data_objects::SdpaBackwardAttributes>(flatbuffers::FlatBufferBuil
         params.at("left_bound").get<std::optional<int64_t>>(),
         params.at("right_bound").get<std::optional<int64_t>>(),
         // Enum parameters
-        params.at("diagonal_alignment").get<data_objects::DiagonalAlignment>());
+        params.at("diagonal_alignment").get<data_objects::DiagonalAlignment>(),
+        // Attention sink, rng dump, determinism and workspace hints. Absent in bundles
+        // written before these fields existed.
+        optionalInt64(inputs, "sink_token_tensor_uid"),
+        optionalInt64(outputs, "dsink_token_tensor_uid"),
+        optionalInt64(outputs, "rng_dump_tensor_uid"),
+        params.value("is_deterministic_algorithm", false),
+        optionalInt64(params, "max_total_seq_len_q"),
+        optionalInt64(params, "max_total_seq_len_kv"));
 }
 
 }

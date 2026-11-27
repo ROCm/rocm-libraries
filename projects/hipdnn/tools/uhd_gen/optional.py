@@ -49,6 +49,8 @@ ATTRIBUTE_DEFAULTS: dict[str, object] = {
     "graph.nodes[*].left_bound": -1,  # the API's own value for unbounded
     "graph.nodes[*].right_bound": -1,  # likewise
     "graph.nodes[*].max_seq_len_kv": SENTINEL,  # not declared
+    "graph.nodes[*].max_total_seq_len_q": SENTINEL,  # not declared (ragged backward only)
+    "graph.nodes[*].max_total_seq_len_kv": SENTINEL,  # likewise
     # Pointwise (hipdnn_frontend/attributes/PointwiseAttributes.hpp; cuDNN's defaults)
     "graph.nodes[*].relu_lower_clip": 0.0,
     "graph.nodes[*].relu_upper_clip": FLOAT_MAX,  # no upper bound

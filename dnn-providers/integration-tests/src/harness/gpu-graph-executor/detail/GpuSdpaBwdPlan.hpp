@@ -56,6 +56,13 @@ struct GpuSdpaBwdParams
     std::optional<Attrs> dropoutMaskTensor;
     std::optional<Attrs> dropoutScaleTensor;
     std::optional<Attrs> dropoutScaleInvTensor;
+    // Philox dropout checked through RNG_DUMP: dropoutMaskTensor is the rng_dump tensor, scale is
+    // 1 / (1 - p) and scale_inv is (1 - p).
+    std::optional<float> philoxDropoutScale;
+    std::optional<float> philoxDropoutScaleInv;
+    // Attention sink (input) and its gradient (output): FLOAT or the graph I/O dtype each.
+    std::optional<Attrs> sinkTensor;
+    std::optional<Attrs> dSinkTensor;
     bool alibi = false;
     int64_t leftBound = -1;
     int64_t rightBound = -1;
@@ -115,7 +122,16 @@ public:
         std::optional<ShallowGpuTensor<float>> dropoutMask;
         std::optional<float> dropoutScale;
         std::optional<float> dropoutScaleInv;
-        if(_params.dropoutMaskTensor.has_value() && _params.dropoutScaleTensor.has_value())
+        if(_params.dropoutMaskTensor.has_value() && _params.philoxDropoutScale.has_value())
+        {
+            // The engine's dumped keep mask is the reference's explicit mask.
+            dropoutMask.emplace(variantPack.at(_params.dropoutMaskTensor->uid),
+                                _params.dropoutMaskTensor->dims,
+                                _params.dropoutMaskTensor->strides);
+            dropoutScale = _params.philoxDropoutScale;
+            dropoutScaleInv = _params.philoxDropoutScaleInv;
+        }
+        else if(_params.dropoutMaskTensor.has_value() && _params.dropoutScaleTensor.has_value())
         {
             dropoutMask.emplace(variantPack.at(_params.dropoutMaskTensor->uid),
                                 _params.dropoutMaskTensor->dims,
@@ -128,6 +144,28 @@ public:
             dropoutScaleInv = resolveScalarOperand(
                 *_params.dropoutScaleInvTensor, variantPack, "SDPA dropout scale inverse");
         }
+
+        // Sink and dSink are each FLOAT or the I/O dtype: bind whichever the tensor is.
+        std::optional<ShallowGpuTensor<float>> sinkFloat;
+        std::optional<ShallowGpuTensor<IoDataType>> sinkIo;
+        std::optional<ShallowGpuTensor<float>> dSinkFloat;
+        std::optional<ShallowGpuTensor<IoDataType>> dSinkIo;
+        const auto bindSinkLike
+            = [&variantPack](const std::optional<GpuSdpaBwdParams::Attrs>& attrs,
+                             auto& floatSlot,
+                             auto& ioSlot) -> hipdnn_data_sdk::utilities::ITensor* {
+            if(!attrs.has_value())
+            {
+                return nullptr;
+            }
+            if(attrs->data_type == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+            {
+                return &floatSlot.emplace(variantPack.at(attrs->uid), attrs->dims, attrs->strides);
+            }
+            return &ioSlot.emplace(variantPack.at(attrs->uid), attrs->dims, attrs->strides);
+        };
+        auto* sink = bindSinkLike(_params.sinkTensor, sinkFloat, sinkIo);
+        auto* dSink = bindSinkLike(_params.dSinkTensor, dSinkFloat, dSinkIo);
 
         std::optional<float> attnScale;
         if(_params.scaleTensor.has_value())
@@ -164,7 +202,8 @@ public:
                 .setDropout(dropoutMask.has_value() ? &dropoutMask.value() : nullptr,
                             dropoutScale,
                             dropoutScaleInv)
-                .setAlibi(_params.alibi));
+                .setAlibi(_params.alibi)
+                .setSink(sink, dSink));
     }
 
 private:
@@ -244,6 +283,16 @@ public:
         params.dropoutMaskTensor = optional(attrs->dropout_mask_tensor_uid());
         params.dropoutScaleTensor = optional(attrs->dropout_scale_tensor_uid());
         params.dropoutScaleInvTensor = optional(attrs->dropout_scale_inv_tensor_uid());
+        if(isSdpaBwdPhiloxDropoutWithDump(*attrs, tensorMap))
+        {
+            // The dumped keep mask is the explicit mask, with scale 1 / (1 - p) and scale_inv (1 - p).
+            const auto keep = 1.0F - attrs->dropout_probability().value();
+            params.dropoutMaskTensor = unpack(attrs->rng_dump_tensor_uid().value());
+            params.philoxDropoutScale = 1.0F / keep;
+            params.philoxDropoutScaleInv = keep;
+        }
+        params.sinkTensor = optional(attrs->sink_token_tensor_uid());
+        params.dSinkTensor = optional(attrs->dsink_token_tensor_uid());
 
         std::optional<float> attnScaleValue;
         if(attrs->attn_scale_value().has_value())

@@ -16,7 +16,9 @@
 #include <hipdnn_test_sdk/constants/SdpaBwdConstants.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
+#include <array>
 #include <memory>
+#include <utility>
 #include <vector>
 
 using namespace hipdnn_backend;
@@ -95,6 +97,9 @@ protected:
         makeScalarTensor(K_SDPA_BWD_TENSOR_DROPOUT_SCALE_UID);
         makeScalarTensor(K_SDPA_BWD_TENSOR_DROPOUT_SCALE_INV_UID);
         makeScalarTensor(K_SDPA_BWD_TENSOR_DBIAS_UID);
+        makeScalarTensor(K_SDPA_BWD_TENSOR_SINK_TOKEN_UID);
+        makeScalarTensor(K_SDPA_BWD_TENSOR_DSINK_TOKEN_UID);
+        makeScalarTensor(K_SDPA_BWD_TENSOR_RNG_DUMP_UID);
     }
 
     static SdpaBackwardAttributesT createRequiredOnlyAttrs()
@@ -125,6 +130,12 @@ protected:
         attrs.dropout_scale_tensor_uid = K_SDPA_BWD_TENSOR_DROPOUT_SCALE_UID;
         attrs.dropout_scale_inv_tensor_uid = K_SDPA_BWD_TENSOR_DROPOUT_SCALE_INV_UID;
         attrs.dbias_tensor_uid = K_SDPA_BWD_TENSOR_DBIAS_UID;
+        attrs.sink_token_tensor_uid = K_SDPA_BWD_TENSOR_SINK_TOKEN_UID;
+        attrs.dsink_token_tensor_uid = K_SDPA_BWD_TENSOR_DSINK_TOKEN_UID;
+        attrs.rng_dump_tensor_uid = K_SDPA_BWD_TENSOR_RNG_DUMP_UID;
+        attrs.is_deterministic_algorithm = true;
+        attrs.max_total_seq_len_q = 4096;
+        attrs.max_total_seq_len_kv = 8192;
         attrs.alibi_mask = true;
         attrs.causal_mask = true;
         attrs.padding_mask = true;
@@ -284,6 +295,12 @@ TEST_F(TestSdpaBwdOperationFromNode, OptionalTensorReferencesSetWhenAllFieldsPre
               K_SDPA_BWD_TENSOR_DROPOUT_SCALE_INV_UID);
     ASSERT_NE(desc->getDBiasDesc(), nullptr);
     EXPECT_EQ(desc->getDBiasDesc()->getData().uid, K_SDPA_BWD_TENSOR_DBIAS_UID);
+    ASSERT_NE(desc->getSinkTokenDesc(), nullptr);
+    EXPECT_EQ(desc->getSinkTokenDesc()->getData().uid, K_SDPA_BWD_TENSOR_SINK_TOKEN_UID);
+    ASSERT_NE(desc->getDsinkTokenDesc(), nullptr);
+    EXPECT_EQ(desc->getDsinkTokenDesc()->getData().uid, K_SDPA_BWD_TENSOR_DSINK_TOKEN_UID);
+    ASSERT_NE(desc->getRngDumpDesc(), nullptr);
+    EXPECT_EQ(desc->getRngDumpDesc()->getData().uid, K_SDPA_BWD_TENSOR_RNG_DUMP_UID);
 }
 
 TEST_F(TestSdpaBwdOperationFromNode, TensorReferencesMatchTensorMap)
@@ -318,18 +335,24 @@ TEST_F(TestSdpaBwdOperationFromNode, RequiredOnlyHasNullOptionalTensors)
     EXPECT_EQ(desc->getDropoutScaleDesc(), nullptr);
     EXPECT_EQ(desc->getDropoutScaleInvDesc(), nullptr);
     EXPECT_EQ(desc->getDBiasDesc(), nullptr);
+    EXPECT_EQ(desc->getSinkTokenDesc(), nullptr);
+    EXPECT_EQ(desc->getDsinkTokenDesc(), nullptr);
+    EXPECT_EQ(desc->getRngDumpDesc(), nullptr);
 
     // Optional scalars unset
     EXPECT_FALSE(desc->getData().dropout_probability.has_value());
     EXPECT_FALSE(desc->getData().attn_scale_value.has_value());
     EXPECT_FALSE(desc->getData().left_bound.has_value());
     EXPECT_FALSE(desc->getData().right_bound.has_value());
+    EXPECT_FALSE(desc->getData().max_total_seq_len_q.has_value());
+    EXPECT_FALSE(desc->getData().max_total_seq_len_kv.has_value());
 
     // Bool defaults false
     EXPECT_FALSE(desc->getData().alibi_mask);
     EXPECT_FALSE(desc->getData().causal_mask);
     EXPECT_FALSE(desc->getData().padding_mask);
     EXPECT_FALSE(desc->getData().causal_mask_bottom_right);
+    EXPECT_FALSE(desc->getData().is_deterministic_algorithm);
 }
 
 TEST_F(TestSdpaBwdOperationFromNode, AllFieldsScalarsAndBoolsPreserved)
@@ -350,6 +373,11 @@ TEST_F(TestSdpaBwdOperationFromNode, AllFieldsScalarsAndBoolsPreserved)
     EXPECT_EQ(desc->getData().left_bound.value(), 5);
     ASSERT_TRUE(desc->getData().right_bound.has_value());
     EXPECT_EQ(desc->getData().right_bound.value(), 15);
+    EXPECT_TRUE(desc->getData().is_deterministic_algorithm);
+    ASSERT_TRUE(desc->getData().max_total_seq_len_q.has_value());
+    EXPECT_EQ(desc->getData().max_total_seq_len_q.value(), 4096);
+    ASSERT_TRUE(desc->getData().max_total_seq_len_kv.has_value());
+    EXPECT_EQ(desc->getData().max_total_seq_len_kv.value(), 8192);
     EXPECT_EQ(desc->getData().diagonal_alignment, DiagonalAlignment::BOTTOM_RIGHT);
 }
 
@@ -367,6 +395,9 @@ TEST_F(TestSdpaBwdOperationFromNode, SucceedsWithOnlyRequiredTensorsInAttrs)
     attrs.dropout_scale_tensor_uid = flatbuffers::nullopt;
     attrs.dropout_scale_inv_tensor_uid = flatbuffers::nullopt;
     attrs.dbias_tensor_uid = flatbuffers::nullopt;
+    attrs.sink_token_tensor_uid = flatbuffers::nullopt;
+    attrs.dsink_token_tensor_uid = flatbuffers::nullopt;
+    attrs.rng_dump_tensor_uid = flatbuffers::nullopt;
 
     NodeT node;
     node.compute_data_type = DataType::FLOAT;
@@ -386,6 +417,9 @@ TEST_F(TestSdpaBwdOperationFromNode, SucceedsWithOnlyRequiredTensorsInAttrs)
     EXPECT_EQ(desc->getDropoutScaleDesc(), nullptr);
     EXPECT_EQ(desc->getDropoutScaleInvDesc(), nullptr);
     EXPECT_EQ(desc->getDBiasDesc(), nullptr);
+    EXPECT_EQ(desc->getSinkTokenDesc(), nullptr);
+    EXPECT_EQ(desc->getDsinkTokenDesc(), nullptr);
+    EXPECT_EQ(desc->getRngDumpDesc(), nullptr);
 }
 
 TEST_F(TestSdpaBwdOperationFromNode, OptionalTensorUidSetButMissingInMap)
@@ -429,8 +463,11 @@ TEST_F(TestSdpaBwdOperationFromNode, GetTensorDescriptorsAllOptionals)
     auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
 
     auto tensors = desc->getTensorDescriptors();
-    // 9 required + 10 optional = 19
-    ASSERT_EQ(tensors.size(), 19u);
+    // 9 required + 13 optional = 22
+    ASSERT_EQ(tensors.size(), 22u);
+    EXPECT_EQ(tensors[19]->getData().uid, K_SDPA_BWD_TENSOR_SINK_TOKEN_UID);
+    EXPECT_EQ(tensors[20]->getData().uid, K_SDPA_BWD_TENSOR_DSINK_TOKEN_UID);
+    EXPECT_EQ(tensors[21]->getData().uid, K_SDPA_BWD_TENSOR_RNG_DUMP_UID);
 }
 
 TEST_F(TestSdpaBwdOperationFromNode, BuildNodeRoundTrip)
@@ -473,6 +510,17 @@ TEST_F(TestSdpaBwdOperationFromNode, BuildNodeRoundTrip)
     EXPECT_EQ(attrs->left_bound.value(), 5);
     ASSERT_TRUE(attrs->right_bound.has_value());
     EXPECT_EQ(attrs->right_bound.value(), 15);
+    ASSERT_TRUE(attrs->sink_token_tensor_uid.has_value());
+    EXPECT_EQ(attrs->sink_token_tensor_uid.value(), K_SDPA_BWD_TENSOR_SINK_TOKEN_UID);
+    ASSERT_TRUE(attrs->dsink_token_tensor_uid.has_value());
+    EXPECT_EQ(attrs->dsink_token_tensor_uid.value(), K_SDPA_BWD_TENSOR_DSINK_TOKEN_UID);
+    ASSERT_TRUE(attrs->rng_dump_tensor_uid.has_value());
+    EXPECT_EQ(attrs->rng_dump_tensor_uid.value(), K_SDPA_BWD_TENSOR_RNG_DUMP_UID);
+    EXPECT_TRUE(attrs->is_deterministic_algorithm);
+    ASSERT_TRUE(attrs->max_total_seq_len_q.has_value());
+    EXPECT_EQ(attrs->max_total_seq_len_q.value(), 4096);
+    ASSERT_TRUE(attrs->max_total_seq_len_kv.has_value());
+    EXPECT_EQ(attrs->max_total_seq_len_kv.value(), 8192);
     EXPECT_EQ(attrs->diagonal_alignment, DiagonalAlignment::BOTTOM_RIGHT);
 }
 
@@ -491,6 +539,12 @@ TEST_F(TestSdpaBwdOperationFromNode, BuildNodeOmitsUnsetOptionalScalars)
     EXPECT_FALSE(attrs->attn_scale_value.has_value());
     EXPECT_FALSE(attrs->left_bound.has_value());
     EXPECT_FALSE(attrs->right_bound.has_value());
+    EXPECT_FALSE(attrs->sink_token_tensor_uid.has_value());
+    EXPECT_FALSE(attrs->dsink_token_tensor_uid.has_value());
+    EXPECT_FALSE(attrs->rng_dump_tensor_uid.has_value());
+    EXPECT_FALSE(attrs->is_deterministic_algorithm);
+    EXPECT_FALSE(attrs->max_total_seq_len_q.has_value());
+    EXPECT_FALSE(attrs->max_total_seq_len_kv.has_value());
 }
 
 TEST_F(TestSdpaBwdOperationFromNode, GetAttributeWorksAfterFromNode)
@@ -529,6 +583,56 @@ TEST_F(TestSdpaBwdOperationFromNode, GetAttributeWorksAfterFromNode)
         HIPDNN_ATTR_OPERATION_TYPE_EXT, HIPDNN_TYPE_OPERATION_TYPE_EXT, 1, &opTypeCount, &opType);
     ASSERT_EQ(opTypeCount, 1);
     EXPECT_EQ(opType, HIPDNN_OPERATION_TYPE_SDPA_BACKWARD_EXT);
+}
+
+TEST_F(TestSdpaBwdOperationFromNode, GetAttributeReadsSinkRngDeterministicAndSeqLenAfterFromNode)
+{
+    auto node = createAllNode();
+    auto desc = SdpaBwdOperationDescriptor::fromNode(node, _tensorMap);
+
+    bool deterministic = false;
+    int64_t count = 0;
+    desc->getAttribute(HIPDNN_ATTR_SDPA_BWD_IS_DETERMINISTIC_ALGORITHM_EXT,
+                       HIPDNN_TYPE_BOOLEAN,
+                       1,
+                       &count,
+                       &deterministic);
+    ASSERT_EQ(count, 1);
+    EXPECT_TRUE(deterministic);
+
+    int64_t maxQ = 0;
+    desc->getAttribute(
+        HIPDNN_ATTR_SDPA_BWD_MAX_TOTAL_SEQ_LEN_Q_EXT, HIPDNN_TYPE_INT64, 1, &count, &maxQ);
+    ASSERT_EQ(count, 1);
+    EXPECT_EQ(maxQ, 4096);
+
+    int64_t maxKv = 0;
+    desc->getAttribute(
+        HIPDNN_ATTR_SDPA_BWD_MAX_TOTAL_SEQ_LEN_KV_EXT, HIPDNN_TYPE_INT64, 1, &count, &maxKv);
+    ASSERT_EQ(count, 1);
+    EXPECT_EQ(maxKv, 8192);
+
+    const std::array<std::pair<hipdnnBackendAttributeName_t, int64_t>, 3> tensorAttrs
+        = {{{HIPDNN_ATTR_OPERATION_SDPA_BWD_SINK_TOKEN_EXT, K_SDPA_BWD_TENSOR_SINK_TOKEN_UID},
+            {HIPDNN_ATTR_OPERATION_SDPA_BWD_DSINK_TOKEN_EXT, K_SDPA_BWD_TENSOR_DSINK_TOKEN_UID},
+            {HIPDNN_ATTR_OPERATION_SDPA_BWD_RNG_DUMP_EXT, K_SDPA_BWD_TENSOR_RNG_DUMP_UID}}};
+    for(const auto& [attr, expectedUid] : tensorAttrs)
+    {
+        hipdnn_backend::ScopedDescriptor scoped;
+        int64_t tensorCount = 0;
+        desc->getAttribute(attr,
+                           HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                           1,
+                           &tensorCount,
+                           static_cast<void*>(scoped.getPtr()));
+        ASSERT_EQ(tensorCount, 1) << "attr " << attr;
+        ASSERT_NE(scoped.get(), nullptr);
+        int64_t uid = 0;
+        int64_t uidCount = 0;
+        scoped.get()->getAttribute(
+            HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, 1, &uidCount, &uid);
+        EXPECT_EQ(uid, expectedUid) << "attr " << attr;
+    }
 }
 
 TEST_F(TestSdpaBwdOperationFromNode, NamePreservedFromNode)

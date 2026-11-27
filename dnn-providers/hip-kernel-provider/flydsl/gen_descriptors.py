@@ -171,10 +171,12 @@ SPLIT_SHARED_WORKSPACE = "ws.bytes"
 # pack, on its own dispatch (RFC 0021: a pack's launch set is uniform). A dQ or merged row that stores dB through the dBias reduce is the
 # ``reduce`` pack of its op, launched as a ``dbias_reduce`` entry of its ``sources`` (a standalone companion object on gfx11, a second
 # kernel of the row's own object on gfx950); a dK-only row of the value-head split (``u2=dk``), which launches its dV-only partner beside
-# it, is the ``u2`` pack of dkdv; a V-head dQ row (``u2=dq``), whose kernel takes ``num_head_v``, is the ``u2`` pack of dq.
+# it, is the ``u2`` pack of dkdv; a V-head dQ row (``u2=dq``), whose kernel takes ``num_head_v``, is the ``u2`` pack of dq; a sink-twin
+# prep row (``sink=1``), which launches the dSink reduce after the twin, is the ``sink`` pack of prep.
 # Per op: the dispatch suffix of each pack (its dispatch symbol ``<symbols>_<suffix>``, its UDD ``<stem>_<suffix>.udd.json``) and the
 # stem of its file ``<arch>.<stem>.kdp.json``; ``extra_pack`` names the pack a row belongs to.
 EXTRA_PACKS = {
+    "sdpa_bwd_prep": {"sink": "sink"},
     "sdpa_bwd_dq": {"reduce": "reduce", "u2": "dq_u2"},
     "sdpa_bwd_dkdv": {"u2": "u2"},
     "sdpa_bwd_merged": {"reduce": "reduce"},
@@ -187,12 +189,18 @@ TAILZERO_ROLE = "tailzero"
 # (``u2=dv``), the second launch of its dK-only partner. Neither is a KMD kernel of its own.
 TAILZERO_HV_ROLE = "tailzero_hv"
 DVONLY_ROLE = "dvonly"
+# The dSink reduce (``generators/gen_sdpa_bwd_dsink_reduce.py``): the second launch of a sink-twin prep row (``sink=1``), after the twin
+# has written the per-row sink terms. It is the product of a content op of its own, ``sdpa_bwd_dsink_reduce``, whose objects no row of
+# any slot is (``COMPANION_ONLY_OPS``); a prep row names its object of the row's dtype by a path into that op's folder, as the
+# merged rows name the dQ tail-zero objects. The prep manifest therefore carries no companion and its digest is the prep op's alone.
+DSINK_REDUCE_ROLE = "dsink_reduce"
+COMPANION_ONLY_OPS = ("sdpa_bwd_dsink_reduce",)
 # The launches of a row, in launch order, and the ops whose rows are launched through ``sources``: the op's own object first, then
 # its dBias reduce when it has one, then the tail-zero companion. A dQ row that stores no dB is ``{dq, tailzero}`` and a merged row
 # without a reduce is ``{merged, tailzero}``; with a reduce they are ``{dq, dbias_reduce, tailzero}`` and ``{merged, dbias_reduce, tailzero}``.
 MAIN_LAUNCH = {"sdpa_bwd_dq": "dq", "sdpa_bwd_merged": "merged"}
 # The same, with the ops whose rows are multi-launch only in their extra pack (a dK-only row launches ``dkdv`` then ``dvonly``).
-LAUNCH_NAME = {**MAIN_LAUNCH, "sdpa_bwd_dkdv": "dkdv"}
+LAUNCH_NAME = {**MAIN_LAUNCH, "sdpa_bwd_dkdv": "dkdv", "sdpa_bwd_prep": "prep"}
 # The packed-tile bound the engines enforce (``PACK_MAX_BLOCK_Q`` in ``FlydslSdpaBwdNativeShared.hpp``), read from the header at
 # generation time. The ops whose ``gqa_pack`` rows carry a resolved ``block_q``, which must be in ``(0, bound]``.
 NATIVE_SHARED_HEADER = (
@@ -626,7 +634,11 @@ def collect(content_dir: Path, arch: str) -> list[KernelEntry]:
     that is absent, on one whose bytes do not hash to the recorded SHA256, and on
     one built for a processor other than the one its directory names.
     """
-    manifests = sorted(content_dir.glob(f"*/{arch}/{MANIFEST_NAME}"))
+    # The objects of a companion-only op (``COMPANION_ONLY_OPS``) are read first: the rows that launch them are in other manifests.
+    manifests = sorted(
+        content_dir.glob(f"*/{arch}/{MANIFEST_NAME}"),
+        key=lambda path: (path.parent.parent.name not in COMPANION_ONLY_OPS, path),
+    )
     if not manifests:
         raise FileNotFoundError(
             f"no */{arch}/{MANIFEST_NAME} under {content_dir}; run the generators "
@@ -634,6 +646,7 @@ def collect(content_dir: Path, arch: str) -> list[KernelEntry]:
         )
 
     entries: list[KernelEntry] = []
+    companion_only: dict[tuple[str, str], dict[str, Any]] = {}
     for manifest_path in manifests:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         op = manifest["op"]
@@ -718,6 +731,17 @@ def collect(content_dir: Path, arch: str) -> list[KernelEntry]:
             where = str(path)
             verify_arch(describe(data, where, record["symbol"]), arch, where)
             verify_generic(data, arch, where)
+            if op in COMPANION_ONLY_OPS:
+                # Named from a sibling op's folder, as the merged rows name the dQ tail-zero objects.
+                key = companion_identity(record)
+                if key in companion_only:
+                    raise ValueError(f"{manifest_path}: two objects for {key}")
+                companion_only[key] = {
+                    **record,
+                    "file": f"../../{op}/{arch}/{record['file']}",
+                    "path": path,
+                }
+                continue
             knobs = record["knobs"]
             # A value-head split object defines the kernel of its own (the dV-only object that of the dK-only one).
             u2 = knobs.get("u2")
@@ -768,6 +792,15 @@ def collect(content_dir: Path, arch: str) -> list[KernelEntry]:
                         f"the {bias_dtype} companion is {reduce['symbol']!r}"
                     )
                 row_companions[REDUCE_ROLE] = reduce
+            if op == "sdpa_bwd_prep" and knobs.get("sink") == 1:
+                # The sink twin writes the per-row sink terms; the dSink reduce of its dtype folds them into dSink.
+                dsink = companion_only.get((DSINK_REDUCE_ROLE, record["dtype"]))
+                if dsink is None:
+                    raise ValueError(
+                        f"{path}: a sink-twin prep row launches the {DSINK_REDUCE_ROLE} object of dtype {record['dtype']}, "
+                        f"but no {COMPANION_ONLY_OPS[0]}/{arch} manifest has one; generate it first, into the same content root"
+                    )
+                row_companions[DSINK_REDUCE_ROLE] = dsink
             if op in MAIN_LAUNCH and TAILZERO_ROLE not in row_companions:
                 raise ValueError(
                     f"{path}: {op} rows launch the {tailzero_role} companion, but {manifest_path} has none "
@@ -1207,7 +1240,7 @@ def extra_pack(entry: KernelEntry) -> str | None:
     """The dispatch suffix of the extra pack (``EXTRA_PACKS``) @p entry belongs to, None for a row of its op's standard pack.
 
     A dQ or merged row that stores dB through a reduce is ``reduce``; a V-head dQ row (``u2=dq``) is ``u2``; a dK-only row (it has a
-    dV-only partner) is ``u2``.
+    dV-only partner) is ``u2``; a sink-twin prep row (it has a dSink reduce) is ``sink``.
     """
     companions = entry.companions or {}
     if entry.op == "sdpa_bwd_dq":
@@ -1218,6 +1251,8 @@ def extra_pack(entry: KernelEntry) -> str | None:
         return "reduce" if REDUCE_ROLE in companions else None
     if entry.op == "sdpa_bwd_dkdv":
         return "u2" if DVONLY_ROLE in companions else None
+    if entry.op == "sdpa_bwd_prep":
+        return "sink" if DSINK_REDUCE_ROLE in companions else None
     return None
 
 
@@ -1266,7 +1301,7 @@ def _arch_documents(
         else:
             # A row launched through `sources`: its own object, then its dBias reduce (a dB-storing dQ or merged row: a
             # standalone companion object on gfx11, a second kernel of the row's own object on gfx950), its dV-only partner (a
-            # dK-only row) and its tail-zero companion, in launch order.
+            # dK-only row), its tail-zero companion and its dSink reduce (a sink-twin prep row), in launch order.
             reduce = entry.companions.get(REDUCE_ROLE)
             if (
                 reduce is not None
@@ -1288,7 +1323,12 @@ def _arch_documents(
                         "file": entry.companions[role]["file"],
                         "symbol": entry.companions[role]["symbol"],
                     }
-                    for role in (REDUCE_ROLE, DVONLY_ROLE, TAILZERO_ROLE)
+                    for role in (
+                        REDUCE_ROLE,
+                        DVONLY_ROLE,
+                        TAILZERO_ROLE,
+                        DSINK_REDUCE_ROLE,
+                    )
                     if role in entry.companions
                 },
             }

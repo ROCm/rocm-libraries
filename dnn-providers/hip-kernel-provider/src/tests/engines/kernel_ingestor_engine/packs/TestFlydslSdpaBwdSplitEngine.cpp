@@ -92,6 +92,17 @@ const PackSymbols DQ_U2{"hipkernel:flydsl_sdpa_bwd_split",
                         "",
                         ""};
 
+/// The prep slot's dispatch for a graph with dSink: the sink twin and the dSink reduce kernel.
+const PackSymbols PREP_SINK{"hipkernel:flydsl_sdpa_bwd_split",
+                            "hipkernel.flydsl_sdpa_bwd_split.graph_match",
+                            "",
+                            "hipkernel.flydsl_sdpa_bwd_split.prep.kernel_match",
+                            "",
+                            "hipkernel.flydsl_sdpa_bwd_split.prep_sink.dispatch",
+                            "",
+                            "",
+                            ""};
+
 const PackSymbols MERGED{"hipkernel:flydsl_sdpa_bwd_merged",
                          "hipkernel.flydsl_sdpa_bwd_merged.graph_match",
                          "",
@@ -149,6 +160,19 @@ SdpaBwdSpec withPaddedVarlen(const SdpaBwdSpec& spec)
     return spec.withEdit([](SdpaBwdGraph& g) { addSeqLens(g); });
 }
 
+/// @p spec with a sink of the graph's dtype and, with @p withDsink, its dSink.
+SdpaBwdSpec withSink(const SdpaBwdSpec& spec, bool withDsink)
+{
+    const auto dtype = spec.dtype;
+    return spec.withEdit([=](SdpaBwdGraph& g) {
+        addSink(g, dtype);
+        if(withDsink)
+        {
+            addDsink(g, dtype);
+        }
+    });
+}
+
 /// @p spec padded, with the tensors named in @p names ragged (multiplier @p multiplier), each
 /// with an offset tensor of its own; a ragged Q brings ragged stats packed (H, T).
 SdpaBwdSpec
@@ -192,6 +216,7 @@ struct RowSpec
     int64_t padded = 0;
     std::string floorValue = "tail";
     std::string dform = "bk";
+    /// prep: 1 is the sink twin; a plain row carries -1 (gfx950) or 0 (gfx11).
     int64_t sink = -1;
     int64_t gqaPack = -1;
     int64_t blockQ = -1;
@@ -275,6 +300,14 @@ RowSpec causalRow(int64_t tile = 64)
     return row;
 }
 
+/// The sink twin: a plain prep row with `sink` 1.
+RowSpec twinRow(int64_t tile = 64)
+{
+    RowSpec row = plainRow(tile);
+    row.sink = 1;
+    return row;
+}
+
 /// A bias row that stages the bias through LDS, as the gfx950 16-bit bias rows with a staged
 /// alternative do not (those are `direct`) but the ones this default stands for do.
 RowSpec biasRow(int64_t tile = 64)
@@ -341,7 +374,7 @@ bool serves(Slot slot, const SdpaBwdSpec& spec, const RowSpec& row)
 std::vector<hipdnnPluginDeviceBuffer_t> buffersFor()
 {
     std::vector<hipdnnPluginDeviceBuffer_t> buffers;
-    for(int64_t uid = sdpa_bwd_uid::Q; uid <= sdpa_bwd_uid::RAGGED_OFFSET_STATS; ++uid)
+    for(int64_t uid = sdpa_bwd_uid::Q; uid <= sdpa_bwd_uid::RNG_DUMP; ++uid)
     {
         buffers.push_back({uid, asPointer(ptrOf(uid))});
     }
@@ -486,6 +519,31 @@ const ParamList& prepParams()
         addParams(
             list, 'i', {"varlen_bits", "num_seqlens", "max_seqlen_q", "num_head_q", "hdim_vo"});
         addStrides(list, {"o", "do"});
+        return list;
+    }();
+    return s_params;
+}
+
+/// `_PARAMS["prep_sink"]`: prep's list, then the sink and the per-row dSink term.
+const ParamList& prepSinkParams()
+{
+    static const ParamList s_params = [] {
+        ParamList list = prepParams();
+        addParams(list, 'p', {"Sink", "SinkTerm"});
+        return list;
+    }();
+    return s_params;
+}
+
+/// `_PARAMS["dsink_reduce"]`, in order.
+const ParamList& dsinkReduceParams()
+{
+    static const ParamList s_params = [] {
+        ParamList list;
+        addParams(list, 'p', {"SinkTerm", "DSink"});
+        addParams(list, 'i', {"batch_size"});
+        addParams(list, 'p', {"seqinfo_q0", "seqinfo_q1"});
+        addParams(list, 'i', {"varlen_bits", "num_seqlens", "max_seqlen_q", "num_head_q"});
         return list;
     }();
     return s_params;
@@ -670,6 +728,20 @@ std::map<std::string, uint64_t> valuesOf(Slot slot, const FlydslSdpaBwdSplitLaun
     return decode(dump.kernarg, paramsOf(slot));
 }
 
+/// The sink twin's launch values, the image checked against `_PARAMS["prep_sink"]`.
+std::map<std::string, uint64_t> twinValuesOf(const FlydslSdpaBwdSplitLaunchDump& dump)
+{
+    EXPECT_EQ(dump.kernarg.size(), imageBytes(prepSinkParams()));
+    return decode(dump.kernarg, prepSinkParams());
+}
+
+/// The dSink reduce launch's values, the image checked against `_PARAMS["dsink_reduce"]`.
+std::map<std::string, uint64_t> dsinkValuesOf(const FlydslSdpaBwdSplitLaunchDump& dump)
+{
+    EXPECT_EQ(dump.dsinkKernarg.size(), imageBytes(dsinkReduceParams()));
+    return decode(dump.dsinkKernarg, dsinkReduceParams());
+}
+
 // ---------------------------------------------------------------------------
 // graph_match
 // ---------------------------------------------------------------------------
@@ -760,6 +832,7 @@ std::vector<SdpaBwdSpec> workspaceSpecs()
             withBias(baseSpec(), true, {1, 1, 16, 16}),
             withBias(withDropout(baseSpec(), DataType::INT32, true), true, {1, 8, 16, 16}),
             withBias(fp32Spec(), true, {1, 1, 16, 16}),
+            withSink(baseSpec(), true),
             dimsSpec(3, 5, 77, 91, 64)};
 }
 
@@ -802,6 +875,13 @@ TEST(TestFlydslSdpaBwdSplitWorkspace, EveryRegionEndsWithinTheSharedBytesAndNone
         if(bound->count("ws.seed.offset") != 0)
         {
             regions.emplace_back(tokenOf(*bound, "ws.seed.offset"), 16);
+        }
+        // A dSink graph's sinkterm region: fp32 [B, Hq, Sq], after LSE'.
+        EXPECT_EQ(bound->count("ws.sinkterm.offset") != 0,
+                  shape.dsinkUid != flydsl_sdpa_bwd::NO_UID);
+        if(bound->count("ws.sinkterm.offset") != 0)
+        {
+            regions.emplace_back(tokenOf(*bound, "ws.sinkterm.offset"), stats);
         }
         // The seed is uploaded exactly when it is not a 64-bit device tensor.
         const bool uploads = shape.seedForm != flydsl_sdpa_bwd::SeedForm::NONE
@@ -902,6 +982,58 @@ TEST(TestFlydslSdpaBwdSplitWorkspace, PublishesNoSeedOffsetForASeedReadInPlace)
     EXPECT_EQ(tokenOf(*inPlace, "ws.delta.offset"), 0);
 }
 
+TEST(TestFlydslSdpaBwdSplitWorkspace, ADsinkGraphPlacesTheSinktermRegionAfterLse)
+{
+    const auto spec = dimsSpec(3, 5, 77, 91, 64);
+    constexpr int64_t STATS = int64_t{3} * 5 * 77 * 4;
+    const auto aligned = [](int64_t bytes) {
+        return static_cast<int64_t>(alignSharedWorkspace(static_cast<size_t>(bytes)));
+    };
+    const auto plain = graphMatch(spec);
+    const auto sinkOnly = graphMatch(withSink(spec, false));
+    const auto dsink = graphMatch(withSink(spec, true));
+    ASSERT_TRUE(plain.has_value() && sinkOnly.has_value() && dsink.has_value());
+
+    const int64_t lse = tokenOf(*dsink, "ws.lse.offset");
+    const int64_t sinkterm = tokenOf(*dsink, "ws.sinkterm.offset");
+    EXPECT_EQ(lse, tokenOf(*plain, "ws.lse.offset"));
+    EXPECT_EQ(sinkterm, aligned(lse + STATS));
+    EXPECT_EQ(tokenOf(*dsink, "ws.bytes"), sinkterm + STATS);
+    EXPECT_EQ(tokenOf(*dsink, "ws.scratch_offset"), aligned(sinkterm + STATS));
+
+    // A sink without dSink needs no region: its sink is in the caller's LSE already.
+    EXPECT_EQ(plain->count("ws.sinkterm.offset"), 0U);
+    EXPECT_EQ(sinkOnly->count("ws.sinkterm.offset"), 0U);
+    EXPECT_EQ(tokenOf(*sinkOnly, "ws.bytes"), tokenOf(*plain, "ws.bytes"));
+}
+
+TEST(TestFlydslSdpaBwdSplitWorkspace, TheSinktermRegionFollowsAnUploadedSeedRegion)
+{
+    const auto bound = graphMatch(withSink(withDropout(baseSpec(), DataType::INT32, true), true));
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_EQ(tokenOf(*bound, "ws.seed.offset"), 0);
+    EXPECT_EQ(tokenOf(*bound, "ws.delta.offset"), 256);
+    // Each region is fp32 [2, 8, 16] = 1024 bytes, each after the one before on 256.
+    EXPECT_EQ(tokenOf(*bound, "ws.lse.offset"), 1280);
+    EXPECT_EQ(tokenOf(*bound, "ws.sinkterm.offset"), 2304);
+}
+
+TEST(TestFlydslSdpaBwdSplitGraph, BindsTheSinkTokenOnlyForAGraphWithDsink)
+{
+    EXPECT_EQ(tokenOf(*graphMatch(baseSpec()), "flydsl_sdpa_bwd_split.sink"), 0);
+    EXPECT_EQ(tokenOf(*graphMatch(withSink(baseSpec(), false)), "flydsl_sdpa_bwd_split.sink"), 0);
+    EXPECT_EQ(tokenOf(*graphMatch(withSink(baseSpec(), true)), "flydsl_sdpa_bwd_split.sink"), 1);
+}
+
+TEST(TestFlydslSdpaBwdSplitGraph, ADsinkGraphWithNoTwinRowIsDeclinedAndASinkOnlyOneIsServed)
+{
+    // No sink twin is built at tile 224, so a V head dim in (192, 224] has no row for dSink.
+    const auto wide = dimsSpec(2, 8, 16, 16, 208);
+    EXPECT_FALSE(graphMatch(withSink(wide, true)).has_value());
+    EXPECT_TRUE(graphMatch(withSink(wide, false)).has_value());
+    EXPECT_TRUE(graphMatch(withSink(dimsSpec(2, 8, 16, 16, 256), true)).has_value());
+}
+
 // ---------------------------------------------------------------------------
 // kernel_match
 // ---------------------------------------------------------------------------
@@ -925,12 +1057,29 @@ TEST(TestFlydslSdpaBwdSplitKernel, PrepReadsTheValueHeadDimOnly)
     EXPECT_TRUE(serves(Slot::PREP, withHeadDims(baseSpec(), 100, 64), plainRow(64)));
 }
 
-TEST(TestFlydslSdpaBwdSplitKernel, PrepDeclinesTheSinkTwin)
+TEST(TestFlydslSdpaBwdSplitKernel, PrepServesTheSinkTwinOnlyForAGraphWithDsink)
 {
-    RowSpec twin = plainRow(64);
-    twin.sink = 1;
-    EXPECT_FALSE(serves(Slot::PREP, baseSpec(), twin));
-    EXPECT_TRUE(serves(Slot::PREP, baseSpec(), plainRow(64)));
+    // A sink without dSink is served by the plain rows: the sink is in the caller's LSE.
+    for(const bool withDsink : {false, true})
+    {
+        const auto spec = withSink(baseSpec(), withDsink);
+        EXPECT_EQ(serves(Slot::PREP, spec, twinRow()), withDsink);
+        EXPECT_EQ(serves(Slot::PREP, spec, plainRow()), !withDsink);
+    }
+    EXPECT_FALSE(serves(Slot::PREP, baseSpec(), twinRow()));
+    EXPECT_TRUE(serves(Slot::PREP, baseSpec(), plainRow()));
+    // Plain rows are admitted whatever spelling their `sink` takes: -1 on gfx950, 0 on gfx11.
+    RowSpec gfx11Plain = plainRow();
+    gfx11Plain.sink = 0;
+    EXPECT_TRUE(serves(Slot::PREP, baseSpec(), gfx11Plain));
+    EXPECT_TRUE(serves(Slot::PREP, withSink(baseSpec(), false), gfx11Plain));
+    EXPECT_FALSE(serves(Slot::PREP, withSink(baseSpec(), true), gfx11Plain));
+    // The twin is chosen by head dim like any prep row.
+    RowSpec padded = twinRow(128);
+    padded.padded = 1;
+    EXPECT_TRUE(serves(Slot::PREP, withSink(withHeadDims(baseSpec(), 64, 100), true), padded));
+    EXPECT_FALSE(
+        serves(Slot::PREP, withSink(withHeadDims(baseSpec(), 64, 100), true), twinRow(64)));
 }
 
 TEST(TestFlydslSdpaBwdSplitKernel, ServesDimsEqualToAnExactTileAndAbovePaddedFloors)
@@ -1734,6 +1883,101 @@ TEST(TestFlydslSdpaBwdSplitLaunch, PrepLaunchValuesAreTheKernelsOwn)
     EXPECT_EQ(dumpOf(Slot::PREP, fp32, single).grid, (std::array<unsigned int, 3>{7, 5, 3}));
 }
 
+TEST(TestFlydslSdpaBwdSplitLaunch, TheSinkTwinTakesPrepsArgumentsThenTheSinkAndTheSinkterm)
+{
+    const auto spec = dimsSpec(3, 5, 100, 91, 64);
+    const auto sinkSpec = withSink(spec, true);
+    const GraphFixture fixture(buildSdpaBwdGraph(sinkSpec));
+    const auto bound = matchesGraph(splitSymbols(Slot::PREP), fixture.context());
+    ASSERT_TRUE(bound.has_value());
+    const uint64_t sinkterm
+        = WORKSPACE + static_cast<uint64_t>(tokenOf(*bound, "ws.sinkterm.offset"));
+
+    const auto dump = dumpOf(Slot::PREP, sinkSpec, twinRow());
+    const auto plainDump = dumpOf(Slot::PREP, spec, plainRow());
+    const auto twin = twinValuesOf(dump);
+    EXPECT_EQ(twin.at("Sink"), ptrOf(sdpa_bwd_uid::SINK));
+    EXPECT_EQ(twin.at("SinkTerm"), sinkterm);
+    // The 27 arguments the plain prep launch of the same graph takes.
+    for(const auto& [name, value] : valuesOf(Slot::PREP, plainDump))
+    {
+        EXPECT_EQ(twin.at(name), value) << name;
+    }
+    EXPECT_EQ(dump.block, plainDump.block);
+    EXPECT_EQ(dump.grid, plainDump.grid);
+}
+
+TEST(TestFlydslSdpaBwdSplitLaunch, TheDsinkReduceSumsTheSinktermIntoDsinkOneBlockPerHead)
+{
+    const auto spec = withSink(dimsSpec(3, 5, 100, 91, 64), true);
+    const GraphFixture fixture(buildSdpaBwdGraph(spec));
+    const auto bound = matchesGraph(splitSymbols(Slot::PREP), fixture.context());
+    ASSERT_TRUE(bound.has_value());
+    const uint64_t sinkterm
+        = WORKSPACE + static_cast<uint64_t>(tokenOf(*bound, "ws.sinkterm.offset"));
+
+    const auto dump = dumpOf(Slot::PREP, spec, twinRow());
+    ASSERT_TRUE(dump.dsink);
+    EXPECT_TRUE(dump.sinktermZeroed);
+    EXPECT_EQ(dump.dsinkBlock, 64U);
+    EXPECT_EQ(dump.dsinkGrid, (std::array<unsigned int, 3>{5, 1, 1}));
+    const auto dsink = dsinkValuesOf(dump);
+    EXPECT_EQ(dsink.at("SinkTerm"), sinkterm);
+    EXPECT_EQ(dsink.at("DSink"), ptrOf(sdpa_bwd_uid::DSINK));
+    EXPECT_EQ(dsink.at("batch_size"), 3U);
+    EXPECT_EQ(dsink.at("max_seqlen_q"), 100U);
+    EXPECT_EQ(dsink.at("num_head_q"), 5U);
+    EXPECT_EQ(dsink.at("num_seqlens"), 0U);
+    // A dense graph passes O for the lengths it does not have, as the twin does.
+    const auto twin = twinValuesOf(dump);
+    EXPECT_EQ(dsink.at("seqinfo_q0"), ptrOf(sdpa_bwd_uid::O));
+    EXPECT_EQ(dsink.at("seqinfo_q1"), twin.at("seqinfo_q1"));
+    EXPECT_EQ(dsink.at("varlen_bits"), twin.at("varlen_bits"));
+}
+
+TEST(TestFlydslSdpaBwdSplitLaunch, TheDsinkReducePassesAPaddedGraphsLengths)
+{
+    const auto spec = withSink(withPaddedVarlen(dimsSpec(3, 5, 100, 91, 64)), true);
+    const auto dump = dumpOf(Slot::PREP, spec, twinRow());
+    ASSERT_TRUE(dump.dsink);
+    const auto dsink = dsinkValuesOf(dump);
+    const auto twin = twinValuesOf(dump);
+    EXPECT_EQ(dsink.at("seqinfo_q0"), ptrOf(sdpa_bwd_uid::SEQ_LEN_Q));
+    EXPECT_EQ(dsink.at("seqinfo_q0"), twin.at("seqinfo_q0"));
+    EXPECT_EQ(dsink.at("varlen_bits"), twin.at("varlen_bits"));
+}
+
+TEST(TestFlydslSdpaBwdSplitLaunch, ASinkOnlyGraphLaunchesPlainPrepWithNoDsinkReduceOrMemset)
+{
+    const auto spec = withSink(dimsSpec(3, 5, 100, 91, 64), false);
+    const auto dump = dumpOf(Slot::PREP, spec, plainRow());
+    EXPECT_FALSE(dump.dsink);
+    EXPECT_FALSE(dump.sinktermZeroed);
+    EXPECT_EQ(dump.kernarg.size(), imageBytes(prepParams()));
+}
+
+TEST(TestFlydslSdpaBwdSplitLaunch, ThePrepRowMustBeTheTwinExactlyWhenTheGraphHasDsink)
+{
+    expectBadParam([] { dumpOf(Slot::PREP, baseSpec(), twinRow()); });
+    expectBadParam([] { dumpOf(Slot::PREP, withSink(baseSpec(), false), twinRow()); });
+    expectBadParam([] { dumpOf(Slot::PREP, withSink(baseSpec(), true), plainRow()); });
+}
+
+TEST(TestFlydslSdpaBwdSplitLaunch, ATokenThatDisagreesWithTheSinktermRegionIsRefused)
+{
+    const auto spec = withSink(baseSpec(), true);
+    expectBadParam([&] {
+        dumpOf(Slot::PREP, spec, twinRow(), [](BoundTokens& bound) {
+            bound.erase("ws.sinkterm.offset");
+        });
+    });
+    expectBadParam([&] {
+        dumpOf(Slot::PREP, spec, twinRow(), [](BoundTokens& bound) {
+            bound["ws.sinkterm.offset"] = int64_t{0};
+        });
+    });
+}
+
 TEST(TestFlydslSdpaBwdSplitLaunch, DkdvAndDqGridsFollowTheRowsGeometry)
 {
     const auto spec = dimsSpec(3, 6, 100, 91, 64);
@@ -2024,6 +2268,84 @@ TEST(TestFlydslSdpaBwdSplitDispatch, TheDqHandlersDeclareTheirLaunchesAndTheOthe
     {
         EXPECT_TRUE(dispatchHandler(splitSymbols(slot)).launchNames().empty());
     }
+    EXPECT_EQ(dispatchHandler(PREP_SINK).launchNames(),
+              (std::set<std::string>{"prep", "dsink_reduce"}));
+    EXPECT_FALSE(dispatchHandler(PREP_SINK).supportsSaving());
+}
+
+const char* const PREP_ENTRY_SYMBOL = "prep_entry_symbol";
+const char* const DSINK_ENTRY_SYMBOL = "dsink_entry_symbol";
+
+/// A sink twin row whose launches are the `sources` entries "prep" and, with @p dsink, the
+/// "dsink_reduce" one, in an archive that does not exist.
+KernelDefinition sinkSourcesRow(std::optional<std::vector<KernelArgument>> dsink
+                                = recordedSignature(dsinkReduceParams()))
+{
+    auto kernel = makeRow(Slot::PREP, twinRow());
+    const auto tree = std::filesystem::temp_directory_path().string();
+    kernel.originDirectory = tree;
+    kernel.treeRoot = tree;
+    KernelSource prep;
+    prep.kind = KernelSourceKind::KPACK;
+    prep.library = "there-is-no-archive-here.kpack";
+    prep.tocKey = "toc#0";
+    prep.symbol = PREP_ENTRY_SYMBOL;
+    prep.signature = recordedSignature(prepSinkParams());
+    kernel.sources = {{"prep", prep}};
+    if(dsink.has_value())
+    {
+        KernelSource reduce = prep;
+        reduce.symbol = DSINK_ENTRY_SYMBOL;
+        reduce.signature = std::move(*dsink);
+        kernel.sources["dsink_reduce"] = std::move(reduce);
+    }
+    return kernel;
+}
+
+TEST(TestFlydslSdpaBwdSplitDispatch, ThePrepSinkHandlerRequiresBothLaunchesAndChecksTheDsinkList)
+{
+    const auto spec = withSink(baseSpec(), true);
+    const auto missing = prepareFailure(PREP_SINK, spec, sinkSourcesRow(std::nullopt));
+    EXPECT_TRUE(contains(missing, "no launch 'dsink_reduce'")) << missing;
+
+    auto dropped = recordedSignature(dsinkReduceParams());
+    dropped.pop_back();
+    const auto refused = prepareFailure(PREP_SINK, spec, sinkSourcesRow(dropped));
+    EXPECT_TRUE(contains(refused, "is packaged with arguments")) << refused;
+    EXPECT_TRUE(contains(refused, DSINK_ENTRY_SYMBOL)) << refused;
+
+    // A twin packaged as one launch has no `prep` launch.
+    const auto single = prepareFailure(PREP_SINK, spec, makeRow(Slot::PREP, twinRow()));
+    EXPECT_TRUE(contains(single, "is a single-launch kernel, so it has no launch 'prep'"))
+        << single;
+}
+
+TEST(TestFlydslSdpaBwdSplitDispatch, ThePlainPrepHandlerRefusesTheTwinAndPrepSinkRefusesAPlainRow)
+{
+    const auto spec = withSink(baseSpec(), true);
+    const auto plainOnTwin
+        = prepareFailure(splitSymbols(Slot::PREP), spec, makeRow(Slot::PREP, twinRow()));
+    EXPECT_TRUE(contains(plainOnTwin, "has sink 1 but is dispatched by the prep handler"))
+        << plainOnTwin;
+    const auto twinOnPlain = prepareFailure(PREP_SINK, spec, makeRow(Slot::PREP, plainRow()));
+    EXPECT_TRUE(contains(twinOnPlain, "has sink -1 but the graph has dSink")) << twinOnPlain;
+}
+
+TEST(TestFlydslSdpaBwdSplitDispatch, OnlyTheDqSlotsScratchIsAWorkspaceBytesEvenForADsinkGraph)
+{
+    const GraphFixture fixture(buildSdpaBwdGraph(withSink(baseSpec(), true)));
+    const auto bound = matchesGraph(splitSymbols(Slot::PREP), fixture.context());
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_EQ(dispatchHandler(PREP_SINK).workspaceBytes(
+                  fixture.context(), *bound, makeRow(Slot::PREP, twinRow())),
+              0U);
+    EXPECT_EQ(dispatchHandler(splitSymbols(Slot::DQ))
+                  .workspaceBytes(fixture.context(), *bound, makeRow(Slot::DQ, plainRow())),
+              0U);
+}
+
+TEST(TestFlydslSdpaBwdSplitDispatch, TheDqReduceAndDqU2HandlersDeclareTheirLaunchesAndDoNotSave)
+{
     EXPECT_FALSE(dispatchHandler(DQ_REDUCE).supportsSaving());
     EXPECT_EQ(dispatchHandler(DQ_U2).launchNames(), (std::set<std::string>{"dq", "tailzero"}));
     EXPECT_FALSE(dispatchHandler(DQ_U2).supportsSaving());

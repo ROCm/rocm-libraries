@@ -245,6 +245,17 @@ INSTANTIATE_TEST_SUITE_P(
                          s.kvHeads = 8;
                          s.sinkHeadStride = int64_t{1} << 24;
                      })},
+        // A 16-bit sink in the query's dtype (the stride argument's bit 32 clear), strided
+        // across heads too.
+        AcceptedCase{"SinkInTheQueryDtype", accepted([](SdpaGraphSpec& s) {
+                         s.withSink = true;
+                         s.sinkDataType = s.dataType;
+                     })},
+        AcceptedCase{"SinkInTheQueryDtypeStridedAcrossHeads", accepted([](SdpaGraphSpec& s) {
+                         s.withSink = true;
+                         s.sinkDataType = s.dataType;
+                         s.sinkHeadStride = 3;
+                     })},
         AcceptedCase{"GroupedQueryHeads", accepted([](SdpaGraphSpec& s) {
                          s.heads = 8;
                          s.kvHeads = 2;
@@ -1522,39 +1533,87 @@ TEST(TestFlydslSdpaRdnaKernelMatch, ServesAFloatSinkOnTheSinkObjects)
     EXPECT_EQ(flydsl_sdpa::rdnaSinkStrideArgument(3, true), (int64_t{1} << 32) | 3);
     EXPECT_EQ(flydsl_sdpa::rdnaSinkStrideArgument(0, true), int64_t{1} << 32);
     EXPECT_EQ(flydsl_sdpa::rdnaSinkStrideArgument(0, false), 0);
+    EXPECT_TRUE(flydsl_sdpa_rdna::flydslSdpaRdnaBinding(bound).sinkFloat);
 }
 
-TEST(TestFlydslSdpaRdnaGraphMatch, DeclinesASixteenBitSink)
+TEST(TestFlydslSdpaRdnaKernelMatch, ServesASixteenBitSinkInTheQueryDtypeWithTheFloatBitClear)
 {
-    // hipDNN's sink is FLOAT, as cuDNN's (SEM-022): a BFLOAT16 or HALF sink, in the query's
-    // dtype or the other one, declines on the RDNA prefill, decode and aiw engines, though the
-    // kernels could read it. The FLOAT sink is the control.
+    // A sink in the query's dtype binds its head stride in 16-bit elements and runs on the
+    // same sink objects; the kernels read it in the query's dtype when bit 32 of the stride
+    // argument is clear.
+    SdpaGraphSpec sunk;
+    sunk.withSink = true;
+    sunk.sinkDataType = sunk.dataType;
+    sunk.sinkHeadStride = 3;
+    const GraphFixture fixture(buildFlydslSdpaRdnaGraph(sunk));
+    const auto bound = bindingsFor(sunk);
+    EXPECT_EQ(boundInt(bound, FLYDSL_SDPA_RDNA_SINK_STRIDE_TOKEN), 3);
+    const auto binding = flydsl_sdpa_rdna::flydslSdpaRdnaBinding(bound);
+    EXPECT_FALSE(binding.sinkFloat);
+    EXPECT_EQ(flydsl_sdpa::rdnaSinkStrideArgument(binding.sinkStride, binding.sinkFloat), 3);
+    const auto sink
+        = makeFlydslSdpaRdnaKernel("bf16", 64, 0, 128, 32, 1, 0, 64, 0, 0, 0, std::nullopt, 1);
+    EXPECT_TRUE(matchesKernel(FLYDSL_SDPA_RDNA, fixture.context(), sink, bound));
+    EXPECT_FALSE(matchesKernel(
+        FLYDSL_SDPA_RDNA, fixture.context(), makeFlydslSdpaRdnaKernel("bf16", 64, 0), bound));
+}
+
+TEST(TestFlydslSdpaRdnaGraphMatch, ServesASixteenBitSinkOnlyInTheQueryDtype)
+{
+    // A BFLOAT16 or HALF sink equal to the query's dtype is served wherever a FLOAT sink is on
+    // the RDNA prefill, decode and aiw engines; the 16-bit dtype the query is not declines.
     for(const auto query : {DataType::HALF, DataType::BFLOAT16})
     {
-        for(const auto sinkType : {DataType::HALF, DataType::BFLOAT16, DataType::FLOAT})
+        for(const auto sinkType : {DataType::HALF, DataType::BFLOAT16})
         {
             SdpaGraphSpec sunk;
             sunk.dataType = query;
             sunk.withSink = true;
             sunk.sinkDataType = sinkType;
+            auto floatSunk = sunk;
+            floatSunk.sinkDataType = DataType::FLOAT;
             const GraphFixture fixture(buildFlydslSdpaRdnaGraph(sunk));
+            const GraphFixture floatFixture(buildFlydslSdpaRdnaGraph(floatSunk));
             for(const auto* engine :
                 {&FLYDSL_SDPA_RDNA, &FLYDSL_SDPA_RDNA_DECODE, &FLYDSL_SDPA_AIW})
             {
                 const bool matched = matchesGraph(*engine, fixture.context()).has_value();
-                if(sinkType != DataType::FLOAT)
+                const bool floatMatched = matchesGraph(*engine, floatFixture.context()).has_value();
+                if(sinkType != query)
                 {
                     EXPECT_FALSE(matched)
                         << engine->engineName << " query " << EnumNameDataType(query) << " sink "
                         << EnumNameDataType(sinkType);
                 }
-                else if(engine == &FLYDSL_SDPA_RDNA)
+                else
                 {
-                    EXPECT_TRUE(matched) << "the FLOAT control, query " << EnumNameDataType(query);
+                    EXPECT_EQ(matched, floatMatched)
+                        << engine->engineName << " query " << EnumNameDataType(query);
+                    if(engine == &FLYDSL_SDPA_RDNA)
+                    {
+                        EXPECT_TRUE(matched) << "query " << EnumNameDataType(query);
+                    }
                 }
             }
         }
     }
+}
+
+TEST(TestFlydslSdpaRdnaGraphMatch, BoundsASixteenBitSinksHeadOffsetsAsOneHalfPerElement)
+{
+    // The kernels read h * stride 16-bit halves in 32 bits: a 16-bit sink is one half an element,
+    // so over 64 heads 2^25 per head stays inside int32 and 2^26 does not.
+    SdpaGraphSpec sunk;
+    sunk.withSink = true;
+    sunk.sinkDataType = sunk.dataType;
+    sunk.heads = 64;
+    sunk.kvHeads = 8;
+    sunk.sinkHeadStride = int64_t{1} << 25;
+    const GraphFixture inside(buildFlydslSdpaRdnaGraph(sunk));
+    EXPECT_TRUE(matchesGraph(FLYDSL_SDPA_RDNA, inside.context()).has_value());
+    sunk.sinkHeadStride = int64_t{1} << 26;
+    const GraphFixture past(buildFlydslSdpaRdnaGraph(sunk));
+    EXPECT_FALSE(matchesGraph(FLYDSL_SDPA_RDNA, past.context()).has_value());
 }
 
 TEST(TestFlydslSdpaRdnaKernelMatch, PairsABiasWithASinkWithTheObjectBuiltForBoth)
@@ -2900,8 +2959,25 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
     {
         sinkFloat.fillWith(*spec.sinkValue);
     }
-    const auto sinkAt = [&](int64_t h) -> double { return sinkFloat.at(0, h, 0, 0); };
-    const auto sinkDevice = [&]() -> void* { return sinkFloat.device(); };
+    // A graph whose sinkDataType is the query's binds the same logits rounded to it instead,
+    // a 16-bit sink the kernels read in the query's dtype (bit 32 of the stride clear; kernel
+    // modifications 33 and 12); the reference sees the rounded values.
+    const bool sinkInQueryType
+        = spec.sinkDataType.has_value() && *spec.sinkDataType == spec.dataType;
+    DeviceTensor<T> sinkQuery({1, spec.heads, 1, 1}, {0, 1, 0, 0}, 7U, false);
+    if(sinkInQueryType)
+    {
+        for(int64_t h = 0; h < spec.heads; ++h)
+        {
+            sinkQuery.set(0, h, 0, 0, T(static_cast<float>(sinkFloat.at(0, h, 0, 0))));
+        }
+        sinkQuery.upload();
+    }
+    const auto sinkAt = [&](int64_t h) -> double {
+        return sinkInQueryType ? sinkQuery.at(0, h, 0, 0) : sinkFloat.at(0, h, 0, 0);
+    };
+    const auto sinkDevice
+        = [&]() -> void* { return sinkInQueryType ? sinkQuery.device() : sinkFloat.device(); };
 
     float runtimeScale = spec.scale;
     std::vector<hipdnnPluginDeviceBuffer_t> buffers{
@@ -3303,8 +3379,8 @@ void expectSdpaMatchesReference(const SdpaGraphSpec& spec,
                     {
                         lseError = std::abs(actualLse - expectedLse);
                     }
-                    // A keyless row's LSE is the sink itself: the f32 sink's bits exactly, so
-                    // one read as 16-bit is a full miss.
+                    // A keyless row's LSE is the sink itself, exactly (a FLOAT sink's bits, so
+                    // one read as 16-bit is a full miss; a 16-bit sink widened).
                     if(spec.withSink && !hasKeys && std::isfinite(expectedLse)
                        && static_cast<float>(actualLse) != static_cast<float>(expectedLse))
                     {
@@ -5551,6 +5627,102 @@ TEST_P(TestGpuFlydslSdpaRdnaComprehensiveTier, DecodesWithAFloatSink)
 {
     SKIP_IF_NO_DEVICES();
     expectFloatSinksMatchTheReference(RdnaFamily::DECODE);
+}
+
+/// A BFLOAT16 or HALF sink equal to the query's dtype (kernel modifications 33 and 12: bit 32 of
+/// the stride argument clear), on @p family's sink objects, against the harness's reference and
+/// hipDNN's CPU reference: rank 1 with a bf16 query and rank 4 with an f16 query over rows no
+/// key reaches (LSE = the sink, widened exactly), a sink far above the scores, a bias with a
+/// sink, and padding. Decode runs one split and several.
+void expectSixteenBitSinksMatchTheReference(RdnaFamily family)
+{
+    using hipdnn_data_sdk::types::bfloat16;
+    using hipdnn_data_sdk::types::half;
+    const bool decode = family == RdnaFamily::DECODE;
+    const auto base = [decode]() {
+        SdpaGraphSpec spec;
+        spec.headDim = 64;
+        spec.heads = 8;
+        spec.kvHeads = 2;
+        spec.seqLenQ = decode ? 1 : 150;
+        spec.seqLenKv = decode ? 2100 : 150;
+        spec.mask = decode ? SdpaMask::BOTTOM_RIGHT_CAUSAL : SdpaMask::TOP_LEFT_CAUSAL;
+        spec.stats = SdpaStats::LSE;
+        spec.withSink = true;
+        spec.sinkDataType = spec.dataType;
+        return spec;
+    };
+    {
+        SCOPED_TRACE("bf16 query and sink, rank 1");
+        auto spec = base();
+        expectSdpaMatchesReference<bfloat16>(spec, BF16_TOLERANCE, family);
+        if(decode)
+        {
+            spec.seqLenKv = 60;
+            expectSdpaMatchesReference<bfloat16>(spec, BF16_TOLERANCE, family);
+        }
+    }
+    {
+        SCOPED_TRACE("f16 query and sink, rank 4, rows no key reaches");
+        auto spec = base();
+        spec.sinkRank4 = true;
+        spec.dataType = DataType::HALF;
+        spec.sinkDataType = DataType::HALF;
+        spec.headDim = 128;
+        spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+        spec.seqLenQ = decode ? 4 : 80;
+        spec.seqLenKv = decode ? 2 : 48;
+        expectSdpaMatchesReference<half>(spec, F16_TOLERANCE, family);
+    }
+    {
+        SCOPED_TRACE("a sink far above the scores");
+        auto spec = base();
+        spec.sinkValue = 200.0F;
+        expectSdpaMatchesReference<bfloat16>(spec, BF16_TOLERANCE, family);
+    }
+    {
+        SCOPED_TRACE("a bias and a sink");
+        auto spec = base();
+        spec.withBias = true;
+        spec.biasNegativeInfinityRows = true;
+        if(!decode)
+        {
+            // aiw reads the mask's rows in 8-key vectors, an f32 one 32-byte aligned.
+            spec.seqLenQ = 160;
+            spec.seqLenKv = 160;
+            spec.alignment[FLYDSL_SDPA_RDNA_BIAS_UID] = 32;
+        }
+        expectSdpaMatchesReference<bfloat16>(spec, BF16_TOLERANCE, family);
+    }
+    {
+        SCOPED_TRACE("padding");
+        auto spec = base();
+        spec.batch = 3;
+        if(decode)
+        {
+            spec.seqLenKv = 600;
+            setPadding(spec, {1, 1, 0}, {600, 0, 300});
+        }
+        else
+        {
+            spec.seqLenQ = 80;
+            spec.seqLenKv = 96;
+            setPadding(spec, {80, 33, 5}, {64, 96, 17});
+        }
+        expectSdpaMatchesReference<bfloat16>(spec, BF16_TOLERANCE, family);
+    }
+}
+
+TEST_P(TestGpuFlydslSdpaRdnaComprehensiveTier, AddsASixteenBitSinkInTheQueryDtype)
+{
+    SKIP_IF_NO_DEVICES();
+    expectSixteenBitSinksMatchTheReference(RdnaFamily::PREFILL);
+}
+
+TEST(TestGpuFlydslSdpaRdnaDispatch, DecodesWithASixteenBitSinkInTheQueryDtype)
+{
+    SKIP_IF_NO_DEVICES();
+    expectSixteenBitSinksMatchTheReference(RdnaFamily::DECODE);
 }
 
 // V and the LSE in layouts of their own.
@@ -7844,6 +8016,12 @@ TEST_P(TestGpuFlydslSdpaAiwComprehensiveTier, AddsAFloatSink)
 {
     SKIP_IF_NO_DEVICES();
     expectFloatSinksMatchTheReference(RdnaFamily::AIW);
+}
+
+TEST(TestGpuFlydslSdpaAiwDispatch, AddsASixteenBitSinkInTheQueryDtype)
+{
+    SKIP_IF_NO_DEVICES();
+    expectSixteenBitSinksMatchTheReference(RdnaFamily::AIW);
 }
 
 /// A sink logit of -inf contributes nothing: rows with keys are plain softmax, and a row no

@@ -132,10 +132,9 @@ TEST(TestCudnnShimGraphSDPA, BackwardConstructAndValidate)
     EXPECT_TRUE(graph.validate().is_good());
 }
 
-TEST(TestCudnnShimGraphSDPA, BackwardDeterministicRequestSurfacesRecordedError)
+TEST(TestCudnnShimGraphSDPA, BackwardDeterministicRequestIsAccepted)
 {
-    // SHIM-DIVERGENCE(MISSING): determinism is correctness-critical; requesting
-    // it must fail loudly rather than silently run non-deterministically.
+    // is_deterministic_algorithm reaches the graph; engines that cannot honor it decline.
     fe::graph::Graph graph;
     std::shared_ptr<fe::graph::Tensor_attributes> q;
     std::shared_ptr<fe::graph::Tensor_attributes> k;
@@ -153,7 +152,26 @@ TEST(TestCudnnShimGraphSDPA, BackwardDeterministicRequestSurfacesRecordedError)
                         stats,
                         fe::graph::SDPA_backward_attributes{}.set_deterministic_algorithm(true));
 
-    EXPECT_TRUE(graph.validate().is_bad());
+    EXPECT_TRUE(graph.validate().is_good());
+}
+
+TEST(TestCudnnShimGraphSDPA, BackwardMaxTotalSeqLenWithoutRaggedIsGraphNotSupported)
+{
+    fe::graph::Graph graph;
+    std::shared_ptr<fe::graph::Tensor_attributes> q;
+    std::shared_ptr<fe::graph::Tensor_attributes> k;
+    std::shared_ptr<fe::graph::Tensor_attributes> v;
+    addForwardInputs(graph, q, k, v);
+    auto o = makeTensor(graph, {2, 8, 16, 64}, {8192, 1024, 64, 1}, 4);
+    auto dO = makeTensor(graph, {2, 8, 16, 64}, {8192, 1024, 64, 1}, 5);
+    auto stats = makeTensor(graph, {2, 8, 16, 1}, {128, 16, 1, 1}, 6);
+
+    graph.sdpa_backward(
+        q, k, v, o, dO, stats, fe::graph::SDPA_backward_attributes{}.set_max_total_seq_len_q(128));
+
+    auto error = graph.validate();
+    ASSERT_TRUE(error.is_bad());
+    EXPECT_EQ(error.get_code(), fe::error_code_t::GRAPH_NOT_SUPPORTED);
 }
 
 TEST(TestCudnnShimGraphSDPA, BackwardDeterministicFalseIsIgnored)
@@ -202,7 +220,7 @@ TEST_F(TestCudnnShimGraphSDPABackend, BuildOperationGraphReachesBackend)
 // ErrorRecorder first-error-wins: two unsupported backward setters are chained;
 // the FIRST recorded message is what surfaces at validate(). Asserting the
 // message (not just is_bad) is what distinguishes first-wins from last-wins.
-TEST(TestCudnnShimGraphSDPA, DeferredErrorFirstWinsScoreModBeforeSeqLen)
+TEST(TestCudnnShimGraphSDPA, DeferredErrorFirstWinsScoreModBeforeScoreModBprop)
 {
     fe::graph::Graph graph;
     std::shared_ptr<fe::graph::Tensor_attributes> q;
@@ -217,18 +235,19 @@ TEST(TestCudnnShimGraphSDPA, DeferredErrorFirstWinsScoreModBeforeSeqLen)
     attrs
         .set_score_mod([](const std::shared_ptr<fe::graph::Graph>&,
                           std::shared_ptr<fe::graph::Tensor_attributes> t) { return t; })
-        .set_max_total_seq_len_q(128);
+        .set_score_mod_bprop([](const std::shared_ptr<fe::graph::Graph>&,
+                                std::shared_ptr<fe::graph::Tensor_attributes> t) { return t; });
     graph.sdpa_backward(q, k, v, o, dO, stats, attrs);
 
     auto error = graph.validate();
     ASSERT_TRUE(error.is_bad());
     EXPECT_NE(error.get_message().find("score modifier"), std::string::npos);
-    EXPECT_EQ(error.get_message().find("max_total_seq_len_q"), std::string::npos);
+    EXPECT_EQ(error.get_message().find("backprop"), std::string::npos);
 }
 
-// Same two setters in the opposite order: now the seq-len message wins, proving
+// Same two setters in the opposite order: now the backprop message wins, proving
 // the latch keys on call order rather than on which setter is "more severe".
-TEST(TestCudnnShimGraphSDPA, DeferredErrorFirstWinsSeqLenBeforeScoreMod)
+TEST(TestCudnnShimGraphSDPA, DeferredErrorFirstWinsScoreModBpropBeforeScoreMod)
 {
     fe::graph::Graph graph;
     std::shared_ptr<fe::graph::Tensor_attributes> q;
@@ -240,14 +259,16 @@ TEST(TestCudnnShimGraphSDPA, DeferredErrorFirstWinsSeqLenBeforeScoreMod)
     auto stats = makeTensor(graph, {2, 8, 16, 1}, {128, 16, 1, 1}, 6);
 
     fe::graph::SDPA_backward_attributes attrs;
-    attrs.set_max_total_seq_len_q(128).set_score_mod(
-        [](const std::shared_ptr<fe::graph::Graph>&,
-           std::shared_ptr<fe::graph::Tensor_attributes> t) { return t; });
+    attrs
+        .set_score_mod_bprop([](const std::shared_ptr<fe::graph::Graph>&,
+                                std::shared_ptr<fe::graph::Tensor_attributes> t) { return t; })
+        .set_score_mod([](const std::shared_ptr<fe::graph::Graph>&,
+                          std::shared_ptr<fe::graph::Tensor_attributes> t) { return t; });
     graph.sdpa_backward(q, k, v, o, dO, stats, attrs);
 
     auto error = graph.validate();
     ASSERT_TRUE(error.is_bad());
-    EXPECT_NE(error.get_message().find("max_total_seq_len_q"), std::string::npos);
+    EXPECT_NE(error.get_message().find("backprop"), std::string::npos);
     EXPECT_EQ(error.get_message().find("score modifier"), std::string::npos);
 }
 

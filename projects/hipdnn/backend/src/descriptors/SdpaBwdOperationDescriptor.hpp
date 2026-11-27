@@ -111,6 +111,18 @@ public:
     {
         return _dbiasDesc;
     }
+    std::shared_ptr<TensorDescriptor> getSinkTokenDesc() const
+    {
+        return _sinkTokenDesc;
+    }
+    std::shared_ptr<TensorDescriptor> getDsinkTokenDesc() const
+    {
+        return _dsinkTokenDesc;
+    }
+    std::shared_ptr<TensorDescriptor> getRngDumpDesc() const
+    {
+        return _rngDumpDesc;
+    }
 
     // Get compute data type for the operation (used when building graph nodes)
     hipdnn_flatbuffers_sdk::data_objects::DataType getComputeDataType() const
@@ -160,6 +172,9 @@ private:
     std::shared_ptr<TensorDescriptor> _dropoutScaleDesc;
     std::shared_ptr<TensorDescriptor> _dropoutScaleInvDesc;
     std::shared_ptr<TensorDescriptor> _dbiasDesc;
+    std::shared_ptr<TensorDescriptor> _sinkTokenDesc;
+    std::shared_ptr<TensorDescriptor> _dsinkTokenDesc;
+    std::shared_ptr<TensorDescriptor> _rngDumpDesc;
 
     // Compute data type for this operation (stored at node level in graph)
     hipdnn_flatbuffers_sdk::data_objects::DataType _computeDataType

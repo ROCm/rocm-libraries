@@ -658,6 +658,215 @@ class TestSdpaBwdExtendedMath(unittest.TestCase):
         self.assertFalse(bool(keep[2:].any()))
 
 
+@unittest.skipIf(TORCH_MISSING, "the generator requires PyTorch")
+class TestSdpaBwdSinkMath(unittest.TestCase):
+    """The sink column: forward, dSink and the gradients equal FP64 autograd of the
+    sink-column softmax, which shares no code with compute_dsink."""
+
+    @classmethod
+    def setUpClass(cls):
+        spec = importlib.util.spec_from_file_location(
+            "generate_sdpa_bwd_golden", SCRIPT_PATH
+        )
+        cls.gen = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.gen)
+        cls.torch = cls.gen.torch
+
+    def _run(
+        self,
+        h_q=2,
+        h_kv=2,
+        s_q=8,
+        s_kv=12,
+        keep_mask=None,
+        dropout_p=None,
+        seq_lens_q=None,
+    ):
+        torch, gen = self.torch, self.gen
+        rng = torch.Generator().manual_seed(5)
+        draw = lambda *shape: torch.empty(shape).uniform_(-1, 1, generator=rng)
+        Q, K, V = draw(2, h_q, s_q, 4), draw(2, h_kv, s_kv, 4), draw(2, h_kv, s_kv, 4)
+        dO = draw(2, h_q, s_q, 4)
+        sink = torch.empty(h_q).uniform_(0.5, 3.0, generator=rng)
+        mask, scale_d, scale_inv = None, 1.0, 1.0
+        if dropout_p is not None:
+            mask = (
+                torch.empty(2, h_q, s_q, s_kv).uniform_(0, 1, generator=rng)
+                >= dropout_p
+            ).float()
+            scale_d, scale_inv = 1.0 / (1.0 - dropout_p), 1.0 - dropout_p
+        O, lse = gen.compute_forward_explicit(
+            Q, K, V, 0.5, keep_mask, None, mask, scale_d, sink, seq_lens_q
+        )
+        dQ, dK, dV, _ = gen.compute_backward(
+            Q, K, V, O, lse, dO, 0.5, keep_mask, None, mask, scale_d, scale_inv, None
+        )
+        dSink = gen.compute_dsink(sink, lse, O, dO)
+        aQ, aK, aV, _, aSink = gen.autograd_fp64_sink_gradients(
+            Q, K, V, dO, 0.5, sink, keep_mask, None, mask, scale_d
+        )
+        worst = gen.worst_relative_deviation(
+            [
+                ("dQ", dQ, aQ),
+                ("dK", dK, aK),
+                ("dV", dV, aV),
+                ("dSink", dSink.view(-1), aSink),
+            ]
+        )
+        return worst, dSink, aSink, sink, O, lse, dO
+
+    def test_dsink_matches_autograd_per_query_head(self):
+        self.assertLess(self._run()[0], 1e-5)
+        worst, dSink = self._run(h_q=4, h_kv=2)[:2]
+        self.assertLess(worst, 1e-5)
+        # GQA does not group sinks: one dSink per query head.
+        self.assertEqual(list(dSink.shape), [1, 4, 1, 1])
+
+    def test_dsink_under_a_causal_band(self):
+        keep = self.gen.build_bound_mask(8, 12, None, 0, True)
+        self.assertLess(self._run(keep_mask=keep)[0], 1e-5)
+
+    def test_dsink_uses_the_raw_rowsum_under_dropout(self):
+        worst, dSink, aSink, sink, O, lse, dO = self._run(dropout_p=0.3)
+        self.assertLess(worst, 1e-5)
+        # Scaling D by dropout_scale_inv (as dS does) is not the sink's gradient.
+        scaled = self.gen.compute_dsink(sink, lse, O, dO * 0.7).view(-1)
+        self.assertGreater(
+            ((scaled - aSink).abs().max() / aSink.abs().max()).item(), 1e-2
+        )
+
+    def test_dsink_is_negative_when_dO_follows_O(self):
+        # With dO = O, D = |O|^2 > 0 and dSink = -sum(P_sink * D) < 0.
+        torch, gen = self.torch, self.gen
+        rng = torch.Generator().manual_seed(9)
+        draw = lambda *shape: torch.empty(shape).uniform_(-1, 1, generator=rng)
+        Q, K, V = draw(1, 2, 6, 4), draw(1, 2, 6, 4), draw(1, 2, 6, 4)
+        sink = torch.tensor([1.0, 2.0])
+        O, lse = gen.compute_forward_explicit(Q, K, V, 0.5, None, None, None, 1.0, sink)
+        self.assertTrue(bool((gen.compute_dsink(sink, lse, O, O) < 0).all()))
+
+    def test_padded_query_rows_keep_lse_minus_inf_and_live_dead_rows_get_the_sink(self):
+        # SEM-022: a live row with no key has LSE = sink; a padded query row
+        # (past seq_len_q) stays O = 0, LSE = -inf even with a sink.
+        keep = self.gen.build_padded_keep_mask(8, 12, [3, 8], [12, 5], None, 0, False)
+        worst, dSink, _, sink, O, lse, _ = self._run(keep_mask=keep, seq_lens_q=[3, 8])
+        self.assertLess(worst, 1e-5)
+        # Batch 0, rows 3..7 are padded.
+        self.assertTrue(bool(self.torch.isneginf(lse[0, :, 3:]).all()))
+        self.assertTrue(bool((O[0, :, 3:] == 0).all()))
+        # Batch 1 (Sq 8 > Skv 5, bottom-right): rows 0..2 are live with no key.
+        self.assertTrue(self.torch.equal(lse[1, :, 0, 0], sink))
+        self.assertTrue(bool((O[1, :, :3] == 0).all()))
+        # Every live row's LSE is finite.
+        self.assertTrue(bool(self.torch.isfinite(lse[0, :, :3]).all()))
+        self.assertTrue(bool(self.torch.isfinite(lse[1]).all()))
+
+
+@unittest.skipIf(TORCH_MISSING, "the generator requires PyTorch")
+class TestSdpaBwdSinkBundles(unittest.TestCase):
+    """--sink must reach both halves of the pair, in the requested dtype."""
+
+    def _generate(self, tmp, *extra_args):
+        root = Path(tmp)
+        result = run_generator(root / "B/B", root / "F/F", *extra_args)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        graphs = [json.loads((root / f"{d}/{d}.json").read_text()) for d in "BF"]
+        return root, graphs[0], graphs[1]
+
+    def _tensor(self, graph, uid):
+        return next(t for t in graph["tensors"] if t["uid"] == uid)
+
+    def test_float_sink_is_wired_in_both_halves(self):
+        with TemporaryDirectory() as tmp:
+            root, bwd, fwd = self._generate(tmp, "--sink", "float")
+            node = bwd["nodes"][0]
+            sink_uid = node["inputs"]["sink_token_tensor_uid"]
+            dsink_uid = node["outputs"]["dsink_token_tensor_uid"]
+            for uid in (sink_uid, dsink_uid):
+                tensor = self._tensor(bwd, uid)
+                self.assertEqual(tensor["dims"], [1, H, 1, 1])
+                self.assertEqual(tensor["data_type"], "float")
+                size = (root / f"B/B.tensor{uid}.bin").stat().st_size
+                self.assertEqual(size, H * FP32_BYTES)
+            fwd_uid = fwd["nodes"][0]["inputs"]["sink_token_tensor_uid"]
+            self.assertIsNotNone(fwd_uid)
+            self.assertEqual(
+                (root / f"B/B.tensor{sink_uid}.bin").read_bytes(),
+                (root / f"F/F.tensor{fwd_uid}.bin").read_bytes(),
+            )
+            meta = json.loads((root / "B/B.meta.json").read_text())
+            self.assertEqual(meta["config"]["sink"]["dtype"], "float")
+
+    def test_io_sink_and_dsink_are_stored_in_the_io_dtype(self):
+        with TemporaryDirectory() as tmp:
+            root, bwd, _ = self._generate(tmp, "--sink", "io")
+            node = bwd["nodes"][0]
+            for uid in (
+                node["inputs"]["sink_token_tensor_uid"],
+                node["outputs"]["dsink_token_tensor_uid"],
+            ):
+                self.assertEqual(self._tensor(bwd, uid)["data_type"], "bfloat16")
+                size = (root / f"B/B.tensor{uid}.bin").stat().st_size
+                self.assertEqual(size, H * BF16_BYTES)
+
+    def test_sink_keys_are_absent_without_the_flag(self):
+        with TemporaryDirectory() as tmp:
+            _, bwd, fwd = self._generate(tmp)
+            node = bwd["nodes"][0]
+            self.assertNotIn("sink_token_tensor_uid", node["inputs"])
+            self.assertNotIn("dsink_token_tensor_uid", node["outputs"])
+            self.assertIsNone(fwd["nodes"][0]["inputs"]["sink_token_tensor_uid"])
+
+    def test_ragged_sink_bundle_passes_the_storage_check(self):
+        # The read-back check compares the stored dSink with FP64 autograd.
+        with TemporaryDirectory() as tmp:
+            self._generate(
+                tmp,
+                "--sink",
+                "io",
+                "--seq-lens-q",
+                "20",
+                "--seq-lens-kv",
+                "25",
+                "--ragged-sides",
+                "qkv",
+            )
+
+    def test_sink_sweep_case_is_expressed_by_the_sink_template(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sweep_dir = root / "Sink"
+            template = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT_PATH),
+                    "--write-template",
+                    str(sweep_dir),
+                    "--template-kind",
+                    "dense_sink",
+                    "--attn-scale",
+                    "0.25",
+                ],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(template.returncode, 0, template.stderr)
+            for sink in ("float", "io"):
+                result = run_generator(
+                    root / "unused/B",
+                    root / f"F{sink}/F",
+                    "--sweep-bundle-dir",
+                    str(sweep_dir),
+                    "--case-id",
+                    f"golden_sink_{sink}",
+                    "--sink",
+                    sink,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+            cases = json.loads((sweep_dir / "sweep.json").read_text())["cases"]
+            self.assertEqual(len(cases), 2)
+
+
 # ctest reports exit code 77 as Skipped (SKIP_RETURN_CODE), so a run in which every
 # test skipped, e.g. without PyTorch, does not look like a pass.
 SKIP_EXIT = 77

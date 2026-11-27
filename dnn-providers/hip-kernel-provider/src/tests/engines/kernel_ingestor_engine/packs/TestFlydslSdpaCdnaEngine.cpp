@@ -137,6 +137,7 @@ constexpr const char* CDNA_STATS_TOKEN = "flydsl_sdpa_cdna.stats.uid";
 constexpr const char* CDNA_DIAG_OFFSET_TOKEN = "flydsl_sdpa_cdna.diag_offset";
 constexpr const char* CDNA_WINDOW_TOKEN = "flydsl_sdpa_cdna.window_lo";
 constexpr const char* CDNA_SINK_STRIDE_TOKEN = "flydsl_sdpa_cdna.sink.stride";
+constexpr const char* CDNA_SINK_FLOAT_TOKEN = "flydsl_sdpa_cdna.sink.float";
 constexpr int64_t CDNA_NO_WINDOW = -(int64_t{1} << 30);
 
 constexpr const char* CDNA_DTYPE_FIELD = "dtype";
@@ -302,6 +303,21 @@ std::vector<CdnaCase> acceptedCases()
     limitSink.kvHeads = 8;
     limitSink.sinkHeadStride = int64_t{1} << 24;
     cases.push_back({"SinkHeadOffsetsAtTheInt32Limit", limitSink});
+    // A 16-bit sink in the query's dtype (vendored-kernel modification 41's sink_on 1): one
+    // half an element, so the same bound is 2^25 per head over 64 heads.
+    auto querySink = cdnaSpec();
+    querySink.withSink = true;
+    querySink.sinkDataType = querySink.dataType;
+    cases.push_back({"SinkInTheQueryDtype", querySink});
+    querySink.sinkRank4 = true;
+    cases.push_back({"SinkInTheQueryDtypeRank4", querySink});
+    querySink.sinkRank4 = false;
+    querySink.sinkHeadStride = 3;
+    cases.push_back({"SinkInTheQueryDtypeStridedAcrossHeads", querySink});
+    auto limitQuerySink = limitSink;
+    limitQuerySink.sinkDataType = limitQuerySink.dataType;
+    limitQuerySink.sinkHeadStride = int64_t{1} << 25;
+    cases.push_back({"SinkInTheQueryDtypeHeadOffsetsAtTheInt32Limit", limitQuerySink});
     // Multi-head latent attention, un-absorbed: V narrower than Q and K.
     auto mla = cdnaSpec();
     mla.headDim = 192;
@@ -894,7 +910,7 @@ TEST_P(TestFlydslSdpaCdnaGraphDeclines, DeclinesTheGraph)
 std::vector<CdnaCase> declinedCases()
 {
     std::vector<CdnaCase> cases;
-    // A sink that is not FLOAT (SEM-022), 16-bit ones too, though the kernels could read them.
+    // A sink that is neither FLOAT nor 16-bit in the query's dtype (SEM-022).
     auto fp8Sink = cdnaSpec();
     fp8Sink.withSink = true;
     fp8Sink.sinkDataType = DataType::FP8_E4M3;
@@ -903,10 +919,6 @@ std::vector<CdnaCase> declinedCases()
     doubleSink.withSink = true;
     doubleSink.sinkDataType = DataType::DOUBLE;
     cases.push_back({"SinkInDouble", doubleSink});
-    auto querySink = cdnaSpec();
-    querySink.withSink = true;
-    querySink.sinkDataType = querySink.dataType;
-    cases.push_back({"SinkInTheQueryDtype", querySink});
     auto otherSink = cdnaSpec();
     otherSink.withSink = true;
     otherSink.sinkDataType
@@ -924,6 +936,12 @@ std::vector<CdnaCase> declinedCases()
     cases.push_back({"SinkHeadOffsetsPastInt32", wideSinkStride});
     wideSinkStride.sinkHeadStride = int64_t{1} << 25;
     cases.push_back({"FloatSinkHeadOffsetsPastInt32", wideSinkStride});
+    // A 16-bit sink is one half an element: at 2^26 per head over 64 heads head 32 and up
+    // would read another head's logit.
+    auto wideQuerySink = wideSinkStride;
+    wideQuerySink.sinkDataType = wideQuerySink.dataType;
+    wideQuerySink.sinkHeadStride = int64_t{1} << 26;
+    cases.push_back({"SinkInTheQueryDtypeHeadOffsetsPastInt32", wideQuerySink});
     // A bias in neither the query's dtype nor f32.
     auto f16Bias = cdnaSpec();
     f16Bias.withBias = true;
@@ -2147,37 +2165,84 @@ TEST(TestFlydslSdpaCdnaKernelMatch, ServesAFloatSinkOnTheSinkObjects)
     EXPECT_EQ(flydsl_sdpa_cdna::SINK_FLOAT, 2);
 }
 
-TEST(TestFlydslSdpaCdnaGraphMatch, DeclinesASixteenBitSink)
+TEST(TestFlydslSdpaCdnaGraphMatch, ServesASixteenBitSinkOnlyInTheQueryDtype)
 {
-    // hipDNN's sink is FLOAT, as cuDNN's (SEM-022): a BFLOAT16 or HALF sink, in the query's
-    // dtype or the other one, declines on the generic, dual-wave and decode engines, though the
-    // kernels could read it. The FLOAT sink is the control.
+    // A BFLOAT16 or HALF sink equal to the query's dtype is served wherever a FLOAT sink is (the
+    // kernels read it with sink_on SINK_QUERY_DTYPE); the 16-bit dtype the query is not
+    // declines on the generic, dual-wave and decode engines.
     for(const auto query : {DataType::HALF, DataType::BFLOAT16})
     {
-        for(const auto sinkType : {DataType::HALF, DataType::BFLOAT16, DataType::FLOAT})
+        for(const auto sinkType : {DataType::HALF, DataType::BFLOAT16})
         {
             auto spec = cdnaSpec();
             spec.dataType = query;
             spec.withSink = true;
             spec.sinkDataType = sinkType;
+            auto floatSink = spec;
+            floatSink.sinkDataType = DataType::FLOAT;
             const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec));
+            const GraphFixture floatFixture(buildFlydslSdpaRdnaGraph(floatSink));
             for(const auto* engine :
                 {&FLYDSL_SDPA_CDNA, &FLYDSL_SDPA_CDNA_DUALWAVE, &FLYDSL_SDPA_CDNA_DECODE})
             {
                 const bool matched = matchesGraph(*engine, fixture.context()).has_value();
-                if(sinkType != DataType::FLOAT)
+                const bool floatMatched = matchesGraph(*engine, floatFixture.context()).has_value();
+                if(sinkType != query)
                 {
                     EXPECT_FALSE(matched)
                         << engine->engineName << " query " << EnumNameDataType(query) << " sink "
                         << EnumNameDataType(sinkType);
                 }
-                else if(engine == &FLYDSL_SDPA_CDNA)
+                else
                 {
-                    EXPECT_TRUE(matched) << "the FLOAT control, query " << EnumNameDataType(query);
+                    EXPECT_EQ(matched, floatMatched)
+                        << engine->engineName << " query " << EnumNameDataType(query);
+                    if(engine == &FLYDSL_SDPA_CDNA)
+                    {
+                        EXPECT_TRUE(matched) << "query " << EnumNameDataType(query);
+                    }
                 }
             }
         }
     }
+}
+
+TEST(TestFlydslSdpaCdnaKernelMatch, ServesASixteenBitSinkOnTheSinkObjectsWithSinkOnQueryDtype)
+{
+    // A sink in the query's dtype binds its head stride in 16-bit elements, is marked not
+    // FLOAT, and runs on the sink objects; the native passes sink_on SINK_QUERY_DTYPE (a FLOAT
+    // sink SINK_FLOAT, no sink SINK_OFF).
+    auto spec = cdnaSpec();
+    spec.withSink = true;
+    spec.sinkDataType = spec.dataType;
+    spec.sinkHeadStride = 3;
+    const GraphFixture fixture(buildFlydslSdpaRdnaGraph(spec));
+    const auto bound = matchesGraph(FLYDSL_SDPA_CDNA, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_EQ(tryGetBoundInt(*bound, CDNA_SINK_STRIDE_TOKEN), std::optional<int64_t>(3));
+    EXPECT_EQ(tryGetBoundInt(*bound, CDNA_SINK_FLOAT_TOKEN), std::optional<int64_t>(0));
+    EXPECT_EQ(flydsl_sdpa_cdna::flydslSdpaCdnaBinding(*bound).sinkOn(),
+              flydsl_sdpa_cdna::SINK_QUERY_DTYPE);
+    auto withSink = makeCdnaKernel("generic", 128, 0, "bf16", 64);
+    withSink.metadata["has_sink"] = int64_t{1};
+    EXPECT_TRUE(matchesCdnaKernel(fixture.context(), withSink, *bound));
+    EXPECT_FALSE(matchesCdnaKernel(
+        fixture.context(), makeCdnaKernel("generic", 128, 0, "bf16", 64), *bound));
+
+    spec.sinkDataType = DataType::FLOAT;
+    const GraphFixture floatFixture(buildFlydslSdpaRdnaGraph(spec));
+    const auto floatBound = matchesGraph(FLYDSL_SDPA_CDNA, floatFixture.context());
+    ASSERT_TRUE(floatBound.has_value());
+    EXPECT_EQ(tryGetBoundInt(*floatBound, CDNA_SINK_FLOAT_TOKEN), std::optional<int64_t>(1));
+    EXPECT_EQ(flydsl_sdpa_cdna::flydslSdpaCdnaBinding(*floatBound).sinkOn(),
+              flydsl_sdpa_cdna::SINK_FLOAT);
+
+    const GraphFixture plain(buildFlydslSdpaRdnaGraph(cdnaSpec()));
+    const auto plainBound = matchesGraph(FLYDSL_SDPA_CDNA, plain.context());
+    ASSERT_TRUE(plainBound.has_value());
+    EXPECT_EQ(flydsl_sdpa_cdna::flydslSdpaCdnaBinding(*plainBound).sinkOn(),
+              flydsl_sdpa_cdna::SINK_OFF);
+    EXPECT_EQ(flydsl_sdpa_cdna::SINK_QUERY_DTYPE, 1);
 }
 
 TEST(TestFlydslSdpaCdnaKernelMatch, ReadsVThroughItsOwnStridesOnlyOnTheMaskedPath)
@@ -3256,18 +3321,29 @@ void writeCdnaBiasNans(const SdpaGraphSpec& spec,
     }
 }
 
-/// The FLOAT sink logits a CDNA case binds, one per query head (none without a sink): random
-/// values in the query's dtype plus low bits no 16-bit dtype holds (vendored-kernel modification
-/// 36), so a sink read as 16-bit is caught; or every one the spec's value, or -inf.
+/// Whether a CDNA case's sink is 16-bit, in the query's dtype (vendored-kernel modification 41's
+/// sink_on 1) rather than FLOAT.
+inline bool cdnaSinkIsInTheQueryDtype(const SdpaGraphSpec& spec)
+{
+    return spec.sinkDataType.has_value() && *spec.sinkDataType == spec.dataType;
+}
+
+/// The sink logits a CDNA case binds, one per query head (none without a sink): random values
+/// in the query's dtype plus, for a FLOAT sink, low bits no 16-bit dtype holds (vendored-kernel
+/// modification 36), so a sink read as 16-bit is caught; or every one the spec's value, or -inf.
+/// A sink in the query's dtype holds the values already rounded to it, so the reference sees
+/// what the device reads.
 template <typename T>
 std::vector<float> cdnaSinkLogits(const SdpaGraphSpec& spec)
 {
+    const bool narrow = cdnaSinkIsInTheQueryDtype(spec);
     const auto values
         = spec.withSink ? fillValues<T>(static_cast<size_t>(spec.heads), 5U) : std::vector<T>{};
     std::vector<float> logits(values.size());
     for(size_t hi = 0; hi < values.size(); ++hi)
     {
-        logits[hi] = static_cast<float>(values[hi]) + static_cast<float>((hi % 7) + 1) * 1.0e-3F;
+        logits[hi] = static_cast<float>(values[hi])
+                     + (narrow ? 0.0F : static_cast<float>((hi % 7) + 1) * 1.0e-3F);
     }
     if(spec.sinkValue)
     {
@@ -3277,7 +3353,45 @@ std::vector<float> cdnaSinkLogits(const SdpaGraphSpec& spec)
     {
         std::fill(logits.begin(), logits.end(), -std::numeric_limits<float>::infinity());
     }
+    if(narrow)
+    {
+        for(auto& logit : logits)
+        {
+            logit = static_cast<float>(T(logit));
+        }
+    }
     return logits;
+}
+
+/// Uploads a CDNA case's sink logits (cdnaSinkLogits): FLOAT, or narrowed to the query's 16-bit
+/// dtype when the spec's sink is in that dtype (vendored-kernel modification 41). Leaves
+/// @p sinkDevice null without a sink.
+template <typename T>
+void uploadCdnaSink(const SdpaGraphSpec& spec,
+                    const std::vector<float>& sinkLogits,
+                    std::vector<void*>& allocations,
+                    void*& sinkDevice)
+{
+    sinkDevice = nullptr;
+    if(!spec.withSink)
+    {
+        return;
+    }
+    std::vector<T> narrowed;
+    if(cdnaSinkIsInTheQueryDtype(spec))
+    {
+        for(const auto logit : sinkLogits)
+        {
+            narrowed.push_back(T(logit));
+        }
+    }
+    const void* sinkHost = narrowed.empty() ? static_cast<const void*>(sinkLogits.data())
+                                            : static_cast<const void*>(narrowed.data());
+    const size_t sinkBytes
+        = static_cast<size_t>(spec.heads) * (narrowed.empty() ? sizeof(float) : sizeof(T));
+    ASSERT_EQ(hipSuccess, hipMalloc(&sinkDevice, sinkBytes));
+    allocations.push_back(sinkDevice);
+    ASSERT_EQ(hipSuccess, hipMemcpy(sinkDevice, sinkHost, sinkBytes, hipMemcpyHostToDevice));
 }
 
 /// A CDNA sink case's O and LSE against hipDNN's CPU reference (FLOAT [1, Hq, 1, 1], SEM-022;
@@ -4032,15 +4146,12 @@ void expectCandidatesMatchReference(const MatchContext& context,
     // The attention sink: one FLOAT logit per query head (vendored-kernel modification 36),
     // with low bits no 16-bit dtype holds, so a sink read as 16-bit is caught; or every one the
     // spec's value.
+    // A spec whose sinkDataType is the query's binds a 16-bit sink instead (modification 41).
     const auto sinkLogits = cdnaSinkLogits<T>(spec);
     void* sinkDevice = nullptr;
+    ASSERT_NO_FATAL_FAILURE(uploadCdnaSink<T>(spec, sinkLogits, allocations, sinkDevice));
     if(spec.withSink)
     {
-        const size_t sinkBytes = static_cast<size_t>(h) * sizeof(float);
-        ASSERT_EQ(hipSuccess, hipMalloc(&sinkDevice, sinkBytes));
-        allocations.push_back(sinkDevice);
-        ASSERT_EQ(hipSuccess,
-                  hipMemcpy(sinkDevice, sinkLogits.data(), sinkBytes, hipMemcpyHostToDevice));
         buffers.push_back({FLYDSL_SDPA_RDNA_SINK_UID, sinkDevice});
     }
     // A runtime scale arrives with the buffers, as a host scalar.
@@ -4526,8 +4637,8 @@ void expectCandidatesMatchReference(const MatchContext& context,
                         else if(rowKind[row] == Row::KEYLESS && spec.withSink
                                 && static_cast<float>(lse) != static_cast<float>(expectedLse[row]))
                         {
-                            // The sink itself: the f32 sink's bits exactly, so one read as
-                            // 16-bit is a full miss.
+                            // The sink itself, exactly (a FLOAT sink's bits, so one read as
+                            // 16-bit is a full miss; a 16-bit sink widened).
                             lseError = 1e30;
                         }
                         if(!(lseError <= LSE_TOLERANCE))
@@ -7239,6 +7350,48 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, AddsAFloatSink)
         rank4.sinkRank4 = true;
         rank4.seqLenKv = 64;
         expectCdnaMatchesReference(rank4, BF16_TOLERANCE);
+    }
+}
+
+TEST(TestGpuFlydslSdpaCdnaDispatch, AddsASixteenBitSinkInTheQueryDtype)
+{
+    // A BFLOAT16 or HALF sink equal to the query's dtype (vendored-kernel modification 41's
+    // sink_on 1), rank 1 with a bf16 query and rank 4 over rows no key reaches (LSE = the
+    // sink, widened exactly) with an f16 query, then with a bias and padding; against the
+    // harness's reference and hipDNN's CPU reference. The FLOAT sink's cases are above.
+    auto spec = cdnaSpec();
+    spec.headDim = 64;
+    spec.heads = 16;
+    spec.kvHeads = 2;
+    spec.withSink = true;
+    spec.sinkDataType = spec.dataType;
+    spec.stats = SdpaStats::LSE;
+    spec.mask = SdpaMask::BOTTOM_RIGHT_CAUSAL;
+    spec.seqLenQ = 300;
+    spec.seqLenKv = 300;
+    {
+        SCOPED_TRACE("bf16 query and sink, rank 1");
+        expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    }
+    {
+        SCOPED_TRACE("f16 query and sink, rank 4, rows no key reaches");
+        auto rank4 = spec;
+        rank4.dataType = DataType::HALF;
+        rank4.sinkDataType = DataType::HALF;
+        rank4.sinkRank4 = true;
+        rank4.seqLenKv = 64;
+        expectCdnaMatchesReference(rank4, BF16_TOLERANCE);
+    }
+    {
+        SCOPED_TRACE("a bias and a sink far above the scores, padding");
+        auto biased = spec;
+        biased.withBias = true;
+        biased.biasMasksRows = true;
+        biased.sinkValue = 6.0e4F;
+        biased.seqLenQ = 96;
+        biased.seqLenKv = 96;
+        setPadding(biased, {96, 33, 5}, {64, 96, 17});
+        expectCdnaMatchesReference(biased, BF16_TOLERANCE);
     }
 }
 

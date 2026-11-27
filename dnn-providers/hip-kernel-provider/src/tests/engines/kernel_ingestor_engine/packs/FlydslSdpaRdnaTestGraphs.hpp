@@ -261,7 +261,8 @@ struct SdpaGraphSpec
     /// device harnesses allocate a packed sink.
     std::optional<int64_t> sinkHeadStride;
     /// The sink's dtype as the graph declares it, FLOAT (cuDNN's and hipDNN's, SEM-022) when
-    /// unset. Graph only: the device harnesses hold a FLOAT sink.
+    /// unset. The device harnesses bind a FLOAT sink, or a 16-bit one in the query's dtype
+    /// when this is the query's dtype; any other value is graph only.
     std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> sinkDataType;
     /// The bias as the graph declares it: rank 1 to 4, right-aligned to [B, H, Sq, Skv].
     /// Empty dims mean a packed [1, 1, Sq, Skv]; empty strides mean packed row-major.
@@ -2300,8 +2301,8 @@ inline std::vector<SdpaFieldDecline> sdpaFieldDeclines()
             },
             add);
     }
-    // The sink is FLOAT (SEM-022): any other dtype declines (shared servableSinkStride), the
-    // 16-bit ones too, though the kernels could read them; the FLOAT sink is the control.
+    // The sink is FLOAT, or 16-bit in the query's dtype (SEM-022): any other dtype declines
+    // (shared servableSink); the FLOAT sink is the control.
     edit(
         "SinkInFp8",
         [withSink](SdpaGraphSpec& s) {
@@ -2317,13 +2318,6 @@ inline std::vector<SdpaFieldDecline> sdpaFieldDeclines()
         },
         withSink);
     edit(
-        "SinkInTheQueryDtype",
-        [withSink](SdpaGraphSpec& s) {
-            withSink(s);
-            s.sinkDataType = s.dataType;
-        },
-        withSink);
-    edit(
         "SinkInTheOther16BitDtype",
         [withSink](SdpaGraphSpec& s) {
             withSink(s);
@@ -2334,7 +2328,7 @@ inline std::vector<SdpaFieldDecline> sdpaFieldDeclines()
         withSink);
     // The kernels read a head's sink at h * stride 16-bit halves in 32 bits, two halves a FLOAT
     // element: with 64 heads, a stride of 2^26 puts heads 16 and up past it, and 2^25 heads 32
-    // and up (shared servableSinkStride).
+    // and up (shared servableSink).
     const auto sixtyFourHeadsWithASink = [withSink](SdpaGraphSpec& s) {
         withSink(s);
         s.heads = 64;

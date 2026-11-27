@@ -31,6 +31,9 @@ it names; a companion kept in another op's folder is resolved relative to the ro
 A dK-only dK/dV row of the value-head split (``u2=dk``) is a multi-launch UKD too: ``dkdv``, then ``dvonly``, the manifest's dV-only row (``u2=dv``)
 whose Spec equals its own apart from ``u2``. A dV-only row is no UKD of its own.
 
+A sink-twin prep row (``sink=1``) is a multi-launch UKD too: ``prep``, then ``dsink_reduce``, the object of its dtype in the content op
+``sdpa_bwd_dsink_reduce`` (a sibling folder, named as the merged tail-zero companions are). That op's manifest names no UKD of its own.
+
 So for a generic target, every member's shard is shown to ship the one shared
 object set, byte for byte, and no member is left without it.
 """
@@ -69,13 +72,17 @@ def _manifests(content_dir: Path) -> list[tuple[str, str, dict]]:
 # when the manifest lists one for the row (a gfx11 dQ row that stores dB; a gfx950 combined row holds the reduce in its own
 # object and has none), then the tail-zero companion that every dQ and merged row launches.
 MAIN_LAUNCH = {"sdpa_bwd_dq": "dq", "sdpa_bwd_merged": "merged"}
-# The launch name of the op's own object in a multi-launch row; a dK-only row is the one multi-launch row of dkdv.
-LAUNCH_NAME = {**MAIN_LAUNCH, "sdpa_bwd_dkdv": "dkdv"}
+# The launch name of the op's own object in a multi-launch row; a dK-only row is the one multi-launch row of dkdv, a sink-twin row of prep.
+LAUNCH_NAME = {**MAIN_LAUNCH, "sdpa_bwd_dkdv": "dkdv", "sdpa_bwd_prep": "prep"}
 REDUCE_ROLE = "dbias_reduce"
 TAILZERO_ROLE = "tailzero"
 # The V-head tail-zero object, the ``tailzero`` launch of a ``u2=dq`` row; the dV-only object, the second launch of a ``u2=dk`` row.
 TAILZERO_HV_ROLE = "tailzero_hv"
 DVONLY_ROLE = "dvonly"
+# The dSink reduce, the second launch of a sink-twin prep row (``sink=1``). Its objects are the content op ``sdpa_bwd_dsink_reduce``'s,
+# which no shard holds a UKD of: a prep row names the object of its dtype in that op's folder.
+DSINK_REDUCE_ROLE = "dsink_reduce"
+COMPANION_ONLY_OPS = ("sdpa_bwd_dsink_reduce",)
 
 
 def _bias_dtype(record: dict) -> str:
@@ -143,9 +150,13 @@ def _launches_companions(companions: list[dict], record: dict) -> bool:
 
 
 def _launch_problems(
-    where, name, document, record, manifest, want_dir, main_launch
+    where, name, document, record, manifest, want_dir, main_launch, sibling_objects
 ) -> list[str]:
-    """What is wrong with the ``sources`` UKD @p document of the manifest row @p record."""
+    """What is wrong with the ``sources`` UKD @p document of the manifest row @p record.
+
+    @p sibling_objects are the manifest rows of the companion-only ops of the same target (``COMPANION_ONLY_OPS``), each with its ``file``
+    spelled relative to this op's folder.
+    """
     provenance = document.get("provenance", {})
     if provenance.get("origin_kind") != "hsaco":
         return [f"{where}: {name} was not packed from an hsaco"]
@@ -167,6 +178,13 @@ def _launch_problems(
         if dvonly is None:
             return [f"{where}: {name} has no dV-only row (u2=dv) in the manifest"]
         wanted[DVONLY_ROLE] = (dvonly["file"], dvonly["sha256"], dvonly["symbol"])
+    if record["knobs"].get("sink") == 1:
+        dsink = _companion_of(sibling_objects, DSINK_REDUCE_ROLE, record["dtype"])
+        if dsink is None:
+            return [
+                f"{where}: {name} has no {DSINK_REDUCE_ROLE} object of dtype {record['dtype']} in {COMPANION_ONLY_OPS[0]}"
+            ]
+        wanted[DSINK_REDUCE_ROLE] = (dsink["file"], dsink["sha256"], dsink["symbol"])
     tailzero = _companion_of(companions, _tailzero_role(record), record["dtype"])
     if tailzero is not None:
         wanted[TAILZERO_ROLE] = (
@@ -211,7 +229,8 @@ def check(content_dir: Path, out_root: Path, arches: list[str]) -> list[str]:
     for arch in arches:
         served = 0
         for op, target, manifest in manifests:
-            if not families.covers(target, arch):
+            # The objects of a companion-only op ship as the launches of other ops' rows, never as UKDs of their own.
+            if op in COMPANION_ONLY_OPS or not families.covers(target, arch):
                 continue
             served += 1
             folder = out_root / arch / content_dir.name / op / target
@@ -240,6 +259,12 @@ def check(content_dir: Path, out_root: Path, arches: list[str]) -> list[str]:
                 provenance = document.get("provenance", {})
                 source = document.get("kernel_source", {})
                 want_dir = f"{content_dir.name}/{op}/{target}"
+                sibling_objects = [
+                    {**instance, "file": f"../../{other}/{target}/{instance['file']}"}
+                    for other, other_target, other_manifest in manifests
+                    if other in COMPANION_ONLY_OPS and other_target == target
+                    for instance in other_manifest["instances"]
+                ]
                 want_file = f"{want_dir}/{record['file']}"
                 if document.get("arch") != [arch]:
                     problems.append(
@@ -259,11 +284,14 @@ def check(content_dir: Path, out_root: Path, arches: list[str]) -> list[str]:
                         manifest,
                         want_dir,
                         LAUNCH_NAME[op],
+                        sibling_objects,
                     )
                     continue
-                if _launches_companions(
-                    manifest.get("companions", []), record
-                ) or _dvonly_of(manifest, record):
+                if (
+                    _launches_companions(manifest.get("companions", []), record)
+                    or _dvonly_of(manifest, record)
+                    or record["knobs"].get("sink") == 1
+                ):
                     problems.append(
                         f"{where}: {name} launches companion objects "
                         "but ships as one launch"

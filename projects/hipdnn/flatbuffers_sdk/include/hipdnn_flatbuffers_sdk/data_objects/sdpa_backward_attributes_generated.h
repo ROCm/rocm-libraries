@@ -55,6 +55,12 @@ struct SdpaBackwardAttributesT : public ::flatbuffers::NativeTable {
   ::flatbuffers::Optional<int64_t> left_bound = ::flatbuffers::nullopt;
   ::flatbuffers::Optional<int64_t> right_bound = ::flatbuffers::nullopt;
   hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment diagonal_alignment = hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment::TOP_LEFT;
+  ::flatbuffers::Optional<int64_t> sink_token_tensor_uid = ::flatbuffers::nullopt;
+  ::flatbuffers::Optional<int64_t> dsink_token_tensor_uid = ::flatbuffers::nullopt;
+  ::flatbuffers::Optional<int64_t> rng_dump_tensor_uid = ::flatbuffers::nullopt;
+  bool is_deterministic_algorithm = false;
+  ::flatbuffers::Optional<int64_t> max_total_seq_len_q = ::flatbuffers::nullopt;
+  ::flatbuffers::Optional<int64_t> max_total_seq_len_kv = ::flatbuffers::nullopt;
 };
 
 struct SdpaBackwardAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
@@ -88,7 +94,13 @@ struct SdpaBackwardAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::T
     VT_ATTN_SCALE_VALUE = 52,
     VT_LEFT_BOUND = 54,
     VT_RIGHT_BOUND = 56,
-    VT_DIAGONAL_ALIGNMENT = 58
+    VT_DIAGONAL_ALIGNMENT = 58,
+    VT_SINK_TOKEN_TENSOR_UID = 60,
+    VT_DSINK_TOKEN_TENSOR_UID = 62,
+    VT_RNG_DUMP_TENSOR_UID = 64,
+    VT_IS_DETERMINISTIC_ALGORITHM = 66,
+    VT_MAX_TOTAL_SEQ_LEN_Q = 68,
+    VT_MAX_TOTAL_SEQ_LEN_KV = 70
   };
   int64_t q_tensor_uid() const {
     return GetField<int64_t>(VT_Q_TENSOR_UID, 0);
@@ -258,6 +270,42 @@ struct SdpaBackwardAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::T
   bool mutate_diagonal_alignment(hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment _diagonal_alignment = static_cast<hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment>(0)) {
     return SetField<int8_t>(VT_DIAGONAL_ALIGNMENT, static_cast<int8_t>(_diagonal_alignment), 0);
   }
+  ::flatbuffers::Optional<int64_t> sink_token_tensor_uid() const {
+    return GetOptional<int64_t, int64_t>(VT_SINK_TOKEN_TENSOR_UID);
+  }
+  bool mutate_sink_token_tensor_uid(int64_t _sink_token_tensor_uid) {
+    return SetField<int64_t>(VT_SINK_TOKEN_TENSOR_UID, _sink_token_tensor_uid);
+  }
+  ::flatbuffers::Optional<int64_t> dsink_token_tensor_uid() const {
+    return GetOptional<int64_t, int64_t>(VT_DSINK_TOKEN_TENSOR_UID);
+  }
+  bool mutate_dsink_token_tensor_uid(int64_t _dsink_token_tensor_uid) {
+    return SetField<int64_t>(VT_DSINK_TOKEN_TENSOR_UID, _dsink_token_tensor_uid);
+  }
+  ::flatbuffers::Optional<int64_t> rng_dump_tensor_uid() const {
+    return GetOptional<int64_t, int64_t>(VT_RNG_DUMP_TENSOR_UID);
+  }
+  bool mutate_rng_dump_tensor_uid(int64_t _rng_dump_tensor_uid) {
+    return SetField<int64_t>(VT_RNG_DUMP_TENSOR_UID, _rng_dump_tensor_uid);
+  }
+  bool is_deterministic_algorithm() const {
+    return GetField<uint8_t>(VT_IS_DETERMINISTIC_ALGORITHM, 0) != 0;
+  }
+  bool mutate_is_deterministic_algorithm(bool _is_deterministic_algorithm = 0) {
+    return SetField<uint8_t>(VT_IS_DETERMINISTIC_ALGORITHM, static_cast<uint8_t>(_is_deterministic_algorithm), 0);
+  }
+  ::flatbuffers::Optional<int64_t> max_total_seq_len_q() const {
+    return GetOptional<int64_t, int64_t>(VT_MAX_TOTAL_SEQ_LEN_Q);
+  }
+  bool mutate_max_total_seq_len_q(int64_t _max_total_seq_len_q) {
+    return SetField<int64_t>(VT_MAX_TOTAL_SEQ_LEN_Q, _max_total_seq_len_q);
+  }
+  ::flatbuffers::Optional<int64_t> max_total_seq_len_kv() const {
+    return GetOptional<int64_t, int64_t>(VT_MAX_TOTAL_SEQ_LEN_KV);
+  }
+  bool mutate_max_total_seq_len_kv(int64_t _max_total_seq_len_kv) {
+    return SetField<int64_t>(VT_MAX_TOTAL_SEQ_LEN_KV, _max_total_seq_len_kv);
+  }
   bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyField<int64_t>(verifier, VT_Q_TENSOR_UID, 8) &&
@@ -288,6 +336,12 @@ struct SdpaBackwardAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::T
            VerifyField<int64_t>(verifier, VT_LEFT_BOUND, 8) &&
            VerifyField<int64_t>(verifier, VT_RIGHT_BOUND, 8) &&
            VerifyField<int8_t>(verifier, VT_DIAGONAL_ALIGNMENT, 1) &&
+           VerifyField<int64_t>(verifier, VT_SINK_TOKEN_TENSOR_UID, 8) &&
+           VerifyField<int64_t>(verifier, VT_DSINK_TOKEN_TENSOR_UID, 8) &&
+           VerifyField<int64_t>(verifier, VT_RNG_DUMP_TENSOR_UID, 8) &&
+           VerifyField<uint8_t>(verifier, VT_IS_DETERMINISTIC_ALGORITHM, 1) &&
+           VerifyField<int64_t>(verifier, VT_MAX_TOTAL_SEQ_LEN_Q, 8) &&
+           VerifyField<int64_t>(verifier, VT_MAX_TOTAL_SEQ_LEN_KV, 8) &&
            verifier.EndTable();
   }
   SdpaBackwardAttributesT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
@@ -383,6 +437,24 @@ struct SdpaBackwardAttributesBuilder {
   void add_diagonal_alignment(hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment diagonal_alignment) {
     fbb_.AddElement<int8_t>(SdpaBackwardAttributes::VT_DIAGONAL_ALIGNMENT, static_cast<int8_t>(diagonal_alignment), 0);
   }
+  void add_sink_token_tensor_uid(int64_t sink_token_tensor_uid) {
+    fbb_.AddElement<int64_t>(SdpaBackwardAttributes::VT_SINK_TOKEN_TENSOR_UID, sink_token_tensor_uid);
+  }
+  void add_dsink_token_tensor_uid(int64_t dsink_token_tensor_uid) {
+    fbb_.AddElement<int64_t>(SdpaBackwardAttributes::VT_DSINK_TOKEN_TENSOR_UID, dsink_token_tensor_uid);
+  }
+  void add_rng_dump_tensor_uid(int64_t rng_dump_tensor_uid) {
+    fbb_.AddElement<int64_t>(SdpaBackwardAttributes::VT_RNG_DUMP_TENSOR_UID, rng_dump_tensor_uid);
+  }
+  void add_is_deterministic_algorithm(bool is_deterministic_algorithm) {
+    fbb_.AddElement<uint8_t>(SdpaBackwardAttributes::VT_IS_DETERMINISTIC_ALGORITHM, static_cast<uint8_t>(is_deterministic_algorithm), 0);
+  }
+  void add_max_total_seq_len_q(int64_t max_total_seq_len_q) {
+    fbb_.AddElement<int64_t>(SdpaBackwardAttributes::VT_MAX_TOTAL_SEQ_LEN_Q, max_total_seq_len_q);
+  }
+  void add_max_total_seq_len_kv(int64_t max_total_seq_len_kv) {
+    fbb_.AddElement<int64_t>(SdpaBackwardAttributes::VT_MAX_TOTAL_SEQ_LEN_KV, max_total_seq_len_kv);
+  }
   explicit SdpaBackwardAttributesBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -423,8 +495,19 @@ inline ::flatbuffers::Offset<SdpaBackwardAttributes> CreateSdpaBackwardAttribute
     ::flatbuffers::Optional<float> attn_scale_value = ::flatbuffers::nullopt,
     ::flatbuffers::Optional<int64_t> left_bound = ::flatbuffers::nullopt,
     ::flatbuffers::Optional<int64_t> right_bound = ::flatbuffers::nullopt,
-    hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment diagonal_alignment = hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment::TOP_LEFT) {
+    hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment diagonal_alignment = hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment::TOP_LEFT,
+    ::flatbuffers::Optional<int64_t> sink_token_tensor_uid = ::flatbuffers::nullopt,
+    ::flatbuffers::Optional<int64_t> dsink_token_tensor_uid = ::flatbuffers::nullopt,
+    ::flatbuffers::Optional<int64_t> rng_dump_tensor_uid = ::flatbuffers::nullopt,
+    bool is_deterministic_algorithm = false,
+    ::flatbuffers::Optional<int64_t> max_total_seq_len_q = ::flatbuffers::nullopt,
+    ::flatbuffers::Optional<int64_t> max_total_seq_len_kv = ::flatbuffers::nullopt) {
   SdpaBackwardAttributesBuilder builder_(_fbb);
+  if(max_total_seq_len_kv) { builder_.add_max_total_seq_len_kv(*max_total_seq_len_kv); }
+  if(max_total_seq_len_q) { builder_.add_max_total_seq_len_q(*max_total_seq_len_q); }
+  if(rng_dump_tensor_uid) { builder_.add_rng_dump_tensor_uid(*rng_dump_tensor_uid); }
+  if(dsink_token_tensor_uid) { builder_.add_dsink_token_tensor_uid(*dsink_token_tensor_uid); }
+  if(sink_token_tensor_uid) { builder_.add_sink_token_tensor_uid(*sink_token_tensor_uid); }
   if(right_bound) { builder_.add_right_bound(*right_bound); }
   if(left_bound) { builder_.add_left_bound(*left_bound); }
   if(dbias_tensor_uid) { builder_.add_dbias_tensor_uid(*dbias_tensor_uid); }
@@ -448,6 +531,7 @@ inline ::flatbuffers::Offset<SdpaBackwardAttributes> CreateSdpaBackwardAttribute
   builder_.add_q_tensor_uid(q_tensor_uid);
   if(attn_scale_value) { builder_.add_attn_scale_value(*attn_scale_value); }
   if(dropout_probability) { builder_.add_dropout_probability(*dropout_probability); }
+  builder_.add_is_deterministic_algorithm(is_deterministic_algorithm);
   builder_.add_diagonal_alignment(diagonal_alignment);
   builder_.add_causal_mask_bottom_right(causal_mask_bottom_right);
   builder_.add_causal_mask(causal_mask);
@@ -488,7 +572,13 @@ inline bool operator==(const SdpaBackwardAttributesT &lhs, const SdpaBackwardAtt
       (lhs.attn_scale_value == rhs.attn_scale_value) &&
       (lhs.left_bound == rhs.left_bound) &&
       (lhs.right_bound == rhs.right_bound) &&
-      (lhs.diagonal_alignment == rhs.diagonal_alignment);
+      (lhs.diagonal_alignment == rhs.diagonal_alignment) &&
+      (lhs.sink_token_tensor_uid == rhs.sink_token_tensor_uid) &&
+      (lhs.dsink_token_tensor_uid == rhs.dsink_token_tensor_uid) &&
+      (lhs.rng_dump_tensor_uid == rhs.rng_dump_tensor_uid) &&
+      (lhs.is_deterministic_algorithm == rhs.is_deterministic_algorithm) &&
+      (lhs.max_total_seq_len_q == rhs.max_total_seq_len_q) &&
+      (lhs.max_total_seq_len_kv == rhs.max_total_seq_len_kv);
 }
 
 inline bool operator!=(const SdpaBackwardAttributesT &lhs, const SdpaBackwardAttributesT &rhs) {
@@ -533,6 +623,12 @@ inline void SdpaBackwardAttributes::UnPackTo(SdpaBackwardAttributesT *_o, const 
   { auto _e = left_bound(); _o->left_bound = _e; }
   { auto _e = right_bound(); _o->right_bound = _e; }
   { auto _e = diagonal_alignment(); _o->diagonal_alignment = _e; }
+  { auto _e = sink_token_tensor_uid(); _o->sink_token_tensor_uid = _e; }
+  { auto _e = dsink_token_tensor_uid(); _o->dsink_token_tensor_uid = _e; }
+  { auto _e = rng_dump_tensor_uid(); _o->rng_dump_tensor_uid = _e; }
+  { auto _e = is_deterministic_algorithm(); _o->is_deterministic_algorithm = _e; }
+  { auto _e = max_total_seq_len_q(); _o->max_total_seq_len_q = _e; }
+  { auto _e = max_total_seq_len_kv(); _o->max_total_seq_len_kv = _e; }
 }
 
 inline ::flatbuffers::Offset<SdpaBackwardAttributes> SdpaBackwardAttributes::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const SdpaBackwardAttributesT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
@@ -571,6 +667,12 @@ inline ::flatbuffers::Offset<SdpaBackwardAttributes> CreateSdpaBackwardAttribute
   auto _left_bound = _o->left_bound;
   auto _right_bound = _o->right_bound;
   auto _diagonal_alignment = _o->diagonal_alignment;
+  auto _sink_token_tensor_uid = _o->sink_token_tensor_uid;
+  auto _dsink_token_tensor_uid = _o->dsink_token_tensor_uid;
+  auto _rng_dump_tensor_uid = _o->rng_dump_tensor_uid;
+  auto _is_deterministic_algorithm = _o->is_deterministic_algorithm;
+  auto _max_total_seq_len_q = _o->max_total_seq_len_q;
+  auto _max_total_seq_len_kv = _o->max_total_seq_len_kv;
   return hipdnn_flatbuffers_sdk::data_objects::CreateSdpaBackwardAttributes(
       _fbb,
       _q_tensor_uid,
@@ -600,7 +702,13 @@ inline ::flatbuffers::Offset<SdpaBackwardAttributes> CreateSdpaBackwardAttribute
       _attn_scale_value,
       _left_bound,
       _right_bound,
-      _diagonal_alignment);
+      _diagonal_alignment,
+      _sink_token_tensor_uid,
+      _dsink_token_tensor_uid,
+      _rng_dump_tensor_uid,
+      _is_deterministic_algorithm,
+      _max_total_seq_len_q,
+      _max_total_seq_len_kv);
 }
 
 }  // namespace data_objects

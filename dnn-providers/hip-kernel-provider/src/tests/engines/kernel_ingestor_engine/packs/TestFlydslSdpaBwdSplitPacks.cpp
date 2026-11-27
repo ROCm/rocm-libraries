@@ -46,7 +46,8 @@
  * choose their own expectation.
  *
  * - gfx950: 86 prep (34 bf16, 34 f16, 18 fp32), 1313 dkdv (547, 484, 282) and 962 dq (369,
- *   368, 225) rows over tiles 32..512 in the rt and bk dQ forms, prep with sink twins. The 301
+ *   368, 225) rows over tiles 32..512 in the rt and bk dQ forms, prep with sink twins (a pack
+ *   of their own: the twin and the dSink reduce kernel as two launches). The 301
  *   dq rows that serve a dB-storing bias name the dBias reduce kernel by symbol, a second
  *   entry point of the same code object: the fp32 one for an fp32 query or an f32 bias. Every
  *   dq row is a multi-launch pack: its `sources` hold the dQ kernel, the dBias reduce kernel
@@ -103,6 +104,10 @@ constexpr const char* DKDV_LAUNCH = "dkdv";
 constexpr const char* DVONLY_LAUNCH = "dvonly";
 constexpr const char* REDUCE_LAUNCH = "dbias_reduce";
 constexpr const char* TAILZERO_LAUNCH = "tailzero";
+constexpr const char* PREP_DISPATCH = "hipkernel.flydsl_sdpa_bwd_split.prep.dispatch";
+constexpr const char* PREP_SINK_DISPATCH = "hipkernel.flydsl_sdpa_bwd_split.prep_sink.dispatch";
+constexpr const char* PREP_LAUNCH = "prep";
+constexpr const char* DSINK_REDUCE_LAUNCH = "dsink_reduce";
 
 /// The rows one slot ships, per dtype, as the generators emit them.
 struct SlotCount
@@ -384,10 +389,13 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, IsOneSlottedEngineWithANativeGraphMatchAndAK
 
     // Every shard ships the multi-launch dq dispatch of the rows that carry the reduce kernel as a
     // launch; the two V-head dispatches exactly where a row of V heads of its own is shipped.
-    std::set<std::string> expectedDispatches{"hipkernel.flydsl_sdpa_bwd_split.prep.dispatch",
-                                             DKDV_DISPATCH,
-                                             DQ_DISPATCH,
-                                             DQ_REDUCE_DISPATCH};
+    std::set<std::string> expectedDispatches{
+        PREP_DISPATCH, DKDV_DISPATCH, DQ_DISPATCH, DQ_REDUCE_DISPATCH};
+    // The sink twins ride their own two-launch dispatch, exactly where they are shipped.
+    if(content().prepSinkRows > 0)
+    {
+        expectedDispatches.insert(PREP_SINK_DISPATCH);
+    }
     for(const auto& pack : slotOf(set, "dkdv").packs)
     {
         if(std::any_of(pack.kernels.begin(), pack.kernels.end(), isU2Row))
@@ -438,6 +446,8 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, ShipsEverySplitRowOnceAndNoKernelInTwoSlots)
     size_t sourcesRows = 0;
     std::set<std::string> companions;
     std::map<std::string, std::set<std::string>> tailzeroByDtype;
+    // The dsink_reduce companion objects the sink twins' `sources` name, per dtype.
+    std::map<std::string, std::set<std::string>> dsinkReduceByDtype;
     std::map<std::string, std::set<std::string>> tailzeroHvByDtype;
     // The `lds` and the `direct` bias rows of the dq slot, per dtype: the chunk-contract rule
     // keeps an aligned 16-bit bias off a `direct` row that has a staged alternative, and a row
@@ -546,6 +556,22 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, ShipsEverySplitRowOnceAndNoKernelInTwoSlots)
                 if(slotName == "prep")
                 {
                     EXPECT_EQ(content().sinkValues.count(integer("sink")), 1U) << kernel.name;
+                    // The sink twin is the prep row of two launches, the twin then the dSink
+                    // reduce kernel, bound by the prep_sink dispatch; every other prep row is
+                    // one launch of the plain dispatch.
+                    const bool twin = integer("sink") == 1;
+                    EXPECT_EQ(packDispatch, twin ? PREP_SINK_DISPATCH : PREP_DISPATCH)
+                        << kernel.name;
+                    EXPECT_EQ(!kernel.sources.empty(), twin) << kernel.name;
+                    if(twin)
+                    {
+                        EXPECT_NE(dtype, "fp32") << kernel.name << ": fp32 has no sink twin";
+                        EXPECT_EQ(kernel.sources.size(), 2U) << kernel.name;
+                        EXPECT_EQ(kernel.sources.count(PREP_LAUNCH), 1U) << kernel.name;
+                        ASSERT_EQ(kernel.sources.count(DSINK_REDUCE_LAUNCH), 1U) << kernel.name;
+                        dsinkReduceByDtype[dtype].insert(
+                            kernel.sources.at(DSINK_REDUCE_LAUNCH).sha256);
+                    }
                     EXPECT_EQ(text("grid"), "qblocks_by_heads_by_seqs") << kernel.name;
                     const auto& rungBelow = dtype == "fp32" ? rungBelowFp32 : rungBelow16Bit;
                     if(shape.prepFloorIsRungBelow && rungBelow.count(headDim) == 1)
@@ -719,6 +745,21 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, ShipsEverySplitRowOnceAndNoKernelInTwoSlots)
     EXPECT_EQ(sourcesRows, content().slots[2].rows);
     EXPECT_EQ(companions.size(), content().companions);
     EXPECT_EQ(tailzeroByDtype.size(), content().tailzeroEntries);
+    if(content().prepSinkRows > 0)
+    {
+        // One dSink reduce object per 16-bit dtype, named by every twin of that dtype.
+        EXPECT_EQ(dsinkReduceByDtype.size(), 2U);
+        for(const auto& [dtype, objects] : dsinkReduceByDtype)
+        {
+            EXPECT_NE(dtype, "fp32");
+            EXPECT_EQ(objects.size(), 1U) << dtype << ": one dsink_reduce object per dtype";
+            EXPECT_EQ(objects.count(std::string()), 0U) << dtype << ": the entry names no object";
+        }
+    }
+    else
+    {
+        EXPECT_TRUE(dsinkReduceByDtype.empty());
+    }
     for(const auto& [dtype, objects] : tailzeroByDtype)
     {
         EXPECT_EQ(objects.size(), 1U) << dtype << ": one tail-zero object per dtype entry";
@@ -780,6 +821,10 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, EveryKernelDeclaresItsSlotsSignature)
         {{"global_buffer", 8, 1}, {"by_value", 8, 4}, {"by_value", 4, 5}, {"by_value", 8, 6}});
     const auto prep = expand(prepRuns);
     const auto prepSink = expand(join(prepRuns, {{"global_buffer", 8, 2}}));
+    // `_PARAMS["dsink_reduce"]`: the term and dSink pointers, i32 batch, the two seqinfo
+    // pointers, four i32 (varlen_bits, num_seqlens, max_seqlen_q, num_head_q).
+    const auto dsinkReduce = expand(
+        {{"global_buffer", 8, 2}, {"by_value", 4, 1}, {"global_buffer", 8, 2}, {"by_value", 4, 4}});
     // `_PARAMS["dkdv"]` and `_PARAMS["dq"]`: nine pointers and four seqinfo pointers, the Q and
     // K multipliers, the offset pairs, six i32 (varlen_bits .. window_right), the two philox
     // pointers, the i64 offset, i32 threshold, f32 scale, four i32 (heads, head dims), f32
@@ -874,6 +919,15 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, EveryKernelDeclaresItsSlotsSignature)
                 if(slotName == "prep")
                 {
                     expectedSlots = twin ? &prepSink : &prep;
+                }
+                if(slotName == "prep" && !kernel.sources.empty())
+                {
+                    // The twin launch has the prep_sink list, then the dSink reduce kernel's.
+                    expectSignature(kernel.name, kernel.sources.at(PREP_LAUNCH), *expectedSlots);
+                    expectSignature(kernel.name + " dsink_reduce",
+                                    kernel.sources.at(DSINK_REDUCE_LAUNCH),
+                                    dsinkReduce);
+                    continue;
                 }
                 if(kernel.sources.empty())
                 {

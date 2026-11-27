@@ -245,12 +245,13 @@ batch when `seq_len_q/kv` are set).
 ### SEM-015: Dropout
 
 - **Status:** Aligned (cuDNN's explicit-mask ("custom") dropout, CPU and GPU references; Philox dropout with
-  RNG_DUMP, forward; Philox dropout from seed and offset, served by the FlyDSL backward engines). In the forward, Philox
-  dropout without RNG_DUMP is declined by the references.
+  RNG_DUMP, forward and backward; Philox dropout from seed and offset, served by the FlyDSL backward engines). The
+  references decline Philox dropout without RNG_DUMP.
 - **cuDNN:** forward `O = (P ∘ M · s) V` with mask M `[B|1, H|1, Sq, Skv]` and `dropout_scale` s; Stats are the
   pre-dropout softmax's. Backward (composite lowering, `scaled_dot_product_flash_attention.h`):
   `D = rowsum(dO ∘ O) · dropout_scale_inv` (1 when absent), `dS = s · P ∘ (M ∘ dP − D)`, `dV = (P ∘ M · s)ᵀ dO`,
   dBias reduces that dS. With `dropout_scale_inv = 1/s` this is the exact gradient; without it, only for s = 1.
+  Forward and backward lower to the same Bernoulli(1−p) rng op from the same seed and offset.
 - **PyTorch / AOTriton:** Philox dropout with seed/offset; the keep mask is not exposed except through test
   helpers (`_fill_mem_eff_dropout_mask_`).
 - **hipDNN today:** the CPU forward and backward references implement the explicit-mask form (FLOAT mask,
@@ -301,6 +302,14 @@ batch when `seq_len_q/kv` are set).
   cudnn-frontend v1.24.0, whose backward builds its RNG node from seed and offset whatever the probability
   (`scaled_dot_product_flash_attention.h:1496-1512`), where hipDNN's backward reads neither at probability 0; it is
   listed in [KNOWN_DIVERGENCES.md](./KNOWN_DIVERGENCES.md#sdpa-dropout-random-stream).
+- **Backward RNG_DUMP:** a backward graph with `dropout_probability` in `(0, 1)`, seed, offset and an `rng_dump`
+  output (set with `set_rng_dump`, FLOAT `[B, H_q, Sq, Skv]`) is accepted by the CPU and GPU backward references.
+  They use the engine's backward dump as the explicit mask with `dropout_scale = 1/(1−p)` and
+  `dropout_scale_inv = 1−p`, as above. The harness hand-off scans the backward node the same way. cuDNN's frontend
+  validates nothing about the dump and ignores it without a dropout probability; hipDNN's frontend also stores it
+  unchecked, and a reference or engine declines a dump with no Philox dropout (cause `rng_dump`).
+- **Forward and backward dumps:** the contract is that both are bitwise equal for the same `(seed, offset, p,
+  shape)`. No test pins it: no engine emits a forward or backward dump yet, and a test needs one that emits both.
 
 ## Score modifiers (extensions and conventions)
 
@@ -333,19 +342,47 @@ batch when `seq_len_q/kv` are set).
 
 ### SEM-022: Attention sinks
 
-- **Status:** Aligned (CPU and dense GPU forward references).
+- **Status:** Aligned (CPU and dense GPU forward references; CPU and GPU backward references with dSink).
 - **Agreed semantics:** one unscaled logit per head, counted in the softmax denominator only, with no V row,
   and included in the LSE. cuDNN shape `[1, H_q, 1, 1]`, fp32 (cudnn-frontend `test/python/sdpa/fp16_ref.py`):
   `M = max(max_j s_j, sink)`, denominator `Σ exp(s_j − M) + exp(sink − M)`.
 - **Consequence:** a row with no live key but a finite sink has O = 0 and **LSE = sink**, not -inf. Padded query
   rows stay O = 0, LSE = -inf.
-- **hipDNN today:** both references implement it for a FLOAT `[1, H, 1, 1]` sink, and the frontend rejects other
-  shapes and dtypes, as cuDNN does (vLLM's model-dtype sinks are converted by the adapter). Pinned by
+- **dSink:** the logits of a row are `[s_1 … s_n, sink]`; the sink column has no V row, so softmax backward gives
+  `dSink[h] = − Σ_b Σ_{q < seq_len_q[b]} exp(sink[h] − LSE[b,h,q]) · D[b,h,q]` with `D = rowsum(dO ∘ O)`, the
+  raw rowsum before any `dropout_scale_inv` factor (the sink is never dropped). LSE is the forward Stats, which
+  include the sink. dSink has shape `[1, H_q, 1, 1]` and sums over batch and query rows only (GQA: indexed by
+  query head). Padded rows and rows with LSE = -inf contribute 0. With the sink in the LSE, dQ, dK and dV need
+  no extra term. cuDNN's python reference negates (`fp16_ref.py:377-381`, v1.24.0); the C++ composite
+  (`scaled_dot_product_flash_attention.h:1532-1551`) shows no visible negation in the frontend. hipDNN pins `-`
+  by derivation, finite differences and an FP64 autograd golden.
+- **Dtype:** cuDNN's frontend checks neither sink nor dSink; its tests allocate FLOAT `(1, H_q, 1, 1)`. hipDNN
+  accepts FLOAT, or BFLOAT16 or HALF equal to Q's data type (the graph I/O data type when Q's is unset) set on
+  the sink itself, dims exactly `[1, H_q, 1, 1]`, in the forward and the backward, and dSink must have the sink's
+  data type. Any other type, an FP8 sink in an FP8 graph included, fails `validate()` with `INVALID_VALUE`
+  (`TestSdpaFwdNode.PreValidateSinkDataTypeReferentIsQ`, `TestSdpaBwdNode.PreValidateFailsSinkInFp8Dtype`). An untyped
+  sink or dSink, including one whose type `fill_from_context` supplied from the graph, must be FLOAT, so a FLOAT
+  buffer left untyped is never read as the graph's 16-bit type. The wider range is a supported superset: every
+  graph cuDNN accepts is accepted unchanged, and a model-dtype sink (vLLM, HF) needs no conversion. The FlyDSL
+  forward sink objects already read a 16-bit sink (hip-kernel-provider `flydsl/COVERAGE.md`). Behavior change in
+  the forward: the forward sink, previously FLOAT only, now also accepts BFLOAT16 or HALF equal to Q's data type set on the sink
+  (`TestSdpaFwdNode.PreValidateSinkShapeAndType`, `GraphValidateAcceptsASinkTypedInQsDataType`); an untyped sink
+  in a 16-bit graph still fails (`GraphValidateRejectsUntypedSinkInAHalfGraph`). A dSink without a sink fails
+  with `ATTRIBUTE_NOT_SET`; a sink without a dSink is accepted, as in cuDNN. Ragged Q/K/V/O with a sink is
+  accepted. The references read and write either data type, accumulate in fp32 and round once.
+- **hipDNN today:** both references implement the forward sink and the backward dSink. Pinned by
   `SinkWithUniformScores`, `SinkOnFullyMaskedRow`, `SinkEqualsExtraZeroValueKey`, CPU/GPU parity and the paged sink
-  golden bundles.
+  golden bundles; backward by `SinkEqualsExtraZeroValueKeyBackward`, `SinkBackwardUniformScores`,
+  `TestCpuFpReferenceSdpaGradCheck.SinkDSink` and `SinkDSinkWithExplicitMaskDropout` (mutation: scaling D by
+  `dropout_scale_inv` fails).
 - **vLLM:** sinks are in the model dtype and kernels upcast them.
-- **Future:** BFLOAT16 / HALF sinks in the model dtype (vLLM, HF) as an extension, in a follow-up.
-- **Open:** the dSink definition. AITER's test uses an LSE without the sink; do not follow it.
+- **Providers:** an engine whose kernels read the caller's (sink-inclusive) LSE serves a graph with `sink_token`
+  and no `dsink_token` unchanged, since dQ, dK and dV depend on the sink only through Stats (cuDNN's backward reads
+  the sink only for dSink, `scaled_dot_product_flash_attention.h:1322, 1532-1551`). The ASM SDPA backward engine
+  and the merged FlyDSL backward engine serve such a graph; a dSink still makes them decline. FlyDSL split
+  behavior is unchanged. The FlyDSL forward matchers serve a FLOAT sink and a BFLOAT16 or HALF sink equal to Q's
+  data type, and decline any other sink data type.
+- **Note:** AITER's test uses an LSE without the sink for dSink; do not follow it.
 
 ### SEM-023: Max and Sum_exp row statistics
 
@@ -489,6 +526,58 @@ batch when `seq_len_q/kv` are set).
   (the references serve it).
 - **Conversion:** `cu_seqlens_q` / `query_start_loc` becomes Q's (and O's, the LSE's) ragged offset; `cu_seqlens_k`
   K's and V's; `seqused_k` / `seq_lens` becomes `seq_len_kv` `[B, 1, 1, 1]`. All views, no copy.
+
+## Backward options and operands
+
+### SEM-029: Backward determinism and `max_total_seq_len`
+
+- **Status:** Aligned (store); Diverges (S_max check, below); Extension (per-engine determinism claims).
+- **cuDNN:** `set_deterministic_algorithm(bool)` and `set_max_total_seq_len_q/kv(int64_t)` are plain stores
+  (cudnn-frontend v1.24.0 `graph_properties.h:2387-2394, 2475-2477`). `max_total_seq_len_q/kv` with no ragged
+  offset on Q, K, V or O fails with `GRAPH_NOT_SUPPORTED` "only supported with packed layout"; one check covers
+  both values and there is no positivity check (`scaled_dot_product_flash_attention.h:1221-1224`). The value only
+  sizes workspace; cuDNN resets it silently on some backends and head dims (`:1333-1355`). Determinism is
+  rejected per hardware (`:1275-1291`).
+- **hipDNN:** `SdpaBackwardAttributes::is_deterministic_algorithm` and `max_total_seq_len_q/kv` round-trip through
+  the schema, the backend attributes (`HIPDNN_ATTR_SDPA_BWD_IS_DETERMINISTIC_ALGORITHM_EXT`,
+  `HIPDNN_ATTR_SDPA_BWD_MAX_TOTAL_SEQ_LEN_Q_EXT`, `HIPDNN_ATTR_SDPA_BWD_MAX_TOTAL_SEQ_LEN_KV_EXT`) and JSON.
+  `validate()` accepts both determinism values. `max_total_seq_len_q/kv` without a ragged Q, K, V or O fails with
+  `GRAPH_NOT_SUPPORTED`, as cuDNN does. The packer writes `HIPDNN_ATTR_SDPA_BWD_IS_DETERMINISTIC_ALGORITHM_EXT`
+  only when it is true and the unpacker reads a missing attribute as false, so a graph that uses none of the
+  six new backward fields lowers through a backend that rejects their ids
+  (`TestSdpaBwdPackUnpack.GraphUsingNoNewFieldLowersThroughABackendThatRejectsThem`).
+- **`max_total_seq_len_q/kv`:** the physical token span of the packed Q (K/V) buffer, at least
+  `max(offset[b] + len[b])` over the batch (cudnn-frontend `docs/operations/Attention.md:761-781`). It is
+  serialized so that an engine can read it to size buffers and set its sequence-length arguments. No in-tree
+  engine reads it yet: the ASM SDPA engine declines grouped (ragged) backward graphs, and its grouped backward
+  (ALMIOPEN-3364) is the intended reader. Engines that do not need it ignore it. Divergence from cuDNN, which checks only
+  raggedness: `validate()` fails with `INVALID_VALUE` when `max_total_seq_len_q` is below Q's S_max (`dims[2]`) or
+  `max_total_seq_len_kv` is below K's S_max; equal to S_max is valid. Pinned by
+  `TestSdpaBwdNode.PreValidateFailsMaxTotalSeqLenQBelowQSMax`, `PreValidateFailsMaxTotalSeqLenKvBelowKSMax`,
+  `PreValidateSucceedsMaxTotalSeqLenEqualToSMax` and `PreValidateRaggedRuleStillPrecedesTheSMaxCheck`.
+- **Determinism claims:** a request reaches every engine; an engine that cannot guarantee run-to-run bitwise
+  equality declines it. The ASM backward engine declines (dQ accumulates with atomics). The CPU and GPU
+  references serve it (sequential or fixed-order, one writer per output). The cache key separates graphs that
+  differ in `is_deterministic_algorithm` or in either `max_total_seq_len`. An out-of-tree plugin that does not read the field
+  ignores it.
+- **Silent reset:** cuDNN resets the value on some backends and head dims; hipDNN does not.
+- **Contract:** cuDNN for storage and the ragged check, plus the S_max check above. Determinism is per graph through `is_deterministic_algorithm`.
+
+### SEM-030: Philox seed and offset operands
+
+- **Status:** Aligned (INT32 or INT64, host or device); Diverges (shape, below).
+- **cuDNN:** the documentation table lists seed and offset as INT32 or INT64, shape `(1,1,1,1)`, CPU or GPU
+  (cudnn-frontend `docs/operations/Attention.md`, "Philox RNG Dropout" rows, main branch). The frontend enforces
+  none of it, and its own host scalar constructor gives dims `{1}` (`graph_properties.h:149-153`, v1.24.0).
+- **hipDNN:** forward and backward `validate()` check each present seed and offset: data type INT32 or INT64
+  explicitly (an unset type resolves to the graph I/O type and fails), every dim 1, rank 1 to 4. Both
+  pass-by-value and device tensors are accepted; placement is not checked. Behavior change in the forward: a
+  forward graph whose seed or offset has another data type (including an unset type that resolves to a floating
+  I/O type), more than one element, or a rank outside 1 to 4 now fails `validate()` with `INVALID_VALUE`
+  (`TestSdpaFwdNode.PreValidateSeedOffsetShapeAndType`).
+- **Contract:** cuDNN's documented types and placement. The shape rule is relaxed from `(1,1,1,1)` to "all dims 1,
+  rank 1 to 4" because `TensorAttributes::set_value` and cuDNN's scalar constructor produce rank 1. Listed in
+  `KNOWN_DIVERGENCES.md`.
 
 ## Process
 

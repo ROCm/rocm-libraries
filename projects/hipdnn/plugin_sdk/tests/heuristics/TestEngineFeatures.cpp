@@ -1372,8 +1372,9 @@ GraphT backwardGraph(void (*vary)(SdpaBackwardAttributesT&))
                   sdpa);
 }
 
-// The backward counts 2.5x the forward over the same band; a bias gradient and inverse-scaled
-// dropout are elementwise, and valid lengths leave the declared extent.
+// The backward counts 2.5x the forward over the same band; a bias gradient, inverse-scaled
+// dropout and a sink with its gradient are elementwise, and valid lengths leave the declared
+// extent.
 TEST(TestEngineFeatures, AttentionBackwardCountsItsBandAndNotItsElementwiseOperands)
 {
     using Variation = void (*)(SdpaBackwardAttributesT&);
@@ -1383,6 +1384,13 @@ TEST(TestEngineFeatures, AttentionBackwardCountsItsBandAndNotItsElementwiseOpera
          [](SdpaBackwardAttributesT& op) {
              op.dbias_tensor_uid = 10;
              op.dropout_scale_inv_tensor_uid = 11;
+         },
+         23040.0,
+         false},
+        {"sink and its gradient",
+         [](SdpaBackwardAttributesT& op) {
+             op.sink_token_tensor_uid = 10;
+             op.dsink_token_tensor_uid = 11;
          },
          23040.0,
          false},

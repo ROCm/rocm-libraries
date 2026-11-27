@@ -78,6 +78,10 @@ inline constexpr int64_t RAGGED_OFFSET_DQ = 25;
 inline constexpr int64_t RAGGED_OFFSET_DK = 26;
 inline constexpr int64_t RAGGED_OFFSET_DV = 27;
 inline constexpr int64_t RAGGED_OFFSET_STATS = 28;
+/// The uids addSink, addDsink and the rng_dump edit assign.
+inline constexpr int64_t SINK = 29;
+inline constexpr int64_t DSINK = 30;
+inline constexpr int64_t RNG_DUMP = 31;
 } // namespace sdpa_bwd_uid
 
 /// A pass-by-value tensor's baked value; monostate for a tensor that has none.
@@ -131,6 +135,12 @@ struct SdpaBwdAttributes
     std::optional<int64_t> rightBound;
     hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment diagonalAlignment
         = hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment::TOP_LEFT;
+    std::optional<int64_t> sinkUid;
+    std::optional<int64_t> dsinkUid;
+    std::optional<int64_t> rngDumpUid;
+    bool isDeterministicAlgorithm = false;
+    std::optional<int64_t> maxTotalSeqLenQ;
+    std::optional<int64_t> maxTotalSeqLenKv;
 };
 
 /// The node's operation: the one the matcher serves, or a forward SDPA node.
@@ -324,6 +334,36 @@ inline SdpaBwdTensor& addDbias(SdpaBwdGraph& graph)
     tensor.uid = sdpa_bwd_uid::DBIAS;
     tensor.name = "dbias";
     graph.attributes.dbiasUid = tensor.uid;
+    graph.tensors.push_back(std::move(tensor));
+    return graph.tensors.back();
+}
+
+/// Adds the sink tensor of dtype @p dtype, dense [1, Hq, 1, 1], and names it.
+inline SdpaBwdTensor& addSink(SdpaBwdGraph& graph,
+                              hipdnn_flatbuffers_sdk::data_objects::DataType dtype)
+{
+    SdpaBwdTensor tensor;
+    tensor.uid = sdpa_bwd_uid::SINK;
+    tensor.name = "sink";
+    tensor.dtype = dtype;
+    tensor.dims = {1, graph.heads, 1, 1};
+    tensor.strides = denseStrides(tensor.dims);
+    graph.attributes.sinkUid = tensor.uid;
+    graph.tensors.push_back(std::move(tensor));
+    return graph.tensors.back();
+}
+
+/// Adds the dSink tensor of dtype @p dtype, dense [1, Hq, 1, 1], and names it.
+inline SdpaBwdTensor& addDsink(SdpaBwdGraph& graph,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType dtype)
+{
+    SdpaBwdTensor tensor;
+    tensor.uid = sdpa_bwd_uid::DSINK;
+    tensor.name = "dsink";
+    tensor.dtype = dtype;
+    tensor.dims = {1, graph.heads, 1, 1};
+    tensor.strides = denseStrides(tensor.dims);
+    graph.attributes.dsinkUid = tensor.uid;
     graph.tensors.push_back(std::move(tensor));
     return graph.tensors.back();
 }
@@ -614,7 +654,13 @@ inline flatbuffers::FlatBufferBuilder buildSdpaBwdGraph(const SdpaBwdSpec& spec)
                          detail::toFlatOptional(a.attnScaleValue),
                          detail::toFlatOptional(a.leftBound),
                          detail::toFlatOptional(a.rightBound),
-                         a.diagonalAlignment)
+                         a.diagonalAlignment,
+                         detail::toFlatOptional(a.sinkUid),
+                         detail::toFlatOptional(a.dsinkUid),
+                         detail::toFlatOptional(a.rngDumpUid),
+                         a.isDeterministicAlgorithm,
+                         detail::toFlatOptional(a.maxTotalSeqLenQ),
+                         detail::toFlatOptional(a.maxTotalSeqLenKv))
                          .Union();
     }
     else

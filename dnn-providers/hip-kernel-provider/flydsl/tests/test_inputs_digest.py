@@ -194,6 +194,8 @@ def test_a_new_generator_module_changes_only_the_ops_that_import_it(
         ("generators/gen_rmsnorm.py", {"rmsnorm"}),
         ("generators/_codeobject.py", set(OP_KERNEL_DIRS)),
         ("generators/_ops.py", set()),
+        # The dSink reduce's generator is read by its own op only: the prep op, whose sink-twin rows launch that op's objects, keeps its digest.
+        ("generators/gen_sdpa_bwd_dsink_reduce.py", {"sdpa_bwd_dsink_reduce"}),
         ("kernels_src/kernels/norm/rmsnorm_kernel.py", {"rmsnorm", "rmsnorm_bwd"}),
         # The RDNA and CDNA kernels and the RNG dump's mask writer import the aiw directory's
         # Philox by file (one source for the dropout stream).

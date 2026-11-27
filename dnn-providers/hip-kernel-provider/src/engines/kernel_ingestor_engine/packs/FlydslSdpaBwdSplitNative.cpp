@@ -88,6 +88,11 @@
  * dV-only object (`dvonly`) over the V heads, and the dq row's tail-zero launch is the V-head
  * object.
  *
+ * A graph with sink and dSink takes the prep sink twin (a prep row of `sink` 1, dispatched by
+ * `prep_sink`): the shared workspace gains an fp32 `sinkterm` region, zeroed by a memset ahead
+ * of the twin, and a `dsink_reduce` launch after it sums the term into dSink. A graph with a
+ * sink and no dSink is served by the plain prep rows: its sink is already in the caller's LSE.
+ *
  * Launch arguments are a pure function of the plan prepare() resolves and the execute-time
  * buffers (launchArguments()), so one description of each kernel's argument list feeds the
  * launch, the signature the descriptor is checked against, and the tests' dumps.
@@ -141,6 +146,11 @@ constexpr std::string_view DKDV_KERNEL_MATCHER_SYMBOL
 constexpr std::string_view DQ_KERNEL_MATCHER_SYMBOL
     = "hipkernel.flydsl_sdpa_bwd_split.dq.kernel_match";
 constexpr std::string_view PREP_DISPATCH_SYMBOL = "hipkernel.flydsl_sdpa_bwd_split.prep.dispatch";
+/// The prep slot's two-launch dispatch for a graph with dSink: every row is a sink twin and
+/// carries the twin as `prep` and the dSink reduce kernel as `dsink_reduce`, in that launch
+/// order. Only rows of `sink` 1 ride it, and no other prep dispatch serves such a row.
+constexpr std::string_view PREP_SINK_DISPATCH_SYMBOL
+    = "hipkernel.flydsl_sdpa_bwd_split.prep_sink.dispatch";
 constexpr std::string_view DKDV_DISPATCH_SYMBOL = "hipkernel.flydsl_sdpa_bwd_split.dkdv.dispatch";
 constexpr std::string_view DQ_DISPATCH_SYMBOL = "hipkernel.flydsl_sdpa_bwd_split.dq.dispatch";
 /// The dq slot's multi-launch dispatches: every dq row carries its launches as `sources`, the
@@ -161,6 +171,9 @@ constexpr std::string_view DKDV_LAUNCH = "dkdv";
 constexpr std::string_view DVONLY_LAUNCH = "dvonly";
 /// The launch names of a dq row's `sources`.
 constexpr std::string_view DQ_LAUNCH = "dq";
+/// The launch names of a prep sink row's `sources`.
+constexpr std::string_view PREP_LAUNCH = "prep";
+constexpr std::string_view DSINK_REDUCE_LAUNCH = "dsink_reduce";
 
 // Kernel metadata fields beyond the shared ones, declared by each slot's KMD: they belong to the
 // slot that names them.
@@ -168,7 +181,8 @@ constexpr std::string_view DQ_LAUNCH = "dq";
 constexpr std::string_view DFORM_FIELD = "dform";
 /// `g1` (floor 0), `tail` (the rung below the tile), or the floor itself.
 constexpr std::string_view FLOOR_FIELD = "floor";
-/// prep: 1 is the sink twin, which takes arguments a graph without a sink cannot give.
+/// prep: 1 is the sink twin, which also writes the per-row dSink term; only a graph with dSink
+/// is served by it, any other by a row of 0.
 constexpr std::string_view SINK_FIELD = "sink";
 /// How the object's launch grid maps the problem onto x, y and z; see gridOf.
 constexpr std::string_view GRID_FIELD = "grid";
@@ -221,6 +235,8 @@ constexpr std::string_view SEQ_Q_TOKEN = "flydsl_sdpa_bwd_split.seq_q";
 constexpr std::string_view SEQ_KV_TOKEN = "flydsl_sdpa_bwd_split.seq_kv";
 /// The reduce launch's grid y extent; 0 when the graph's dBias is not broadcast.
 constexpr std::string_view REDUCE_PLANES_TOKEN = "flydsl_sdpa_bwd_split.reduce_planes";
+/// 1 when the graph has a dSink: a prep row serves it iff its `sink` is 1.
+constexpr std::string_view SINK_TOKEN = "flydsl_sdpa_bwd_split.sink";
 
 // The shared workspace region's tokens (RFC 0021 section 6.1): `ws.bytes` names its size in
 // the UED's `shared_workspace`; the runtime checks `ws.scratch_offset` against it.
@@ -230,6 +246,8 @@ constexpr std::string_view WS_DELTA_OFFSET_TOKEN = "ws.delta.offset";
 constexpr std::string_view WS_LSE_OFFSET_TOKEN = "ws.lse.offset";
 /// Published only when the seed and offset are written into the workspace.
 constexpr std::string_view WS_SEED_OFFSET_TOKEN = "ws.seed.offset";
+/// Published only when the graph has a dSink: the twin's per-row term, summed by dsink_reduce.
+constexpr std::string_view WS_SINKTERM_OFFSET_TOKEN = "ws.sinkterm.offset";
 
 /// The fp32 ladder: no 384, so the t512 tail floor is 256.
 constexpr std::array<int64_t, 9> FP32_LADDER{32, 64, 96, 128, 160, 192, 224, 256, 512};
@@ -238,6 +256,9 @@ constexpr std::array<int64_t, 9> FP32_LADDER{32, 64, 96, 128, 160, 192, 224, 256
 constexpr int64_t PREP_BLOCK_THREADS = 256;
 constexpr int64_t PREP_MAX_LANES_PER_ROW = 16;
 constexpr int64_t VECTOR_BYTES = 16;
+/// The dsink_reduce kernel's threads per block (`_FIXED_BLOCK` in `_sdpa_bwd_cdna_build.py`);
+/// its grid is one block per query head.
+constexpr unsigned int DSINK_REDUCE_THREADS = 64;
 
 constexpr std::string_view slotName(Slot slot)
 {
@@ -296,6 +317,7 @@ native::WorkspaceRequest requestFor(const bwd::SdpaBwdProblem& problem)
     native::WorkspaceRequest request;
     request.rowStatistics = true;
     request.dbiasElementBytes = problem.biasElementBytes;
+    request.sinkTerm = problem.dsinkUid != bwd::NO_UID;
     return request;
 }
 
@@ -334,6 +356,10 @@ std::string proveWorkspace(const native::WorkspaceLayout& layout)
     }
     shared.push_back({"delta", layout.delta});
     shared.push_back({"lse", layout.lse});
+    if(layout.hasSinkterm)
+    {
+        shared.push_back({"sinkterm", layout.sinkterm});
+    }
 
     int64_t cursor = 0;
     for(const auto& [name, region] : shared)
@@ -550,6 +576,7 @@ std::optional<BoundTokens> flydslSdpaBwdSplitGraphMatches(const MatchContext& co
     bound[std::string(SEQ_Q_TOKEN)] = problem.seqLenQ;
     bound[std::string(SEQ_KV_TOKEN)] = problem.seqLenKv;
     bound[std::string(REDUCE_PLANES_TOKEN)] = reducePlanes(problem);
+    bound[std::string(SINK_TOKEN)] = int64_t{problem.dsinkUid != bwd::NO_UID ? 1 : 0};
 
     bound[std::string(WS_BYTES_TOKEN)] = static_cast<int64_t>(layout.sharedBytes);
     bound[std::string(WS_SCRATCH_OFFSET_TOKEN)] = static_cast<int64_t>(layout.scratchOffset);
@@ -558,6 +585,10 @@ std::optional<BoundTokens> flydslSdpaBwdSplitGraphMatches(const MatchContext& co
     if(layout.uploadsSeed)
     {
         bound[std::string(WS_SEED_OFFSET_TOKEN)] = static_cast<int64_t>(layout.seed.offset);
+    }
+    if(layout.hasSinkterm)
+    {
+        bound[std::string(WS_SINKTERM_OFFSET_TOKEN)] = static_cast<int64_t>(layout.sinkterm.offset);
     }
     return bound;
 }
@@ -767,6 +798,7 @@ struct GraphFacts
     int64_t seqLenQ = 0;
     int64_t seqLenKv = 0;
     int64_t reducePlanes = 0;
+    bool sink = false;
 };
 
 std::optional<GraphFacts> readFacts(const BoundTokens& bound)
@@ -792,9 +824,10 @@ std::optional<GraphFacts> readFacts(const BoundTokens& bound)
     const auto seqLenQ = tryGetBoundInt(bound, SEQ_Q_TOKEN);
     const auto seqLenKv = tryGetBoundInt(bound, SEQ_KV_TOKEN);
     const auto planes = tryGetBoundInt(bound, REDUCE_PLANES_TOKEN);
+    const auto sink = tryGetBoundInt(bound, SINK_TOKEN);
     if(!graphClass || !headDimQk || !headDimV || !dropout || !dbias || !biasUnstaged || !biasF32
        || !valueHeadsDiffer || !gqaPack || !batch || !numHeads || !numKvHeads || !numVHeads
-       || !seqLenQ || !seqLenKv || !planes)
+       || !seqLenQ || !seqLenKv || !planes || !sink)
     {
         return std::nullopt;
     }
@@ -814,7 +847,8 @@ std::optional<GraphFacts> readFacts(const BoundTokens& bound)
                       *numVHeads,
                       *seqLenQ,
                       *seqLenKv,
-                      *planes};
+                      *planes,
+                      *sink != 0};
 }
 
 /// A launch grid.
@@ -959,8 +993,9 @@ bool flydslSdpaBwdSplitKernelMatches(const MatchContext& /*context*/,
     }
     if constexpr(SLOT == Slot::PREP)
     {
-        // The sink twin takes arguments no graph here supplies.
-        if(row->sink == 1)
+        // The sink twin serves a graph with dSink and no other graph; a graph without one is
+        // served by the plain rows, its sink already in the caller's LSE.
+        if((row->sink == 1) != facts->sink)
         {
             return false;
         }
@@ -1042,6 +1077,10 @@ struct SplitPlan : native::BwdPlanCommon
     /// A `dkdv` row with `u2`: the dV-only launch's grid, over the V heads. The launch has the
     /// dK-only launch's block and arguments.
     Grid dvonlyGrid;
+    /// The prep row is the sink twin (`sink` 1): a dSink graph. Its dsink_reduce launch is
+    /// one block per query head.
+    bool sink = false;
+    Grid dsinkGrid;
 };
 
 bwd::SdpaBwdProblem problemOf(const MatchContext& context)
@@ -1068,6 +1107,10 @@ void requireTokens(const BoundTokens& bound, const native::WorkspaceLayout& layo
     require(WS_SCRATCH_OFFSET_TOKEN, layout.scratchOffset);
     require(WS_DELTA_OFFSET_TOKEN, layout.delta.offset);
     require(WS_LSE_OFFSET_TOKEN, layout.lse.offset);
+    if(layout.hasSinkterm)
+    {
+        require(WS_SINKTERM_OFFSET_TOKEN, layout.sinkterm.offset);
+    }
     if(layout.uploadsSeed)
     {
         require(WS_SEED_OFFSET_TOKEN, layout.seed.offset);
@@ -1121,6 +1164,20 @@ SplitPlan planFor(Slot slot,
 
     plan.workspace = native::workspaceLayout(problem, requestFor(problem));
     requireTokens(bound, plan.workspace);
+    if(slot == Slot::PREP)
+    {
+        // A row of the other kind would read arguments the graph does not supply, or leave
+        // the graph's dSink unwritten.
+        plan.sink = row->sink == 1;
+        if(plan.sink != facts->sink)
+        {
+            native::failBadParam(ERROR_SCOPE,
+                                 "kernel '" + kernel.name + "' has sink "
+                                     + std::to_string(row->sink) + " but the graph "
+                                     + (facts->sink ? "has" : "has no") + " dSink");
+        }
+        plan.dsinkGrid = {static_cast<unsigned int>(facts->numHeads), 1, 1};
+    }
     if(slot == Slot::DQ && plan.workspace.reduces)
     {
         if(row->reduceSymbol.empty())
@@ -1210,6 +1267,51 @@ struct PrepKernargs
                         strideDO.batch,
                         strideDO.head,
                         strideDO.seq);
+    }
+};
+
+/**
+ * @brief The prep sink twin's arguments (`_PARAMS["prep_sink"]`): prep's 27, then the sink
+ *        and the per-row dSink term it accumulates into (fp32 `[B, Hq, Sq]`, zeroed first):
+ *        29 arguments.
+ */
+struct PrepSinkKernargs
+{
+    PrepKernargs prep;
+    void* sink = nullptr;
+    void* sinkTerm = nullptr;
+
+    auto tie() const
+    {
+        return std::tuple_cat(prep.tie(), std::tie(sink, sinkTerm));
+    }
+};
+
+/// The dSink reduce kernel's arguments (`_PARAMS["dsink_reduce"]`): the per-row term, the
+/// user's dSink and the extents that bound the rows it sums: 9 arguments.
+struct DsinkReduceKernargs
+{
+    void* sinkTerm = nullptr;
+    void* dSink = nullptr;
+    int32_t batchSize = 0;
+    void* seqinfoQ0 = nullptr;
+    void* seqinfoQ1 = nullptr;
+    int32_t varlenBits = 0;
+    int32_t numSeqlens = 0;
+    int32_t maxSeqlenQ = 0;
+    int32_t numHeadQ = 0;
+
+    auto tie() const
+    {
+        return std::tie(sinkTerm,
+                        dSink,
+                        batchSize,
+                        seqinfoQ0,
+                        seqinfoQ1,
+                        varlenBits,
+                        numSeqlens,
+                        maxSeqlenQ,
+                        numHeadQ);
     }
 };
 
@@ -1467,17 +1569,19 @@ using DkdvU2Kernargs = DkdvKernargsT<true>;
 using DqKernargs = DqKernargsT<false>;
 using DqU2Kernargs = DqKernargsT<true>;
 
-/// The argument list of @p slot's kernel, the V-head variant's when @p u2.
-const std::vector<KernelArgument>& signatureOfSlot(Slot slot, bool u2)
+/// The argument list of @p slot's kernel, the V-head variant's when @p u2, the sink twin's
+/// (prep only) when @p sink.
+const std::vector<KernelArgument>& signatureOfSlot(Slot slot, bool u2, bool sink = false)
 {
     static const auto s_prep = native::signatureOf<PrepKernargs>();
+    static const auto s_prepSink = native::signatureOf<PrepSinkKernargs>();
     static const auto s_dkdv = native::signatureOf<DkdvKernargs>();
     static const auto s_dkdvU2 = native::signatureOf<DkdvU2Kernargs>();
     static const auto s_dq = native::signatureOf<DqKernargs>();
     static const auto s_dqU2 = native::signatureOf<DqU2Kernargs>();
     if(slot == Slot::PREP)
     {
-        return s_prep;
+        return sink ? s_prepSink : s_prep;
     }
     if(slot == Slot::DKDV)
     {
@@ -1486,13 +1590,26 @@ const std::vector<KernelArgument>& signatureOfSlot(Slot slot, bool u2)
     return u2 ? s_dqU2 : s_dq;
 }
 
+/// The dsink_reduce kernel's argument list.
+const std::vector<KernelArgument>& dsinkReduceSignature()
+{
+    static const auto s_signature = native::signatureOf<DsinkReduceKernargs>();
+    return s_signature;
+}
+
 // ---------------------------------------------------------------------------
 // Launch arguments
 // ---------------------------------------------------------------------------
 
 struct LaunchArguments
 {
-    std::variant<PrepKernargs, DkdvKernargs, DkdvU2Kernargs, DqKernargs, DqU2Kernargs> kernel;
+    std::variant<PrepKernargs,
+                 PrepSinkKernargs,
+                 DkdvKernargs,
+                 DkdvU2Kernargs,
+                 DqKernargs,
+                 DqU2Kernargs>
+        kernel;
     std::optional<native::ReduceKernargs> reduce;
     /// Set on the prep launch only: it writes the seed region the other slots read.
     std::optional<native::SeedUpload> seedUpload;
@@ -1501,6 +1618,9 @@ struct LaunchArguments
     std::optional<native::TailzeroKernargs> tailzero;
     /// The same launch of a graph whose V heads differ from K's: the V-head object's arguments.
     std::optional<native::TailzeroHvKernargs> tailzeroHv;
+    /// Set on the prep launch of a graph with dSink: the launch that sums the twin's per-row
+    /// term into dSink, after the twin.
+    std::optional<DsinkReduceKernargs> dsink;
 };
 
 /// Every argument of the launch, from the plan and the execute-time buffers; touches no
@@ -1553,7 +1673,31 @@ LaunchArguments launchArguments(const SplitPlan& plan,
         prep.hdimVo = toInt32(problem.headDimV, "hdim_vo");
         prep.strideO = pitch(problem.o, problem.seqLenQ, problem.headDimV);
         prep.strideDO = pitch(problem.dO, problem.seqLenQ, problem.headDimV);
-        arguments.kernel = prep;
+        if(plan.sink)
+        {
+            if(problem.dsinkUid == bwd::NO_UID || !layout.hasSinkterm)
+            {
+                native::failBadParam(ERROR_SCOPE,
+                                     "a sink twin row was chosen for a graph without dSink");
+            }
+            void* const sinkTerm = native::inWorkspace(workspace, layout.sinkterm.offset);
+            arguments.kernel = PrepSinkKernargs{prep, buffer(problem.sinkUid), sinkTerm};
+            DsinkReduceKernargs dsink;
+            dsink.sinkTerm = sinkTerm;
+            dsink.dSink = buffer(problem.dsinkUid);
+            dsink.batchSize = toInt32(problem.batch, "batch");
+            dsink.seqinfoQ0 = prep.seqinfoQ0;
+            dsink.seqinfoQ1 = prep.seqinfoQ1;
+            dsink.varlenBits = prep.varlenBits;
+            dsink.numSeqlens = prep.numSeqlens;
+            dsink.maxSeqlenQ = prep.maxSeqlenQ;
+            dsink.numHeadQ = prep.numHeadQ;
+            arguments.dsink = dsink;
+        }
+        else
+        {
+            arguments.kernel = prep;
+        }
         const auto seed = native::bindSeed(
             problem, layout, plan.scalars, deviceBuffers, numDeviceBuffers, workspace, unused);
         arguments.seedUpload = seed.upload;
@@ -1749,12 +1893,14 @@ public:
                                IngestorKernelCode code,
                                std::optional<IngestorKernelCode> dvonlyCode,
                                std::optional<IngestorKernelCode> reduceCode,
-                               std::optional<IngestorKernelCode> tailzeroCode)
+                               std::optional<IngestorKernelCode> tailzeroCode,
+                               std::optional<IngestorKernelCode> dsinkCode)
         : _plan(std::move(plan))
         , _code(std::move(code))
         , _dvonly(std::move(dvonlyCode))
         , _reduce(std::move(reduceCode))
         , _tailzero(std::move(tailzeroCode))
+        , _dsink(std::move(dsinkCode))
     {
     }
 
@@ -1788,12 +1934,18 @@ public:
         return _tailzero->kernelForStream(stream);
     }
 
+    compilation::IRunnableKernel& dsinkForStream(hipStream_t stream) const
+    {
+        return _dsink->kernelForStream(stream);
+    }
+
 private:
     SplitPlan _plan;
     IngestorKernelCode _code;
     std::optional<IngestorKernelCode> _dvonly;
     std::optional<IngestorKernelCode> _reduce;
     std::optional<IngestorKernelCode> _tailzero;
+    std::optional<IngestorKernelCode> _dsink;
 };
 
 /**
@@ -1806,6 +1958,10 @@ private:
  * its `sources`, and each is built from its own entry; the plain `dq` dispatch serves the rows
  * that name no reduce kernel and refuses one that does. On dkdv @p SOURCES is the `dkdv_u2`
  * dispatch (dK-only and dV-only launches).
+ *
+ * With @p SOURCES on prep the dispatch serves the sink twin rows of a graph with dSink: the
+ * launches are `prep` (the twin) and `dsink_reduce`, after a memset of the workspace's dSink
+ * term; the plain prep dispatch refuses a twin row and this one refuses any other.
  *
  * With @p DQ_U2 (dq only) the dispatch serves the rows of `u2_role` `dq`, whose launches are
  * the V-head dQ kernel and the V-head tail-zero kernel; the standard dq dispatches refuse
@@ -1822,12 +1978,15 @@ public:
         : _kernelCompiler(kernelCompiler)
         , _kpackLoader(kpackLoader)
     {
-        static_assert(!SOURCES || SLOT != Slot::PREP, "prep is one launch");
         static_assert(!DQ_U2 || (SLOT == Slot::DQ && !SOURCES), "dq_u2 is a dq dispatch");
     }
 
     std::set<std::string> launchNames() const override
     {
+        if constexpr(SLOT == Slot::PREP && SOURCES)
+        {
+            return {std::string(PREP_LAUNCH), std::string(DSINK_REDUCE_LAUNCH)};
+        }
         if constexpr(SLOT == Slot::DKDV && SOURCES)
         {
             return {std::string(DKDV_LAUNCH), std::string(DVONLY_LAUNCH)};
@@ -1869,12 +2028,34 @@ public:
         // or disagrees on an ABI fails on the host whatever the state of the archive.
         [[maybe_unused]] const bool reduces = !plan.reduceSymbol.empty();
         [[maybe_unused]] const bool zeroesTails = plan.tailzeroMask != 0;
-        const auto& slotSignature = signatureOfSlot(SLOT, plan.u2);
+        const auto& slotSignature = signatureOfSlot(SLOT, plan.u2, plan.sink);
         std::optional<KernelDefinition> dqLaunch;
         std::optional<KernelDefinition> dkLaunch;
         std::optional<KernelDefinition> dvonlyKernel;
         std::optional<KernelDefinition> reduceKernel;
         std::optional<KernelDefinition> tailzeroKernel;
+        std::optional<KernelDefinition> prepLaunch;
+        std::optional<KernelDefinition> dsinkKernel;
+        if constexpr(SLOT == Slot::PREP)
+        {
+            // A twin row is launched by the `prep_sink` dispatch and no other.
+            if(plan.sink != SOURCES)
+            {
+                native::failBadParam(ERROR_SCOPE,
+                                     "kernel '" + kernel.name + "' has sink "
+                                         + (plan.sink ? "1" : "0") + " but is dispatched by the "
+                                         + (SOURCES ? "prep_sink" : "prep") + " handler");
+            }
+            if constexpr(SOURCES)
+            {
+                prepLaunch = launchKernelDefinition(kernel, std::string(PREP_LAUNCH));
+                dsinkKernel = launchKernelDefinition(kernel, std::string(DSINK_REDUCE_LAUNCH));
+                requireSignatureMatch(dsinkKernel->source.signature,
+                                      dsinkReduceSignature(),
+                                      dsinkKernel->source.symbol,
+                                      describeDescriptor("kernel", kernel.name, kernel.kernelId));
+            }
+        }
         if constexpr(SLOT == Slot::DKDV)
         {
             // A row serves V heads of its own exactly when its pack's dispatch launches both
@@ -1949,6 +2130,10 @@ public:
         {
             slotSource = &*dkLaunch;
         }
+        else if(prepLaunch.has_value())
+        {
+            slotSource = &*prepLaunch;
+        }
         const KernelDefinition& slotKernel = *slotSource;
 
         // Built from the arch alone; see FlydslRmsNormNative.cpp's prepare().
@@ -1993,11 +2178,24 @@ public:
             tailzeroCode->setBlockSize(native::TAILZERO_THREADS, 1, 1);
             tailzeroCode->setGridSize(plan.tailzeroGrid.x, plan.tailzeroGrid.y, 1);
         }
+        std::optional<IngestorKernelCode> dsinkCode;
+        if(dsinkKernel.has_value())
+        {
+            dsinkCode.emplace(buildIngestorKernelCode(_kernelCompiler,
+                                                      _kpackLoader,
+                                                      context,
+                                                      *dsinkKernel,
+                                                      options,
+                                                      dsinkReduceSignature()));
+            dsinkCode->setBlockSize(DSINK_REDUCE_THREADS, 1, 1);
+            dsinkCode->setGridSize(plan.dsinkGrid.x, plan.dsinkGrid.y, plan.dsinkGrid.z);
+        }
         return std::make_unique<PreparedFlydslSdpaBwdSplit>(std::move(plan),
                                                             std::move(code),
                                                             std::move(dvonlyCode),
                                                             std::move(reduceCode),
-                                                            std::move(tailzeroCode));
+                                                            std::move(tailzeroCode),
+                                                            std::move(dsinkCode));
     }
 
     void launch(const Handle& handle,
@@ -2015,6 +2213,11 @@ public:
         {
             native::uploadSeed(*arguments.seedUpload, workspace, stream);
         }
+        // The twin accumulates into the dSink term, so it starts at zero.
+        if(arguments.dsink.has_value())
+        {
+            native::zeroSinkterm(preparedSplit.plan().workspace, workspace, stream);
+        }
         // Changing an argument list means changing its struct with it: the signature the
         // descriptor is checked against is read from the same tie().
         const auto launchKernel = [&](compilation::IRunnableKernel& kernel) {
@@ -2026,6 +2229,14 @@ public:
                 arguments.kernel);
         };
         launchKernel(preparedSplit.kernelForStream(stream));
+        if(arguments.dsink.has_value())
+        {
+            std::apply(
+                [&](const auto&... argument) {
+                    preparedSplit.dsinkForStream(stream).launch(stream, argument...);
+                },
+                arguments.dsink->tie());
+        }
         // A `dkdv_u2` row: the dV-only launch follows the dK-only one with the same arguments.
         if(preparedSplit.hasDvonly())
         {
@@ -2097,6 +2308,8 @@ void registerFlydslSdpaBwdSplitSymbols(SymbolScope<Handle>& scope)
               &flydslSdpaBwdSplitKernelMatches<Slot::DKDV>);
     scope.add(std::string(DQ_KERNEL_MATCHER_SYMBOL), &flydslSdpaBwdSplitKernelMatches<Slot::DQ>);
     scope.add(std::string(PREP_DISPATCH_SYMBOL), &flydslSdpaBwdSplitDispatchHandler<Slot::PREP>());
+    scope.add(std::string(PREP_SINK_DISPATCH_SYMBOL),
+              &flydslSdpaBwdSplitDispatchHandler<Slot::PREP, true>());
     scope.add(std::string(DKDV_DISPATCH_SYMBOL), &flydslSdpaBwdSplitDispatchHandler<Slot::DKDV>());
     scope.add(std::string(DQ_DISPATCH_SYMBOL), &flydslSdpaBwdSplitDispatchHandler<Slot::DQ>());
     scope.add(std::string(DQ_REDUCE_DISPATCH_SYMBOL),
@@ -2152,6 +2365,14 @@ FlydslSdpaBwdSplitLaunchDump describeFlydslSdpaBwdSplitLaunchForTesting(
         dump.tailzeroKernarg = native::kernargImage(*arguments.tailzeroHv);
         dump.tailzeroBlock = native::TAILZERO_THREADS;
         dump.tailzeroGrid = {plan.tailzeroGrid.x, plan.tailzeroGrid.y, 1};
+    }
+    if(arguments.dsink.has_value())
+    {
+        dump.dsink = true;
+        dump.dsinkKernarg = native::kernargImage(*arguments.dsink);
+        dump.dsinkBlock = DSINK_REDUCE_THREADS;
+        dump.dsinkGrid = {plan.dsinkGrid.x, plan.dsinkGrid.y, plan.dsinkGrid.z};
+        dump.sinktermZeroed = true;
     }
     if(arguments.seedUpload.has_value())
     {

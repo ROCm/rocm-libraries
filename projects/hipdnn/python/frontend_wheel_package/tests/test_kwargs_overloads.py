@@ -753,6 +753,67 @@ def _sdpa_backward_mask_dropout(t):
     )
 
 
+def _sdpa_backward_philox_dropout_rng_dump(t):
+    seed = t.input("seed", _SEED_DIM, INT64)
+    offset = t.input("offset", _SEED_DIM, INT64)
+    rng_dump = t.input("rng_dump", _SCORE_DIM)
+    return (
+        dict(dropout=(0.25, seed, offset), rng_dump=rng_dump),
+        lambda a: a.set_dropout(0.25, seed, offset).set_rng_dump(rng_dump),
+    )
+
+
+def _sdpa_backward_sink_tokens(t):
+    sink_token = t.input("sink_token", [1, 8, 1, 1])
+    dsink_token = t.input("dsink_token", [1, 8, 1, 1])
+    return (
+        dict(sink_token=sink_token, dSink_token=dsink_token),
+        lambda a: a.set_sink_token(sink_token).set_dsink_token(dsink_token),
+    )
+
+
+def _ragged_sdpa_backward(keywords, compute):
+    """max_total_seq_len_* needs a ragged Q/K/V/O, so this builds its own graph."""
+    graph, t = _graph(compute)
+    offsets = t.input("offsets", [3, 1, 1, 1], INT32)
+    q = t.input("q", [2, 8, 16, 64]).set_ragged_offset(offsets)
+    k = t.input("k", [2, 8, 32, 64])
+    v = t.input("v", [2, 8, 32, 64])
+    o = t.input("o", [2, 8, 16, 64])
+    d_o = t.input("do", [2, 8, 16, 64])
+    stats = t.input("stats", _STATS_DIM)
+    if keywords:
+        outputs = graph.sdpa_backward(
+            q,
+            k,
+            v,
+            o,
+            d_o,
+            stats,
+            **_compute_keywords(compute),
+            name="sdpab",
+            max_total_seq_len_q=16,
+            max_total_seq_len_kv=32,
+        )
+    else:
+        attributes = (
+            _new_attributes(hipdnn.SdpaBackwardAttributes, compute)
+            .set_name("sdpab")
+            .set_max_total_seq_len_q(16)
+            .set_max_total_seq_len_kv(32)
+        )
+        outputs = graph.sdpa_backward(q, k, v, o, d_o, stats, attributes)
+    _adopt_outputs(t, outputs, ["dq", "dk", "dv"], tuple)
+    return graph
+
+
+def _sdpa_backward_deterministic(t):
+    return (
+        dict(use_deterministic_algorithm=True),
+        lambda a: a.set_deterministic_algorithm(True),
+    )
+
+
 def _sdpa(options):
     def build(keywords, compute):
         graph, t = _graph(compute)
@@ -886,6 +947,16 @@ _PARITY_CASES = [
     _sdpa_backward_case(_sdpa_backward_bias, "bias_dbias"),
     _sdpa_backward_case(_sdpa_backward_philox_dropout, "philox_dropout"),
     _sdpa_backward_case(_sdpa_backward_mask_dropout, "mask_dropout"),
+    _sdpa_backward_case(
+        _sdpa_backward_philox_dropout_rng_dump, "philox_dropout_rng_dump"
+    ),
+    _sdpa_backward_case(_sdpa_backward_sink_tokens, "sink_tokens"),
+    pytest.param(
+        _ragged_sdpa_backward,
+        id="sdpa_backward-max_total_seq_len",
+        marks=_requires_sdpa,
+    ),
+    _sdpa_backward_case(_sdpa_backward_deterministic, "deterministic_algorithm"),
 ]
 
 
@@ -1132,16 +1203,55 @@ class TestSdpaDispatch:
         outputs = graph.sdpa(*self._qkv(), generate_stats=True, attn_scale=scale)
         assert isinstance(outputs, tuple) and len(outputs) == 2
 
-    def test_unsupported_parameters_raise_not_implemented(self):
+    def test_score_mod_callbacks_raise_not_implemented(self):
         graph = create_float_graph()
         with pytest.raises(NotImplementedError, match="score_mod"):
             graph.sdpa(*self._qkv(), generate_stats=True, score_mod=lambda *args: None)
-        with pytest.raises(NotImplementedError, match="use_deterministic_algorithm"):
+        with pytest.raises(NotImplementedError, match="score_mod"):
+            graph.sdpa_backward(*self._backward_inputs(), score_mod=lambda *args: None)
+        with pytest.raises(NotImplementedError, match="score_mod_bprop"):
             graph.sdpa_backward(
-                *self._backward_inputs(), use_deterministic_algorithm=True
+                *self._backward_inputs(), score_mod_bprop=lambda *args: None
             )
-        with pytest.raises(NotImplementedError, match="max_total_seq_len_q"):
-            graph.sdpa_backward(*self._backward_inputs(), max_total_seq_len_q=64)
+
+    @pytest.mark.parametrize("mask_dropout", [False, True], ids=["no_dropout", "mask"])
+    def test_backward_rng_dump_is_ignored_without_philox_dropout(self, mask_dropout):
+        def build(with_rng_dump):
+            graph, t = _graph(OP_COMPUTE)
+            q = t.input("q", [2, 8, 16, 64])
+            k = t.input("k", [2, 8, 32, 64])
+            v = t.input("v", [2, 8, 32, 64])
+            o = t.input("o", [2, 8, 16, 64])
+            d_o = t.input("do", [2, 8, 16, 64])
+            stats = t.input("stats", _STATS_DIM)
+            options = {}
+            if mask_dropout:
+                options["dropout"] = (
+                    t.input("dropout_mask", _SCORE_DIM),
+                    t.scalar("dropout_scale", 1.25),
+                    t.scalar("dropout_scale_inv", 0.8),
+                )
+            if with_rng_dump:
+                options["rng_dump"] = hipdnn.Tensor.create(_SCORE_DIM, FLOAT)
+            outputs = graph.sdpa_backward(
+                q,
+                k,
+                v,
+                o,
+                d_o,
+                stats,
+                compute_data_type=OP_COMPUTE,
+                name="sdpab",
+                **options,
+            )
+            _adopt_outputs(t, outputs, ["dq", "dk", "dv"], tuple)
+            return graph
+
+        graphs = (build(True), build(False))
+        for graph in graphs:
+            status = graph.validate()
+            assert status.is_good(), status.get_message()
+        assert canonical_graph_json(graphs[0]) == canonical_graph_json(graphs[1])
 
 
 # --- GPU tier: keyword-built graphs through plan build and stub execution ---

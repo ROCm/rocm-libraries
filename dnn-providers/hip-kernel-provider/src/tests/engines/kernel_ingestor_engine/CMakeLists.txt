@@ -164,6 +164,7 @@ if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaBwdObjectsPerObject.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaBwdPhiloxOracle.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaBwdPhiloxDevice.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaBwdSink.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaObjects.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaDropout.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaHeadPad.cpp

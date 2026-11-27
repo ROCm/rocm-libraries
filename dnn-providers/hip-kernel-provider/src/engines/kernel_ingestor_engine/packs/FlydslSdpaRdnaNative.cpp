@@ -525,9 +525,8 @@ public:
                                  "flydsl_sdpa_rdna");
         }
         void* sink = optionalBuffer(binding.sink, deviceBuffers, numDeviceBuffers);
-        // The head stride, with bit 32 set for the FLOAT sink (kernel modification 31).
-        const int64_t sinkStride
-            = rdnaSinkStrideArgument(binding.sinkStride, binding.sink != NO_SINK);
+        // The head stride, with bit 32 set for a FLOAT sink (kernel modification 31).
+        const int64_t sinkStride = rdnaSinkStrideArgument(binding.sinkStride, binding.sinkFloat);
         // Each batch's lengths under padding; null (the launch's lengths) for a dense graph.
         // seq_len_kv alone over packed sequences: the query lengths are Q's table one entry on
         // (queryLengthsArgument).
