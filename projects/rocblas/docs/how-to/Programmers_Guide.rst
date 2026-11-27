@@ -2063,6 +2063,8 @@ To add new data-driven tests to the rocBLAS GoogleTest Framework, follow these s
 
    The ``function`` must be one of the functions tested for and recognized in steps D-F.
 
+   Index ``int32`` overflow tests should be named with a ``_size_t`` suffix.
+
    The syntax and idioms of the YAML files is best understood by looking at the
    existing ``*_gtest.yaml`` files as examples.
 

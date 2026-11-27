@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -38,7 +38,10 @@ __device__ void rocblas_spr2_kernel_calc(bool        is_upper,
     rocblas_int tx = (blockIdx.x * DIM_X * N_TX) + threadIdx.x;
     rocblas_int ty = blockIdx.y * DIM_Y + threadIdx.y;
 
-    int index = is_upper ? ((ty * (ty + 1)) / 2) + tx : ((ty * (2 * n - ty + 1)) / 2) + (tx - ty);
+    // ty*(ty+1) and ty*(2*n-ty+1) overflow signed int32 for the last rows
+    // (n >= 46342 upper, n >= 46341 lower). The packed length still fits in int32.
+    int64_t index = is_upper ? ((int64_t(ty) * (ty + 1)) / 2) + tx
+                             : ((int64_t(ty) * (2 * int64_t(n) - ty + 1)) / 2) + (tx - ty);
 
 #pragma unroll
     for(int i = 0; i < N_TX; i++, tx += DIM_X, index += DIM_X)

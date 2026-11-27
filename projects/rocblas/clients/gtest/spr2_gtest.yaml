@@ -101,6 +101,23 @@ Tests:
   incx_incy: *incx_incy_range_small
   alpha: [ 1.0 ]
 
+# ROCM-34872: rocblas_spr2_kernel_calc stores the packed index in a 32-bit int.
+# ty*(ty+1) overflows signed int32 for uplo U when n >= 46342, and
+# ty*(2*n-ty+1) overflows for uplo L when n >= 46341. The packed length
+# n*(n+1)/2 still fits in int32 (about 4 GiB of float). The trailing packed
+# elements disagree with the host reference. Two device copies need a large GPU.
+- name: spr2_size_t
+  category: stress
+  function: spr2
+  precision: *single_precision
+  uplo: [ U, L ]
+  N: 46342
+  incx: 1
+  incy: 1
+  alpha: 1.0
+  os_flags: LINUX
+  gpu_arch: ['90a','942','950']
+
 - name: spr2_ILP64
   category: stress
   arguments:

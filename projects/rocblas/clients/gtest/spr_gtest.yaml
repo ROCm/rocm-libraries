@@ -105,6 +105,22 @@ Tests:
   incx: [ 1 ]
   alpha_beta: *alpha_range_small
 
+# Same packed-index overflow as spr2 (ROCM-34872): rocblas_spr_kernel_calc stores
+# the packed index in a 32-bit int. ty*(ty+1) overflows signed int32 for uplo U
+# when n >= 46342, and ty*(2*n-ty+1) overflows for uplo L when n >= 46341. The
+# packed length n*(n+1)/2 still fits in int32 (about 4 GiB of float). The trailing
+# packed elements disagree with the host reference.
+- name: spr_size_t
+  category: stress
+  function: spr
+  precision: *single_precision
+  uplo: [ U, L ]
+  N: 46342
+  incx: 1
+  alpha: 1.0
+  os_flags: LINUX
+  gpu_arch: ['90a','942','950']
+
 # batched
 - name: spr_batched_fortran
   category: quick
