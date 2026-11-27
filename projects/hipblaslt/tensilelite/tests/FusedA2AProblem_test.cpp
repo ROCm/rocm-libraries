@@ -5,6 +5,7 @@
 
 #include "ClientProblemFactory.hpp"
 
+#include <Tensile/AMDGPU.hpp>
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/ContractionProblemPredicates.hpp>
 #include <Tensile/ContractionSolution.hpp>
@@ -86,24 +87,11 @@ TEST(FusedA2AProblem, ShapePredicate)
     EXPECT_TRUE(mt256(plain));
 }
 
-TEST(FusedA2AProblem, SegmentNeedsOnePeerGroupPerRank)
-{
-    KernelArguments args(false);
-    appendFusedSegment(args, std::vector<FusedA2APeerFields>(4), nullptr, 0, 4, 0, 2048, 304);
-    EXPECT_EQ(args.size(), FUSED_A2A_SEGMENT_BYTES);
-
-    KernelArguments shortArgs(false);
-    EXPECT_THROW(appendFusedSegment(
-                     shortArgs, std::vector<FusedA2APeerFields>(1), nullptr, 0, 4, 0, 2048, 304),
-                 std::runtime_error);
-}
-
 TEST(FusedA2AProblem, SegmentNeedsCuCount)
 {
     KernelArguments args(false);
-    EXPECT_THROW(
-        appendFusedSegment(args, std::vector<FusedA2APeerFields>(4), nullptr, 0, 4, 0, 2048, 0),
-        std::runtime_error);
+    EXPECT_THROW(appendFusedSegment(args, FusedA2APeerTable{}, nullptr, 0, 4, 0, 2048, 0),
+                 std::runtime_error);
 }
 
 TEST(FusedA2AProblem, GemmTypeOnlyMatchesTheFusedMode)
@@ -128,6 +116,21 @@ TEST(FusedA2AProblem, GemmTypeOnlyMatchesTheFusedMode)
     solution.problemType.fusedA2A = FusedA2A::Disabled;
     EXPECT_FALSE(isGemmTypeSame(solution, fused));
     EXPECT_TRUE(isGemmTypeSame(solution, plain));
+}
+
+TEST(FusedA2AProblem, SolveRejectsAMismatchedFusedMode)
+{
+    auto fused = fusedProblem(3072, 512, 3072, 2, 2048);
+    auto plain = fused;
+    plain.setFusedA2A(FusedA2A::Disabled);
+    ContractionSolution solution;
+    ContractionInputs   inputs;
+    AMDGPU              gpu;
+
+    solution.problemType.fusedA2A = FusedA2A::GemmA2A;
+    EXPECT_THROW(solution.solve(plain, inputs, gpu), std::runtime_error);
+    solution.problemType.fusedA2A = FusedA2A::Disabled;
+    EXPECT_THROW(solution.solve(fused, inputs, gpu), std::runtime_error);
 }
 
 namespace

@@ -247,3 +247,25 @@ class TestWaveSizeForArch:
         is what every non-gfx10/11/12 AMD target has shipped."""
         assert wave_size_for_arch("gfx999") == 64
         assert wave_size_for_arch("") == 64
+
+
+class TestNumericalNotes:
+    def test_the_field_defaults_to_no_claim(self):
+        """``None`` is an absent key; ``[]`` is a claim, so the default is not a list."""
+        assert make_engine().numerical_notes is None
+
+    def test_the_vocabulary_is_the_ten_lowercase_names(self):
+        from codegen.models import NUMERICAL_NOTES
+
+        assert NUMERICAL_NOTES == (
+            "tensor_core",
+            "down_convert_inputs",
+            "reduced_precision_reduction",
+            "fft",
+            "nondeterministic",
+            "winograd",
+            "winograd_tile_4x4",
+            "winograd_tile_6x6",
+            "winograd_tile_13x13",
+            "strict_nan_prop",
+        )

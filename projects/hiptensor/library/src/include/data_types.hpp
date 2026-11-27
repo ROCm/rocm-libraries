@@ -61,9 +61,11 @@ struct hiptensorOperationDescriptor
     hiptensorDataType_t mScalarType;
     float               mFlops;
     float               mMovedBytes;
-    uint32_t            mPaddingLeft;
-    uint32_t            mPaddingRighT;
-    void*               mPaddingValue;
+    //! One entry per mode of the output tensor.
+    std::vector<uint32_t> mPaddingLeft;
+    std::vector<uint32_t> mPaddingRight;
+    //! One element of the output tensor's data type.
+    std::vector<uint8_t> mPaddingValue;
 
     hiptensorOperationType_t    mOperationType;
     int32_t                     mContractionOpId;
