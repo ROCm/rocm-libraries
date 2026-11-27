@@ -135,6 +135,7 @@ def tdmIgnoredHints(state, asm_caps):
     the fields tdmCacheModifiers emits for the set. A stashed member (tdmStashedMembers) issues
     its own load with those same fields. A key is listed when its value differs from that
     field; NonTemporal is compared on its scope bits, the only ones a TDM load reads.
+    Under TDMFuse 1-3 a scale rides its data tensor's load, so its keys must equal that tensor's.
     """
     if not _has_temporal_hint(asm_caps):
         return []
