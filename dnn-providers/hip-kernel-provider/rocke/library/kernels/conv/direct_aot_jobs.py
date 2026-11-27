@@ -1935,7 +1935,8 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
             if k * k * c <= 5 * 32
         ),
     ),
-    # Its wave64 MFMA port (gfx950): the same layers.
+    # Its wave64 MFMA port (gfx950): the same layers, except the 3x3 K=1 head,
+    # which is gfx1250 only (no gfx950 numeric case covers it).
     _FWD_SMALLK_MFMA: (
         "fwd",
         tuple(
@@ -1949,6 +1950,7 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
                 kpg=kk,
             )
             for kh, kw, pad, pw, st, kk in FWD_SMALLK_LAYERS
+            if (kh, kw, kk) != (3, 3, 1)
         ),
     ),
     # LDS-DMA ping-pong forward on wave64 MFMA (gfx950): dense, stride 1, odd
