@@ -67,6 +67,15 @@ def decodeNonTemporal(
     return (False, False, False, scope, temporal_hint, non_volatile)
 
 
+def ntBitIgnored(asm_caps):
+    """True when TemporalHint replaces the NonTemporal nt bit (0x4): wherever th: modifiers exist.
+
+    decodeNonTemporal then clears nt and a tensor_load_to_lds has no nt field, so NonTemporal 4-7
+    emit what NonTemporal & 3 emits, whether or not the assembler also takes an nt modifier.
+    """
+    return _has_temporal_hint(asm_caps)
+
+
 def tdmCacheModifiers(asm_caps, hints, decider=None):
     """Return ``TENSORModifiers`` for one ``tensor_load_to_lds``, or ``None``.
 

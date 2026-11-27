@@ -61,7 +61,7 @@ from ..Components.TDMFuse import TDM_FUSE_GROUPING, TDM_SCALE_TENSORS, tdmBothTe
                                        tdmGroupingSeparatesAB, tdmPairOnEveryWave, \
                                        tdmPapRejectReason, tdmSeparateABDescriptors, tdmWavePartition, \
                                        tdmWaveSeparated
-from ..Components.NonTemporal import tdmAbsentHints, tdmIgnoredHints
+from ..Components.NonTemporal import ntBitIgnored, tdmAbsentHints, tdmIgnoredHints
 from ..Common.TypeValidationErrors import ConfigTypeError
 from ..CustomKernels import isCustomKernelConfig, supportsUserSgprKernargPreload, validateCustomPersistentArgs
 from ..SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, get_mxs_mt_config, \
@@ -3262,24 +3262,19 @@ class Solution(collections.abc.Mapping):
       state["NonTemporalGate"] = state["NonTemporal"]
       state["NonTemporalMetadata"] = state["NonTemporal"]
 
-    if isaInfoMap[isa].asmCaps.get("HasTHModifier", False):
-      droppedNT = sorted(
-        "NonTemporal%s"%ch for ch in ("",) + _cacheHintTensors
-        if state["NonTemporal%s"%ch] >= 4
-      )
-      if droppedNT:
-        # rocisa prints nt only in MUBUFModifiers, and only with HasNTModifier.
-        if not isaInfoMap[isa].asmCaps["HasNTModifier"]:
-          reject(state, printRejectionReason,
-                 "NonTemporal 4-7 set the nt bit (0x4), which this ISA has no modifier for, so they "
-                 "emit what NonTemporal & 3 emits (%s): use NonTemporal & 3, and TemporalHint*=1 "
-                 "(TH_NT) for non-temporal hints" % ", ".join(droppedNT))
-          return
-        printWarning(
-          "gfx1250 ignores the NonTemporal nt bit (0x4) on %s; use TemporalHint*=1 (TH_NT) for non-temporal hints."
-          % ", ".join(droppedNT)
-        )
+    droppedNT = sorted(
+      "NonTemporal%s"%ch for ch in ("",) + _cacheHintTensors
+      if state.get("NonTemporal%s"%ch, 0) >= 4
+    )
+    if droppedNT and ntBitIgnored(isaInfoMap[isa].asmCaps):
+      reject(state, printRejectionReason,
+             "NonTemporal 4-7 set the nt bit (0x4), which TemporalHint replaces wherever th: modifiers "
+             "exist, so they emit what NonTemporal & 3 emits (%s): set each to NonTemporal & 3, and use "
+             "TemporalHint*=1 (TH_NT) for non-temporal hints"
+             % ", ".join("%s=%d emits %d" % (key, state[key], state[key] & 3) for key in droppedNT))
+      return
 
+    if isaInfoMap[isa].asmCaps.get("HasTHModifier", False):
       reservedLoadHints = [
         "TemporalHint%s"%ch for ch in _cacheHintLoadTensors
         if state["TemporalHint%s"%ch] == 7

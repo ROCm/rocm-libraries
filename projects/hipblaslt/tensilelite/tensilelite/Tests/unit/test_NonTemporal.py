@@ -41,6 +41,7 @@ from tensilelite.Components.NonTemporal import (
     _tdmHintKeyValues,
     decodeNonTemporal,
     forceCoherentNonTemporal,
+    ntBitIgnored,
     tdmCacheModifiers,
 )
 
@@ -349,3 +350,32 @@ def test_tdm_hint_key_values_invert_tdm_cache_modifiers():
             for nv in range(2):
                 mods = tdmCacheModifiers(GFX1250_CAPS, [(nt, TemporalHint(th), NonVolatile(nv))])
                 assert _tdmHintKeyValues(mods) == (nt, th, nv), (nt, th, nv)
+
+
+# ---------------------------------------------------------------------------
+# ntBitIgnored - TemporalHint replaces the nt bit wherever th: modifiers exist
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("nt_value", [4, 5, 6, 7])
+@pytest.mark.parametrize("has_nt", [False, True])
+def test_decode_with_th_gives_nontemporal_4_to_7_the_fields_of_and_3(nt_value, has_nt):
+    """With th: modifiers the nt bit decodes to nothing, whatever the nt modifier."""
+    caps = dict(GFX1250_CAPS, HasNTModifier=has_nt)
+    assert decodeNonTemporal(caps, nt_value) == decodeNonTemporal(caps, nt_value & 3)
+
+
+@pytest.mark.parametrize("has_nt", [False, True])
+def test_nt_bit_ignored_wherever_th_modifiers_exist(has_nt):
+    """gfx1250 and gfx120x have th: modifiers; whether the assembler takes nt does not decide."""
+    assert ntBitIgnored({"HasTHModifier": True, "HasNTModifier": has_nt}) is True
+
+
+@pytest.mark.parametrize("caps", [
+    {"HasTHModifier": False, "HasNTModifier": True},
+    {"HasTHModifier": False, "HasNTModifier": False},
+    {},
+    None,
+])
+def test_nt_bit_kept_without_th_modifiers(caps):
+    """gfx942 and gfx950 have no th: modifiers, so NonTemporal bit 2 still decodes to nt there."""
+    assert ntBitIgnored(caps) is False
+    assert decodeNonTemporal(caps, 4)[2] is True

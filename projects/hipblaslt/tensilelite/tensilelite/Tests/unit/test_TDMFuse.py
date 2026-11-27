@@ -2969,14 +2969,31 @@ def test_solution_takes_one_sided_hints_on_tdmfuse1(_gp_gfx1250, gfx1250_iim, as
     assert _IGNORED_RULE in bareOut and "TemporalHintMXSA=0 emits 1" in bareOut, bareOut
 
 
-def test_solution_rejects_nontemporal_4_to_7_without_the_nt_modifier(
-        _gp_gfx1250, gfx1250_iim, assembler, capsys):
+@pytest.mark.parametrize("hasNT", [False, True])
+def test_solution_rejects_nontemporal_4_to_7_whatever_the_nt_modifier(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, hasNT):
+    """TemporalHint replaces the nt bit wherever th: modifiers exist, so the nt modifier does not decide."""
     from tensilelite.Common.Architectures import gfxToIsa
+    from toolchain_test_helpers import copy_isa_info_map
 
-    keepsNT = bool(gfx1250_iim[gfxToIsa("gfx1250")].asmCaps["HasNTModifier"])
-    sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=0, NonTemporalD=4)
-    assert sol.get("Valid") is keepsNT, out
-    assert (_NT_RULE in out) is not keepsNT, out
+    iim = copy_isa_info_map(gfx1250_iim)
+    iim[gfxToIsa("gfx1250")].asmCaps["HasNTModifier"] = hasNT
+    sol, out = _derive(iim, assembler, capsys, TDMFuse=0, NonTemporalD=4)
+    assert sol.get("Valid") is False, out
+    assert _NT_RULE in out and "NonTemporalD=4 emits 0" in out, out
+    kept, keptOut = _derive(iim, assembler, capsys, TDMFuse=0, NonTemporalD=3)
+    assert kept.get("Valid") is True, keptOut
+    assert _NT_RULE not in keptOut, keptOut
+
+
+def test_solution_names_every_copy_of_an_unsuffixed_nontemporal_4_to_7(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys):
+    """An unsuffixed NonTemporal reaches A, B, C, D, Gate and Metadata before the check."""
+    sol, out = _derive(gfx1250_iim, assembler, capsys, TDMFuse=0, NonTemporal=5)
+    assert sol.get("Valid") is False, out
+    for key in ("NonTemporal", "NonTemporalA", "NonTemporalB", "NonTemporalC", "NonTemporalD",
+                "NonTemporalGate", "NonTemporalMetadata"):
+        assert "%s=5 emits 1" % key in out, out
 
 
 def test_solution_hints_untouched_on_one_wave(_gp_gfx1250, gfx1250_iim, assembler, capsys):
