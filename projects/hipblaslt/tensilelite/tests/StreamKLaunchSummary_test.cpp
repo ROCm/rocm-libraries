@@ -2375,6 +2375,28 @@ TEST(StreamKDynamicSplitTest, ManyTilesStayWhole)
     EXPECT_EQ(e.grid, 256u);
 }
 
+// The dynamic grid fills every CU to the kernel's occupancy, within the flag
+// slots after the queue counters.
+TEST(StreamKDynamicSplitTest, MaxGridFollowsTheOccupancy)
+{
+    AMDGPU gpu;
+    gpu.computeUnitCount   = 256;
+    const size_t flagSlots = 1792;
+    for(auto [occupancy, expected] : std::vector<std::pair<int, size_t>>{
+            {-1, 256}, {0, 256}, {1, 256}, {3, 768}, {4, 1024}, {7, 1792}, {8, 1792}})
+    {
+        SCOPED_TRACE("occupancy " + std::to_string(occupancy));
+        EXPECT_EQ(StreamK::Dynamic::maxGrid(gpu, occupancy, flagSlots), expected);
+    }
+    EXPECT_EQ(StreamK::Dynamic::maxGrid(gpu, 8, 0), 2048u) << "0 flag slots leaves it unbounded";
+    EXPECT_EQ(StreamK::Dynamic::maxGrid(gpu, 8, 100), 100u);
+
+    gpu.persistentMaxCUs = 300;
+    EXPECT_EQ(StreamK::Dynamic::maxGrid(gpu, 8, flagSlots), 300u);
+    gpu.persistentFixedGrid = 200;
+    EXPECT_EQ(StreamK::Dynamic::maxGrid(gpu, 8, flagSlots), 200u);
+}
+
 // Fewer tiles than CUs: the static grid's split (see StreamK::Dynamic::computeSplit).
 TEST(StreamKDynamicSplitTest, SplitFollowsTheStaticFactors)
 {
@@ -3010,6 +3032,39 @@ TEST_F(StreamKDynamicSplitSolveTest, FitMatchesTheReservation)
         EXPECT_EQ(solution->partialTileSize(slots), slots * solution->partialTileSize(1));
 }
 
+// Whole tiles launch up to the kernel's occupancy per CU, bounded by the flag
+// slots so getSKGrid never has to clamp. Splits are sized for the CUs, so
+// occupancy leaves them alone.
+TEST_F(StreamKDynamicSplitSolveTest, GridFollowsTheOccupancy)
+{
+    const Shape  manyTiles{6400, 6400, 1024, 1}; // 2500 tiles
+    auto         problem = dynamicSplitGemm(manyTiles);
+    const size_t tiles   = problem.getNumTiles(solution->sizeMapping, 1);
+    ASSERT_EQ(tiles, 2500u);
+    const auto   split      = dynamicSplitGemm(longKTiles(20));
+    const size_t splitTiles = split.getNumTiles(solution->sizeMapping, 1);
+    const auto   splitAtOne = solution->streamKDynamicDecomposition(split, device, splitTiles);
+    ASSERT_GT(splitAtOne.tiles, 0u);
+
+    for(auto [occupancy, expected] :
+        std::vector<std::pair<int, size_t>>{{1, 256}, {3, 768}, {4, 1024}, {8, 1792}})
+    {
+        SCOPED_TRACE("occupancy " + std::to_string(occupancy));
+        solution->sizeMapping.CUOccupancy = occupancy;
+        const auto d = solution->streamKDynamicDecomposition(problem, device, tiles);
+        EXPECT_EQ(d.tiles, 0u);
+        EXPECT_EQ(d.grid, expected);
+        ASSERT_NE(tiles % expected, 0u) << "getSKGrid's flag clamp applies to this grid";
+        EXPECT_EQ(solution->getSKGrid(problem, device, tiles, origami::reduction_t::tree),
+                  expected);
+        EXPECT_EQ(solution->computeStreamKDecisions(problem, device).grid(), expected);
+        EXPECT_EQ(solution->requiredWorkspaceSize(problem, device), 0u);
+
+        expectSameSplit(solution->streamKDynamicDecomposition(split, device, splitTiles),
+                        splitAtOne);
+    }
+}
+
 // Uniform summation order: the dynamic split gives every tile the same parts
 // (skTiles == tiles), so it splits as with the mode off, except where partials
 // are summed in arrival order or widened by the fixup.
@@ -3498,4 +3553,119 @@ TEST_F(StreamKDynamicParallelSolveTest, ParallelEqualPartsFollowTheRoundedSplit)
     const auto invocations = solveWithFakeBuffers(*solution, problem, device);
     ASSERT_EQ(invocations.size(), 2u) << "GEMM + PostGSU";
     EXPECT_EQ(postGSUSplit(invocations[1], problem), d.split);
+}
+
+// The CU-count hint caps splitCUs (see streamKDynamicDecomposition). 14 x 2
+// tiles of 144 iterations: 256 / 28 = 9 parts per tile, 192 / 28 = 6 hinted.
+TEST_F(StreamKDynamicParallelSolveTest, HintSizesTheSplit)
+{
+    auto         problem = dynamicSplitGemm({1792, 256, 9216, 1});
+    const size_t tiles   = problem.getNumTiles(solution->sizeMapping, 1);
+    ASSERT_EQ(tiles, 28u);
+
+    const auto open = solution->streamKDynamicDecomposition(problem, device, tiles);
+    ASSERT_TRUE(open.parallel);
+    EXPECT_EQ(open.split, 9u);
+
+    problem.setParams().setSmCountTarget(192);
+    const auto hinted = solution->streamKDynamicDecomposition(problem, device, tiles);
+    ASSERT_TRUE(hinted.parallel);
+    EXPECT_EQ(hinted.split, 6u);
+    EXPECT_EQ(hinted.grid, 168u);
+    EXPECT_LT(solution->partialTileSize(hinted.partialSlots()),
+              solution->partialTileSize(open.partialSlots()));
+
+    // A hint above the CU count, or none, sizes for the device.
+    problem.setParams().setSmCountTarget(100000);
+    expectSameSplit(solution->streamKDynamicDecomposition(problem, device, tiles), open);
+    problem.setParams().setSmCountTarget(0);
+    expectSameSplit(solution->streamKDynamicDecomposition(problem, device, tiles), open);
+
+    // 14 x 4 tiles: parallel on the device (56 <= 256 / 4), the arrival
+    // fixup on 192 hinted CUs (56 > 192 / 4), with 3 parts per tile.
+    auto         wide      = dynamicSplitGemm({1792, 512, 9216, 1});
+    const size_t wideTiles = wide.getNumTiles(solution->sizeMapping, 1);
+    ASSERT_EQ(wideTiles, 56u);
+    const auto w = solution->streamKDynamicDecomposition(wide, device, wideTiles);
+    EXPECT_TRUE(w.parallel);
+    EXPECT_EQ(w.split, 4u);
+    wide.setParams().setSmCountTarget(192);
+    const auto wh = solution->streamKDynamicDecomposition(wide, device, wideTiles);
+    EXPECT_FALSE(wh.parallel);
+    EXPECT_EQ(wh.split, 3u);
+    EXPECT_EQ(wh.grid, 168u);
+}
+
+// The workspace query and the launch see the same hint, so they agree. A
+// launch given the larger workspace an unhinted query asks for takes the
+// hinted split; one given the hinted workspace without the hint shrinks to it.
+TEST_F(StreamKDynamicParallelSolveTest, HintedWorkspaceQueryAndLaunchAgree)
+{
+    auto         problem      = dynamicSplitGemm({1792, 256, 9216, 1});
+    const size_t tiles        = problem.getNumTiles(solution->sizeMapping, 1);
+    const auto   open         = solution->streamKDynamicDecomposition(problem, device, tiles);
+    const size_t openRequired = solution->requiredWorkspaceSize(problem, device);
+
+    problem.setParams().setSmCountTarget(192);
+    const auto   hinted   = solution->streamKDynamicDecomposition(problem, device, tiles);
+    const size_t required = solution->requiredWorkspaceSize(problem, device);
+    ASSERT_TRUE(hinted.parallel);
+    EXPECT_EQ(solution->computeStreamKDecisions(problem, device).requiredWorkspaceBytes, required);
+
+    ASSERT_NO_FATAL_FAILURE(expectWorkspaceAndLaunchCarry(*solution, problem, hinted));
+    EXPECT_EQ(solution->resolvePersistentSettings(problem, device).reduction,
+              origami::reduction_t::parallel);
+    EXPECT_EQ(solveWithFakeBuffers(*solution, problem, device).size(), 2u) << "GEMM + PostGSU";
+
+    problem.setWorkspaceSize(openRequired);
+    expectSameSplit(solution->streamKDynamicDecomposition(problem, device, tiles), hinted);
+
+    problem.setParams().setSmCountTarget(0);
+    problem.setWorkspaceSize(required);
+    const auto shrunk = solution->streamKDynamicDecomposition(problem, device, tiles);
+    EXPECT_LT(shrunk.totalItems, open.totalItems);
+    EXPECT_LE(solution->partialTileSize(shrunk.partialSlots()), required);
+    EXPECT_LE(solution->resolvePersistentSettings(problem, device).workspaceBytes, required);
+}
+
+// Whole tiles keep the device-wide grid under the hint.
+TEST_F(StreamKDynamicParallelSolveTest, HintKeepsWholeTileGrid)
+{
+    auto         problem = dynamicSplitGemm({4096, 2048, 9216, 1});
+    const size_t tiles   = problem.getNumTiles(solution->sizeMapping, 1);
+    const auto   open    = solution->streamKDynamicDecomposition(problem, device, tiles);
+    ASSERT_EQ(open.tiles, 0u);
+
+    problem.setParams().setSmCountTarget(192);
+    const auto hinted = solution->streamKDynamicDecomposition(problem, device, tiles);
+    EXPECT_EQ(hinted.tiles, 0u);
+    EXPECT_EQ(hinted.grid, open.grid);
+    EXPECT_EQ(hinted.grid, 256u);
+}
+
+// A hint below the XCD count or the tile count keeps the tiles whole, and the
+// grid still gives every non-empty work queue a workgroup.
+TEST_F(StreamKDynamicParallelSolveTest, HintBelowQueuesKeepsTilesWholeAndCoversQueues)
+{
+    for(size_t batch : {size_t{4}, size_t{16}})
+        for(int hint : {2, 4})
+        {
+            SCOPED_TRACE(std::to_string(batch) + " tiles, hint " + std::to_string(hint));
+            auto problem = dynamicSplitGemm(longKTiles(batch));
+            problem.setParams().setSmCountTarget(hint);
+            const size_t tiles = problem.getNumTiles(solution->sizeMapping, 1);
+            ASSERT_EQ(tiles, batch);
+
+            const auto d = solution->streamKDynamicDecomposition(problem, device, tiles);
+            EXPECT_EQ(d.tiles, 0u);
+            EXPECT_EQ(d.totalItems, tiles);
+
+            const auto   decided = solution->computeStreamKDecisions(problem, device);
+            const size_t covered = std::min(size_t{d.totalItems}, decided.numQueues);
+            ASSERT_LT(size_t(hint), decided.numQueues);
+            EXPECT_GE(decided.grid(), covered);
+            EXPECT_GE(solution->getSKGrid(problem, device, tiles, origami::reduction_t::tree),
+                      covered);
+            EXPECT_NO_THROW(solveWithFakeBuffers(*solution, problem, device));
+        }
 }

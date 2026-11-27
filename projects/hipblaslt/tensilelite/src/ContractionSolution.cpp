@@ -7375,8 +7375,8 @@ namespace TensileLite
             {
                 if(self.sizeMapping.hasDynamicAssignment() || sk5DynamicSubMode())
                 {
-                    // Use all CUs (up to StreamK::Dynamic::MaxOccupancy workgroups
-                    // each), capped by the work items.
+                    // Fill every CU to the kernel's occupancy, capped by the work
+                    // items and the flag region (StreamK::Dynamic::maxGrid).
                     grid = self.streamKDynamicDecomposition(problem, hardware, tiles).grid;
                 }
                 else
@@ -7774,8 +7774,9 @@ namespace TensileLite
             // per-XCD work-queue counters, so they index fewer entries than the
             // region holds. The rest index from 0 and keep all of them;
             // tightening every path would cost them grid they are entitled to.
-            // On these paths StreamK::Dynamic::computeSplit() keeps skTiles * skSplit
-            // within it; the grid bound is a backstop.
+            // On these paths StreamK::Dynamic::maxGrid() already bounds the grid
+            // and StreamK::Dynamic::computeSplit() keeps skTiles * skSplit within
+            // it; the clamp is a backstop.
             size_t flagEntries = StreamKFlagElements;
             // The && short-circuits, so a launch that never reaches the flags
             // does not pay for resolving the SK5 sub-mode.
@@ -7845,11 +7846,21 @@ namespace TensileLite
         // Handwritten kernels size their workspace from their own metadata, which
         // holds no split partials, so they keep every tile whole, overrides included.
         const bool handwritten = handwrittenCustomKernel();
+        // Arrival counters (and per-part flags) start after the queue counters.
+        const size_t prefixEntries = StreamK::Dynamic::queueRegionBytes(hardware) / sizeof(int);
+        in.flagSlots
+            = prefixEntries < StreamKFlagElements ? StreamKFlagElements - prefixEntries : 0;
         if(AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware))
         {
-            in.maxGrid = StreamK::Dynamic::maxGrid(*pAMDGPU, sizeMapping.CUOccupancy);
+            in.maxGrid = StreamK::Dynamic::maxGrid(*pAMDGPU, sizeMapping.CUOccupancy, in.flagSlots);
             // One part per CU, within that grid.
             in.splitCUs = std::min(static_cast<size_t>(pAMDGPU->computeUnitCount), in.maxGrid);
+            // Size the split for the CU-count hint, as origami's num_cus does for
+            // the static grid, so no part waits for a second round. The grid stays
+            // device-wide: the queues balance whole tiles.
+            const int cuHint = problem.getParams().smCountTarget();
+            if(cuHint > 0)
+                in.splitCUs = std::min(in.splitCUs, static_cast<size_t>(cuHint));
             if(!handwritten)
             {
                 in.overrideTiles = pAMDGPU->skTiles;
@@ -7877,11 +7888,7 @@ namespace TensileLite
               && !(problemType.useGradient && problemType.useBias) && !problemType.outputAmaxD;
         in.allowParallel = internalArgsSupport.dynamicParallel && splittable
                            && sizeMapping.hasHybridAssignment() && parallelStoresSupported;
-        in.unevenParts = internalArgsSupport.dynamicUnevenParts;
-        // Arrival counters (and per-part flags) start after the queue counters.
-        const size_t prefixEntries = StreamK::Dynamic::queueRegionBytes(hardware) / sizeof(int);
-        in.flagSlots
-            = prefixEntries < StreamKFlagElements ? StreamKFlagElements - prefixEntries : 0;
+        in.unevenParts      = internalArgsSupport.dynamicUnevenParts;
         in.workspaceBytes   = problem.workspaceSize();
         in.partialTileBytes = partialTileSize(1);
         return StreamK::Dynamic::computeSplit(in);
