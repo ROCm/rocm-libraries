@@ -230,4 +230,44 @@ namespace
         EXPECT_NE(memcmp(hB.data(), hB.data() + lda, m * sizeof(float)), 0)
             << "columns 0 and 1 hold the same values";
     }
+
+    // Every batch of a host_batch_matrix, then the next draws of the caller's random sequence,
+    // which a batched helper must leave as it found it
+    template <typename T>
+    std::vector<T> batches_then_caller_draws(const host_batch_matrix<T>& hA)
+    {
+        std::vector<T> out;
+        for(int64_t b = 0; b < hA.batch_count(); b++)
+            out.insert(out.end(), hA[b], hA[b] + hA.lda() * hA.n());
+        for(int i = 0; i < 4; i++)
+            out.push_back(random_generator<T>());
+        return out;
+    }
+
+    // The batched regular_to_banded and make_unit_diagonal reseed each batch: they fill unused
+    // band storage and the unit diagonal with random values from the threads of a parallel loop
+    TEST(rocblas_init, quick_banded_and_unit_diagonal_are_independent_of_thread_count)
+    {
+        constexpr rocblas_int n = 41, k = 5, batches = 5;
+        for(bool upper : {false, true})
+            expect_independent_of_thread_count<float>([upper] {
+                host_batch_matrix<float> hA(n, n, n, batches);
+                rocblas_init_matrix(
+                    rocblas_client_general_matrix, 'L', random_generator<float>, hA);
+                // ldab > k + 1, so the rows below the band are filled with random values too
+                host_batch_matrix<float> hAB(k + 1, n, k + 4, batches);
+                regular_to_banded(upper, hA, hAB, k);
+                return batches_then_caller_draws(hAB);
+            });
+        for(rocblas_fill uplo : {rocblas_fill_lower, rocblas_fill_upper})
+            expect_independent_of_thread_count<double>([uplo] {
+                host_batch_matrix<double> hA(n, n, n + 3, batches);
+                rocblas_init_matrix(rocblas_client_triangular_matrix,
+                                    uplo == rocblas_fill_lower ? 'L' : 'U',
+                                    random_generator<double>,
+                                    hA);
+                make_unit_diagonal(uplo, hA);
+                return batches_then_caller_draws(hA);
+            });
+    }
 }

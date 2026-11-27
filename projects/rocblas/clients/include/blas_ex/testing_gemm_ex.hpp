@@ -525,6 +525,10 @@ void testing_gemm_ex_run(const Arguments& arg)
 
         cpu_time_used = get_time_us_no_sync() - cpu_time_used;
 
+        // outputs whose comparison may allow for the accumulation order on HPL data (see below)
+        constexpr bool hpl_tolerance
+            = !std::is_same_v<To, rocblas_half> && !std::is_same_v<To, rocblas_bfloat16>;
+
         if(arg.pointer_mode_host)
         {
             if(arg.unit_check)
@@ -541,12 +545,14 @@ void testing_gemm_ex_run(const Arguments& arg)
                     const double tol = K * sum_error_tolerance<Tc>;
                     near_check_general<To, To_hpa>(M, N, ldd, hD_gold, hD_1, tol);
                 }
-                else if(arg.initialization == rocblas_initialization::hpl)
+                else if(hpl_tolerance && arg.initialization == rocblas_initialization::hpl)
                 {
                     // HPL data is random reals, so a sum of K products is not exact and how it
                     // rounds depends on the order of the additions, which the CPU reference and the
                     // GPU kernel do not share. Allow about one rounding of the accumulation type
-                    // per product, scaled by alpha and beta.
+                    // per product, scaled by alpha and beta. Half and bfloat16 outputs keep the
+                    // exact check, which accepts both rounding modes and whose own rounding is far
+                    // coarser than this accumulation error.
                     const double tol
                         = K * sum_error_tolerance<Tc>
                           * (double(rocblas_abs(h_alpha_Tc)) + double(rocblas_abs(h_beta_Tc)));
@@ -583,12 +589,14 @@ void testing_gemm_ex_run(const Arguments& arg)
                     const double tol = K * sum_error_tolerance<Tc>;
                     near_check_general<To, To_hpa>(M, N, ldd, hD_gold, hD_2, tol);
                 }
-                else if(arg.initialization == rocblas_initialization::hpl)
+                else if(hpl_tolerance && arg.initialization == rocblas_initialization::hpl)
                 {
                     // HPL data is random reals, so a sum of K products is not exact and how it
                     // rounds depends on the order of the additions, which the CPU reference and the
                     // GPU kernel do not share. Allow about one rounding of the accumulation type
-                    // per product, scaled by alpha and beta.
+                    // per product, scaled by alpha and beta. Half and bfloat16 outputs keep the
+                    // exact check, which accepts both rounding modes and whose own rounding is far
+                    // coarser than this accumulation error.
                     const double tol
                         = K * sum_error_tolerance<Tc>
                           * (double(rocblas_abs(h_alpha_Tc)) + double(rocblas_abs(h_beta_Tc)));
