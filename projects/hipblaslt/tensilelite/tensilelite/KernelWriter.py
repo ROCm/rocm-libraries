@@ -1991,8 +1991,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         for vacancy in self.localReadsVacancy:
           # {"items","latencyLeft","atIter","atMfmaIndex","noReadsAtThisIter"}
           for localRead in list(localReadItemsThisLoop):
-            if vacancy["latencyLeft"] >= localRead.issueLatency() * 2:
-              vacancy["latencyLeft"] -= localRead.issueLatency() * 2
+            if vacancy["latencyLeft"] >= sched_rocisa_view(localRead).issueLatency() * 2:
+              vacancy["latencyLeft"] -= sched_rocisa_view(localRead).issueLatency() * 2
               vacancy["items"].add(localRead)
               localReadItemsThisLoop.remove(localRead)
               if vacancy["atMfmaIndex"] > self.states.sync1LdsMfmaIndex and oneBufferScheduling:
@@ -2122,7 +2122,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                   latencyLeft -= (tPA["localWriteInstruction"].issueLatency*2)
             readLeftLROPT = 0
             for j in range(len(localReadItemsThisLoop)):
-              latencyLeft -= localReadItemsThisLoop[j].issueLatency()*2
+              latencyLeft -= sched_rocisa_view(localReadItemsThisLoop[j]).issueLatency()*2
               readLeftLROPT += 1 if latencyLeft >= 0 else 0
             # at least 1 instruction
             readLeftLROPT = max(readLeftLROPT,1)
@@ -2163,9 +2163,9 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
               latencyLeft -= readLeft * tPA["localWriteInstruction"].issueLatency * 2
             else:
               readLeft = len(localReadItemsThisLoop)
-              latencyLeft -= sum(j.issueLatency()*2 for j in localReadItemsThisLoop)
+              latencyLeft -= sum(sched_rocisa_view(j).issueLatency()*2 for j in localReadItemsThisLoop)
           else:
-            latencyLeft -= sum(j.issueLatency()*2 for j in localReadItemsThisLoop)
+            latencyLeft -= sum(sched_rocisa_view(j).issueLatency()*2 for j in localReadItemsThisLoop)
 
         # force to schedule all remaining localreads before start to schedule localwrite.
         if mfmaIndex == self.states.sync1LdsMfmaIndex and oneBufferScheduling:
@@ -2338,7 +2338,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         if self.states.numItersPLR and iteration >= isBarrier:
           readLeftLROPT = 0
           for j in range(len(localReadItemsNextLoop)):
-            latencyLeft -= localReadItemsNextLoop[j].issueLatency()*2
+            latencyLeft -= sched_rocisa_view(localReadItemsNextLoop[j]).issueLatency()*2
             readLeftLROPT += 1 if latencyLeft >= 0 else 0
           # at least 1 instruction
           readLeftLROPT = max(readLeftLROPT,1)
