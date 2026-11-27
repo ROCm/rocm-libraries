@@ -89,9 +89,10 @@
  * first, here as there.
  *
  * Knobs: hipkernel:BatchnormTraining and hipkernel:BatchnormBackward ship a kernel per
- * performance configuration their build takes (`variant`, `block_size`, `vector_size`), and
- * hipkernel:BatchnormInference a kernel per vector width of each form (`vector_size`), so a
- * caller can pin one. Unpinned, each engine's scorer ranks the configuration the hand-written
+ * performance configuration their build takes (`variant`, `block_size`, `vector_size`),
+ * hipkernel:BatchnormInference a kernel per vector width of each form (`vector_size`), and
+ * hipkernel:LayernormBwd a kernel per scale/bias reduction (`parallel`), so a caller can pin
+ * one. Unpinned, each engine's scorer ranks the configuration the hand-written
  * engine's heuristics choose first, and the plan is the hand-written engine's.
  *
  * Deliberate difference: a graph with override shapes is declined by every family. Each
@@ -124,10 +125,12 @@ constexpr std::string_view BATCHNORM_BACKWARD = "BATCHNORM_BACKWARD";
 
 // The knobs: the kernels' integer metadata naming the performance configuration each builds.
 // Batchnorm training and backward: BatchnormSpatialConfig's variant, groupSize and
-// vectorSize. Batchnorm inference: BatchnormInferenceConfig's vectorSize.
+// vectorSize. Batchnorm inference: BatchnormInferenceConfig's vectorSize. Layernorm
+// backward: LayernormBwdConfig's parallel, 0 or 1.
 constexpr std::string_view VARIANT_FIELD = "variant";
 constexpr std::string_view BLOCK_SIZE_FIELD = "block_size";
 constexpr std::string_view VECTOR_SIZE_FIELD = "vector_size";
+constexpr std::string_view PARALLEL_FIELD = "parallel";
 
 // ---------------------------------------------------------------------------
 // Matching
@@ -744,6 +747,65 @@ double batchnormInferenceScore(const MatchContext& context,
     return heuristicFirstScore(inferenceConfigOf(kernel), heuristic, INFERENCE_CONFIG_ORDER);
 }
 
+/// The layernorm backward params of the graph.
+layernorm::LayernormBwdParams layernormBwdParams(const MatchContext& context)
+{
+    return layernorm::LayernormBwdParams(
+        context.graph.getNodeWrapper(0).attributesAs<data_objects::LayernormBackwardAttributes>(),
+        context.graph.getTensorMap());
+}
+
+/// The layernorm backward configuration @p kernel builds: whether its `parallel` reduction
+/// splits across workgroups.
+layernorm::LayernormBwdConfig layernormBwdConfigOf(const KernelDefinition& kernel)
+{
+    return {kernel.getIntMetadata(std::string(PARALLEL_FIELD)) != 0};
+}
+
+/// The layernorm backward reductions for heuristicFirstScore(): with two, the one the launch
+/// heuristics did not choose ranks second whatever this order.
+constexpr std::array<layernorm::LayernormBwdConfig, 2> LAYERNORM_BWD_CONFIG_ORDER
+    = {{{false}, {true}}};
+
+/// Kernel-scoped, layernorm backward: the operation, and a reduction that can run the graph
+/// (isBwdConfigApplicable(), which accepts both).
+bool layernormBwdKernelMatches(const MatchContext& context,
+                               const BoundTokens& bound,
+                               const KernelDefinition& kernel)
+{
+    if(!kernelMatches(context, bound, kernel))
+    {
+        return false;
+    }
+    try
+    {
+        const auto params = layernormBwdParams(context);
+        const auto statistics
+            = params.mean() == nullptr ? std::nullopt : std::make_optional(params.mean());
+        const layernorm::ProblemDescription problem(
+            params.x(), params.scale(), statistics, layernorm::Direction::BACKWARD);
+        return layernorm::isBwdConfigApplicable(problem, layernormBwdConfigOf(kernel));
+    }
+    catch(const std::exception& error)
+    {
+        HIPDNN_PLUGIN_LOG_INFO("hipkernel:LayernormBwd declines kernel " << kernel.name << ": "
+                                                                         << error.what());
+        return false;
+    }
+}
+
+/// The launch heuristics' reduction first.
+double layernormBwdScore(const MatchContext& context,
+                         const BoundTokens& /*bound*/,
+                         const KernelDefinition& kernel)
+{
+    const auto params = layernormBwdParams(context);
+    return heuristicFirstScore(
+        layernormBwdConfigOf(kernel),
+        layernorm::defaultLayernormBwdConfig(params, context.deviceProperties.multiProcessorCount),
+        LAYERNORM_BWD_CONFIG_ORDER);
+}
+
 // ---------------------------------------------------------------------------
 // Dispatch: shared
 // ---------------------------------------------------------------------------
@@ -1166,20 +1228,17 @@ class LayernormBwdDispatchHandler : public HipMlopsDispatchHandler
 public:
     using HipMlopsDispatchHandler::HipMlopsDispatchHandler;
 
+    /// The workspace of the reduction @p kernel names, which prepare() builds.
     size_t workspaceBytes(const MatchContext& context,
                           const BoundTokens& /*bound*/,
-                          const KernelDefinition& /*kernel*/) const override
+                          const KernelDefinition& kernel) const override
     {
-        const auto& attributes = context.graph.getNodeWrapper(0)
-                                     .attributesAs<data_objects::LayernormBackwardAttributes>();
-        const layernorm::LayernormBwdParams params(attributes, context.graph.getTensorMap());
-        const int multiProcessorCount = context.deviceProperties.multiProcessorCount;
-        return layernorm::layernormBwdWorkspaceBytes(
-            params,
-            multiProcessorCount,
-            layernorm::defaultLayernormBwdConfig(params, multiProcessorCount));
+        return layernorm::layernormBwdWorkspaceBytes(layernormBwdParams(context),
+                                                     context.deviceProperties.multiProcessorCount,
+                                                     layernormBwdConfigOf(kernel));
     }
 
+    /// Builds the reduction @p kernel names: two launches, or three for the parallel one.
     std::unique_ptr<PreparedDispatch> prepare(const MatchContext& context,
                                               const BoundTokens& /*bound*/,
                                               const KernelDefinition& kernel) const override
@@ -1187,13 +1246,12 @@ public:
         const auto& attributes = context.graph.getNodeWrapper(0)
                                      .attributesAs<data_objects::LayernormBackwardAttributes>();
         const auto& tensorMap = context.graph.getTensorMap();
-        const layernorm::LayernormBwdParams params(attributes, tensorMap);
-        const int multiProcessorCount = context.deviceProperties.multiProcessorCount;
-        const auto build = layernorm::buildLayernormBwdKernel(
-            params,
-            context.deviceProperties.gcnArchName,
-            multiProcessorCount,
-            layernorm::defaultLayernormBwdConfig(params, multiProcessorCount));
+        const auto params = layernormBwdParams(context);
+        const auto build
+            = layernorm::buildLayernormBwdKernel(params,
+                                                 context.deviceProperties.gcnArchName,
+                                                 context.deviceProperties.multiProcessorCount,
+                                                 layernormBwdConfigOf(kernel));
 
         std::optional<hipdnn_plugin_sdk::ScalarOperand> epsilon;
         if(attributes.epsilon_tensor_uid().has_value())
@@ -1998,7 +2056,8 @@ void registerHipMlopsLayernormFwdSymbols(SymbolScope<Handle>& scope)
 void registerHipMlopsLayernormBwdSymbols(SymbolScope<Handle>& scope)
 {
     scope.add("hipkernel.layernorm_bwd.graph_match", &layernormBwdGraphMatches);
-    scope.add("hipkernel.layernorm_bwd.kernel_match", &kernelMatches);
+    scope.add("hipkernel.layernorm_bwd.kernel_match", &layernormBwdKernelMatches);
+    scope.add("hipkernel.layernorm_bwd.score", &layernormBwdScore);
     scope.add("hipkernel.layernorm_bwd.dispatch", &dispatchHandler<LayernormBwdDispatchHandler>());
 }
 

@@ -16,7 +16,8 @@
           "kmd_id": "429378a5-9af9-4b6b-8477-a57b99591230",
           "metadata_fields": [],
           "matcher_only_fields": [
-            "operation"
+            "operation",
+            "parallel"
           ],
           "bindings": {},
           "vocabulary": {}
@@ -28,14 +29,30 @@
     {
       "version": "1.0",
       "id": "d322d7dd-b0ac-4042-a2bc-65a5a7e77383",
-      "name": "hip_mlops.layernorm_bwd",
+      "name": "hip_mlops.layernorm_bwd.one_pass",
       "kernel_source": {
         "kind": "embedded_source",
         "source_file": "kernels/LayernormBwd.cpp",
         "entry_point": "LayernormBwd"
       },
       "metadata": {
-        "operation": "LAYERNORM_BWD"
+        "operation": "LAYERNORM_BWD",
+        "parallel": 0
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "f3e0858f-f01e-4350-a4eb-a79057f1fc4b",
+      "name": "hip_mlops.layernorm_bwd.parallel",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/LayernormBwd.cpp",
+        "entry_point": "LayernormBwd"
+      },
+      "metadata": {
+        "operation": "LAYERNORM_BWD",
+        "parallel": 1
       },
       "priority": 0
     }

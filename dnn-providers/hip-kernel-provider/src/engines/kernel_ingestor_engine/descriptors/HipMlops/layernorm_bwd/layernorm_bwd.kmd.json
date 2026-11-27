@@ -6,6 +6,11 @@
     {
       "name": "operation",
       "type": "string"
+    },
+    {
+      "name": "parallel",
+      "type": "int",
+      "default_value": 0
     }
   ]
 }

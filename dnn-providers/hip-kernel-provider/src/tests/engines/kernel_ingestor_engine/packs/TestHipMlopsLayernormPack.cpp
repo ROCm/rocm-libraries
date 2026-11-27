@@ -6,6 +6,8 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <set>
+#include <string>
 #include <vector>
 
 #include <gmock/gmock.h>
@@ -27,6 +29,11 @@
  *        builder accepts in their direction, and compute forward and backward layernorm as CPU
  *        references do -- the backward on both of its launch sequences, with the graph's
  *        epsilon and with the default.
+ *
+ *        hipkernel:LayernormBwd ships a kernel per scale/bias reduction (ALMIOPEN-3066),
+ *        addressed by the knob `parallel`: the launch heuristics' reduction ranks first, the
+ *        workspace follows the reduction selected, and each, pinned through the knob, computes
+ *        as the reference does.
  */
 namespace
 {
@@ -295,6 +302,122 @@ INSTANTIATE_TEST_SUITE_P(
     [](const ::testing::TestParamInfo<RefusalCase>& info) { return info.param.name; });
 
 // ---------------------------------------------------------------------------
+// Knob: one backward kernel per scale/bias reduction
+// ---------------------------------------------------------------------------
+
+const std::vector<std::string> KNOBS = {"parallel"};
+
+/// A device of 4 CUs: a parallel pass keeps 4 * 1024 * 4 = 16384 work items busy.
+constexpr int COMPUTE_UNITS = 4;
+
+LayernormGraph backwardOf(std::vector<int64_t> dims, bool withStatistics = true)
+{
+    LayernormGraph spec;
+    spec.backward = true;
+    spec.dims = std::move(dims);
+    spec.withStatistics = withStatistics;
+    return spec;
+}
+
+TEST(TestHipMlopsLayernormBwdKnob, TheBackwardShipsAKernelPerReduction)
+{
+    EXPECT_EQ(engineKnobs(LAYERNORM_BWD_ENGINE), KNOBS);
+    std::set<int64_t> reductions;
+    for(const auto& kernel : loadedKernels(LAYERNORM_BWD_ENGINE))
+    {
+        EXPECT_TRUE(reductions.insert(kernel.getIntMetadata("parallel")).second) << kernel.name;
+        EXPECT_EQ(kernel.source.entryPoint, "LayernormBwd");
+    }
+    EXPECT_EQ(reductions, (std::set<int64_t>{0, 1}));
+    // The forward has one launch sequence and no knob.
+    EXPECT_TRUE(engineKnobs(LAYERNORM_FWD_ENGINE).empty());
+}
+
+struct ReductionCase
+{
+    const char* name;
+    std::vector<int64_t> dims;
+    int64_t expected;
+};
+
+class TestHipMlopsLayernormBwdDefault : public ::testing::TestWithParam<ReductionCase>
+{
+};
+
+// Both reductions run any graph, so the knob always offers both; the launch heuristics'
+// choice (defaultLayernormBwdConfig()) ranks first.
+TEST_P(TestHipMlopsLayernormBwdDefault, TheHeuristicsReductionRanksFirst)
+{
+    for(const bool withStatistics : {true, false})
+    {
+        SCOPED_TRACE(withStatistics ? "with statistics" : "without statistics");
+        const auto spec = backwardOf(GetParam().dims, withStatistics);
+        const auto kernels = rankedKernels(engineFor(spec),
+                                           buildLayernormGraph(spec),
+                                           devicePropertiesWithComputeUnits(COMPUTE_UNITS));
+        expectUniqueTuples(kernels, KNOBS);
+        const auto offered = knobValues(kernels, "parallel");
+        ASSERT_EQ(offered.size(), 2U);
+        EXPECT_EQ(offered.front(), GetParam().expected);
+        EXPECT_THAT(offered, ::testing::UnorderedElementsAre(0, 1));
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    ,
+    TestHipMlopsLayernormBwdDefault,
+    ::testing::Values(
+        // 3 rows of 2400: the whole tensor fits one parallel pass.
+        ReductionCase{"FewRowsOnePass", {3, 5, 16, 30}, 0},
+        // 8 rows of 2400 exceed it while a row does not: split across workgroups.
+        ReductionCase{"ManyRowsParallel", {8, 5, 16, 30}, 1},
+        // A row of 20480 alone exceeds it.
+        ReductionCase{"WideRowsOnePass", {2, 5, 64, 64}, 0}),
+    [](const ::testing::TestParamInfo<ReductionCase>& info) { return info.param.name; });
+
+/// The workspace the backward's handler reports for its kernel of reduction @p parallel on
+/// @p spec's graph, on a device of COMPUTE_UNITS CUs: what a plan of that kernel allocates.
+size_t workspaceOf(const LayernormGraph& spec, int64_t parallel)
+{
+    for(const auto& kernel : loadedKernels(LAYERNORM_BWD_ENGINE))
+    {
+        if(kernel.getIntMetadata("parallel") == parallel)
+        {
+            return workspaceBytesOf(LAYERNORM_BWD_ENGINE,
+                                    buildLayernormGraph(spec),
+                                    kernel,
+                                    devicePropertiesWithComputeUnits(COMPUTE_UNITS));
+        }
+    }
+    ADD_FAILURE() << "no kernel of reduction " << parallel;
+    return 0;
+}
+
+TEST(TestHipMlopsLayernormBwdKnob, TheWorkspaceFollowsTheSelectedReduction)
+{
+    // 3 rows of 2400 on 4 CUs: the parallel reduction keeps 2 partial sums of dscale and dbias
+    // per column, 4 * 2 * 2400 * 2 bytes; recomputing the statistics adds a mean and an
+    // inverse variance per row, 4 * 2 * 3 bytes, to either.
+    EXPECT_EQ(workspaceOf(backwardOf({3, 5, 16, 30}), 0), 0U);
+    EXPECT_EQ(workspaceOf(backwardOf({3, 5, 16, 30}), 1), 38400U);
+    EXPECT_EQ(workspaceOf(backwardOf({3, 5, 16, 30}, false), 0), 24U);
+    EXPECT_EQ(workspaceOf(backwardOf({3, 5, 16, 30}, false), 1), 38424U);
+}
+
+TEST(TestHipMlopsLayernormBwdKnob, PinningAReductionBuildsIt)
+{
+    const auto spec = backwardOf({3, 5, 16, 30});
+    const auto kernels = rankedKernels(engineFor(spec),
+                                       buildLayernormGraph(spec),
+                                       devicePropertiesWithComputeUnits(COMPUTE_UNITS));
+    for(const int64_t parallel : {0, 1})
+    {
+        EXPECT_EQ(pinnedTuple(kernels, KNOBS, {{"parallel", parallel}}),
+                  (KnobSettings{{"parallel", parallel}}));
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Numerics through the engine
 // ---------------------------------------------------------------------------
 
@@ -455,10 +578,12 @@ Inputs inputsFor(const LayernormGraph& spec)
             deterministicValues(count, 1.9f)};
 }
 
-/// Runs the backward of @p spec through the engine against the reference. With
-/// statistics in the graph, they are the reference forward's; without, the kernel
-/// recomputes them with @p expectedEpsilon.
-EngineRun checkBackward(const LayernormGraph& spec, double expectedEpsilon)
+/// Runs the backward of @p spec through the engine, with @p knobs pinned, against the
+/// reference. With statistics in the graph, they are the reference forward's; without, the
+/// kernel recomputes them with @p expectedEpsilon.
+EngineRun checkBackward(const LayernormGraph& spec,
+                        double expectedEpsilon,
+                        const KnobSettings& knobs = {})
 {
     const auto in = inputsFor(spec);
     const size_t count = in.x.size();
@@ -490,8 +615,16 @@ EngineRun checkBackward(const LayernormGraph& spec, double expectedEpsilon)
 
     EngineRun run;
     EXPECT_NO_FATAL_FAILURE(
-        executeThroughTheEngine(engineFor(spec), buildLayernormGraph(spec), buffers, &run));
-    EXPECT_EQ(run.workspaceBytes, run.maxWorkspaceBytes);
+        executeThroughTheEngine(engineFor(spec), buildLayernormGraph(spec), buffers, &run, knobs));
+    // Unpinned, the engine's maximum covers both reductions; pinned, only the one built.
+    if(knobs.empty())
+    {
+        EXPECT_LE(run.workspaceBytes, run.maxWorkspaceBytes);
+    }
+    else
+    {
+        EXPECT_EQ(run.workspaceBytes, run.maxWorkspaceBytes);
+    }
 
     expectNear(dx.read(), expected.dx, "dx");
     expectNear(dscale.read(), expected.dscale, "dscale");
@@ -595,6 +728,46 @@ TEST(TestHipMlopsLayernormDevice, BackwardOnTheParallelPathMatchesTheReference)
     const auto run = checkBackward(spec, static_cast<double>(spec.epsilon));
     // Given statistics, only the parallel partial sums need a workspace.
     EXPECT_GT(run.workspaceBytes, 0U);
+}
+
+TEST(TestHipMlopsLayernormDevice, TheProviderAdvertisesTheReductionKnob)
+{
+    SKIP_IF_NO_DEVICES();
+
+    // 3 rows of 2400 fit one parallel pass on a device of 2 CUs or more: the one-pass
+    // reduction is the default.
+    const auto spec = backwardOf({3, 5, 16, 30});
+    const auto knobs = advertisedKnobs(engineFor(spec), buildLayernormGraph(spec));
+    ASSERT_EQ(knobs.size(), 1U);
+    EXPECT_EQ(knobs[0].name, "parallel");
+    EXPECT_EQ(knobs[0].defaultValue, 0);
+    EXPECT_THAT(knobs[0].validValues, ::testing::UnorderedElementsAre(0, 1));
+}
+
+TEST(TestHipMlopsLayernormDevice, EachReductionPinnedThroughTheKnobMatchesTheReference)
+{
+    SKIP_IF_NO_DEVICES();
+
+    // Both reductions on a graph the heuristics give the one-pass one, so the parallel one
+    // runs only because it is pinned.
+    for(const bool withStatistics : {true, false})
+    {
+        for(const int64_t parallel : {0, 1})
+        {
+            SCOPED_TRACE(withStatistics ? "with statistics" : "without statistics");
+            SCOPED_TRACE(parallel == 1 ? "parallel" : "one pass");
+            LayernormGraph spec;
+            spec.backward = true;
+            spec.withStatistics = withStatistics;
+            const auto run
+                = checkBackward(spec, static_cast<double>(spec.epsilon), {{"parallel", parallel}});
+            if(withStatistics)
+            {
+                // Only the parallel partial sums need a workspace.
+                EXPECT_EQ(run.workspaceBytes > 0U, parallel == 1);
+            }
+        }
+    }
 }
 
 } // namespace

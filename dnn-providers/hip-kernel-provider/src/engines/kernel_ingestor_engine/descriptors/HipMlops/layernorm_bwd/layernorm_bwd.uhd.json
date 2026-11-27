@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "id": "91acd4e0-04bb-4538-8cee-56e16062a88b",
+  "name": "LayernormBwd selector",
+  "adapter": "native",
+  "objective": "max",
+  "native": {
+    "symbol": "hipkernel.layernorm_bwd.score"
+  }
+}

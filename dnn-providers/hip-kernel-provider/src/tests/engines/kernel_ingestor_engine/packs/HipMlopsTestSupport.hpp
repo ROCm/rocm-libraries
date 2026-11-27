@@ -268,6 +268,33 @@ inline std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>
     return ranked;
 }
 
+/// testDeviceProperties() with @p multiProcessorCount CUs, for the heuristics that size for
+/// the device.
+inline hipdnn_plugin_sdk::ingestor::DeviceProperties
+    devicePropertiesWithComputeUnits(int multiProcessorCount)
+{
+    auto properties = testDeviceProperties();
+    properties.multiProcessorCount = multiProcessorCount;
+    return properties;
+}
+
+/// The workspace @p engine's dispatch handler reports for @p kernel on @p builder's graph on a
+/// device of @p properties: what a plan of that kernel allocates.
+inline size_t workspaceBytesOf(const MlopsEngine& engine,
+                               flatbuffers::FlatBufferBuilder builder,
+                               const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel,
+                               hipdnn_plugin_sdk::ingestor::DeviceProperties properties)
+{
+    using namespace hipdnn_plugin_sdk::ingestor;
+    registerNativeIngestorSymbols();
+    const GraphFixture fixture(std::move(builder), std::move(properties));
+    const auto context = fixture.context();
+    const auto bound = GraphMatchRegistry::resolve(std::string(engine.graphMatcher))(context);
+    EXPECT_TRUE(bound.has_value());
+    const auto* handler = DispatchRegistry<Handle>::resolve(engineSymbol(engine, "dispatch"));
+    return handler->workspaceBytes(context, bound.value_or(BoundTokens{}), kernel);
+}
+
 /// The distinct values of integer field @p knob across @p ranked, best first: the values the
 /// engine advertises for the knob, its default first.
 inline std::vector<int64_t>
