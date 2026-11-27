@@ -39,6 +39,10 @@ rocke_status_t serialized_ir_parse(const char* ir_text,
                                    rocke_kernel_def_t** out_kernel,
                                    rocke_strbuf_t* message);
 
+/* Whether `arch` names a target: a NULL or empty one names none, and the
+ * serialized-IR entries have no default target. */
+bool serialized_ir_names_target(const char* arch);
+
 /* Hand the reason in `message` to the caller as malloc'd text: *out_message
  * receives it (NULL when allocating it failed), and `message` is left empty.
  * A NULL out_message discards it. */

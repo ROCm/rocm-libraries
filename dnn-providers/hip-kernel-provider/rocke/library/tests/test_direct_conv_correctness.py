@@ -698,16 +698,15 @@ def _run_forward_device(
     x = stored_uniform(rng, (p.N, p.H, p.W, p.total_c), dtype, 1.0)
     w = stored_uniform(rng, (p.total_k, p.KH, p.KW, p.cpg), dtype, 1.0)
     ref = direct_fwd_reference(p, storage.decode(x, dtype), storage.decode(w, dtype))
-    # Zero D rather than leaving it uninitialised: the tail guards are supposed
-    # to leave the out-of-range lanes alone, and a garbage-filled D is the only
-    # way a guard that writes where it must not shows up as a mismatch.
-    y = np.zeros((p.N, p.Ho, p.Wo, p.total_k), storage.host_dtype(dtype))
+    # NaN-fill D, so an output element the kernel leaves unwritten fails the
+    # comparison instead of matching a zero reference.
+    y = poisoned((p.N, p.Ho, p.Wo, p.total_k), dtype, 0xFF)
     try:
         y = launch_direct_conv(
             artifact, p, (x, w), y, grid=grid, block=block, dtype=dtype
         )
     except HipError as e:
-        return False, f"kernel load failed: {e}"
+        return False, f"kernel load or launch failed: {e}"
 
     rel_err = peak_relative_error(storage.decode(y, dtype), ref, floor=1.0)
     if not rel_err < tol:
@@ -1274,8 +1273,9 @@ def _run_dgrad_device(
 ) -> tuple[bool, str]:
     """Launch and verify one direct dgrad kernel on ``p``: ``dY`` and KRSC
     ``W`` are U(-0.5, 0.5) draws from seed 42 stored as ``dtype``, ``dX``
-    starts zeroed, and the result is checked against the float64 data
-    gradient of the stored values (exact input H, W at any stride).
+    starts NaN-filled (so an element left unwritten fails), and the result is
+    checked against the float64 data gradient of the stored values (exact input
+    H, W at any stride).
 
     Returns ``(passed, reason)``.
     """
@@ -1285,13 +1285,13 @@ def _run_dgrad_device(
     dy = stored_uniform(rng, (p.N, p.Ho, p.Wo, p.total_k), dtype, 0.5)
     w = stored_uniform(rng, (p.total_k, p.KH, p.KW, p.cpg), dtype, 0.5)
     ref = direct_dgrad_reference(p, storage.decode(dy, dtype), storage.decode(w, dtype))
-    dx = np.zeros((p.N, p.H, p.W, p.total_c), storage.host_dtype(dtype))
+    dx = poisoned((p.N, p.H, p.W, p.total_c), dtype, 0xFF)
     try:
         dx = launch_direct_conv(
             artifact, p, (dy, w), dx, grid=grid, block=block, direction="dgrad"
         )
     except HipError as e:
-        return False, f"kernel load failed: {e}"
+        return False, f"kernel load or launch failed: {e}"
 
     rel_err = peak_relative_error(storage.decode(dx, dtype), ref, floor=1.0)
     tol = _TOL_BF16 if dtype == "bf16" else _TOL
@@ -1731,7 +1731,7 @@ def _run_nongrouped_spec(
                 block=(red_spec.threads, 1, 1),
             )
     except HipError as e:
-        return False, f"kernel load failed: {e}"
+        return False, f"kernel load or launch failed: {e}"
 
     rel_err = peak_relative_error(storage.decode(y_dev.read(), p.dtype), ref, floor=1.0)
     tol = _TOL_BF16 if p.dtype == "bf16" else _TOL
@@ -2447,7 +2447,7 @@ def _run_wgrad_one(
             direction="wgrad",
         )
     except HipError as e:
-        return False, f"kernel load failed: {e}"
+        return False, f"kernel load or launch failed: {e}"
     dw = dw_dev.read().sum(axis=1).reshape(ref.shape)
 
     rel_err = peak_relative_error(dw, ref, floor=1.0)

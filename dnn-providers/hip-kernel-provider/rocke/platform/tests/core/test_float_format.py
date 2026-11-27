@@ -14,7 +14,7 @@ The HIP lowerers in both engines put that spelling into C++ literals through one
 adapter each: repr() plus an "f" suffix for a float, repr() alone for a double,
 and the <math.h> NAN / INFINITY macros for the values repr() spells in a way
 C++ does not accept. A second test lowers float and double constants through
-both engines and checks each literal against that rule.
+each engine and checks each literal against that rule.
 """
 
 import math
@@ -23,10 +23,10 @@ import random
 import struct
 import subprocess
 
+import pytest
 from rocke.core.ir import F32, F64, IRBuilder, PtrType
 from rocke.core.ir_serialize import parse, serialize
-from rocke.core.lower_hip import lower_kernel_to_hip
-from rocke.tests.engines import native_engine_or_skip
+from rocke.tests.engines import ENGINES, lower_hip_with_engine
 from rocke.tests.lanes import BUILD_VARIANT, skip_until
 
 
@@ -125,15 +125,12 @@ def _declared_literals(hip: str, c_type: str) -> list[str]:
     ]
 
 
-def test_both_hip_lowerers_spell_float_literals_the_same():
-    native = native_engine_or_skip()
-    ir = _constants_kernel()
-    python_hip = lower_kernel_to_hip(parse(ir), arch="gfx942")
-    native_hip = native.lower_serialized_ir_to_hip(ir, "gfx942")
-    for engine, hip in (("Python", python_hip), ("C++", native_hip)):
-        assert _declared_literals(hip, "float") == [
-            f32 for _, f32, _ in _HIP_LITERALS
-        ], engine
-        assert _declared_literals(hip, "double") == [
-            f64 for _, _, f64 in _HIP_LITERALS
-        ], engine
+@pytest.mark.parametrize("engine", ENGINES)
+def test_each_hip_lowerer_spells_float_literals_by_the_rule(engine):
+    """The Python case runs in every lane; the C++ case runs wherever the C++
+    HIP lowering can (the shared library or ROCKE_IR_LOWER_CLI) and also
+    requires the C++ source to equal the Python source."""
+    # Through serialization, as the C++ engine receives the kernel.
+    hip = lower_hip_with_engine(parse(_constants_kernel()), "gfx942", engine=engine)
+    assert _declared_literals(hip, "float") == [f32 for _, f32, _ in _HIP_LITERALS]
+    assert _declared_literals(hip, "double") == [f64 for _, _, f64 in _HIP_LITERALS]

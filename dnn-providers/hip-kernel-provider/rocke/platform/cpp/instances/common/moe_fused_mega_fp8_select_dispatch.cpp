@@ -66,12 +66,17 @@ static bool moe_fp8_cadence_is(const char* eff, const char* want)
  * scheduling-cadence emitters
  * ======================================================================= */
 
-/* _emit_loop_cadence_hint: emit b.iglp_opt(1) iff effective cadence == "iglp1". */
+/* _emit_loop_cadence_hint (declared in instance_moe_fused_mega_fp8_internal.h).
+ * "comgr_fresh_process" is the Python COMGR_FRESH_PROCESS_ATTR
+ * (helpers/compile.py); the serialized-IR byte-identity lane checks the two. */
 void rocke_moe_fp8_emit_loop_cadence_hint(rocke_moe_fp8_build_ctx_t* ctx, const char* cadence)
 {
     const char* eff = moe_fp8_effective_cadence(ctx, cadence);
     if(moe_fp8_cadence_is(eff, "iglp1"))
+    {
         rocke_b_iglp_opt(ctx->b, 1);
+        rocke_attr_set_bool(ctx->b, &ctx->b->kernel->attrs, "comgr_fresh_process", true);
+    }
 }
 
 /* _emit_sgb_gateup_dtla: compv4-style cadence for the DTLA gate/up loop body

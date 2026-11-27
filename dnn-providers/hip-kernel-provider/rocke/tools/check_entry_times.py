@@ -56,13 +56,19 @@ it once the tier's slowest shard fits its budget); ``record`` keeps them as
 they are. Each run prints every shard's projection, the margin of the slowest
 shard to the limit and its gap to the budget.
 
+A tier may also limit what one item of an entry takes (``item_budget_seconds``,
+quick's Q2): an entry whose recorded time is over it passes only when it is a
+pytest entry whose tests were all measured (``tests_measured``) and whose
+recorded test times (``test_seconds``) are all within it. A
+tier that runs no GPU entries (quick) fails on an entry registered as GPU work
+(the GPU resource lock or the GPU label), unless ``GPU_ENTRY_ALLOWLIST`` names
+it with its reason.
+
 ``check`` judges one operating system: the one it runs on, or ``--column``.
 The registration it lists is that system's, so another system's column cannot
 be judged from it. ``check`` also fails when an entry a CI tier runs has no
-time in that column, so a new entry cannot count as 0 s, and when a registered
-entry has a time in the committed ``entry_times.json`` but none in the
-``--entry-times`` file it projects from, so a time cannot drop out of the
-projection unnoticed.
+time in that column, so neither a new entry nor one whose time was removed can
+count as 0 s.
 
 The installed test tree carries this file and ``entry_times.json`` in
 ``tests/tools``, and the check needs that tree: the registration CTest lists
@@ -73,13 +79,23 @@ entry runs::
     python check_entry_times.py check --ctest-dir .
 
 Refresh one operating system's times from ``ctest -V`` logs of CI test jobs
-(any tier, any shard; entries the logs do not show keep their previous time).
+(any tier, any shard; entries the logs do not show passing keep their previous
+time).
 A split entry's whole time is the sum over its shards of each shard's median;
 when the logs lack a shard, it is the shard count times the median shard. Test
 seconds come from the logs that carry pytest's ``--durations`` report, for the
-tests of at least ``TEST_SECONDS_FLOOR``::
+tests of at least ``TEST_SECONDS_FLOOR``, and ``tests_measured`` names the
+entries whose reports the logs hold for every shard of a run, so that list is
+complete for them (run the logged jobs with ``--durations=0
+--durations-min=0``)::
 
     python check_entry_times.py record --column linux --source "<what these are>" LOG...
+
+Drop one column's times for entries the registration no longer holds (a
+listing of that operating system's registration), so renamed or removed
+entries do not linger::
+
+    python check_entry_times.py prune --column linux --ctest-dir .
 
 Lower a ceiling to the current projection, rounded up to 10 s::
 
@@ -101,6 +117,8 @@ import tempfile
 from collections.abc import Iterable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import MappingProxyType
+from typing import Any
 
 import pytest
 
@@ -124,7 +142,7 @@ from rocke.tests.ci_shard import (
     place_keys,
     shard_from_arguments,
 )
-from rocke.tests.ctest_listing import list_ctest_entries
+from rocke.tests.ctest_listing import GPU_LABEL, GPU_RESOURCE_LOCK, list_ctest_entries
 from rocke.tests.ctest_shard import shard_costs, shard_key
 from rocke.tests.ctest_workers import RUN_ALONE_MARKER, WORKERS_OPTION, worker_keys
 from rocke.tests.host_cpus import available_cpus
@@ -133,6 +151,7 @@ from rocke.tests.run_records import fixture_session_environment
 __all__ = [
     "CI_TIERS",
     "ENTRY_TIMES_PATH",
+    "GPU_ENTRY_ALLOWLIST",
     "STEP_LIMIT_SECONDS",
     "TEST_SECONDS_FLOOR",
     "RegisteredEntry",
@@ -141,13 +160,19 @@ __all__ = [
     "collect_entry_keys",
     "entry_seconds_from_ctest_logs",
     "evaluate_tiers",
+    "gpu_allowlist_breaches",
+    "gpu_entry_breaches",
     "host_column",
+    "item_budget_breaches",
     "load_entry_times",
     "lowered_ceiling",
+    "measured_entries_from_ctest_logs",
+    "pruned_column",
+    "recorded_test_seconds",
     "registered_entries",
     "slow_test_seconds_from_ctest_logs",
     "split_entry_shard_seconds",
-    "times_dropped_from",
+    "tier_breaches",
     "untimed_entries",
 ]
 
@@ -180,23 +205,53 @@ _CHECK_COSTS = {_CHECK_KEY: 1.0}
 
 @dataclasses.dataclass(frozen=True)
 class TierLayout:
-    """How CI runs one tier: its shard count and rocKE's time budget per shard."""
+    """How CI runs one tier and what the tier admits: its shard count, rocKE's
+    time budget per shard, the most one item of an entry may take
+    (``item_budget_seconds``; ``None``: no item budget) and whether its entries
+    may use the GPU (``runs_gpu_entries``)."""
 
     label: str
     shards: int
     budget_seconds: float
+    item_budget_seconds: float | None = None
+    runs_gpu_entries: bool = True
+
+    def __post_init__(self) -> None:
+        if self.shards < 1 or self.budget_seconds <= 0:
+            raise ValueError(
+                f"TierLayout failed - {self.label} shards={self.shards}, "
+                f"budget_seconds={self.budget_seconds:g}, expected at least one "
+                "shard and a positive budget"
+            )
+        item = self.item_budget_seconds
+        if item is not None and not 0 < item <= self.budget_seconds:
+            raise ValueError(
+                f"TierLayout failed - {self.label} item_budget_seconds={item:g}, "
+                f"expected a positive budget within budget_seconds="
+                f"{self.budget_seconds:g}"
+            )
 
 
 # Shard counts and the 30-minute step are TheRock's test configuration for the
-# provider (fetch_test_configurations.py and test_component.yml).
-# Budgets: quick runs as one shard and gives rocKE 300 s of it; a standard shard
-# gives rocKE 540 s, under a third of the 30-minute step, which leaves the rest
-# of the step to the provider's other tests. The budgets are ratchets: fix a breach at its source (a
-# cheaper test, a smaller shard key, a different tier), never by raising them.
+# provider (fetch_test_configurations.py and test_component.yml). The budgets
+# are TESTING.md's Q1, Q2 and S4 (section 5.0.3 says what each tier is for and
+# why). The budgets are ratchets: fix a breach at its source (a cheaper test, a
+# smaller shard key, a different tier), never by raising them.
 CI_TIERS = (
-    TierLayout("quick", shards=1, budget_seconds=300.0),
+    TierLayout(
+        "quick",
+        shards=1,
+        budget_seconds=30.0,
+        item_budget_seconds=2.0,
+        runs_gpu_entries=False,
+    ),
     TierLayout("standard", shards=4, budget_seconds=540.0),
 )
+
+# The entries registered as GPU work that still run in a tier that runs no GPU
+# entries, each with why. Only the quick tier's one end-to-end enablement check
+# may be here, and only if it launches a kernel.
+GPU_ENTRY_ALLOWLIST: Mapping[str, str] = MappingProxyType({})
 
 
 def host_column() -> str:
@@ -214,6 +269,7 @@ class RegisteredEntry:
     environment: tuple[str, ...] = ()
     working_directory: str | None = None
     skip_return_code: int | None = None
+    resource_locks: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
         if self.workers < 1:
@@ -228,6 +284,13 @@ class RegisteredEntry:
     @property
     def splits_across_shards(self) -> bool:
         return ACTIVATION_FLAG in self.command
+
+    @property
+    def uses_gpu(self) -> bool:
+        """Whether the entry is registered as GPU work: it takes the GPU
+        resource lock, which every entry selecting a ``gpu``-marked test must
+        take, or carries the GPU label."""
+        return GPU_RESOURCE_LOCK in self.resource_locks or GPU_LABEL in self.labels
 
     @property
     def pytest_arguments(self) -> tuple[str, ...] | None:
@@ -376,6 +439,7 @@ def registered_entries(tests: Iterable[Mapping]) -> list[RegisteredEntry]:
                 environment=tuple(properties.get("ENVIRONMENT", ())),
                 working_directory=properties.get("WORKING_DIRECTORY"),
                 skip_return_code=properties.get("SKIP_RETURN_CODE"),
+                resource_locks=frozenset(properties.get("RESOURCE_LOCK", ())),
             )
         )
     return entries
@@ -384,8 +448,10 @@ def registered_entries(tests: Iterable[Mapping]) -> list[RegisteredEntry]:
 def load_entry_times(path: Path = ENTRY_TIMES_PATH) -> dict[str, dict]:
     """``{column: {"source": str, "seconds": {entry: whole seconds},
     "test_seconds": {entry: {test node id: seconds}},
-    "ceilings": {tier label: seconds}}}``; ``test_seconds`` and ``ceilings``
-    are optional."""
+    "tests_measured": [entry], "ceilings": {tier label: seconds}}}``;
+    ``tests_measured`` names the entries whose every test of at least
+    ``TEST_SECONDS_FLOOR`` is in ``test_seconds``. All but ``source`` and
+    ``seconds`` are optional."""
     return json.loads(path.read_text(encoding="utf-8"))
 
 
@@ -539,26 +605,158 @@ def untimed_entries(
     ]
 
 
-def times_dropped_from(
+def item_budget_breaches(
     entries: Iterable[RegisteredEntry],
-    committed: Mapping[str, Mapping],
-    projected: Mapping[str, Mapping],
+    entry_times: Mapping[str, Mapping],
+    tiers: Sequence[TierLayout] = CI_TIERS,
 ) -> list[str]:
-    """Registered entries ``committed`` has a time for and ``projected`` lacks.
+    """One failure per column, tier with an item budget, and item of an entry
+    that tier runs that may take longer than the budget. An entry whose whole
+    time fits the budget passes; otherwise only a pytest entry that
+    ``tests_measured`` names, whose recorded test times are all within it,
+    passes. An entry with no time is left to
+    :func:`untimed_entries`."""
+    entries = list(entries)
+    found = []
+    for column, recorded in entry_times.items():
+        whole_seconds = recorded["seconds"]
+        test_seconds = recorded.get("test_seconds", {})
+        measured = set(recorded.get("tests_measured", ()))
+        for tier in tiers:
+            budget = tier.item_budget_seconds
+            if budget is None:
+                continue
+            where = f"{column} {tier.label}"
+            limit = f"the {budget:.0f} s item budget of {tier.label}"
+            for entry in entries:
+                whole = whole_seconds.get(entry.name)
+                if not entry.runs_in(tier) or whole is None or whole <= budget:
+                    continue
+                if entry.pytest_arguments is None:
+                    found.append(
+                        f"{where}: {entry.name} takes {whole:.1f} s, and it is not a "
+                        f"pytest entry, so it is one item, over {limit}; make it "
+                        "cheaper or move it to standard"
+                    )
+                elif entry.name not in measured:
+                    found.append(
+                        f"{where}: {entry.name} takes {whole:.1f} s and its tests "
+                        f"were not all measured, so no item is known to be within "
+                        f"{limit}; record them from the logs of every shard of a "
+                        "CI run with pytest's --durations report "
+                        "(check_entry_times.py record), or move it to standard"
+                    )
+                else:
+                    found += [
+                        f"{where}: {entry.name} test {test} takes {seconds:.1f} s, "
+                        f"over {limit}; make it cheaper or move it to standard"
+                        for test, seconds in sorted(
+                            test_seconds.get(entry.name, {}).items()
+                        )
+                        if seconds > budget
+                    ]
+    return found
 
-    An entry without a time is not counted, so losing one would make a tier
-    look cheaper than it is.
+
+def gpu_allowlist_breaches(
+    allowlist: Mapping[str, str] = GPU_ENTRY_ALLOWLIST,
+) -> list[str]:
+    """One failure when ``allowlist`` names more than one entry, as only the
+    quick tier's one end-to-end enablement check may use the GPU there, and
+    one per entry without a reason."""
+    found = []
+    if len(allowlist) > 1:
+        found.append(
+            f"GPU_ENTRY_ALLOWLIST check failed - names={sorted(allowlist)}, expected "
+            "at most one: the quick tier's one end-to-end enablement check"
+        )
+    found += [
+        f"GPU_ENTRY_ALLOWLIST check failed - {name}: reason={reason!r}, expected "
+        "why the entry must use the GPU"
+        for name, reason in allowlist.items()
+        if not reason.strip()
+    ]
+    return found
+
+
+def gpu_entry_breaches(
+    entries: Iterable[RegisteredEntry],
+    tiers: Sequence[TierLayout] = CI_TIERS,
+    allowlist: Mapping[str, str] = GPU_ENTRY_ALLOWLIST,
+) -> list[str]:
+    """One failure per tier that runs no GPU entries and entry of it that is
+    registered as GPU work, unless ``allowlist`` names the entry."""
+    entries = list(entries)
+    found = []
+    for tier in tiers:
+        if tier.runs_gpu_entries:
+            continue
+        found += [
+            f"{tier.label}: {entry.name} uses the GPU, and {tier.label} runs no GPU "
+            "entry; move it to standard (a GPU numeric or reference check belongs "
+            "there), or, if it is the tier's one end-to-end enablement check, "
+            "name it in GPU_ENTRY_ALLOWLIST with its reason"
+            for entry in entries
+            if entry.runs_in(tier) and entry.uses_gpu and entry.name not in allowlist
+        ]
+    return found
+
+
+def tier_breaches(
+    entries: Iterable[RegisteredEntry],
+    entry_times: Mapping[str, Mapping],
+    verdicts: Iterable[TierVerdict],
+    tiers: Sequence[TierLayout] = CI_TIERS,
+) -> list[str]:
+    """Every failure of the tiers' rules, as ``check`` reports them: an entry a
+    tier runs with no time (:func:`untimed_entries`), an item over its tier's
+    item budget (:func:`item_budget_breaches`), a GPU entry in a tier that runs
+    none (:func:`gpu_entry_breaches`), an allowlist that is not one entry with
+    a reason (:func:`gpu_allowlist_breaches`) and each shard over its limits
+    (:meth:`TierVerdict.breaches` of ``verdicts``, the :func:`evaluate_tiers`
+    of the same entries, data and tiers)."""
+    entries = list(entries)
+    return [
+        *untimed_entries(entries, entry_times, tiers),
+        *item_budget_breaches(entries, entry_times, tiers),
+        *gpu_entry_breaches(entries, tiers),
+        *gpu_allowlist_breaches(),
+        *(breach for verdict in verdicts for breach in verdict.breaches()),
+    ]
+
+
+def pruned_column(
+    column: Mapping[str, Any], entries: Iterable[RegisteredEntry]
+) -> tuple[dict[str, Any], list[str]]:
+    """``column`` (one operating system's data) without the entry times,
+    slow-test times and measured marks of entries that ``entries`` does not
+    register, and the names it dropped from any of them, sorted. Its other
+    keys (source, ceilings) are kept as they are.
     """
     registered = {entry.name for entry in entries}
-    dropped = []
-    for column, recorded in committed.items():
-        kept = projected.get(column, {}).get("seconds", {})
-        dropped += [
-            f"{column}: {name} has a committed time but none in the projected data"
-            for name in sorted(registered & set(recorded["seconds"]))
-            if name not in kept
+    timed = (
+        set(column.get("seconds", {}))
+        | set(column.get("test_seconds", {}))
+        | set(column.get("tests_measured", ()))
+    )
+    dropped = sorted(timed - registered)
+    kept = dict(column)
+    kept["seconds"] = {
+        name: seconds
+        for name, seconds in column.get("seconds", {}).items()
+        if name in registered
+    }
+    if "test_seconds" in column:
+        kept["test_seconds"] = {
+            name: tests
+            for name, tests in column["test_seconds"].items()
+            if name in registered
+        }
+    if "tests_measured" in column:
+        kept["tests_measured"] = [
+            name for name in column["tests_measured"] if name in registered
         ]
-    return dropped
+    return kept, dropped
 
 
 def lowered_ceiling(verdict: TierVerdict) -> float | None:
@@ -704,8 +902,16 @@ def _collect_all(
 
 
 # `ctest -V` lines, as ctest prints them or after the timestamp a CI log
-# prefixes to each line.
-_RESULT = re.compile(r"\d+/\d+ Test +#(\d+): (\S+) \.+.*?\s([\d.]+) sec")
+# prefixes to each line. A result line carries the entry's status: `Passed`, or
+# after `***` one such as `Failed`, `Skipped`, `Not Run` or `Timeout`.
+_RESULT = re.compile(
+    r"\d+/\d+ Test +#(\d+): (\S+) \.+\s*\**(\w+(?: Run)?)\b.*?\s([\d.]+) sec"
+)
+# The one status whose seconds measure what an entry costs: a skipped entry
+# (its SKIP_RETURN_CODE, such as a GPU entry of another target), one CTest did
+# not start, and one that failed or timed out (at collection, say, or at its
+# limit) did not run its tests through.
+_MEASURED_STATUS = "Passed"
 _COMMAND = re.compile(r"(?:^|\s)(\d+): Test command: (.*)$")
 _SHARD = re.compile(r"(?:^|\s)(\d+): rocke-ctest-shard: (\d+)/(\d+)\b")
 # One line of pytest's `--durations` report, as an entry prints it (a worker's
@@ -726,7 +932,8 @@ class _ShardRun:
 
 
 def _shard_runs_in_log(text: str) -> dict[str, _ShardRun]:
-    """Each ``rocke_*`` entry's run as one shard's log shows it."""
+    """Each ``rocke_*`` entry's passed run as one shard's log shows it: a run
+    with any other status (:data:`_MEASURED_STATUS`) is left out."""
     split, shard_of_number, runs = set(), {}, {}
     for line in text.splitlines():
         if match := _COMMAND.search(line):
@@ -736,8 +943,8 @@ def _shard_runs_in_log(text: str) -> dict[str, _ShardRun]:
             number, index, count = match.groups()
             shard_of_number[number] = (int(index), int(count))
         elif match := _RESULT.search(line):
-            number, name, elapsed = match.groups()
-            if name.startswith(ROCKE_ENTRY_PREFIX):
+            number, name, status, elapsed = match.groups()
+            if name.startswith(ROCKE_ENTRY_PREFIX) and status == _MEASURED_STATUS:
                 # The plugin reports no shard line when the run is unsharded.
                 index, count = (
                     shard_of_number.get(number, (0, 1)) if number in split else (0, 1)
@@ -799,6 +1006,22 @@ def entry_seconds_from_ctest_logs(logs: Iterable[Path]) -> dict[str, float]:
     }
 
 
+def _reported_shards(logs: Iterable[Path]) -> dict[str, dict[int, set[int]]]:
+    """Per ``rocke_*`` entry and shard count, the shards whose ``--durations``
+    report the logs hold."""
+    reported: dict[str, dict[int, set[int]]] = {}
+    for log in logs:
+        text = _read_log(log)
+        runs = _shard_runs_in_log(text)
+        for name in _test_seconds_in_log(text):
+            if name in runs:
+                run = runs[name]
+                reported.setdefault(name, {}).setdefault(run.count, set()).add(
+                    run.index
+                )
+    return reported
+
+
 def slow_test_seconds_from_ctest_logs(
     logs: Iterable[Path],
 ) -> dict[str, dict[str, float]]:
@@ -822,6 +1045,43 @@ def slow_test_seconds_from_ctest_logs(
         if slow:
             recorded[name] = slow
     return recorded
+
+
+def measured_entries_from_ctest_logs(logs: Iterable[Path]) -> list[str]:
+    """The ``rocke_*`` entries whose ``--durations`` reports the logs hold for
+    every shard of a run of them, sorted: every test of theirs that takes at
+    least ``TEST_SECONDS_FLOOR`` is then in :func:`slow_test_seconds_from_ctest_logs`.
+    An entry reported on some shards only is not one, as a slow test on a
+    missing shard would go unseen. The logged runs need
+    ``--durations=0 --durations-min=0``: pytest leaves the faster tests out of
+    its report otherwise, and an entry whose report is empty is not seen."""
+    return sorted(
+        name
+        for name, counts in _reported_shards(logs).items()
+        if any(indices == set(range(count)) for count, indices in counts.items())
+    )
+
+
+def recorded_test_seconds(
+    column: Mapping[str, Any],
+    test_seconds: Mapping[str, Mapping[str, float]],
+    measured: Iterable[str],
+) -> tuple[dict[str, dict[str, float]], list[str]]:
+    """``column``'s test seconds and measured entries after a ``record`` of
+    logs that give ``test_seconds`` and fully measure ``measured``: an entry
+    the logs measured gets exactly their slow tests (none if they have none),
+    an entry the logs show only in part keeps its new slow tests but is no
+    longer measured, and every other entry keeps what it had."""
+    measured = set(measured)
+    tests = {**column.get("test_seconds", {}), **test_seconds}
+    for name in measured:
+        tests[name] = dict(test_seconds.get(name, {}))
+    shown_in_part = set(test_seconds) - measured
+    still_measured = set(column.get("tests_measured", ())) - shown_in_part
+    return (
+        {name: dict(times) for name, times in sorted(tests.items()) if times},
+        sorted(still_measured | measured),
+    )
 
 
 def _registration(arguments: argparse.Namespace) -> list[RegisteredEntry]:
@@ -880,13 +1140,10 @@ def _check(arguments: argparse.Namespace) -> int:
             "not projected per shard, as their listing skips on this host "
             "(divided evenly): " + ", ".join(not_placed)
         )
-    breaches = untimed_entries(entries, column)
-    breaches += times_dropped_from(
-        entries, load_entry_times(arguments.committed_times), entry_times
-    )
-    for verdict in evaluate_tiers(entries, column, entry_keys):
+    verdicts = evaluate_tiers(entries, column, entry_keys)
+    for verdict in verdicts:
         print(verdict.summary())
-        breaches += verdict.breaches()
+    breaches = tier_breaches(entries, column, verdicts)
     for breach in breaches:
         print(f"FAIL {breach}")
     return 1 if breaches else 0
@@ -904,14 +1161,36 @@ def _record(arguments: argparse.Namespace) -> int:
     column["source"] = arguments.source
     column["seconds"] = dict(sorted({**column.get("seconds", {}), **seconds}.items()))
     test_seconds = slow_test_seconds_from_ctest_logs(arguments.logs)
-    if test_seconds:
-        column["test_seconds"] = dict(
-            sorted({**column.get("test_seconds", {}), **test_seconds}.items())
-        )
+    measured = measured_entries_from_ctest_logs(arguments.logs)
+    tests, tests_measured = recorded_test_seconds(column, test_seconds, measured)
+    for key, value in (("test_seconds", tests), ("tests_measured", tests_measured)):
+        if value:
+            column[key] = value
+        else:
+            column.pop(key, None)
     _write_entry_times(entry_times, arguments.entry_times)
     print(
-        f"recorded {len(seconds)} entries and the slow tests of "
-        f"{len(test_seconds)} into {arguments.column}"
+        f"recorded {len(seconds)} entries, the slow tests of {len(test_seconds)} "
+        f"and every test of {len(measured)} into {arguments.column}"
+    )
+    return 0
+
+
+def _prune(arguments: argparse.Namespace) -> int:
+    entry_times = load_entry_times(arguments.entry_times)
+    column = _column_of(entry_times, arguments.column, "prune")
+    entries = _registration(arguments)
+    if not entries:
+        raise ValueError(
+            "prune failed - the registration has no rocke_* entries, expected "
+            "the listing of a configured rocKE test tree"
+        )
+    kept, dropped = pruned_column(column[arguments.column], entries)
+    entry_times[arguments.column] = kept
+    _write_entry_times(entry_times, arguments.entry_times)
+    print(
+        f"dropped {len(dropped)} unregistered entries from {arguments.column}"
+        + "".join(f"\n  {name}" for name in dropped)
     )
     return 0
 
@@ -989,12 +1268,6 @@ def _add_registration_source(parser: argparse.ArgumentParser) -> None:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--entry-times", type=Path, default=ENTRY_TIMES_PATH)
-    parser.add_argument(
-        "--committed-times",
-        type=Path,
-        default=ENTRY_TIMES_PATH,
-        help="data whose registered entries `check` may not lose a time for",
-    )
     commands = parser.add_subparsers(dest="command", required=True)
 
     check = commands.add_parser("check", help="fail if a shard would exceed its limit")
@@ -1018,6 +1291,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     record.add_argument("--source", required=True, help="which jobs and dates")
     record.add_argument("logs", type=Path, nargs="+", help="ctest -V logs (.gz ok)")
     record.set_defaults(run=_record)
+
+    prune = commands.add_parser(
+        "prune", help="drop one column's times for entries no longer registered"
+    )
+    prune.add_argument("--column", required=True, help="operating system, e.g. linux")
+    _add_registration_source(prune)
+    prune.set_defaults(run=_prune)
 
     lower = commands.add_parser(
         "lower-ceiling", help="move one ceiling down to the current projection"

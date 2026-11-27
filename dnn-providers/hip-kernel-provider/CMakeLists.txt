@@ -689,31 +689,19 @@ if(HIPKERNELPROVIDER_ENABLE_ROCKE)
     set(ROCKE_INSTALL_DEVELOPMENT OFF)
     # The C++ engine's Python modules (rocke_engine, rocke_library_engine) let
     # the installed pytest entries run the C++ engine and compare it with the
-    # Python one; without them those tests skip. They install beside the rocke
-    # package and build whenever the build's Python has pybind11, unless
-    # ROCKE_BUILD_PYBIND is set explicitly. Not on Windows: TheRock's test
-    # artifact does not capture .pyd modules, and the modules have not been
-    # built or run there. When it builds none, ROCKE_ENGINE_MODULES_ABSENT_REASON
-    # says why: the installed guard rocke_engine_modules_check reports it as its
-    # skip reason.
-    if(HIPKERNELPROVIDER_ENABLE_TESTS AND NOT DEFINED ROCKE_BUILD_PYBIND)
-        if(WIN32)
-            set(ROCKE_ENGINE_MODULES_ABSENT_REASON
-                "Windows provider builds do not build them (TheRock's test artifact does not capture .pyd modules)")
-        else()
-            include("${CMAKE_CURRENT_SOURCE_DIR}/rocke/platform/cmake/rocke_pybind11.cmake")
-            rocke_locate_pybind11(_hkp_have_pybind11)
-            if(_hkp_have_pybind11)
-                set(ROCKE_BUILD_PYBIND ON)
-            else()
-                set(ROCKE_ENGINE_MODULES_ABSENT_REASON
-                    "the build's Python had no pybind11")
-                message(WARNING
-                    "rocKE: ${Python3_EXECUTABLE} has no pybind11, so the C++ engine's "
-                    "Python modules are not built and the installed tests that need "
-                    "them skip. Install pybind11 there to build them.")
-            endif()
-        endif()
+    # Python one; without them those tests skip. They are pybind11 modules and
+    # build only when the configure sets ROCKE_BUILD_PYBIND=ON (a cache option,
+    # OFF unless set), which a provider build does not: the provider build uses
+    # no pybind11, and a pybind11 that happens to be on the build host is not
+    # picked up (the binding direction: rocke/platform/dsl_docs/hipdnn_provider/
+    # plan.md). Not on Windows:
+    # TheRock's test artifact does not capture .pyd modules, and the modules
+    # have not been built or run there. When it builds none,
+    # ROCKE_ENGINE_MODULES_ABSENT_REASON says why: the installed guard
+    # rocke_engine_modules_check reports it as its skip reason.
+    if(HIPKERNELPROVIDER_ENABLE_TESTS AND WIN32 AND NOT ROCKE_BUILD_PYBIND)
+        set(ROCKE_ENGINE_MODULES_ABSENT_REASON
+            "Windows provider builds do not build them (TheRock's test artifact does not capture .pyd modules)")
     endif()
 
     # The shared engine (librocke) lets the installed pytest entries run the C++

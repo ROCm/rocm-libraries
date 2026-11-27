@@ -33,6 +33,9 @@
  *     caller cannot set it once for a type and get it wrong per spec.
  *   - kernel_name() consults the _*_name_parts methods:
  *     rocke_attention_dense_name_parts_t, which the concrete spec fills.
+ *   - The entry points here use base storage: two bytes per K/V element and
+ *     no storage name token. Use the concrete gfx950 entry points for FP8;
+ *     they pass its width and token into the same checks and name assembler.
  *   - check_dense_spec_preflight re-runs the concrete type's validators: the
  *     base checks (run by preflight itself, on the same spec) and then the
  *     arch's own fields (rocke_attention_dense_validate_fn, optional).
@@ -82,6 +85,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #include "rocke/ir.h" /* rocke_status_t */
 
@@ -261,6 +265,53 @@ bool rocke_attention_dense_spec_preflight(const rocke_attention_dense_spec_t* sp
                                           const void* ctx,
                                           char* reason,
                                           size_t reason_cap);
+
+/* Host metadata from common/attention_dense_decode.py. This is the same
+ * registry used by validation, naming and auto selection, not an arch copy.
+ * Accessors require a supported spec; unknown decodes / unusable divisors
+ * return ROCKE_ERR_VALUE. Returned strings and metadata have static lifetime. */
+rocke_status_t rocke_attention_dense_nonpersist_grid(const rocke_attention_dense_spec_t* spec,
+                                                     bool lookahead,
+                                                     int out[3]);
+
+#define ROCKE_DENSE_MAX_FASTDIVISORS 3
+#define ROCKE_DENSE_FASTDIV_DIVIDEND_LIMIT 1073741824
+typedef struct rocke_attention_dense_divisor
+{
+    const char* name;
+    const char* magic_name;
+    const char* shift_name;
+} rocke_attention_dense_divisor_t;
+rocke_status_t
+    rocke_attention_dense_persist_divisors(const rocke_attention_dense_spec_t* spec,
+                                           bool lookahead,
+                                           const rocke_attention_dense_divisor_t* const** out,
+                                           size_t* count);
+
+typedef struct rocke_attention_dense_fastdiv_values
+{
+    int32_t magic[ROCKE_DENSE_MAX_FASTDIVISORS];
+    int shift[ROCKE_DENSE_MAX_FASTDIVISORS];
+    size_t count;
+} rocke_attention_dense_fastdiv_values_t;
+/* fastdiv_kernargs: called only on a runtime-shape persistent body. Reports
+ * its own dividend-limit refusal, independently of the supports predicate. */
+bool rocke_attention_dense_fastdiv_values(const rocke_attention_dense_spec_t* spec,
+                                          bool lookahead,
+                                          const char* arch,
+                                          rocke_attention_dense_fastdiv_values_t* out,
+                                          char* reason,
+                                          size_t reason_cap);
+
+/* Host-only part of common/attention_dense_kv_split.py. Segment device code
+ * and the combine kernel belong to the dense builders, not the host spec. */
+#define ROCKE_DENSE_MAX_KV_SEGMENTS 64
+extern const char* const ROCKE_DENSE_SEGMENT_PARAMS[3];
+bool rocke_attention_dense_check_kv_segments(const rocke_attention_dense_spec_t* spec,
+                                             int segments,
+                                             bool emit_lse,
+                                             char* reason,
+                                             size_t reason_cap);
 
 #ifdef __cplusplus
 } /* extern "C" */

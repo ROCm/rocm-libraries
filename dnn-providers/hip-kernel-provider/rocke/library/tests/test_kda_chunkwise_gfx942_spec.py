@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import pytest
+from rocke.tests.comgr import compile_kernel_or_skip
 
 from kernels.gfx942.kda_chunkwise import (
     LDS_LIMIT,
@@ -28,18 +29,6 @@ from kernels.gfx942.kda_chunkwise import (
 )
 
 ARCH = "gfx942"
-
-
-def _compile_or_skip(kernel):
-    """Compile through comgr, skipping only when the toolchain is absent."""
-    try:
-        from rocke.helpers.compile import compile_kernel
-    except Exception as exc:  # noqa: BLE001  # pragma: no cover
-        pytest.skip(f"comgr toolchain unavailable: {exc}")
-    try:
-        return compile_kernel(kernel, arch=ARCH, capture_ir_text=False)
-    except ImportError as exc:  # pragma: no cover
-        pytest.skip(f"comgr toolchain unavailable: {exc}")
 
 
 def _tile(**kwargs) -> KdaTileSpec:
@@ -149,7 +138,7 @@ class TestScanSpec:
     ],
 )
 def test_builds_and_compiles(builder, spec):
-    artifact = _compile_or_skip(builder(spec))
+    artifact = compile_kernel_or_skip(builder(spec), arch=ARCH)
     assert artifact.hsaco_bytes > 0
 
 

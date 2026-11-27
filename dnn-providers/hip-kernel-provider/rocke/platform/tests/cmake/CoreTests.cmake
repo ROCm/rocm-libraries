@@ -87,15 +87,18 @@ if(BUILD_TESTING)
     # The registration it audits is the same on every platform, so it runs
     # where the provider's install paths are POSIX paths only. The entry also
     # runs the tests of tools/limbo_audit.py, the per-test audit of CI runs
-    # against the same registry, which lives in the source tree only, and the
-    # check that no host entry runs a GPU test, which configures this tree too.
+    # against the same registry, which lives in the source tree only, the
+    # check that no host entry runs a GPU test, which configures this tree too,
+    # and the check that the quick tier keeps to its rules (TESTING.md, section
+    # 5.0.3), which configures it and reads rocke/tools.
     if(NOT WIN32)
       add_test(
         NAME rocke_pending_lanes_check
         COMMAND "${Python3_EXECUTABLE}" -m pytest
                 "${CMAKE_CURRENT_SOURCE_DIR}/tools/test_pending_lanes.py"
                 "${CMAKE_CURRENT_SOURCE_DIR}/tools/test_limbo_audit.py"
-                "${CMAKE_CURRENT_SOURCE_DIR}/tools/test_gpu_work_placement.py" -q)
+                "${CMAKE_CURRENT_SOURCE_DIR}/tools/test_gpu_work_placement.py"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tools/test_quick_tier.py" -q)
       set_tests_properties(
         rocke_pending_lanes_check
         PROPERTIES
@@ -135,6 +138,25 @@ if(BUILD_TESTING)
                 "${CMAKE_CURRENT_SOURCE_DIR}/tools/test_no_torch.py" -q)
       set_tests_properties(
         rocke_no_torch_check
+        PROPERTIES
+          LABELS "ckc;python;host"
+          TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU}
+          ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python")
+    endif()
+
+    # No new toolchain pin in the test and library code under rocke/: no
+    # LLVM-flavor or ROCm-release pin, no decision on the comgr's ROCm release,
+    # no private runtime or lowering name in library code. Each remaining pin is
+    # on the allowlist beside the test, which only shrinks. Kept in step with the
+    # rocke-toolchain-pins hook in the root .pre-commit-config.yaml; like the
+    # entry above it lists the source checkout through git and reads library/.
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../library")
+      add_test(
+        NAME rocke_toolchain_pins_check
+        COMMAND "${Python3_EXECUTABLE}" -m pytest
+                "${CMAKE_CURRENT_SOURCE_DIR}/tools/test_toolchain_pins.py" -q)
+      set_tests_properties(
+        rocke_toolchain_pins_check
         PROPERTIES
           LABELS "ckc;python;host"
           TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU}
@@ -186,7 +208,7 @@ if(BUILD_TESTING)
               "${_rocke_parity_dir}/optimization_barrier_emit.py"
               --count 17 --rocke-shard-from-gtest-env)
     set_tests_properties(rocke_optimization_barrier_hip_pair
-                         PROPERTIES LABELS "ckc;python;host;quick"
+                         PROPERTIES LABELS "ckc;python;host;standard"
                                     ENVIRONMENT "PYTHONPATH=${_rocke_python_root}"
                                     TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})
   endif()
@@ -237,7 +259,7 @@ if(BUILD_TESTING)
   add_executable(rocke_f64_mma core/test_f64_mma.cpp)
   target_link_libraries(rocke_f64_mma PRIVATE rocke_core)
   target_include_directories(rocke_f64_mma PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/../cpp/instances/gfx942")
+    "${CMAKE_CURRENT_SOURCE_DIR}/../cpp/instances/common")
   add_test(NAME rocke_f64_mma COMMAND rocke_f64_mma)
   set_tests_properties(rocke_f64_mma PROPERTIES LABELS "ckc;unit;host")
   rocke_cxx_test_installed_name(_rocke_installed_name rocke_f64_mma)
@@ -302,7 +324,9 @@ if(BUILD_TESTING)
   # HIP source. The HIP source identity gate runs the C++ lowering through it,
   # via ROCKE_IR_LOWER_CLI, where the rocke_engine binding is not built, as in
   # the installed test tree. It is installed beside the tests but kept out of
-  # ROCKE_INSTALL_TEST_TARGETS, which registers each binary as a test.
+  # ROCKE_INSTALL_TEST_TARGETS, which registers each binary as a test. Not
+  # being a test, CTest cannot name its path to tests/run_all.py, so the build
+  # records it (rocke_record_program_path).
   add_executable(rocke_ir_lower_cli core/ir_lower_cli.cpp)
   target_link_libraries(rocke_ir_lower_cli PRIVATE rocke_core)
   rocke_cxx_test_installed_name(_rocke_installed_name rocke_ir_lower_cli)
@@ -310,6 +334,7 @@ if(BUILD_TESTING)
                         PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
   install(TARGETS rocke_ir_lower_cli
           RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  rocke_record_program_path(rocke_ir_lower_cli)
 
   # The engine entry rocke_ir_lower_cli and the binding share, called with and
   # without its optional message buffer. Not built on Windows: the Windows CI

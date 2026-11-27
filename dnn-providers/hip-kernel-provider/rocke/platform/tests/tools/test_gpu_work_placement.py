@@ -66,11 +66,13 @@ from rocke.tests.lanes import SOURCE_TREE, skip_until
 ROCKE = platform_root().parent.resolve()
 GPU_MARK = "gpu"
 # The device entry points a test calls to launch a kernel or move data to the
-# GPU: the runtime itself (also re-exported by rocke.runtime) and the test
-# helpers built on it.
+# GPU: the runtime itself, the kernel launcher (both also re-exported by
+# rocke.runtime), the device array, and the test helpers built on them.
 LAUNCH_ENTRY_POINTS: Mapping[str, frozenset[str]] = {
-    "rocke.runtime": frozenset({"Runtime"}),
+    "rocke.runtime": frozenset({"KernelLauncher", "Runtime"}),
+    "rocke.runtime.device_array": frozenset({"DeviceArray"}),
     "rocke.runtime.hip_module": frozenset({"Runtime"}),
+    "rocke.runtime.launcher": frozenset({"KernelLauncher"}),
     "rocke.tests.gpu": frozenset({"launch_with_buffers", "run_on_device"}),
     "rocke.tests.universal_gemm": frozenset({"launch_universal_gemm"}),
 }
@@ -236,6 +238,18 @@ from rocke.runtime import hip_module as hip
 def test_launches():
     hip.Runtime
 """,
+    "test_device_array.py": """
+from rocke.runtime.device_array import DeviceArray
+
+def test_launches():
+    DeviceArray
+""",
+    "test_kernel_launcher.py": """
+from rocke.runtime import launcher
+
+def test_launches():
+    launcher.KernelLauncher
+""",
     "test_host.py": """
 from rocke.runtime import hip_module
 
@@ -290,6 +304,8 @@ def test_a_host_entry_that_deselects_gpu_tests_passes(tree):
         ("test_unmarked_launch.py", "rocke.tests.gpu.run_on_device"),
         ("test_reexported_runtime.py", "rocke.runtime.Runtime"),
         ("test_runtime_by_module.py", "rocke.runtime.hip_module.Runtime"),
+        ("test_device_array.py", "rocke.runtime.device_array.DeviceArray"),
+        ("test_kernel_launcher.py", "rocke.runtime.launcher.KernelLauncher"),
     ],
 )
 def test_an_unmarked_module_that_uses_a_launch_entry_point_is_refused(

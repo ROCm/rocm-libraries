@@ -32,6 +32,12 @@ pytestmark = pytest.mark.skipif(
     ),
 )
 
+# Why the checks are gfx950's alone: the gfx942 port has its own prologue file.
+_GFX950_ONLY = (
+    "the test checks the build prologue of the gfx950 tiled 2D attention C++ "
+    "port; the gfx942 port keeps its prologue in a file of its own"
+)
+
 # bool NAME(rocke_gfx950_attn2d_build_ctx_t*, rocke_ir_builder_t*,
 #           const rocke_attention_tiled_2d_spec_t*, const char*)
 _PROLOGUE = re.compile(
@@ -61,7 +67,7 @@ def _prologues() -> list[tuple[str, str, str]]:
 
 @arch_specific(
     ("gfx950",),
-    reason="the test reads the gfx950 tiled 2D attention C++ glue file; cpp/instances/gfx942 has no tiled 2D attention file",
+    reason=_GFX950_ONLY,
 )
 def test_there_is_one_prologue_and_it_is_file_local():
     glue = GLUE.relative_to(CPP).as_posix()
@@ -75,7 +81,7 @@ def test_there_is_one_prologue_and_it_is_file_local():
 
 @arch_specific(
     ("gfx950",),
-    reason="the test reads the gfx950 tiled 2D attention C++ glue file; cpp/instances/gfx942 has no tiled 2D attention file",
+    reason=_GFX950_ONLY,
 )
 def test_the_driver_calls_it():
     assert re.search(

@@ -13,7 +13,9 @@ toolchain, not a kernel defect.
 A CI lane that must run a test on a given arch sets ``ROCKE_REQUIRE_<ARCH>=1`` (for
 example ``ROCKE_REQUIRE_GFX942=1``). A test that names that arch then fails instead of
 skipping when the current GPU is a different arch or there is no GPU, so a lane that
-lost its GPU does not pass with no coverage.
+lost its GPU does not pass with no coverage. That is per test and per arch; that a GPU
+entry finds any GPU at all is checked once for the whole entry by the
+``rocke.tests.require_gpu`` plugin.
 """
 
 from __future__ import annotations
@@ -22,7 +24,6 @@ import os
 from collections.abc import Collection, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
-import numpy as np
 import pytest
 
 from rocke.core.ir import KernelDef
@@ -30,26 +31,33 @@ from rocke.tests.ir_validity import arbiter_verdict, skip_without_verdict
 from rocke.tests.lanes import arch_skip_reason
 
 if TYPE_CHECKING:
+    import numpy as np
+
     from rocke.helpers.compile import KernelArtifact
 
 __all__ = [
+    "DEVICE_MEMORY_HEADROOM_BYTES",
     "current_device_arch",
     "current_device_arch_in",
     "launch_with_buffers",
     "probe_device_arch",
     "run_on_device",
+    "skip_without_device_memory",
     "supported_device_arch",
 ]
 
-# Host array dtype -> rocke signature dtype name.
+# Host array dtype name -> rocke signature dtype name. Keyed by name so this
+# module imports without numpy: every pytest root loads it at session start
+# (rocke.tests.quarantine), and a numpy-free session must start.
 _SIGNATURE_DTYPE = {
-    np.float64: "f64",
-    np.float32: "f32",
-    np.float16: "f16",
-    np.int32: "i32",
-    np.int16: "i16",
-    np.int8: "i8",
-    np.uint8: "u8",
+    "float64": "f64",
+    "float32": "f32",
+    "float16": "f16",
+    "int64": "i64",
+    "int32": "i32",
+    "int16": "i16",
+    "int8": "i8",
+    "uint8": "u8",
 }
 
 
@@ -98,6 +106,33 @@ def current_device_arch_in(arches: Collection[str], subject: str = "this test") 
     return arch
 
 
+#: Device memory a large-allocation test leaves for the rest of its launch (the
+#: outputs, code objects and the runtime's own allocations), on top of what it
+#: allocates itself (:func:`skip_without_device_memory`).
+DEVICE_MEMORY_HEADROOM_BYTES = 1 << 30
+
+
+def skip_without_device_memory(
+    allocated_bytes: int, subject: str = "this test"
+) -> None:
+    """Skip unless HIP's current device has room for ``allocated_bytes`` plus
+    :data:`DEVICE_MEMORY_HEADROOM_BYTES` of total memory, naming `subject` and
+    the GiB it needs. Judged on the device's total, not its free memory, so
+    whether a case runs does not depend on what else holds memory on the device;
+    a test that needs most of it also runs alone (the ``rocke_run_alone`` mark,
+    ``rocke.tests.ctest_workers``)."""
+    from rocke.runtime.hip_module import get_device_total_memory
+
+    needed = allocated_bytes + DEVICE_MEMORY_HEADROOM_BYTES
+    total = get_device_total_memory()
+    if total is None or total < needed:
+        found = "an unknown amount" if total is None else f"{total / 2**30:.1f} GiB"
+        pytest.skip(
+            f"{subject} needs a device with {needed / 2**30:.1f} GiB of memory; "
+            f"found {found}"
+        )
+
+
 def supported_device_arch(kernel: KernelDef, arches: Collection[str]) -> str:
     """The current GPU's arch when it is one of `arches` (the arches whose hardware
     supports `kernel`'s data types) and the IR the active engine lowers `kernel` to
@@ -129,7 +164,7 @@ def run_on_device(
 
     artifact = compile_kernel(kernel, arch=arch)
     signature = [
-        sig_param(name, _SIGNATURE_DTYPE[host.dtype.type])
+        sig_param(name, _SIGNATURE_DTYPE[host.dtype.name])
         for name, host in buffers.items()
     ]
     launch_with_buffers(

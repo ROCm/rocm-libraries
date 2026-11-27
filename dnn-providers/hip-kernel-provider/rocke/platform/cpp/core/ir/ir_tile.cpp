@@ -89,7 +89,7 @@ static const char* rocke_mma_result_hint(const char* op_id)
  * _SMEM_VECTOR_ELEMENTS). One list for both directions keeps the pair
  * symmetric: whatever one stores as a vector can be loaded back. */
 static const char* const ROCKE_SMEM_VECTOR_ELEMENTS[]
-    = {"f16", "bf16", "i16", "f32", "i32", "tf32", "f64", "fp8e4m3", "bf8e5m2", "i8"};
+    = {"f16", "bf16", "i16", "f32", "i32", "tf32", "f64", "i64", "fp8e4m3", "bf8e5m2", "i8"};
 
 /* Python _require_smem_vector_element: refuse an LDS vector `access` of an
  * element outside ROCKE_SMEM_VECTOR_ELEMENTS, listing the admitted types. */
@@ -314,7 +314,7 @@ void rocke_b_smem_store_vN(rocke_ir_builder_t* b,
             allowed = allowed_8bit;
             acount = 4;
         }
-        else if(strcmp(elem_name, "f64") == 0)
+        else if(strcmp(elem_name, "f64") == 0 || strcmp(elem_name, "i64") == 0)
         {
             allowed = allowed_64bit;
             acount = 1;
@@ -427,7 +427,7 @@ rocke_value_t* rocke_b_smem_load_vN(rocke_ir_builder_t* b,
             allowed = allowed_16bit;
             acount = 5;
         }
-        else if(strcmp(dn, "f64") == 0)
+        else if(strcmp(dn, "f64") == 0 || strcmp(dn, "i64") == 0)
         {
             allowed = allowed_64bit;
             acount = 2;

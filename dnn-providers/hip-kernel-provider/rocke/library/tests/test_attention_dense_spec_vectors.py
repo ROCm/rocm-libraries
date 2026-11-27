@@ -732,7 +732,7 @@ def _dump(data: dict) -> str:
     items = list(data.items())
     for i, (key, value) in enumerate(items):
         tail = "," if i + 1 < len(items) else ""
-        if key == "cases":
+        if key in ("cases", "signatures"):
             rows = [json.dumps(c, separators=(",", ":")) for c in value]
             lines.append(f' "{key}": [\n  ' + ",\n  ".join(rows) + f"\n ]{tail}")
         elif key == "hook_tables":
@@ -1057,9 +1057,413 @@ def test_hook_tables_exercise_every_hook():
             ), f"{cls.__name__}.{hook} differs from the base but no case pins it"
 
 
+# Concrete gfx950 coverage is deliberately separate from the shared hook tables:
+# those tables supply recorded hooks, whereas this table supplies only raw spec
+# inputs and requires the native implementation to derive every gfx950 answer.
+# Domain: annotations' int32/bool/double/optional-string values, not arbitrary
+# Python objects accepted through numeric coercion. In particular a float knob
+# is recorded as a float, even when integral; None stays distinct from a default.
+GFX950_VECTORS = VECTORS.with_name("attention_dense_gfx950_spec_vectors.json")
+_GFX950_SEED = 2711
+_GFX950_COUNT = 192
+
+
+def _gfx950_cases():
+    cases = [dict(c) for c in _CASES if all(v is not None for v in c.values())]
+    cases += [
+        {},
+        dict(arch="gfx942"),
+        dict(arch="gfx942", lds_num_buffers=3),
+        dict(lds_v_row_pad=-8),
+        dict(lds_v_row_pad=4),
+        dict(lds_k_row_pad=-8),
+        dict(lds_k_row_pad=4),
+        dict(lds_num_buffers=1),
+        dict(lds_num_buffers=3),
+        dict(lds_num_buffers=3, right_bound=-1),
+        dict(dtype="bad", lds_num_buffers=3),
+        dict(block_m=64, kv_segments=0),
+        dict(lds_k_row_pad=1024, kv_segments=0),
+        dict(lazy_rescale_threshold=0.0),
+        dict(lazy_rescale_threshold=8.000000000000002),
+        dict(exp_per_pv_step=0),
+        dict(exp_per_pv_step=-1),
+        dict(pv_priority=-1),
+        dict(pv_priority=4),
+        dict(pv_sched_fence_mask=-1),
+        dict(pv_sched_fence_mask=2048),
+        dict(pv_sched_group_ds_read=0),
+        dict(iglp_mode=2),
+        dict(pv_loop_order="it's"),
+        dict(pv_loop_order='x"y'),
+        dict(pv_loop_order="x" * 700),
+        dict(o_store_width=0),
+        dict(o_store_width=8),
+        dict(dtype="fp16", o_store_width=2),
+        dict(iglp_mode=0),
+        dict(iglp_mode=1, pv_sched_fence=False),
+        dict(right_bound=-1),
+        dict(right_bound=1, causal=False),
+        dict(right_bound=1, causal_bottom_right=True),
+        dict(
+            right_bound=1,
+            paged=True,
+            block_size=16,
+            num_kv_blocks=64,
+            sliding_window=128,
+        ),
+        dict(right_bound=1, varlen=True),
+        dict(right_bound=2147483647),
+        dict(
+            paged=True,
+            causal=False,
+            block_size=16,
+            num_kv_blocks=64,
+            sliding_window=128,
+        ),
+        dict(
+            causal_bottom_right=True,
+            paged=True,
+            block_size=16,
+            num_kv_blocks=64,
+            sliding_window=128,
+        ),
+        dict(causal_bottom_right=True, persistent=True),
+        dict(causal_bottom_right=True, sliding_window=128),
+        dict(causal_bottom_right=True, varlen=True),
+        dict(wide_lds_dma=True),
+        dict(wide_lds_dma=True, persistent=True, head_size=64),
+        dict(wide_lds_dma=True, persistent=True, block_n=128),
+        *[
+            dict(wide_lds_dma=True, persistent=True, **{k: True})
+            for k in ("ragged", "varlen", "paged")
+        ],
+        *[
+            dict(wide_lds_dma=True, persistent=True, **{k: 0})
+            for k in ("lds_k_group_pad", "lds_k_row_pad", "lds_v_row_pad")
+        ],
+        dict(wide_lds_dma=True, persistent=True),
+        dict(lds_k_row_pad=0, lds_v_row_pad=64, block_n=128),
+        dict(lds_k_row_pad=8, lds_v_row_pad=64, block_n=128),
+        dict(block_n=256),
+        dict(block_m=64),
+        *[dict(kv_segments=s) for s in (0, 1, 3, 64, 65)],
+        *[
+            dict(kv_segments=3, **{k: v})
+            for k, v in (
+                ("persistent", True),
+                ("sliding_window", 128),
+                ("use_sinks", True),
+                ("emit_lse", True),
+                ("ragged", True),
+                ("varlen", True),
+                ("paged", True),
+            )
+        ],
+        dict(
+            kv_segments=3,
+            paged=True,
+            block_size=16,
+            num_kv_blocks=64,
+            sliding_window=128,
+        ),
+        dict(kv_segments=64, seqlen_q=32768),
+        dict(kv_segments=64, seqlen_q=32512),
+        # Ragged Q/O cap is BYTES, independently of KV element bound.
+        dict(ragged=True, seqlen_q=524287, num_query_heads=16, num_kv_heads=1),
+        dict(ragged=True, seqlen_q=524288, num_query_heads=16, num_kv_heads=1),
+        # Constructor/support pass; the decode's gqa*Hq bound reaches 2**30.
+        *[
+            dict(
+                persistent=True,
+                persist_decode="bt_hkv_minor",
+                seqlen_q=256,
+                num_query_heads=h,
+                num_kv_heads=1,
+                head_size=64,
+                seqlen_kv=64,
+            )
+            for h in (32767, 32768)
+        ],
+    ]
+    # Only K/V storage changes: compare the pointer/scale ABI for each compute
+    # dtype, and put both a nondefault BM and a layout suffix after its name tag.
+    fp8 = dict(kv_storage_dtype="fp8e4m3")
+    for dtype in ("bf16", "fp16"):
+        for storage in (None, "fp8e4m3"):
+            cases.append(
+                dict(
+                    dtype=dtype, kv_storage_dtype=storage, block_m=128, lds_k_row_pad=0
+                )
+            )
+    cases += [
+        dict(kv_storage_dtype=""),
+        dict(kv_storage_dtype="fp16", lds_v_row_pad=-8),  # storage before arch knobs
+        dict(dtype="bad", kv_storage_dtype="fp16"),  # base before storage
+        *[
+            dict(fp8, **{k: True})
+            for k in ("persistent", "ragged", "varlen", "use_sinks")
+        ],
+        # With BM256, threads*8=4096: D64*BN32 falls short; BN64 fits exactly.
+        dict(fp8, head_size=64, block_n=32),
+        dict(fp8, head_size=64, block_n=64),
+        dict(fp8, head_size=64, block_n=32, kv_segments=0),
+        # Both pass construction: segment and tile checks must each precede sinks.
+        dict(fp8, use_sinks=True, kv_segments=0),
+        dict(fp8, use_sinks=True, head_size=64, block_n=32),
+        # Two K/V heads of D128: 2^22 rows reach 2 GiB only at two bytes;
+        # 2^23 rows reach it even at one. Keep Q/O small throughout.
+        dict(seqlen_kv=1 << 22),
+        dict(fp8, seqlen_kv=1 << 22),
+        dict(fp8, seqlen_kv=1 << 23),
+        # Physical cache (16 rows/block), not logical sequence length. At
+        # 2^18 blocks only fp8 gets as far as the concrete paged rejection.
+        dict(paged=True, block_size=16, num_kv_blocks=1 << 18),
+        dict(fp8, paged=True, block_size=16, num_kv_blocks=1 << 18),
+        dict(fp8, paged=True, block_size=16, num_kv_blocks=1 << 19),
+        # Plain causal D64: accepted page sizes beyond the minimum of 16.
+        *[
+            dict(paged=True, head_size=64, block_size=n, num_kv_blocks=32)
+            for n in (32, 64)
+        ],
+    ]
+    for persistent, decodes in ((True, PERSIST_DECODES), (False, NONPERSIST_DECODES)):
+        for decode in decodes:
+            cases.append(
+                dict(
+                    persistent=persistent,
+                    num_persistent=8,
+                    **{
+                        (
+                            "persist_decode" if persistent else "nonpersist_decode"
+                        ): decode
+                    },
+                )
+            )
+    for key, values in {
+        "exp_per_pv_step": (None, 1, 2, 4),
+        "pv_sched_fence": (None, False, True),
+        "pv_sched_group_template": (None, False, True),
+        "iglp_mode": (None, -1),
+        "pv_loop_order": (None, "d_major", "k_major"),
+        "lazy_rescale_threshold": (8.0, 1.0, 1e-7, 0.0001, 7.999999999999999),
+        "use_exp2_fast": (False,),
+        "partial_vmcnt_prefetch": (False,),
+        "causal_diag_split": (False,),
+        "pv_priority": (0, 3),
+        "pv_sched_fence_mask": (0, 2047),
+        "pv_sched_group_ds_read": (1, 3),
+        "o_store_width": (1, 2),
+    }.items():
+        cases.extend({key: v} for v in values)
+    for dtype in ("bf16", "fp16"):
+        for d in (64, 128):
+            for bm in (128, 256):
+                for mode in (
+                    {},
+                    dict(paged=True, block_size=16, num_kv_blocks=64),
+                    dict(
+                        paged=True, block_size=16, num_kv_blocks=64, sliding_window=128
+                    ),
+                    dict(varlen=True),
+                    dict(use_sinks=True, emit_lse=True),
+                    dict(varlen=True, emit_lse=True),
+                    dict(varlen=True, use_sinks=True, emit_lse=True),
+                ):
+                    cases.append(dict(dtype=dtype, head_size=d, block_m=bm, **mode))
+    rng = random.Random(_GFX950_SEED)
+    for _ in range(_GFX950_COUNT):
+        cases.append(
+            dict(
+                batch=rng.choice((1, 2, 16, 128)),
+                seqlen_q=rng.choice((256, 512, 768, 4096)),
+                seqlen_kv=rng.choice((512, 1024, 4096)),
+                dtype=rng.choice(("bf16", "fp16")),
+                head_size=rng.choice((64, 128)),
+                block_m=rng.choice((128, 256)),
+                block_n=rng.choice((32, 64, 128, 256)),
+                persistent=rng.choice((False, True)),
+                num_persistent=rng.choice((8, 128, 256)),
+                right_bound=rng.choice((0, 1, 128)),
+                lazy_rescale_threshold=rng.choice((8.0, 4.0, 0.125)),
+                pv_loop_order=rng.choice((None, "d_major", "k_major")),
+            )
+        )
+    return cases
+
+
+def _gfx950_spec(overrides):
+    spec = object.__new__(Gfx950AttentionDenseSpec)
+    for f in fields(Gfx950AttentionDenseSpec):
+        value = overrides.get(f.name, _BASE.get(f.name, f.default))
+        object.__setattr__(spec, f.name, value)
+    return spec
+
+
+def _gfx950_expect(spec, arch="gfx950"):
+    from kernels.gfx950 import attention_dense as gfx
+
+    try:
+        spec.__post_init__()
+        valid, reason = True, ""
+    except ValueError as e:
+        valid, reason = False, str(e)
+    except ZeroDivisionError:
+        # Same interpreter-dependent exception exemption as the shared-spec _CASES table.
+        valid, reason = False, None
+    ok, why = gfx.supports_attention_dense(spec, arch=arch)
+    if reason is None and arch == "gfx950":
+        why = None
+    result = dict(
+        valid=valid,
+        reason=reason,
+        supports=ok,
+        supports_reason=why,
+        kv_elem_bytes=spec.kv_elem_bytes,
+    )
+    if not ok:
+        return result
+    result.update(
+        resolved_exp_per_pv_step=spec.resolved_exp_per_pv_step(),
+        resolved_pv_sched_fence=spec.resolved_pv_sched_fence(),
+        resolved_pv_sched_group_template=spec.resolved_pv_sched_group_template(),
+        resolved_iglp_mode=spec.resolved_iglp_mode(),
+        resolved_pv_loop_order=spec.resolved_pv_loop_order(),
+        resolved_persist_decode=spec.resolved_persist_decode,
+        resolved_nonpersist_decode=spec.resolved_nonpersist_decode,
+        runtime_shape=spec.runtime_shape,
+        runtime_param_fields=list(spec.runtime_param_fields),
+        shape_kernarg_fields=list(gfx._shape_kernarg_fields(spec)),
+        kernel_name=spec.kernel_name(),
+        name_parts=_name_parts(spec),
+        lds_bytes=gfx.gfx950_dense_static_lds_bytes(
+            head_size=spec.head_size,
+            block_n=spec.block_n,
+            k_row_pad=spec.lds_k_row_pad,
+            v_row_pad=spec.lds_v_row_pad,
+            k_group_pad=spec.lds_k_group_pad,
+            wide_lds_dma=spec.wide_lds_dma,
+        ),
+        grid=list(gfx.attention_dense_grid(spec)),
+        block=list(gfx.attention_dense_block(spec)),
+        signature=gfx.attention_dense_signature(spec),
+    )
+    try:
+        result["runtime_args"] = list(
+            map(list, gfx.attention_dense_runtime_args(spec).items())
+        )
+        result["runtime_args_reason"] = ""
+    except ValueError as e:
+        result["runtime_args"] = None
+        result["runtime_args_reason"] = str(e)
+    return result
+
+
+def _gfx950_build():
+    from kernels.gfx950.attention_dense import gfx950_dense_tile_legality
+
+    cases = []
+    signatures = []  # First occurrence fixes the index; preserve argument order.
+    for raw in _gfx950_cases():
+        overrides = dict(raw)
+        arch = overrides.pop("arch", "gfx950")
+        expect = _gfx950_expect(_gfx950_spec(overrides), arch)
+        if "signature" in expect:
+            signature = expect.pop("signature")
+            if signature not in signatures:
+                signatures.append(signature)
+            expect["signature_id"] = signatures.index(signature)
+        cases.append(dict(spec=overrides, arch=arch, expect=expect))
+    return {
+        "_comment": "Generated with --regenerate; concrete gfx950 declared-type C contract. "
+        "int32/bool/double/optional-string only, no Python numeric-kind coercion.",
+        "fields": [f.name for f in fields(Gfx950AttentionDenseSpec)],
+        "defaults": {
+            f.name: f.default
+            for f in fields(Gfx950AttentionDenseSpec)
+            if f.default is not MISSING
+        },
+        "tile_legality": {
+            str(d): list(map(list, gfx950_dense_tile_legality(head_size=d)))
+            for d in (0, 64, 128)
+        },
+        "generated": {"seed": _GFX950_SEED, "count": _GFX950_COUNT},
+        "base": _BASE,
+        "signatures": signatures,
+        "cases": cases,
+    }
+
+
+def test_gfx950_contract_matches_current_python():
+    recorded = json.loads(GFX950_VECTORS.read_text(encoding="utf-8"))
+    current = stamp_fingerprint(_gfx950_build())
+    assert recorded == current, (
+        f"gfx950 native contract drift: review, then run `{rerecord_command(GOLDEN_NAME)}` "
+        "from the rocke directory and rerun rocke_attention_dense_gfx950_spec"
+    )
+
+
+def test_gfx950_vectors_cover_host_boundaries():
+    """Keep important consumer paths represented, not just the table's size."""
+    data = json.loads(GFX950_VECTORS.read_text(encoding="utf-8"))
+    cases = [
+        dict(c, spec={**data["defaults"], **data["base"], **c["spec"]})
+        for c in data["cases"]
+    ]
+    supported = [c for c in cases if c["expect"]["supports"]]
+    for persistent, key, decodes in (
+        (True, "resolved_persist_decode", PERSIST_DECODES),
+        (False, "resolved_nonpersist_decode", NONPERSIST_DECODES),
+    ):
+        got = {
+            c["expect"][key] for c in supported if c["spec"]["persistent"] == persistent
+        }
+        assert got == set(decodes)
+    assert any(not c["expect"]["valid"] for c in cases)
+    assert any(c["expect"]["valid"] and not c["expect"]["supports"] for c in cases)
+    assert any(c["expect"]["runtime_args"] is None for c in supported)
+    assert any(c["spec"]["wide_lds_dma"] for c in supported)
+    assert any(c["expect"]["lds_bytes"] == 163840 for c in supported)
+    assert any("static LDS" in (c["expect"]["supports_reason"] or "") for c in cases)
+    assert {c["spec"]["kv_segments"] for c in supported} >= {1, 3, 64}
+    assert {c["spec"]["dtype"] for c in supported} == {"bf16", "fp16"}
+    assert {c["spec"]["head_size"] for c in supported} == {64, 128}
+    assert {c["spec"]["block_m"] for c in supported} == {128, 256}
+    assert any(c["spec"]["paged"] and c["spec"]["sliding_window"] for c in supported)
+    assert any(c["spec"]["varlen"] and c["spec"]["emit_lse"] for c in supported)
+    assert any(c["spec"]["use_sinks"] and c["spec"]["emit_lse"] for c in supported)
+    assert any(
+        c["spec"]["varlen"] and c["spec"]["use_sinks"] and not c["expect"]["valid"]
+        for c in cases
+    )
+    # Resolved behavior alone does not identify a binary: explicit default knobs
+    # have distinct raw repr hashes even when they resolve to the same policy.
+    default = _gfx950_spec({})
+    raw_default = {f.name: getattr(default, f.name) for f in fields(default)}
+    pairs = [
+        c
+        for c in supported
+        if all(
+            c["spec"][k] == v for k, v in raw_default.items() if k != "pv_loop_order"
+        )
+    ]
+    names = {c["spec"]["pv_loop_order"]: c["expect"]["kernel_name"] for c in pairs}
+    assert names[None] != names["d_major"]
+
+
 if __name__ == "__main__":
     if sys.argv[1:] == ["--regenerate"]:
         VECTORS.write_text(_dump(stamp_fingerprint(_build())), encoding="utf-8")
         print(f"wrote {VECTORS}")
+        gfx950_data = _gfx950_build()
+        GFX950_VECTORS.write_text(
+            _dump(stamp_fingerprint(gfx950_data)), encoding="utf-8"
+        )
+        supported = [c for c in gfx950_data["cases"] if c["expect"]["supports"]]
+        print(
+            f"wrote {GFX950_VECTORS}: {len(gfx950_data['cases'])} cases, "
+            f"{len(supported)} supported, "
+            f"{sum(c['expect']['runtime_args'] is None for c in supported)} runtime-args rejects"
+        )
     else:
         sys.exit("usage: test_attention_dense_spec_vectors.py --regenerate")

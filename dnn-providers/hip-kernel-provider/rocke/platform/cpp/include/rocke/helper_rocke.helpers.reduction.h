@@ -15,6 +15,7 @@
  *   - ReduceCombine                        (combiner enum: sum/max/min/prod)
  *   - row_norm_needs_two_pass              (pure host-side BUILD-time selector)
  *   - tree_reduce                          (balanced binary-tree fold)
+ *   - butterfly_allreduce                  (ascending XOR butterfly all-reduce)
  *   - block_lds_reduce                     (LDS tree reduce, broadcast)
  *   - block_lds_reduce_pair                (twin-channel, one barrier schedule)
  *   - block_lds_reduce_with_wave_prologue  (wave-XOR + cross-warp LDS)
@@ -91,6 +92,20 @@ typedef rocke_value_t* (*rocke_combine_fn)(rocke_ir_builder_t* b,
  * ``user`` is forwarded to every ``combine`` invocation. */
 rocke_value_t* rocke_tree_reduce(
     rocke_ir_builder_t* b, rocke_combine_fn combine, void* user, rocke_value_t* const* xs, int n);
+
+/* ---------------------------------------------------- butterfly_allreduce */
+
+/* butterfly_allreduce(b, value, combine, stages) analogue: reduce `value` across
+ * 2**stages lanes with an ascending XOR butterfly; every one of those lanes ends
+ * up holding the result. Stage k exchanges with lane l ^ 2**k and folds with
+ * combine(own, remote, user), which must be commutative. f32/i32 stages inside
+ * the 16-lane DPP row ride rocke_b_warp_shuffle_xor_dpp (masks 1 and 2 as
+ * themselves, 4 and 8 as DPP masks 7 and 15, whose partners hold the same
+ * value once the lower stages ran); masks 16 and up, and other types, take
+ * rocke_b_warp_shuffle_xor. An i64 value crosses lanes as its two i32 halves.
+ * stages outside 0..6 raises ROCKE_ERR_VALUE. */
+rocke_value_t* rocke_butterfly_allreduce(
+    rocke_ir_builder_t* b, rocke_value_t* value, rocke_combine_fn combine, void* user, int stages);
 
 /* --------------------------------------------------------- block_lds_reduce */
 

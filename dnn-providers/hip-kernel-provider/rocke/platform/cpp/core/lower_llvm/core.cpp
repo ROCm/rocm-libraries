@@ -2283,10 +2283,7 @@ static void ll_lower_into(rocke_lower_t* L,
     {
         if(arch == NULL)
         {
-            rocke_ll_fail(L,
-                          ROCKE_ERR_VALUE,
-                          "lowering requires an explicit gfx target "
-                          "(there is no default)");
+            rocke_ll_fail(L, ROCKE_ERR_VALUE, ROCKE_NO_TARGET_REASON);
         }
         rocke_ll_fail(L, bst != ROCKE_OK ? bst : ROCKE_ERR_KEY, "unknown arch backend %s", arch);
     }
