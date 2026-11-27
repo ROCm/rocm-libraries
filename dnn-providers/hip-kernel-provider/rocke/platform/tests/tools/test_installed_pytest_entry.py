@@ -89,6 +89,21 @@ def test_the_compiler_options_extend_the_entrys_environment_list(tmp_path):
     assert '  ENVIRONMENT "${_rocke_x_pytest_environment}"' in lines
 
 
+def test_a_test_path_listed_twice_stops_the_configure(tmp_path):
+    result = _run(
+        "rocke_installed_pytest_entry(entry rocke_x_pytest\n"
+        "  TESTS a.py b.py a.py c.py b.py\n"
+        "  LABELS ckc ENVIRONMENT PYTHONPATH=lib TIMEOUT 900)",
+        tmp_path,
+    )
+    assert result.returncode != 0
+    message = " ".join(result.stderr.split())
+    assert (
+        "rocke_installed_pytest_entry(rocke_x_pytest): TESTS lists a.py, b.py "
+        "more than once; list each path once"
+    ) in message
+
+
 @pytest.mark.parametrize("missing", ["LABELS", "ENVIRONMENT", "TIMEOUT"])
 def test_an_entry_without_a_required_property_stops_the_configure(tmp_path, missing):
     given = {

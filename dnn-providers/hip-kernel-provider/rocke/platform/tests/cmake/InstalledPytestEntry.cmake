@@ -18,11 +18,11 @@
 # The command is ${_ROCKE_INSTALLED_PYTEST}, the worker plugin when WORKERS is
 # given, then each of TESTS and ARGUMENTS as one quoted argument, in order,
 # then the GPU per-test limit when GPU is given. TESTS are the paths or node
-# ids the entry collects, as written in the CTestTestfile. ENVIRONMENT is the
-# text of the ENVIRONMENT property. With COMPILER_TOOLS the entry's
-# environment also takes the compiler tool locations
-# (_rocke_compiler_tool_environment of the installed CTestTestfile), and with
-# COMPILER_REQUIREMENT the policy that makes a missing tool fail
+# ids the entry collects, as written in the CTestTestfile; a path listed twice
+# stops the configure. ENVIRONMENT is the text of the ENVIRONMENT property.
+# With COMPILER_TOOLS the entry's environment also takes the compiler tool
+# locations (_rocke_compiler_tool_environment of the installed CTestTestfile),
+# and with COMPILER_REQUIREMENT the policy that makes a missing tool fail
 # (_rocke_compiler_requirement_environment). GPU also takes the GPU resource
 # lock, so a parallel ctest -j never runs two GPU entries at once.
 function(rocke_installed_pytest_entry out_var name)
@@ -41,6 +41,8 @@ function(rocke_installed_pytest_entry out_var name)
               "rocke_installed_pytest_entry(${name}): ${_required} is required")
     endif()
   endforeach()
+  _rocke_refuse_repeated_tests(${name} ${_entry_TESTS})
+
   set(_command "${_ROCKE_INSTALLED_PYTEST}")
   if(_entry_WORKERS)
     string(APPEND _command " ${_ROCKE_INSTALLED_PYTEST_WORKERS}")
@@ -80,4 +82,24 @@ function(rocke_installed_pytest_entry out_var name)
   endif()
   string(APPEND _text "  TIMEOUT ${_entry_TIMEOUT})\n")
   set(${out_var} "${_text}" PARENT_SCOPE)
+endfunction()
+
+# Stop the configure when the TESTS of the pytest entry <name>, the remaining
+# arguments, name a path more than once; the message names each repeat.
+function(_rocke_refuse_repeated_tests name)
+  set(_seen "")
+  set(_repeated "")
+  foreach(_test IN LISTS ARGN)
+    if(NOT _test IN_LIST _seen)
+      list(APPEND _seen "${_test}")
+    elseif(NOT _test IN_LIST _repeated)
+      list(APPEND _repeated "${_test}")
+    endif()
+  endforeach()
+  if(_repeated)
+    list(JOIN _repeated ", " _repeated)
+    message(FATAL_ERROR
+            "rocke_installed_pytest_entry(${name}): TESTS lists ${_repeated} "
+            "more than once; list each path once")
+  endif()
 endfunction()
