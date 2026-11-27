@@ -26,6 +26,7 @@
 #include <iostream>
 #include <unordered_set>
 
+#include "stinkytofu/analysis/asm/GirFrameAnalysis.hpp"
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/PassManager.hpp"
@@ -190,11 +191,74 @@ bool isTensorAnchor(const StinkyInstruction& inst) {
     return isBarrier(inst) || isDSRead(inst) || isDSWrite(inst) || isDSAtomic(inst);
 }
 
-bool hasUntaggedTensorAnchor(BasicBlock& bb) {
+/// True when the GIR frame pipeline owns this function's LDS and tensor ordering.
+///
+/// The conservative fallbacks below read a missing `MemTokenData` as "cannot prove disjoint" and
+/// drain to 0.  Under the frame contract the proof moved to the frame map, which grades the same
+/// hazards across the rotation, so the token's absence proves nothing and the drain only discards
+/// what the frame counter flow derived.
+///
+/// `girFrameWaits` is that second half and is not implied by the first: the backend imports the
+/// contract on EnableGirFramePipeline alone, while emitting waits from it also needs
+/// EnableGirFrameWaitCntInsertion. With the map imported but no waits derived from it, dropping
+/// the fallback leaves the hazard guarded by nothing.
+bool girOwnsOrdering(const StinkyInstruction& inst, bool girFrameWaits) {
+    if (!girFrameWaits) return false;
+    const BasicBlock* block = inst.getParent();
+    const Function* function = block ? block->getParentFunc() : nullptr;
+    return function != nullptr && hasGirFrameContract(*function);
+}
+
+/// A fence GirFencePlacementPass placed, found in the record it left. Placement names the WAIT
+/// half; a split signal is the same fence, so it answers for its pair -- found by walking to the
+/// next BARRIER, since the scheduler issues ordinary work between the two halves.
+bool girPlacedFence(const StinkyInstruction& inst) {
+    const BasicBlock* block = inst.getParent();
+    const Function* function = block ? block->getParentFunc() : nullptr;
+    if (!function) return false;
+    const auto* placed = function->getStructMetaData<GirFenceCoverage>(kGirFenceCoverageKey);
+    if (placed == nullptr) return false;
+    if (placed->fences.count(&inst) != 0) return true;
+    if (!isBarrierSignal(inst) || !isSplitBarrierAllWave(inst)) return false;
+    bool after = false;
+    for (const IRBase& node : *block) {
+        const auto* other = dyn_cast<const StinkyInstruction>(&node);
+        if (!other) continue;
+        if (other == &inst) {
+            after = true;
+            continue;
+        }
+        if (!after || !isBarrier(*other)) continue;
+        return isBarrierWait(*other) && isSplitBarrierAllWave(*other) &&
+               placed->fences.count(other) != 0;
+    }
+    return false;
+}
+
+bool takesNoWait(const StinkyInstruction& inst, bool girFrameWaits) {
+    return girOwnsOrdering(inst, girFrameWaits);
+}
+
+/// True when the frame counter flow will actually STATE the waits for the storage this
+/// instruction names.  A tag alone is the frontend's intent, not a derivation: `GirActionData`
+/// says the model names the storage, so the relaxations below need the same two halves
+/// `girOwnsOrdering` does -- a contract for the model to be real, and the waits to be derived
+/// from it.  A tag carried into a function with neither turns the generic drain off and puts
+/// nothing in its place.
+bool girStatesStorageWaits(const StinkyInstruction& inst, bool girFrameWaits) {
+    if (!girFrameWaits || !girNamesStorage(inst)) return false;
+    const BasicBlock* block = inst.getParent();
+    const Function* function = block ? block->getParentFunc() : nullptr;
+    return function != nullptr && hasGirFrameContract(*function);
+}
+
+bool hasUntaggedTensorAnchor(BasicBlock& bb, bool girFrameWaits) {
     for (IRBase& ir : bb) {
         auto* inst = dyn_cast<StinkyInstruction>(&ir);
         if (inst == nullptr) continue;
-        if (isTensorAnchor(*inst) && inst->getModifier<MemTokenData>() == nullptr) return true;
+        if (isTensorAnchor(*inst) && !takesNoWait(*inst, girFrameWaits) &&
+            inst->getModifier<MemTokenData>() == nullptr)
+            return true;
     }
     return false;
 }
@@ -486,6 +550,8 @@ int modifierWaitValue(const StinkyInstruction& inst, CounterKind c) {
 // split group and none to the others. The modifier is consulted only as a
 // fallback, and only for the opcode's own counter. Anything undecodable credits
 // nothing, which can cost a redundant wait but can never drop a required one.
+}  // namespace
+
 bool observedWaitDrains(const StinkyInstruction& inst, int counts[CK_Count]) {
     for (int c = 0; c < CK_Count; ++c) counts[c] = WaitCountSpec::kUnused;
     if (!isWaitCnt(inst) && !inst.is(InstFlag::IF_WaitTensorCnt)) return false;
@@ -540,8 +606,8 @@ bool observedWaitDrains(const StinkyInstruction& inst, int counts[CK_Count]) {
 
 // Apply a wait already present in the stream: it drains the queues exactly like
 // one we plan, and seeds the elision state so we do not emit a duplicate.
-void creditObservedWait(DataflowState& state, CounterEmitState emit[CK_Count], CounterKind c,
-                        int w) {
+static void creditObservedWait(DataflowState& state, CounterEmitState emit[CK_Count], CounterKind c,
+                               int w) {
     if (w < 0) return;
     // On an out-of-order counter a nonzero immediate proves nothing about any
     // particular op (see waitToDrain), so only a full drain is creditable.
@@ -549,6 +615,8 @@ void creditObservedWait(DataflowState& state, CounterEmitState emit[CK_Count], C
     trimQueues(state.queues[c], w);
     emit[c].recordEmittedWait(w);
 }
+
+namespace {
 
 // Credit every counter an existing wait drains. Returns true when `inst` IS a
 // wait, meaning the caller must skip it as both consumer and producer. Shared by
@@ -728,7 +796,7 @@ int phiCurrentQueueWait(StinkyInstruction* phi, CounterKind c, const DataflowSta
 // Compute per-counter required waits for `inst` against the live `state`.
 void computeRequiredWaits(StinkyInstruction* inst, DataflowState& state,
                           const std::array<WaitDataflow::RawWaitPredicate, CK_Count>& rawNeedsWait,
-                          int required[CK_Count]) {
+                          bool girFrameWaits, int required[CK_Count]) {
     // Required wait per counter. -1 = no constraint yet.
     for (int c = 0; c < CK_Count; ++c) required[c] = WaitCountSpec::kUnused;
 
@@ -824,11 +892,16 @@ void computeRequiredWaits(StinkyInstruction* inst, DataflowState& state,
         }
     };
 
-    if (isLdsWriterAnchor(*inst)) {
+    // A GIR-named anchor's LDS anti-dependences come from the frame counter flow, which grades
+    // them across the rotation.  The token scan answers the same question from residual tokens and
+    // only ever tightens, so leaving it on pins the anchor to the newest overlapping read -- a
+    // drain to 0 -- however finely the frame model graded it.
+    if (isLdsWriterAnchor(*inst) && !girStatesStorageWaits(*inst, girFrameWaits)) {
         const auto* tk = inst->getModifier<MemTokenData>();
         if (tk != nullptr) scanDsAntiDeps(*inst, tk->tokens, /*barrierMode=*/false);
     }
-    if (isBarrier(*inst)) {
+    // A GIR fence's tokens name hazards the frame counter flow already grades.
+    if (isBarrier(*inst) && !girPlacedFence(*inst)) {
         const auto* tk = inst->getModifier<MemTokenData>();
         if (tk != nullptr) scanDsAntiDeps(*inst, tk->tokens, /*barrierMode=*/true);
     }
@@ -837,7 +910,8 @@ void computeRequiredWaits(StinkyInstruction* inst, DataflowState& state,
     // that lacks MemTokenData cannot be proven disjoint from a tensor
     // anchor, so treat it as an extra dep. Tagged overlaps are already
     // covered by the SSA UD chain through LDS<token> pseudo-regs.
-    if (isTensorAnchor(*inst) && inst->getModifier<MemTokenData>() != nullptr) {
+    if (isTensorAnchor(*inst) && inst->getModifier<MemTokenData>() != nullptr &&
+        !girOwnsOrdering(*inst, girFrameWaits)) {
         for (const auto& q : state.queues[CK_Tensor]) {
             const int qsize = static_cast<int>(q.ops.size());
             for (int idx = 0; idx < qsize; ++idx) {
@@ -877,19 +951,24 @@ void computeRequiredWaits(StinkyInstruction* inst, DataflowState& state,
     // Conservative MemTokenData fallbacks. An untagged anchor or
     // untagged producer means we cannot prove disjointness, so we
     // force the matching counter to 0.
-    if (isTensorAnchor(*inst) && inst->getModifier<MemTokenData>() == nullptr &&
-        anyOpInFlight(CK_Tensor)) {
+    if (isTensorAnchor(*inst) && !takesNoWait(*inst, girFrameWaits) &&
+        inst->getModifier<MemTokenData>() == nullptr &&
+        !girStatesStorageWaits(*inst, girFrameWaits) && anyOpInFlight(CK_Tensor)) {
         required[CK_Tensor] = 0;
     }
-    if ((isLdsWriterAnchor(*inst) || isBarrier(*inst)) &&
-        inst->getModifier<MemTokenData>() == nullptr && anyOpInFlight(CK_Async)) {
+    // A barrier is exempt only when GIR PLACED it, which is what the token scan above already
+    // asks. A contract does not make every barrier in the function a frame fence.
+    const bool asyncAnchor = (isLdsWriterAnchor(*inst) && !takesNoWait(*inst, girFrameWaits)) ||
+                             (isBarrier(*inst) && !girPlacedFence(*inst));
+    if (asyncAnchor && inst->getModifier<MemTokenData>() == nullptr && anyOpInFlight(CK_Async)) {
         required[CK_Async] = 0;
     }
     if (isLdsWriterAnchor(*inst) && inst->getModifier<MemTokenData>() == nullptr &&
+        !girStatesStorageWaits(*inst, girFrameWaits) && !girOwnsOrdering(*inst, girFrameWaits) &&
         anyOpInFlight(CK_DS) && !isDSWrite(*inst)) {
         required[CK_DS] = 0;
     }
-    if (isBarrier(*inst) && anyOpInFlight(CK_DS)) {
+    if (isBarrier(*inst) && !girPlacedFence(*inst) && anyOpInFlight(CK_DS)) {
         bool needs = inst->getModifier<MemTokenData>() == nullptr;
         if (!needs) {
             for (const auto& q : state.queues[CK_DS]) {
@@ -953,7 +1032,7 @@ void WaitDataflow::transferBlock(BasicBlock& bb, DataflowState& state) {
         if (creditIfObservedWait(*inst, state, emit)) continue;
 
         int required[CK_Count];
-        computeRequiredWaits(inst, state, rawNeedsWait, required);
+        computeRequiredWaits(inst, state, rawNeedsWait, girFrameWaitsEnabled, required);
 
         // Decide what to emit (apply redundancy elision) and trim per-pred
         // queues accordingly.
@@ -1045,7 +1124,7 @@ bool WaitDataflow::solve() {
         // exactly the steady-state queue saturations.
         overflowSites.clear();
         for (BasicBlock* bb : rpo) {
-            const bool keepLiveTensorState = hasUntaggedTensorAnchor(*bb);
+            const bool keepLiveTensorState = hasUntaggedTensorAnchor(*bb, girFrameWaitsEnabled);
             DataflowState entry = mergeFromPredecessors(*bb);
             if (!loopCarriedTokenDepsEnabled && iter > 0) {
                 restoreTensorState(entry, result.entryState[bb], keepLiveTensorState);
@@ -1123,7 +1202,7 @@ void WaitDataflow::finalizePlan(WaitInsertionPlan& plan) const {
         newAnchors.clear();
 
         for (BasicBlock* bb : rpo) {
-            const bool keepLiveTensorState = hasUntaggedTensorAnchor(*bb);
+            const bool keepLiveTensorState = hasUntaggedTensorAnchor(*bb, girFrameWaitsEnabled);
             // Entry = merge of recomputed predecessor exits (back-edges
             // start at bottom and tighten over iterations), then apply the
             // optimizer's predecessor tail drains.
@@ -1145,7 +1224,7 @@ void WaitDataflow::finalizePlan(WaitInsertionPlan& plan) const {
                 if (creditIfObservedWait(*inst, state, emit)) continue;
 
                 int computed[CK_Count];
-                computeRequiredWaits(inst, state, rawNeedsWait, computed);
+                computeRequiredWaits(inst, state, rawNeedsWait, girFrameWaitsEnabled, computed);
 
                 // Emit the optimizer's planned wait where present (floor),
                 // else the freshly recomputed requirement.

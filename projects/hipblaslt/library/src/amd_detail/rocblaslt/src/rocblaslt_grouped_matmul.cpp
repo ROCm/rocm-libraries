@@ -254,7 +254,7 @@ namespace
             return rocblaslt_status_invalid_value;
         }
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
-        RocblasltFusedEpilogueInfo fusedInfo;
+        RocblasltFusionInfo fusedInfo;
         if(rocblaslt_resolve_fused_a2a(*desc, fusedInfo) || fusedInfo.misattached)
         {
             log_error(__func__, "grouped GEMM does not support a fused all-to-all");

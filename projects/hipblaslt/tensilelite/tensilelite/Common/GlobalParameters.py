@@ -683,6 +683,7 @@ defaultBenchmarkCommonParameters = [
     {"StreamKFixupTreeReduction": [0]},
     {"DebugStreamK": [0]},
     {"DebugPersistentKernelLoopForever": [False]},
+    {"DebugDisableInstrMask": [0]},
     {"ActivationFused": [True]},
     {"ActivationFuncCall": [True]},
     {"ActivationAlt": [False]},

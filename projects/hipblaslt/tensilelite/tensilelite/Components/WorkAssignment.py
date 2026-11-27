@@ -10,6 +10,7 @@ from rocisa.instruction import SMovB32, VMovB32, VReadfirstlaneB32, SCmpEQU32, S
 import abc
 from ..Component import Component
 from ..Common import log2, clusterEnabled, persistentSpatialCluster
+from ..Common.DebugInstrMask import keepInstrComment
 from rocisa.enum import CacheScope
 from rocisa.functions import scalarUInt32DivideAndRemainder, scalarStaticDivideAndRemainder
 from ..ExecutionPolicy import hasDynamicAssignment, hasHybridAssignment, isStreamKSpatialCluster
@@ -80,14 +81,16 @@ def _emitWorkItemMailbox(writer, module, vLocalAddress, vWaveWorkItemIdx, skipLa
     # release before the next LDS0 write. WG barriers stay untokened.
     mailboxToken = _mailboxLds0Token(writer)
     storeInst = DSStoreB32(dstAddr=vgpr(vLocalAddress), src=vgpr(vWaveWorkItemIdx),
-                           ds=DSModifiers(offset=0))
+                           ds=DSModifiers(offset=0),
+                           comment=keepInstrComment(writer))
     storeInst.setMemToken(mailboxToken)
     module.add(storeInst)
     module.add(SWaitCnt(dscnt=0))
     module.add(skipLabel)
     module.add(SBarrier(comment="mailbox publish: wave 0 store visible"))
     loadInst = DSLoadB32(dst=vgpr(vWaveWorkItemIdx), src=vgpr(vLocalAddress),
-                         ds=DSModifiers(offset=0))
+                         ds=DSModifiers(offset=0),
+                         comment=keepInstrComment(writer))
     loadInst.setMemToken(_mailboxLds0Token(writer))
     module.add(loadInst)
     module.add(SWaitCnt(dscnt=0))

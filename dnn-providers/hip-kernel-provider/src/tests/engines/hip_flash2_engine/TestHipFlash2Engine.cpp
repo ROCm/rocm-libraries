@@ -17,6 +17,8 @@
 #include <hipdnn_test_sdk/utilities/SdpaGraphMutators.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include <optional>
+
 #include "core/Handle.hpp"
 #include "engines/hip_flash2_engine/HipFlash2Engine.hpp"
 #include "engines/hip_flash2_engine/HipFlash2FwdPlanBuilder_v2.hpp"
@@ -52,6 +54,19 @@ TEST_F(TestHipFlash2Engine, GetDetailsReportsGraphCaptureSupport)
     EXPECT_THAT(
         details.behaviorNotes(),
         ::testing::Contains(static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE)));
+}
+
+TEST_F(TestHipFlash2Engine, GetDetailsLeavesNumericalNotesAbsentWhileUnclaimed)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+    hipdnnPluginConstData_t result;
+    _engine->getDetails(_handle, graph, result);
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper details(result.ptr,
+                                                                                     result.size);
+    EXPECT_EQ(details.numericalNotes(), std::nullopt);
 }
 
 // -- isApplicable tests --------------------------------------------------------

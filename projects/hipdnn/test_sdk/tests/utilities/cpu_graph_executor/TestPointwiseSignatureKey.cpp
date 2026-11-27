@@ -639,7 +639,9 @@ TEST(TestPointwiseSignatureKey, PlanBuildersRegisteredForImplementedBinaryModes)
            {DataType::HALF, DataType::HALF, DataType::FLOAT, DataType::HALF},
            {DataType::BFLOAT16, DataType::BFLOAT16, DataType::FLOAT, DataType::BFLOAT16},
            {DataType::HALF, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT},
-           {DataType::FLOAT, DataType::BFLOAT16, DataType::FLOAT, DataType::FLOAT}};
+           {DataType::FLOAT, DataType::BFLOAT16, DataType::FLOAT, DataType::FLOAT},
+           {DataType::FLOAT, DataType::HALF, DataType::FLOAT, DataType::HALF},
+           {DataType::FLOAT, DataType::BFLOAT16, DataType::FLOAT, DataType::BFLOAT16}};
     // input0 / input1 / compute combinations registered for comparison modes (BOOLEAN output)
     const std::vector<std::array<DataType, 3>> comparisonCombinations
         = {{DataType::FLOAT, DataType::FLOAT, DataType::FLOAT},

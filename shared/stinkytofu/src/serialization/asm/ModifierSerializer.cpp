@@ -543,7 +543,8 @@ const char* girActionKindName(GirActionKind kind) {
 }
 
 bool serializeVisit(const GirActionData& mod, std::ostream& os) {
-    os << ", mod.gir_action = { action = " << mod.actionId << ", anchor = " << mod.anchorAction
+    os << ", mod.gir_action = { action = " << girExternalActionId(mod.actionId)
+       << ", anchor = " << girExternalActionId(mod.anchorAction)
        << ", kind = " << girActionKindName(mod.kind);
     // Indexed flat fields: the parsed dict merges repeated keys, so a nested list would not
     // round-trip.  `accessN_` is verbose but symmetric and handles any count.
