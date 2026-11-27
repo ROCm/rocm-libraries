@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "65d56d9a-ae2b-4636-a27b-98b1c0b3c91a",
+  "name": "kernel operation matches the graph's",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.batchnorm_backward.kernel_match"
+}

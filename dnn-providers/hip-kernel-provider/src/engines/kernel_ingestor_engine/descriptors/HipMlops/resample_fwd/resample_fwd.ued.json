@@ -1,0 +1,14 @@
+{
+  "version": "1.0",
+  "id": "39c6896a-f226-434e-8db3-cb4c7ccc4745",
+  "name": "hipkernel:ResampleFwd",
+  "sdk_version": "1.4.0",
+  "graph_match": {
+    "native": "hipkernel.resample_fwd.graph_match"
+  },
+  "metadata": "eb82dc6b-33ee-46dd-b085-c789be79fa26",
+  "behavior_notes": [
+    "runtime_compilation",
+    "supports_graph_capture"
+  ]
+}

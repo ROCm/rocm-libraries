@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "3fecb47d-07db-4d6b-a991-2b719808ebee",
+  "name": "RmsNormBwd dispatch",
+  "dispatch_symbol": "hipkernel.rms_norm_bwd.dispatch"
+}

@@ -1,0 +1,14 @@
+{
+  "version": "1.0",
+  "id": "fa25c852-31fa-4862-8766-0c4576e8b23f",
+  "name": "hipkernel:LayernormFwd",
+  "sdk_version": "1.4.0",
+  "graph_match": {
+    "native": "hipkernel.layernorm_fwd.graph_match"
+  },
+  "metadata": "5afc1d1b-9a8c-4275-9208-4c6e786630a1",
+  "behavior_notes": [
+    "runtime_compilation",
+    "supports_graph_capture"
+  ]
+}

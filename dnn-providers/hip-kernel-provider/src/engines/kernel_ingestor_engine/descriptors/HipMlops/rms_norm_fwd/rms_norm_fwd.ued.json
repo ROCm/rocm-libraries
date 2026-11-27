@@ -1,0 +1,14 @@
+{
+  "version": "1.0",
+  "id": "0529eade-1762-45e9-9100-73d9ba71c6e4",
+  "name": "hipkernel:RmsNormFwd",
+  "sdk_version": "1.4.0",
+  "graph_match": {
+    "native": "hipkernel.rms_norm_fwd.graph_match"
+  },
+  "metadata": "48aebc14-a5e6-425f-8c38-55e431b794a7",
+  "behavior_notes": [
+    "runtime_compilation",
+    "supports_graph_capture"
+  ]
+}

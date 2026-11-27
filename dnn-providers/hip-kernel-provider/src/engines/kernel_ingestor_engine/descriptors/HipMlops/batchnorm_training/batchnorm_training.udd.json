@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "a3652ffc-0e73-4575-98f5-953e38a21a3d",
+  "name": "BatchnormTraining dispatch",
+  "dispatch_symbol": "hipkernel.batchnorm_training.dispatch"
+}

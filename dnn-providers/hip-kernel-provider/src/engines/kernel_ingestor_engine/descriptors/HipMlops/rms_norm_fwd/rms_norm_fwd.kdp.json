@@ -1,0 +1,44 @@
+{
+  "version": "1.0",
+  "id": "f6fe838c-9940-44a0-901a-30d10a5f4d6a",
+  "name": "hipkernel:rms_norm_fwd",
+  "matchers": [
+    "9bedcea7-4723-4b6b-b851-5a12595a9834"
+  ],
+  "engine": "0529eade-1762-45e9-9100-73d9ba71c6e4",
+  "dispatch": "18750fc4-6658-4848-9540-dae69d006583",
+  "provenance": {
+    "specialization_contract": {
+      "schema_version": 1,
+      "consumers": [
+        {
+          "engine_id": "0529eade-1762-45e9-9100-73d9ba71c6e4",
+          "kmd_id": "48aebc14-a5e6-425f-8c38-55e431b794a7",
+          "metadata_fields": [],
+          "matcher_only_fields": [
+            "operation"
+          ],
+          "bindings": {},
+          "vocabulary": {}
+        }
+      ]
+    }
+  },
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "a844e65d-ef7c-4a5d-8be4-d5553c437196",
+      "name": "hip_mlops.rmsnorm_fwd",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/RMSNormFwd.cpp",
+        "entry_point": "RMSnormFwd"
+      },
+      "metadata": {
+        "operation": "RMSNORM_FWD"
+      },
+      "priority": 0
+    }
+  ],
+  "arch": []
+}

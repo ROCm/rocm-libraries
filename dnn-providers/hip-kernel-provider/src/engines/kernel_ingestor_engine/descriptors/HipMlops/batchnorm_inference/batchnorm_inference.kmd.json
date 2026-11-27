@@ -1,0 +1,11 @@
+{
+  "version": "1.0",
+  "id": "1d746e44-101d-4061-97f1-0c29baacda45",
+  "name": "BatchnormInference variant fields",
+  "fields": [
+    {
+      "name": "operation",
+      "type": "string"
+    }
+  ]
+}

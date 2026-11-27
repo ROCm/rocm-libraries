@@ -649,7 +649,16 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
         "hipkernel.standalone_pointwise.dispatch.v1",
         "hipkernel.batchnorm_inference_pointwise.dispatch",
 #ifdef HIPDNN_ENGINE_HIP_MLOPS_INGESTOR
-        "hipkernel.hip_mlops.resample_fwd_dispatch",
+        // The HIP MLOps engines, one pack table row each.
+        "hipkernel.resample_fwd.dispatch",
+        "hipkernel.resample_bwd.dispatch",
+        "hipkernel.layernorm_fwd.dispatch",
+        "hipkernel.layernorm_bwd.dispatch",
+        "hipkernel.rms_norm_fwd.dispatch",
+        "hipkernel.rms_norm_bwd.dispatch",
+        "hipkernel.batchnorm_inference.dispatch",
+        "hipkernel.batchnorm_training.dispatch",
+        "hipkernel.batchnorm_backward.dispatch",
 #endif
         "hipkernel.conv_fwd.dispatch",
         "hipkernel.gfx950_conv_dgrad_aot.dispatch",

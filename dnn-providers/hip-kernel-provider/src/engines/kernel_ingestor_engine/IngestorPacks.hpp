@@ -55,8 +55,20 @@ void registerStandalonePointwiseSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope
 void resetStandalonePointwiseModuleCache();
 
 #ifdef HIPDNN_ENGINE_HIP_MLOPS_INGESTOR
-/// @see packs/HipMlopsNative.cpp
-void registerHipMlopsSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+/// @see packs/HipMlopsNative.cpp, which serves the nine HIP MLOps engines, one per primary
+/// operation
+void registerHipMlopsResampleFwdSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void registerHipMlopsResampleBwdSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void registerHipMlopsLayernormFwdSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void registerHipMlopsLayernormBwdSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void registerHipMlopsRmsNormFwdSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void registerHipMlopsRmsNormBwdSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void registerHipMlopsBatchnormInferenceSymbols(
+    hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void registerHipMlopsBatchnormTrainingSymbols(
+    hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void registerHipMlopsBatchnormBackwardSymbols(
+    hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 #endif
 
 /// @see packs/BatchnormInferencePointwiseNative.cpp

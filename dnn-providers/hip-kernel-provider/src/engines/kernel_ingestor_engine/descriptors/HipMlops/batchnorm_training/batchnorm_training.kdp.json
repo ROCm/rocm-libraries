@@ -1,0 +1,44 @@
+{
+  "version": "1.0",
+  "id": "d2f5970b-4723-4ed8-95e9-3e66756a7179",
+  "name": "hipkernel:batchnorm_training",
+  "matchers": [
+    "403a8f60-1355-49f8-947e-c7aa0beee2cb"
+  ],
+  "engine": "d99582eb-4ebc-49cc-9a3e-f1da8bb08c14",
+  "dispatch": "a3652ffc-0e73-4575-98f5-953e38a21a3d",
+  "provenance": {
+    "specialization_contract": {
+      "schema_version": 1,
+      "consumers": [
+        {
+          "engine_id": "d99582eb-4ebc-49cc-9a3e-f1da8bb08c14",
+          "kmd_id": "6db512a4-c20d-40b0-abeb-5828ac2b3e06",
+          "metadata_fields": [],
+          "matcher_only_fields": [
+            "operation"
+          ],
+          "bindings": {},
+          "vocabulary": {}
+        }
+      ]
+    }
+  },
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "a7bdc7f4-e1d5-4d78-8b43-4cbcd5d79118",
+      "name": "hip_mlops.batchnorm_training",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/BatchNormFwdTrainSpatial.cpp",
+        "entry_point": "BatchNormFwdTrainSpatial"
+      },
+      "metadata": {
+        "operation": "BATCHNORM_TRAINING"
+      },
+      "priority": 0
+    }
+  ],
+  "arch": []
+}

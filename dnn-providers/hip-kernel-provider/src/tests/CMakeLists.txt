@@ -58,38 +58,38 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         KEYS kernels/BatchnormInferencePointwise.cpp
     )
     if(HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR)
-        # This binary discovers the production HipMlops bundle too, and resolves embedded
+        # This binary discovers the production HipMlops bundles too, and resolves embedded
         # sources from its own table, so it registers the plugin's HipMlops keys again.
-        set(_hip_mlops_dir "${CMAKE_CURRENT_SOURCE_DIR}/../engines/kernel_ingestor_engine/descriptors/HipMlops/kernels")
+        set(_hip_mlops_dir "${CMAKE_CURRENT_SOURCE_DIR}/../engines/kernel_ingestor_engine/descriptors/HipMlops")
         add_kernels_for_embedding(
             TARGET hip_kernel_provider_tests
-            FILES "${_hip_mlops_dir}/resample/ResampleFwd.cpp"
-                  "${_hip_mlops_dir}/resample/ResampleBwd.cpp"
-                  "${_hip_mlops_dir}/layernorm/LayernormFwd.cpp"
-                  "${_hip_mlops_dir}/layernorm/LayernormBwd.cpp"
-                  "${_hip_mlops_dir}/layernorm/LayernormCommon.hpp"
-                  "${_hip_mlops_dir}/rmsnorm/RMSNormFwd.cpp"
-                  "${_hip_mlops_dir}/rmsnorm/RMSNormBwd.cpp"
-                  "${_hip_mlops_dir}/batchnorm/BatchNormFwdInferSpatial.cpp"
-                  "${_hip_mlops_dir}/batchnorm/BatchNormFwdTrainSpatial.cpp"
-                  "${_hip_mlops_dir}/batchnorm/BatchNormBwdSpatial.cpp"
-                  "${_hip_mlops_dir}/batchnorm/Configuration.hpp"
-                  "${_hip_mlops_dir}/batchnorm/BatchnormFunctions.hpp"
-                  "${_hip_mlops_dir}/batchnorm/ReductionFunctions.hpp"
-                  "${_hip_mlops_dir}/batchnorm/StaticUnroll.hpp"
-                  "${_hip_mlops_dir}/types/VectorTypes.hpp"
-                  "${_hip_mlops_dir}/common/HipKernelActivation.hpp"
-                  "${_hip_mlops_dir}/common/HipKernelMath.hpp"
-            KEYS kernels/resample/ResampleFwd.cpp
-                 kernels/resample/ResampleBwd.cpp
-                 kernels/layernorm/LayernormFwd.cpp
-                 kernels/layernorm/LayernormBwd.cpp
+            FILES "${_hip_mlops_dir}/resample_fwd/kernels/ResampleFwd.cpp"
+                  "${_hip_mlops_dir}/resample_bwd/kernels/ResampleBwd.cpp"
+                  "${_hip_mlops_dir}/layernorm_fwd/kernels/LayernormFwd.cpp"
+                  "${_hip_mlops_dir}/layernorm_bwd/kernels/LayernormBwd.cpp"
+                  "${_hip_mlops_dir}/include/layernorm/LayernormCommon.hpp"
+                  "${_hip_mlops_dir}/rms_norm_fwd/kernels/RMSNormFwd.cpp"
+                  "${_hip_mlops_dir}/rms_norm_bwd/kernels/RMSNormBwd.cpp"
+                  "${_hip_mlops_dir}/batchnorm_inference/kernels/BatchNormFwdInferSpatial.cpp"
+                  "${_hip_mlops_dir}/batchnorm_training/kernels/BatchNormFwdTrainSpatial.cpp"
+                  "${_hip_mlops_dir}/batchnorm_backward/kernels/BatchNormBwdSpatial.cpp"
+                  "${_hip_mlops_dir}/include/batchnorm/Configuration.hpp"
+                  "${_hip_mlops_dir}/include/batchnorm/BatchnormFunctions.hpp"
+                  "${_hip_mlops_dir}/include/batchnorm/ReductionFunctions.hpp"
+                  "${_hip_mlops_dir}/include/batchnorm/StaticUnroll.hpp"
+                  "${_hip_mlops_dir}/include/types/VectorTypes.hpp"
+                  "${_hip_mlops_dir}/include/common/HipKernelActivation.hpp"
+                  "${_hip_mlops_dir}/include/common/HipKernelMath.hpp"
+            KEYS kernels/ResampleFwd.cpp
+                 kernels/ResampleBwd.cpp
+                 kernels/LayernormFwd.cpp
+                 kernels/LayernormBwd.cpp
                  LayernormCommon.hpp
-                 kernels/rmsnorm/RMSNormFwd.cpp
-                 kernels/rmsnorm/RMSNormBwd.cpp
-                 kernels/batchnorm/BatchNormFwdInferSpatial.cpp
-                 kernels/batchnorm/BatchNormFwdTrainSpatial.cpp
-                 kernels/batchnorm/BatchNormBwdSpatial.cpp
+                 kernels/RMSNormFwd.cpp
+                 kernels/RMSNormBwd.cpp
+                 kernels/BatchNormFwdInferSpatial.cpp
+                 kernels/BatchNormFwdTrainSpatial.cpp
+                 kernels/BatchNormBwdSpatial.cpp
                  Configuration.hpp
                  BatchnormFunctions.hpp
                  ReductionFunctions.hpp
@@ -293,7 +293,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         add_dependencies(hip_kernel_provider_tests hkp_packaging_multi_launch)
     endif()
 
-    # FlyDSL's kernels, and the HipMlops bundle (HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR),
+    # FlyDSL's kernels, and the HipMlops bundles (HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR),
     # ship in the production shard, which the unit root main() resolves does not reach,
     # so their device cases would find no descriptor for their engine. The binary
     # therefore names the production root as an ADDITIVE one, as the integration binary

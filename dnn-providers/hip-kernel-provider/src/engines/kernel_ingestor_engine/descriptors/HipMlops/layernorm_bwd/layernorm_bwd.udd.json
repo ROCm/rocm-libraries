@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "409dc072-0f46-4350-a7c9-cfc0ceaa4cbf",
+  "name": "LayernormBwd dispatch",
+  "dispatch_symbol": "hipkernel.layernorm_bwd.dispatch"
+}

@@ -25,8 +25,16 @@ const std::vector<IngestorPack>& ingestorPacks()
         {"hipkernel:ConvFwd", &registerConvFwdSymbols, &resetConvFwdModuleCache},
 #ifdef HIPDNN_ENGINE_HIP_MLOPS_INGESTOR
         // Built only with HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR; see this directory's
-        // CMakeLists.txt.
-        {"hipkernel:HipMlops", &registerHipMlopsSymbols, nullptr},
+        // CMakeLists.txt. One engine per primary operation.
+        {"hipkernel:ResampleFwd", &registerHipMlopsResampleFwdSymbols, nullptr},
+        {"hipkernel:ResampleBwd", &registerHipMlopsResampleBwdSymbols, nullptr},
+        {"hipkernel:LayernormFwd", &registerHipMlopsLayernormFwdSymbols, nullptr},
+        {"hipkernel:LayernormBwd", &registerHipMlopsLayernormBwdSymbols, nullptr},
+        {"hipkernel:RmsNormFwd", &registerHipMlopsRmsNormFwdSymbols, nullptr},
+        {"hipkernel:RmsNormBwd", &registerHipMlopsRmsNormBwdSymbols, nullptr},
+        {"hipkernel:BatchnormInference", &registerHipMlopsBatchnormInferenceSymbols, nullptr},
+        {"hipkernel:BatchnormTraining", &registerHipMlopsBatchnormTrainingSymbols, nullptr},
+        {"hipkernel:BatchnormBackward", &registerHipMlopsBatchnormBackwardSymbols, nullptr},
 #endif
 #ifdef HIPDNN_ENGINE_FLYDSL
         // Compiled only when FlyDSL staged a shard; see the gate in this directory's

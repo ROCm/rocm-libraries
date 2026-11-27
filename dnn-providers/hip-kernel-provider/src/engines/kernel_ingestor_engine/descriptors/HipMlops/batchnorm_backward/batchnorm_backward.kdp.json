@@ -1,0 +1,44 @@
+{
+  "version": "1.0",
+  "id": "cee8f459-b196-4810-83a1-92d02dbde92a",
+  "name": "hipkernel:batchnorm_backward",
+  "matchers": [
+    "65d56d9a-ae2b-4636-a27b-98b1c0b3c91a"
+  ],
+  "engine": "4ea145fe-0c4f-41ef-bfa3-63503fb030b5",
+  "dispatch": "6984476c-9a2b-409b-9482-ccbd46665baa",
+  "provenance": {
+    "specialization_contract": {
+      "schema_version": 1,
+      "consumers": [
+        {
+          "engine_id": "4ea145fe-0c4f-41ef-bfa3-63503fb030b5",
+          "kmd_id": "8bf081ad-f2b6-43a9-b6bd-b26a5f2960dd",
+          "metadata_fields": [],
+          "matcher_only_fields": [
+            "operation"
+          ],
+          "bindings": {},
+          "vocabulary": {}
+        }
+      ]
+    }
+  },
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "37aacaac-7a7e-41d1-8ee5-055e2dc778a0",
+      "name": "hip_mlops.batchnorm_backward",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/BatchNormBwdSpatial.cpp",
+        "entry_point": "BatchNormBwdSpatial"
+      },
+      "metadata": {
+        "operation": "BATCHNORM_BACKWARD"
+      },
+      "priority": 0
+    }
+  ],
+  "arch": []
+}

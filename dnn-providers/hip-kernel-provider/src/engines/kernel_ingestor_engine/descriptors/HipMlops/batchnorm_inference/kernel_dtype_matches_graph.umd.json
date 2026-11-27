@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "4da7aaa4-1c7a-4df1-ae0b-8f4bec6c374f",
+  "name": "kernel operation matches the graph's",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.batchnorm_inference.kernel_match"
+}

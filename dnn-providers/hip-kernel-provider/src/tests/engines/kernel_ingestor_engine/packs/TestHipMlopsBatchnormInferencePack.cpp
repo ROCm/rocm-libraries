@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <vector>
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
 
@@ -23,10 +24,10 @@
 
 /**
  * @file TestHipMlopsBatchnormInferencePack.cpp
- * @brief The HIP MLOps engine on the kernel ingestor, batchnorm inference (ALMIOPEN-3073): the
- *        engine accepts what the hand-written builder accepts -- inference with an inverse
- *        variance or with a variance and epsilon, alone or followed by a ReLU -- and computes
- *        each through the engine as a CPU reference does.
+ * @brief The HIP MLOps batchnorm inference engine on the kernel ingestor (ALMIOPEN-3073):
+ *        hipkernel:BatchnormInference accepts what the hand-written builder accepts --
+ *        inference with an inverse variance or with a variance and epsilon, one pack each,
+ *        alone or followed by a ReLU -- and computes each as a CPU reference does.
  */
 namespace
 {
@@ -197,9 +198,32 @@ flatbuffers::FlatBufferBuilder buildBatchnormGraph(const BatchnormGraph& spec)
     return builder;
 }
 
+/// The engine that serves @p spec, in either form.
+const MlopsEngine& engineFor(const BatchnormGraph& /*spec*/)
+{
+    return BATCHNORM_INFERENCE_ENGINE;
+}
+
 auto match(const BatchnormGraph& spec)
 {
-    return matchGraph(buildBatchnormGraph(spec));
+    return matchGraph(engineFor(spec), buildBatchnormGraph(spec));
+}
+
+/// @p spec's graph reaches its engine alone, which binds @p operation.
+void expectServedAlone(const BatchnormGraph& spec, const char* operation)
+{
+    EXPECT_THAT(acceptingEngines(buildBatchnormGraph(spec)),
+                ::testing::ElementsAre(engineFor(spec).name));
+    EXPECT_EQ(boundOperation(match(spec)), operation);
+}
+
+// ---------------------------------------------------------------------------
+// Identity
+// ---------------------------------------------------------------------------
+
+TEST(TestHipMlopsBatchnormInferencePack, IsOfferedUnderItsOwnNameAndIdWithAPackPerForm)
+{
+    expectOfferedUnderItsOwnNameAndId(BATCHNORM_INFERENCE_ENGINE);
 }
 
 BatchnormGraph edited(void (*edit)(BatchnormGraph&))
@@ -213,23 +237,21 @@ BatchnormGraph edited(void (*edit)(BatchnormGraph&))
 // Graph match
 // ---------------------------------------------------------------------------
 
-TEST(TestHipMlopsBatchnormInferenceGraphMatch, RoutesEachFormToItsPackFusedOrNot)
+TEST(TestHipMlopsBatchnormInferenceGraphMatch, RoutesEachFormToItsPackOfItsEngineAloneFusedOrNot)
 {
-    EXPECT_EQ(boundOperation(match({})), "BATCHNORM_INFERENCE");
-    EXPECT_EQ(boundOperation(match(edited([](auto& s) { s.activation = Activation::RELU; }))),
-              "BATCHNORM_INFERENCE");
-    EXPECT_EQ(boundOperation(match(edited([](auto& s) { s.withVariance = true; }))),
-              "BATCHNORM_INFERENCE_VARIANCE");
-    EXPECT_EQ(boundOperation(match(edited([](auto& s) {
-                  s.withVariance = true;
-                  s.activation = Activation::CLIPPED_RELU;
-              }))),
-              "BATCHNORM_INFERENCE_VARIANCE");
+    expectServedAlone({}, "BATCHNORM_INFERENCE");
+    expectServedAlone(edited([](auto& s) { s.activation = Activation::RELU; }),
+                      "BATCHNORM_INFERENCE");
+    expectServedAlone(edited([](auto& s) { s.withVariance = true; }),
+                      "BATCHNORM_INFERENCE_VARIANCE");
+    expectServedAlone(edited([](auto& s) {
+                          s.withVariance = true;
+                          s.activation = Activation::CLIPPED_RELU;
+                      }),
+                      "BATCHNORM_INFERENCE_VARIANCE");
     // 3D and 5D as well as 4D.
-    EXPECT_EQ(boundOperation(match(edited([](auto& s) { s.dims = {3, 8, 40}; }))),
-              "BATCHNORM_INFERENCE");
-    EXPECT_EQ(boundOperation(match(edited([](auto& s) { s.dims = {2, 4, 3, 5, 6}; }))),
-              "BATCHNORM_INFERENCE");
+    expectServedAlone(edited([](auto& s) { s.dims = {3, 8, 40}; }), "BATCHNORM_INFERENCE");
+    expectServedAlone(edited([](auto& s) { s.dims = {2, 4, 3, 5, 6}; }), "BATCHNORM_INFERENCE");
 }
 
 struct RefusalCase
@@ -242,9 +264,9 @@ class TestHipMlopsBatchnormInferenceRefusal : public ::testing::TestWithParam<Re
 {
 };
 
-TEST_P(TestHipMlopsBatchnormInferenceRefusal, Declines)
+TEST_P(TestHipMlopsBatchnormInferenceRefusal, EveryEngineDeclines)
 {
-    EXPECT_FALSE(match(GetParam().spec).has_value());
+    EXPECT_THAT(acceptingEngines(buildBatchnormGraph(GetParam().spec)), ::testing::IsEmpty());
 }
 
 // The hand-written builder's refusals.
@@ -389,7 +411,8 @@ void checkInference(const BatchnormGraph& spec)
            {BIAS_UID, biasBuffer.get()}};
 
     EngineRun run;
-    ASSERT_NO_FATAL_FAILURE(executeThroughTheEngine(buildBatchnormGraph(spec), buffers, &run));
+    ASSERT_NO_FATAL_FAILURE(
+        executeThroughTheEngine(engineFor(spec), buildBatchnormGraph(spec), buffers, &run));
     EXPECT_EQ(run.workspaceBytes, 0U);
     EXPECT_EQ(run.maxWorkspaceBytes, 0U);
     expectNear(yBuffer.read(), expected);

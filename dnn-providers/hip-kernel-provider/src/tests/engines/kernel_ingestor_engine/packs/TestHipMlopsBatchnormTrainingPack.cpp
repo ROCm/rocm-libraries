@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <vector>
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
 
@@ -23,12 +24,12 @@
 
 /**
  * @file TestHipMlopsBatchnormTrainingPack.cpp
- * @brief The HIP MLOps engine on the kernel ingestor, batchnorm training and backward
- *        (ALMIOPEN-3074): the engine accepts what the hand-written builders accept, and
- *        computes training (with and without saved and running statistics, alone or followed
- *        by a ReLU) and the backward (with saved statistics or recomputing them) through the
- *        engine as a CPU reference does. The three-node backward fusion is covered by its
- *        integration bundles.
+ * @brief The HIP MLOps batchnorm training and backward engines on the kernel ingestor
+ *        (ALMIOPEN-3074): hipkernel:BatchnormTraining and hipkernel:BatchnormBackward each
+ *        accept what the hand-written builders accept, and compute training (with and without
+ *        saved and running statistics, alone or followed by a ReLU) and the backward (with
+ *        saved statistics or recomputing them) as a CPU reference does. The three-node
+ *        backward fusion is covered by its integration bundles.
  */
 namespace
 {
@@ -247,9 +248,33 @@ flatbuffers::FlatBufferBuilder buildBatchnormGraph(const BatchnormGraph& spec)
     return builder;
 }
 
+/// The engine that serves @p spec: training, or the backward.
+const MlopsEngine& engineFor(const BatchnormGraph& spec)
+{
+    return spec.backward ? BATCHNORM_BACKWARD_ENGINE : BATCHNORM_TRAINING_ENGINE;
+}
+
 auto match(const BatchnormGraph& spec)
 {
-    return matchGraph(buildBatchnormGraph(spec));
+    return matchGraph(engineFor(spec), buildBatchnormGraph(spec));
+}
+
+/// @p spec's graph reaches its engine alone, which binds @p operation.
+void expectServedAlone(const BatchnormGraph& spec, const char* operation)
+{
+    EXPECT_THAT(acceptingEngines(buildBatchnormGraph(spec)),
+                ::testing::ElementsAre(engineFor(spec).name));
+    EXPECT_EQ(boundOperation(match(spec)), operation);
+}
+
+// ---------------------------------------------------------------------------
+// Identity
+// ---------------------------------------------------------------------------
+
+TEST(TestHipMlopsBatchnormTrainingPack, TrainingAndBackwardAreEachOfferedUnderTheirOwnNameAndId)
+{
+    expectOfferedUnderItsOwnNameAndId(BATCHNORM_TRAINING_ENGINE);
+    expectOfferedUnderItsOwnNameAndId(BATCHNORM_BACKWARD_ENGINE);
 }
 
 BatchnormGraph edited(void (*edit)(BatchnormGraph&))
@@ -263,23 +288,22 @@ BatchnormGraph edited(void (*edit)(BatchnormGraph&))
 // Graph match
 // ---------------------------------------------------------------------------
 
-TEST(TestHipMlopsBatchnormTrainingGraphMatch, RoutesTrainingAndBackwardToTheirPacks)
+TEST(TestHipMlopsBatchnormTrainingGraphMatch, RoutesTrainingAndBackwardToTheirEnginesAlone)
 {
-    EXPECT_EQ(boundOperation(match({})), "BATCHNORM_TRAINING");
-    EXPECT_EQ(boundOperation(match(edited([](auto& s) {
-                  s.withSaved = false;
-                  s.withRunning = false;
-              }))),
-              "BATCHNORM_TRAINING");
-    EXPECT_EQ(boundOperation(match(edited([](auto& s) { s.activation = Activation::RELU; }))),
-              "BATCHNORM_TRAINING");
-    EXPECT_EQ(boundOperation(match(edited([](auto& s) { s.backward = true; }))),
-              "BATCHNORM_BACKWARD");
-    EXPECT_EQ(boundOperation(match(edited([](auto& s) {
-                  s.backward = true;
-                  s.withSaved = false;
-              }))),
-              "BATCHNORM_BACKWARD");
+    expectServedAlone({}, "BATCHNORM_TRAINING");
+    expectServedAlone(edited([](auto& s) {
+                          s.withSaved = false;
+                          s.withRunning = false;
+                      }),
+                      "BATCHNORM_TRAINING");
+    expectServedAlone(edited([](auto& s) { s.activation = Activation::RELU; }),
+                      "BATCHNORM_TRAINING");
+    expectServedAlone(edited([](auto& s) { s.backward = true; }), "BATCHNORM_BACKWARD");
+    expectServedAlone(edited([](auto& s) {
+                          s.backward = true;
+                          s.withSaved = false;
+                      }),
+                      "BATCHNORM_BACKWARD");
 }
 
 struct RefusalCase
@@ -292,9 +316,9 @@ class TestHipMlopsBatchnormTrainingRefusal : public ::testing::TestWithParam<Ref
 {
 };
 
-TEST_P(TestHipMlopsBatchnormTrainingRefusal, Declines)
+TEST_P(TestHipMlopsBatchnormTrainingRefusal, EveryEngineDeclines)
 {
-    EXPECT_FALSE(match(GetParam().spec).has_value());
+    EXPECT_THAT(acceptingEngines(buildBatchnormGraph(GetParam().spec)), ::testing::IsEmpty());
 }
 
 // The hand-written builders' refusals.
@@ -528,7 +552,8 @@ void checkTraining(const BatchnormGraph& spec)
     }
 
     EngineRun run;
-    ASSERT_NO_FATAL_FAILURE(executeThroughTheEngine(buildBatchnormGraph(spec), buffers, &run));
+    ASSERT_NO_FATAL_FAILURE(
+        executeThroughTheEngine(engineFor(spec), buildBatchnormGraph(spec), buffers, &run));
     EXPECT_EQ(run.workspaceBytes, 0U);
     EXPECT_EQ(run.maxWorkspaceBytes, 0U);
 
@@ -616,7 +641,8 @@ void checkBackward(const BatchnormGraph& spec)
     }
 
     EngineRun run;
-    ASSERT_NO_FATAL_FAILURE(executeThroughTheEngine(buildBatchnormGraph(spec), buffers, &run));
+    ASSERT_NO_FATAL_FAILURE(
+        executeThroughTheEngine(engineFor(spec), buildBatchnormGraph(spec), buffers, &run));
     EXPECT_EQ(run.workspaceBytes, 0U);
 
     expectNear(dxBuffer.read(), dx, "dx", 1e-3f);

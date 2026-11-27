@@ -1,0 +1,14 @@
+{
+  "version": "1.0",
+  "id": "bbe2040b-f220-4284-91b1-04dfc6e6606c",
+  "name": "hipkernel:RmsNormBwd",
+  "sdk_version": "1.4.0",
+  "graph_match": {
+    "native": "hipkernel.rms_norm_bwd.graph_match"
+  },
+  "metadata": "e7b2eb24-cc09-4bcb-91c7-17c12b99a2f4",
+  "behavior_notes": [
+    "runtime_compilation",
+    "supports_graph_capture"
+  ]
+}

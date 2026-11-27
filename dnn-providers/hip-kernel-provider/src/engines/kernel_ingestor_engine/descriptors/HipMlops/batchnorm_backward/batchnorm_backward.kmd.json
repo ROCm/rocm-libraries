@@ -1,0 +1,11 @@
+{
+  "version": "1.0",
+  "id": "8bf081ad-f2b6-43a9-b6bd-b26a5f2960dd",
+  "name": "BatchnormBackward variant fields",
+  "fields": [
+    {
+      "name": "operation",
+      "type": "string"
+    }
+  ]
+}

@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -29,26 +30,105 @@
 
 /**
  * @file HipMlopsTestSupport.hpp
- * @brief What the HIP MLOps family tests share (ALMIOPEN-3066): the engine's names, its graph
- *        match, device buffers, and a run of a graph through the provider as a plan build and
- *        execute would.
+ * @brief What the HIP MLOps family tests share (ALMIOPEN-3066): the engines' names, their
+ *        graph matches, device buffers, and a run of a graph through the provider as a plan
+ *        build and execute would.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::testing::hip_mlops
 {
 
-constexpr std::string_view ENGINE_NAME = "hipkernel:HipMlops";
+/// One of the HIP MLOps engines on the ingestor, one per primary operation: the name its UED
+/// declares, the symbol of its graph match, and how many packs it ships.
+struct MlopsEngine
+{
+    std::string_view name;
+    std::string_view graphMatcher;
+    std::size_t packCount;
+};
+
+inline constexpr MlopsEngine RESAMPLE_FWD_ENGINE{
+    "hipkernel:ResampleFwd", "hipkernel.resample_fwd.graph_match", 1};
+inline constexpr MlopsEngine RESAMPLE_BWD_ENGINE{
+    "hipkernel:ResampleBwd", "hipkernel.resample_bwd.graph_match", 1};
+inline constexpr MlopsEngine LAYERNORM_FWD_ENGINE{
+    "hipkernel:LayernormFwd", "hipkernel.layernorm_fwd.graph_match", 1};
+inline constexpr MlopsEngine LAYERNORM_BWD_ENGINE{
+    "hipkernel:LayernormBwd", "hipkernel.layernorm_bwd.graph_match", 1};
+inline constexpr MlopsEngine RMS_NORM_FWD_ENGINE{
+    "hipkernel:RmsNormFwd", "hipkernel.rms_norm_fwd.graph_match", 1};
+inline constexpr MlopsEngine RMS_NORM_BWD_ENGINE{
+    "hipkernel:RmsNormBwd", "hipkernel.rms_norm_bwd.graph_match", 1};
+/// Two packs: an inverse variance the graph supplies, or a variance and epsilon.
+inline constexpr MlopsEngine BATCHNORM_INFERENCE_ENGINE{
+    "hipkernel:BatchnormInference", "hipkernel.batchnorm_inference.graph_match", 2};
+inline constexpr MlopsEngine BATCHNORM_TRAINING_ENGINE{
+    "hipkernel:BatchnormTraining", "hipkernel.batchnorm_training.graph_match", 1};
+inline constexpr MlopsEngine BATCHNORM_BACKWARD_ENGINE{
+    "hipkernel:BatchnormBackward", "hipkernel.batchnorm_backward.graph_match", 1};
+
+inline constexpr std::array<MlopsEngine, 9> ENGINES = {RESAMPLE_FWD_ENGINE,
+                                                       RESAMPLE_BWD_ENGINE,
+                                                       LAYERNORM_FWD_ENGINE,
+                                                       LAYERNORM_BWD_ENGINE,
+                                                       RMS_NORM_FWD_ENGINE,
+                                                       RMS_NORM_BWD_ENGINE,
+                                                       BATCHNORM_INFERENCE_ENGINE,
+                                                       BATCHNORM_TRAINING_ENGINE,
+                                                       BATCHNORM_BACKWARD_ENGINE};
+
+/// The built-in engine the hand-written HIP MLOps engine registers, not built in this mode.
 constexpr std::string_view BUILTIN_NAME = "HIP_MLOPS_ENGINE";
-constexpr std::string_view GRAPH_MATCHER = "hipkernel.hip_mlops.graph_match";
 constexpr std::string_view OPERATION_TOKEN = "hip_mlops.operation";
 
-/// The engine's graph match on @p builder's graph.
+/// @p engine's graph match on @p builder's graph.
 inline std::optional<hipdnn_plugin_sdk::ingestor::BoundTokens>
-    matchGraph(flatbuffers::FlatBufferBuilder builder)
+    matchGraph(const MlopsEngine& engine, flatbuffers::FlatBufferBuilder builder)
 {
     registerNativeIngestorSymbols();
     const GraphFixture fixture(std::move(builder));
-    return hipdnn_plugin_sdk::ingestor::GraphMatchRegistry::resolve(std::string(GRAPH_MATCHER))(
-        fixture.context());
+    return hipdnn_plugin_sdk::ingestor::GraphMatchRegistry::resolve(
+        std::string(engine.graphMatcher))(fixture.context());
+}
+
+/// The names of the HIP MLOps engines whose graph match accepts @p builder's graph: the one
+/// engine that serves it, or none.
+inline std::vector<std::string_view> acceptingEngines(flatbuffers::FlatBufferBuilder builder)
+{
+    registerNativeIngestorSymbols();
+    const GraphFixture fixture(std::move(builder));
+    std::vector<std::string_view> accepting;
+    for(const auto& engine : ENGINES)
+    {
+        if(hipdnn_plugin_sdk::ingestor::GraphMatchRegistry::resolve(
+               std::string(engine.graphMatcher))(fixture.context())
+               .has_value())
+        {
+            accepting.push_back(engine.name);
+        }
+    }
+    return accepting;
+}
+
+/// @p engine is loaded with its packs and offered under its own name and id, and the
+/// hand-written engine's id is offered by nobody.
+inline void expectOfferedUnderItsOwnNameAndId(const MlopsEngine& engine)
+{
+    SCOPED_TRACE(std::string(engine.name));
+    const auto* set = findLoadedSet(engine.name);
+    ASSERT_NE(set, nullptr) << "no descriptor set loaded";
+    EXPECT_EQ(distinctPackIdCount(*set), engine.packCount);
+
+    core::Container container;
+    const auto ids = container.getEngineManager().getAllEngineIds();
+    const auto engineId = hipdnn_data_sdk::utilities::engineNameToId(std::string(engine.name));
+    EXPECT_THAT(ids, ::testing::Contains(engineId));
+    EXPECT_THAT(ids,
+                ::testing::Not(::testing::Contains(
+                    hipdnn_data_sdk::utilities::engineNameToId(std::string(BUILTIN_NAME)))));
+
+    const char* advertised = nullptr;
+    ASSERT_EQ(core::Container::getEngineName(engineId, &advertised), HIPDNN_PLUGIN_STATUS_SUCCESS);
+    EXPECT_EQ(std::string(advertised), engine.name);
 }
 
 /// The operation a graph match bound, or nullopt when it declined.
@@ -150,13 +230,14 @@ struct EngineRun
     size_t workspaceBytes = 0;
 };
 
-/// Builds the engine's plan for @p builder's graph through the provider, as a plan build
+/// Builds @p engine's plan for @p builder's graph through the provider, as a plan build
 /// would, and executes it on @p buffers with a workspace of the plan's size.
-inline void executeThroughTheEngine(const flatbuffers::FlatBufferBuilder& builder,
+inline void executeThroughTheEngine(const MlopsEngine& engine,
+                                    const flatbuffers::FlatBufferBuilder& builder,
                                     const std::vector<hipdnnPluginDeviceBuffer_t>& buffers,
                                     EngineRun* run = nullptr)
 {
-    const auto engineId = hipdnn_data_sdk::utilities::engineNameToId(BUILTIN_NAME);
+    const auto engineId = hipdnn_data_sdk::utilities::engineNameToId(std::string(engine.name));
     core::Container container;
     auto& engineManager = container.getEngineManager();
     Handle handle;

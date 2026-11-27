@@ -10,6 +10,7 @@
 #include <optional>
 #include <vector>
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
 
@@ -24,10 +25,10 @@
 
 /**
  * @file TestHipMlopsRmsnormPack.cpp
- * @brief The HIP MLOps engine on the kernel ingestor, RMSnorm family (ALMIOPEN-3072): the
- *        engine accepts what the hand-written builders accept -- RMSnorm alone, and fused with
- *        a ReLU after the forward or before the backward -- and computes all four through the
- *        engine as CPU references do.
+ * @brief The HIP MLOps RMSnorm engines on the kernel ingestor (ALMIOPEN-3072):
+ *        hipkernel:RmsNormFwd and hipkernel:RmsNormBwd each accept what the hand-written
+ *        builders accept in their direction -- RMSnorm alone, and fused with a ReLU after the
+ *        forward or before the backward -- and compute all four as CPU references do.
  */
 namespace
 {
@@ -289,9 +290,33 @@ flatbuffers::FlatBufferBuilder buildRmsnormGraph(const RmsnormGraph& spec)
     return builder;
 }
 
+/// The engine that serves @p spec's direction, fused or not.
+const MlopsEngine& engineFor(const RmsnormGraph& spec)
+{
+    return spec.backward ? RMS_NORM_BWD_ENGINE : RMS_NORM_FWD_ENGINE;
+}
+
 auto match(const RmsnormGraph& spec)
 {
-    return matchGraph(buildRmsnormGraph(spec));
+    return matchGraph(engineFor(spec), buildRmsnormGraph(spec));
+}
+
+/// @p spec's graph reaches its engine alone, which binds @p operation.
+void expectServedAlone(const RmsnormGraph& spec, const char* operation)
+{
+    EXPECT_THAT(acceptingEngines(buildRmsnormGraph(spec)),
+                ::testing::ElementsAre(engineFor(spec).name));
+    EXPECT_EQ(boundOperation(match(spec)), operation);
+}
+
+// ---------------------------------------------------------------------------
+// Identity
+// ---------------------------------------------------------------------------
+
+TEST(TestHipMlopsRmsnormPack, EachDirectionIsOfferedUnderItsOwnNameAndId)
+{
+    expectOfferedUnderItsOwnNameAndId(RMS_NORM_FWD_ENGINE);
+    expectOfferedUnderItsOwnNameAndId(RMS_NORM_BWD_ENGINE);
 }
 
 RmsnormGraph edited(void (*edit)(RmsnormGraph&))
@@ -305,22 +330,21 @@ RmsnormGraph edited(void (*edit)(RmsnormGraph&))
 // Graph match
 // ---------------------------------------------------------------------------
 
-TEST(TestHipMlopsRmsnormGraphMatch, RoutesEachDirectionToItsPackFusedOrNot)
+TEST(TestHipMlopsRmsnormGraphMatch, RoutesEachDirectionToItsEngineAloneFusedOrNot)
 {
-    EXPECT_EQ(boundOperation(match({})), "RMSNORM_FWD");
-    EXPECT_EQ(boundOperation(match(edited([](auto& s) { s.activation = Activation::RELU; }))),
-              "RMSNORM_FWD");
-    EXPECT_EQ(boundOperation(match(edited([](auto& s) { s.backward = true; }))), "RMSNORM_BWD");
-    EXPECT_EQ(boundOperation(match(edited([](auto& s) {
-                  s.backward = true;
-                  s.activation = Activation::RELU;
-              }))),
-              "RMSNORM_BWD");
-    EXPECT_EQ(boundOperation(match(edited([](auto& s) {
-                  s.backward = true;
-                  s.activation = Activation::IDENTITY;
-              }))),
-              "RMSNORM_BWD");
+    expectServedAlone({}, "RMSNORM_FWD");
+    expectServedAlone(edited([](auto& s) { s.activation = Activation::RELU; }), "RMSNORM_FWD");
+    expectServedAlone(edited([](auto& s) { s.backward = true; }), "RMSNORM_BWD");
+    expectServedAlone(edited([](auto& s) {
+                          s.backward = true;
+                          s.activation = Activation::RELU;
+                      }),
+                      "RMSNORM_BWD");
+    expectServedAlone(edited([](auto& s) {
+                          s.backward = true;
+                          s.activation = Activation::IDENTITY;
+                      }),
+                      "RMSNORM_BWD");
 }
 
 struct RefusalCase
@@ -333,9 +357,9 @@ class TestHipMlopsRmsnormRefusal : public ::testing::TestWithParam<RefusalCase>
 {
 };
 
-TEST_P(TestHipMlopsRmsnormRefusal, Declines)
+TEST_P(TestHipMlopsRmsnormRefusal, EveryEngineDeclines)
 {
-    EXPECT_FALSE(match(GetParam().spec).has_value());
+    EXPECT_THAT(acceptingEngines(buildRmsnormGraph(GetParam().spec)), ::testing::IsEmpty());
 }
 
 // The hand-written builders' refusals.
@@ -578,7 +602,8 @@ void checkForward(const RmsnormGraph& spec)
     }
 
     EngineRun run;
-    ASSERT_NO_FATAL_FAILURE(executeThroughTheEngine(buildRmsnormGraph(spec), buffers, &run));
+    ASSERT_NO_FATAL_FAILURE(
+        executeThroughTheEngine(engineFor(spec), buildRmsnormGraph(spec), buffers, &run));
     EXPECT_EQ(run.workspaceBytes, 0U);
     EXPECT_EQ(run.maxWorkspaceBytes, 0U);
 
@@ -627,7 +652,8 @@ void checkBackward(const RmsnormGraph& spec)
     }
 
     EngineRun run;
-    ASSERT_NO_FATAL_FAILURE(executeThroughTheEngine(buildRmsnormGraph(spec), buffers, &run));
+    ASSERT_NO_FATAL_FAILURE(
+        executeThroughTheEngine(engineFor(spec), buildRmsnormGraph(spec), buffers, &run));
     EXPECT_EQ(run.workspaceBytes, 0U);
     EXPECT_EQ(run.maxWorkspaceBytes, 0U);
 

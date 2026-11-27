@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "6984476c-9a2b-409b-9482-ccbd46665baa",
+  "name": "BatchnormBackward dispatch",
+  "dispatch_symbol": "hipkernel.batchnorm_backward.dispatch"
+}

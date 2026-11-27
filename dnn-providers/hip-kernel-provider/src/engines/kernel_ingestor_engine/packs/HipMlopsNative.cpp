@@ -3,10 +3,12 @@
 
 #ifdef HIPDNN_ENGINE_HIP_MLOPS_INGESTOR
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
+#include <initializer_list>
 #include <memory>
 #include <optional>
 #include <string>
@@ -68,19 +70,23 @@
 
 /**
  * @file HipMlopsNative.cpp
- * @brief The HIP MLOps engine on the kernel ingestor (ALMIOPEN-3066): the engine's graph
- *        match, its per-family operation matchers, and one dispatch handler per family.
+ * @brief The HIP MLOps operations on the kernel ingestor (ALMIOPEN-3066): one engine per
+ *        primary operation node, each with its own graph match, and one dispatch handler per
+ *        family.
  *
- * The descriptor engine `hipkernel:HipMlops` takes over HIP_MLOPS_ENGINE's name and id
- * (`builtin_engine`). Each family accepts exactly the graphs the hand-written engine's plan
- * builder accepts, through that builder's own validator, and compiles the same embedded
- * source with the same compile options and launches (buildResampleFwdKernel(),
- * buildLayernormBwdKernel(), buildRMSnormFwdKernel() and friends), so the two engines serve a
- * graph with one program. RMSnorm and batchnorm also serve the hand-written builders'
- * fused graphs: an activation after the forward (two nodes), and before the backward (RMSnorm:
- * two nodes; batchnorm: three, from the inference that produced the activation's input).
- * The hand-written engine's engine-level checks (ragged and misaligned tensors) run first,
- * here as there.
+ * Nine descriptor engines, each under its own name and id: hipkernel:ResampleFwd,
+ * hipkernel:ResampleBwd, hipkernel:LayernormFwd, hipkernel:LayernormBwd, hipkernel:RmsNormFwd,
+ * hipkernel:RmsNormBwd, hipkernel:BatchnormInference (two packs, by the form of the node),
+ * hipkernel:BatchnormTraining and hipkernel:BatchnormBackward. A fused graph is served by the
+ * engine of the operation it is built around. Each family accepts exactly the graphs the
+ * hand-written engine's plan builder accepts, through that builder's own validator, and
+ * compiles the same embedded source with the same compile options and launches
+ * (buildResampleFwdKernel(), buildLayernormBwdKernel(), buildRMSnormFwdKernel() and friends),
+ * so the two serve a graph with one program. RMSnorm and batchnorm also serve the hand-written
+ * builders' fused graphs: an activation after the forward (two nodes), and before the backward
+ * (RMSnorm: two nodes; batchnorm: three, from the inference that produced the activation's
+ * input). The hand-written engine's engine-level checks (ragged and misaligned tensors) run
+ * first, here as there.
  *
  * Deliberate difference: a graph with override shapes is declined by every family. Each
  * bakes its shapes into the compiled program; the hand-written Resample builders were the
@@ -94,10 +100,6 @@ namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 
 namespace
 {
-
-// The contract with the installed descriptor files, which restate these same strings.
-constexpr std::string_view GRAPH_MATCHER_SYMBOL = "hipkernel.hip_mlops.graph_match";
-constexpr std::string_view KERNEL_MATCHER_SYMBOL = "hipkernel.hip_mlops.kernel_match";
 
 constexpr std::string_view OPERATION_FIELD = "operation";
 constexpr std::string_view OPERATION_TOKEN = "hip_mlops.operation";
@@ -233,8 +235,9 @@ void checkTrainingGraph(const MatchContext& context)
 /// The operation of the family that serves @p context's graph, or nullopt. Mirrors the
 /// hand-written plan builders' isApplicable(): fp32 compute throughout, one node of the
 /// family's attributes (or a fused graph of two or three), and the family's validator.
-/// Families are disjoint by their first node's type.
-std::optional<std::string_view> familyOf(const MatchContext& context)
+/// Families are disjoint by their first node's type. @p engine names the engine asking, for
+/// the log.
+std::optional<std::string_view> familyOf(const MatchContext& context, std::string_view engine)
 {
     const auto nodeCount = context.graph.nodeCount();
     if(nodeCount < 1 || nodeCount > 3)
@@ -311,24 +314,59 @@ std::optional<std::string_view> familyOf(const MatchContext& context)
     }
     catch(const std::exception& error)
     {
-        HIPDNN_PLUGIN_LOG_INFO("hipkernel:HipMlops declines the graph: " << error.what());
+        HIPDNN_PLUGIN_LOG_INFO(engine << " declines the graph: " << error.what());
         return std::nullopt;
     }
 }
 
+/// The type of the node a graph of one to three nodes is built around, the one that names
+/// its engine: the only node; in a two-node graph the node beside the activation (the
+/// activation's backward comes first); in the three-node graph the batchnorm backward, last.
+/// NONE for any other node count.
+data_objects::NodeAttributes primaryNodeType(const MatchContext& context)
+{
+    const auto nodeCount = context.graph.nodeCount();
+    if(nodeCount == 1 || nodeCount == 3)
+    {
+        return context.graph.getNodeWrapper(nodeCount - 1).attributesType();
+    }
+    if(nodeCount == 2)
+    {
+        const auto first = context.graph.getNodeWrapper(0).attributesType();
+        return first == data_objects::NodeAttributes::PointwiseAttributes
+                   ? context.graph.getNodeWrapper(1).attributesType()
+                   : first;
+    }
+    return data_objects::NodeAttributes::NONE;
+}
+
 /**
- * @brief Graph-scoped applicability for the whole engine: binds the operation of the one
- *        family that serves the graph, which the per-pack operation matchers select on.
+ * @brief Graph-scoped applicability for one engine: binds the operation of the family that
+ *        serves the graph when it is one of @p operations, the engine's own, which the kernel
+ *        matcher (and a multi-pack engine's operation matchers) select on.
+ *
+ * Only the engine whose @p primaryTypes hold the graph's primary node runs the validators, so
+ * a graph is validated, and a refusal logged, once rather than by every engine.
  */
-std::optional<BoundTokens> hipMlopsGraphMatches(const MatchContext& context)
+std::optional<BoundTokens>
+    graphMatchesOwnFamily(const MatchContext& context,
+                          std::string_view engine,
+                          std::initializer_list<data_objects::NodeAttributes> primaryTypes,
+                          std::initializer_list<std::string_view> operations)
 {
     if(!passesEngineChecks(context) || context.graph.getGraph().is_override_shape_enabled())
     {
         return std::nullopt;
     }
+    if(std::find(primaryTypes.begin(), primaryTypes.end(), primaryNodeType(context))
+       == primaryTypes.end())
+    {
+        return std::nullopt;
+    }
 
-    const auto family = familyOf(context);
-    if(!family.has_value())
+    const auto family = familyOf(context, engine);
+    if(!family.has_value()
+       || std::find(operations.begin(), operations.end(), *family) == operations.end())
     {
         return std::nullopt;
     }
@@ -336,6 +374,86 @@ std::optional<BoundTokens> hipMlopsGraphMatches(const MatchContext& context)
     BoundTokens bound;
     bound[std::string(OPERATION_TOKEN)] = std::string(*family);
     return bound;
+}
+
+std::optional<BoundTokens> resampleFwdGraphMatches(const MatchContext& context)
+{
+    return graphMatchesOwnFamily(context,
+                                 "hipkernel:ResampleFwd",
+                                 {data_objects::NodeAttributes::ResampleFwdAttributes},
+                                 {RESAMPLE_FWD});
+}
+
+std::optional<BoundTokens> resampleBwdGraphMatches(const MatchContext& context)
+{
+    return graphMatchesOwnFamily(context,
+                                 "hipkernel:ResampleBwd",
+                                 {data_objects::NodeAttributes::ResampleBwdAttributes},
+                                 {RESAMPLE_BWD});
+}
+
+std::optional<BoundTokens> layernormFwdGraphMatches(const MatchContext& context)
+{
+    return graphMatchesOwnFamily(context,
+                                 "hipkernel:LayernormFwd",
+                                 {data_objects::NodeAttributes::LayernormAttributes},
+                                 {LAYERNORM_FWD});
+}
+
+std::optional<BoundTokens> layernormBwdGraphMatches(const MatchContext& context)
+{
+    return graphMatchesOwnFamily(context,
+                                 "hipkernel:LayernormBwd",
+                                 {data_objects::NodeAttributes::LayernormBackwardAttributes},
+                                 {LAYERNORM_BWD});
+}
+
+/// Also the forward followed by an activation.
+std::optional<BoundTokens> rmsNormFwdGraphMatches(const MatchContext& context)
+{
+    return graphMatchesOwnFamily(context,
+                                 "hipkernel:RmsNormFwd",
+                                 {data_objects::NodeAttributes::RMSNormAttributes},
+                                 {RMSNORM_FWD});
+}
+
+/// Also an activation's backward followed by the backward.
+std::optional<BoundTokens> rmsNormBwdGraphMatches(const MatchContext& context)
+{
+    return graphMatchesOwnFamily(context,
+                                 "hipkernel:RmsNormBwd",
+                                 {data_objects::NodeAttributes::RMSNormBackwardAttributes},
+                                 {RMSNORM_BWD});
+}
+
+/// Either form of the node, each alone or followed by an activation; the operation bound
+/// selects the pack.
+std::optional<BoundTokens> batchnormInferenceGraphMatches(const MatchContext& context)
+{
+    return graphMatchesOwnFamily(
+        context,
+        "hipkernel:BatchnormInference",
+        {data_objects::NodeAttributes::BatchnormInferenceAttributes,
+         data_objects::NodeAttributes::BatchnormInferenceAttributesVarianceExt},
+        {BATCHNORM_INFERENCE, BATCHNORM_INFERENCE_VARIANCE});
+}
+
+/// Also the training followed by an activation.
+std::optional<BoundTokens> batchnormTrainingGraphMatches(const MatchContext& context)
+{
+    return graphMatchesOwnFamily(context,
+                                 "hipkernel:BatchnormTraining",
+                                 {data_objects::NodeAttributes::BatchnormAttributes},
+                                 {BATCHNORM_TRAINING});
+}
+
+/// Also the three-node graph: an inference, an activation's backward, then the backward.
+std::optional<BoundTokens> batchnormBackwardGraphMatches(const MatchContext& context)
+{
+    return graphMatchesOwnFamily(context,
+                                 "hipkernel:BatchnormBackward",
+                                 {data_objects::NodeAttributes::BatchnormBackwardAttributes},
+                                 {BATCHNORM_BACKWARD});
 }
 
 /// The operation the graph match bound, or nullopt.
@@ -1609,45 +1727,80 @@ const Handler& dispatchHandler()
 
 } // namespace
 
-void registerHipMlopsSymbols(SymbolScope<Handle>& scope)
+// One function per engine. The symbols are the contract with the installed descriptor
+// files, which restate these same strings: each engine's under its own namespace, its slug.
+
+void registerHipMlopsResampleFwdSymbols(SymbolScope<Handle>& scope)
 {
-    scope.add(std::string(GRAPH_MATCHER_SYMBOL), &hipMlopsGraphMatches);
-    scope.add(std::string(KERNEL_MATCHER_SYMBOL), &kernelMatches);
+    scope.add("hipkernel.resample_fwd.graph_match", &resampleFwdGraphMatches);
+    scope.add("hipkernel.resample_fwd.kernel_match", &kernelMatches);
+    scope.add("hipkernel.resample_fwd.dispatch", &dispatchHandler<ResampleFwdDispatchHandler>());
+}
 
-    scope.add("hipkernel.hip_mlops.resample_fwd_match", &operationMatches<RESAMPLE_FWD>);
-    scope.add("hipkernel.hip_mlops.resample_bwd_match", &operationMatches<RESAMPLE_BWD>);
-    scope.add("hipkernel.hip_mlops.layernorm_fwd_match", &operationMatches<LAYERNORM_FWD>);
-    scope.add("hipkernel.hip_mlops.layernorm_bwd_match", &operationMatches<LAYERNORM_BWD>);
-    scope.add("hipkernel.hip_mlops.rmsnorm_fwd_match", &operationMatches<RMSNORM_FWD>);
-    scope.add("hipkernel.hip_mlops.rmsnorm_bwd_match", &operationMatches<RMSNORM_BWD>);
-    scope.add("hipkernel.hip_mlops.batchnorm_inference_match",
+void registerHipMlopsResampleBwdSymbols(SymbolScope<Handle>& scope)
+{
+    scope.add("hipkernel.resample_bwd.graph_match", &resampleBwdGraphMatches);
+    scope.add("hipkernel.resample_bwd.kernel_match", &kernelMatches);
+    scope.add("hipkernel.resample_bwd.dispatch", &dispatchHandler<ResampleBwdDispatchHandler>());
+}
+
+void registerHipMlopsLayernormFwdSymbols(SymbolScope<Handle>& scope)
+{
+    scope.add("hipkernel.layernorm_fwd.graph_match", &layernormFwdGraphMatches);
+    scope.add("hipkernel.layernorm_fwd.kernel_match", &kernelMatches);
+    scope.add("hipkernel.layernorm_fwd.dispatch", &dispatchHandler<LayernormFwdDispatchHandler>());
+}
+
+void registerHipMlopsLayernormBwdSymbols(SymbolScope<Handle>& scope)
+{
+    scope.add("hipkernel.layernorm_bwd.graph_match", &layernormBwdGraphMatches);
+    scope.add("hipkernel.layernorm_bwd.kernel_match", &kernelMatches);
+    scope.add("hipkernel.layernorm_bwd.dispatch", &dispatchHandler<LayernormBwdDispatchHandler>());
+}
+
+void registerHipMlopsRmsNormFwdSymbols(SymbolScope<Handle>& scope)
+{
+    scope.add("hipkernel.rms_norm_fwd.graph_match", &rmsNormFwdGraphMatches);
+    scope.add("hipkernel.rms_norm_fwd.kernel_match", &kernelMatches);
+    scope.add("hipkernel.rms_norm_fwd.dispatch", &dispatchHandler<RmsnormFwdDispatchHandler>());
+}
+
+void registerHipMlopsRmsNormBwdSymbols(SymbolScope<Handle>& scope)
+{
+    scope.add("hipkernel.rms_norm_bwd.graph_match", &rmsNormBwdGraphMatches);
+    scope.add("hipkernel.rms_norm_bwd.kernel_match", &kernelMatches);
+    scope.add("hipkernel.rms_norm_bwd.dispatch", &dispatchHandler<RmsnormBwdDispatchHandler>());
+}
+
+void registerHipMlopsBatchnormInferenceSymbols(SymbolScope<Handle>& scope)
+{
+    scope.add("hipkernel.batchnorm_inference.graph_match", &batchnormInferenceGraphMatches);
+    scope.add("hipkernel.batchnorm_inference.kernel_match", &kernelMatches);
+
+    scope.add("hipkernel.batchnorm_inference.batchnorm_inference_match",
               &operationMatches<BATCHNORM_INFERENCE>);
-    scope.add("hipkernel.hip_mlops.batchnorm_inference_variance_match",
+    scope.add("hipkernel.batchnorm_inference.batchnorm_inference_variance_match",
               &operationMatches<BATCHNORM_INFERENCE_VARIANCE>);
-    scope.add("hipkernel.hip_mlops.batchnorm_training_match",
-              &operationMatches<BATCHNORM_TRAINING>);
-    scope.add("hipkernel.hip_mlops.batchnorm_backward_match",
-              &operationMatches<BATCHNORM_BACKWARD>);
 
-    scope.add("hipkernel.hip_mlops.resample_fwd_dispatch",
-              &dispatchHandler<ResampleFwdDispatchHandler>());
-    scope.add("hipkernel.hip_mlops.resample_bwd_dispatch",
-              &dispatchHandler<ResampleBwdDispatchHandler>());
-    scope.add("hipkernel.hip_mlops.layernorm_fwd_dispatch",
-              &dispatchHandler<LayernormFwdDispatchHandler>());
-    scope.add("hipkernel.hip_mlops.layernorm_bwd_dispatch",
-              &dispatchHandler<LayernormBwdDispatchHandler>());
-    scope.add("hipkernel.hip_mlops.rmsnorm_fwd_dispatch",
-              &dispatchHandler<RmsnormFwdDispatchHandler>());
-    scope.add("hipkernel.hip_mlops.rmsnorm_bwd_dispatch",
-              &dispatchHandler<RmsnormBwdDispatchHandler>());
-    scope.add("hipkernel.hip_mlops.batchnorm_inference_dispatch",
+    scope.add("hipkernel.batchnorm_inference.dispatch",
               &dispatchHandler<BatchnormInferenceDispatchHandler>());
-    scope.add("hipkernel.hip_mlops.batchnorm_inference_variance_dispatch",
+    scope.add("hipkernel.batchnorm_inference.batchnorm_inference_variance_dispatch",
               &dispatchHandler<BatchnormInferenceVarianceDispatchHandler>());
-    scope.add("hipkernel.hip_mlops.batchnorm_training_dispatch",
+}
+
+void registerHipMlopsBatchnormTrainingSymbols(SymbolScope<Handle>& scope)
+{
+    scope.add("hipkernel.batchnorm_training.graph_match", &batchnormTrainingGraphMatches);
+    scope.add("hipkernel.batchnorm_training.kernel_match", &kernelMatches);
+    scope.add("hipkernel.batchnorm_training.dispatch",
               &dispatchHandler<BatchnormTrainingDispatchHandler>());
-    scope.add("hipkernel.hip_mlops.batchnorm_backward_dispatch",
+}
+
+void registerHipMlopsBatchnormBackwardSymbols(SymbolScope<Handle>& scope)
+{
+    scope.add("hipkernel.batchnorm_backward.graph_match", &batchnormBackwardGraphMatches);
+    scope.add("hipkernel.batchnorm_backward.kernel_match", &kernelMatches);
+    scope.add("hipkernel.batchnorm_backward.dispatch",
               &dispatchHandler<BatchnormBackwardDispatchHandler>());
 }
 

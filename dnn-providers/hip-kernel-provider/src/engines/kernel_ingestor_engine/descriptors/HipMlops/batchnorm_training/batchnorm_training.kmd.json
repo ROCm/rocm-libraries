@@ -1,0 +1,11 @@
+{
+  "version": "1.0",
+  "id": "6db512a4-c20d-40b0-abeb-5828ac2b3e06",
+  "name": "BatchnormTraining variant fields",
+  "fields": [
+    {
+      "name": "operation",
+      "type": "string"
+    }
+  ]
+}

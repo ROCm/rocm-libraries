@@ -28,10 +28,10 @@
 
 /**
  * @file TestHipMlopsResamplePack.cpp
- * @brief The HIP MLOps engine on the kernel ingestor, Resample family (ALMIOPEN-3075): the
- *        engine takes over HIP_MLOPS_ENGINE's id, accepts what the hand-written builders
- *        accept and declines override shapes, and computes forward and backward resampling
- *        through the engine as CPU references do.
+ * @brief The HIP MLOps Resample engines on the kernel ingestor (ALMIOPEN-3075):
+ *        hipkernel:ResampleFwd and hipkernel:ResampleBwd are each offered under their own
+ *        name and id, each accepts what its hand-written builder accepts and declines override
+ *        shapes, and they compute forward and backward resampling as CPU references do.
  */
 namespace
 {
@@ -170,47 +170,49 @@ flatbuffers::FlatBufferBuilder buildResampleGraph(const ResampleGraph& spec)
     return builder;
 }
 
+/// The engine that serves @p spec's direction.
+const MlopsEngine& engineFor(const ResampleGraph& spec)
+{
+    return spec.backward ? RESAMPLE_BWD_ENGINE : RESAMPLE_FWD_ENGINE;
+}
+
 auto match(const ResampleGraph& spec)
 {
-    return matchGraph(buildResampleGraph(spec));
+    return matchGraph(engineFor(spec), buildResampleGraph(spec));
 }
 
 // ---------------------------------------------------------------------------
-// Identity: the descriptor engine is HIP_MLOPS_ENGINE
+// Identity: each direction is its own engine
 // ---------------------------------------------------------------------------
 
-TEST(TestHipMlopsResamplePack, TakesOverTheHandWrittenEnginesNameAndId)
+TEST(TestHipMlopsResamplePack, EachDirectionIsOfferedUnderItsOwnNameAndId)
 {
-    const auto& set = loadedSet(ENGINE_NAME);
-    EXPECT_EQ(set.engine.builtinEngine, BUILTIN_NAME);
-    // One pack per operation: Resample, Layernorm and RMSnorm forward and backward, and
-    // batchnorm inference (with an inverse variance or a variance), training and backward.
-    EXPECT_EQ(distinctPackIdCount(set), 10U);
-
-    core::Container container;
-    const auto ids = container.getEngineManager().getAllEngineIds();
-    EXPECT_THAT(ids, ::testing::Contains(hipdnn_data_sdk::utilities::engineNameToId(BUILTIN_NAME)));
-    EXPECT_THAT(ids,
-                ::testing::Not(::testing::Contains(
-                    hipdnn_data_sdk::utilities::engineNameToId(std::string(ENGINE_NAME)))));
+    expectOfferedUnderItsOwnNameAndId(RESAMPLE_FWD_ENGINE);
+    expectOfferedUnderItsOwnNameAndId(RESAMPLE_BWD_ENGINE);
 }
 
 // ---------------------------------------------------------------------------
 // Graph match
 // ---------------------------------------------------------------------------
 
-TEST(TestHipMlopsResampleGraphMatch, RoutesEachDirectionToItsPack)
+TEST(TestHipMlopsResampleGraphMatch, RoutesEachDirectionToItsEngineAlone)
 {
+    EXPECT_THAT(acceptingEngines(buildResampleGraph({})),
+                ::testing::ElementsAre(RESAMPLE_FWD_ENGINE.name));
     EXPECT_EQ(boundOperation(match({})), "RESAMPLE_FWD");
 
     ResampleGraph withIndex;
     withIndex.withIndex = true;
+    EXPECT_THAT(acceptingEngines(buildResampleGraph(withIndex)),
+                ::testing::ElementsAre(RESAMPLE_FWD_ENGINE.name));
     EXPECT_EQ(boundOperation(match(withIndex)), "RESAMPLE_FWD");
 
     ResampleGraph backward;
     backward.backward = true;
     backward.mode = data_objects::ResampleMode::AVGPOOL_INCLUDE_PADDING;
     backward.padding = data_objects::PaddingMode::ZERO_PAD;
+    EXPECT_THAT(acceptingEngines(buildResampleGraph(backward)),
+                ::testing::ElementsAre(RESAMPLE_BWD_ENGINE.name));
     EXPECT_EQ(boundOperation(match(backward)), "RESAMPLE_BWD");
 }
 
@@ -231,9 +233,9 @@ class TestHipMlopsResampleRefusal : public ::testing::TestWithParam<RefusalCase>
 {
 };
 
-TEST_P(TestHipMlopsResampleRefusal, Declines)
+TEST_P(TestHipMlopsResampleRefusal, EveryEngineDeclines)
 {
-    EXPECT_FALSE(match(GetParam().spec).has_value());
+    EXPECT_THAT(acceptingEngines(buildResampleGraph(GetParam().spec)), ::testing::IsEmpty());
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -389,8 +391,10 @@ TEST(TestHipMlopsResampleDevice, ForwardMatchesTheReferenceForEveryMode)
 
         const DeviceBuffer<float> dx(elementCount(INPUT_DIMS), x);
         const DeviceBuffer<float> dy(elementCount(OUTPUT_DIMS));
-        ASSERT_NO_FATAL_FAILURE(executeThroughTheEngine(
-            buildResampleGraph(spec), {{SOURCE_UID, dx.get()}, {RESULT_UID, dy.get()}}));
+        ASSERT_NO_FATAL_FAILURE(
+            executeThroughTheEngine(RESAMPLE_FWD_ENGINE,
+                                    buildResampleGraph(spec),
+                                    {{SOURCE_UID, dx.get()}, {RESULT_UID, dy.get()}}));
 
         expectNear(dy.read(), forwardReference(x, mode));
     }
@@ -407,7 +411,8 @@ TEST(TestHipMlopsResampleDevice, MaxpoolIndexAndBackwardMatchTheReference)
     const DeviceBuffer<float> xBuffer(elementCount(INPUT_DIMS), x);
     const DeviceBuffer<float> yBuffer(elementCount(OUTPUT_DIMS));
     const DeviceBuffer<int32_t> indexBuffer(elementCount(OUTPUT_DIMS));
-    ASSERT_NO_FATAL_FAILURE(executeThroughTheEngine(buildResampleGraph(forward),
+    ASSERT_NO_FATAL_FAILURE(executeThroughTheEngine(RESAMPLE_FWD_ENGINE,
+                                                    buildResampleGraph(forward),
                                                     {{SOURCE_UID, xBuffer.get()},
                                                      {RESULT_UID, yBuffer.get()},
                                                      {INDEX_UID, indexBuffer.get()}}));
@@ -437,6 +442,7 @@ TEST(TestHipMlopsResampleDevice, MaxpoolIndexAndBackwardMatchTheReference)
     const DeviceBuffer<float> dy(elementCount(OUTPUT_DIMS), dyValues);
     const DeviceBuffer<float> dx(elementCount(INPUT_DIMS));
     ASSERT_NO_FATAL_FAILURE(executeThroughTheEngine(
+        RESAMPLE_BWD_ENGINE,
         buildResampleGraph(backward),
         {{SOURCE_UID, dy.get()}, {RESULT_UID, dx.get()}, {INDEX_UID, indexBuffer.get()}}));
     expectNear(dx.read(), backwardReference(dyValues, data_objects::ResampleMode::MAXPOOL, index));
@@ -458,8 +464,10 @@ TEST(TestHipMlopsResampleDevice, AveragingBackwardMatchesTheReference)
 
         const DeviceBuffer<float> dy(elementCount(OUTPUT_DIMS), dyValues);
         const DeviceBuffer<float> dx(elementCount(INPUT_DIMS));
-        ASSERT_NO_FATAL_FAILURE(executeThroughTheEngine(
-            buildResampleGraph(spec), {{SOURCE_UID, dy.get()}, {RESULT_UID, dx.get()}}));
+        ASSERT_NO_FATAL_FAILURE(
+            executeThroughTheEngine(RESAMPLE_BWD_ENGINE,
+                                    buildResampleGraph(spec),
+                                    {{SOURCE_UID, dy.get()}, {RESULT_UID, dx.get()}}));
 
         expectNear(dx.read(), backwardReference(dyValues, mode, {}));
     }

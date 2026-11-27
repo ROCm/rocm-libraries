@@ -1,0 +1,11 @@
+{
+  "version": "1.0",
+  "id": "48aebc14-a5e6-425f-8c38-55e431b794a7",
+  "name": "RmsNormFwd variant fields",
+  "fields": [
+    {
+      "name": "operation",
+      "type": "string"
+    }
+  ]
+}

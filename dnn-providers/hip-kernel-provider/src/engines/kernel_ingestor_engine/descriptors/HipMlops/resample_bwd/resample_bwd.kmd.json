@@ -1,0 +1,11 @@
+{
+  "version": "1.0",
+  "id": "d0d0277d-a4ee-474d-b3df-88c3c9dd9c95",
+  "name": "ResampleBwd variant fields",
+  "fields": [
+    {
+      "name": "operation",
+      "type": "string"
+    }
+  ]
+}

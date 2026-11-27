@@ -1,0 +1,14 @@
+{
+  "version": "1.0",
+  "id": "d99582eb-4ebc-49cc-9a3e-f1da8bb08c14",
+  "name": "hipkernel:BatchnormTraining",
+  "sdk_version": "1.4.0",
+  "graph_match": {
+    "native": "hipkernel.batchnorm_training.graph_match"
+  },
+  "metadata": "6db512a4-c20d-40b0-abeb-5828ac2b3e06",
+  "behavior_notes": [
+    "runtime_compilation",
+    "supports_graph_capture"
+  ]
+}

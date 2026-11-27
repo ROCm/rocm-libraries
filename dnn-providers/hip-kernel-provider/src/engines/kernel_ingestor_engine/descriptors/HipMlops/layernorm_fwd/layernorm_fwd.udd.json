@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "34f23c7a-7a1a-4ffe-b6fa-c3ada0514114",
+  "name": "LayernormFwd dispatch",
+  "dispatch_symbol": "hipkernel.layernorm_fwd.dispatch"
+}

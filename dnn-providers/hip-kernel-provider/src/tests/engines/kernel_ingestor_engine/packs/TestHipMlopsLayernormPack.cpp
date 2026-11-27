@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <vector>
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
 
@@ -21,10 +22,11 @@
 
 /**
  * @file TestHipMlopsLayernormPack.cpp
- * @brief The HIP MLOps engine on the kernel ingestor, Layernorm family (ALMIOPEN-3071): the
- *        engine accepts what the hand-written builder accepts, and computes forward and
- *        backward layernorm through the engine as CPU references do -- the backward on both
- *        of its launch sequences, with the graph's epsilon and with the default.
+ * @brief The HIP MLOps Layernorm engines on the kernel ingestor (ALMIOPEN-3071):
+ *        hipkernel:LayernormFwd and hipkernel:LayernormBwd each accept what the hand-written
+ *        builder accepts in their direction, and compute forward and backward layernorm as CPU
+ *        references do -- the backward on both of its launch sequences, with the graph's
+ *        epsilon and with the default.
  */
 namespace
 {
@@ -193,31 +195,55 @@ flatbuffers::FlatBufferBuilder buildLayernormGraph(const LayernormGraph& spec)
     return builder;
 }
 
+/// The engine that serves @p spec's direction.
+const MlopsEngine& engineFor(const LayernormGraph& spec)
+{
+    return spec.backward ? LAYERNORM_BWD_ENGINE : LAYERNORM_FWD_ENGINE;
+}
+
 auto match(const LayernormGraph& spec)
 {
-    return matchGraph(buildLayernormGraph(spec));
+    return matchGraph(engineFor(spec), buildLayernormGraph(spec));
+}
+
+/// @p spec's graph reaches its engine alone, which binds @p operation.
+void expectServedAlone(const LayernormGraph& spec, const char* operation)
+{
+    EXPECT_THAT(acceptingEngines(buildLayernormGraph(spec)),
+                ::testing::ElementsAre(engineFor(spec).name));
+    EXPECT_EQ(boundOperation(match(spec)), operation);
+}
+
+// ---------------------------------------------------------------------------
+// Identity
+// ---------------------------------------------------------------------------
+
+TEST(TestHipMlopsLayernormPack, EachDirectionIsOfferedUnderItsOwnNameAndId)
+{
+    expectOfferedUnderItsOwnNameAndId(LAYERNORM_FWD_ENGINE);
+    expectOfferedUnderItsOwnNameAndId(LAYERNORM_BWD_ENGINE);
 }
 
 // ---------------------------------------------------------------------------
 // Graph match
 // ---------------------------------------------------------------------------
 
-TEST(TestHipMlopsLayernormGraphMatch, RoutesEachDirectionToItsPack)
+TEST(TestHipMlopsLayernormGraphMatch, RoutesEachDirectionToItsEngineAlone)
 {
-    EXPECT_EQ(boundOperation(match({})), "LAYERNORM_FWD");
+    expectServedAlone({}, "LAYERNORM_FWD");
 
     LayernormGraph withoutStatistics;
     withoutStatistics.withStatistics = false;
-    EXPECT_EQ(boundOperation(match(withoutStatistics)), "LAYERNORM_FWD");
+    expectServedAlone(withoutStatistics, "LAYERNORM_FWD");
 
     LayernormGraph backward;
     backward.backward = true;
-    EXPECT_EQ(boundOperation(match(backward)), "LAYERNORM_BWD");
+    expectServedAlone(backward, "LAYERNORM_BWD");
 
     // Every optional backward operand absent.
     backward.withStatistics = false;
     backward.withEpsilon = false;
-    EXPECT_EQ(boundOperation(match(backward)), "LAYERNORM_BWD");
+    expectServedAlone(backward, "LAYERNORM_BWD");
 }
 
 struct RefusalCase
@@ -237,9 +263,9 @@ class TestHipMlopsLayernormRefusal : public ::testing::TestWithParam<RefusalCase
 {
 };
 
-TEST_P(TestHipMlopsLayernormRefusal, Declines)
+TEST_P(TestHipMlopsLayernormRefusal, EveryEngineDeclines)
 {
-    EXPECT_FALSE(match(GetParam().spec).has_value());
+    EXPECT_THAT(acceptingEngines(buildLayernormGraph(GetParam().spec)), ::testing::IsEmpty());
 }
 
 // The hand-written builder's refusals, each in both directions where it applies.
@@ -463,7 +489,8 @@ EngineRun checkBackward(const LayernormGraph& spec, double expectedEpsilon)
     }
 
     EngineRun run;
-    EXPECT_NO_FATAL_FAILURE(executeThroughTheEngine(buildLayernormGraph(spec), buffers, &run));
+    EXPECT_NO_FATAL_FAILURE(
+        executeThroughTheEngine(engineFor(spec), buildLayernormGraph(spec), buffers, &run));
     EXPECT_EQ(run.workspaceBytes, run.maxWorkspaceBytes);
 
     expectNear(dx.read(), expected.dx, "dx");
@@ -502,7 +529,8 @@ TEST(TestHipMlopsLayernormDevice, ForwardMatchesTheReference)
         }
 
         EngineRun run;
-        ASSERT_NO_FATAL_FAILURE(executeThroughTheEngine(buildLayernormGraph(spec), buffers, &run));
+        ASSERT_NO_FATAL_FAILURE(
+            executeThroughTheEngine(engineFor(spec), buildLayernormGraph(spec), buffers, &run));
         EXPECT_EQ(run.workspaceBytes, 0U);
         EXPECT_EQ(run.maxWorkspaceBytes, 0U);
 

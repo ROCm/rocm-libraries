@@ -1,0 +1,44 @@
+{
+  "version": "1.0",
+  "id": "00517a1d-5b0c-4678-ab22-60470b4bba5b",
+  "name": "hipkernel:resample_fwd",
+  "matchers": [
+    "12a29eac-1614-4d5a-9b67-b88f82f39d96"
+  ],
+  "engine": "39c6896a-f226-434e-8db3-cb4c7ccc4745",
+  "dispatch": "088c5902-0855-47b0-9661-14e40316f8f2",
+  "provenance": {
+    "specialization_contract": {
+      "schema_version": 1,
+      "consumers": [
+        {
+          "engine_id": "39c6896a-f226-434e-8db3-cb4c7ccc4745",
+          "kmd_id": "eb82dc6b-33ee-46dd-b085-c789be79fa26",
+          "metadata_fields": [],
+          "matcher_only_fields": [
+            "operation"
+          ],
+          "bindings": {},
+          "vocabulary": {}
+        }
+      ]
+    }
+  },
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "292c8634-49d9-4698-ad59-33211527593f",
+      "name": "hip_mlops.resample_fwd",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ResampleFwd.cpp",
+        "entry_point": "ResampleFwd"
+      },
+      "metadata": {
+        "operation": "RESAMPLE_FWD"
+      },
+      "priority": 0
+    }
+  ],
+  "arch": []
+}

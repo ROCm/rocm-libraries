@@ -1,0 +1,11 @@
+{
+  "version": "1.0",
+  "id": "5afc1d1b-9a8c-4275-9208-4c6e786630a1",
+  "name": "LayernormFwd variant fields",
+  "fields": [
+    {
+      "name": "operation",
+      "type": "string"
+    }
+  ]
+}

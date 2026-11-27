@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "0f8e7cf5-6b88-414c-87da-034b9297c55d",
+  "name": "ResampleBwd dispatch",
+  "dispatch_symbol": "hipkernel.resample_bwd.dispatch"
+}

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 # The plugin resolves kpack descriptors, which read their kernel code from an archive on
-# disk, so nothing is embedded there -- except the HipMlops bundle below. The unit-test binary resolves both kinds: it reads
+# disk, so nothing is embedded there -- except the HipMlops bundles below. The unit-test binary resolves both kinds: it reads
 # kpack descriptors from a staged archive, and for embedded_source descriptors it links
 # this engine statically and embeds its own copy of the kernel sources.
 
@@ -240,11 +240,12 @@ if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
     target_compile_definitions(hip_kernel_provider_impl PUBLIC HIPDNN_ENGINE_FLYDSL=1)
 endif()
 
-# ALMIOPEN-3066: the HIP MLOps families on the ingestor, behind the migration option. Unlike
-# every other production pack their descriptors are shipped direct-load bundles, so the
-# plugin compiles their kernels from embedded source: each is registered under the
-# `source_file` its descriptor names, which hkp_verify_embedded_sources() checks. The
-# headers they include resolve by bare name.
+# ALMIOPEN-3066: the HIP MLOps operations on the ingestor, one engine per primary operation,
+# behind the migration option. Unlike every other production pack their descriptors are
+# shipped direct-load bundles, so the plugin compiles their kernels from embedded source: each
+# is registered under the `source_file` its descriptor names, relative to that engine's
+# folder, which hkp_verify_embedded_sources() checks. The headers they include resolve by
+# bare name.
 if(HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR)
     target_sources(hip_kernel_provider_impl PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/HipMlopsNative.cpp
@@ -253,33 +254,33 @@ if(HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR)
     include("${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/KernelEmbedding.cmake")
     add_kernels_for_embedding(
         TARGET hip_kernel_provider_impl
-        FILES "${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/resample/ResampleFwd.cpp"
-              "${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/resample/ResampleBwd.cpp"
-              "${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/layernorm/LayernormFwd.cpp"
-              "${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/layernorm/LayernormBwd.cpp"
-              "${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/layernorm/LayernormCommon.hpp"
-              "${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/rmsnorm/RMSNormFwd.cpp"
-              "${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/rmsnorm/RMSNormBwd.cpp"
-              "${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/batchnorm/BatchNormFwdInferSpatial.cpp"
-              "${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/batchnorm/BatchNormFwdTrainSpatial.cpp"
-              "${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/batchnorm/BatchNormBwdSpatial.cpp"
-              "${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/batchnorm/Configuration.hpp"
-              "${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/batchnorm/BatchnormFunctions.hpp"
-              "${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/batchnorm/ReductionFunctions.hpp"
-              "${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/batchnorm/StaticUnroll.hpp"
-              "${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/types/VectorTypes.hpp"
-              "${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/common/HipKernelActivation.hpp"
-              "${HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR}/common/HipKernelMath.hpp"
-        KEYS kernels/resample/ResampleFwd.cpp
-             kernels/resample/ResampleBwd.cpp
-             kernels/layernorm/LayernormFwd.cpp
-             kernels/layernorm/LayernormBwd.cpp
+        FILES "${HKP_HIP_MLOPS_INGESTOR_DIR}/resample_fwd/kernels/ResampleFwd.cpp"
+              "${HKP_HIP_MLOPS_INGESTOR_DIR}/resample_bwd/kernels/ResampleBwd.cpp"
+              "${HKP_HIP_MLOPS_INGESTOR_DIR}/layernorm_fwd/kernels/LayernormFwd.cpp"
+              "${HKP_HIP_MLOPS_INGESTOR_DIR}/layernorm_bwd/kernels/LayernormBwd.cpp"
+              "${HKP_HIP_MLOPS_INGESTOR_DIR}/include/layernorm/LayernormCommon.hpp"
+              "${HKP_HIP_MLOPS_INGESTOR_DIR}/rms_norm_fwd/kernels/RMSNormFwd.cpp"
+              "${HKP_HIP_MLOPS_INGESTOR_DIR}/rms_norm_bwd/kernels/RMSNormBwd.cpp"
+              "${HKP_HIP_MLOPS_INGESTOR_DIR}/batchnorm_inference/kernels/BatchNormFwdInferSpatial.cpp"
+              "${HKP_HIP_MLOPS_INGESTOR_DIR}/batchnorm_training/kernels/BatchNormFwdTrainSpatial.cpp"
+              "${HKP_HIP_MLOPS_INGESTOR_DIR}/batchnorm_backward/kernels/BatchNormBwdSpatial.cpp"
+              "${HKP_HIP_MLOPS_INGESTOR_DIR}/include/batchnorm/Configuration.hpp"
+              "${HKP_HIP_MLOPS_INGESTOR_DIR}/include/batchnorm/BatchnormFunctions.hpp"
+              "${HKP_HIP_MLOPS_INGESTOR_DIR}/include/batchnorm/ReductionFunctions.hpp"
+              "${HKP_HIP_MLOPS_INGESTOR_DIR}/include/batchnorm/StaticUnroll.hpp"
+              "${HKP_HIP_MLOPS_INGESTOR_DIR}/include/types/VectorTypes.hpp"
+              "${HKP_HIP_MLOPS_INGESTOR_DIR}/include/common/HipKernelActivation.hpp"
+              "${HKP_HIP_MLOPS_INGESTOR_DIR}/include/common/HipKernelMath.hpp"
+        KEYS kernels/ResampleFwd.cpp
+             kernels/ResampleBwd.cpp
+             kernels/LayernormFwd.cpp
+             kernels/LayernormBwd.cpp
              LayernormCommon.hpp
-             kernels/rmsnorm/RMSNormFwd.cpp
-             kernels/rmsnorm/RMSNormBwd.cpp
-             kernels/batchnorm/BatchNormFwdInferSpatial.cpp
-             kernels/batchnorm/BatchNormFwdTrainSpatial.cpp
-             kernels/batchnorm/BatchNormBwdSpatial.cpp
+             kernels/RMSNormFwd.cpp
+             kernels/RMSNormBwd.cpp
+             kernels/BatchNormFwdInferSpatial.cpp
+             kernels/BatchNormFwdTrainSpatial.cpp
+             kernels/BatchNormBwdSpatial.cpp
              Configuration.hpp
              BatchnormFunctions.hpp
              ReductionFunctions.hpp

@@ -1,0 +1,11 @@
+{
+  "version": "1.0",
+  "id": "eb82dc6b-33ee-46dd-b085-c789be79fa26",
+  "name": "ResampleFwd variant fields",
+  "fields": [
+    {
+      "name": "operation",
+      "type": "string"
+    }
+  ]
+}

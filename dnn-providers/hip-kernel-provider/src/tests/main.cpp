@@ -276,7 +276,7 @@ int main(int argc, char** argv)
 #endif
 
 #ifdef HIPKERNELPROVIDER_ADDITIVE_PRODUCT_DESCRIPTOR_RELDIR
-    // FlyDSL's kernels, and the HipMlops bundle, ship in the production shard, which the
+    // FlyDSL's kernels, and the HipMlops bundles, ship in the production shard, which the
     // unit root above does not reach. An installed plugin finds that shard beside its own module; this binary is
     // not the plugin, so it names the shard through HIPDNN_DESCRIPTOR_RUNTIME_DIR, the
     // ingestor's additive root: it ADDS the tree to the search instead of replacing one,
@@ -300,7 +300,7 @@ int main(int argc, char** argv)
 #if defined(HIPKERNELPROVIDER_ASM_SDPA_DESCRIPTOR_RELDIR) \
     && !defined(HIPKERNELPROVIDER_ADDITIVE_PRODUCT_DESCRIPTOR_RELDIR)
     // The ASM SDPA engine's L1 models ship loose under the production tree's asm_sdpa/,
-    // which the unit root does not reach either. Where FlyDSL or the HipMlops bundle already
+    // which the unit root does not reach either. Where FlyDSL or the HipMlops bundles already
     // added the whole production root above, that root holds them; otherwise only this one
     // folder is added, through HIPDNN_DESCRIPTOR_PATH (additive too), so no production pack
     // reaches the other suites. Never over a value the caller supplied.

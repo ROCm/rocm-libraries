@@ -52,6 +52,23 @@ using namespace hip_kernel_provider::core;
 static_assert(hipdnn_plugin_sdk::HasGetEngineName<Container>::value,
               "Container::getEngineName must match the signature the plugin SDK calls");
 
+#ifdef HIPDNN_ENGINE_HIP_MLOPS_INGESTOR
+/// The HIP MLOps operations on the ingestor (HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR): one
+/// engine per primary operation, each under its own name and id, in place of HIP_MLOPS_ENGINE.
+/// Literals, as the ingestor names below are.
+constexpr std::array<const char*, 9> HIP_MLOPS_INGESTOR_ENGINE_NAMES = {
+    "hipkernel:ResampleFwd",
+    "hipkernel:ResampleBwd",
+    "hipkernel:LayernormFwd",
+    "hipkernel:LayernormBwd",
+    "hipkernel:RmsNormFwd",
+    "hipkernel:RmsNormBwd",
+    "hipkernel:BatchnormInference",
+    "hipkernel:BatchnormTraining",
+    "hipkernel:BatchnormBackward",
+};
+#endif
+
 /// Engines this build configuration exposes: every compiled-in native engine, plus every
 /// shipped descriptor set. Spelled out here rather than read from the provider inventory,
 /// so an engine that disappears from that inventory fails these tests.
@@ -61,7 +78,7 @@ static_assert(hipdnn_plugin_sdk::HasGetEngineName<Container>::value,
 ///
 /// The ingestor names are literals where the others are shared constants, and must stay
 /// that way. The others are declared in C++ and read here from the same constant as
-/// production, so a rename moves both sides together and goes undetected. These two are
+/// production, so a rename moves both sides together and goes undetected. These are
 /// declared in descriptor JSON, so restating them here is an independent check.
 static std::vector<std::string> expectedEngineNames()
 {
@@ -79,12 +96,18 @@ static std::vector<std::string> expectedEngineNames()
     names.emplace_back("hipkernel:ConvFwd");
     names.emplace_back("hipkernel:Pointwise");
 #endif
+#ifdef HIPDNN_ENGINE_HIP_MLOPS_INGESTOR
+    names.insert(names.end(),
+                 HIP_MLOPS_INGESTOR_ENGINE_NAMES.begin(),
+                 HIP_MLOPS_INGESTOR_ENGINE_NAMES.end());
+#endif
     return names;
 }
 
 /// Upper bound for the fixed-size buffers below. Raise it when a configuration exposes
-/// more engines than this. FlyDSL alone adds one engine per kernel family.
-constexpr uint32_t MAX_EXPECTED_ENGINES = 32;
+/// more engines than this. FlyDSL alone adds one engine per kernel family, and the HIP MLOps
+/// operations on the ingestor nine.
+constexpr uint32_t MAX_EXPECTED_ENGINES = 48;
 
 TEST(TestContainer, ConstructsSuccessfully)
 {
@@ -146,6 +169,37 @@ TEST(TestContainer, CopyEngineIdsWithBufferContainsHipMlopsEngineId)
         containsHipMlopsEngine |= (engine == hipdnn_data_sdk::utilities::HIP_MLOPS_ENGINE_ID);
     }
     EXPECT_EQ(containsHipMlopsEngine, true);
+#endif
+}
+
+// With the HIP MLOps operations on the ingestor, the hand-written engine is not built and no
+// descriptor engine takes its name or id: each ingestor engine is offered under its own.
+TEST(TestContainer, IngestorModeOffersEachHipMlopsEngineUnderItsOwnIdAndNotHipMlopsEngine)
+{
+#ifndef HIPDNN_ENGINE_HIP_MLOPS_INGESTOR
+    GTEST_SKIP();
+#else
+    std::array<int64_t, MAX_EXPECTED_ENGINES> engineIds = {};
+    uint32_t numEngines = 0;
+    const auto totalEngines
+        = Container::copyEngineIds(engineIds.data(), MAX_EXPECTED_ENGINES, numEngines);
+    ASSERT_LE(totalEngines, MAX_EXPECTED_ENGINES) << "raise MAX_EXPECTED_ENGINES";
+
+    const auto last = engineIds.begin() + static_cast<std::ptrdiff_t>(numEngines);
+    EXPECT_EQ(std::find(engineIds.begin(), last, hipdnn_data_sdk::utilities::HIP_MLOPS_ENGINE_ID),
+              last)
+        << "HIP_MLOPS_ENGINE is advertised in ingestor mode";
+    for(const auto* name : HIP_MLOPS_INGESTOR_ENGINE_NAMES)
+    {
+        const auto engineId = hipdnn_data_sdk::utilities::engineNameToId(name);
+        EXPECT_NE(std::find(engineIds.begin(), last, engineId), last)
+            << "engine '" << name << "' is not advertised";
+
+        const char* advertised = nullptr;
+        ASSERT_EQ(Container::getEngineName(engineId, &advertised), HIPDNN_PLUGIN_STATUS_SUCCESS)
+            << name;
+        EXPECT_EQ(std::string(advertised), name);
+    }
 #endif
 }
 
@@ -448,7 +502,8 @@ TEST(TestContainer, GetEngineNameRejectsANullNameArgument)
 
 // The provider's schema guard's opt-in list (GraphSchema.hpp): the HIP MLOps and HIP Flash2
 // engines claim graph schema 1.4.0 (each of them gates ragged tensors, declared alignments and
-// offset multipliers), and the ASM SDPA engine and the six FlyDSL SDPA forward engines claim 1.6.0,
+// offset multipliers), and so do the nine HIP MLOps engines on the ingestor (their UEDs'
+// sdk_version; their graph matches run the hand-written engine's same checks), and the ASM SDPA engine and the six FlyDSL SDPA forward engines claim 1.6.0,
 // the SDK's newest (their forward matchers also gate cu_seq_len), and the two FlyDSL SDPA
 // backward engines claim 1.4.0 (their UEDs' sdk_version; their matchers reviewed against every field
 // up to it, and a backward graph never carries cu_seq_len). So does the RDNA WMMA prefill engine,
@@ -465,6 +520,15 @@ TEST(TestContainer, PinsEveryEnginesDeclaredGraphSchema)
         {"hipkernel:Gfx1151WmmaAttention", "1.4.0"},
         {std::string(hipdnn_data_sdk::utilities::ASM_SDPA_ENGINE_NAME), "1.6.0"},
         {std::string(hipdnn_data_sdk::utilities::HIP_MLOPS_ENGINE_NAME), "1.4.0"},
+        {"hipkernel:ResampleFwd", "1.4.0"},
+        {"hipkernel:ResampleBwd", "1.4.0"},
+        {"hipkernel:LayernormFwd", "1.4.0"},
+        {"hipkernel:LayernormBwd", "1.4.0"},
+        {"hipkernel:RmsNormFwd", "1.4.0"},
+        {"hipkernel:RmsNormBwd", "1.4.0"},
+        {"hipkernel:BatchnormInference", "1.4.0"},
+        {"hipkernel:BatchnormTraining", "1.4.0"},
+        {"hipkernel:BatchnormBackward", "1.4.0"},
         {std::string(hipdnn_data_sdk::utilities::HIP_FLASH2_ENGINE_NAME), "1.4.0"},
         {"hipkernel:flydsl_sdpa_rdna", "1.6.0"},
         {"hipkernel:flydsl_sdpa_rdna_decode", "1.6.0"},

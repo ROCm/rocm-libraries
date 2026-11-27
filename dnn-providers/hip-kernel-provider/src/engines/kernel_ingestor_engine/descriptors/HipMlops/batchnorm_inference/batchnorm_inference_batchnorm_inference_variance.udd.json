@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "d99b4003-162b-4a24-ad00-f83243e6aac7",
+  "name": "BatchnormInference batchnorm_inference_variance dispatch",
+  "dispatch_symbol": "hipkernel.batchnorm_inference.batchnorm_inference_variance_dispatch"
+}

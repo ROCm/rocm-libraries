@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "549fe1dc-2b0f-41ba-8308-6dd5c6607932",
+  "name": "kernel operation matches the graph's",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.layernorm_fwd.kernel_match"
+}

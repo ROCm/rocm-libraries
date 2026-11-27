@@ -76,16 +76,17 @@ option(ENABLE_HIP_MLOPS_ENGINE "Build the HIP kernel engine" ON)
 
 # ALMIOPEN-3066: serve the HIP MLOps families migrated so far from the kernel ingestor's
 # HipMlops descriptors (descriptors/HipMlops/, packed only when this is ON) instead of the
-# hand-written engine. The descriptor engine takes over HIP_MLOPS_ENGINE's name and id
-# (`builtin_engine`), so the two cannot both be built. Families not yet migrated are not
-# served in this mode. Removed, with the hand-written engine, at cutover.
+# hand-written engine: one descriptor engine per primary operation, each under its own name
+# and id. Both would accept the same graphs from the same kernel sources, so the two cannot
+# both be built. Families not yet migrated are not served in this mode. Removed, with the
+# hand-written engine, at cutover.
 option(HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR
        "Serve the migrated HIP MLOps families from the kernel ingestor" OFF)
 if(HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR)
     if(ENABLE_HIP_MLOPS_ENGINE)
         message(FATAL_ERROR
-                "HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR and ENABLE_HIP_MLOPS_ENGINE both claim "
-                "HIP_MLOPS_ENGINE's engine id; turn ENABLE_HIP_MLOPS_ENGINE OFF.")
+                "HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR and ENABLE_HIP_MLOPS_ENGINE both serve "
+                "the migrated HIP MLOps families; turn ENABLE_HIP_MLOPS_ENGINE OFF.")
     endif()
     if(NOT HIPDNN_ENABLE_KERNEL_INGESTOR)
         message(FATAL_ERROR

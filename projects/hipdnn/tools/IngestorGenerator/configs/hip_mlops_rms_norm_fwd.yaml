@@ -1,0 +1,46 @@
+# The RMSnorm forward engine on the kernel ingestor (ALMIOPEN-3066), one of the nine engines
+# that serve the HIP MLOps operations, one per primary operation node. Every kernel is
+# embedded source compiled at plan build, with the graph baked in as compile options, as the
+# hand-written HIP_MLOPS_ENGINE does. The bundle ships under
+# descriptors/HipMlops/rms_norm_fwd/ with its kernel source in kernels/, and is packed only
+# with HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR ON.
+
+engine:
+  name: hipkernel:RmsNormFwd
+  sdk_version: "1.4.0"
+  behavior_notes: [runtime_compilation, supports_graph_capture]
+  heuristic: none
+
+kmd_fields:
+  - name: operation
+    type: string
+
+graph_match:
+  shape: shared_shape
+  discriminator: none
+
+kernel_source_kind: embedded_source
+workspace_policy: none
+
+authored_subpath: descriptors/HipMlops/rms_norm_fwd
+
+packs:
+  # Also serves the hand-written builder's two-node graph, an activation fused after the
+  # forward; the graph match tells it apart from the plain one.
+  - name: rmsnorm_fwd
+    kernels:
+      - name: hip_mlops.rmsnorm_fwd
+        kernel_source:
+          kind: embedded_source
+          source_file: kernels/RMSNormFwd.cpp
+          entry_point: RMSnormFwd
+        metadata:
+          operation: RMSNORM_FWD
+        priority: 0
+
+# Embedded source compiled at plan build: every field is matcher-only.
+specialization:
+  metadata_fields: []
+  matcher_only_fields: [operation]
+  bindings: {}
+  vocabulary: {}

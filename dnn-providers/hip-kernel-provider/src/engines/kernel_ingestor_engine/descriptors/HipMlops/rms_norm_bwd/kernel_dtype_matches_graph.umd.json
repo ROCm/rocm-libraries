@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "3f4fbe7f-a7ef-4ae1-b41e-b84313f68fbc",
+  "name": "kernel operation matches the graph's",
+  "scope": "kernel",
+  "match_symbol": "hipkernel.rms_norm_bwd.kernel_match"
+}

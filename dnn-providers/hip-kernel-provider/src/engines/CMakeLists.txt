@@ -5,10 +5,11 @@ if(ENABLE_ASM_SDPA_ENGINE)
     add_subdirectory(asm_sdpa_engine)
 endif()
 
-# The HIP MLOps families migrated to the kernel ingestor keep their kernel sources beside the
-# HipMlops descriptors. Both engines compile them, so both read them from here.
-set(HKP_HIP_MLOPS_INGESTOR_KERNEL_DIR
-    "${CMAKE_CURRENT_SOURCE_DIR}/kernel_ingestor_engine/descriptors/HipMlops/kernels")
+# The HIP MLOps operations migrated to the kernel ingestor keep their kernel sources beside the
+# descriptors of the engine that serves each (<engine>/kernels/), and the headers those share
+# under include/. Both engines compile them, so both read them from here.
+set(HKP_HIP_MLOPS_INGESTOR_DIR
+    "${CMAKE_CURRENT_SOURCE_DIR}/kernel_ingestor_engine/descriptors/HipMlops")
 
 # The ingestor's HipMlops packs share this engine's applicability checks and compile
 # options, so its shared sources build in either mode.

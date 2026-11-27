@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "088c5902-0855-47b0-9661-14e40316f8f2",
+  "name": "ResampleFwd dispatch",
+  "dispatch_symbol": "hipkernel.resample_fwd.dispatch"
+}
