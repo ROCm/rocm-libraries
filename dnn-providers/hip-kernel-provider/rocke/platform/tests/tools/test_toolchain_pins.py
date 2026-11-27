@@ -164,6 +164,33 @@ def test_the_allowlist_is_sorted_one_canonical_line_per_file():
         ("from rocke import runtime\nlib = runtime.comgr._lib\n", {PRIVATE_IMPORT}),
         ("from rocke.runtime import _coexistence\n", {PRIVATE_IMPORT}),
     ],
+    ids=[
+        "flavor-constant",
+        "flavor-class-attribute",
+        "flavor-comparison",
+        "flavor-membership",
+        "flavor-env-get-compared",
+        "flavor-env-index-compared",
+        "flavor-tuple-assigned",
+        "flavor-monkeypatch-setenv",
+        "flavor-env-assigned",
+        "flavor-mock-patch-dict",
+        "flavor-env-dict-copy",
+        "flavor-env-get-default",
+        "rocm-comgr-lib-setenv",
+        "rocm-release-constant",
+        "rocm-release-tuple",
+        "rocm-install-path",
+        "rocm-release-compared",
+        "rocm-torch-build-tag",
+        "rocm-version-call",
+        "rocm-version-call-alias",
+        "private-import-in-function",
+        "private-attribute-of-alias",
+        "private-attribute-dotted",
+        "private-attribute-of-package",
+        "private-module-import",
+    ],
 )
 def test_each_kind_of_pin_is_found(source, kinds):
     assert file_kinds(toolchain_pins_in_python(source, "<synthetic>")) == kinds
@@ -317,6 +344,14 @@ LISTED = {"library/tests/listed.py": AllowlistEntry(frozenset({FLAVOR_PIN}), "AI
                 "from rocke.core.lower_llvm import _detect_llvm_flavor"
             ),
         ),
+    ],
+    ids=[
+        "flavor-pin-in-library-test",
+        "flavor-pin-in-platform-test",
+        "rocm-pin-in-library-test",
+        "rocm-version-in-library-code",
+        "rocm-version-in-platform-test",
+        "private-import-in-library-code",
     ],
 )
 def test_a_planted_pin_of_each_kind_fails_the_gate(repository, path, source, breach):
