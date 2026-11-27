@@ -37,7 +37,7 @@ import numpy as np
 import pytest
 
 from kernels.common import attention_unified as au
-from rocke.numeric.bf16 import bf16_to_f32, f32_to_bf16
+from rocke.numeric.storage import decode, encode, round_to
 from rocke.runtime.device_array import DeviceArray
 from rocke.runtime.hip_module import get_device_arch
 from rocke.tests.lanes import arch_skip_reason
@@ -286,15 +286,6 @@ def test_d192_pair_takes_the_one_warp_kernel():
         assert spec.head_size == 192 and spec.num_warps == 1, spec
 
 
-def _encode(x, dtype):
-    """fp32 values as the kernel's fp16 or bf16 (raw uint16) host array."""
-    return x.astype(np.float16) if dtype == "fp16" else f32_to_bf16(x)
-
-
-def _decode(x, dtype):
-    return x.astype(np.float32) if dtype == "fp16" else bf16_to_f32(x)
-
-
 def _case(geometry, shape, seed):
     """fp32 q, k, v exact in the kernel dtype, cu_seqlens_q and a block table
     wider than needed whose unused slots point at a poison block."""
@@ -310,7 +301,7 @@ def _case(geometry, shape, seed):
         table[s, :n] = [next(order) for _ in range(n)]
 
     def randn(*dims):
-        return _decode(_encode(rng.standard_normal(dims, np.float32), dtype), dtype)
+        return round_to(rng.standard_normal(dims, np.float32), dtype)
 
     q = randn(sum(q_lens), hq, d)
     k = randn(num_blocks, bs, hkv, d)
@@ -403,7 +394,7 @@ def _launch_3d(arch, problem, q, k, v, out, cu, seq_lens, table, scale):
 def _launch(arch, path, problem, geometry, q, k, v, cu, table, kv_lens):
     """Run one shape on ``path``; returns O as float32."""
     d, _, dtype = geometry
-    host_q = _encode(q, dtype)
+    host_q = encode(q, dtype)
     # Every byte 0xFF is NaN in fp16 and bf16: an element the kernel skips
     # fails the check instead of passing on stale memory.
     out_host = np.empty_like(host_q)
@@ -411,8 +402,8 @@ def _launch(arch, path, problem, geometry, q, k, v, cu, table, kv_lens):
     out = DeviceArray(out_host, dtype)
     args = {
         "q": DeviceArray(host_q, dtype),
-        "k": DeviceArray(_encode(k, dtype), dtype),
-        "v": DeviceArray(_encode(v, dtype), dtype),
+        "k": DeviceArray(encode(k, dtype), dtype),
+        "v": DeviceArray(encode(v, dtype), dtype),
         "out": out,
         "cu": DeviceArray(cu),
         "seq_lens": DeviceArray(np.array(kv_lens, dtype=np.int32)),
@@ -437,7 +428,7 @@ def _launch(arch, path, problem, geometry, q, k, v, cu, table, kv_lens):
             use_graph=False,
         )
     # The read is a blocking copy, so the launch has finished.
-    return _decode(out.read(), dtype)
+    return decode(out.read(), dtype)
 
 
 def _cache(path):
