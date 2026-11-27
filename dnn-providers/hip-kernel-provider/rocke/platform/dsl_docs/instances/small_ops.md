@@ -674,6 +674,98 @@ correct by construction; a GPU-available follow-up should add GPU-numeric
 coverage, an example two-launch orchestration, and measure against the
 single-kernel path on the shapes it targets.
 
+### BatchNorm2D: modes, layouts, dtypes, backward and dispatch
+
+Beyond the single-kernel NCHW forward above, the family has these kernel kinds. All
+of them are AOT-generic: `N`, `C`, `H`, `W` (and the launch geometry of the multi-CTA
+kinds) are runtime kernel arguments, so one compiled binary serves any shape that
+its runtime admission check accepts.
+
+Dtypes: `f16`, `bf16` and `f32` for every kind except the flat inference kernel and
+the NHWC kinds (`f16` / `bf16` only). `f32` uses vector widths 2 and 4; 16-bit data
+uses 2 to 8. Running statistics are always `f32`; the saved mean / inverse standard
+deviation of a training forward use the data dtype, those of a backward are `f32`.
+
+| Kind | Spec | Direction | Launches |
+|---|---|---|---|
+| Dynamic single kernel (`channels_per_block`, `n_groups`, `fast_reduce`) | `BatchNorm2DSpec(dynamic=True)` | infer, train | 1 |
+| Flat elementwise inference | `BatchNorm2DFlatInferSpec` | infer | 1 |
+| Dynamic split reduction | `BatchNorm2DSplitDynSpec` | train | 2 (reduce, apply) |
+| Single-launch backward | `BatchNorm2DBwdSpec` | backward | 1 |
+| Split backward | `BatchNorm2DBwdSplitSpec` | backward | 2 |
+| Channels-last (NHWC) | `BatchNorm2DNhwcSpec` | infer, train, backward | 1 or 2 |
+| Multi-channel-per-wave | `BatchNorm2DMcwSpec` | train, backward | 1 |
+| Read-once persistent grid | `BatchNorm2DRoSpec` | train, backward | 1 |
+
+Semantics shared by the training kinds: `Y` and the saved inverse standard
+deviation use the biased variance; the running variance is updated with the
+unbiased variance, `var * M / max(M - 1, 1)` for `M = N*H*W` samples per channel,
+and the running mean with the batch mean. A thread that owns no elements
+contributes an empty Welford partial (not NaN). Backward takes the saved `Mean` / `InvStd` and
+produces `dX`, `dScale`, `dBias`:
+
+```text
+xhat   = (x - mean) * invstd
+dbias  = sum(dy)               dscale = sum(dy * xhat)
+dx     = scale * invstd / M * (M * dy - dbias - xhat * dscale)
+```
+
+Both reductions are plain sums, so the partials of any split merge by addition.
+
+- **Flat inference.** A pure elementwise stream over the whole tensor (grid sized
+  from the element count), `unroll` vectors per thread. `aligned=True` needs
+  `H*W % vec == 0`; `aligned=False` is for `H*W % vec != 0` rows. Never trains.
+- **Dynamic split.** Reduce kernel: one CTA per `(channel, split)`, `Workspace`
+  receives one `(mean, M2, count)` per split. Apply kernel: merges the splits of its
+  channel, updates the running statistics, writes `Y`. The split geometry
+  (`NChunk`, `HwChunk`, `SplitN`, `SplitHw`) is a runtime plan from
+  `batchnorm2d_split_plan` (spatial chunk a multiple of `block_size * vec`, at
+  least two and at most `block_size` splits); the grid is `(C, SplitN, SplitHw)` and
+  the workspace is `batchnorm2d_split_dyn_workspace_floats`. The backward pair
+  shares the geometry; its workspace holds the two sums per split.
+- **NHWC.** Memory order `(N, H, W, C)`; a CTA owns a channel tile and a range of
+  rows. Infer is one streaming kernel; train / backward are a reduce + apply pair
+  around an `f32` workspace of `2 * C * splits`. Runtime admission: `C % vec == 0`
+  and the channel tile no more than twice `C`.
+- **Multi-channel-per-wave.** Small tensors: a wave covers `cpw` channels, the whole
+  channel group is held in registers, one launch. Geometry (`waves`, `npw` samples
+  per wave, `slots`, `vec`) is part of the candidate, and a candidate admits only the
+  shapes it was sized for (`mcw_admits`). The default candidate set is a fixed
+  greedy cover per `(dtype, mode)`; the full space stays reachable for sweeps.
+- **Read-once.** A persistent grid: every channel's data is read from memory once and
+  held in registers, partial sums are exchanged through a global barrier built from
+  `global_atomic_add` (with a sync `scope`) and `global_flag_wait_ge_bounded`. The
+  grid is a whole number of channel groups that must all be co-resident, so the plan
+  takes the device's co-resident CTA capacity (`max_resident`) and a launch with a
+  larger grid is refused. Every wait is bounded; a barrier that gives up increments
+  `Err[0]` instead of hanging. Barrier words are `batchnorm2d_ro_sync_ints(C)` int32
+  and are zeroed once, or the `Epoch` argument grows per launch.
+
+Dispatch. The auto-selected default stays the single-kernel NCHW forward; every
+other kind is an opt-in candidate set, never auto-selected, enumerated per row by its
+runtime admission:
+
+- dynamic single-kernel and flat inference: any shape whose channel / sample counts
+  divide `channels_per_block` / `n_groups` (flat: the alignment rules above);
+- split: a plan whose CTA count `C * splits` lies in `[256, 16384]`;
+- backward (request flag `backward=True`): single-launch candidates by the same
+  divisibility rules, split pairs by plan;
+- NHWC: per mode, a fixed set of tile geometries crossed with the runtime plans;
+- multi-channel-per-wave: the shipped candidates that admit the shape;
+- read-once (NCHW / NCDHW, `f16` and `f32`): only where the x tensor is at least
+  8,000,000 bytes and the per-channel split satisfies `2 <= SplitN * SplitHw <= 16`
+  (`BatchNormRoCandidate.plans(rule=True)`); `rule=False` gives the full sweep space.
+
+NCDHW tensors are handled as NCHW with the depth folded into the height.
+
+Verification: byte identity and parity in both engines
+(`platform/tests/instances/parity/batchnorm2d_*_emit.py` / `.c`), host tests of the
+specs, plans and candidate sets
+(`platform/tests/dispatch/dispatch_tests/batchnorm/test_batchnorm_coverage.py`), and
+GPU numeric tests of every kernel kind against an fp64 numpy reference, no torch
+(`platform/tests/numeric/test_batchnorm_numeric.py`; reference in
+`rocke.numeric.batchnorm_reference`).
+
 ## Transpose2D
 
 File:

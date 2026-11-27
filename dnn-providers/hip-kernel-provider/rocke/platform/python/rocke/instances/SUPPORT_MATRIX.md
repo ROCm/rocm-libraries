@@ -432,6 +432,23 @@ parity runs on the matching device and is not implied by the ✅ here.
     batch mean/variance) and ready for a GPU-available follow-up to add
     GPU-numeric coverage, wire up an example two-launch orchestration, and
     measure against the single-kernel path on the shapes it targets.
+  - **Kernel kinds beyond the single-kernel NCHW forward** (all AOT-generic,
+    opt-in, never auto-selected; see `platform/dsl_docs/instances/small_ops.md`,
+    "BatchNorm2D: modes, layouts, dtypes, backward and dispatch"):
+    flat elementwise inference, dynamic cross-CTA split reduction (reduce +
+    apply, runtime plan, dispatch-enumerated), single-launch and split
+    backward, channels-last (NHWC) infer / train / backward, multi-channel-
+    per-wave train / backward, and read-once persistent-grid train / backward
+    (admitted only for tensors of at least 8,000,000 bytes with a per-channel
+    split of 2 to 16 work items). Dtypes: `f16`, `bf16`, `f32`, except flat
+    inference and NHWC (`f16` / `bf16`). Training updates the running
+    variance with the unbiased variance and can save the batch mean / inverse
+    standard deviation. Byte-identity-verified in both engines
+    (`batchnorm2d_{flat,dyn_split,bwd,nhwc,mcw,ro}_emit.py`/`.c` and the
+    extended `batchnorm2d_emit.py`/`.c`, all 4 LLVM flavors) and
+    GPU-numeric-verified against an fp64 numpy reference without torch
+    (`platform/tests/numeric/test_batchnorm_numeric.py`). The shipped AOT
+    kernel set is additive over the base forward set.
 - **`add_rmsnorm2d_rdquant` on gfx1151 (RDNA):** only `out_dtype="i8"` is
   supported. fp8/bf8 output needs the CDNA-only `v_cvt_pk_{fp8,bf8}_f32`
   conversion, so fp8/bf8 specs are rejected by the validator on non-CDNA

@@ -106,6 +106,7 @@ f32 range gives the infinity or zero of its sign. Any other operand types are re
 | `memref.global_store_typed`   | `global_store`                | typed `store addrspace(1)` |
 | `memref.global_store_vN`      | `global_store_vN`             | vector `store addrspace(1)` |
 | `memref.global_atomic_add_f32`| `global_atomic_add_f32`       | `atomicrmw fadd addrspace(1)` |
+| `memref.global_atomic_add`   | `global_atomic_add` (`ordering=`, optional `scope=`) | `atomicrmw add` / `fadd addrspace(1)` on i32 / f32; without `scope` the lowering default sync scope, otherwise `syncscope(<scope>)` |
 | `memref.fence`               | `fence`                       | `fence syncscope(...) <ordering>` |
 | `memref.global_flag_store`   | `global_flag_store`           | `store atomic i32 ... syncscope(...) <ordering>` |
 | `memref.global_flag_wait_eq` | `global_flag_wait_eq`         | spin loop around `load atomic i32 ... acquire` |
