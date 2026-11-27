@@ -43,6 +43,19 @@ There are 2 template parameters for this kernel template.
 ## codegen
 To speed up compile time, we instantiate the kernels into separate file. In this way we can benefit from parallel building from CMake/Make system. This is achieved by `generate.py` script. Besides, you can look into this script to learn how to instantiate a kernel instance step by step, which is described in `FMHA_FWD_KERNEL_BODY` variable.
 
+### Conditional rescaling TDM forward pipeline
+
+`qr_tdm_cr` uses conditional rescaling (CR) to avoid unnecessary softmax
+rescaling and maximum reductions. It uses the shared `FmhaFwdKernel` for
+FP16/BF16 forward attention on gfx1250. Generated dispatch selects CR only
+without LSE output or dropout; LSE-enabled and dropout calls retain the existing
+pipelines pending forward/backward numerical qualification.
+See [codegen](codegen/ops/fmha_fwd.py) for supported configurations and dispatch selection, and
+[argument validation](../../../include/ck_tile/ops/fmha/detail/fmha_fwd_cr_args.hpp)
+for tensor layout requirements.
+See the [performance report](docs/qr_tdm_cr_performance.md) for mask-aware
+TFLOPS comparisons, measurement provenance, and numerical validation limits.
+
 ### Basic TDM forward feature coverage
 
 On gfx125, FP16/BF16 `qr_tdm` supports logits soft cap, dropout, group-mode
@@ -65,11 +78,11 @@ Its generated configurations use FP16 or BF16 Q/K/V with D64/V64, D128/V128,
 or D192/V128, and row-major V. They use no bias, dropout, logits
 soft cap, quantization, or sink tokens; LSE output is optional. Other configurations retain
 the existing pipeline candidates.
-Generated `qr_tdm_sched` requires a null runtime `sink_ptr`; a finite virtual-sink
-logit uses the existing `qr_tdm` fallback. This runtime pointer is independent
-of the compile-time sink-token flag.
+Generated `qr_tdm_sched` requires a null runtime `sink_ptr`; other candidates
+handle virtual-sink logits. This runtime pointer is independent of the
+compile-time sink-token flag.
 
-The generated API tries matching scheduled traits first. D64/V64 uses a
+After checking preferred CR configurations, the generated API tries matching scheduled traits first. D64/V64 uses a
 128-by-64 Q/K sequence tile, matching the existing `qr_tdm` M128 geometry and
 compiler minimum-waves-per-EU hint of three. The launch API retains the
 historical `MinBlockPerCu` name; this hint does not establish achieved workgroup

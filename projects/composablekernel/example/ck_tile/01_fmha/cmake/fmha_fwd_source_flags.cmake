@@ -14,6 +14,26 @@ function(ck_tile_fmha_fwd_get_source_compile_options fwd_blob_name out_var)
                   AND CMAKE_HIP_COMPILER_VERSION VERSION_LESS 24)))
     list(APPEND compile_options -mllvm -amdgpu-expert-scheduling-mode)
   endif()
+  # CR's operand prefetch and barrier placement were tuned with these
+  # scheduling costs. Scope them to this pipeline's translation units.
+  if(fwd_blob_name MATCHES "^fmha_fwd_d(32|64|96|128|160|192)_(fp16|bf16)_.*_qr_tdm_cr_.*_gfx125\\.cpp$")
+    # Clang 23's expert schedule produces sparse, nondeterministic output errors
+    # on the native BF16 causal/window paths. Let it insert the dependency checks
+    # for these instances; row-range masking preserves their throughput.
+    if(NOT (DEFINED CMAKE_HIP_COMPILER_VERSION AND CMAKE_HIP_COMPILER_VERSION VERSION_LESS 24
+            AND fwd_blob_name MATCHES "^fmha_fwd_d(64|128)_bf16_.*_qr_tdm_cr_.*_nlogits_nbias_mask_nlse_ndropout_nskip_nqscale_ntrload_nsink_gfx125\\.cpp$"))
+      list(APPEND compile_options -mllvm -amdgpu-expert-scheduling-mode
+        -mllvm -amdgpu-sched-strategy=max-ilp
+        -mllvm -amdgpu-barrier-signal-wait-latency=32)
+    endif()
+  endif()
+  # D64 and these D32 geometries favor packed register allocation in
+  # same-device measurements. Keep this setting tied to their tile shapes.
+  if(fwd_blob_name MATCHES "^fmha_fwd_d64_(fp16|bf16)_.*_qr_tdm_cr_.*_gfx125\\.cpp$" OR
+     fwd_blob_name MATCHES "^fmha_fwd_d32_(fp16|bf16)_.*_b(64x128|128x(64|128))x.*_qr_tdm_cr_.*_gfx125\\.cpp$")
+    list(APPEND compile_options -Xclang -target-feature -Xclang -real-true16)
+  endif()
+
   # Break large PHIs so blockscale and non-MX D64 keep the loop-carried K group in dwords.
   if(fwd_blob_name MATCHES "^fmha_fwd_d[0-9]+_[a-z0-9]+_.*_qr_tdm_fp8_sched_.*_blockscale_ntrload_.*_gfx125\\.cpp$"
      OR fwd_blob_name MATCHES "^fmha_fwd_d64_[a-z0-9]+_.*_qr_tdm_fp8_sched_.*_(nqscale|pertensor|perhead)_ntrload_.*_gfx125\\.cpp$")

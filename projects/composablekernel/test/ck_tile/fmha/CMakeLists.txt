@@ -119,7 +119,6 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
         LABELS "${TEST_NAME};CK_TILE_FMHA_TESTS")
     add_gtest_executable(test_ck_tile_fmha_qr_tdm_lds_padding
         test_qr_tdm_lds_padding.cpp)
-    target_link_libraries(test_ck_tile_fmha_qr_tdm_lds_padding PRIVATE utility)
     # the qr_tdm pipeline folds log2(e) into scale_s and has no exp() fallback
     target_compile_definitions(test_ck_tile_fmha_qr_tdm_lds_padding
         PRIVATE CK_TILE_FMHA_FWD_FAST_EXP2=1)
@@ -169,7 +168,6 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
     function(add_qr_tdm_sched_gtest target source)
         add_gtest_executable(${target} ${source})
         if(TARGET ${target})
-            target_link_libraries(${target} PRIVATE utility)
             target_compile_definitions(${target} PRIVATE CK_TILE_FMHA_FWD_FAST_EXP2=1)
             set_property(TARGET ${target} PROPERTY HIP_ARCHITECTURES
                 ${FMHA_QR_TDM_SCHED_GPU_TARGETS})
@@ -196,10 +194,33 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
         LABELS "${TEST_NAME};CK_TILE_FMHA_TESTS;CK_TILE_FMHA_CODEGEN_TESTS"
         TIMEOUT 180)
 
+    if(TARGET ${FMHA_FWD_INSTANCES})
+        set(fmha_test_dispatch "${CMAKE_CURRENT_BINARY_DIR}/fmha_fwd_test_dispatch.cpp")
+        set(fmha_test_sources "${CMAKE_CURRENT_BINARY_DIR}/fmha_fwd_test_sources.txt")
+        file(GENERATE OUTPUT "${fmha_test_sources}"
+            CONTENT "$<JOIN:$<TARGET_PROPERTY:${FMHA_FWD_INSTANCES},SOURCES>,\n>\n")
+        file(GLOB_RECURSE fmha_test_codegen CONFIGURE_DEPENDS
+            "${PROJECT_SOURCE_DIR}/example/ck_tile/01_fmha/codegen/*.py")
+        add_custom_command(OUTPUT "${fmha_test_dispatch}"
+            COMMAND ${Python3_EXECUTABLE}
+                "${CMAKE_CURRENT_SOURCE_DIR}/generate_fmha_fwd_test_dispatch.py"
+                --sources "${fmha_test_sources}" --output "${fmha_test_dispatch}"
+            DEPENDS "${fmha_test_sources}" ${fmha_test_codegen}
+                "${CMAKE_CURRENT_SOURCE_DIR}/generate_fmha_fwd_test_dispatch.py"
+            VERBATIM)
+        # Like the production dispatcher, these declarations are specialized in
+        # the instance translation units linked below.
+        set_source_files_properties("${fmha_test_dispatch}" PROPERTIES
+            LANGUAGE HIP COMPILE_OPTIONS -Wno-undefined-func-template)
+    endif()
+
     foreach(dtype IN ITEMS bf16 fp16)
         if(TARGET ${FMHA_FWD_INSTANCES})
             set(target test_ck_tile_fmha_qr_tdm_sched_fwd_${dtype})
             add_qr_tdm_sched_gtest(${target} test_qr_tdm_sched_fwd.cpp)
+            target_sources(${target} PRIVATE "${fmha_test_dispatch}")
+            target_include_directories(${target} PRIVATE
+                "${PROJECT_SOURCE_DIR}/example/ck_tile/01_fmha")
             target_link_libraries(${target} PRIVATE ${FMHA_FWD_INSTANCES})
             if(dtype STREQUAL "fp16")
                 target_compile_definitions(${target} PRIVATE DataTypeConfig=FmhaFwdFp16)
@@ -246,6 +267,76 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
                 -mllvm -amdgpu-expert-scheduling-mode -fgpu-flush-denormals-to-zero)
         endforeach()
     endforeach()
+endif()
+
+# Direct CR tests exercise its own kernel and host adapter even when codegen
+# filters omit CR from the default dispatcher.
+set(FMHA_QR_TDM_CR_TEST_TARGETS)
+if(SUPPORTED_GPU_TARGETS MATCHES "gfx1250")
+    set(FMHA_QR_TDM_CR_GPU_TARGETS ${SUPPORTED_GPU_TARGETS})
+    list(FILTER FMHA_QR_TDM_CR_GPU_TARGETS INCLUDE REGEX "^gfx1250")
+    include(${PROJECT_SOURCE_DIR}/example/ck_tile/01_fmha/cmake/fmha_fwd_source_flags.cmake)
+    # A mixed typed-test TU must use dependency checks if any of its native
+    # BF16 masked instances require them. Query production's policy so compiler
+    # version changes do not leave the test policy behind. Other families in
+    # these TUs do not necessarily use their production schedule; per-source
+    # schedule validation requires generated-instance tests.
+    set(cr_test_expert_schedule TRUE)
+    foreach(dim IN ITEMS 64 128)
+        ck_tile_fmha_fwd_get_source_compile_options(
+            "fmha_fwd_d${dim}_bf16_group_qr_tdm_cr_vr_pssk_nlogits_nbias_mask_nlse_ndropout_nskip_nqscale_ntrload_nsink_gfx125.cpp"
+            cr_native_options)
+        if(NOT "-amdgpu-expert-scheduling-mode" IN_LIST cr_native_options)
+            set(cr_test_expert_schedule FALSE)
+        endif()
+    endforeach()
+    foreach(suffix IN ITEMS "" "_d64" "_long" "_head_dim" "_report" "_d64_report")
+        set(target "test_ck_tile_fmha_qr_tdm_cr_fwd${suffix}")
+        if(suffix STREQUAL "_long" OR suffix STREQUAL "_head_dim")
+            list(APPEND REGRESSION_TESTS ${target})
+        endif()
+        add_gtest_executable(${target} test_qr_tdm_cr_fwd.cpp)
+        target_compile_definitions(${target} PRIVATE CK_TILE_FMHA_FWD_FAST_EXP2=1)
+        target_compile_options(${target} PRIVATE -Wno-float-equal -fgpu-flush-denormals-to-zero)
+        if(suffix MATCHES "_report$")
+            target_compile_definitions(${target} PRIVATE CK_TILE_TEST_CR_REPORT=1)
+            set(report_dim 128)
+            if(suffix STREQUAL "_d64_report")
+                set(report_dim 64)
+                target_compile_definitions(${target} PRIVATE CK_TILE_TEST_CR_D64=1)
+            endif()
+            ck_tile_fmha_fwd_get_source_compile_options(
+                "fmha_fwd_d${report_dim}_bf16_group_qr_tdm_cr_vr_pssk_nlogits_nbias_mask_nlse_ndropout_nskip_nqscale_ntrload_nsink_gfx125.cpp"
+                report_options)
+            # Preserve repeated -mllvm/-Xclang pairs instead of option de-duplication.
+            string(JOIN " " report_options_string ${report_options})
+            target_compile_options(${target} PRIVATE "SHELL:${report_options_string}")
+        elseif(cr_test_expert_schedule)
+            # These mixed typed-test translation units include native BF16
+            # masked CR. Match production's dependency checks on clang <24;
+            # expert scheduling can otherwise produce nondeterministic output.
+            target_compile_options(${target} PRIVATE
+                "SHELL:-mllvm -amdgpu-expert-scheduling-mode"
+                "SHELL:-mllvm -amdgpu-sched-strategy=max-ilp"
+                "SHELL:-mllvm -amdgpu-barrier-signal-wait-latency=32")
+        endif()
+        if(suffix STREQUAL "_head_dim")
+            target_compile_definitions(${target} PRIVATE CK_TILE_TEST_CR_HEAD_DIM=1)
+        elseif(suffix STREQUAL "_d64")
+            target_compile_definitions(${target} PRIVATE CK_TILE_TEST_CR_D64=1)
+            target_compile_options(${target} PRIVATE
+                "SHELL:-Xclang -target-feature -Xclang -real-true16")
+        elseif(suffix STREQUAL "_long")
+            target_compile_definitions(${target} PRIVATE CK_TILE_TEST_CR_LONG=1)
+            set_tests_properties(${target} PROPERTIES TIMEOUT 300)
+        endif()
+        set_property(TARGET ${target} PROPERTY HIP_ARCHITECTURES ${FMHA_QR_TDM_CR_GPU_TARGETS})
+        get_test_property(${target} LABELS common_labels)
+        set_tests_properties(${target} PROPERTIES
+            LABELS "${common_labels};${TEST_NAME};CK_TILE_FMHA_TESTS")
+        list(APPEND FMHA_QR_TDM_CR_TEST_TARGETS ${target})
+    endforeach()
+    add_dependencies(${TEST_NAME} ${FMHA_QR_TDM_CR_TEST_TARGETS})
 endif()
 
 # The independent arithmetic reference is a host test on every FMHA architecture.
@@ -322,6 +413,7 @@ set_tests_properties(test_ck_tile_fmha_fwd_codegen PROPERTIES
 add_custom_target(ck_tile_fmha_tests
     COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure -C ${CMAKE_CFG_INTDIR} -L "CK_TILE_FMHA_TESTS"
     DEPENDS ${TEST_NAME} ${FMHA_QR_TDM_TEST_TARGETS} ${FMHA_QR_TDM_SCHED_TEST_TARGETS}
+        ${FMHA_QR_TDM_CR_TEST_TARGETS}
         test_ck_tile_fmha_fwd_workgroup_mapping
     USES_TERMINAL
     COMMENT "Running all ck_tile fmha tests..."

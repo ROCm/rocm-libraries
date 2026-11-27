@@ -10,6 +10,7 @@
 #include "ck_tile/ops/fmha.hpp"
 
 #include "bias.hpp"
+#include "fmha_fwd_cr_support.hpp"
 #include "mask.hpp"
 #include "quant.hpp"
 #include "rotary.hpp"
@@ -740,7 +741,32 @@ fmha_batch_prefill_select_kv_load_mode(ck_tile::index_t page_block_size,
                               : ck_tile::BlockAttentionKVCacheLoadModeEnum::BUFFER_LOAD;
 }
 
-template <typename FmhaKernel>
+template <typename Kernel>
+using fmha_fwd_native_kargs = decltype(Kernel::MakeKargs(std::declval<const fmha_fwd_args&>()));
+
+template <typename Kernel>
+using fmha_fwd_native_grid =
+    decltype(Kernel::GridSize(std::declval<const typename Kernel::Kargs&>()));
+
+template <typename FmhaKernel,
+          std::enable_if_t<ck_tile::is_detected<fmha_fwd_native_kargs, FmhaKernel>::value, int> = 0>
+auto fmha_fwd_create_kargs_and_grids(fmha_fwd_args args)
+{
+    auto kargs = FmhaKernel::MakeKargs(args);
+    if constexpr(ck_tile::is_detected<fmha_fwd_native_grid, FmhaKernel>::value)
+        return ck_tile::make_tuple(kargs, FmhaKernel::GridSize(kargs));
+    else
+        return ck_tile::make_tuple(kargs,
+                                   FmhaKernel::GridSize(args.batch,
+                                                        args.nhead_q,
+                                                        args.max_seqlen_q,
+                                                        args.hdim_v,
+                                                        args.seqlen_k_ptr != nullptr));
+}
+
+template <
+    typename FmhaKernel,
+    std::enable_if_t<!ck_tile::is_detected<fmha_fwd_native_kargs, FmhaKernel>::value, int> = 0>
 auto fmha_fwd_create_kargs_and_grids(fmha_fwd_args args)
 {
     assert(args.nhead_q % args.nhead_k == 0);
@@ -1882,3 +1908,45 @@ struct fmha_batch_prefill_traits : public fmha_fwd_traits
 float fmha_batch_prefill(fmha_batch_prefill_traits,
                          fmha_batch_prefill_args,
                          const ck_tile::stream_config&);
+
+// Host launch policy: self-contained pipelines may select native tuning variants
+// without adding device-side branches to FmhaFwdKernel.
+template <typename Kernel, typename Arch>
+struct FmhaFwdLaunch
+{
+    template <typename K, typename Visitor>
+    using has_kernel_selection =
+        decltype(K::VisitKernels(std::declval<const fmha_fwd_args&>(), std::declval<Visitor>()));
+
+    template <typename K>
+    static auto Prepare(const fmha_fwd_args& a, const K&)
+    {
+        return fmha_fwd_create_kargs_and_grids<K>(a);
+    }
+
+    template <typename Pipeline, typename Epilogue>
+    static auto Prepare(const fmha_fwd_args& a, const ck_tile::FmhaFwdV3Kernel<Pipeline, Epilogue>&)
+    {
+        return fmha_fwd_v3_create_kargs_and_grids<ck_tile::FmhaFwdV3Kernel<Pipeline, Epilogue>>(a);
+    }
+
+    static float Run(const ck_tile::stream_config& s, const fmha_fwd_args& a)
+    {
+        auto launch = [&](auto kernel) {
+            using K             = decltype(kernel);
+            auto [kargs, grids] = Prepare(a, kernel);
+            if(!K::IsSupportedArgument(kargs))
+            {
+                ck_tile::CK_TILE_ERROR("Arguments not supported! Skipping fmha_fwd!");
+                return -1.0f;
+            }
+            return ck_tile::launch_kernel(s,
+                                          ck_tile::make_kernel<K::kBlockPerCu, Arch>(
+                                              kernel, grids, K::BlockSize(), 0, kargs));
+        };
+        if constexpr(ck_tile::is_detected<has_kernel_selection, Kernel, decltype(launch)>::value)
+            return Kernel::VisitKernels(a, launch);
+        else
+            return launch(Kernel{});
+    }
+};

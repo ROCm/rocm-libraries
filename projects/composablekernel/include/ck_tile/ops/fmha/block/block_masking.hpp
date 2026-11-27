@@ -541,6 +541,18 @@ struct SimplifiedGenericAttentionMask
         }
     }
 
+    // Express a valid score row as a signed start and an unsigned width, so callers
+    // can reuse its bounds across all columns. Empty/padded rows have width zero.
+    CK_TILE_HOST_DEVICE constexpr auto GetRowRangeUnsigned(index_t i_y) const
+    {
+        static_assert(IsMasking);
+        const index_t x_start = -y + i_y + 1;
+        const index_t x_end   = min(i_y + x, x_total);
+        const uint32_t width =
+            i_y < y_total && x_start < x_end ? uint32_t(x_end) - uint32_t(x_start) : 0u;
+        return ck_tile::make_tuple(x_start, width);
+    }
+
     // A nonempty signed interval has the same membership under unsigned offsets.
     CK_TILE_DEVICE bool IsOutOfBoundUnsigned(index_t i_y, index_t i_x) const
     {

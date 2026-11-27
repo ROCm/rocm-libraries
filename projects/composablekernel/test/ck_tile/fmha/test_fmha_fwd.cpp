@@ -668,7 +668,11 @@ TEST_P(QrTdmPingPong, DataTypeConfig)
                                                    &selected_kernel);
         ASSERT_EQ(result, fwd_result::success);
         EXPECT_NE(selected_kernel.find("_b64x"), std::string::npos) << selected_kernel;
-        EXPECT_NE(selected_kernel.find("_qr_tdm_pingpong_"), std::string::npos) << selected_kernel;
+        // CR takes the no-LSE ALiBi case; the other cases still exercise ping-pong.
+        const bool cr = ck_tile::get_device_name().compare(0, 7, "gfx1250") == 0 && !lse &&
+                        std::string_view{bias_str} == "a";
+        EXPECT_NE(selected_kernel.find(cr ? "_qr_tdm_cr_" : "_qr_tdm_pingpong_"), std::string::npos)
+            << selected_kernel;
         EXPECT_NE(selected_kernel.find(tag), std::string::npos) << selected_kernel;
     }
 }
@@ -766,10 +770,10 @@ INSTANTIATE_TEST_SUITE_P(
     QrTdmNewHeadDim,
     Combine(Values(mode_enum::batch, mode_enum::group),
             Values(std::tuple{160, 160, 127, 509, "0"}, // 160 dense, seqlen-padded, bm0=64
-                   std::tuple{160, 160, 128, 256, "0"}, // 160 at N=128: bm0=128
+                   std::tuple{160, 160, 128, 256, "0"}, // 160 at qr_tdm's Q=128 crossover
                    std::tuple{160, 160, 99, 256, "1"},  // 160 causal, bm0=64
                    std::tuple{96, 96, 127, 509, "0"},   // 96/96 dense, bm0=64
-                   std::tuple{96, 96, 128, 256, "0"},   // 96/96 at N=128: bm0=128
+                   std::tuple{96, 96, 128, 256, "0"},   // 96/96 at qr_tdm's Q=128 crossover
                    std::tuple{96, 96, 99, 256, "1"}))); // 96/96 causal, bm0=64
 
 TEST_P(QrTdmNewHeadDim, DataTypeConfig)
@@ -820,14 +824,20 @@ TEST_P(QrTdmNewHeadDim, DataTypeConfig)
         ASSERT_EQ(result, fwd_result::success);
         EXPECT_NE(selected_kernel.find("_qr_tdm_"), std::string::npos);
 
-        // bm0 crossover at max_seqlen_q == 128 (measured; see
+        // CR handles these no-LSE cases with bm0=64 on gfx1250.
+        // The original qr_tdm fallback has a bm0 crossover at max_seqlen_q == 128 (see
         // GFX125_QR_TDM_BM0_CROSSOVER_MAX_SEQLEN_Q in fmha_fwd.py). The tile is
-        // embedded in the kernel name as "_b<bm0>x<bn0>x...". Only assert in batch
-        // mode: there a.max_seqlen_q == seqlen_q, so the input directly drives tile
+        // embedded in the kernel name as "_b<bm0>x<bn0>x...". Check that crossover only
+        // in batch mode: there a.max_seqlen_q == seqlen_q, so the input directly drives tile
         // selection. In group mode a.max_seqlen_q is the packed total q length across
         // the batch (sum of per-sequence lengths), not the per-sequence seqlen, so a
         // single input seqlen does not pin dispatch to one side of the crossover.
-        if(mode == mode_enum::batch)
+        if(ck_tile::get_device_name().compare(0, 7, "gfx1250") == 0)
+        {
+            EXPECT_NE(selected_kernel.find("_qr_tdm_cr_"), std::string::npos) << selected_kernel;
+            EXPECT_NE(selected_kernel.find("_b64x"), std::string::npos) << selected_kernel;
+        }
+        else if(mode == mode_enum::batch)
         {
             if(seqlen_q >= 128)
                 EXPECT_NE(selected_kernel.find("_b128x"), std::string::npos) << selected_kernel;
