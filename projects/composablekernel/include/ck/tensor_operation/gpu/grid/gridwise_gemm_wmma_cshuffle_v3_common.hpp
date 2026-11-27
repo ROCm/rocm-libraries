@@ -326,7 +326,10 @@ struct GridwiseGemm_wmma_cshuffle_v3_base
     __device__ static bool constexpr IsValidInstanceDevice()
     {
 #if defined(__gfx11__) || defined(__gfx117__)
-        constexpr bool SupportMemOp = CGlobalMemoryDataOperation_ == InMemoryDataOperationEnum::Set;
+        // gfx11/gfx117 do not support *_atomic_pk_add_f16/bf16 instructions
+        constexpr bool SupportMemOp =
+            CGlobalMemoryDataOperation_ != InMemoryDataOperationEnum::AtomicAdd ||
+            !(std::is_same_v<EDataType, ck::half_t> || std::is_same_v<EDataType, ck::bhalf_t>);
 #else
         constexpr bool SupportMemOp = sizeof(EDataType) >= 2 || (CGlobalMemoryDataOperation_ ==
                                                                  InMemoryDataOperationEnum::Set);
