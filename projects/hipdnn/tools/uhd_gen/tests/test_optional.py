@@ -101,6 +101,8 @@ UNSET_MEANINGS = {
     "graph.nodes[*].left_bound": -1.0,  # unbounded
     "graph.nodes[*].right_bound": -1.0,  # unbounded
     "graph.nodes[*].max_seq_len_kv": -1.0,  # not declared
+    "graph.nodes[*].max_total_seq_len_q": -1.0,  # not declared (SdpaBackwardAttributes.hpp)
+    "graph.nodes[*].max_total_seq_len_kv": -1.0,  # not declared
     "graph.nodes[*].relu_lower_clip": 0.0,  # cuDNN pointwise defaults
     # cuDNN's unset upper clip is the float maximum (numpy.finfo(numpy.float32).max)
     "graph.nodes[*].relu_upper_clip": 3.4028234663852886e38,

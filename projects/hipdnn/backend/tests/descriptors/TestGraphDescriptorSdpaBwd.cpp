@@ -63,6 +63,9 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
                              HipdnnBackendDescriptor* dropoutScaleDesc = nullptr,
                              HipdnnBackendDescriptor* dropoutScaleInvDesc = nullptr,
                              HipdnnBackendDescriptor* dbiasDesc = nullptr,
+                             HipdnnBackendDescriptor* sinkTokenDesc = nullptr,
+                             HipdnnBackendDescriptor* dsinkTokenDesc = nullptr,
+                             HipdnnBackendDescriptor* rngDumpDesc = nullptr,
                              hipdnnDataType_t computeType = HIPDNN_DATA_FLOAT)
 {
     auto wrapper = createDescriptor<SdpaBwdOperationDescriptor>();
@@ -122,6 +125,18 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
     if(dbiasDesc != nullptr)
     {
         setTensorAttr(*desc, HIPDNN_ATTR_OPERATION_SDPA_BWD_DBIAS_EXT, dbiasDesc);
+    }
+    if(sinkTokenDesc != nullptr)
+    {
+        setTensorAttr(*desc, HIPDNN_ATTR_OPERATION_SDPA_BWD_SINK_TOKEN_EXT, sinkTokenDesc);
+    }
+    if(dsinkTokenDesc != nullptr)
+    {
+        setTensorAttr(*desc, HIPDNN_ATTR_OPERATION_SDPA_BWD_DSINK_TOKEN_EXT, dsinkTokenDesc);
+    }
+    if(rngDumpDesc != nullptr)
+    {
+        setTensorAttr(*desc, HIPDNN_ATTR_OPERATION_SDPA_BWD_RNG_DUMP_EXT, rngDumpDesc);
     }
 
     desc->setAttribute(HIPDNN_ATTR_SDPA_BWD_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
@@ -184,6 +199,16 @@ public:
         EXPECT_FALSE(attrs->attn_scale_value.has_value());
         EXPECT_FALSE(attrs->left_bound.has_value());
         EXPECT_FALSE(attrs->right_bound.has_value());
+    }
+
+    static void verifyNewOptionalFieldsUnset(const SdpaBackwardAttributesT* attrs)
+    {
+        EXPECT_FALSE(attrs->sink_token_tensor_uid.has_value());
+        EXPECT_FALSE(attrs->dsink_token_tensor_uid.has_value());
+        EXPECT_FALSE(attrs->rng_dump_tensor_uid.has_value());
+        EXPECT_FALSE(attrs->is_deterministic_algorithm);
+        EXPECT_FALSE(attrs->max_total_seq_len_q.has_value());
+        EXPECT_FALSE(attrs->max_total_seq_len_kv.has_value());
     }
 
     std::shared_ptr<GraphDescriptor> getDescriptor() const
@@ -298,6 +323,9 @@ TEST_F(TestGraphDescriptorSdpaBwd, BuildFromSingleOperation)
     auto dropoutScaleDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_DROPOUT_SCALE_UID);
     auto dropoutScaleInvDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_DROPOUT_SCALE_INV_UID);
     auto dbiasDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_DBIAS_UID);
+    auto sinkTokenDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_SINK_TOKEN_UID);
+    auto dsinkTokenDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_DSINK_TOKEN_UID);
+    auto rngDumpDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_RNG_DUMP_UID);
 
     auto opWrapper = createFinalizedSdpaBwdOp(t.q.get(),
                                               t.k.get(),
@@ -317,7 +345,10 @@ TEST_F(TestGraphDescriptorSdpaBwd, BuildFromSingleOperation)
                                               dropoutMaskDesc.get(),
                                               dropoutScaleDesc.get(),
                                               dropoutScaleInvDesc.get(),
-                                              dbiasDesc.get());
+                                              dbiasDesc.get(),
+                                              sinkTokenDesc.get(),
+                                              dsinkTokenDesc.get(),
+                                              rngDumpDesc.get());
 
     auto graphDesc = getDescriptor();
     setHandle();
@@ -342,8 +373,8 @@ TEST_F(TestGraphDescriptorSdpaBwd, BuildFromSingleOperation)
     ASSERT_NE(graphT, nullptr);
     ASSERT_EQ(graphT->nodes.size(), 1u);
 
-    // Exact tensor count: 9 required + 10 optional = 19
-    ASSERT_EQ(graphT->tensors.size(), 19u);
+    // Exact tensor count: 9 required + 13 optional = 22
+    ASSERT_EQ(graphT->tensors.size(), 22u);
 
     auto& node = graphT->nodes[0];
     ASSERT_EQ(node->attributes.type, NodeAttributes::SdpaBackwardAttributes);
@@ -383,6 +414,15 @@ TEST_F(TestGraphDescriptorSdpaBwd, BuildFromSingleOperation)
 
     ASSERT_TRUE(attrs->dbias_tensor_uid.has_value());
     EXPECT_EQ(attrs->dbias_tensor_uid.value(), K_SDPA_BWD_TENSOR_DBIAS_UID);
+
+    ASSERT_TRUE(attrs->sink_token_tensor_uid.has_value());
+    EXPECT_EQ(attrs->sink_token_tensor_uid.value(), K_SDPA_BWD_TENSOR_SINK_TOKEN_UID);
+
+    ASSERT_TRUE(attrs->dsink_token_tensor_uid.has_value());
+    EXPECT_EQ(attrs->dsink_token_tensor_uid.value(), K_SDPA_BWD_TENSOR_DSINK_TOKEN_UID);
+
+    ASSERT_TRUE(attrs->rng_dump_tensor_uid.has_value());
+    EXPECT_EQ(attrs->rng_dump_tensor_uid.value(), K_SDPA_BWD_TENSOR_RNG_DUMP_UID);
 
     // Verify tensor attributes survive serialization for required tensors
     verifyTensor(findTensorByUid(*graphT, K_SDPA_BWD_TENSOR_Q_UID),
@@ -520,6 +560,7 @@ TEST_F(TestGraphDescriptorSdpaBwd, BuildFromRequiredOnlyOperation)
     EXPECT_FALSE(attrs->dbias_tensor_uid.has_value());
 
     verifyDefaultScalarAttrs(attrs);
+    verifyNewOptionalFieldsUnset(attrs);
 
     // Compute data type should be FLOAT
     EXPECT_EQ(graphT->nodes[0]->compute_data_type, DataType::FLOAT);
@@ -542,6 +583,9 @@ TEST_F(TestGraphDescriptorSdpaBwd, ComputeDataTypePreserved)
                                               t.dq.get(),
                                               t.dk.get(),
                                               t.dv.get(),
+                                              nullptr,
+                                              nullptr,
+                                              nullptr,
                                               nullptr,
                                               nullptr,
                                               nullptr,
@@ -605,6 +649,16 @@ TEST_F(TestGraphDescriptorSdpaBwd, NonDefaultScalarsPreservedInSerialization)
     int64_t rightBound = 15;
     desc->setAttribute(HIPDNN_ATTR_SDPA_BWD_RIGHT_BOUND_EXT, HIPDNN_TYPE_INT64, 1, &rightBound);
 
+    // Set non-default deterministic flag and workspace hints
+    desc->setAttribute(
+        HIPDNN_ATTR_SDPA_BWD_IS_DETERMINISTIC_ALGORITHM_EXT, HIPDNN_TYPE_BOOLEAN, 1, &trueVal);
+    int64_t maxTotalQ = 4096;
+    desc->setAttribute(
+        HIPDNN_ATTR_SDPA_BWD_MAX_TOTAL_SEQ_LEN_Q_EXT, HIPDNN_TYPE_INT64, 1, &maxTotalQ);
+    int64_t maxTotalKv = 8192;
+    desc->setAttribute(
+        HIPDNN_ATTR_SDPA_BWD_MAX_TOTAL_SEQ_LEN_KV_EXT, HIPDNN_TYPE_INT64, 1, &maxTotalKv);
+
     // Set non-default diagonal alignment
     auto diagAlign = HIPDNN_DIAGONAL_ALIGNMENT_BOTTOM_RIGHT_EXT;
     desc->setAttribute(HIPDNN_ATTR_SDPA_BWD_DIAGONAL_ALIGNMENT_EXT,
@@ -639,6 +693,11 @@ TEST_F(TestGraphDescriptorSdpaBwd, NonDefaultScalarsPreservedInSerialization)
     EXPECT_EQ(attrs->left_bound.value(), 5);
     ASSERT_TRUE(attrs->right_bound.has_value());
     EXPECT_EQ(attrs->right_bound.value(), 15);
+    EXPECT_TRUE(attrs->is_deterministic_algorithm);
+    ASSERT_TRUE(attrs->max_total_seq_len_q.has_value());
+    EXPECT_EQ(attrs->max_total_seq_len_q.value(), 4096);
+    ASSERT_TRUE(attrs->max_total_seq_len_kv.has_value());
+    EXPECT_EQ(attrs->max_total_seq_len_kv.value(), 8192);
 
     // Verify non-default diagonal alignment
     EXPECT_EQ(attrs->diagonal_alignment, DiagonalAlignment::BOTTOM_RIGHT);
@@ -661,6 +720,9 @@ TEST_F(TestGraphDescriptorSdpaBwd, AllOptionalTensorsPresentInSerializedTensorLi
     auto dropoutScaleDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_DROPOUT_SCALE_UID);
     auto dropoutScaleInvDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_DROPOUT_SCALE_INV_UID);
     auto dbiasDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_DBIAS_UID);
+    auto sinkTokenDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_SINK_TOKEN_UID);
+    auto dsinkTokenDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_DSINK_TOKEN_UID);
+    auto rngDumpDesc = createFinalizedTensor(K_SDPA_BWD_TENSOR_RNG_DUMP_UID);
 
     auto opWrapper = createFinalizedSdpaBwdOp(t.q.get(),
                                               t.k.get(),
@@ -680,7 +742,10 @@ TEST_F(TestGraphDescriptorSdpaBwd, AllOptionalTensorsPresentInSerializedTensorLi
                                               dropoutMaskDesc.get(),
                                               dropoutScaleDesc.get(),
                                               dropoutScaleInvDesc.get(),
-                                              dbiasDesc.get());
+                                              dbiasDesc.get(),
+                                              sinkTokenDesc.get(),
+                                              dsinkTokenDesc.get(),
+                                              rngDumpDesc.get());
 
     auto graphT = finalizeGraphAndUnpack(opWrapper);
     ASSERT_NE(graphT, nullptr);
@@ -714,6 +779,9 @@ TEST_F(TestGraphDescriptorSdpaBwd, AllOptionalTensorsPresentInSerializedTensorLi
     EXPECT_TRUE(tensorUids.count(K_SDPA_BWD_TENSOR_DROPOUT_SCALE_UID) > 0);
     EXPECT_TRUE(tensorUids.count(K_SDPA_BWD_TENSOR_DROPOUT_SCALE_INV_UID) > 0);
     EXPECT_TRUE(tensorUids.count(K_SDPA_BWD_TENSOR_DBIAS_UID) > 0);
+    EXPECT_TRUE(tensorUids.count(K_SDPA_BWD_TENSOR_SINK_TOKEN_UID) > 0);
+    EXPECT_TRUE(tensorUids.count(K_SDPA_BWD_TENSOR_DSINK_TOKEN_UID) > 0);
+    EXPECT_TRUE(tensorUids.count(K_SDPA_BWD_TENSOR_RNG_DUMP_UID) > 0);
 }
 
 // =============================================================================

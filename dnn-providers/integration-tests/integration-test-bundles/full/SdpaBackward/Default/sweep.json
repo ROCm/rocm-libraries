@@ -503502,6 +503502,236 @@
       }
     },
     {
+      "id": "hf324t6_b1h2k2v2_2177x2177_d32_bfp16_tlcausal_bshd_tolp",
+      "values": {
+        "io_data_type": "bfloat16",
+        "attributes": {
+          "compute_data_type": "float",
+          "parameters__alibi_mask": false,
+          "parameters__attn_scale_value": 0.17677669529663687,
+          "parameters__causal_mask": false,
+          "parameters__causal_mask_bottom_right": false,
+          "parameters__diagonal_alignment": "TOP_LEFT",
+          "parameters__dropout_probability": null,
+          "parameters__left_bound": null,
+          "parameters__right_bound": 0
+        },
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              2177,
+              32
+            ],
+            "strides": [
+              139328,
+              32,
+              64,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              2,
+              2177,
+              32
+            ],
+            "strides": [
+              139328,
+              32,
+              64,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              2,
+              2177,
+              32
+            ],
+            "strides": [
+              139328,
+              32,
+              64,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              2,
+              2177,
+              32
+            ],
+            "strides": [
+              139328,
+              32,
+              64,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              2,
+              2177,
+              32
+            ],
+            "strides": [
+              139328,
+              32,
+              64,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              2,
+              2177,
+              32
+            ],
+            "strides": [
+              139328,
+              32,
+              64,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              2,
+              2177,
+              32
+            ],
+            "strides": [
+              139328,
+              32,
+              64,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1,
+              2,
+              2177,
+              32
+            ],
+            "strides": [
+              139328,
+              32,
+              64,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1,
+              2,
+              2177,
+              1
+            ],
+            "strides": [
+              4354,
+              2177,
+              1,
+              1
+            ],
+            "data_type": "float",
+            "alignment": 16
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "generate_sdpa_bwd_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU); O and Stats derived from the forward by the fill (#14312)",
+        "operation": "SdpaBackward",
+        "plan_items": [
+          "A11",
+          "A3",
+          "DT1",
+          "DT3",
+          "G7",
+          "G8",
+          "HF",
+          "HF324T6",
+          "T1",
+          "T18",
+          "T2",
+          "T22",
+          "T3",
+          "T4",
+          "T5",
+          "T6",
+          "T7",
+          "T8",
+          "T9",
+          "V10",
+          "V2",
+          "V7"
+        ],
+        "purpose": "probe",
+        "size_class": "M",
+        "seed": 0,
+        "tol_class": "P",
+        "inputs": {
+          "0": {
+            "kind": "free",
+            "lo": -1,
+            "hi": 1
+          },
+          "2": {
+            "kind": "free",
+            "lo": -1,
+            "hi": 1
+          },
+          "6": {
+            "kind": "free",
+            "lo": -1,
+            "hi": 1
+          },
+          "7": {
+            "kind": "free",
+            "lo": -1,
+            "hi": 1
+          }
+        },
+        "notes": "probe: hdim; HF census g324T_b1h2k2_2177x2177_d32_causal_bfp16_bshd: 1 models, e.g. EleutherAI/pythia-14m"
+      }
+    },
+    {
       "id": "hf333b1_b16h2k2v2_512x512_d24_bfp16_none_bshd_told",
       "values": {
         "io_data_type": "bfloat16",
@@ -545501,6 +545731,235 @@
           }
         },
         "notes": "probe: hdim; HF census g333H_b1h2k2_1026x1026_d24_none_bfp16_bhsd: 1 models, e.g. facebook/esm2_t12_35M_UR50D"
+      }
+    },
+    {
+      "id": "hf333t2_b1h2k2v2_1027x1027_d24_bfp16_none_bshd_toldl",
+      "values": {
+        "io_data_type": "bfloat16",
+        "attributes": {
+          "compute_data_type": "float",
+          "parameters__alibi_mask": false,
+          "parameters__attn_scale_value": 0.20412414523193154,
+          "parameters__causal_mask": false,
+          "parameters__causal_mask_bottom_right": false,
+          "parameters__diagonal_alignment": "TOP_LEFT",
+          "parameters__dropout_probability": null,
+          "parameters__left_bound": null,
+          "parameters__right_bound": null
+        },
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              1027,
+              24
+            ],
+            "strides": [
+              49296,
+              24,
+              48,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              2,
+              1027,
+              24
+            ],
+            "strides": [
+              49296,
+              24,
+              48,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              2,
+              1027,
+              24
+            ],
+            "strides": [
+              49296,
+              24,
+              48,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              2,
+              1027,
+              24
+            ],
+            "strides": [
+              49296,
+              24,
+              48,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              2,
+              1027,
+              24
+            ],
+            "strides": [
+              49296,
+              24,
+              48,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              2,
+              1027,
+              24
+            ],
+            "strides": [
+              49296,
+              24,
+              48,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              2,
+              1027,
+              24
+            ],
+            "strides": [
+              49296,
+              24,
+              48,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1,
+              2,
+              1027,
+              24
+            ],
+            "strides": [
+              49296,
+              24,
+              48,
+              1
+            ],
+            "data_type": "bfloat16",
+            "alignment": 16
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1,
+              2,
+              1027,
+              1
+            ],
+            "strides": [
+              2054,
+              1027,
+              1,
+              1
+            ],
+            "data_type": "float",
+            "alignment": 16
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "generate_sdpa_bwd_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU); O and Stats derived from the forward by the fill (#14312)",
+        "operation": "SdpaBackward",
+        "plan_items": [
+          "A11",
+          "DT1",
+          "DT3",
+          "G7",
+          "G8",
+          "HF",
+          "HF333T2",
+          "T1",
+          "T18",
+          "T2",
+          "T22",
+          "T3",
+          "T4",
+          "T5",
+          "T6",
+          "T7",
+          "T8",
+          "T9",
+          "V10",
+          "V2",
+          "V7"
+        ],
+        "purpose": "probe",
+        "size_class": "M",
+        "seed": 0,
+        "tol_class": "DL",
+        "inputs": {
+          "0": {
+            "kind": "free",
+            "lo": -1,
+            "hi": 1
+          },
+          "2": {
+            "kind": "free",
+            "lo": -1,
+            "hi": 1
+          },
+          "6": {
+            "kind": "free",
+            "lo": -1,
+            "hi": 1
+          },
+          "7": {
+            "kind": "free",
+            "lo": -1,
+            "hi": 1
+          }
+        },
+        "notes": "probe: hdim; HF census g333T_b1h2k2_1027x1027_d24_none_bfp16_bshd: 1 models, e.g. facebook/esm2_t12_35M_UR50D"
       }
     },
     {
@@ -613497,6 +613956,236 @@
           }
         },
         "notes": "probe: hdim; HF census g318T_b1h2k2_577x577_d16_none_bfp16_bshd: 1 models, e.g. facebook/esm2_t6_8M_UR50D"
+      }
+    },
+    {
+      "id": "hf325d1_b1h2k2v2_64x64_d72_fp16_tlcausal_bshd_tolp",
+      "values": {
+        "io_data_type": "half",
+        "attributes": {
+          "compute_data_type": "float",
+          "parameters__alibi_mask": false,
+          "parameters__attn_scale_value": 0.11785113019775793,
+          "parameters__causal_mask": false,
+          "parameters__causal_mask_bottom_right": false,
+          "parameters__diagonal_alignment": "TOP_LEFT",
+          "parameters__dropout_probability": null,
+          "parameters__left_bound": null,
+          "parameters__right_bound": 0
+        },
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              1,
+              2,
+              64,
+              72
+            ],
+            "strides": [
+              9216,
+              72,
+              144,
+              1
+            ],
+            "data_type": "half",
+            "alignment": 16
+          },
+          {
+            "uid": 1,
+            "dims": [
+              1,
+              2,
+              64,
+              72
+            ],
+            "strides": [
+              9216,
+              72,
+              144,
+              1
+            ],
+            "data_type": "half",
+            "alignment": 16
+          },
+          {
+            "uid": 2,
+            "dims": [
+              1,
+              2,
+              64,
+              72
+            ],
+            "strides": [
+              9216,
+              72,
+              144,
+              1
+            ],
+            "data_type": "half",
+            "alignment": 16
+          },
+          {
+            "uid": 3,
+            "dims": [
+              1,
+              2,
+              64,
+              72
+            ],
+            "strides": [
+              9216,
+              72,
+              144,
+              1
+            ],
+            "data_type": "half",
+            "alignment": 16
+          },
+          {
+            "uid": 4,
+            "dims": [
+              1,
+              2,
+              64,
+              72
+            ],
+            "strides": [
+              9216,
+              72,
+              144,
+              1
+            ],
+            "data_type": "half",
+            "alignment": 16
+          },
+          {
+            "uid": 5,
+            "dims": [
+              1,
+              2,
+              64,
+              72
+            ],
+            "strides": [
+              9216,
+              72,
+              144,
+              1
+            ],
+            "data_type": "half",
+            "alignment": 16
+          },
+          {
+            "uid": 6,
+            "dims": [
+              1,
+              2,
+              64,
+              72
+            ],
+            "strides": [
+              9216,
+              72,
+              144,
+              1
+            ],
+            "data_type": "half",
+            "alignment": 16
+          },
+          {
+            "uid": 7,
+            "dims": [
+              1,
+              2,
+              64,
+              72
+            ],
+            "strides": [
+              9216,
+              72,
+              144,
+              1
+            ],
+            "data_type": "half",
+            "alignment": 16
+          },
+          {
+            "uid": 8,
+            "dims": [
+              1,
+              2,
+              64,
+              1
+            ],
+            "strides": [
+              128,
+              64,
+              1,
+              1
+            ],
+            "data_type": "float",
+            "alignment": 16
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "generate_sdpa_bwd_bundles.py",
+        "generator_version": "1",
+        "reference_source": "hipDNN reference executors, auto verification (GPU reference, then CPU); O and Stats derived from the forward by the fill (#14312)",
+        "operation": "SdpaBackward",
+        "plan_items": [
+          "A11",
+          "A3",
+          "DT1",
+          "DT3",
+          "G7",
+          "G8",
+          "HF",
+          "HF325D1",
+          "T1",
+          "T18",
+          "T2",
+          "T22",
+          "T3",
+          "T4",
+          "T5",
+          "T6",
+          "T7",
+          "T8",
+          "T9",
+          "V10",
+          "V2",
+          "V7"
+        ],
+        "purpose": "probe",
+        "size_class": "M",
+        "seed": 0,
+        "tol_class": "P",
+        "inputs": {
+          "0": {
+            "kind": "free",
+            "lo": -1,
+            "hi": 1
+          },
+          "2": {
+            "kind": "free",
+            "lo": -1,
+            "hi": 1
+          },
+          "6": {
+            "kind": "free",
+            "lo": -1,
+            "hi": 1
+          },
+          "7": {
+            "kind": "free",
+            "lo": -1,
+            "hi": 1
+          }
+        },
+        "notes": "probe: hdim; HF census g325D_b1h2k2_64x64_d72_causal_fp16_bshd: 1 models, e.g. google/tipsv2-so400m14"
       }
     },
     {

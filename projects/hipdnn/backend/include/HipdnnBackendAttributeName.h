@@ -1269,6 +1269,26 @@ typedef enum
     /** @brief Compute data type for SDPA backward */
     HIPDNN_ATTR_SDPA_BWD_COMP_TYPE_EXT = 3128,
 
+    /** @brief Introduced in hipdnn_backend 0.5.0: the six SDPA backward attributes below
+     *  (3129-3134). */
+    /** @brief Attention sink token tensor for SDPA backward (optional) */
+    HIPDNN_ATTR_OPERATION_SDPA_BWD_SINK_TOKEN_EXT = 3129,
+
+    /** @brief Gradient of the attention sink token (dSink) output tensor for SDPA backward (optional) */
+    HIPDNN_ATTR_OPERATION_SDPA_BWD_DSINK_TOKEN_EXT = 3130,
+
+    /** @brief Philox dropout keep-mask dump output tensor for SDPA backward (optional) */
+    HIPDNN_ATTR_OPERATION_SDPA_BWD_RNG_DUMP_EXT = 3131,
+
+    /** @brief Whether a deterministic algorithm is required (bool) */
+    HIPDNN_ATTR_SDPA_BWD_IS_DETERMINISTIC_ALGORITHM_EXT = 3132,
+
+    /** @brief Physical token span of the packed query buffer, at least max(offset[b] + len[b]) over the batch (int64, optional) */
+    HIPDNN_ATTR_SDPA_BWD_MAX_TOTAL_SEQ_LEN_Q_EXT = 3133,
+
+    /** @brief Physical token span of the packed key/value buffers, at least max(offset[b] + len[b]) over the batch (int64, optional) */
+    HIPDNN_ATTR_SDPA_BWD_MAX_TOTAL_SEQ_LEN_KV_EXT = 3134,
+
     /** @} */
 
     /**

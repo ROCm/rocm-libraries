@@ -12,6 +12,7 @@
 #include "OperationsDir.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <set>
 #include <string>
 #include <vector>
@@ -327,13 +328,16 @@ TEST(TestRegimeFocus, ARegimeTheEngineDoesNotServeIsNotReachedRatherThanSaturate
 TEST(TestRegimeFocus, ARegimeInACorpusWhoseEveryCombinationIsEmptyIsSaturated)
 {
     // The ragged form is declared only with bshd, so every combination of these two keeps is
-    // empty: nothing is left to search, which is a proof.
+    // empty: nothing is left to search, which is a proof. The two keeps leave 1344 combinations
+    // (seven dtypes since fp8), past the default bound of 1024, where the sample holds only
+    // combinations that can hold a problem, here none: the proof is the count of empty ones.
     const auto metadata = shippedSdpa();
     std::string error;
     const auto focus = compileRegimeFocus(metadata, "decode_long_mha", error);
     ASSERT_TRUE(focus.has_value()) << error;
     auto request = focusRequest();
-    request.maxCombinations = 1024;
+    request.maxCombinations = ExplorationRequest{}.maxCombinations;
+    ASSERT_EQ(request.maxCombinations, 1024U);
     request.keep = {{"form", "ragged"}, {"layout", "bhsd"}};
 
     const auto found = exploreRegime(metadata, *focus, request, 10, SERVES_EVERYTHING, {}, {});
@@ -342,16 +346,67 @@ TEST(TestRegimeFocus, ARegimeInACorpusWhoseEveryCombinationIsEmptyIsSaturated)
     EXPECT_TRUE(found.saturated);
 }
 
+TEST(TestRegimeFocus, PastTheBoundTheFocusSearchesTheMainPassSampleForItsSeed)
+{
+    // The forward's 67200 combinations are past the bound, so the lanes are a sample; under
+    // the request's seed it is the main pass's sample, and another seed samples others.
+    const auto metadata = shippedSdpa();
+    std::string error;
+    const auto focus = compileRegimeFocus(metadata, "decode_long_mha", error);
+    ASSERT_TRUE(focus.has_value()) << error;
+
+    const auto lanesSearched = [&](uint64_t seed) {
+        const auto request = focusedSearchRequest(seed);
+        size_t total = 0;
+        const auto sample = detail::categoricalCombinations(
+            metadata.parameters,
+            request.maxCombinations,
+            request.seed,
+            total,
+            [&metadata](const ProblemPoint& combination) {
+                return !detail::excludedByCategoricals(metadata, combination);
+            },
+            request.keep);
+        EXPECT_GT(total, request.maxCombinations);
+        std::set<std::string> sampled;
+        for(const auto& combination : sample)
+        {
+            sampled.insert(detail::describe(combination));
+        }
+        std::set<std::string> searched;
+        const ProblemOracle record = [&](const ProblemPoint& point) {
+            ProblemPoint lane;
+            for(const auto& [name, value] : sample.front())
+            {
+                lane[name] = point.at(name);
+            }
+            const auto key = detail::describe(lane);
+            EXPECT_EQ(sampled.count(key), 1U) << "seed " << seed << " searched " << key;
+            searched.insert(key);
+            return true;
+        };
+        exploreRegime(metadata, *focus, request, 40, record, {}, {});
+        return searched;
+    };
+
+    const auto one = lanesSearched(1);
+    const auto two = lanesSearched(2);
+    ASSERT_FALSE(one.empty());
+    EXPECT_NE(one, two);
+}
+
 TEST(TestRegimeFocus, ARegimeTheDeclaredConstraintsExcludeIsSaturatedWithoutAskingTheEngine)
 {
-    // Cross attention (more queries than keys) is admitted only under a non-causal mask, so
-    // under a causal keep every proposal in the regime breaks a constraint.
+    // Cross attention (more queries than keys) under a causal mask is admitted only anchored
+    // top-left, where every query row keeps a key, so under a causal, bottom-right keep every
+    // proposal in the regime breaks a constraint. (A causal keep alone admits the top-left
+    // half, which a search that finds its footholds then serves.)
     const auto metadata = shippedSdpa();
     std::string error;
     const auto focus = compileRegimeFocus(metadata, "cross_long_gqa", error);
     ASSERT_TRUE(focus.has_value()) << error;
     auto request = focusRequest();
-    request.keep = {{"is_causal", "true"}};
+    request.keep = {{"is_causal", "true"}, {"alignment", "bottom_right"}};
     int64_t asked = 0;
     const ProblemOracle counting = [&asked](const ProblemPoint&) {
         ++asked;
@@ -385,10 +440,18 @@ TEST(TestRegimeFocus, AnUnservedRegimeCostsOnlyTheProbe)
     EXPECT_TRUE(found.problems.empty());
     EXPECT_FALSE(found.saturated);
     // The sample is capped at maxCombinations, plus one extra combination per declared value it
-    // missed, so the cap is what the enumeration actually yields.
+    // missed, so the cap is what the enumeration actually yields: the same sample the focus
+    // takes, of the combinations that can hold a problem, under the request's seed.
     size_t total = 0;
-    const auto combinations
-        = detail::categoricalCombinations(metadata.parameters, request.maxCombinations, total);
+    const auto combinations = detail::categoricalCombinations(
+        metadata.parameters,
+        request.maxCombinations,
+        request.seed,
+        total,
+        [&metadata](const ProblemPoint& combination) {
+            return !detail::excludedByCategoricals(metadata, combination);
+        },
+        request.keep);
     EXPECT_LE(found.proposed, static_cast<int64_t>(combinations.size()) * request.probeBudget);
 }
 
@@ -437,11 +500,11 @@ class TestShippedValueWeights : public ::testing::TestWithParam<std::string>
 TEST_P(TestShippedValueWeights,
        AFocusedSearchRealisesTheDeclaredValueWeightsAndProbesOnlyTheLanesItNeeds)
 {
-    // layout 2:1:1 and scale 2:1:1 in both, window 3:1:1:1 in sdpa_fwd, which alone declares one;
-    // the form is unweighted. The regime quota and floor path splits its need over categorical
-    // lanes, so a lane-even split would make every value 1/3 (window none 1/4) however the main
-    // search is weighted.
-    const bool forward = GetParam() == "sdpa_fwd";
+    // layout 2:1:1:1:1, scale 2:1:1, window 3:1:1:1 and value_head_dim 3:1 in both (and, in the
+    // forward only, dtype 8:8:8:1:1:2:1, which the shares below do not test); the form is
+    // unweighted. The regime quota and floor path splits its need over categorical lanes, so a
+    // lane-even split would make every value even (bshd 1/4 here, window none 1/4) however the
+    // main search is weighted.
     const auto metadata = test::shippedOperation(GetParam());
     std::string error;
     const auto focus = compileRegimeFocus(metadata, "decode_long_mha", error);
@@ -457,7 +520,10 @@ TEST_P(TestShippedValueWeights,
     // over every point, so over every point the weighted and the unweighted share both fall
     // within the tolerance of 0.5 (about 0.5 and 0.47 in sdpa_bwd). Among the points whose form states
     // the scale the weight is what remains once the forced share, the rows of those two forms,
-    // is taken out, and the unweighted 1/3 is further from it than the tolerance.
+    // is taken out. The lanes are a seeded sample of the combinations, so the realised share
+    // moves with the seed: over seeds 1 to 8 it fell within 0.034 of the weighted share in both
+    // declarations, inside the tolerance below; the weighted share must also be nearer than the
+    // unweighted 1/3, which in sdpa_bwd can sit as close as 0.05.
     const auto* formParameter = metadata.find("form");
     ASSERT_NE(formParameter, nullptr);
     EXPECT_TRUE(formParameter->weights.empty()) << "the forms are even strata, not weighted";
@@ -484,32 +550,45 @@ TEST_P(TestShippedValueWeights,
               }
               return static_cast<double>(held) / static_cast<double>(counted);
           };
-    EXPECT_NEAR(shareOf("layout", "bshd", false), 0.5, 0.05);
-    EXPECT_NEAR(shareOf("layout", "bhsd", false), 0.25, 0.05);
+    // A decode regime holds no qkv_packed graph (a fused QKV projection is self-attention, and a
+    // decode step has one query against a long cache), so the layouts left share 2:1:1:1.
+    EXPECT_NEAR(shareOf("layout", "bshd", false), 0.4, 0.05);
+    EXPECT_NEAR(shareOf("layout", "bhsd", false), 0.2, 0.05);
     EXPECT_NEAR(shareOf("scale", "inv_sqrt_d", false), 0.5, 0.1);
-    EXPECT_NEAR(shareOf("scale", "inv_sqrt_d", true), statedInvSqrtD, 0.03);
-    // No form is starved: each holds at least 0.4 of an even share, though the three that fewer
-    // combinations can hold (scale_unset, scale_tensor, ragged) hold less than the others.
+    const auto stated = shareOf("scale", "inv_sqrt_d", true);
+    EXPECT_NEAR(stated, statedInvSqrtD, 0.045);
+    EXPECT_LT(std::abs(stated - statedInvSqrtD), std::abs(stated - (1.0 / 3.0)))
+        << "the stated scales are nearer an even split than the declared weight";
+    // No form is starved. The three that fewer combinations can hold sit below an even share by
+    // construction: scale_unset and scale_tensor take inv_sqrt_d only (half the scale weight),
+    // and ragged the token-major layouts only (bshd's 2 of 5 here, with no qkv_packed in a
+    // decode regime). Around that the sampled lanes vary by a fifth, so each form is held to a
+    // quarter of an even share; a stride that aliased a form away left it none.
     for(const auto& form : formParameter->values)
     {
         EXPECT_GE(shareOf("form", form, false),
-                  0.4 / static_cast<double>(formParameter->values.size()))
+                  0.25 / static_cast<double>(formParameter->values.size()))
             << form;
     }
-    if(forward)
-    {
-        EXPECT_NEAR(shareOf("window", "none", false), 0.5, 0.1);
-        EXPECT_NEAR(shareOf("window", "local_128", false), 1.0 / 6.0, 0.08);
-    }
+    EXPECT_NEAR(shareOf("window", "none", false), 0.5, 0.1);
+    EXPECT_NEAR(shareOf("window", "local_128", false), 1.0 / 6.0, 0.08);
+    EXPECT_NEAR(shareOf("value_head_dim", "same", false), 0.75, 0.08);
 
     // A floor of 60 needs at most 60 lanes of the declared lanes; running each of them once would
     // cost its whole budget.
     const auto few = exploreRegime(metadata, *focus, request, 60, SERVES_EVERYTHING, {}, {});
     ASSERT_GE(few.problems.size(), 60u);
     size_t total = 0;
-    const auto lanes
-        = detail::categoricalCombinations(metadata.parameters, request.maxCombinations, total)
-              .size();
+    const auto lanes = detail::categoricalCombinations(
+                           metadata.parameters,
+                           request.maxCombinations,
+                           request.seed,
+                           total,
+                           [&metadata](const ProblemPoint& combination) {
+                               return !detail::excludedByCategoricals(metadata, combination);
+                           },
+                           request.keep)
+                           .size();
     EXPECT_LT(few.proposed, static_cast<int64_t>(lanes) * request.budgetPerCombination / 8)
         << "proposed " << few.proposed << " over " << lanes << " lanes";
 }
@@ -520,7 +599,7 @@ INSTANTIATE_TEST_SUITE_P(SdpaDeclarations,
 
 TEST(TestRegimeFocus, AFocusedSearchUnderAKeepSpendsItsLanesOnTheCombinationsTheKeepAdmits)
 {
-    // The forward's 6912 combinations are past the bound of 1024, and a sample drawn before the
+    // The forward's 67200 combinations are past the bound of 1024, and a sample drawn before the
     // keep leaves a few of the 6 combinations the keep admits that can hold a problem, or none.
     const auto metadata = test::shippedOperation("sdpa_fwd");
     std::string error;
@@ -769,8 +848,9 @@ TEST_P(TestShippedForms, ALabelTheAxisDoesNotDeclareIsRefused)
 {
     const auto metadata = TestShippedForms::metadata();
     std::string error;
-    EXPECT_FALSE(compileFormFocus(metadata, "form", "paged", error).has_value());
-    EXPECT_NE(error.find("paged"), std::string::npos) << error;
+    // A schema feature no form declares.
+    EXPECT_FALSE(compileFormFocus(metadata, "form", "block_mask", error).has_value());
+    EXPECT_NE(error.find("block_mask"), std::string::npos) << error;
     error.clear();
     EXPECT_FALSE(compileFormFocus(metadata, "layout", "padded", error).has_value());
     EXPECT_NE(error.find("layout"), std::string::npos) << error;

@@ -56,7 +56,9 @@ bool deviceVisible()
 // The SDPA forward graph whose outputs are the backward node's O and stats: one forward
 // node over the backward node's Q, K, V and forward attributes (scale, band and causal
 // flags, additive mask, ALiBi, padding with its sequence lengths, the explicit dropout
-// mask and scale), and every tensor it reads, ragged offsets included. Rank-3 stats are
+// mask and scale, the attention sink), and every tensor it reads, ragged offsets included.
+// The sink joins the forward's softmax, so O and stats are sink-inclusive, which is what the
+// backward's LSE must be (SEM-022). Rank-3 stats are
 // declared [B, H, Sq, 1] over the same memory, the shape both forward references take.
 struct ForwardGraph
 {
@@ -107,6 +109,7 @@ ForwardGraph buildForwardGraph(const fb::Graph& graph,
     a.seq_len_kv_tensor_uid = b.seq_len_kv_tensor_uid();
     a.dropout_mask_tensor_uid = b.dropout_mask_tensor_uid();
     a.dropout_scale_tensor_uid = b.dropout_scale_tensor_uid();
+    a.sink_token_tensor_uid = b.sink_token_tensor_uid();
     a.alibi_mask = b.alibi_mask();
     a.padding_mask = b.padding_mask();
     a.causal_mask = b.causal_mask();
@@ -204,6 +207,7 @@ std::optional<std::string>
     addOptional("seq_len_kv", attributes.seq_len_kv_tensor_uid());
     addOptional("the dropout mask", attributes.dropout_mask_tensor_uid());
     addOptional("the dropout scale", attributes.dropout_scale_tensor_uid());
+    addOptional("the sink", attributes.sink_token_tensor_uid());
     std::vector<std::pair<std::string, int64_t>> outputs
         = {{"O", attributes.o_tensor_uid()}, {"stats", attributes.stats_tensor_uid()}};
 
@@ -242,6 +246,7 @@ std::optional<std::string>
         }
         tensorUids.push_back(*offsets);
     }
+
     if(attributes.scale_tensor_uid().has_value())
     {
         const int64_t scaleUid = *attributes.scale_tensor_uid();

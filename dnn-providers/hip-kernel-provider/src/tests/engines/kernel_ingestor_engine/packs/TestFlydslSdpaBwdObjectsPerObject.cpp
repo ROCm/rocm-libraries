@@ -61,8 +61,10 @@
  * K's heads. A `u2` object's plan is also checked to launch its second kernel (the dV-only dkdv,
  * the V-head tail zero).
  *
- * prep's sink twin is the one object left out: the engine's kernel matcher never admits it, since
- * it takes two arguments no graph supplies.
+ * prep's sink twin is an object of the prep slot like the others, launched on a graph with a
+ * sink and a dSink: the engine's prep `sink` pack runs it and then the dsink_reduce kernel of
+ * the twin's dtype (a companion, in descriptors/FlyDSL/sdpa_bwd_dsink_reduce, with no slot of its
+ * own), so each twin's plan is checked to launch both and dSink is compared with the reference.
  *
  * The dBias reduce companions are the dq objects that name a reduce kernel, launched on a bias
  * whose gradient is summed over batch and heads. A multi-launch object (gfx11) is checked to
@@ -143,16 +145,11 @@ enum class ObjectSelection
     EVERY
 };
 
-/// Whether @p kernel is one of @p slot's objects: every object of its engine slot, except that
-/// the reduce companions are the dq objects that name a reduce kernel, and that prep's sink twin
-/// is left out. The twin takes two arguments no SDPA backward graph supplies, so the engine's
-/// kernel matcher never admits it (FlydslSdpaBwdSplitNative.cpp), and no graph reaches it.
+/// Whether @p kernel is one of @p slot's objects: every object of its engine slot, including
+/// prep's sink twin, except that the reduce companions are the dq objects that name a reduce
+/// kernel.
 bool isObjectOf(ObjectSlot slot, const KernelDefinition& kernel)
 {
-    if(slot == ObjectSlot::PREP)
-    {
-        return intField(kernel, "sink") != 1;
-    }
     return slot != ObjectSlot::DBIAS_REDUCE || !stringField(kernel, "reduce_symbol").empty();
 }
 
@@ -273,6 +270,11 @@ std::vector<BwdCase>
                 c.valueHeads = std::max<int64_t>(1, c.kvHeads / 2);
             }
         }
+        if(slot == ObjectSlot::PREP && intField(kernel, "sink") == 1)
+        {
+            // The sink twin serves a graph with a sink and a dSink, and nothing else.
+            c.dsink = true;
+        }
         if(slot == ObjectSlot::DBIAS_REDUCE)
         {
             c.biasOverBatch = true;
@@ -316,7 +318,7 @@ std::string describe(const BwdCase& c)
            + (c.biasDtype() != c.dtype ? " f32 bias" : "")
            + (c.biasPitch != 0 ? " pitch=" + std::to_string(c.biasPitch) : "")
            + (c.biasOverBatch && c.biasOverHead ? " broadcast" : "")
-           + (c.dropout > 0.0F ? " dropout" : "");
+           + (c.dropout > 0.0F ? " dropout" : "") + (c.dsink ? " sink+dsink" : "");
 }
 
 /// The fields whose values change the code an object runs beyond its head dim.
@@ -456,6 +458,11 @@ ObjectPin pinOf(ObjectSlot slot, const DescriptorSet& set, const KernelDefinitio
     else if(u2Role == "dq")
     {
         pin.sources = {"tailzero"};
+    }
+    if(slot == ObjectSlot::PREP && intField(kernel, "sink") == 1)
+    {
+        // The twin's pack launches it, then the dsink_reduce kernel of its dtype.
+        pin.sources = {"prep", "dsink_reduce"};
     }
     if(const auto* declared = engineSlotOf(set, engineSlot))
     {

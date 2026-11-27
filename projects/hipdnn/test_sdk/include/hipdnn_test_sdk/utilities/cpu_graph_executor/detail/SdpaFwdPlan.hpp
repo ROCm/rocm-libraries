@@ -15,6 +15,7 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/IGraphNodePlanBuilder.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/IGraphNodePlanExecutor.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PlanUtils.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaSinkOperand.hpp>
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
 
 namespace hipdnn_test_sdk::detail
@@ -230,11 +231,11 @@ public:
                   ? static_cast<const hipdnn_data_sdk::utilities::TensorBase<VDataType>&>(*denseV)
                   : *shallowVTensor;
 
-        std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<float>> shallowSink;
+        // FLOAT or Q dtype; the reference reads it through a FLOAT view.
+        std::optional<SdpaSinkOperand<QDataType>> sink;
         if(_params.sinkTensor.has_value())
         {
-            shallowSink = createShallowTensor<float>(*_params.sinkTensor,
-                                                     variantPack.at(_params.sinkTensor->uid));
+            sink.emplace(*_params.sinkTensor, variantPack.at(_params.sinkTensor->uid));
         }
 
         std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<float>> shallowDropoutMask;
@@ -287,7 +288,7 @@ public:
                     .setMask(rawPointer(shallowAttnMaskTensor))
                     .setBand(_params.leftBound, _params.rightBound, _params.topLeftAlignment)
                     .setSeqLens(rawPointer(shallowSeqLenQ), rawPointer(shallowSeqLenKv))
-                    .setSink(rawPointer(shallowSink))
+                    .setSink(sink.has_value() ? sink->tensor() : nullptr)
                     .setDropout(rawPointer(shallowDropoutMask), dropoutScale)
                     .setAlibi(_params.alibi)
                     .setBlockMask(rawPointer(shallowBlockMask))

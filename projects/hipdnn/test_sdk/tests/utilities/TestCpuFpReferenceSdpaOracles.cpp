@@ -12,6 +12,7 @@
 // covered while SEM-001 is open.
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <functional>
@@ -1235,4 +1236,325 @@ TEST(TestCpuFpReferenceSdpaProperty, BlockMaskEqualsNegInfBiasOnClearedTiles)
     EXPECT_THROW((CpuFpReferenceSdpa::forward<float, float, float, float>(
                      q, k, v, oMasked, SdpaFwdOptions<float>{}.setBlockMask(&wrongShape))),
                  std::invalid_argument);
+}
+
+// ---------------------------------------------------------------------------
+// Attention sink backward (dSink)
+// ---------------------------------------------------------------------------
+
+namespace
+{
+// D = rowsum(dO * O) of one query row.
+double rowD(const Tensor<float>& o, const Tensor<float>& dO, int64_t b, int64_t h, int64_t sq)
+{
+    double d = 0.0;
+    for(int64_t dv = 0; dv < o.dims()[3]; ++dv)
+    {
+        d += static_cast<double>(dO.getHostValue(b, h, sq, dv))
+             * static_cast<double>(o.getHostValue(b, h, sq, dv));
+    }
+    return d;
+}
+
+// One row's term of dSink: -exp(sink[h] - LSE) * D, written out independently of the reference.
+double sinkTerm(const Tensor<float>& o,
+                const Tensor<float>& dO,
+                const Tensor<float>& lse,
+                const Tensor<float>& sink,
+                int64_t b,
+                int64_t h,
+                int64_t sq)
+{
+    return -std::exp(static_cast<double>(sink.getHostValue(0, h, 0, 0))
+                     - static_cast<double>(lse.getHostValue(b, h, sq, 0)))
+           * rowD(o, dO, b, h, sq);
+}
+} // namespace
+
+// A sink is one more key with a zero value row. So the gradients of the sink graph equal those of
+// the graph with an extra zero key whose score is the sink (bias = sink), and dSink is the gradient
+// of that extra key's score: the dBias of the extra column. Query head h uses KV head h / 2.
+TEST(TestCpuFpReferenceSdpaProperty, SinkEqualsExtraZeroValueKeyBackward)
+{
+    constexpr int64_t B = 2;
+    constexpr int64_t HQ = 4;
+    constexpr int64_t HK = 2;
+    constexpr int64_t SQ = 3;
+    constexpr int64_t SKV = 5;
+    constexpr int64_t D = 4;
+    constexpr float SCALE = 0.5F;
+    SdpaRun withSink({B, HQ, SQ, D}, {B, HK, SKV, D}, {B, HK, SKV, D});
+    withSink.q.fillWithRandomValues(-1.0F, 1.0F, 161);
+    withSink.k.fillWithRandomValues(-1.0F, 1.0F, 162);
+    withSink.v.fillWithRandomValues(-1.0F, 1.0F, 163);
+    Tensor<float> sink({1, HQ, 1, 1});
+    const std::array<float, HQ> sinkValues = {0.9F, -0.2F, 0.4F, 1.3F};
+    for(int64_t h = 0; h < HQ; ++h)
+    {
+        sink.setHostValue(sinkValues[static_cast<size_t>(h)], 0, h, 0, 0);
+    }
+    runWithSink(withSink, sink);
+    // dO = 2 * O so that D = dO . O is clearly nonzero.
+    forEachIndex(withSink.dO.dims(), [&](const std::vector<int64_t>& i) {
+        withSink.dO.setHostValue(2.0F * withSink.o.getHostValue(i), i);
+    });
+    Tensor<float> dSink({1, HQ, 1, 1});
+    CpuFpReferenceSdpa::backward(
+        withSink.q,
+        withSink.k,
+        withSink.v,
+        withSink.o,
+        withSink.dO,
+        withSink.dQ,
+        withSink.dK,
+        withSink.dV,
+        SdpaBwdOptions<float>{}.setScale(SCALE).setLse(&withSink.lse).setSink(&sink, &dSink));
+
+    SdpaRun extra({B, HQ, SQ, D}, {B, HK, SKV + 1, D}, {B, HK, SKV + 1, D});
+    Tensor<float> bias({1, HQ, 1, SKV + 1});
+    bias.fillWithValue(0.0F);
+    for(int64_t h = 0; h < HQ; ++h)
+    {
+        bias.setHostValue(sink.getHostValue(0, h, 0, 0), 0, h, 0, SKV);
+    }
+    forEachIndex(extra.q.dims(), [&](const std::vector<int64_t>& i) {
+        extra.q.setHostValue(withSink.q.getHostValue(i), i);
+    });
+    forEachIndex(extra.dO.dims(), [&](const std::vector<int64_t>& i) {
+        extra.dO.setHostValue(withSink.dO.getHostValue(i), i);
+    });
+    forEachIndex(extra.k.dims(), [&](const std::vector<int64_t>& i) {
+        const bool sinkKey = i[2] == SKV;
+        extra.k.setHostValue(sinkKey ? 0.0F : withSink.k.getHostValue(i), i);
+        extra.v.setHostValue(sinkKey ? 0.0F : withSink.v.getHostValue(i), i);
+    });
+    CpuFpReferenceSdpa::forward(
+        extra.q,
+        extra.k,
+        extra.v,
+        extra.o,
+        SdpaFwdOptions<float>{}.setScale(SCALE).setMask(&bias).setLse(&extra.lse));
+    Tensor<float> dBias({1, HQ, 1, SKV + 1});
+    CpuFpReferenceSdpa::backward(
+        extra.q,
+        extra.k,
+        extra.v,
+        extra.o,
+        extra.dO,
+        extra.dQ,
+        extra.dK,
+        extra.dV,
+        SdpaBwdOptions<float>{}.setScale(SCALE).setLse(&extra.lse).setMask(&bias).setDBias(&dBias));
+
+    expectAllNear(withSink.dQ, extra.dQ, TOL, "dQ");
+    forEachIndex(withSink.dK.dims(), [&](const std::vector<int64_t>& i) {
+        EXPECT_NEAR(withSink.dK.getHostValue(i), extra.dK.getHostValue(i), TOL) << "dK";
+        EXPECT_NEAR(withSink.dV.getHostValue(i), extra.dV.getHostValue(i), TOL) << "dV";
+    });
+    for(int64_t h = 0; h < HQ; ++h)
+    {
+        EXPECT_NEAR(dSink.getHostValue(0, h, 0, 0), dBias.getHostValue(0, h, 0, SKV), TOL)
+            << "dSink head " << h;
+        EXPECT_GT(std::abs(dSink.getHostValue(0, h, 0, 0)), 1e-3F) << "head " << h;
+    }
+}
+
+// Q = 0 makes every score 0, so with sink s: P_sink = e^s / (n + e^s) in every row and
+// dSink[h] = -P_sink * sum_{b, sq} D[b, h, sq].
+TEST(TestCpuFpReferenceSdpaClosedForm, SinkBackwardUniformScores)
+{
+    constexpr int64_t B = 2;
+    constexpr int64_t H = 2;
+    constexpr int64_t SQ = 3;
+    constexpr int64_t SKV = 6;
+    SdpaRun r({B, H, SQ, 4}, {B, H, SKV, 4}, {B, H, SKV, 3});
+    r.q.fillWithValue(0.0F);
+    r.k.fillWithRandomValues(-1.0F, 1.0F, 171);
+    r.v.fillWithRandomValues(-1.0F, 1.0F, 172);
+    Tensor<float> sink({1, H, 1, 1});
+    sink.setHostValue(0.7F, 0, 0, 0, 0);
+    sink.setHostValue(-1.3F, 0, 1, 0, 0);
+    runWithSink(r, sink);
+    forEachIndex(r.dO.dims(), [&](const std::vector<int64_t>& i) {
+        r.dO.setHostValue(2.0F * r.o.getHostValue(i), i);
+    });
+    Tensor<float> dSink({1, H, 1, 1});
+    CpuFpReferenceSdpa::backward(
+        r.q,
+        r.k,
+        r.v,
+        r.o,
+        r.dO,
+        r.dQ,
+        r.dK,
+        r.dV,
+        SdpaBwdOptions<float>{}.setScale(0.5F).setLse(&r.lse).setSink(&sink, &dSink));
+
+    for(int64_t h = 0; h < H; ++h)
+    {
+        const auto s = static_cast<double>(sink.getHostValue(0, h, 0, 0));
+        const double pSink = std::exp(s) / (static_cast<double>(SKV) + std::exp(s));
+        double dSum = 0.0;
+        for(int64_t b = 0; b < B; ++b)
+        {
+            for(int64_t sq = 0; sq < SQ; ++sq)
+            {
+                dSum += rowD(r.o, r.dO, b, h, sq);
+            }
+        }
+        ASSERT_GT(std::abs(dSum), 1e-3) << "head " << h;
+        EXPECT_NEAR(static_cast<double>(dSink.getHostValue(0, h, 0, 0)),
+                    -pSink * dSum,
+                    1e-5 * std::abs(pSink * dSum))
+            << "head " << h;
+    }
+}
+
+// Query rows past seq_len_q have no output and contribute nothing, whatever the buffers hold:
+// here their LSE is finite and their O, dO are not zero, so a reference that visited them would
+// add a term.
+TEST(TestCpuFpReferenceSdpaClosedForm, SinkPaddedRowsExcluded)
+{
+    constexpr int64_t B = 2;
+    constexpr int64_t H = 2;
+    constexpr int64_t SQ = 4;
+    constexpr int64_t SKV = 4;
+    constexpr int64_t LIVE_Q0 = 2;
+    SdpaRun r({B, H, SQ, 4}, {B, H, SKV, 4}, {B, H, SKV, 4});
+    r.q.fillWithRandomValues(-1.0F, 1.0F, 181);
+    r.k.fillWithRandomValues(-1.0F, 1.0F, 182);
+    r.v.fillWithRandomValues(-1.0F, 1.0F, 183);
+    r.dO.fillWithRandomValues(-1.0F, 1.0F, 184);
+    Tensor<int32_t> lensQ({B, 1, 1, 1});
+    Tensor<int32_t> lensKv({B, 1, 1, 1});
+    lensQ.setHostValue(static_cast<int32_t>(LIVE_Q0), 0, 0, 0, 0);
+    lensQ.setHostValue(static_cast<int32_t>(SQ), 1, 0, 0, 0);
+    lensKv.setHostValue(3, 0, 0, 0, 0);
+    lensKv.setHostValue(4, 1, 0, 0, 0);
+    Tensor<float> sink({1, H, 1, 1});
+    sink.setHostValue(0.6F, 0, 0, 0, 0);
+    sink.setHostValue(-0.4F, 0, 1, 0, 0);
+    CpuFpReferenceSdpa::forward(r.q,
+                                r.k,
+                                r.v,
+                                r.o,
+                                SdpaFwdOptions<float>{}
+                                    .setScale(0.5F)
+                                    .setSink(&sink)
+                                    .setSeqLens(&lensQ, &lensKv)
+                                    .setLse(&r.lse));
+    for(int64_t h = 0; h < H; ++h)
+    {
+        for(int64_t sq = LIVE_Q0; sq < SQ; ++sq)
+        {
+            r.lse.setHostValue(0.3F, 0, h, sq, 0);
+            for(int64_t dv = 0; dv < 4; ++dv)
+            {
+                r.o.setHostValue(0.8F, 0, h, sq, dv);
+            }
+        }
+    }
+    Tensor<float> dSink({1, H, 1, 1});
+    CpuFpReferenceSdpa::backward(r.q,
+                                 r.k,
+                                 r.v,
+                                 r.o,
+                                 r.dO,
+                                 r.dQ,
+                                 r.dK,
+                                 r.dV,
+                                 SdpaBwdOptions<float>{}
+                                     .setScale(0.5F)
+                                     .setLse(&r.lse)
+                                     .setSeqLens(&lensQ, &lensKv)
+                                     .setSink(&sink, &dSink));
+
+    for(int64_t h = 0; h < H; ++h)
+    {
+        double expected = 0.0;
+        for(int64_t sq = 0; sq < LIVE_Q0; ++sq)
+        {
+            expected += sinkTerm(r.o, r.dO, r.lse, sink, 0, h, sq);
+        }
+        for(int64_t sq = 0; sq < SQ; ++sq)
+        {
+            expected += sinkTerm(r.o, r.dO, r.lse, sink, 1, h, sq);
+        }
+        EXPECT_NEAR(static_cast<double>(dSink.getHostValue(0, h, 0, 0)), expected, 1e-5)
+            << "head " << h;
+    }
+}
+
+// A row with no live key but a finite sink has LSE = sink and O = 0, so it adds nothing to dSink
+// and gets no dQ. With a sink of -inf the same row is dead (LSE = -inf): its term is skipped
+// rather than exp(-inf - -inf) = NaN.
+TEST(TestCpuFpReferenceSdpaClosedForm, SinkFullyMaskedRowContributesZero)
+{
+    SdpaRun r({1, 1, 2, 4}, {1, 1, 3, 4}, {1, 1, 3, 4});
+    r.q.fillWithRandomValues(-1.0F, 1.0F, 191);
+    r.k.fillWithRandomValues(-1.0F, 1.0F, 192);
+    r.v.fillWithRandomValues(-1.0F, 1.0F, 193);
+    r.dO.fillWithRandomValues(-1.0F, 1.0F, 194);
+    Tensor<float> bias({2, 3});
+    bias.fillWithValue(0.0F);
+    for(int64_t j = 0; j < 3; ++j)
+    {
+        bias.setHostValue(NEG_INF, 0, j);
+    }
+    for(const float sinkValue : {0.4F, NEG_INF})
+    {
+        Tensor<float> sink({1, 1, 1, 1});
+        sink.fillWithValue(sinkValue);
+        runWithSink(r, sink, &bias);
+        Tensor<float> dSink({1, 1, 1, 1});
+        dSink.fillWithValue(123.0F);
+        CpuFpReferenceSdpa::backward(
+            r.q,
+            r.k,
+            r.v,
+            r.o,
+            r.dO,
+            r.dQ,
+            r.dK,
+            r.dV,
+            SdpaBwdOptions<float>{}.setScale(0.5F).setLse(&r.lse).setMask(&bias).setSink(&sink,
+                                                                                         &dSink));
+
+        ASSERT_TRUE(std::isfinite(dSink.getHostValue(0, 0, 0, 0))) << "sink " << sinkValue;
+        // Only row 1 is live; with a -inf sink every term is exp(-inf) = 0.
+        const double expected
+            = std::isinf(sinkValue) ? 0.0 : sinkTerm(r.o, r.dO, r.lse, sink, 0, 0, 1);
+        EXPECT_NEAR(static_cast<double>(dSink.getHostValue(0, 0, 0, 0)), expected, 1e-6)
+            << "sink " << sinkValue;
+        for(int64_t d = 0; d < 4; ++d)
+        {
+            EXPECT_EQ(r.dQ.getHostValue(0, 0, 0, d), 0.0F);
+        }
+    }
+}
+
+// dSink needs the sink, and both must be [1, H, 1, 1].
+TEST(TestCpuFpReferenceSdpaClosedForm, SinkBackwardValidation)
+{
+    SdpaRun r({1, 2, 2, 4}, {1, 2, 3, 4}, {1, 2, 3, 4});
+    Tensor<float> sink({1, 2, 1, 1});
+    sink.fillWithValue(0.1F);
+    Tensor<float> dSink({1, 2, 1, 1});
+    Tensor<float> wrongShape({1, 3, 1, 1});
+    const auto run = [&](const TensorBase<float>* sinkIn, TensorBase<float>* dSinkOut) {
+        CpuFpReferenceSdpa::backward(r.q,
+                                     r.k,
+                                     r.v,
+                                     r.o,
+                                     r.dO,
+                                     r.dQ,
+                                     r.dK,
+                                     r.dV,
+                                     SdpaBwdOptions<float>{}.setSink(sinkIn, dSinkOut));
+    };
+    EXPECT_NO_THROW(run(&sink, &dSink));
+    EXPECT_NO_THROW(run(&sink, nullptr));
+    EXPECT_THROW(run(nullptr, &dSink), std::invalid_argument);
+    EXPECT_THROW(run(&wrongShape, &dSink), std::invalid_argument);
+    EXPECT_THROW(run(&sink, &wrongShape), std::invalid_argument);
 }

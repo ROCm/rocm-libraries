@@ -710,9 +710,8 @@ public:
                 "flydsl_sdpa_rdna_decode");
         }
         void* sink = optionalBuffer(binding.sink, deviceBuffers, numDeviceBuffers);
-        // The head stride, with bit 32 set for the FLOAT sink (kernel modification 31).
-        const int64_t sinkStride
-            = rdnaSinkStrideArgument(binding.sinkStride, binding.sink != NO_SINK);
+        // The head stride, with bit 32 set for a FLOAT sink (kernel modification 31).
+        const int64_t sinkStride = rdnaSinkStrideArgument(binding.sinkStride, binding.sinkFloat);
 
         const auto& s = preparedSdpa.strides();
         const auto& b = preparedSdpa.biasStrides();

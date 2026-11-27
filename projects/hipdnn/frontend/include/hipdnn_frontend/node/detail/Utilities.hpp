@@ -695,6 +695,82 @@ inline Error validateSdpaDiagonalBand(const std::optional<int64_t>& leftBound,
     return {};
 }
 
+// The data type a tensor will have once fill_from_context runs: its own, or the graph's
+// io_data_type when unset.
+inline DataType effectiveTensorDataType(const std::shared_ptr<graph::TensorAttributes>& tensor,
+                                        DataType ioDataType)
+{
+    const auto dataType = tensor->get_data_type();
+    return dataType == DataType::NOT_SET ? ioDataType : dataType;
+}
+
+// Validates an SDPA attention-sink tensor (forward sink_token, backward sink_token and
+// dsink_token) when present: dims exactly [1, H_q, 1, 1], and a data type of FLOAT (cuDNN) or,
+// as a hipDNN extension, BFLOAT16 or HALF equal to Q's effective data type (Q's own type, or the
+// graph I/O type when Q's is unset) and set on the tensor itself. Any other type, including an
+// FP8 Q's own type, is rejected. A type the tensor does not set itself (unset, or supplied by
+// fill_from_context) counts only when it is FLOAT, so a FLOAT buffer left untyped is never read
+// in the graph's 16-bit I/O type.
+inline Error validateSdpaSinkTensor(const std::shared_ptr<graph::TensorAttributes>& tensor,
+                                    const std::string& nodeName,
+                                    const std::string& role,
+                                    int64_t numHeadsQ,
+                                    DataType qEffectiveDataType,
+                                    DataType ioDataType)
+{
+    if(!tensor)
+    {
+        return {};
+    }
+    const auto& dims = tensor->get_dim();
+    HIPDNN_RETURN_IF_TRUE(dims.size() != 4 || dims[0] != 1 || dims[1] != numHeadsQ || dims[2] != 1
+                              || dims[3] != 1,
+                          ErrorCode::INVALID_VALUE,
+                          nodeName + ": " + role + " must have dims [1, H_q, 1, 1] with H_q="
+                              + std::to_string(numHeadsQ));
+    const auto effective = effectiveTensorDataType(tensor, ioDataType);
+    const bool typedOnTensor = tensor->get_data_type() != DataType::NOT_SET
+                               && !TensorAttributesAccess::isDataTypeFromContext(*tensor);
+    // A type set on the tensor is never NOT_SET, so an unset Q type never matches it.
+    const bool sixteenBitMatchesQ
+        = typedOnTensor && effective == qEffectiveDataType
+          && (effective == DataType::BFLOAT16 || effective == DataType::HALF);
+    HIPDNN_RETURN_IF_TRUE(
+        effective != DataType::FLOAT && !sixteenBitMatchesQ,
+        ErrorCode::INVALID_VALUE,
+        nodeName + ": " + role
+            + " must have FLOAT data type, or BFLOAT16/HALF equal to Q's data type set on the "
+              "tensor");
+    return {};
+}
+
+// Validates a Philox seed or offset tensor when present: INT32 or INT64 (an unset type
+// resolves to the graph I/O type and fails), exactly one element (every dim 1, rank 1..4).
+// Host (pass-by-value) and device tensors are both accepted.
+inline Error validateSdpaPhiloxOperand(const std::shared_ptr<graph::TensorAttributes>& tensor,
+                                       const std::string& nodeName,
+                                       const std::string& role,
+                                       DataType ioDataType)
+{
+    if(!tensor)
+    {
+        return {};
+    }
+    const auto effective = effectiveTensorDataType(tensor, ioDataType);
+    HIPDNN_RETURN_IF_TRUE(effective != DataType::INT32 && effective != DataType::INT64,
+                          ErrorCode::INVALID_VALUE,
+                          nodeName + ": " + role + " must have INT32 or INT64 data type");
+    const auto& dims = tensor->get_dim();
+    const bool singleElement
+        = !dims.empty() && dims.size() <= 4
+          && std::all_of(dims.begin(), dims.end(), [](int64_t dim) { return dim == 1; });
+    HIPDNN_RETURN_IF_FALSE(singleElement,
+                           ErrorCode::INVALID_VALUE,
+                           nodeName + ": " + role
+                               + " must be a single element (all dims 1, rank 1 to 4)");
+    return {};
+}
+
 // Rejects an SDPA node whose deprecated causal_mask and causal_mask_bottom_right members are both
 // set (forward and backward share the rule). Each names a different diagonal alignment, so the
 // pair has no single meaning (SdpaSemanticsRegister SEM-002). The error code is the one

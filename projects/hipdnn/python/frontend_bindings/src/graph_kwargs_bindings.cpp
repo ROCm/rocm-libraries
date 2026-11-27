@@ -230,14 +230,6 @@ void applyDiagonalBand(AttributesT& attributes,
     }
 }
 
-void requireNullTensor(const TensorPtr& value, const char* parameter)
-{
-    if(value)
-    {
-        hipdnn_python::throwUnsupportedParameter(parameter, "None");
-    }
-}
-
 // Philox form (probability, seed, offset) or explicit mask form.
 using SdpaDropout
     = std::variant<std::tuple<float, TensorPtr, TensorPtr>, std::tuple<TensorPtr, TensorPtr>>;
@@ -438,23 +430,10 @@ void sdpaBindings(nb::class_<graph::Graph>& cls)
            const nb::object& scoreModBprop,
            const TensorPtr& sinkToken,
            const TensorPtr& dSinkToken) {
-            if(maxTotalSeqLenQ)
-            {
-                hipdnn_python::throwUnsupportedParameter("max_total_seq_len_q", "None");
-            }
-            if(maxTotalSeqLenKv)
-            {
-                hipdnn_python::throwUnsupportedParameter("max_total_seq_len_kv", "None");
-            }
-            requireNullTensor(rngDump, "rng_dump");
-            if(useDeterministicAlgorithm)
-            {
-                hipdnn_python::throwUnsupportedParameter("use_deterministic_algorithm", "False");
-            }
             hipdnn_python::requireNone(scoreMod, "score_mod");
             hipdnn_python::requireNone(scoreModBprop, "score_mod_bprop");
-            requireNullTensor(sinkToken, "sink_token");
-            requireNullTensor(dSinkToken, "dSink_token");
+            // As in cuDNN, rng_dump only applies to the Philox dropout form and is
+            // ignored otherwise.
 
             graph::SdpaBackwardAttributes attributes;
             attributes.set_alibi_mask(useAlibiMask)
@@ -485,12 +464,33 @@ void sdpaBindings(nb::class_<graph::Graph>& cls)
             {
                 attributes.set_seq_len_kv(seqLenKv);
             }
+            if(maxTotalSeqLenQ)
+            {
+                attributes.set_max_total_seq_len_q(*maxTotalSeqLenQ);
+            }
+            if(maxTotalSeqLenKv)
+            {
+                attributes.set_max_total_seq_len_kv(*maxTotalSeqLenKv);
+            }
+            attributes.set_deterministic_algorithm(useDeterministicAlgorithm);
+            if(sinkToken)
+            {
+                attributes.set_sink_token(sinkToken);
+            }
+            if(dSinkToken)
+            {
+                attributes.set_dsink_token(dSinkToken);
+            }
             if(dropout)
             {
                 if(const auto* philox = std::get_if<0>(&*dropout))
                 {
                     attributes.set_dropout(
                         std::get<0>(*philox), std::get<1>(*philox), std::get<2>(*philox));
+                    if(rngDump)
+                    {
+                        attributes.set_rng_dump(rngDump);
+                    }
                 }
                 else
                 {

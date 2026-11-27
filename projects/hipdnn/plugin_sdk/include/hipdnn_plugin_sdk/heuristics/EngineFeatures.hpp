@@ -467,8 +467,8 @@ inline std::optional<double>
 }
 
 /// FlashAttention's convention: 2.5x the forward, which recomputes QK^T and adds the dV,
-/// dP, dQ and dK products to the forward's two. A bias gradient is a reduction of dP and
-/// inverse-scaled dropout elementwise, so neither adds to it.
+/// dP, dQ and dK products to the forward's two. A bias gradient and a sink gradient are
+/// reductions of dP, and inverse-scaled dropout and a sink are elementwise, so none adds to it.
 inline std::optional<double>
     nodeFlops(const Graph& graph,
               const hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributes& op)

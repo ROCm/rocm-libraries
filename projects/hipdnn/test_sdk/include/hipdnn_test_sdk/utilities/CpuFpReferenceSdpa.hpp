@@ -213,6 +213,13 @@ struct SdpaBwdOptions
     std::optional<float> dropoutScaleInv;
     std::optional<float> softcap;
     bool alibi = false;
+    /// Attention sink, FP32 [1, H, 1, 1], as in SdpaFwdOptions. lse must then be the sink-inclusive
+    /// forward LSE (SEM-022); with lse null the softmax is recomputed with the sink.
+    const hipdnn_data_sdk::utilities::TensorBase<float>* sinkToken = nullptr;
+    /// Gradient of sinkToken, FP32 [1, H, 1, 1] (requires sinkToken):
+    /// dSink[h] = -sum_b sum_{sq < seqLenQ[b]} exp(sink[h] - LSE) * D, with D = rowsum(dO * O)
+    /// before the dropoutScaleInv factor. Rows with LSE = +-inf contribute 0. GQA sums by query head.
+    hipdnn_data_sdk::utilities::TensorBase<float>* dSink = nullptr;
 
     SdpaBwdOptions& setScale(std::optional<float> value)
     {
@@ -265,6 +272,13 @@ struct SdpaBwdOptions
     SdpaBwdOptions& setAlibi(bool value)
     {
         alibi = value;
+        return *this;
+    }
+    SdpaBwdOptions& setSink(const hipdnn_data_sdk::utilities::TensorBase<float>* sink,
+                            hipdnn_data_sdk::utilities::TensorBase<float>* dSinkOut)
+    {
+        sinkToken = sink;
+        dSink = dSinkOut;
         return *this;
     }
 };
@@ -513,14 +527,7 @@ public:
             = resolveSeqLens(options.seqLenKv, options.seqLenQ, batch, seqKv, "seqLenKv");
         validateDropoutMask(options.dropoutMask, batch, numHeads, seqQ, seqKv);
         validateSoftcap(options.softcap);
-        // Attention sink (cuDNN): one unscaled logit per query head, [1, H, 1, 1].
-        if(options.sinkToken != nullptr
-           && (static_cast<int64_t>(options.sinkToken->elementCount()) != numHeads
-               || options.sinkToken->dims().size() != 4
-               || options.sinkToken->dims()[1] != numHeads))
-        {
-            throw std::invalid_argument("CpuFpReferenceSdpa: sinkToken must be [1, H, 1, 1]");
-        }
+        validateSinkShape(options.sinkToken, "sinkToken", numHeads);
         validateBlockMask(options.blockMask, batch, numHeads, seqQ, seqKv);
 
         const auto headsPerHeadK = numHeads / numHeadsK;
@@ -629,7 +636,7 @@ public:
         }
     }
 
-    /// SDPA backward: dQ, dK, dV (and dBias) from the upstream gradient dO, through the same score
+    /// SDPA backward: dQ, dK, dV (and dBias, dSink) from the upstream gradient dO, through the same score
     /// pipeline as forward. P comes from the forward LSE when given, else from a recomputed
     /// softmax. Each feature is a field of SdpaBwdOptions that is off by default.
     ///
@@ -756,6 +763,12 @@ public:
         const auto validKv
             = resolveSeqLens(options.seqLenKv, options.seqLenQ, batch, seqKv, "seqLenKv");
         validateDropoutMask(options.dropoutMask, batch, numHeadsQ, seqQ, seqKv);
+        validateSinkShape(options.sinkToken, "sinkToken", numHeadsQ);
+        validateSinkShape(options.dSink, "dSink", numHeadsQ);
+        if(options.dSink != nullptr && options.sinkToken == nullptr)
+        {
+            throw std::invalid_argument("CpuFpReferenceSdpa::backward: dSink requires sinkToken");
+        }
         validateSoftcap(options.softcap);
         // Dropout with an explicit mask, composed as cuDNN's backward does: D is scaled by
         // dropoutScaleInv (1 when unset), dP is masked, dS is scaled by dropoutScale, and dV uses
@@ -801,6 +814,11 @@ public:
             dBiasAccum.assign(static_cast<size_t>(count), ComputeDataType(0));
         }
 
+        std::vector<ComputeDataType> dSinkAccum;
+        if(options.dSink != nullptr)
+        {
+            dSinkAccum.assign(static_cast<size_t>(numHeadsQ), ComputeDataType(0));
+        }
         std::vector<ComputeDataType> scores(static_cast<size_t>(seqKv));
         std::vector<ComputeDataType> probs(static_cast<size_t>(seqKv));
         std::vector<ComputeDataType> dP(static_cast<size_t>(seqKv));
@@ -816,6 +834,11 @@ public:
                 const auto kvHeadV = hQ / headsPerHeadV;
                 // Padding: a query row past seq_len_q has no output, so it contributes nothing
                 // (its dQ stays 0); keys past seq_len_kv are never read.
+                const auto sinkVal
+                    = options.sinkToken != nullptr
+                          ? static_cast<ComputeDataType>(
+                                options.sinkToken->getHostValue(std::vector<int64_t>{0, hQ, 0, 0}))
+                          : -std::numeric_limits<ComputeDataType>::infinity();
                 for(int64_t sq = 0; sq < liveQ; ++sq)
                 {
                     // D = rowsum(dO * O), scaled by dropoutScaleInv.
@@ -827,6 +850,7 @@ public:
                                 * static_cast<ComputeDataType>(
                                     o.getHostValue(std::vector<int64_t>{b, hQ, sq, dv}));
                     }
+                    const auto rawD = rowD;
                     rowD *= dropoutInv;
 
                     std::fill(softcapGrad.begin(), softcapGrad.end(), ComputeDataType(1.0));
@@ -842,12 +866,16 @@ public:
                              scale,
                              scores,
                              &softcapGrad);
+                    // The row's log-sum-exp including the sink: P = exp(score - LSE) and the sink's
+                    // own probability is exp(sink - LSE).
+                    auto rowLse = -std::numeric_limits<ComputeDataType>::infinity();
                     if(options.lse != nullptr)
                     {
-                        // P = exp(score - LSE). A row with no live key has LSE = -inf (+inf from
-                        // kernels that use that convention); its P is all zero.
+                        // A row with no live key has LSE = -inf (+inf from kernels that use that
+                        // convention); its P is all zero.
                         const float lseVal
                             = options.lse->getHostValue(std::vector<int64_t>{b, hQ, sq, 0});
+                        rowLse = static_cast<ComputeDataType>(lseVal);
                         const bool deadRow = std::isinf(lseVal);
                         for(int64_t skv = 0; skv < liveKv; ++skv)
                         {
@@ -860,8 +888,20 @@ public:
                     else
                     {
                         std::fill(probs.begin(), probs.end(), ComputeDataType(0.0));
-                        softmaxRow(
-                            scores, -std::numeric_limits<ComputeDataType>::infinity(), probs);
+                        const auto [maxVal, sumExp] = softmaxRow(scores, sinkVal, probs);
+                        if(!std::isinf(maxVal))
+                        {
+                            rowLse = maxVal + std::log(sumExp);
+                        }
+                    }
+
+                    // dSink: the sink column has no V row, so dP_sink = 0 and the softmax backward
+                    // gives dl_sink = -P_sink * D. D is the raw rowsum(dO * O): the sink is never
+                    // dropped and O already carries the dropout mask and scale. A dead row (no key,
+                    // no sink) has LSE = -inf and contributes nothing.
+                    if(!dSinkAccum.empty() && !std::isinf(rowLse))
+                    {
+                        dSinkAccum[static_cast<size_t>(hQ)] -= std::exp(sinkVal - rowLse) * rawD;
                     }
 
                     // dP = (dO @ V^T) * mask (dropout).
@@ -937,6 +977,10 @@ public:
         storeAccumulated(dqAccum, dQ);
         storeAccumulated(dkAccum, dK);
         storeAccumulated(dvAccum, dV);
+        if(options.dSink != nullptr)
+        {
+            storeAccumulated(dSinkAccum, *options.dSink);
+        }
         if(dBias != nullptr)
         {
             storeAccumulated(dBiasAccum, *dBias);
@@ -969,6 +1013,18 @@ private:
         {
             throw std::invalid_argument(std::string("CpuFpReferenceSdpa: ") + name
                                         + " must be rank-4");
+        }
+    }
+
+    /// Attention sink and its gradient (cuDNN): one value per query head, [1, H, 1, 1].
+    static void validateSinkShape(const hipdnn_data_sdk::utilities::TensorBase<float>* sink,
+                                  const char* name,
+                                  int64_t numHeads)
+    {
+        if(sink != nullptr && sink->dims() != std::vector<int64_t>{1, numHeads, 1, 1})
+        {
+            throw std::invalid_argument(std::string("CpuFpReferenceSdpa: ") + name
+                                        + " must be [1, H, 1, 1]");
         }
     }
 

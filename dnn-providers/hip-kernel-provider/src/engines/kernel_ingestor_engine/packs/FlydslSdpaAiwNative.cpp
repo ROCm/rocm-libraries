@@ -822,9 +822,9 @@ public:
                     b[1],
                     b[2],
                     sink,
-                    // The head stride, with bit 32 set for the FLOAT sink (kernel
+                    // The head stride, with bit 32 set for a FLOAT sink (kernel
                     // modification 11).
-                    rdnaSinkStrideArgument(binding.sinkStride, binding.sink != NO_SINK),
+                    rdnaSinkStrideArgument(binding.sinkStride, binding.sinkFloat),
                     b[3],
                     i32(problem.numVHeads),
                     s[4][0],

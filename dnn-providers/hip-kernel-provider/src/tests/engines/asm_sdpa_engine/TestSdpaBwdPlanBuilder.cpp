@@ -24,6 +24,7 @@
 #include "tests/engines/asm_sdpa_engine/AsmSdpaTestSupport.hpp"
 #include "tests/engines/asm_sdpa_engine/DeprecatedCausalMaskCases.hpp"
 #include "tests/engines/asm_sdpa_engine/SdpaAttnScaleCases.hpp"
+#include "tests/engines/asm_sdpa_engine/SdpaBwdGraphMutators.hpp"
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_backward_attributes_generated.h>
@@ -3849,6 +3850,92 @@ TEST_F(TestSdpaBwdPlanBuilder, BuildPlanDeclinesA16GraphsTheA16KernelsDoNotServe
         }
         EXPECT_FALSE(context.hasValidPlan());
     }
+}
+
+// =============================================================================
+// Backward fields the engine does not serve
+// =============================================================================
+
+// Each case adds exactly one field to a graph the engine accepts and expects the decline, so
+// deleting that field's decline fails that case and no other. The unmodified graph is asserted
+// accepted first: the device check declines every graph on a device that is neither gfx942 nor
+// gfx950, which would make a bare EXPECT_FALSE pass without testing the field.
+class TestSdpaBwdUnservedFields : public TestSdpaBwdPlanBuilder
+{
+protected:
+    void SetUp() override
+    {
+        SKIP_IF_NO_DEVICES();
+        if(!bwd_dispatch::isSupportedArch(deviceString()))
+        {
+            GTEST_SKIP();
+        }
+
+        _base = createSdpaBwdGraph();
+        ASSERT_TRUE(isApplicable(_base));
+    }
+
+    bool isApplicable(const flatbuffers::FlatBufferBuilder& builder)
+    {
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+            builder.GetBufferPointer(), builder.GetSize());
+        return _planBuilder.isApplicable(_handle, graphWrapper);
+    }
+
+    flatbuffers::FlatBufferBuilder _base;
+};
+
+// dQ/dK/dV depend on the sink only through the forward Stats, which the kernels read from the
+// caller's buffer, so a sink without a dSink is served. The decline is the dSink output below.
+TEST_F(TestSdpaBwdUnservedFields, IsApplicableAcceptsSinkTokenWithoutDsink)
+{
+    EXPECT_TRUE(isApplicable(addBwdSinkToken(_base)));
+}
+
+TEST_F(TestSdpaBwdUnservedFields, IsApplicableDeclinesSinkTokenWithDsinkToken)
+{
+    const auto dims = std::vector<int64_t>{4, 8, 256, 128};
+    const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+    const auto withBoth = hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(
+        dims,
+        strides,
+        dims,
+        strides,
+        dims,
+        strides,
+        dims,
+        strides,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+        /*withScale=*/false,
+        /*alibiMask=*/false,
+        /*paddingMask=*/false,
+        /*causalMask=*/false,
+        /*overrideShapeEnabled=*/false,
+        /*withSinkToken=*/true,
+        /*withDsinkToken=*/true);
+    EXPECT_FALSE(isApplicable(withBoth));
+}
+
+TEST_F(TestSdpaBwdUnservedFields, IsApplicableDeclinesDsinkToken)
+{
+    EXPECT_FALSE(isApplicable(addBwdDsinkToken(_base)));
+}
+
+TEST_F(TestSdpaBwdUnservedFields, IsApplicableDeclinesRngDump)
+{
+    EXPECT_FALSE(isApplicable(addBwdRngDump(_base)));
+}
+
+TEST_F(TestSdpaBwdUnservedFields, IsApplicableDeclinesDeterministicAlgorithm)
+{
+    EXPECT_FALSE(isApplicable(withBwdDeterministicAlgorithm(_base)));
+}
+
+// max_total_seq_len_q/kv give the physical token span of a packed (ragged) buffer. The engine
+// declines ragged graphs, so on a graph it accepts they must not change the decision.
+TEST_F(TestSdpaBwdUnservedFields, IsApplicableIgnoresMaxTotalSeqLen)
+{
+    EXPECT_TRUE(isApplicable(withBwdMaxTotalSeqLen(_base, 1024, 2048)));
 }
 
 // =============================================================================

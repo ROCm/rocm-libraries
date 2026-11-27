@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -20,29 +21,40 @@ namespace hipdnn_integration_tests::bundle
 {
 
 /// Philox dropout is validated through RNG_DUMP (SdpaSemanticsRegister.md SEM-015): the engine
-/// writes its keep mask to the rng_dump output, the reference reads that mask as its explicit
-/// dropout mask, and rng_dump itself is not compared (it is the oracle's input, not a result).
+/// writes its keep mask to the rng_dump output (of the forward or the backward node), the
+/// reference reads that mask as its explicit dropout mask, and rng_dump itself is not compared
+/// (it is the oracle's input, not a result).
 struct SdpaRngDump
 {
     int64_t uid;
     float dropoutProbability;
 };
 
-/// The rng_dump output of the graph's SDPA forward node when it uses Philox dropout, if any.
-inline std::optional<SdpaRngDump>
-    findSdpaRngDump(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph)
+/// The rng_dump output of every SDPA forward or backward node in the graph that uses Philox
+/// dropout, in node order (a forward and a backward node each carry their own dump).
+inline std::vector<SdpaRngDump>
+    findSdpaRngDumps(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph)
 {
+    std::vector<SdpaRngDump> dumps;
     for(uint32_t i = 0; i < graph.nodeCount(); ++i)
     {
-        const auto* sdpa = graph.getNode(i).attributes_as_SdpaAttributes();
+        const auto& node = graph.getNode(i);
+        const auto* sdpa = node.attributes_as_SdpaAttributes();
         if(sdpa != nullptr && sdpa->rng_dump_tensor_uid().has_value()
            && sdpa->dropout_probability().has_value())
         {
-            return SdpaRngDump{sdpa->rng_dump_tensor_uid().value(),
-                               sdpa->dropout_probability().value()};
+            dumps.push_back(SdpaRngDump{sdpa->rng_dump_tensor_uid().value(),
+                                        sdpa->dropout_probability().value()});
+        }
+        const auto* sdpaBwd = node.attributes_as_SdpaBackwardAttributes();
+        if(sdpaBwd != nullptr && sdpaBwd->rng_dump_tensor_uid().has_value()
+           && sdpaBwd->dropout_probability().has_value())
+        {
+            dumps.push_back(SdpaRngDump{sdpaBwd->rng_dump_tensor_uid().value(),
+                                        sdpaBwd->dropout_probability().value()});
         }
     }
-    return std::nullopt;
+    return dumps;
 }
 
 /// Copies the engine's dumped keep mask into the reference's rng_dump buffer (host side; the
@@ -102,12 +114,14 @@ inline std::string checkRngDump(hipdnn_data_sdk::utilities::ITensor& dump, float
 
 /// The output uids to compare: every output except a Philox rng_dump.
 inline std::vector<int64_t> comparedOutputUids(const std::vector<int64_t>& outputUids,
-                                               const std::optional<SdpaRngDump>& dump)
+                                               const std::vector<SdpaRngDump>& dumps)
 {
     std::vector<int64_t> uids;
     for(const auto uid : outputUids)
     {
-        if(!dump.has_value() || uid != dump->uid)
+        const bool isDump = std::any_of(
+            dumps.begin(), dumps.end(), [uid](const SdpaRngDump& dump) { return dump.uid == uid; });
+        if(!isDump)
         {
             uids.push_back(uid);
         }

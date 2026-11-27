@@ -69,6 +69,23 @@ that combination is exploration only` is not a failure either: the engine served
 operation's named workloads for that combination, which the search still explores. Report it
 when the engine is meant to serve those workloads.
 
+corpus_gen's `WARNING: archetype <name> was never admitted (N drawn): ...` is expected when
+the reason it gives is `--max-bytes`: the archetype's graphs are past the byte limit at every
+declared size (matmul's `gpt3_175b_projection`, `sdpa_bwd`'s `gpt3_175b_prefill` and
+`long_context`, and both SDPA declarations' `video_dit_full_attention` at the default 256 MiB).
+Report it when the reason is the engine declining an archetype it is meant to
+serve.
+
+Some SDPA archetypes anchor graphs no CDNA engine served in the 2026-11-24 OOTB run, so a
+`declined by the engine` warning on them is the coverage gap itself, not a corpus fault:
+`alibi_causal_lm` (both directions, ALiBi), `paged_kv_decode` (`sdpa_fwd`, paged KV),
+`sdpa_bwd`'s `padded_head_dim` (head dims off the multiples of 8), `swin_window_relative_bias`
+(a dBias row pitch off 16 bytes), `mla_absorbed_decode` (head dim 576) and
+`shared_kv_head_dim_512` (past FlyDSL's 32-bit offsets at 128 heads and 16384 tokens, and past
+the default `--max-bytes`). Report the gap against the engine, and keep the warning in the
+set's notes: it is the only place a declined graph is named, since corpus_gen writes only the
+graphs the engine admits.
+
 ## Silent failures: green runs with useless results
 
 | Symptom | Likely cause |

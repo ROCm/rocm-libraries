@@ -76,6 +76,8 @@ Engines verified for stream capture report `SUPPORTS_GRAPH_CAPTURE`, so `select_
 
 `deselect_numeric_notes({NONDETERMINISTIC})` keeps only engines whose reported numerical notes omit `NONDETERMINISTIC`. A provider claims determinism with an explicit empty list; an engine that declares nothing is reported `NONDETERMINISTIC`, so a missing claim proves nothing. A failed note query for an engine fails the filter instead of passing it.
 
+SDPA backward determinism is per graph: `SdpaBackwardAttributes::set_deterministic_algorithm(true)` reaches the engines, and an engine that cannot guarantee it declines the graph ([SEM-029](./SdpaSemanticsRegister.md)). The numeric-note filter does not select it.
+
 ## Engine filtering
 
 The native `Graph` keeps cuDNN's filter semantics: filters persist until changed, `check_support()` answers "is this supported with these filters?", and `build_plans()` builds the best plan that passes them ([RFC 0025](rfcs/0025_NumericalNotes.md) §4 lists the differences). The shim reapplies its own filters (`deselect_engines`, the behavior-note filters, and the determinism filter) to the applicable engines after plan creation, as native `deselect_engines`, which replaces its list. A filter set after plans were created takes effect at the next `check_support()`, `build_plans()`, `build_plan_at_index()`, or `autotune()`, including for plans already created.
@@ -113,6 +115,21 @@ hipDNN knob IDs are matched to `KnobType_t` by their last dot-separated segment,
 | `set_sm_count`, `set_sm_version`, `set_device_properties` | Record `INVALID_VALUE`. |
 | `deselect_workspace_greater_than` | Forwarded; reapplied after plan creation. |
 | `deselect_shared_mem_greater_than` | `0`: no-op. Non-zero: records `GRAPH_NOT_SUPPORTED` (no shared-memory metadata). |
+
+## SDPA operands
+
+Two accepted ranges are wider than cuDNN's documented contract. Both are supported supersets: every graph cuDNN accepts is accepted unchanged. The sink range admits a BFLOAT16 or HALF sink in the model data type (vLLM, HF) without a conversion; the FlyDSL forward sink objects already read a 16-bit sink (hip-kernel-provider `flydsl/COVERAGE.md`). The seed and offset range accepts cuDNN's own host scalars, whose constructor gives dims `{1}`.
+
+| Operand | cuDNN | hipDNN |
+|---|---|---|
+| `sink_token`, `dsink_token` (forward and backward) | Documented and tested as FLOAT `[1, H_q, 1, 1]`; the frontend checks nothing | FLOAT, or BFLOAT16 or HALF equal to Q's data type (the graph I/O data type when Q's is unset) set on the tensor itself; any other type, an FP8 sink in an FP8 graph included, is rejected; an untyped sink or dSink takes the graph I/O type and must then be FLOAT. Dims exactly `[1, H_q, 1, 1]`; `dsink_token` must have the sink's data type ([SEM-022](./SdpaSemanticsRegister.md)) |
+| Philox `seed`, `offset` (forward and backward) | Documented as INT32 or INT64, `(1,1,1,1)`, CPU or GPU; the frontend checks nothing | INT32 or INT64 with every dim 1 and rank 1 to 4, host or device. `set_value` and cuDNN's scalar constructor produce rank 1 ([SEM-030](./SdpaSemanticsRegister.md)) |
+
+Behavior change in the forward node: the rules above apply to `SdpaFwdNode` as well as `SdpaBwdNode`. A forward graph whose seed or offset has a data type other than INT32 or INT64 (including an unset data type, which resolves to the graph I/O data type and so fails when that is floating point), more than one element, or a rank outside 1 to 4 now fails `validate()` with `INVALID_VALUE`. The forward sink, previously FLOAT only, now also accepts BFLOAT16 or HALF equal to Q's data type set on the sink itself (an FP8 Q's own type is not accepted); an untyped sink in a 16-bit graph still fails. The frontend tests `TestSdpaFwdNode.PreValidateSeedOffsetShapeAndType`, `PreValidateSinkShapeAndType`, `PreValidateSinkTypeFilledFromTheGraphIsUntyped`, `GraphValidateRejectsUntypedSinkInAHalfGraph` and `GraphValidateAcceptsASinkTypedInQsDataType` and `PreValidateSinkDataTypeReferentIsQ` cover the forward rules.
+
+## SDPA backward `max_total_seq_len_q` and `max_total_seq_len_kv`
+
+cuDNN checks only that Q, K, V or O is ragged when either value is set (and then treats the value as a workspace-size hint). hipDNN keeps that check and adds one: `max_total_seq_len_q` below Q's S_max (`dims[2]`) or `max_total_seq_len_kv` below K's S_max fails `validate()` with `INVALID_VALUE`; a value equal to S_max is valid. The value is the physical token span of the packed buffer, at least `max(offset[b] + len[b])` over the batch, and an engine may read it to size buffers. No in-tree engine reads it yet; the ASM SDPA engine's grouped backward (ALMIOPEN-3364) is the intended reader and needs the value to cover at least one sequence, which is why a value that cannot span one sequence is refused up front. A cuDNN graph with a value below S_max is rejected by hipDNN. See [SEM-029](./SdpaSemanticsRegister.md#sem-029-backward-determinism-and-max_total_seq_len). Frontend tests: `TestSdpaBwdNode.PreValidateFailsMaxTotalSeqLenQBelowQSMax`, `PreValidateFailsMaxTotalSeqLenKvBelowKSMax`, `PreValidateSucceedsMaxTotalSeqLenEqualToSMax`.
 
 ## SDPA cumulative sequence lengths
 

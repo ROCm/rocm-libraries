@@ -362,6 +362,22 @@ def test_split_rows_are_the_reference_rows(op: str) -> None:
     assert not problems, "rows differ from the reference:\n" + "\n".join(problems)
 
 
+def test_dsink_reduce_objects_are_the_reference_pins() -> None:
+    # The dSink reduce is no slot op: a sink-twin prep row names its object by path (``gen_descriptors.COMPANION_ONLY_OPS``), so
+    # its rows are checked here against the sweep's pins, row for row and byte for byte, as the gfx11 objects are.
+    path = CONTENT / "sdpa_bwd_dsink_reduce" / "gfx950" / MANIFEST_NAME
+    if not path.is_file():
+        pytest.skip(f"no sdpa_bwd_dsink_reduce gfx950 content under {CONTENT}")
+    reference = _reference_rows(REFERENCE_CSV, "dsink_reduce,")
+    problems = _pin_problems([path], reference, _exception_pins(EXCEPTIONS_CSV))
+    for record in json.loads(path.read_text(encoding="utf-8"))["instances"]:
+        if reference.get(record["spec"]) not in (None, record["sha256"]):
+            problems.append(
+                f"{record['spec']}: ships {record['sha256']}, the pin is {reference[record['spec']]}"
+            )
+    assert not problems, "rows differ from the reference:\n" + "\n".join(problems)
+
+
 def _arch_pin_problems(manifest_path: Path, reference: dict[str, str]) -> list[str]:
     """Where a gfx11-generic, gfx90a or gfx942 manifest differs from its S1 reference: every row and companion is a reference spec,
     ships the reference's sha256 (such an object is its pin byte for byte; a combined row is gated against its pin), and no reference

@@ -5,8 +5,8 @@
 # for a corpus of EXPECTED_GRAPHS graphs, a manifest that says whether an engine was asked
 # (--without-engine: no, and warns so) and a commands.txt with one bench invocation per graph
 # file it wrote. Given EXPECTED_COMBINATIONS, EXPECTED_MANIFEST, EXPECTED_ANCHORED_PERCENT,
-# EXPECTED_FORM_MIX or EXPECTED_FORMS, it also checks what each of them describes (see below).
-# CLI_ARGS is comma-separated, as in CliExitStatus.cmake.
+# EXPECTED_FORM_MIX, EXPECTED_FORMS or EXPECTED_STDERR, it also checks what each of them
+# describes (see below). CLI_ARGS is comma-separated, as in CliExitStatus.cmake.
 if(NOT DEFINED TOOL OR NOT DEFINED CLI_ARGS OR NOT DEFINED OUTPUT_DIR
    OR NOT DEFINED EXPECTED_EXIT OR NOT DEFINED EXPECTED_GRAPHS)
     message(FATAL_ERROR "TOOL, CLI_ARGS, OUTPUT_DIR, EXPECTED_EXIT and EXPECTED_GRAPHS are required")
@@ -28,6 +28,10 @@ execute_process(
 if(NOT "${toolResult}" STREQUAL "${EXPECTED_EXIT}")
     message(FATAL_ERROR "${TOOL} ${cliArgs} exited with '${toolResult}', expected ${EXPECTED_EXIT}\n"
                         "stdout:\n${toolStdout}\nstderr:\n${toolStderr}")
+endif()
+# EXPECTED_STDERR (optional, a regular expression): what the run says on stderr matches it.
+if(EXPECTED_STDERR AND NOT toolStderr MATCHES "${EXPECTED_STDERR}")
+    message(FATAL_ERROR "stderr does not match '${EXPECTED_STDERR}':\n${toolStderr}")
 endif()
 if(EXPECTED_GRAPHS EQUAL 0)
     return()

@@ -276,6 +276,10 @@ struct BwdCase
     bool perRowTolerance = false;
     /// The workspace size the plan must report, when set.
     std::optional<size_t> expectedWorkspaceBytes;
+    /// The graph has a sink and a dSink, both [1, Hq, 1, 1] in the dtype of Q (16-bit only): O and
+    /// the log-sum-exp carry the sink, and dSink is compared with the reference. The split
+    /// engine serves it through the prep sink twin and the dsink_reduce kernel.
+    bool dsink = false;
 
     bool padded() const
     {
@@ -682,6 +686,14 @@ inline SdpaBwdSpec specOf(const BwdCase& c)
             }
         });
     }
+    if(c.dsink)
+    {
+        const auto sinkType = c.dtype;
+        spec = spec.withEdit([=](SdpaBwdGraph& g) {
+            addSink(g, sinkType);
+            addDsink(g, sinkType);
+        });
+    }
     if(c.dropout > 0.0F)
     {
         const auto probability = c.dropout;
@@ -752,6 +764,8 @@ struct Inputs
     std::vector<double> v;
     std::vector<double> dO;
     std::vector<double> bias;
+    /// One value per query head; empty without a sink.
+    std::vector<double> sink;
 };
 
 inline size_t
@@ -862,12 +876,16 @@ inline Forward forwardOf(const BwdCase& c, const Inputs& in)
                         maximum = std::max(maximum, scores[static_cast<size_t>(j)]);
                     }
                 }
+                const double sinkValue = c.dsink ? in.sink[static_cast<size_t>(h)]
+                                                 : -std::numeric_limits<double>::infinity();
+                maximum = std::max(maximum, sinkValue);
                 if(maximum == -std::numeric_limits<double>::infinity())
                 {
-                    // No key reaches the row: O = 0 and LSE = -inf.
+                    // No key reaches the row, and there is no sink: O = 0 and LSE = -inf.
                     continue;
                 }
-                double sum = 0.0;
+                // The sink is one more column of the softmax, with no value row.
+                double sum = c.dsink ? std::exp(sinkValue - maximum) : 0.0;
                 for(int64_t j = 0; j < c.seqKv; ++j)
                 {
                     if(visible(c, b, row, j))
@@ -905,6 +923,8 @@ struct Gradients
     std::vector<double> dk;
     std::vector<double> dv;
     std::vector<double> dbias;
+    /// One value per query head; empty without a sink.
+    std::vector<double> dsink;
 };
 
 /// Whether the reference of a graph in @p dtype on the device named @p gcnArchName flushes fp16
@@ -948,6 +968,7 @@ inline Gradients backwardOf(const BwdCase& c,
     grads.dk.assign(in.k.size(), 0.0);
     grads.dv.assign(in.v.size(), 0.0);
     grads.dbias.assign(in.bias.size(), 0.0);
+    grads.dsink.assign(c.dsink ? static_cast<size_t>(c.heads) : 0U, 0.0);
     const double dropScale = dropoutScale(c);
     for(int64_t b = 0; b < c.batch; ++b)
     {
@@ -969,6 +990,12 @@ inline Gradients backwardOf(const BwdCase& c,
                 {
                     const auto index = at(b, h, row, e, c.heads, c.seqQ, dv);
                     delta += in.dO[index] * o[index];
+                }
+                if(c.dsink)
+                {
+                    // The sink column has no value row: dS_sink = -P_sink * rowsum(dO * O).
+                    grads.dsink[static_cast<size_t>(h)]
+                        -= std::exp(in.sink[static_cast<size_t>(h)] - rowLse) * delta;
                 }
                 for(int64_t j = 0; j < c.seqKv; ++j)
                 {
@@ -1728,6 +1755,16 @@ void expectPlanMatchesReference(const BwdCase& c,
     {
         in.bias = biasInputsOf<B>(c);
     }
+    if(c.dsink)
+    {
+        // [0, 4] in steps of 1/16: exact in f16 and bf16, and a real share of every softmax row.
+        auto raw = fillValues(static_cast<size_t>(c.heads), 6U);
+        for(auto& value : raw)
+        {
+            value = 2.0 + 2.0 * value;
+        }
+        in.sink = widened(roundedTo<T>(raw));
+    }
     // A padded graph's rows past its lengths carry no data: the gradient's input is zero
     // there, as a packed batch's padding is.
     if(c.padded())
@@ -1910,6 +1947,24 @@ void expectPlanMatchesReference(const BwdCase& c,
             dbias = std::make_unique<DeviceBuffer>(biasHost.size() * sizeof(B));
             buffers.push_back({uid::DBIAS, dbias->get()});
         }
+    }
+    // The sink and dSink are 16-byte aligned (hipMalloc) and at least one vector long.
+    std::unique_ptr<DeviceBuffer> sink;
+    std::unique_ptr<DeviceBuffer> dsink;
+    const auto sinkElements = static_cast<size_t>((c.heads + 7) / 8 * 8);
+    if(c.dsink)
+    {
+        std::vector<T> sinkHost(sinkElements, T(0.0F));
+        for(size_t h = 0; h < in.sink.size(); ++h)
+        {
+            sinkHost[h] = T(static_cast<float>(in.sink[h]));
+        }
+        sink = std::make_unique<DeviceBuffer>(sinkElements * sizeof(T));
+        sink->upload(sinkHost);
+        dsink = std::make_unique<DeviceBuffer>(sinkElements * sizeof(T));
+        dsink->poison();
+        buffers.push_back({uid::SINK, sink->get()});
+        buffers.push_back({uid::DSINK, dsink->get()});
     }
     DeviceBuffer lengthsQ(c.lengthsQ.size() * sizeof(int32_t));
     DeviceBuffer lengthsKv(c.lengthsKv.size() * sizeof(int32_t));
@@ -2189,6 +2244,16 @@ void expectPlanMatchesReference(const BwdCase& c,
         EXPECT_EQ(unstable, 0) << unstable << " of " << c.repeatLaunches - 1
                                << " repeat launches differ bitwise from the first, the first at "
                                << firstMismatch;
+    }
+    if(c.dsink)
+    {
+        auto dsinkGot = widened(dsink->template download<T>());
+        dsinkGot.resize(expected.dsink.size());
+        expectGradient("dSink",
+                       dsinkGot,
+                       expected.dsink,
+                       std::vector<bool>(expected.dsink.size(), true),
+                       tolerance);
     }
 }
 

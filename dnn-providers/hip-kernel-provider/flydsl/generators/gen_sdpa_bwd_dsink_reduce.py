@@ -10,6 +10,11 @@ manifest are shared with the other backward ops in ``_sdpa_bwd_cdna_build``. The
 the sweep's pins (``_instances``); each is built once and recorded as ``ok``,
 ``dual_object`` or ``error`` with its resource row and gate verdicts. Rebuilt objects are
 compared with the pins by ``tools/sdpa_bwd_compare.py``.
+
+The objects ship, in the op's own folder ``<content root>/sdpa_bwd_dsink_reduce/<arch>/``: the second launch (``dsink_reduce``) of
+every sink-twin prep row (``sink=1``) of their dtype, after the twin writes the sink terms. The op has no descriptors of its own;
+``gen_descriptors.py`` (``COMPANION_ONLY_OPS``) names each object from the prep rows' pack, so the prep op's manifest and digest are
+untouched. It takes no reference directory.
 """
 
 from __future__ import annotations

@@ -454,15 +454,18 @@ inline RegimeSearchResult exploreRegime(const OperationMetadata& metadata,
     }
 
     size_t totalCombinations = 0;
+    size_t constraintEmpty = 0;
     std::vector<ProblemPoint> combinations;
     for(auto& combination : detail::categoricalCombinations(
             metadata.parameters,
             request.maxCombinations,
+            request.seed,
             totalCombinations,
             [&metadata](const ProblemPoint& candidate) {
                 return !detail::excludedByCategoricals(metadata, candidate);
             },
-            request.keep))
+            request.keep,
+            &constraintEmpty))
     {
         bool matches = true;
         for(const auto& [name, value] : focus.categoricalPins)
@@ -497,6 +500,9 @@ inline RegimeSearchResult exploreRegime(const OperationMetadata& metadata,
     }
     if(served.empty())
     {
+        // Past the bound the sample holds only combinations that can hold a problem, so a keep
+        // the declared constraints empty entirely leaves no lane: that is a proof too.
+        outcome.saturated = totalCombinations > 0 && constraintEmpty == totalCombinations;
         return outcome;
     }
 

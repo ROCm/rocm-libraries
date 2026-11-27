@@ -357,6 +357,57 @@ public:
             HIPDNN_CHECK_ERROR(validateLastStrideIsOne(stats, "Stats"));
         }
 
+        // Rule 14: Philox dropout operands (cuDNN): single-element INT32 or INT64.
+        const auto ioDataType = graph_attributes.get_io_data_type();
+        HIPDNN_CHECK_ERROR(detail::validateSdpaPhiloxOperand(
+            attributes.get_seed(), "SdpaBwdNode", "seed", ioDataType));
+        HIPDNN_CHECK_ERROR(detail::validateSdpaPhiloxOperand(
+            attributes.get_offset(), "SdpaBwdNode", "offset", ioDataType));
+
+        // Rule 15: attention sink and its gradient: [1, H_q, 1, 1], FLOAT, or BFLOAT16/HALF equal to
+        // Q's data type set on the tensor itself; the gradient has the sink's data type and needs the sink (cuDNN).
+        const auto sink = attributes.get_sink_token();
+        const auto dSink = attributes.get_dsink_token();
+        const auto qDataType = detail::effectiveTensorDataType(q, ioDataType);
+        HIPDNN_CHECK_ERROR(detail::validateSdpaSinkTensor(
+            sink, "SdpaBwdNode", "sink_token", numHeads, qDataType, ioDataType));
+        HIPDNN_CHECK_ERROR(detail::validateSdpaSinkTensor(
+            dSink, "SdpaBwdNode", "dsink_token", numHeads, qDataType, ioDataType));
+        HIPDNN_RETURN_IF_TRUE(dSink && !sink,
+                              ErrorCode::ATTRIBUTE_NOT_SET,
+                              "SdpaBwdNode: dsink_token requires sink_token");
+        HIPDNN_RETURN_IF_TRUE(dSink && sink
+                                  && detail::effectiveTensorDataType(dSink, ioDataType)
+                                         != detail::effectiveTensorDataType(sink, ioDataType),
+                              ErrorCode::INVALID_VALUE,
+                              "SdpaBwdNode: dsink_token data type must equal the sink_token "
+                              "data type");
+
+        // Rule 16: max_total_seq_len_q/kv are the physical token span of the packed Q (K/V)
+        // buffer; an engine may read them to size buffers. Any ragged Q, K, V or O is required
+        // when either is set (cuDNN). Stricter than cuDNN: a value below the largest per-batch
+        // sequence length (Q or K dims[2]) cannot span even one sequence.
+        const bool isRagged = q->has_ragged_offset() || k->has_ragged_offset()
+                              || v->has_ragged_offset() || o->has_ragged_offset();
+        HIPDNN_RETURN_IF_TRUE(
+            (attributes.max_total_seq_len_q.has_value()
+             || attributes.max_total_seq_len_kv.has_value())
+                && !isRagged,
+            ErrorCode::GRAPH_NOT_SUPPORTED,
+            "SdpaBwdNode: max_total_seq_len_q/kv require a ragged (packed) Q, K, V or O");
+        HIPDNN_RETURN_IF_TRUE(
+            attributes.max_total_seq_len_q.has_value()
+                && *attributes.max_total_seq_len_q < qDims[2],
+            ErrorCode::INVALID_VALUE,
+            "SdpaBwdNode: max_total_seq_len_q (" + std::to_string(*attributes.max_total_seq_len_q)
+                + ") must be at least Q's S_max (" + std::to_string(qDims[2]) + ")");
+        HIPDNN_RETURN_IF_TRUE(
+            attributes.max_total_seq_len_kv.has_value()
+                && *attributes.max_total_seq_len_kv < kDims[2],
+            ErrorCode::INVALID_VALUE,
+            "SdpaBwdNode: max_total_seq_len_kv (" + std::to_string(*attributes.max_total_seq_len_kv)
+                + ") must be at least K's S_max (" + std::to_string(kDims[2]) + ")");
+
         return {};
     }
 

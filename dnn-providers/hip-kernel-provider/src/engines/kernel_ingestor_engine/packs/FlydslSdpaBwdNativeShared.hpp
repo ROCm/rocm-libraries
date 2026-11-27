@@ -350,6 +350,10 @@ struct WorkspaceRequest
     bool rowStatistics = false;
     /// Bytes of one element of the broadcast dBias region: its dtype's, 2 for f16 and bf16.
     int64_t dbiasElementBytes = WORKSPACE_ELEMENT_BYTES;
+    /// The dSink twin's per-row term (fp32 `[B, Hq, Sq]`), after LSE': written by the prep
+    /// sink twin, summed by dsink_reduce. Zeroed by the caller before the twin runs. Needs
+    /// `rowStatistics`.
+    bool sinkTerm = false;
 };
 
 /// Where the workspace's regions are: the one place its size and its offsets are decided,
@@ -357,11 +361,11 @@ struct WorkspaceRequest
 ///
 /// Shared regions come first, each after the one before on a 256-byte boundary: `[seed u64 |
 /// offset u64]` at offset 0 when the seed and offset are not 64-bit device tensors, then
-/// Delta, then LSE' when requested. They end at `sharedBytes`. The scratch region, the
-/// full-shape dBias buffer when dBias is broadcast over batch or head, starts at
-/// `scratchOffset`, `sharedBytes` rounded up to 256. The dBias region is never zeroed: the dQ
-/// role writes every in-range element of it exactly once. Every offset and extent is a checked
-/// sum, so every region ends within `totalBytes`.
+/// Delta, then LSE', then the dSink term when requested. They end at `sharedBytes`. The
+/// scratch region, the full-shape dBias buffer when dBias is broadcast over batch or head,
+/// starts at `scratchOffset`, `sharedBytes` rounded up to 256. The dBias region is never
+/// zeroed: the dQ role writes every in-range element of it exactly once. Every offset and
+/// extent is a checked sum, so every region ends within `totalBytes`.
 struct WorkspaceLayout
 {
     bool uploadsSeed = false;
@@ -369,6 +373,8 @@ struct WorkspaceLayout
     Region seed;
     Region delta;
     Region lse;
+    bool hasSinkterm = false;
+    Region sinkterm;
     size_t sharedBytes = 0;
     size_t scratchOffset = 0;
     /// Meaningful when `reduces`; its offset is `scratchOffset`.
@@ -412,6 +418,11 @@ inline WorkspaceLayout workspaceLayout(const bwd::SdpaBwdProblem& problem,
         };
         place(layout.delta);
         place(layout.lse);
+        if(request.sinkTerm)
+        {
+            place(layout.sinkterm);
+            layout.hasSinkterm = true;
+        }
     }
     layout.scratchOffset = alignedUp(layout.sharedBytes);
     layout.totalBytes = layout.sharedBytes;
@@ -595,6 +606,16 @@ inline void uploadSeed(const SeedUpload& upload, void* workspace, hipStream_t st
                                      stream),
                    "hipMemsetD32Async of the seed words");
     }
+}
+
+/// Zeroes the dSink term region of @p workspace on @p stream: the prep sink twin accumulates
+/// into it.
+inline void zeroSinkterm(const WorkspaceLayout& layout, void* workspace, hipStream_t stream)
+{
+    requireHip(
+        hipMemsetAsync(
+            inWorkspace(workspace, layout.sinkterm.offset), 0, layout.sinkterm.bytes, stream),
+        "hipMemsetAsync of the dSink term region");
 }
 
 // ---------------------------------------------------------------------------

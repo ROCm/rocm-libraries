@@ -2498,6 +2498,254 @@ TEST(TestFlydslSdpaBwdMatcher, SC5ScaleBeyond2Pow20InMagnitudeOrNonFiniteDecline
     }
 }
 
+// ---------------------------------------------------------------------------
+// Sink, dSink, rng_dump, deterministic, max_total_seq_len
+// ---------------------------------------------------------------------------
+
+/// The options of an engine that serves a dSink (and so a sink) beside a 16-bit query.
+constexpr MatchOptions ACCEPT_DSINK = [] {
+    MatchOptions options;
+    options.acceptDsink = true;
+    return options;
+}();
+
+constexpr auto F16 = data_objects::DataType::HALF;
+constexpr auto BF16 = data_objects::DataType::BFLOAT16;
+constexpr auto F32 = data_objects::DataType::FLOAT;
+
+SdpaBwdSpec withSink(const SdpaBwdSpec& spec = baseline(), data_objects::DataType dtype = F16)
+{
+    return spec.withEdit([dtype](SdpaBwdGraph& g) { addSink(g, dtype); });
+}
+
+SdpaBwdSpec withSinkAndDsink(const SdpaBwdSpec& spec = baseline(),
+                             data_objects::DataType dtype = F16)
+{
+    return spec.withEdit([dtype](SdpaBwdGraph& g) {
+        addSink(g, dtype);
+        addDsink(g, dtype);
+    });
+}
+
+TEST(TestFlydslSdpaBwdMatcher, RN1RngDumpDeclinesOnEveryEngine)
+{
+    const auto spec = baseline().withEdit(
+        [](SdpaBwdGraph& g) { g.attributes.rngDumpUid = sdpa_bwd_uid::RNG_DUMP; });
+    declined(spec, "rng_dump", "rng_dump_tensor_uid");
+    declined(spec, "rng_dump", "rng_dump_tensor_uid", ACCEPT_DSINK);
+    declined(spec, "rng_dump", "rng_dump_tensor_uid", flydsl_sdpa_bwd::SPLIT_MATCH_OPTIONS);
+}
+
+TEST(TestFlydslSdpaBwdMatcher, SK0DsinkDeclinesWithDefaultOptionsAndASinkAloneAccepts)
+{
+    // A sink without dSink is already in the caller's LSE: every engine serves it.
+    const auto sinkOnly = accepted(withSink());
+    ASSERT_TRUE(sinkOnly.has_value());
+    EXPECT_EQ(sinkOnly->sinkUid, sdpa_bwd_uid::SINK);
+    EXPECT_EQ(sinkOnly->dsinkUid, NO_UID);
+    // A dSink needs the engine's sink twin.
+    declined(withSinkAndDsink(), "sink", "no sink term");
+    EXPECT_TRUE(accepted(withSinkAndDsink(), ACCEPT_DSINK));
+}
+
+TEST(TestFlydslSdpaBwdMatcher, SK1SK2ASinkAloneIsHeldToTheSinkRulesOnEveryEngine)
+{
+    declined(withSink(baseline(), BF16), "sink", "BFLOAT16");
+    declined(withSink(baseline(), data_objects::DataType::FP8_E4M3), "sink", "neither FLOAT");
+    declined(baseline().withEdit([](SdpaBwdGraph& g) { addSink(g, F16).alignment = 8; }),
+             "sink",
+             "declares alignment 8");
+    declined(baseline().withEdit([](SdpaBwdGraph& g) { addSink(g, F16).dims = {1, 4, 1, 1}; }),
+             "sink",
+             "are not [8] or [1,8,1,1]");
+}
+
+TEST(TestFlydslSdpaBwdMatcher, SK1SinkAcceptsInTheIoDtypeAndRecordsItsUids)
+{
+    for(const auto dtype : {F16, BF16})
+    {
+        SCOPED_TRACE(static_cast<int>(dtype));
+        SdpaBwdSpec spec;
+        spec.dtype = dtype;
+        const auto sinkOnly = accepted(withSink(spec, dtype), ACCEPT_DSINK);
+        ASSERT_TRUE(sinkOnly.has_value());
+        EXPECT_EQ(sinkOnly->sinkUid, sdpa_bwd_uid::SINK);
+        EXPECT_EQ(sinkOnly->dsinkUid, NO_UID);
+        const auto both = accepted(withSinkAndDsink(spec, dtype), ACCEPT_DSINK);
+        ASSERT_TRUE(both.has_value());
+        EXPECT_EQ(both->sinkUid, sdpa_bwd_uid::SINK);
+        EXPECT_EQ(both->dsinkUid, sdpa_bwd_uid::DSINK);
+    }
+    const auto plain = accepted(baseline(), ACCEPT_DSINK);
+    ASSERT_TRUE(plain.has_value());
+    EXPECT_EQ(plain->sinkUid, NO_UID);
+}
+
+TEST(TestFlydslSdpaBwdMatcher, SK1SinkDtypeOtherThanQsDeclines)
+{
+    // With a dSink the sink twin reads the I/O dtype: a FLOAT sink declines.
+    declined(
+        withSinkAndDsink(baseline(), F32), "sink", "the kernels read the I/O dtype", ACCEPT_DSINK);
+    declined(withSink(baseline(), BF16), "sink", "BFLOAT16", ACCEPT_DSINK);
+}
+
+TEST(TestFlydslSdpaBwdMatcher, SK1AFloatSinkWithoutDsinkAcceptsOnEveryEngine)
+{
+    // No kernel reads a sink without a dSink, so its dtype only has to be one the frontend allows.
+    for(const auto& options : {MatchOptions{}, ACCEPT_DSINK})
+    {
+        const auto problem = accepted(withSink(baseline(), F32), options);
+        ASSERT_TRUE(problem.has_value());
+        EXPECT_EQ(problem->sinkUid, sdpa_bwd_uid::SINK);
+        EXPECT_EQ(problem->dsinkUid, NO_UID);
+    }
+}
+
+TEST(TestFlydslSdpaBwdMatcher, SK1DsinkOnAFloatGraphDeclinesAndASinkAloneAccepts)
+{
+    declined(withSinkAndDsink(fp32Spec(), F32),
+             "sink",
+             "no sink twin",
+             flydsl_sdpa_bwd::SPLIT_MATCH_OPTIONS);
+    EXPECT_TRUE(accepted(withSink(fp32Spec(), F32), flydsl_sdpa_bwd::SPLIT_MATCH_OPTIONS));
+    EXPECT_TRUE(accepted(fp32Spec(), flydsl_sdpa_bwd::SPLIT_MATCH_OPTIONS));
+}
+
+TEST(TestFlydslSdpaBwdMatcher, SK2SinkMustBeADeviceTensorOfTheServedShapeStrideAndAlignment)
+{
+    const auto edit = [](const std::function<void(SdpaBwdTensor&)>& change) {
+        return baseline().withEdit([change](SdpaBwdGraph& g) { change(addSink(g, F16)); });
+    };
+    declined(edit([](SdpaBwdTensor& t) { t.dims = {1, 4, 1, 1}; }),
+             "sink",
+             "are not [8] or [1,8,1,1]",
+             ACCEPT_DSINK);
+    declined(edit([](SdpaBwdTensor& t) { t.dims = {2, 8, 1, 1}; }),
+             "sink",
+             "are not [8] or [1,8,1,1]",
+             ACCEPT_DSINK);
+    declined(edit([](SdpaBwdTensor& t) { t.strides = {16, 2, 1, 1}; }),
+             "sink",
+             "head stride 2",
+             ACCEPT_DSINK);
+    declined(edit([](SdpaBwdTensor& t) { t.alignment = 8; }),
+             "sink",
+             "declares alignment 8",
+             ACCEPT_DSINK);
+    declined(
+        edit([](SdpaBwdTensor& t) { t.isVirtual = true; }), "sink", "is virtual", ACCEPT_DSINK);
+    declined(edit([](SdpaBwdTensor& t) { t.runtimePassByValue = true; }),
+             "sink",
+             "is pass-by-value",
+             ACCEPT_DSINK);
+    declined(edit([](SdpaBwdTensor& t) { t.raggedOffsetUid = 99; }),
+             "sink",
+             "ragged offset",
+             ACCEPT_DSINK);
+    // [Hq] is served as well as [1, Hq, 1, 1].
+    EXPECT_TRUE(accepted(edit([](SdpaBwdTensor& t) {
+                             t.dims = {8};
+                             t.strides = {1};
+                         }),
+                         ACCEPT_DSINK));
+}
+
+TEST(TestFlydslSdpaBwdMatcher, SK2DsinkIsHeldToTheSinkTensorRules)
+{
+    declined(baseline().withEdit([](SdpaBwdGraph& g) {
+        addSink(g, F16);
+        addDsink(g, F16).alignment = 4;
+    }),
+             "sink",
+             "dSink (uid 30) declares alignment 4",
+             ACCEPT_DSINK);
+}
+
+TEST(TestFlydslSdpaBwdMatcher, SK3DsinkMustHaveTheSinksDtype)
+{
+    declined(baseline().withEdit([](SdpaBwdGraph& g) {
+        addSink(g, F16);
+        addDsink(g, BF16);
+    }),
+             "sink",
+             "differs from the sink's",
+             ACCEPT_DSINK);
+}
+
+TEST(TestFlydslSdpaBwdMatcher, SK3DsinkMustHaveTheSinksDims)
+{
+    declined(baseline().withEdit([](SdpaBwdGraph& g) {
+        addSink(g, F16);
+        auto& dsink = addDsink(g, F16);
+        dsink.dims = {8};
+        dsink.strides = {1};
+    }),
+             "sink",
+             "differ from the sink's",
+             ACCEPT_DSINK);
+}
+
+TEST(TestFlydslSdpaBwdMatcher, SK4DsinkWithoutSinkDeclines)
+{
+    declined(baseline().withEdit([](SdpaBwdGraph& g) { addDsink(g, F16); }),
+             "sink",
+             "without a sink_token",
+             ACCEPT_DSINK);
+}
+
+TEST(TestFlydslSdpaBwdMatcher, SK5DsinkWithValueHeadDimBetween192And224Declines)
+{
+    const auto atDim = [](int64_t dim) {
+        SdpaBwdSpec spec;
+        spec.headDimQk = dim;
+        spec.headDimV = dim;
+        return spec;
+    };
+    declined(withSinkAndDsink(atDim(200)), "sink", "head_dim_v 200", ACCEPT_DSINK);
+    declined(withSinkAndDsink(atDim(224)), "sink", "head_dim_v 224", ACCEPT_DSINK);
+    EXPECT_TRUE(accepted(withSinkAndDsink(atDim(192)), ACCEPT_DSINK));
+    EXPECT_TRUE(accepted(withSinkAndDsink(atDim(232)), ACCEPT_DSINK));
+    // A sink alone needs no twin.
+    EXPECT_TRUE(accepted(withSink(atDim(200)), ACCEPT_DSINK));
+}
+
+TEST(TestFlydslSdpaBwdMatcher, ST5DsinkAndRngDumpAreOutputsSoTheyCannotShareAUid)
+{
+    declined(baseline().withEdit([](SdpaBwdGraph& g) {
+        addSink(g, F16);
+        addDsink(g, F16);
+        g.attributes.dsinkUid = sdpa_bwd_uid::SINK;
+    }),
+             "operand",
+             "dSink (uid 29) shares its uid with sink",
+             ACCEPT_DSINK);
+    declined(
+        baseline().withEdit([](SdpaBwdGraph& g) { g.attributes.rngDumpUid = sdpa_bwd_uid::Q; }),
+        "operand",
+        "rng_dump (uid 1) shares its uid with Q",
+        ACCEPT_DSINK);
+}
+
+TEST(TestFlydslSdpaBwdMatcher, DE1DeterministicAlgorithmAcceptsOnEveryEngine)
+{
+    const auto spec = baseline().withEdit(
+        [](SdpaBwdGraph& g) { g.attributes.isDeterministicAlgorithm = true; });
+    EXPECT_TRUE(accepted(spec));
+    EXPECT_TRUE(accepted(spec, flydsl_sdpa_bwd::SPLIT_MATCH_OPTIONS));
+}
+
+TEST(TestFlydslSdpaBwdMatcher, MT1MaxTotalSeqLenAcceptsAndIsIgnored)
+{
+    const auto spec = baseline().withEdit([](SdpaBwdGraph& g) {
+        g.attributes.maxTotalSeqLenQ = 1024;
+        g.attributes.maxTotalSeqLenKv = 2048;
+    });
+    const auto problem = accepted(spec);
+    ASSERT_TRUE(problem.has_value());
+    EXPECT_EQ(problem->seqLenQ, 16);
+    EXPECT_EQ(problem->seqLenKv, 16);
+}
+
 } // namespace
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing
 

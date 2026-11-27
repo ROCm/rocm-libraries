@@ -910,7 +910,12 @@ def test_a_u2_dispatch_name_is_the_slot_then_u2_and_no_two_ops_share_a_pack_file
         if op in SLOT_OPS
         for stem in packs.values()
     ]
-    assert sorted(files) == ["dq_u2.kdp.json", "reduce.kdp.json", "u2.kdp.json"]
+    assert sorted(files) == [
+        "dq_u2.kdp.json",
+        "reduce.kdp.json",
+        "sink.kdp.json",
+        "u2.kdp.json",
+    ]
     folders = _split()
     for op, slot in (("sdpa_bwd_dq", "dq"), ("sdpa_bwd_dkdv", "dkdv")):
         udd = folders[Path(op)][f"flydsl_{op}_u2.udd.json"]
