@@ -326,11 +326,30 @@ def _plain_spec(**over):
         (dict(pk16=True, one_split=True), "pk16 adds atomically"),
         (dict(slab=True, dw16=True, one_split=True), "slab stores fp32 partials"),
         (dict(unfold_n=3), "unfold_n"),
+        (dict(unfold_n=8), "unfold_n above 4 needs KW == 1"),
+        (dict(pp_tight=True, pingpong=False), "pp_tight needs the ping-pong in halves"),
+        (dict(_problem=dict(kpg=18)), "cpg must be a multiple of 8 and kpg of 4"),
+        (dict(pk16=True, _problem=dict(dtype="bf16")), "pk16: bf16 pair atomics"),
+        (dict(gpack=True), "gpack needs groups > 1"),
+        (dict(row_tail=True, rows_per_seg=2), "row_tail needs the auto launch"),
+        (
+            dict(l64=True, _problem=dict(N=2, H=4096, W=4096, cpg=64, kpg=64)),
+            "l64: a segment's images exceed the i32 buffer range",
+        ),
     ],
     ids=lambda v: v if isinstance(v, str) else "-".join(v),
 )
 def test_tiled_validator_refuses_each_bad_knob(over, message):
-    ok, why = is_valid_wgrad_tiled_spec(_plain_spec(**over))
+    import dataclasses
+
+    over = dict(over)
+    changes = over.pop("_problem", None)
+    spec = _plain_spec(**over)
+    if changes:
+        spec = dataclasses.replace(
+            spec, problem=dataclasses.replace(spec.problem, **changes)
+        )
+    ok, why = is_valid_wgrad_tiled_spec(spec)
     assert not ok
     assert message in why
 
@@ -391,7 +410,7 @@ def test_grouped_gather_cells(cpg):
 
 
 def test_grouped_gather_refuses_other_group_widths():
-    # cpg 4 is not a grouped cell, nor is an unequal cpg / kpg
+    # cpg 4 (kpg % 8) is not a grouped cell, nor is an unequal cpg / kpg
     for over in (dict(cpg=4, kpg=4), dict(cpg=8, kpg=16), dict(cpg=32, kpg=32)):
         spec = WgradGatherSpec(
             problem=_problem(groups=8, stride=2, **over),
@@ -400,7 +419,8 @@ def test_grouped_gather_refuses_other_group_widths():
             grouped=True,
         )
         ok, why = is_valid_wgrad_gather_spec(spec)
-        assert not ok and why
+        assert not ok
+        assert "cpg == kpg in (8, 16)" in why
 
 
 def test_grouped_cells_are_the_gather_cpg_set():
@@ -601,3 +621,45 @@ def test_folded_n_wgrad_problem_folds_one_row_images():
     assert (q.N, q.H, q.W) == (1, 3, 40)
     for bad in (dict(N=1), dict(H=2), dict(KH=3), dict(PAD=1), dict(stride=2)):
         assert folded_n_wgrad_problem(_wg(KW=1, **bad)) is None
+
+
+class _ListCache(_FakeCache):
+    """A cache serving the grid's wgrad jobs that support the asked problem."""
+
+    def __init__(self, jobs):
+        super().__init__()
+        self.jobs = jobs
+
+    def compatible(self, problem, *, direction=None):
+        from benchmarks.common.kernel_cache import KernelCache
+
+        return [
+            (j.identity, Path("main"), {"kernel_name": "main", "spec_wave_size": 64})
+            for j in self.jobs
+            if j.identity.direction == direction
+            and KernelCache.supports_problem(j.identity, problem)[0]
+        ]
+
+
+@pytest.mark.parametrize(
+    "flag, problem",
+    [
+        ("WGRAD_EXCHANGE_HW", _wg(pad_w=0)),
+        ("WGRAD_FOLD_N", _wg()),
+    ],
+    ids=["exchange", "fold"],
+)
+def test_direct_plans_route_one_row_wgrad_through_the_cached_kernels(
+    monkeypatch, flag, problem
+):
+    """The default-on routes of ``direct_plans``: the exchanged (1xN -> Nx1)
+    and the batch-folded plans appear, and vanish with their switch off."""
+    from benchmarks.common import direct_kernel_sweep as dks
+
+    cache = _ListCache(_grid("fp16"))
+    monkeypatch.setattr(dks, "WGRAD_EXCHANGE_HW", False)
+    monkeypatch.setattr(dks, "WGRAD_FOLD_N", False)
+    off, _ = dks.direct_plans(cache, problem, "wgrad", "gfx950")
+    monkeypatch.setattr(dks, flag, True)
+    on, _ = dks.direct_plans(cache, problem, "wgrad", "gfx950")
+    assert len(on) > len(off)

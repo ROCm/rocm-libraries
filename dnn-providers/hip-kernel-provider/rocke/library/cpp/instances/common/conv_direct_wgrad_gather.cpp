@@ -217,10 +217,9 @@ extern "C" bool rocke_direct_wgrad_gather_is_valid_spec(const rocke_direct_wgrad
     }
     const char* why = NULL;
     int acc = p->KH * s->wave_k16 * n_atoms(s) * 4;
-    if(s->grouped
-       && (p->groups < 2 || p->cpg != p->kpg || (p->kpg != 4 && p->kpg != 8 && p->kpg != 16)))
+    if(s->grouped && (p->groups < 2 || p->cpg != p->kpg || (p->kpg != 8 && p->kpg != 16)))
     {
-        why = "grouped needs groups > 1 and cpg == kpg in (4, 8, 16)";
+        why = "grouped needs groups > 1 and cpg == kpg in (8, 16)";
     }
     else if(!s->grouped && p->groups != 1)
     {

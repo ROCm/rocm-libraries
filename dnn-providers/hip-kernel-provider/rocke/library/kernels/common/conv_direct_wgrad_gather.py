@@ -60,7 +60,7 @@ class WgradGatherSpec:
     prefetch: int = 2
     rows_per_seg: int = 16  # output rows per segment (rounded up to the unroll)
     target_blocks: int = 1024
-    # Grouped layers with cpg == kpg in {4, 8, 16} (any stride). A block
+    # Grouped layers with cpg == kpg in {8, 16} (any stride). A block
     # owns block_k output channels = whole groups, and stages only the X
     # channels of those groups ([pixel][block_k] rows, one DMA chunk per
     # pixel slice, out-of-image columns zeroed by the buffer bounds). An MFMA
@@ -182,8 +182,8 @@ def is_valid_wgrad_gather_spec(
     if why is not None:
         return False, why
     if spec.grouped:
-        if p.groups < 2 or p.cpg != p.kpg or p.kpg not in (4, 8, 16):
-            return False, "grouped needs groups > 1 and cpg == kpg in (4, 8, 16)"
+        if p.groups < 2 or p.cpg != p.kpg or p.kpg not in (8, 16):
+            return False, "grouped needs groups > 1 and cpg == kpg in (8, 16)"
     elif p.groups != 1:
         return False, "dense layers only (grouped=False)"
     if p.dtype not in ("fp16", "bf16"):

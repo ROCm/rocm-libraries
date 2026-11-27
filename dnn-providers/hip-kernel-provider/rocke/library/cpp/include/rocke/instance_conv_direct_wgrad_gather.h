@@ -60,7 +60,7 @@ typedef struct rocke_direct_wgrad_gather_spec
     int prefetch; /* default 2 */
     int rows_per_seg; /* default 16 */
     int target_blocks; /* default 1024 */
-    /* default false; grouped layers with cpg == kpg in {4, 8, 16} (any
+    /* default false; grouped layers with cpg == kpg in {8, 16} (any
      * stride): a block owns block_k output channels = whole groups and stages
      * only their X channels; the cross-group products are dropped. */
     bool grouped;
