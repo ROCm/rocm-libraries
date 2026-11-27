@@ -27,7 +27,7 @@ from rocke.numeric import storage
 from rocke.numeric.compare import peak_relative_error
 from rocke.runtime.device_array import DeviceArray
 from rocke.tests.gpu import current_device_arch_in
-from rocke.tests.lanes import BINDING_LANE, import_or_skip_until
+from rocke.tests.lanes import BUILD_VARIANT, import_or_skip_until
 
 from kernels.common.conv_direct_fwd_rr_mfma import (
     FwdRrMfmaSpec,
@@ -460,7 +460,7 @@ def _rr_describe_specs():
 def test_rr_describe_matches_python():
     """The C++ validator, kernel name, grid and workspace of the rr forward
     agree with Python's, accepted and refused specs, on three architectures."""
-    eng = import_or_skip_until("rocke_library_engine", BINDING_LANE)
+    eng = import_or_skip_until("rocke_library_engine", BUILD_VARIANT)
     from kernels.conv.engine_bridge import conv_direct_fwd_rr_mfma_spec_to_dict
 
     for arch in ("gfx950", "gfx942", "gfx1250"):
@@ -480,7 +480,7 @@ def test_rr_describe_matches_python():
 
 def test_rr_wfmt_describe_matches_python():
     """The C++ weight-format helper names and sizes its launch like Python."""
-    eng = import_or_skip_until("rocke_library_engine", BINDING_LANE)
+    eng = import_or_skip_until("rocke_library_engine", BUILD_VARIANT)
     from kernels.conv.engine_bridge import conv_direct_fwd_rr_wfmt_spec_to_dict
 
     for dtype in ("bf16", "fp16"):
@@ -502,7 +502,7 @@ def test_rr_wfmt_describe_matches_python():
 def test_tap1d_describe_matches_python():
     """The C++ validator, kernel name, grid and LDS size of the tap-reuse
     forward agree with Python's, accepted and refused specs."""
-    eng = import_or_skip_until("rocke_library_engine", BINDING_LANE)
+    eng = import_or_skip_until("rocke_library_engine", BUILD_VARIANT)
     from kernels.conv.engine_bridge import conv_direct_fwd_tap1d_mfma_spec_to_dict
 
     specs = [
@@ -551,7 +551,7 @@ def test_tap1d_describe_matches_python():
 def test_backends_lower_identically():
     """The engine bridge gives the same .ll on the Python and C++ backends
     for one spec of each kernel (the parity emitters cover every knob)."""
-    import_or_skip_until("rocke_library_engine", BINDING_LANE)
+    import_or_skip_until("rocke_library_engine", BUILD_VARIANT)
     from kernels.conv.engine_bridge import (
         lower_conv_direct_fwd_rr_mfma,
         lower_conv_direct_fwd_rr_wfmt,
@@ -575,7 +575,7 @@ def test_backends_lower_identically():
 
 def test_binding_rejects_bad_input():
     """A missing, mistyped or partial problem raises in the binding."""
-    eng = import_or_skip_until("rocke_library_engine", BINDING_LANE)
+    eng = import_or_skip_until("rocke_library_engine", BUILD_VARIANT)
     from kernels.conv.engine_bridge import (
         conv_direct_fwd_rr_mfma_spec_to_dict,
         conv_direct_fwd_tap1d_mfma_spec_to_dict,
