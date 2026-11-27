@@ -98,6 +98,12 @@ FAMILY_MAP = {
         # gfx120140, Radeon AI PRO R9700
         {"arch": "gfx1201", "rj_config": "gfx1201_r9700.json", "cus": [64]},
     ],
+    # gfx1250100: 256 CU, reported as CUs and not WGPs, so the param is ("gfx1250", 256). rocjitsu's
+    # gfx1250 config describes a 4 GPU node of identical devices. The CU-correction rewrites the
+    # shared device block, so every one of them reports 256 CU and the one param runs.
+    "gfx125X-dcgpu": [
+        {"arch": "gfx1250", "rj_config": "gfx1250_mi455x_kmd_4gpu.json", "cus": [256]},
+    ],
 }
 
 # Shipped Navi SystemDBs a family covers that this runner does not validate yet, with the reason
