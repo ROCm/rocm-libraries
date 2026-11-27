@@ -3105,3 +3105,70 @@ TEST_F(StreamKDynamicSplitSolveTest, UniformSummationOrderLaunchGateChecksTheDyn
         EXPECT_NO_THROW(solveWithFakeBuffers(*s, problem, device));
     }
 }
+
+// gfx90a, one MI200 GCD: 110 CUs and, per origami, one XCD, so one work queue.
+// The few-tile split follows the device's CU count as on gfx950.
+class StreamKDynamicSplitGfx90aTest : public StreamKDynamicSplitSolveTest
+{
+protected:
+    void SetUp() override
+    {
+        using arch_t = origami::hardware_t::architecture_t;
+        const origami::hardware_t hw(arch_t::gfx90a,
+                                     kGfx90aCuCount,
+                                     65536,
+                                     262144,
+                                     1, // NUM_XCD
+                                     1.0,
+                                     1.0,
+                                     1.0,
+                                     4000000,
+                                     1.2,
+                                     1,
+                                     std::make_tuple(0.0, 0.03, 0.0));
+        device                       = hip::HipAMDGPU{};
+        device.processor             = AMDGPU::Processor::gfx90a;
+        device.computeUnitCount      = static_cast<int>(kGfx90aCuCount);
+        device.deviceName            = "test-gfx90a-analytical";
+        device.analyticalHardware    = std::make_shared<origami::hardware_t>(hw);
+        device.persistentDynamicGrid = static_cast<int>(origami::grid_selection_t::k_split_aware);
+    }
+
+    static constexpr size_t kGfx90aCuCount = 110;
+};
+
+TEST_F(StreamKDynamicSplitGfx90aTest, SplitFollowsTheDeviceCUs)
+{
+    ASSERT_FALSE(StreamK::Dynamic::queueUnsupported(device));
+    EXPECT_EQ(StreamK::Dynamic::bakedQueueCount(device), 1u);
+
+    struct Case
+    {
+        Shape    shape;
+        uint32_t split; // 0: every tile whole
+    };
+    // 1 tile: 16 parts. 12 tiles: 8 parts, 96 of the 110 CUs. 64 tiles: a second
+    // part each would need 128 CUs, so they stay whole (gfx950 cuts them in 4).
+    for(int streamK : {4, 5})
+    {
+        for(Case c : {Case{longKTiles(1), 16}, Case{{512, 384, 4096, 1}, 8},
+                      Case{{1024, 1024, 4096, 1}, 0}})
+        {
+            SCOPED_TRACE("StreamK " + std::to_string(streamK) + " " + c.shape.name());
+            auto         s       = dynamicSplitSolution(streamK);
+            auto         problem = dynamicSplitGemm(c.shape);
+            const size_t tiles   = problem.getNumTiles(s->sizeMapping, 1);
+            const auto   d       = s->streamKDynamicDecomposition(problem, device, tiles);
+            if(c.split == 0)
+            {
+                EXPECT_EQ(d.tiles, 0u);
+                EXPECT_EQ(s->requiredWorkspaceSize(problem, device), 0u);
+                continue;
+            }
+            EXPECT_EQ(d.tiles, tiles);
+            EXPECT_EQ(d.split, c.split);
+            EXPECT_LE(d.partialSlots(), kGfx90aCuCount);
+            ASSERT_NO_FATAL_FAILURE(expectWorkspaceAndLaunchCarry(*s, problem, d));
+        }
+    }
+}
