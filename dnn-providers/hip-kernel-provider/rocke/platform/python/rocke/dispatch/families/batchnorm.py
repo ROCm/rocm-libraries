@@ -26,6 +26,7 @@ from dataclasses import asdict, dataclass
 from typing import Sequence, Tuple
 
 from ...core.arch import ArchTarget, arches_with_own_facts
+from ...core.storage import element_bytes
 from ...instances.common import batchnorm2d as _bn
 from ..core import (
     Capability,
@@ -136,6 +137,9 @@ def _request_errors(req: OperatorRequest) -> list[str]:
     errors: list[str] = []
     if req.op != "batchnorm":
         errors.append(f"unsupported op {req.op!r}")
+    for flag in ("training", "backward"):
+        if not isinstance(getattr(req, flag), bool):
+            errors.append(f"{flag} must be a bool")
     for field in ("n", "c", "h", "w"):
         if int(getattr(req, field)) <= 0:
             errors.append(f"{field} must be positive")
@@ -198,6 +202,8 @@ def _make_candidate(
         if errors:
             return False, "; ".join(errors)
         assert isinstance(req, BatchNormRequest)
+        if req.backward:
+            return False, "forward kernel does not serve backward requests"
         ok, why = selector_matches(req, candidate)
         if not ok:
             return False, why
@@ -453,6 +459,8 @@ def _make_dynamic_candidate(
         if errors:
             return False, "; ".join(errors)
         assert isinstance(req, BatchNormRequest)
+        if req.backward:
+            return False, "forward kernel does not serve backward requests"
         ok, why = selector_matches(req, candidate)
         if not ok:
             return False, why
@@ -575,6 +583,8 @@ def _make_flat_infer_candidate(
         if errors:
             return False, "; ".join(errors)
         assert isinstance(req, BatchNormRequest)
+        if req.backward:
+            return False, "forward kernel does not serve backward requests"
         if req.training:
             return False, "flat kernel is inference-only"
         ok, why = selector_matches(req, candidate)
@@ -1074,7 +1084,7 @@ _RO_SH_REQ = (1, 2, 4, 8, 16, 32)
 RO_MIN_BYTES = 8_000_000
 RO_MIN_SPLIT = 2
 RO_MAX_SPLIT = 16
-_RO_ELEM_BYTES = {"fp16": 2, "f16": 2, "fp32": 4, "f32": 4}
+_RO_DTYPES = ("fp16", "f16", "bf16", "fp32", "f32")
 
 
 @dataclass(frozen=True)
@@ -1120,8 +1130,8 @@ class BatchNormRoCandidate:
         rule: bool = True,
     ):
         if rule and (
-            dtype not in _RO_ELEM_BYTES
-            or n * c * h * w * _RO_ELEM_BYTES[dtype] < RO_MIN_BYTES
+            dtype not in _RO_DTYPES
+            or n * c * h * w * element_bytes(dtype) < RO_MIN_BYTES
         ):
             return []
         spec = self.spec(dtype)

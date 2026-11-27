@@ -507,6 +507,11 @@ bool rocke_batchnorm2d_is_valid_bwd_spec(const rocke_batchnorm2d_bwd_spec_t* spe
         bwd_set_reason(reason, reason_cap, "null spec");
         return false;
     }
+    if(spec->wave_size <= 0 || (spec->wave_size & (spec->wave_size - 1)) != 0)
+    {
+        bwd_set_reason(reason, reason_cap, "wave_size must be a positive power of two");
+        return false;
+    }
     target = rocke_archtarget_from_gfx(arch != NULL ? arch : "gfx950");
     if(target == NULL)
     {

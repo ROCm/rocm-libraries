@@ -752,7 +752,7 @@ runtime admission:
   divisibility rules, split pairs by plan;
 - NHWC: per mode, a fixed set of tile geometries crossed with the runtime plans;
 - multi-channel-per-wave: the shipped candidates that admit the shape;
-- read-once (NCHW / NCDHW, `f16` and `f32`): only where the x tensor is at least
+- read-once (NCHW / NCDHW, `f16`, `bf16` and `f32`): only where the x tensor is at least
   8,000,000 bytes and the per-channel split satisfies `2 <= SplitN * SplitHw <= 16`
   (`BatchNormRoCandidate.plans(rule=True)`); `rule=False` gives the full sweep space.
 

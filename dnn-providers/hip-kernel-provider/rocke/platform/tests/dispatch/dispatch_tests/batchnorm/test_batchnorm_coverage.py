@@ -26,6 +26,41 @@ def _req(n, c, h, w, **kw):
     return dsp.BatchNormRequest(n=n, c=c, h=h, w=w, **kw)
 
 
+class TestRequestAndWaveGuards(unittest.TestCase):
+    def test_forward_support_refuses_backward_requests(self):
+        req = _req(64, 64, 56, 56, backward=True)
+        for cand in (
+            list(dsp.batchnorm_candidates())
+            + list(dsp.flat_infer_batchnorm_candidates())
+            + list(dsp.dynamic_batchnorm_candidates())
+        ):
+            ok, _ = cand._supports(req)
+            self.assertFalse(ok, cand.name)
+
+    def test_non_bool_flags_are_refused(self):
+        for kw in ({"backward": "false"}, {"training": "no"}):
+            self.assertTrue(dsp._request_errors(_req(8, 8, 8, 8, **kw)), kw)
+
+    def test_wave_size_must_be_a_positive_power_of_two(self):
+        cases = (
+            (bn.BatchNorm2DBwdSpec, bn.is_valid_bwd_spec),
+            (bn.BatchNorm2DSplitDynSpec, bn.is_valid_split_dyn_spec),
+            (bn.BatchNorm2DFlatInferSpec, bn.is_valid_flat_infer_spec),
+        )
+        for cls, valid in cases:
+            for ws in (0, -64, 48):
+                ok, why = valid(cls(wave_size=ws), ARCH)
+                self.assertFalse(ok)
+                self.assertIn("wave_size", why)
+
+    def test_read_once_admits_bf16(self):
+        cands = dsp.dynamic_batchnorm_ro_candidates(False, "bf16")
+        plans = [
+            p for c in cands for p in c.plans("bf16", 64, 64, 56, 56, max_resident=4096)
+        ]
+        self.assertTrue(plans)
+
+
 class TestShippedSets(unittest.TestCase):
     def test_mcw_shipped_set_has_58_candidates(self):
         sizes = {k: len(v) for k, v in dsp._MCW_SHIPPED.items()}
@@ -550,9 +585,8 @@ class TestReadOnce(unittest.TestCase):
 
     def test_admission_rule_dtypes(self):
         cand = dsp.BatchNormRoCandidate(256, 4, 32, False)
-        self.assertEqual(
-            self._plans(cand, "bf16", 32, 64, 56, 56), []
-        )  # bf16 is not admitted by the rule
+        # bf16 is sized like f16 by the rule (2 bytes per element)
+        self.assertTrue(self._plans(cand, "bf16", 32, 64, 56, 56))
         self.assertTrue(
             self._plans(
                 dsp.BatchNormRoCandidate(256, 8, 32, False), "fp16", 32, 64, 56, 56

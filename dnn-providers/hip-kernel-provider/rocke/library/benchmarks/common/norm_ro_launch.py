@@ -60,11 +60,20 @@ def compile_ro_cached(
 _occ_cache: dict = {}
 
 
-def resident_ctas(launcher: KernelLauncher, block_size: int, device: int = 0) -> int:
+def resident_ctas(
+    launcher: KernelLauncher, block_size: int, device: Optional[int] = None
+) -> int:
     """CTAs of this kernel that can be co-resident on the device (occupancy x CUs)."""
     from rocke.runtime.hip_module import get_device_num_cus
 
-    key = (launcher.kernel_name, block_size)
+    if device is None:
+        from rocke.runtime.hip_module import _resolve_hip as _rh
+
+        cur = ctypes.c_int(0)
+        if _rh().hipGetDevice(ctypes.byref(cur)) != 0:
+            raise RuntimeError("hipGetDevice failed")
+        device = cur.value
+    key = (launcher.kernel_name, block_size, device)
     if key in _occ_cache:
         return _occ_cache[key]
     from rocke.runtime.hip_module import _resolve_hip
@@ -126,6 +135,7 @@ class RoRun:
         momentum=0.1,
         memset=False,
     ):
+        self._keep = (bufs, sync, err)
         self.cand, self.plan, self.sync, self.err, self.memset = (
             cand,
             plan,

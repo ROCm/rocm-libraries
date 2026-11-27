@@ -222,6 +222,14 @@ class BatchNorm2DSpec:
         )
 
 
+def _wave_size_error(spec) -> str:
+    """Refusal text for a ``wave_size`` that is not a positive power of two, else ``""``."""
+    w = spec.wave_size
+    if w <= 0 or w & (w - 1):
+        return "wave_size must be a positive power of two"
+    return ""
+
+
 def is_valid_spec(spec: BatchNorm2DSpec, arch: str = "gfx950") -> Tuple[bool, str]:
     """Return ``(ok, reason)`` for one BatchNorm2D config on ``arch``.
 
@@ -1584,6 +1592,8 @@ def is_valid_split_spec(
     small (amortizing one CTA's worth of spatial work across a handful of
     CTAs), so this is not a practical limitation.
     """
+    if _wave_size_error(spec):
+        return False, _wave_size_error(spec)
     from ...core.arch import ArchTarget
 
     try:
@@ -2071,6 +2081,8 @@ class BatchNorm2DFlatInferSpec:
 def is_valid_flat_infer_spec(
     spec: BatchNorm2DFlatInferSpec, arch: str = "gfx950"
 ) -> Tuple[bool, str]:
+    if _wave_size_error(spec):
+        return False, _wave_size_error(spec)
     if spec.dtype not in ("f16", "bf16"):
         return False, f"unsupported dtype {spec.dtype!r}"
     if spec.vec not in (1, 2, 4, 8):
@@ -2318,6 +2330,8 @@ def batchnorm2d_split_dyn_grid(
 def is_valid_split_dyn_spec(
     spec: BatchNorm2DSplitDynSpec, arch: str = "gfx950"
 ) -> Tuple[bool, str]:
+    if _wave_size_error(spec):
+        return False, _wave_size_error(spec)
     from ...core.arch import ArchTarget
 
     try:
@@ -2695,6 +2709,8 @@ class BatchNorm2DBwdSpec:
 def is_valid_bwd_spec(
     spec: BatchNorm2DBwdSpec, arch: str = "gfx950"
 ) -> Tuple[bool, str]:
+    if _wave_size_error(spec):
+        return False, _wave_size_error(spec)
     from ...core.arch import ArchTarget
 
     try:
@@ -3283,6 +3299,8 @@ class BatchNorm2DNhwcSpec:
 def is_valid_nhwc_spec(
     spec: BatchNorm2DNhwcSpec, arch: str = "gfx950"
 ) -> Tuple[bool, str]:
+    if _wave_size_error(spec):
+        return False, _wave_size_error(spec)
     from ...core.arch import ArchTarget
 
     try:
@@ -4018,6 +4036,8 @@ class BatchNorm2DMcwSpec:
 def is_valid_mcw_spec(
     spec: BatchNorm2DMcwSpec, arch: str = "gfx950"
 ) -> Tuple[bool, str]:
+    if _wave_size_error(spec):
+        return False, _wave_size_error(spec)
     from ...core.arch import ArchTarget
 
     try:

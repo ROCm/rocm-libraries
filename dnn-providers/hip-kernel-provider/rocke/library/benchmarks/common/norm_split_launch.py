@@ -47,6 +47,8 @@ class SplitRun:
         momentum=0.1,
     ):
         self.cand, self.plan = cand, plan
+        # Keep the allocations alive: only raw addresses are retained below.
+        self._keep = (bufs, ws)
         assert ws.numel() >= batchnorm2d_split_dyn_workspace_floats(c, plan)
         geom = {
             "N": n,
@@ -94,6 +96,8 @@ class SplitBwdRun:
 
     def __init__(self, cand, plan, art_reduce, art_apply, *, n, c, h, w, bufs, ws):
         self.cand, self.plan = cand, plan
+        # Keep the allocations alive: only raw addresses are retained below.
+        self._keep = (bufs, ws)
         assert ws.numel() >= cand.workspace_floats(c, plan)
         geom = {
             "N": n,
@@ -171,6 +175,8 @@ class NhwcRun:
         from rocke.instances.common.batchnorm2d import batchnorm2d_nhwc_grid
 
         self.cand, self.plan = cand, plan
+        # Keep the allocations alive: only raw addresses are retained below.
+        self._keep = (bufs, ws)
         dims = {"N": n, "C": c, "H": h, "W": w}
         p = lambda k: bufs[k].data_ptr()  # noqa: E731
         geom = {"RowsPerCta": plan.rows_per_cta}
@@ -266,6 +272,7 @@ class McwRun:
         from rocke.instances.common.batchnorm2d import batchnorm2d_mcw_grid
 
         self.cand = cand
+        self._keep = bufs  # keep allocations alive (raw addresses only below)
         p = lambda k: bufs[k].data_ptr()  # noqa: E731
         dims = {"N": n, "C": c, "H": h, "W": w}
         if cand.mode == "train":

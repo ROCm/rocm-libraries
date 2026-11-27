@@ -31,6 +31,34 @@ def test_train_and_infer_binaries_get_distinct_keys():
     assert train != infer
 
 
+def test_compile_candidate_cached_keys_train_and_infer_apart(tmp_path, monkeypatch):
+    # drives the real cache entry point: one candidate name, two modes, two files
+    from benchmarks.common import norm_kernel_cache as nkc
+
+    calls = []
+
+    def fake_compile(spec, cand, *, arch):
+        calls.append(spec.training)
+        return {"training": spec.training}
+
+    monkeypatch.setattr(nkc, "compile_candidate", fake_compile)
+    cand = type("Cand", (), {"name": _COMMON["candidate_name"]})()
+    got = [
+        nkc.compile_candidate_cached(
+            _spec(t),
+            cand,
+            arch="gfx950",
+            cache_dir=str(tmp_path),
+            family="batchnorm2d",
+            dims=_COMMON["dims"],
+            dtype="fp16",
+        )
+        for t in (True, False)
+    ]
+    assert got == [{"training": True}, {"training": False}]
+    assert len(list(tmp_path.glob("*.pkl"))) == 2
+
+
 def test_dynamic_key_is_shape_free():
     a = cache_key(**_COMMON, kernel_name="k")
     b = cache_key(

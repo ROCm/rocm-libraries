@@ -106,6 +106,8 @@ bool rocke_batchnorm2d_is_valid_mcw_spec(const rocke_batchnorm2d_mcw_spec_t* spe
         reason[0] = '\0';
     if(spec == NULL)
         return mcw_reject(reason, reason_cap, "null spec");
+    if(spec->wave_size <= 0 || (spec->wave_size & (spec->wave_size - 1)) != 0)
+        return mcw_reject(reason, reason_cap, "wave_size must be a positive power of two");
     if(arch == NULL)
         arch = "gfx950";
     target = rocke_archtarget_from_gfx(arch);

@@ -2280,6 +2280,11 @@ bool rocke_batchnorm2d_is_valid_split_spec(const rocke_batchnorm2d_split_spec_t*
         bn_split_set_reason(reason, reason_cap, "null spec");
         return false;
     }
+    if(spec->wave_size <= 0 || (spec->wave_size & (spec->wave_size - 1)) != 0)
+    {
+        bn_split_set_reason(reason, reason_cap, "wave_size must be a positive power of two");
+        return false;
+    }
     if(arch == NULL)
     {
         arch = "gfx950";
@@ -3061,6 +3066,11 @@ bool rocke_batchnorm2d_is_valid_flat_infer_spec(const rocke_batchnorm2d_flat_inf
         bn_set_reason(reason, reason_cap, "null spec");
         return false;
     }
+    if(spec->wave_size <= 0 || (spec->wave_size & (spec->wave_size - 1)) != 0)
+    {
+        bn_set_reason(reason, reason_cap, "wave_size must be a positive power of two");
+        return false;
+    }
     if(spec->dtype == NULL || (strcmp(spec->dtype, "f16") != 0 && strcmp(spec->dtype, "bf16") != 0))
     {
         snprintf(msg, sizeof msg, "unsupported dtype '%s'", spec->dtype ? spec->dtype : "None");
@@ -3546,6 +3556,11 @@ bool rocke_batchnorm2d_is_valid_split_dyn_spec(const rocke_batchnorm2d_split_dyn
     if(spec == NULL)
     {
         bn_set_reason(reason, reason_cap, "null spec");
+        return false;
+    }
+    if(spec->wave_size <= 0 || (spec->wave_size & (spec->wave_size - 1)) != 0)
+    {
+        bn_set_reason(reason, reason_cap, "wave_size must be a positive power of two");
         return false;
     }
     if(arch == NULL)
