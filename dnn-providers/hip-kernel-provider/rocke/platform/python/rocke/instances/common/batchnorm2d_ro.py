@@ -31,6 +31,7 @@ from ...helpers.reduction import (
 )
 from ...helpers.spec import kernel_name_join
 from ...helpers.tensor_view import make_lds_view
+from .batchnorm2d import _wave_size_error
 
 
 # Ints per channel record of the sync buffer: [0] arrival counter, [1:3] and [3:5]
@@ -111,6 +112,8 @@ def is_valid_ro_spec(spec: BatchNorm2DRoSpec, arch: str = "gfx950") -> Tuple[boo
         return False, "unsupported dtype"
     if spec.vec not in vecs:
         return False, f"vec {spec.vec} not in {vecs}"
+    if _wave_size_error(spec):
+        return False, _wave_size_error(spec)
     if (
         spec.block_size % spec.wave_size
         or spec.block_size > 1024

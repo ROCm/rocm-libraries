@@ -106,7 +106,7 @@ bool rocke_batchnorm2d_is_valid_mcw_spec(const rocke_batchnorm2d_mcw_spec_t* spe
         reason[0] = '\0';
     if(spec == NULL)
         return mcw_reject(reason, reason_cap, "null spec");
-    if(spec->wave_size <= 0 || (spec->wave_size & (spec->wave_size - 1)) != 0)
+    if(!rocke_bn_wave_size_ok(spec->wave_size))
         return mcw_reject(reason, reason_cap, "wave_size must be a positive power of two");
     if(arch == NULL)
         arch = "gfx950";
@@ -198,48 +198,6 @@ rocke_status_t
 /* ------------------------------------------------------------------ *
  * shared pieces
  * ------------------------------------------------------------------ */
-
-static rocke_value_t*
-    mcw_fadd_combine(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c, void* user)
-{
-    (void)user;
-    return rocke_b_fadd(b, a, c);
-}
-
-static rocke_param_opts_t mcw_opts(bool readonly, bool writeonly, int align)
-{
-    rocke_param_opts_t o;
-    memset(&o, 0, sizeof o);
-    o.noalias = true;
-    o.noalias_set = true;
-    if(readonly)
-    {
-        o.readonly = true;
-        o.readonly_set = true;
-    }
-    if(writeonly)
-    {
-        o.writeonly = true;
-        o.writeonly_set = true;
-    }
-    if(align > 0)
-    {
-        o.align = align;
-        o.align_set = true;
-    }
-    return o;
-}
-
-static rocke_value_t* mcw_param(rocke_ir_builder_t* b,
-                                const char* name,
-                                const rocke_type_t* elem,
-                                bool readonly,
-                                bool writeonly,
-                                int align)
-{
-    rocke_param_opts_t o = mcw_opts(readonly, writeonly, align);
-    return rocke_b_param(b, name, rocke_ptr_type(b, elem, "global"), &o);
-}
 
 /* Python _McwCtx: lane coordinates and cached-element addressing. */
 typedef struct mcw_ctx
@@ -424,7 +382,7 @@ static void mcw_group_sums(rocke_ir_builder_t* b,
             rocke_value_t* v = rocke_b_smem_load_vN_f32(b, lds, &slot, 1, 1);
             parts[w] = rocke_b_vec_extract(b, v, 0);
         }
-        out[q] = rocke_tree_reduce(b, mcw_fadd_combine, NULL, parts, W);
+        out[q] = rocke_tree_reduce(b, rocke_bn_fadd_combine, NULL, parts, W);
     }
 }
 
@@ -472,14 +430,16 @@ rocke_kernel_def_t* rocke_build_batchnorm2d_mcw_train(rocke_ir_builder_t* b,
     const int NE = spec->npw * spec->slots;
     rocke_attr_set_int(
         b, &b->kernel->attrs, "max_workgroup_size", rocke_batchnorm2d_mcw_block_size(spec));
-    rocke_value_t* X = mcw_param(b, "X", io_ty, true, false, 16);
-    rocke_value_t* Gamma = mcw_param(b, "Gamma", io_ty, true, false, 16);
-    rocke_value_t* Beta = mcw_param(b, "Beta", io_ty, true, false, 16);
-    rocke_value_t* Y = mcw_param(b, "Y", io_ty, false, true, 16);
-    rocke_value_t* RunningMean = mcw_param(b, "RunningMean", rocke_f32(), false, false, 0);
-    rocke_value_t* RunningVar = mcw_param(b, "RunningVar", rocke_f32(), false, false, 0);
-    rocke_value_t* Mean = mcw_param(b, "Mean", io_ty, false, true, 0);
-    rocke_value_t* InvStd = mcw_param(b, "InvStd", io_ty, false, true, 0);
+    rocke_value_t* X = rocke_bn_ptr_param(b, "X", io_ty, ROCKE_BN_PARAM_READONLY, 16);
+    rocke_value_t* Gamma = rocke_bn_ptr_param(b, "Gamma", io_ty, ROCKE_BN_PARAM_READONLY, 16);
+    rocke_value_t* Beta = rocke_bn_ptr_param(b, "Beta", io_ty, ROCKE_BN_PARAM_READONLY, 16);
+    rocke_value_t* Y = rocke_bn_ptr_param(b, "Y", io_ty, ROCKE_BN_PARAM_WRITEONLY, 16);
+    rocke_value_t* RunningMean
+        = rocke_bn_ptr_param(b, "RunningMean", rocke_f32(), ROCKE_BN_PARAM_PLAIN, 0);
+    rocke_value_t* RunningVar
+        = rocke_bn_ptr_param(b, "RunningVar", rocke_f32(), ROCKE_BN_PARAM_PLAIN, 0);
+    rocke_value_t* Mean = rocke_bn_ptr_param(b, "Mean", io_ty, ROCKE_BN_PARAM_WRITEONLY, 0);
+    rocke_value_t* InvStd = rocke_bn_ptr_param(b, "InvStd", io_ty, ROCKE_BN_PARAM_WRITEONLY, 0);
     rocke_value_t* p_n = rocke_b_param(b, "N", rocke_i32(), NULL);
     rocke_value_t* p_c = rocke_b_param(b, "C", rocke_i32(), NULL);
     rocke_value_t* p_h = rocke_b_param(b, "H", rocke_i32(), NULL);
@@ -512,14 +472,14 @@ rocke_kernel_def_t* rocke_build_batchnorm2d_mcw_train(rocke_ir_builder_t* b,
             ds[e * VEC + i] = rocke_b_select(b, ok[e], d, zero);
         }
     }
-    rocke_value_t* s1 = rocke_tree_reduce(b, mcw_fadd_combine, NULL, ds, NE * VEC);
+    rocke_value_t* s1 = rocke_tree_reduce(b, rocke_bn_fadd_combine, NULL, ds, NE * VEC);
     {
         rocke_value_t** sq = mcw_alloc_vals(b, NE * VEC);
         if(!rocke_ir_builder_ok(b))
             return NULL;
         for(int i = 0; i < NE * VEC; ++i)
             sq[i] = rocke_b_fmul(b, ds[i], ds[i]);
-        rocke_value_t* s2 = rocke_tree_reduce(b, mcw_fadd_combine, NULL, sq, NE * VEC);
+        rocke_value_t* s2 = rocke_tree_reduce(b, rocke_bn_fadd_combine, NULL, sq, NE * VEC);
         rocke_value_t* sums[2] = {s1, s2};
         rocke_value_t* tot[2] = {NULL, NULL};
         mcw_group_sums(b, spec, &ctx, sums, 2, lds, tot);
@@ -596,14 +556,16 @@ rocke_kernel_def_t* rocke_build_batchnorm2d_mcw_bwd(rocke_ir_builder_t* b,
     const int NE = spec->npw * spec->slots;
     rocke_attr_set_int(
         b, &b->kernel->attrs, "max_workgroup_size", rocke_batchnorm2d_mcw_block_size(spec));
-    rocke_value_t* X = mcw_param(b, "X", io_ty, true, false, 16);
-    rocke_value_t* dY = mcw_param(b, "dY", io_ty, true, false, 16);
-    rocke_value_t* Scale = mcw_param(b, "Scale", rocke_f32(), true, false, 0);
-    rocke_value_t* Mean = mcw_param(b, "Mean", rocke_f32(), true, false, 0);
-    rocke_value_t* InvStd = mcw_param(b, "InvStd", rocke_f32(), true, false, 0);
-    rocke_value_t* dX = mcw_param(b, "dX", io_ty, false, true, 16);
-    rocke_value_t* dScale = mcw_param(b, "dScale", rocke_f32(), false, true, 0);
-    rocke_value_t* dBias = mcw_param(b, "dBias", rocke_f32(), false, true, 0);
+    rocke_value_t* X = rocke_bn_ptr_param(b, "X", io_ty, ROCKE_BN_PARAM_READONLY, 16);
+    rocke_value_t* dY = rocke_bn_ptr_param(b, "dY", io_ty, ROCKE_BN_PARAM_READONLY, 16);
+    rocke_value_t* Scale = rocke_bn_ptr_param(b, "Scale", rocke_f32(), ROCKE_BN_PARAM_READONLY, 0);
+    rocke_value_t* Mean = rocke_bn_ptr_param(b, "Mean", rocke_f32(), ROCKE_BN_PARAM_READONLY, 0);
+    rocke_value_t* InvStd
+        = rocke_bn_ptr_param(b, "InvStd", rocke_f32(), ROCKE_BN_PARAM_READONLY, 0);
+    rocke_value_t* dX = rocke_bn_ptr_param(b, "dX", io_ty, ROCKE_BN_PARAM_WRITEONLY, 16);
+    rocke_value_t* dScale
+        = rocke_bn_ptr_param(b, "dScale", rocke_f32(), ROCKE_BN_PARAM_WRITEONLY, 0);
+    rocke_value_t* dBias = rocke_bn_ptr_param(b, "dBias", rocke_f32(), ROCKE_BN_PARAM_WRITEONLY, 0);
     rocke_value_t* p_n = rocke_b_param(b, "N", rocke_i32(), NULL);
     rocke_value_t* p_c = rocke_b_param(b, "C", rocke_i32(), NULL);
     rocke_value_t* p_h = rocke_b_param(b, "H", rocke_i32(), NULL);
@@ -638,8 +600,8 @@ rocke_kernel_def_t* rocke_build_batchnorm2d_mcw_bwd(rocke_ir_builder_t* b,
         rocke_value_t* xh = rocke_b_fmul(b, d, invstd);
         prods[i] = rocke_b_fmul(b, dym[i], xh);
     }
-    rocke_value_t* s1 = rocke_tree_reduce(b, mcw_fadd_combine, NULL, dym, NE * VEC);
-    rocke_value_t* s2 = rocke_tree_reduce(b, mcw_fadd_combine, NULL, prods, NE * VEC);
+    rocke_value_t* s1 = rocke_tree_reduce(b, rocke_bn_fadd_combine, NULL, dym, NE * VEC);
+    rocke_value_t* s2 = rocke_tree_reduce(b, rocke_bn_fadd_combine, NULL, prods, NE * VEC);
     rocke_value_t* sums[2] = {s1, s2};
     rocke_value_t* tot[2] = {NULL, NULL};
     mcw_group_sums(b, spec, &ctx, sums, 2, lds, tot);

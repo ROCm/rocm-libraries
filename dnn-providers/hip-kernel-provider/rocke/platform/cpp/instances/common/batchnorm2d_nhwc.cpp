@@ -113,7 +113,7 @@ bool rocke_batchnorm2d_is_valid_nhwc_spec(const rocke_batchnorm2d_nhwc_spec_t* s
         rocke_spec_set_reason(reason, reason_cap, "null spec");
         return false;
     }
-    if(spec->wave_size <= 0 || (spec->wave_size & (spec->wave_size - 1)) != 0)
+    if(!rocke_bn_wave_size_ok(spec->wave_size))
     {
         rocke_spec_set_reason(reason, reason_cap, "wave_size must be a positive power of two");
         return false;

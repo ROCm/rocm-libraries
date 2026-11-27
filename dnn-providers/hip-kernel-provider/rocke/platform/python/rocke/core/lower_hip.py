@@ -2339,11 +2339,13 @@ class _Lowerer:
         scope = _sync_attr(op, "scope", _FENCE_SCOPES)
         res = _name(op.result)
         self._emit(f"int {res} = 0;")
+        # At least one poll, like the LLVM lowering: max_polls <= 0 still loads once.
         self._emit(
-            f"for (int {res}_i = 0; {res}_i < {_name(max_polls)}; ++{res}_i) {{ "
+            f"for (int {res}_i = 0;;) {{ "
             f"{res} = __hip_atomic_load(&{_name(ptr)}[{_name(idx)}], "
             f"{'__ATOMIC_RELAXED' if op.attrs.get('ordering') == 'monotonic' else '__ATOMIC_ACQUIRE'}, "
-            f"{_HIP_MEMORY_SCOPE[scope]}); if ({res} >= {_name(expect)}) break; }}"
+            f"{_HIP_MEMORY_SCOPE[scope]}); "
+            f"if ({res} >= {_name(expect)} || ++{res}_i >= {_name(max_polls)}) break; }}"
         )
 
     def _op_memref_global_atomic_add_pk_bf16(self, op: Op) -> None:

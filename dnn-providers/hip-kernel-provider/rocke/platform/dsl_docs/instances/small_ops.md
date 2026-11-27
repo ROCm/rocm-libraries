@@ -699,8 +699,13 @@ deviation of a training forward use the data dtype, those of a backward are `f32
 
 Semantics shared by the training kinds: `Y` and the saved inverse standard
 deviation use the biased variance; the running variance is updated with the
-unbiased variance, `var * M / max(M - 1, 1)` for `M = N*H*W` samples per channel,
-and the running mean with the batch mean. A thread that owns no elements
+unbiased variance (all kinds except the static one-block and static two-launch
+split forward kernels of the base PR, which update it with the biased batch
+variance), `var * M / max(M - 1, 1)` for `M = N*H*W` samples per channel,
+and the running mean with the batch mean. Known limitation: the forward kinds save `Mean` / `InvStd` in the I/O dtype
+while every backward kind reads them as f32, so for f16 / bf16 the saved
+buffers of a forward launch are not directly usable by backward (the harness
+passes f32 statistics); saving f32 in every forward kind is a follow-up. A thread that owns no elements
 contributes an empty Welford partial (not NaN). Backward takes the saved `Mean` / `InvStd` and
 produces `dX`, `dScale`, `dBias`:
 

@@ -25,6 +25,17 @@ extern "C" {
 rocke_value_t* rocke_bn_ptr_param(
     rocke_ir_builder_t* b, const char* name, const rocke_type_t* elem, int access, int align);
 
+/* Plain fp32 add for rocke_tree_reduce (Python ``b.fadd``). */
+rocke_value_t*
+    rocke_bn_fadd_combine(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c, void* user);
+
+/* Python _wave_size_error: true when wave_size is a positive power of two.
+ * Every BatchNorm2D validator refuses a spec for which this is false. */
+static inline int rocke_bn_wave_size_ok(int w)
+{
+    return w > 0 && (w & (w - 1)) == 0;
+}
+
 /* Python _bwd_coefs(b, s1, s2, scale, mean, invstd, m_f): out = (a, k2, k3)
  * with dx = a * dy - k2 * (x - mean) - k3. */
 void rocke_bn_bwd_coefs(rocke_ir_builder_t* b,

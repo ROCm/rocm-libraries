@@ -2280,7 +2280,7 @@ bool rocke_batchnorm2d_is_valid_split_spec(const rocke_batchnorm2d_split_spec_t*
         bn_split_set_reason(reason, reason_cap, "null spec");
         return false;
     }
-    if(spec->wave_size <= 0 || (spec->wave_size & (spec->wave_size - 1)) != 0)
+    if(!rocke_bn_wave_size_ok(spec->wave_size))
     {
         bn_split_set_reason(reason, reason_cap, "wave_size must be a positive power of two");
         return false;
@@ -3066,7 +3066,7 @@ bool rocke_batchnorm2d_is_valid_flat_infer_spec(const rocke_batchnorm2d_flat_inf
         bn_set_reason(reason, reason_cap, "null spec");
         return false;
     }
-    if(spec->wave_size <= 0 || (spec->wave_size & (spec->wave_size - 1)) != 0)
+    if(!rocke_bn_wave_size_ok(spec->wave_size))
     {
         bn_set_reason(reason, reason_cap, "wave_size must be a positive power of two");
         return false;
@@ -3558,7 +3558,7 @@ bool rocke_batchnorm2d_is_valid_split_dyn_spec(const rocke_batchnorm2d_split_dyn
         bn_set_reason(reason, reason_cap, "null spec");
         return false;
     }
-    if(spec->wave_size <= 0 || (spec->wave_size & (spec->wave_size - 1)) != 0)
+    if(!rocke_bn_wave_size_ok(spec->wave_size))
     {
         bn_set_reason(reason, reason_cap, "wave_size must be a positive power of two");
         return false;

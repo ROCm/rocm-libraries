@@ -46,12 +46,34 @@ class TestRequestAndWaveGuards(unittest.TestCase):
             (bn.BatchNorm2DBwdSpec, bn.is_valid_bwd_spec),
             (bn.BatchNorm2DSplitDynSpec, bn.is_valid_split_dyn_spec),
             (bn.BatchNorm2DFlatInferSpec, bn.is_valid_flat_infer_spec),
+            (
+                lambda **kw: bn.BatchNorm2DSplitSpec(
+                    n=1, c=64, h=8, w=8, split_hw=2, **kw
+                ),
+                bn.is_valid_split_spec,
+            ),
+            (bn.BatchNorm2DNhwcSpec, bn.is_valid_nhwc_spec),
+            (bn.BatchNorm2DMcwSpec, bn.is_valid_mcw_spec),
+            (ro.BatchNorm2DRoSpec, ro.is_valid_ro_spec),
         )
         for cls, valid in cases:
             for ws in (0, -64, 48):
                 ok, why = valid(cls(wave_size=ws), ARCH)
-                self.assertFalse(ok)
+                self.assertFalse(ok, (valid.__name__, ws))
                 self.assertIn("wave_size", why)
+
+    def test_requests_of_2_pow_31_elements_are_refused(self):
+        # n*c*h*w >= 2**31 would wrap every kernel's i32 flat indexes.
+        big = _req(1 << 15, 1 << 8, 16, 16)
+        self.assertEqual(int(big.n) * int(big.c) * int(big.h) * int(big.w), 1 << 31)
+        self.assertTrue(dsp._request_errors(big))
+        for backward in (False, True):
+            req = _req(1 << 15, 1 << 8, 16, 16, backward=backward)
+            for cand in dsp.dynamic_batchnorm_split_candidates():
+                self.assertEqual(cand.plans(req), ())
+            for cand in dsp.dynamic_batchnorm_bwd_candidates():
+                self.assertFalse(cand._supports(req)[0], cand.name)
+        self.assertFalse(dsp._request_errors(_req(1 << 15, 1 << 8, 16, 15)))
 
     def test_read_once_admits_bf16(self):
         cands = dsp.dynamic_batchnorm_ro_candidates(False, "bf16")

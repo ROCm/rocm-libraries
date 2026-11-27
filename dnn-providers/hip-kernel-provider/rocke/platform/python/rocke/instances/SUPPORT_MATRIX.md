@@ -442,7 +442,11 @@ parity runs on the matching device and is not implied by the ✅ here.
     (admitted only for tensors of at least 8,000,000 bytes with a per-channel
     split of 2 to 16 work items). Dtypes: `f16`, `bf16`, `f32`, except flat
     inference and NHWC (`f16` / `bf16`). Training updates the running
-    variance with the unbiased variance and can save the batch mean / inverse
+    variance with the unbiased variance, except the static one-block and
+    static two-launch split forward kernels of the base batchnorm PR, which
+    still use the biased batch variance (the dispatcher can pick either, so
+    the running variance differs in the last factor `M / (M - 1)`); training
+    can save the batch mean / inverse
     standard deviation. Byte-identity-verified in both engines
     (`batchnorm2d_{flat,dyn_split,bwd,nhwc,mcw,ro}_emit.py`/`.c` and the
     extended `batchnorm2d_emit.py`/`.c`, all 4 LLVM flavors) and

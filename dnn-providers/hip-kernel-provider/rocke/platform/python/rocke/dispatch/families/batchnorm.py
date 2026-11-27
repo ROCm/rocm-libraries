@@ -122,6 +122,10 @@ BATCHNORM_DIM_VOCABULARY = ("n", "c", "h", "w")
 _BATCHNORM_ARCHES = arches_with_own_facts()
 
 
+# Flat element indexes of every batchnorm kernel are i32.
+_MAX_ELEMENTS = 1 << 31
+
+
 def _bn_dtype(dtype: str) -> str:
     d = dtype.lower()
     if d == "fp16":
@@ -143,6 +147,10 @@ def _request_errors(req: OperatorRequest) -> list[str]:
     for field in ("n", "c", "h", "w"):
         if int(getattr(req, field)) <= 0:
             errors.append(f"{field} must be positive")
+    if not errors and (
+        int(req.n) * int(req.c) * int(req.h) * int(req.w) >= _MAX_ELEMENTS
+    ):
+        errors.append("n*c*h*w must be below 2**31 (flat i32 element indexes)")
     if _bn_dtype(req.dtype) not in ("f16", "bf16", "f32"):
         errors.append(f"unsupported dtype {req.dtype!r}; f16/bf16/f32 only")
     try:

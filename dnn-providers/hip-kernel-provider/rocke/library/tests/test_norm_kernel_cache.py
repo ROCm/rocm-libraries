@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 """Host-only tests of the norm AOT cache keys and the torch-free batchnorm tooling."""
 
+import os
 import subprocess
 import sys
 
@@ -84,7 +85,7 @@ def test_batchnorm_tooling_imports_without_torch():
     )
     done = subprocess.run(
         [sys.executable, "-c", code],
-        env={"PYTHONPATH": ":".join(p for p in sys.path if p)},
+        env={**os.environ, "PYTHONPATH": os.pathsep.join(p for p in sys.path if p)},
         capture_output=True,
         text=True,
     )

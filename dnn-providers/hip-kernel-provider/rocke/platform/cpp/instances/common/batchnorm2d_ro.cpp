@@ -98,8 +98,8 @@ bool rocke_batchnorm2d_is_valid_ro_spec(const rocke_batchnorm2d_ro_spec_t* spec,
         snprintf(msg, sizeof msg, "vec %d not in %s", spec->vec, f32 ? "(2, 4)" : "(4, 8)");
         return ro_reject(reason, reason_cap, msg);
     }
-    if(spec->wave_size <= 0 || spec->block_size % spec->wave_size || spec->block_size > 1024
-       || spec->block_size < 64)
+    if(!rocke_bn_wave_size_ok(spec->wave_size) || spec->block_size % spec->wave_size
+       || spec->block_size > 1024 || spec->block_size < 64)
         return ro_reject(
             reason, reason_cap, "block_size must be a multiple of the wave size, <= 1024");
     if(spec->regs < 1 || spec->regs > RO_MAX_REGS)
@@ -162,46 +162,6 @@ long long rocke_batchnorm2d_ro_sync_ints(int c)
 /* ------------------------------------------------------------------ *
  * shared pieces
  * ------------------------------------------------------------------ */
-
-static rocke_value_t*
-    ro_fadd_combine(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c, void* user)
-{
-    (void)user;
-    return rocke_b_fadd(b, a, c);
-}
-
-static rocke_value_t* ro_param(rocke_ir_builder_t* b,
-                               const char* name,
-                               const rocke_type_t* elem,
-                               bool noalias,
-                               bool readonly,
-                               bool writeonly,
-                               int align)
-{
-    rocke_param_opts_t o;
-    memset(&o, 0, sizeof o);
-    if(noalias)
-    {
-        o.noalias = true;
-        o.noalias_set = true;
-    }
-    if(readonly)
-    {
-        o.readonly = true;
-        o.readonly_set = true;
-    }
-    if(writeonly)
-    {
-        o.writeonly = true;
-        o.writeonly_set = true;
-    }
-    if(align > 0)
-    {
-        o.align = align;
-        o.align_set = true;
-    }
-    return rocke_b_param(b, name, rocke_ptr_type(b, elem, "global"), &o);
-}
 
 static rocke_value_t* ro_lds(rocke_ir_builder_t* b, int n, const char* hint)
 {
@@ -491,24 +451,26 @@ rocke_kernel_def_t* rocke_build_batchnorm2d_ro_train(rocke_ir_builder_t* b,
         return NULL;
     const int VEC = spec->vec, R = spec->regs;
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", spec->block_size);
-    rocke_value_t* X = ro_param(b, "X", io_ty, true, true, false, 16);
-    rocke_value_t* Gamma = ro_param(b, "Gamma", io_ty, true, true, false, 16);
-    rocke_value_t* Beta = ro_param(b, "Beta", io_ty, true, true, false, 16);
-    rocke_value_t* Y = ro_param(b, "Y", io_ty, true, false, true, 16);
-    rocke_value_t* RunningMean = ro_param(b, "RunningMean", rocke_f32(), true, false, false, 0);
-    rocke_value_t* RunningVar = ro_param(b, "RunningVar", rocke_f32(), true, false, false, 0);
+    rocke_value_t* X = rocke_bn_ptr_param(b, "X", io_ty, ROCKE_BN_PARAM_READONLY, 16);
+    rocke_value_t* Gamma = rocke_bn_ptr_param(b, "Gamma", io_ty, ROCKE_BN_PARAM_READONLY, 16);
+    rocke_value_t* Beta = rocke_bn_ptr_param(b, "Beta", io_ty, ROCKE_BN_PARAM_READONLY, 16);
+    rocke_value_t* Y = rocke_bn_ptr_param(b, "Y", io_ty, ROCKE_BN_PARAM_WRITEONLY, 16);
+    rocke_value_t* RunningMean
+        = rocke_bn_ptr_param(b, "RunningMean", rocke_f32(), ROCKE_BN_PARAM_PLAIN, 0);
+    rocke_value_t* RunningVar
+        = rocke_bn_ptr_param(b, "RunningVar", rocke_f32(), ROCKE_BN_PARAM_PLAIN, 0);
     rocke_value_t* Mean = NULL;
     rocke_value_t* InvStd = NULL;
     if(spec->save_mean_invstd)
     {
-        Mean = ro_param(b, "Mean", io_ty, true, false, true, 0);
-        InvStd = ro_param(b, "InvStd", io_ty, true, false, true, 0);
+        Mean = rocke_bn_ptr_param(b, "Mean", io_ty, ROCKE_BN_PARAM_WRITEONLY, 0);
+        InvStd = rocke_bn_ptr_param(b, "InvStd", io_ty, ROCKE_BN_PARAM_WRITEONLY, 0);
     }
     rocke_value_t* SyncI
         = rocke_b_param(b, "SyncI", rocke_ptr_type(b, rocke_i32(), "global"), NULL);
     rocke_value_t* SyncF
         = rocke_b_param(b, "SyncF", rocke_ptr_type(b, rocke_f32(), "global"), NULL);
-    rocke_value_t* Err = ro_param(b, "Err", rocke_i32(), true, false, false, 0);
+    rocke_value_t* Err = rocke_bn_ptr_param(b, "Err", rocke_i32(), ROCKE_BN_PARAM_PLAIN, 0);
     ro_common_t P;
     ro_common_params(b, &P);
     rocke_value_t* eps = rocke_b_param(b, "eps", rocke_f32(), NULL);
@@ -549,11 +511,11 @@ rocke_kernel_def_t* rocke_build_batchnorm2d_ro_train(rocke_ir_builder_t* b,
                 rocke_value_t* d = rocke_b_fsub(b, xs[i], shift);
                 ds[i] = rocke_b_select(b, oks[j], d, zero_f);
             }
-            rocke_value_t* r = rocke_tree_reduce(b, ro_fadd_combine, NULL, ds, VEC);
+            rocke_value_t* r = rocke_tree_reduce(b, rocke_bn_fadd_combine, NULL, ds, VEC);
             s1 = rocke_b_fadd(b, s1, r);
             for(int i = 0; i < VEC; ++i)
                 sq[i] = rocke_b_fmul(b, ds[i], ds[i]);
-            r = rocke_tree_reduce(b, ro_fadd_combine, NULL, sq, VEC);
+            r = rocke_tree_reduce(b, rocke_bn_fadd_combine, NULL, sq, VEC);
             s2 = rocke_b_fadd(b, s2, r);
         }
         rocke_value_t *t1 = NULL, *t2 = NULL, *a1 = NULL, *a2 = NULL;
@@ -659,19 +621,21 @@ rocke_kernel_def_t* rocke_build_batchnorm2d_ro_bwd(rocke_ir_builder_t* b,
         return NULL;
     const int VEC = spec->vec, R = spec->regs;
     rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", spec->block_size);
-    rocke_value_t* X = ro_param(b, "X", io_ty, true, true, false, 16);
-    rocke_value_t* dY = ro_param(b, "dY", io_ty, true, true, false, 16);
-    rocke_value_t* Scale = ro_param(b, "Scale", rocke_f32(), true, true, false, 0);
-    rocke_value_t* Mean = ro_param(b, "Mean", rocke_f32(), true, true, false, 0);
-    rocke_value_t* InvStd = ro_param(b, "InvStd", rocke_f32(), true, true, false, 0);
-    rocke_value_t* dX = ro_param(b, "dX", io_ty, true, false, true, 16);
-    rocke_value_t* dScale = ro_param(b, "dScale", rocke_f32(), true, false, true, 0);
-    rocke_value_t* dBias = ro_param(b, "dBias", rocke_f32(), true, false, true, 0);
+    rocke_value_t* X = rocke_bn_ptr_param(b, "X", io_ty, ROCKE_BN_PARAM_READONLY, 16);
+    rocke_value_t* dY = rocke_bn_ptr_param(b, "dY", io_ty, ROCKE_BN_PARAM_READONLY, 16);
+    rocke_value_t* Scale = rocke_bn_ptr_param(b, "Scale", rocke_f32(), ROCKE_BN_PARAM_READONLY, 0);
+    rocke_value_t* Mean = rocke_bn_ptr_param(b, "Mean", rocke_f32(), ROCKE_BN_PARAM_READONLY, 0);
+    rocke_value_t* InvStd
+        = rocke_bn_ptr_param(b, "InvStd", rocke_f32(), ROCKE_BN_PARAM_READONLY, 0);
+    rocke_value_t* dX = rocke_bn_ptr_param(b, "dX", io_ty, ROCKE_BN_PARAM_WRITEONLY, 16);
+    rocke_value_t* dScale
+        = rocke_bn_ptr_param(b, "dScale", rocke_f32(), ROCKE_BN_PARAM_WRITEONLY, 0);
+    rocke_value_t* dBias = rocke_bn_ptr_param(b, "dBias", rocke_f32(), ROCKE_BN_PARAM_WRITEONLY, 0);
     rocke_value_t* SyncI
         = rocke_b_param(b, "SyncI", rocke_ptr_type(b, rocke_i32(), "global"), NULL);
     rocke_value_t* SyncF
         = rocke_b_param(b, "SyncF", rocke_ptr_type(b, rocke_f32(), "global"), NULL);
-    rocke_value_t* Err = ro_param(b, "Err", rocke_i32(), true, false, false, 0);
+    rocke_value_t* Err = rocke_bn_ptr_param(b, "Err", rocke_i32(), ROCKE_BN_PARAM_PLAIN, 0);
     ro_common_t P;
     ro_common_params(b, &P);
     ro_geom_params(b, &P);
@@ -720,9 +684,9 @@ rocke_kernel_def_t* rocke_build_batchnorm2d_ro_bwd(rocke_ir_builder_t* b,
                 d = rocke_b_fmul(b, d, invstd_c);
                 prods[i] = rocke_b_fmul(b, dys[i], d);
             }
-            rocke_value_t* r = rocke_tree_reduce(b, ro_fadd_combine, NULL, dys, VEC);
+            rocke_value_t* r = rocke_tree_reduce(b, rocke_bn_fadd_combine, NULL, dys, VEC);
             s1 = rocke_b_fadd(b, s1, r);
-            r = rocke_tree_reduce(b, ro_fadd_combine, NULL, prods, VEC);
+            r = rocke_tree_reduce(b, rocke_bn_fadd_combine, NULL, prods, VEC);
             s2 = rocke_b_fadd(b, s2, r);
         }
         rocke_value_t *t1 = NULL, *t2 = NULL, *a1 = NULL, *a2 = NULL;

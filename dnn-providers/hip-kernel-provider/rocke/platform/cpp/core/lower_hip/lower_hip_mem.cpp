@@ -942,12 +942,10 @@ static rocke_status_t _op_memref_global_flag_wait_ge_bounded(rocke_h_lowerer_t* 
     ord = rocke_attr_get_str(&op->attrs, "ordering");
     res = rocke_h_name(lw, op->results[0]);
     rocke_h_emitf(lw, "int %s = 0;", res);
+    /* At least one poll, like the LLVM lowering: max_polls <= 0 still loads once. */
     rocke_h_emitf(lw,
-                  "for (int %s_i = 0; %s_i < %s; ++%s_i) { %s = __hip_atomic_load(&%s[%s], "
-                  "%s, %s); if (%s >= %s) break; }",
-                  res,
-                  res,
-                  rocke_h_name(lw, op->operands[3]),
+                  "for (int %s_i = 0;;) { %s = __hip_atomic_load(&%s[%s], %s, %s); "
+                  "if (%s >= %s || ++%s_i >= %s) break; }",
                   res,
                   res,
                   rocke_h_name(lw, op->operands[0]),
@@ -955,7 +953,9 @@ static rocke_status_t _op_memref_global_flag_wait_ge_bounded(rocke_h_lowerer_t* 
                   (ord && !strcmp(ord, "monotonic")) ? "__ATOMIC_RELAXED" : "__ATOMIC_ACQUIRE",
                   hip_memory_scope(scp),
                   res,
-                  rocke_h_name(lw, op->operands[2]));
+                  rocke_h_name(lw, op->operands[2]),
+                  res,
+                  rocke_h_name(lw, op->operands[3]));
     return lw->status;
 }
 

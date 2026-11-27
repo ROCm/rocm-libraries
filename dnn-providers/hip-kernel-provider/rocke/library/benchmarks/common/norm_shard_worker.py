@@ -91,7 +91,9 @@ def run_miopen_case(case: dict, *, timeout: int = 120) -> Optional[float]:
         return None
     dims = dict(case["dims"])
     # MIOpenDriver spells the fp32 driver plainly ``bnorm`` (no dtype suffix).
-    dtype_token = {"fp16": "fp16", "bf16": "bfp16", "fp32": ""}[case["dtype"]]
+    from benchmarks.common.parse_norm_miopen import BNORM_DTYPES
+
+    dtype_token = {v: k[len("bnorm") :] for k, v in BNORM_DTYPES.items()}[case["dtype"]]
     if case["family"] == "bnorm":
         forw = "2" if case["mode"] == "inference" else "1"
         save = "1" if case["mode"] == "training" else "0"

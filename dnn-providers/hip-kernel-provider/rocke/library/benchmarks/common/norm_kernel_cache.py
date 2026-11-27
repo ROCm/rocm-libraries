@@ -55,6 +55,52 @@ from typing import Any, Mapping
 from benchmarks.common.norm_bench_common import compile_candidate
 
 
+def _code_digest() -> str:
+    """Digest of the kernel-source modules a cached artifact is built from.
+
+    Part of every key, so editing a kernel builder invalidates the cache instead
+    of serving the old binary under an unchanged candidate name.
+    """
+    global _CODE_DIGEST
+    if _CODE_DIGEST is None:
+        import rocke.instances.common.batchnorm2d as _bn
+        import rocke.instances.common.batchnorm2d_ro as _ro
+        import rocke.instances.common.layernorm2d as _ln
+
+        h = hashlib.sha1()
+        for mod in (_bn, _ro, _ln):
+            h.update(Path(mod.__file__).read_bytes())
+        _CODE_DIGEST = h.hexdigest()[:12]
+    return _CODE_DIGEST
+
+
+_CODE_DIGEST: "str | None" = None
+
+
+def _load_or_compile(path: Path, name: str, build) -> Any:
+    """Return the pickled artifact at *path*; on a miss run ``build()`` (honouring
+    ``ROCKE_NORM_CACHE_ONLY=1``, which turns a miss into an error) and store it."""
+    if path.is_file():
+        with path.open("rb") as fh:
+            return pickle.load(fh)
+    if os.environ.get("ROCKE_NORM_CACHE_ONLY") == "1":
+        raise RuntimeError(
+            f"AOT cache miss (ROCKE_NORM_CACHE_ONLY=1): {name} -> {path}"
+        )
+    artifact = build()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(f".pkl.{os.getpid()}.tmp")
+    with tmp.open("wb") as fh:
+        pickle.dump(artifact, fh, protocol=pickle.HIGHEST_PROTOCOL)
+    tmp.replace(path)  # atomic: a reader never observes a partial file
+    return artifact
+
+
+def _hashed_path(cache_dir: str, prefix: str, raw: str) -> Path:
+    digest = hashlib.sha1(f"{raw}|{_code_digest()}".encode("utf-8")).hexdigest()[:24]
+    return Path(cache_dir) / f"{prefix}{digest}.pkl"
+
+
 def cache_key(
     *,
     family: str,
@@ -76,7 +122,7 @@ def cache_key(
     else:
         dims_part = ",".join(f"{k}={v}" for k, v in sorted(dims.items()))
         raw = f"{family}|{dims_part}|{dtype}|{arch}|{candidate_name}"
-    digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:24]
+    digest = hashlib.sha1(f"{raw}|{_code_digest()}".encode("utf-8")).hexdigest()[:24]
     return f"{family}_{digest}"
 
 
@@ -109,21 +155,9 @@ def compile_candidate_cached(
         )
         + ".pkl"
     )
-    if path.is_file():
-        with path.open("rb") as fh:
-            return pickle.load(fh)
-
-    if os.environ.get("ROCKE_NORM_CACHE_ONLY") == "1":
-        raise RuntimeError(
-            f"AOT cache miss (ROCKE_NORM_CACHE_ONLY=1): {candidate.name} -> {path}"
-        )
-    artifact = compile_candidate(spec, candidate, arch=arch)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(f".pkl.{os.getpid()}.tmp")
-    with tmp.open("wb") as fh:
-        pickle.dump(artifact, fh, protocol=pickle.HIGHEST_PROTOCOL)
-    tmp.replace(path)  # atomic: a reader never observes a partial file
-    return artifact
+    return _load_or_compile(
+        path, candidate.name, lambda: compile_candidate(spec, candidate, arch=arch)
+    )
 
 
 def compile_split_cached(
@@ -137,30 +171,18 @@ def compile_split_cached(
     spec = cand.spec(dtype, arch)
     kname = spec.kernel_name(kind)
     raw = f"batchnorm2d_split|dynamic|{dtype}|{arch}|{cand.name}|{kname}"
-    path = Path(cache_dir) / (
-        "batchnorm2d_split_"
-        + hashlib.sha1(raw.encode("utf-8")).hexdigest()[:24]
-        + ".pkl"
-    )
-    if path.is_file():
-        with path.open("rb") as fh:
-            return pickle.load(fh)
-    if os.environ.get("ROCKE_NORM_CACHE_ONLY") == "1":
-        raise RuntimeError(
-            f"AOT cache miss (ROCKE_NORM_CACHE_ONLY=1): {kname} -> {path}"
+
+    def build():
+        kdef = (
+            cand.build_reduce(spec, arch)
+            if kind == "reduce"
+            else cand.build_apply(spec, arch)
         )
-    kdef = (
-        cand.build_reduce(spec, arch)
-        if kind == "reduce"
-        else cand.build_apply(spec, arch)
+        return compile_kernel(kdef, arch=arch)
+
+    return _load_or_compile(
+        _hashed_path(cache_dir, "batchnorm2d_split_", raw), kname, build
     )
-    artifact = compile_kernel(kdef, arch=arch)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(f".pkl.{os.getpid()}.tmp")
-    with tmp.open("wb") as fh:
-        pickle.dump(artifact, fh, protocol=pickle.HIGHEST_PROTOCOL)
-    tmp.replace(path)
-    return artifact
 
 
 def compile_nhwc_cached(cand: Any, kind: str, *, dtype: str, arch: str, cache_dir: str):
@@ -171,25 +193,11 @@ def compile_nhwc_cached(cand: Any, kind: str, *, dtype: str, arch: str, cache_di
     spec = cand.spec(dtype, arch)
     kname = spec.kernel_name(kind)
     raw = f"batchnorm2d_nhwc|dynamic|{dtype}|{arch}|{cand.name}|{kname}"
-    path = Path(cache_dir) / (
-        "batchnorm2d_nhwc_"
-        + hashlib.sha1(raw.encode("utf-8")).hexdigest()[:24]
-        + ".pkl"
+    return _load_or_compile(
+        _hashed_path(cache_dir, "batchnorm2d_nhwc_", raw),
+        kname,
+        lambda: compile_kernel(cand.build(kind, spec, arch), arch=arch),
     )
-    if path.is_file():
-        with path.open("rb") as fh:
-            return pickle.load(fh)
-    if os.environ.get("ROCKE_NORM_CACHE_ONLY") == "1":
-        raise RuntimeError(
-            f"AOT cache miss (ROCKE_NORM_CACHE_ONLY=1): {kname} -> {path}"
-        )
-    artifact = compile_kernel(cand.build(kind, spec, arch), arch=arch)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(f".pkl.{os.getpid()}.tmp")
-    with tmp.open("wb") as fh:
-        pickle.dump(artifact, fh, protocol=pickle.HIGHEST_PROTOCOL)
-    tmp.replace(path)
-    return artifact
 
 
 def compile_mcw_cached(cand: Any, *, dtype: str, arch: str, cache_dir: str):
@@ -200,20 +208,23 @@ def compile_mcw_cached(cand: Any, *, dtype: str, arch: str, cache_dir: str):
     spec = cand.spec(dtype, arch)
     kname = spec.kernel_name()
     raw = f"batchnorm2d_mcw|dynamic|{dtype}|{arch}|{cand.name}|{kname}"
-    path = Path(cache_dir) / (
-        "batchnorm2d_mcw_" + hashlib.sha1(raw.encode("utf-8")).hexdigest()[:24] + ".pkl"
+    return _load_or_compile(
+        _hashed_path(cache_dir, "batchnorm2d_mcw_", raw),
+        kname,
+        lambda: compile_kernel(cand.build("fused", spec, arch), arch=arch),
     )
-    if path.is_file():
-        with path.open("rb") as fh:
-            return pickle.load(fh)
-    if os.environ.get("ROCKE_NORM_CACHE_ONLY") == "1":
-        raise RuntimeError(
-            f"AOT cache miss (ROCKE_NORM_CACHE_ONLY=1): {kname} -> {path}"
-        )
-    artifact = compile_kernel(cand.build("fused", spec, arch), arch=arch)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(f".pkl.{os.getpid()}.tmp")
-    with tmp.open("wb") as fh:
-        pickle.dump(artifact, fh, protocol=pickle.HIGHEST_PROTOCOL)
-    tmp.replace(path)
-    return artifact
+
+
+def compile_ro_cached(cand: Any, *, dtype: str, arch: str, cache_dir: str):
+    """Load / build the kernel of a read-once candidate. The key is the candidate
+    and kernel name alone: shape and launch plan are runtime kernel arguments."""
+    from rocke.helpers.compile import compile_kernel
+
+    spec = cand.spec(dtype, arch)
+    kname = spec.kernel_name("bwd" if cand.backward else "train")
+    raw = f"batchnorm2d_ro|dynamic|{dtype}|{arch}|{cand.name}|{kname}"
+    return _load_or_compile(
+        _hashed_path(cache_dir, "batchnorm2d_ro_", raw),
+        kname,
+        lambda: compile_kernel(cand.build(spec), arch=arch),
+    )

@@ -6,11 +6,7 @@
 from __future__ import annotations
 
 import ctypes
-import hashlib
-import os
-import pickle
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, List, Optional, Tuple
 
 from rocke.dispatch.families.batchnorm import (  # noqa: F401
@@ -18,6 +14,7 @@ from rocke.dispatch.families.batchnorm import (  # noqa: F401
     RO_REGS,
     BatchNormRoCandidate,
 )
+from benchmarks.common.norm_kernel_cache import compile_ro_cached as _compile_ro_cached
 from rocke.instances.common.batchnorm2d_ro import batchnorm2d_ro_sync_ints
 from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
@@ -32,29 +29,8 @@ def compile_ro_cached(
     cand: BatchNormRoCandidate, *, dtype: str, arch: str, cache_dir: str
 ):
     """Load / build the kernel of a read-once candidate (shape- and plan-free key)."""
-    from rocke.helpers.compile import compile_kernel
-
     dtype = {"fp16": "f16", "fp32": "f32"}.get(dtype, dtype)
-    spec = cand.spec(dtype, arch)
-    kname = spec.kernel_name("bwd" if cand.backward else "train")
-    raw = f"batchnorm2d_ro|dynamic|{dtype}|{arch}|{cand.name}|{kname}"
-    path = Path(cache_dir) / (
-        "batchnorm2d_ro_" + hashlib.sha1(raw.encode("utf-8")).hexdigest()[:24] + ".pkl"
-    )
-    if path.is_file():
-        with path.open("rb") as fh:
-            return pickle.load(fh)
-    if os.environ.get("ROCKE_NORM_CACHE_ONLY") == "1":
-        raise RuntimeError(
-            f"AOT cache miss (ROCKE_NORM_CACHE_ONLY=1): {kname} -> {path}"
-        )
-    artifact = compile_kernel(cand.build(spec), arch=arch)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(f".pkl.{os.getpid()}.tmp")
-    with tmp.open("wb") as fh:
-        pickle.dump(artifact, fh, protocol=pickle.HIGHEST_PROTOCOL)
-    tmp.replace(path)
-    return artifact
+    return _compile_ro_cached(cand, dtype=dtype, arch=arch, cache_dir=cache_dir)
 
 
 _occ_cache: dict = {}
@@ -64,15 +40,10 @@ def resident_ctas(
     launcher: KernelLauncher, block_size: int, device: Optional[int] = None
 ) -> int:
     """CTAs of this kernel that can be co-resident on the device (occupancy x CUs)."""
-    from rocke.runtime.hip_module import get_device_num_cus
+    from rocke.runtime.hip_module import current_device, get_device_num_cus
 
     if device is None:
-        from rocke.runtime.hip_module import _resolve_hip as _rh
-
-        cur = ctypes.c_int(0)
-        if _rh().hipGetDevice(ctypes.byref(cur)) != 0:
-            raise RuntimeError("hipGetDevice failed")
-        device = cur.value
+        device = current_device()
     key = (launcher.kernel_name, block_size, device)
     if key in _occ_cache:
         return _occ_cache[key]
@@ -206,3 +177,13 @@ class RoRun:
             self.v["Epoch"] = self.epoch
             self.epoch += 1
         self.launcher(self.v, config=self.cfg)
+
+    def check(self) -> None:
+        """Block until the launches queued so far finish; raise if any spin ran out
+        of its bound (``Err`` > 0), which means the outputs hold partial sums."""
+        bad = int(self.err.read().reshape(-1)[0])
+        if bad > 0:
+            raise RuntimeError(
+                f"read-once exchange timed out ({bad} spin(s) exhausted MaxSpin): "
+                "outputs are invalid"
+            )

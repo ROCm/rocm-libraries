@@ -16,9 +16,9 @@ Not every MIOpenDriver line is runnable by the current kernel families -- see
 ``run_norm_shards.py``'s module docstring (and the plan this was built from)
 for the exact scope:
 
-* ``bnormfp16``/``bnormbfp16`` + ``--layout NCHW`` (or ``NCDHW`` with ``-D``, depth folded into the height) + ``--forw 1`` (training)
-  or ``--forw 2`` (inference). Bare ``bnorm`` (fp32), ``--layout NHWC``,
-  and ``--forw 0`` (backward) are out of scope.
+* ``bnormfp16``/``bnormbfp16``/bare ``bnorm`` (fp32) + ``--layout NCHW`` (or ``NCDHW`` with ``-D``, depth folded into the height) + ``--forw 1`` (training)
+  or ``--forw 2`` (inference); ``--layout NHWC`` and ``--forw 0`` (backward)
+  only when the caller opts in (see :func:`parse_bnorm_line`).
 * ``layernormbfp16`` + ``-L NW`` + ``-F 1`` (forward). ``-F 0`` (backward) is
   out of scope.
 
@@ -68,7 +68,7 @@ class ParsedCase:
         return (self.family, self.dims, self.dtype, self.mode)
 
 
-_BNORM_DTYPES = {"bnormfp16": "fp16", "bnormbfp16": "bf16", "bnorm": "fp32"}
+BNORM_DTYPES = {"bnormfp16": "fp16", "bnormbfp16": "bf16", "bnorm": "fp32"}
 _LNORM_DTYPES = {"layernormfp16": "fp16", "layernormbfp16": "bf16"}
 
 
@@ -81,7 +81,7 @@ def parse_bnorm_line(line: str, backward: bool = False, nhwc: bool = False):
     if not m:
         return None, "unparseable"
     token = m.group(1)
-    dtype = _BNORM_DTYPES.get(token)
+    dtype = BNORM_DTYPES.get(token)
     if dtype is None:
         return None, f"unknown-token({token})"
 

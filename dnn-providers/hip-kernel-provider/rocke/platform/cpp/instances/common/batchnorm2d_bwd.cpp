@@ -38,8 +38,8 @@ static void bwd_set_reason(char* reason, size_t reason_cap, const char* msg)
     rocke_spec_set_reason(reason, reason_cap, msg);
 }
 
-static rocke_value_t*
-    bwd_fadd_combine(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c, void* user)
+rocke_value_t*
+    rocke_bn_fadd_combine(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c, void* user)
 {
     (void)user;
     return rocke_b_fadd(b, a, c);
@@ -193,9 +193,9 @@ static void bwd_acc_body(rocke_ir_builder_t* b,
         rocke_value_t* xh = rocke_b_fmul(b, d, ctx->s->invstd_c);
         prods[i] = rocke_b_fmul(b, dys[i], xh);
     }
-    part = rocke_tree_reduce(b, bwd_fadd_combine, NULL, dys, vec);
+    part = rocke_tree_reduce(b, rocke_bn_fadd_combine, NULL, dys, vec);
     new_iter_vals[0] = rocke_b_fadd(b, iter_vars[0], part);
-    part = rocke_tree_reduce(b, bwd_fadd_combine, NULL, prods, vec);
+    part = rocke_tree_reduce(b, rocke_bn_fadd_combine, NULL, prods, vec);
     new_iter_vals[1] = rocke_b_fadd(b, iter_vars[1], part);
 }
 
@@ -507,7 +507,7 @@ bool rocke_batchnorm2d_is_valid_bwd_spec(const rocke_batchnorm2d_bwd_spec_t* spe
         bwd_set_reason(reason, reason_cap, "null spec");
         return false;
     }
-    if(spec->wave_size <= 0 || (spec->wave_size & (spec->wave_size - 1)) != 0)
+    if(!rocke_bn_wave_size_ok(spec->wave_size))
     {
         bwd_set_reason(reason, reason_cap, "wave_size must be a positive power of two");
         return false;
