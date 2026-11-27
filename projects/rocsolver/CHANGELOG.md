@@ -6,6 +6,9 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ## rocSOLVER 3.39.0 for ROCm 10.3.0
 
 ### Optimized
+* Replaced remaining compile-time `WarpSize` assumptions in GPU reduction
+paths with runtime `warpSize` handling, and updated shared-memory warp
+accumulator sizing helpers accordingly.
 
 * Improved performance of STEDC's secular equation solver
 
@@ -91,7 +94,6 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 * Support added for the gfx1250 architecture.
 
 ### Optimized
-
 * Refined `potf2_run_small` dispatch by `BS2` to avoid over-generating specialized kernels while preserving runtime bounds checks on `nb`.
 
 ### Resolved issues
