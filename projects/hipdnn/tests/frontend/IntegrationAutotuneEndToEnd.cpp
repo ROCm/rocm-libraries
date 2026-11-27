@@ -278,7 +278,9 @@ protected:
         config.mode = TuneMode::STANDARD;
         config.strategy = AutotuneStrategy::FIXED_AVERAGE;
         config.warmupIterations = 1;
-        config.timedIterations = 1;
+        // Five samples give the unstalled rerun five negative-reading retries under
+        // the existing max(N, 2) unstalled budget without changing production limits.
+        config.timedIterations = 5;
         config.engineIdFilter
             = {hipdnn_tests::plugin_constants::engineId<AutotunePluginEngineHostSyncs>()};
 
@@ -408,7 +410,11 @@ protected:
         // before HostSyncs exhausts its stalled negative-reading budget, autotune
         // legitimately restarts unstalled before HostSyncs runs, so the watchdog never
         // fires here. Probe HostSyncs alone to confirm stalling is actually active rather
-        // than silently disabled. Remove this branch when the runtime fix ships.
+        // than silently disabled. Because AutotuneResult does not expose the internal
+        // restart reason, this fallback also accepts an intermittent STALL_DECLINED when
+        // the HostSyncs probe arms on the same handle/stream; runIsolated() enables
+        // HIPDNN_LOG_LEVEL=warn so any STALL_DECLINED still appears explicitly in CI logs.
+        // Remove this branch when the runtime fix ships.
         if(elapsed < MIN_EXPECTED_STALL)
         {
             GTEST_LOG_(INFO)

@@ -17724,8 +17724,8 @@ TEST_F(TestGraph, AutotuneReplacesOneNegativeStalledReadingWithoutRestart)
     }
 }
 
-// Stalled readings that stay negative trip the stalled consecutive-negative limit. That
-// must not drop the candidate: the comparison restarts unstalled once and every candidate ranks.
+// Stalled readings that stay negative exhaust the candidate's retry budget. That must not
+// drop the candidate: the comparison restarts unstalled once and every candidate ranks.
 TEST_F(TestGraph, AutotuneRestartsUnstalledAfterThreeNegativeStalledReadings)
 {
     ::testing::FLAGS_gmock_verbose = "error";

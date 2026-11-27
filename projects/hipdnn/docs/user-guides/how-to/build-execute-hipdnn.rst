@@ -150,14 +150,12 @@ unstalled sample, then rerun every candidate unstalled once. Each new comparison
 attempts device-only timing again. A finite negative elapsed reading during a timed
 run is re-measured without disturbing the requested sample count or the convergence
 window, within a per-candidate budget that counts every negative reading in the pass.
-Because the Windows HIP runtime reads negative at a steady rate
-(ROCm/rocm-systems#12925), autotune allows one re-measurement per requested sample
-(at least eight) in both stalled and unstalled passes. In a stalled pass, three
-consecutive negative readings or exhausting the total budget reruns every candidate
-unstalled, so that bad stalled readings do not remove the fastest candidates. An
-unstalled candidate that exhausts its budget fails. Ingestor benchmarking allows two
-re-measurements per candidate in each pass; exhausting them restarts a stalled pass
-unstalled and fails an unstalled candidate.
+A stalled pass allows two re-measurements; one more negative reading reruns every
+candidate unstalled, so that bad stalled readings do not remove the fastest
+candidates. An unstalled pass allows two in ingestor benchmarking, and one per
+requested sample (at least two) in autotune, because the Windows HIP runtime reads
+negative at a steady rate (ROCm/rocm-systems#12925). An unstalled candidate that
+exhausts its budget fails.
 
 See :ref:`backend-api-attribute` for the low-level profiling attributes and
 backend context reuse.
