@@ -1,0 +1,61 @@
+# hipBLASLt Python bindings
+
+Low-level Python bindings for the hipBLASLt GEMM API, built with [nanobind](https://github.com/wjakob/nanobind).
+
+The bindings are a development and testing tool for hipBLASLt and its consumers, not a ROCm deliverable. They're opt-in and source-build only: you build them from a rocm-libraries checkout against an installed ROCm, and hipBLASLt's own build never builds or installs them.
+
+## Building
+
+You need CMake 3.25 or later and Ninja, plus a ROCm install with hipBLASLt's development files.
+
+```bash
+pip install cmake ninja
+```
+
+Point `ROCM_PATH` at the ROCm to build against, then install into the active Python environment:
+
+```bash
+# A ROCm install, for example /opt/rocm:
+ROCM_PATH=/opt/rocm pip install projects/hipblaslt/python
+
+# TheRock's rocm-sdk wheels (rocm[libraries,devel]):
+ROCM_PATH="$(rocm-sdk path --root)" pip install projects/hipblaslt/python
+```
+
+On Windows, hipBLASLt's headers need clang, so build with ROCm's `amdclang++` and Ninja from a Visual Studio developer prompt:
+
+```bat
+for /f "delims=" %i in ('rocm-sdk path --root') do set ROCM_PATH=%i
+set CXX=%ROCM_PATH%\lib\llvm\bin\amdclang++.exe
+set CC=%ROCM_PATH%\lib\llvm\bin\amdclang.exe
+set CMAKE_GENERATOR=Ninja
+pip install projects\hipblaslt\python
+```
+
+To build hipBLASLt and the bindings together, use `invoke build --python` from `projects/hipblaslt`. It installs the bindings into the Python environment that runs `invoke`.
+
+## Which libhipblaslt gets loaded
+
+`import hipblaslt` picks one library and loads it by full path before anything else, in this order:
+
+1. `HIPBLASLT_PY_LIBRARY`, a full path to `libhipblaslt.so.1` or `libhipblaslt.dll`;
+2. TheRock's rocm-sdk wheels, if they're installed;
+3. the hipBLASLt the bindings were built against;
+4. `$ROCM_PATH`, then `$ROCM_HOME`, if that one is gone.
+
+It warns (`HipblasLtLoadWarning`) when it doesn't end up on the hipBLASLt the bindings were built against and `HIPBLASLT_PY_LIBRARY` isn't set.
+
+If torch (or anything else) already loaded hipBLASLt, the bindings use that copy instead. The import raises `HipblasLtLoadError` when `HIPBLASLT_PY_LIBRARY` can't take effect because a different hipBLASLt is already loaded, or when hipBLASLt's companion libraries come from another build.
+
+## Testing
+
+```bash
+pip install pytest
+pytest projects/hipblaslt/python/tests
+```
+
+Tests marked `gpu` skip when no device is visible. Set `HIPBLASLT_PY_REQUIRE_GPU=1` to make them fail instead, as the GPU CI lanes do.
+
+## Design
+
+The decisions behind the bindings, and why, are in [`DESIGN.md`](DESIGN.md).
