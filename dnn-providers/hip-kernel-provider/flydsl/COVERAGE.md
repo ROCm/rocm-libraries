@@ -1145,7 +1145,9 @@ hipDNN states dropout cuDNN's way: `dropout_probability` with a seed and an offs
 - **Seed and offset:** `[1, 1, 1, 1]`, INT64 on the device (8-byte aligned; the kernel reads
   it there, as PyTorch passes it), or INT64/INT32 by value (widened on the host; a seed given by
   value is written to 8 bytes of workspace with two memsets on the launch stream, so the
-  launch stays capturable). INT32 on the device, a seed or offset without a probability, a
+  launch stays capturable). By value still needs rank-4 dims and strides: `set_value()` resets
+  them to `{1}`, so call `set_dim({1, 1, 1, 1}).set_stride({1, 1, 1, 1})` after it. INT32 on
+  the device, a seed or offset without a probability, a
   probability outside [0, 1), and the mask-and-scale form decline.
 - **The RNG dump** (`rng_dump`, `FlydslSdpaRngDump.hpp`): the keep mask the launch applied,
   FLOAT `[B, Hq, Sq, Skv]`, 1 kept and 0 dropped, which hipDNN's references apply as the

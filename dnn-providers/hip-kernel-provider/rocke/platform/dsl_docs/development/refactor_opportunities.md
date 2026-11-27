@@ -4,7 +4,7 @@ Consolidated from the parallel architecture-review buckets (gemm-family +
 helper/transform/launch reviews) and the perf-drift investigation. Findings are
 de-duplicated and grouped by THEME, then ranked impact/effort within each theme.
 
-**Status of local suites (gfx950 / MI355X):**
+**Status of local suites (gfx950):**
 - `tests/test_rocke.py` — **245 passed** (2.8s)
 - `tests/instances/test_rocke_multiarch.py` — **26 passed** (0.24s)
 
@@ -75,7 +75,7 @@ Repeated spec/grid/epilogue code that should be a shared helper.
 
 ## PERF section
 
-### Unified-attention drift (gfx950 / MI355X): ~25-40% slower than README
+### Unified-attention drift (gfx950): ~25-40% slower than README
 - **Status: ENVIRONMENT / BASELINE — not a code regression.** Do not "fix" kernels.
 - **Drift is real & repeatable** (not box noise): with warmup>=10, iters>=30 on
   torch's stream (same HIP-event timer as README), CK latency is rock-stable
@@ -89,7 +89,7 @@ Repeated spec/grid/epilogue code that should be a shared helper.
   The forced **2D kernel reproduces the README exactly** (prefill ck-2d 23.2us vs
   22.0us), and the **3D kernel body/ISA is byte-intact** with every README-credited
   optimization still present. Conclusion: the slowdown is in the 3D
-  segment/reduce path's environment/baseline (driver/runtime/clocks on this MI355X
+  segment/reduce path's environment/baseline (driver/runtime/clocks on this gfx950
   box), not in kernel source. **No refactor action; track as a baseline note.**
 
 ### Qwen example drift

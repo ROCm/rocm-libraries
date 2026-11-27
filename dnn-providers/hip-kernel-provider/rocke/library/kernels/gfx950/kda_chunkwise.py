@@ -102,6 +102,7 @@ from rocke.helpers.activations import (
     _sigmoid_via_exp2,
 )
 from rocke.helpers.atoms import MfmaAtom
+from rocke.helpers.reduction import butterfly_allreduce
 from rocke.helpers.spec import SignatureBuilder, kernel_name_join
 
 _RAW_VALUE_SPLITS = (1, 2, 4, 8)
@@ -613,16 +614,8 @@ def is_valid_spec(spec: KdaChunkPrepSpec, arch: str = "gfx950") -> Tuple[bool, s
 def _reduce16_fadd(b: IRBuilder, v):
     """Sum ``v`` across the 16-lane row subgroup (XOR butterfly)."""
     # Every stage stays inside the 16-lane DPP row, so the whole butterfly
-    # rides warp_shuffle_xor_dpp (VALU DPP, no LDS crossbar / no lgkmcnt(0)
-    # wait): masks 1 and 2 as themselves (quad_perm on gfx9), masks 4 and 8
-    # as dpp masks 7 and 15 (row_half_mirror / row_mirror). The stages run in
-    # ascending order, so every lane of a quad (half-row) already holds the
-    # same sum and the i ^ 7 (i ^ 15) partner adds the same value as i ^ 4
-    # (i ^ 8): bitwise identical to the plain xor butterfly.
-    for mask in (1, 2, 4, 8):
-        remote = b.warp_shuffle_xor_dpp(v, mask if mask <= 2 else 2 * mask - 1)
-        v = b.fadd(v, remote)
-    return v
+    # rides DPP (no LDS crossbar / no lgkmcnt(0) wait).
+    return butterfly_allreduce(b, v, b.fadd, stages=4)
 
 
 def _l2norm_scale8(b: IRBuilder, vals8):

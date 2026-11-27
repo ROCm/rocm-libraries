@@ -11,7 +11,7 @@
 # CHECK-LABEL: @gfx1250_xdl_counts_from_next_wmma
 # CHECK: s_wait_alu
 # CHECK-SAME: va_vdst = 2
-# CHECK: ds_load_b32
+# CHECK-NEXT: ds_load_b32
 
 st.func @gfx1250_xdl_counts_from_next_wmma() {
 ^entry:
@@ -30,7 +30,7 @@ st.func @gfx1250_xdl_counts_from_next_wmma() {
 # CHECK-LABEL: @gfx1250_xdl_no_next_wmma_keeps_per_pipe
 # CHECK: s_wait_alu
 # CHECK-SAME: va_vdst = 0
-# CHECK: ds_load_b32
+# CHECK-NEXT: ds_load_b32
 
 st.func @gfx1250_xdl_no_next_wmma_keeps_per_pipe() {
 ^entry:
@@ -48,7 +48,7 @@ st.func @gfx1250_xdl_no_next_wmma_keeps_per_pipe() {
 # CHECK-LABEL: @gfx1250_xdl_next_anchor_takes_the_nearer_trans
 # CHECK: s_wait_alu
 # CHECK-SAME: va_vdst = 3
-# CHECK: ds_load_b32
+# CHECK-NEXT: ds_load_b32
 
 st.func @gfx1250_xdl_next_anchor_takes_the_nearer_trans() {
 ^entry:

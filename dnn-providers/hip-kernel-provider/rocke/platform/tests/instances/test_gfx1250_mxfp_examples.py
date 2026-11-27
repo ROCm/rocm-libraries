@@ -67,6 +67,7 @@ def test_example_cli_rejects_unsupported_output(monkeypatch, family, capsys):
     assert "invalid choice" in capsys.readouterr().err
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize(
     "family,dtype",
     [

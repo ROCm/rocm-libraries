@@ -16,6 +16,8 @@ from rocke.numeric import storage
 from rocke.numeric.sdpa_reference import sdpa_reference
 
 __all__ = [
+    "PAGED_OUTPUT_ATOL",
+    "PAGED_OUTPUT_RTOL",
     "alibi_score_bias",
     "decode_half",
     "encode_half",
@@ -26,6 +28,14 @@ __all__ = [
     "rows_with_keys",
 ]
 
+
+# The element-wise bound on a paged attention output that still fails one
+# misaddressed K or V page. On long sequences the output's spread is about 0.05
+# (max |o| about 0.2), so a looser absolute bound could hide one misaddressed
+# page. rtol covers the bf16 rounding of the output, which grows with |o| on
+# short sequences (half an ulp is at most |o| / 256).
+PAGED_OUTPUT_ATOL = 2e-3
+PAGED_OUTPUT_RTOL = 2**-8
 
 _HALF_DTYPES = ("fp16", "bf16")
 

@@ -131,7 +131,7 @@ from .llvm_profile import (
     _flavor_at_least,
     _flavor_for_llvm,
     _is_modern_flavor,
-    _supports_llvm23_target_ops,
+    supports_llvm23_target_ops,
 )
 
 
@@ -2159,7 +2159,7 @@ class _Lowerer:
             raise ValueError(
                 f"{op} requires a target with {fact.value}, got {arch.gfx}"
             )
-        if not _supports_llvm23_target_ops(self._flavor):
+        if not supports_llvm23_target_ops(self._flavor):
             raise ValueError(f"{op} requires LLVM flavor llvm23, got {self._flavor}")
 
     # ----- constant folding helpers -----
@@ -7734,7 +7734,7 @@ def _encode_waitcnt_gfx11(vmcnt: int, expcnt: int, lgkmcnt: int) -> int:
 
     The gfx11 ``s_waitcnt`` field layout is *different* from the gfx9/gfx10
     split that :func:`_encode_waitcnt_gfx9_10` produces. It was determined
-    empirically on a gfx1151 (Strix Halo) node by assembling each counter
+    empirically on a gfx1151 node by assembling each counter
     in isolation with the ROCm 7.0.2 ``llvm-mc --show-encoding`` (LLVM's
     own AMDGPU ``encodeWaitcnt``); the encoded 16-bit immediates were:
 

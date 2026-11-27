@@ -130,6 +130,7 @@ def test_code_object_holds_one_v_bitop3_b32_per_op(arch):
     assert mnemonics.count("v_bitop3_b32") == len(_TABLES), mnemonics
 
 
+@pytest.mark.gpu
 def test_gpu_results_equal_the_truth_tables():
     from rocke.helpers.compile import compile_kernel
 

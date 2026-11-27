@@ -207,6 +207,7 @@ def test_hip_lowering_emits_expected_builtin(dtype):
         )
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("dtype", ["f16", "bf16"])
 def test_numerics_on_device(dtype):
     try:

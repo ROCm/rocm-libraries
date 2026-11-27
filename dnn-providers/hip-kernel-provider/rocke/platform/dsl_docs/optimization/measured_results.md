@@ -22,7 +22,7 @@ PYTHONPATH=python:../library python \
   dsl_docs/development/verify_dsl_docs.py
 ```
 
-Result on this checkout: **PASS: 50, FAIL: 0** in ~2 s on MI355X. Coverage includes:
+Result on this checkout: **PASS: 50, FAIL: 0** in ~2 s on gfx950. Coverage includes:
 
 - All public `rocke`, `rocke.helpers`, `rocke.runtime.launcher`, and `rocke.instances` symbols import cleanly.
 - Every documented `IRBuilder` method (arith, math, vector, wave / cross-lane, LDS, buffer, MFMA, fp8/bf8/i8 conversion, `s_waitcnt`, `scf_for_iter`, `scf_if`, etc.) emits LLVM IR.
@@ -37,7 +37,7 @@ Result on this checkout: **PASS: 50, FAIL: 0** in ~2 s on MI355X. Coverage inclu
 - The fusion subsystem (`FusedEpilogue`, `BiasAdd`, `ReLU`, `explain_fn`, `default_lowering_registry`, `FusionLegalizer`, `GreedyFusionScheduler`) constructs and walks an FX graph.
 - The autotuner (`Autotuner`, `AutotuneConfig`, `AutotuneResult`, `make_autotune_key`, `spec_replace`) constructs.
 - Quantization (`quant_max_abs`, `quant_ir_type`, `ir_to_qdtype`, `quantize_scalar_f32`, `dequantize_scalar_to_f32`) round-trips through IR.
-- Chiplet swizzle (`chiplet_transform_chunked` + `NUM_XCDS_MI300X/MI325X/MI350X == 8`) emits IR.
+- Chiplet swizzle (`chiplet_transform_chunked` + `NUM_XCDS_GFX942 == NUM_XCDS_GFX950 == 8`) emits IR.
 
 A small handful of doc inaccuracies surfaced during this verification and were corrected in-place:
 
@@ -183,7 +183,7 @@ These are **one** attempt with zero warmup. The README's published speedups (~1.
 These are the optimization-pass results for the single-batch d128/d64 forward
 prefill cohort (`UnifiedAttention2DTiledSpec`, `num_seqs=1`, bf16/fp16, no-FP8,
 no-SW, `max_seqlen_q>256`). They are **same-session HIP-event A/B vs torch SDPA
-flash** (MI355X / gfx950, LLVM backend llvm22 + comgr 7.2); a ratio >1.0 means CK
+flash** (gfx950, LLVM backend llvm22 + comgr 7.2); a ratio >1.0 means CK
 DSL is faster. On a clock-throttled box only same-session ratios and occupancy
 are trustworthy (runbook §10.6) — these are not absolute hero numbers.
 

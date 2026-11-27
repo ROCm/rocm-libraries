@@ -32,7 +32,7 @@ from rocke.core.ir_serialize import serialize
 from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.helpers.compile import _lower_llvm_via_backend, compile_kernel
 from rocke.tests.engines import skip_without_cpp_engine
-from rocke.tests.lanes import CI_TEST_TOOLS, skip_until
+from rocke.tests.lanes import BUILD_VARIANT, skip_until
 
 
 def _hint(streaming: bool) -> TemporalHint:
@@ -294,7 +294,7 @@ def _global_mem_lines(kernel, arch: str) -> list[str]:
     objdump = _objdump()
     if objdump is None:
         skip_until(
-            CI_TEST_TOOLS,
+            BUILD_VARIANT,
             reason="llvm-objdump not found (LLVM_OBJDUMP / ROCM_PATH / PATH)",
         )
     try:

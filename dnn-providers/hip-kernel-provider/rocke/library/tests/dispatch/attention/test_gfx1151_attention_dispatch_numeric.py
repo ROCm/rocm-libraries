@@ -40,12 +40,13 @@ from dispatch.attention import AttentionMaskType, AttentionRequest, dispatch_att
 from rocke.core.arch import generic_arch_from_target_id
 from rocke.runtime import hip_module
 from rocke.runtime.hip_module import Runtime, get_device_arch
+from rocke.tests.lanes import TICKET, skip_until
 
 # Every gfx11 (gfx12) device dispatches one gfx11-generic (gfx12-generic) set.
 _ARCH = generic_arch_from_target_id(get_device_arch() or "")
 _NEEDS_GPU = pytest.mark.skipif(
     _ARCH not in ("gfx11-generic", "gfx12-generic"),
-    reason="needs an RDNA3/3.5 (gfx11) or RDNA4 (gfx12) GPU",
+    reason="needs an RDNA3/3.5 (gfx11, such as gfx1100) or RDNA4 (gfx12) GPU",
 )
 
 _PREFILL = "wmma_fmha_fwd_v2"
@@ -64,7 +65,10 @@ def _require_served(algorithm: str, head_dim_q: int, head_dim_v: int) -> None:
     """Skip the decode parametrization where no decode bucket serves the
     widths (a bucket serves Q/K widths only from its own minimum up)."""
     if algorithm == _DECODE and not _decode_serves(head_dim_q, head_dim_v):
-        pytest.skip(f"no decode bucket serves head widths {head_dim_q}/{head_dim_v}")
+        skip_until(
+            TICKET,
+            reason=f"no decode bucket serves head widths {head_dim_q}/{head_dim_v}",
+        )
 
 
 def _decode_bucket_serves(bucket: int, head_dim_q: int) -> bool:
@@ -1932,7 +1936,9 @@ def _run_rtdim(request, q, k, v, *, scale, spec=None, bias=None, overrides=None)
 def test_runtime_head_dims_serve_every_width_in_a_bucket(bucket, dim, algorithm):
     """An explicit bucket object at widths well below its bucket."""
     if algorithm == _DECODE and not _decode_bucket_serves(bucket, dim):
-        pytest.skip(f"the decode bucket {bucket} does not serve hdim_q={dim}")
+        skip_until(
+            TICKET, reason=f"the decode bucket {bucket} does not serve hdim_q={dim}"
+        )
     batch, sq, sk, hq, hkv = 2, 37, 53, 8, 4
     q, k, v = _rtdim_qkv(501, batch, sq, sk, hq, hkv, hkv, dim, dim)
     scale = 1.0 / np.sqrt(dim)
@@ -2094,7 +2100,9 @@ def test_runtime_head_dims_rows_ending_at_the_allocation(bucket, dim, algorithm)
     ``d`` must be bounded by the K/V extent rather than read past the
     tensor."""
     if algorithm == _DECODE and not _decode_bucket_serves(bucket, dim):
-        pytest.skip(f"the decode bucket {bucket} does not serve hdim_q={dim}")
+        skip_until(
+            TICKET, reason=f"the decode bucket {bucket} does not serve hdim_q={dim}"
+        )
     batch, sq, sk, hq, hkv = 2, 37, 53, 8, 4
     q, k, v = _rtdim_qkv(508, batch, sq, sk, hq, hkv, hkv, dim, dim)
 

@@ -8,15 +8,16 @@ scratch tree, runs them in pytest processes that stand for CI lanes (each
 lane's environment picks the skip reason a test gives), and audits the
 records against ``rocke.tests.pending_lanes``. A test declares the lane it
 waits for with ``rocke.tests.lanes.skip_until``. The registry entries it relies
-on: ``library/tests/test_attention_ir_cpp_parity.py`` waits for the binding
-lane, ``platform/tests/instances/test_gfx950_mxfp4_numeric.py`` for a gfx950
-runner, and ``platform/tests/portable_ir/test_portable_ir.py::test_record_coverage``
+on: a library test file waits for the build variant alone,
+``platform/tests/instances/test_gfx950_mxfp4_numeric.py`` for the runner
+hardware, and ``platform/tests/portable_ir/test_portable_ir.py::test_record_coverage``
 is quarantined.
 """
 
 from __future__ import annotations
 
 import importlib.util
+import json
 import subprocess
 import sys
 import textwrap
@@ -24,22 +25,39 @@ from pathlib import Path
 
 import pytest
 from rocke.assets import platform_root
-from rocke.tests.lanes import BINDING_LANE, GFX950_RUNNER, skip_until_reason
+from rocke.tests.lanes import (
+    BUILD_VARIANT,
+    RUNNER_HARDWARE,
+    SOURCE_TREE,
+    skip_until_reason,
+)
 from rocke.tests.pending_lanes import PENDING
 from rocke.tests.run_records import RECORDS_DIR_ENV, UNFINISHED, read_run_records
 from rocke.tests.subprocess_launcher import rocke_subprocess_env
 
 ROCKE = platform_root().parent
 _CHILD_TIMEOUT_SECONDS = 120
-# A library test file the registry lists under the binding lane alone, derived
+# A library test file the registry lists under the build variant alone, derived
 # so the example follows the registry: the audit tests below need one whose
 # only recorded reason is that lane.
-BINDING_FILE = min(
+BUILD_VARIANT_FILE = min(
     path
     for path in {entry.path for entry in PENDING}
     if path.startswith("library/tests/")
     and {entry.lane.name for entry in PENDING if entry.path == path}
-    == {BINDING_LANE.name}
+    == {BUILD_VARIANT.name}
+)
+# A test file whose cases the registry lists under the source tree alone, as
+# cases that declare it rather than as the whole file.
+SOURCE_TREE_FILE = min(
+    path
+    for path in {entry.path for entry in PENDING}
+    if {
+        (entry.lane.name, entry.whole_file, entry.node)
+        for entry in PENDING
+        if entry.path == path
+    }
+    == {(SOURCE_TREE.name, False, "")}
 )
 GFX950_FILE = "platform/tests/instances/test_gfx950_mxfp4_numeric.py"
 QUARANTINED_TEST = "platform/tests/portable_ir/test_portable_ir.py"
@@ -62,8 +80,9 @@ limbo_audit = _load_audit_tool()
 
 def test_the_registry_entries_this_audit_relies_on_hold():
     lanes = {(entry.path, entry.lane.name) for entry in PENDING if not entry.node}
-    assert (BINDING_FILE, BINDING_LANE.name) in lanes
-    assert (GFX950_FILE, GFX950_RUNNER.name) in lanes
+    assert (BUILD_VARIANT_FILE, BUILD_VARIANT.name) in lanes
+    assert (GFX950_FILE, RUNNER_HARDWARE.name) in lanes
+    assert (SOURCE_TREE_FILE, SOURCE_TREE.name) in lanes
     assert not any(entry.path == UNREGISTERED_FILE for entry in PENDING)
 
 
@@ -129,14 +148,19 @@ def _audit(tree: Path, lanes: dict[str, Path], universe: Path | None = None):
 _SKIPS_BY_LANE = """
 import os
 import pytest
-from rocke.tests.lanes import BINDING_LANE, GFX950_RUNNER, skip_until_reason
+from rocke.tests.lanes import (
+    BUILD_VARIANT,
+    RUNNER_HARDWARE,
+    SOURCE_TREE,
+    skip_until_reason,
+)
 
 def skip_for(reasons):
     reason = reasons.get(os.environ["FAKE_LANE"])
     if reason:
         pytest.skip(reason)
 """
-_DECLARED_BINDING = skip_until_reason(BINDING_LANE, reason="no rocke_engine")
+_DECLARED_BUILD_VARIANT = skip_until_reason(BUILD_VARIANT, reason="no rocke_engine")
 
 
 def test_a_skip_that_declares_the_files_lane_is_accounted_for_and_no_other(tmp_path):
@@ -149,24 +173,26 @@ def test_runs():
     pass
 
 def test_waits_for_gfx950():
-    skip_for({"gfx942": skip_until_reason(GFX950_RUNNER, reason="needs a gfx950 GPU")})
+    skip_for({"gfx942": skip_until_reason(RUNNER_HARDWARE, reason="needs a gfx950 GPU")})
 
 def test_only_mentions_gfx950():
     skip_for({"gfx942": "the gfx950 kernel is refused here"})
 
-def test_waits_for_the_binding():
-    skip_for({"gfx942": skip_until_reason(BINDING_LANE, reason="no rocke_engine")})
+def test_waits_for_the_build_variant():
+    skip_for({"gfx942": skip_until_reason(BUILD_VARIANT, reason="no rocke_engine")})
 """,
         },
     )
     records = _run_lane(tree, tmp_path / "gfx942", "gfx942")
-    # The file waits for a gfx950 runner, not the binding; a skip that names
+    # The file waits for the runner hardware, not the build variant; a skip that names
     # gfx950 without declaring the lane is not booked as waiting for it.
     assert _audit(tree, {"gfx942": records}) == {
         (GFX950_FILE, "test_only_mentions_gfx950"): {
             "gfx942": "the gfx950 kernel is refused here"
         },
-        (GFX950_FILE, "test_waits_for_the_binding"): {"gfx942": _DECLARED_BINDING},
+        (GFX950_FILE, "test_waits_for_the_build_variant"): {
+            "gfx942": _DECLARED_BUILD_VARIANT
+        },
     }
 
 
@@ -174,11 +200,11 @@ def test_a_skip_that_names_another_lanes_gpu_leaves_the_test_to_that_lane(tmp_pa
     tree = _tree_with(
         tmp_path,
         {
-            BINDING_FILE: _SKIPS_BY_LANE
+            BUILD_VARIANT_FILE: _SKIPS_BY_LANE
             + """
 def test_explained_where_its_gpu_is():
     skip_for({
-        "gfx942": skip_until_reason(BINDING_LANE, reason="no rocke_engine"),
+        "gfx942": skip_until_reason(BUILD_VARIANT, reason="no rocke_engine"),
         "gfx1100": "needs a gfx942 GPU, found gfx1100",
     })
 
@@ -200,8 +226,8 @@ def test_each_lane_leaves_it_to_the_other():
         lane: _run_lane(tree, tmp_path / lane, lane) for lane in ("gfx942", "gfx1100")
     }
     assert set(_audit(tree, lanes)) == {
-        (BINDING_FILE, "test_unexplained_where_its_gpu_is"),
-        (BINDING_FILE, "test_each_lane_leaves_it_to_the_other"),
+        (BUILD_VARIANT_FILE, "test_unexplained_where_its_gpu_is"),
+        (BUILD_VARIANT_FILE, "test_each_lane_leaves_it_to_the_other"),
     }
 
 
@@ -218,8 +244,8 @@ def test_a_lane_run_in_part_leaves_the_other_shards_tests_to_the_other_lanes(
                 f"""
 def test_waits_for_gfx950_{index}():
     skip_for({{
-        "gfx942": skip_until_reason(GFX950_RUNNER, reason="needs a gfx950 GPU"),
-        "gfx1100": skip_until_reason(GFX950_RUNNER, reason="needs a gfx950 GPU"),
+        "gfx942": skip_until_reason(RUNNER_HARDWARE, reason="needs a gfx950 GPU"),
+        "gfx1100": skip_until_reason(RUNNER_HARDWARE, reason="needs a gfx950 GPU"),
     }})
 """
                 for index in range(6)
@@ -263,6 +289,31 @@ def test_left_out():
     )
     assert _audit(tree, {"gfx942": selected_only}, universe) == {
         (UNREGISTERED_FILE, "test_left_out"): {}
+    }
+
+
+def test_a_case_no_lane_collected_is_in_limbo_beside_a_case_that_ran(tmp_path):
+    """A lane that runs one case of a parametrized test by its node id never
+    collects the others; the universe still holds them, and a real case is
+    never taken for the placeholder of an empty parameter set."""
+    tree = _tree_with(
+        tmp_path,
+        {
+            UNREGISTERED_FILE: """
+import pytest
+
+@pytest.mark.parametrize("shape", ["small", "large"])
+def test_shape(shape):
+    pass
+""",
+        },
+    )
+    universe = _run_lane(tree, tmp_path / "universe", "none", "--collect-only")
+    small_only = _run_lane(
+        tree, tmp_path / "gfx942", "gfx942", f"{UNREGISTERED_FILE}::test_shape[small]"
+    )
+    assert _audit(tree, {"gfx942": small_only}, universe) == {
+        (UNREGISTERED_FILE, "test_shape[large]"): {}
     }
 
 
@@ -332,6 +383,112 @@ def test_with_no_case_anywhere(case):
     ]
 
 
+def test_an_empty_parameter_set_skipped_by_a_skip_mark_is_no_missing_test(tmp_path):
+    """A lane whose parameter set is empty skips the placeholder case with the
+    reason of the test's own skip mark, not pytest's empty-set reason: the
+    placeholder's id (``[NOTSET]``, or a ``NOTSET`` part of a stacked
+    parametrize's id) still says no case is missing where other cases ran."""
+    tree = _tree_with(
+        tmp_path,
+        {
+            UNREGISTERED_FILE: """
+import os
+import pytest
+
+CASES = {"gfx942": [1, 2], "gfx1100": []}[os.environ["FAKE_LANE"]]
+
+NOT_HERE = pytest.mark.skipif(
+    os.environ["FAKE_LANE"] != "gfx942", reason="needs a gfx942 GPU, found gfx1100"
+)
+
+@NOT_HERE
+@pytest.mark.parametrize("case", CASES)
+def test_per_gpu(case):
+    pass
+
+@NOT_HERE
+@pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+@pytest.mark.parametrize("case", CASES)
+def test_per_gpu_and_dtype(case, dtype):
+    pass
+""",
+        },
+    )
+    lanes = {
+        lane: _run_lane(tree, tmp_path / lane, lane) for lane in ("gfx942", "gfx1100")
+    }
+    assert _audit(tree, lanes) == {}
+
+
+def test_an_empty_parameter_set_stands_for_no_case_where_other_lanes_have_cases(
+    tmp_path,
+):
+    """Where another lane collected real cases of the test, the placeholder
+    stands for no case, whether those cases ran or not: each real case is
+    audited itself, in limbo only when its own reasons are unrecorded."""
+    tree = _tree_with(
+        tmp_path,
+        {
+            GFX950_FILE: _SKIPS_BY_LANE
+            + """
+CASES = {"gfx942": [1, 2], "gfx1100": []}[os.environ["FAKE_LANE"]]
+
+@pytest.mark.parametrize("case", CASES)
+def test_recorded_where_it_has_cases(case):
+    skip_for({"gfx942": skip_until_reason(RUNNER_HARDWARE, reason="needs a gfx950 GPU")})
+
+@pytest.mark.parametrize("case", CASES)
+def test_unrecorded_where_it_has_cases(case):
+    skip_for({"gfx942": "the kernel is refused here"})
+""",
+        },
+    )
+    lanes = {
+        lane: _run_lane(tree, tmp_path / lane, lane) for lane in ("gfx942", "gfx1100")
+    }
+    assert set(_audit(tree, lanes)) == {
+        (GFX950_FILE, "test_unrecorded_where_it_has_cases[1]"),
+        (GFX950_FILE, "test_unrecorded_where_it_has_cases[2]"),
+    }
+
+
+@pytest.mark.parametrize("last", ["undeclared", "declared"])
+def test_a_lane_keeps_the_recorded_reason_of_one_entry_that_left_a_test_out(
+    tmp_path, last
+):
+    """A lane's host entry leaves an integration test out with a reason that
+    declares the source tree, and its GPU entry leaves it out as no GPU test:
+    whichever entry ran last, the lane's reason is the recorded one."""
+    tree = _tree_with(
+        tmp_path,
+        {
+            SOURCE_TREE_FILE: """
+import pytest
+
+@pytest.mark.integration
+def test_reads_the_source_tree():
+    pass
+""",
+        },
+    )
+    records = tmp_path / "gfx942"
+    selections = {
+        "declared": "not integration and not gpu",
+        "undeclared": "gpu and not integration",
+    }
+    first = "declared" if last == "undeclared" else "undeclared"
+    for entry in (first, last):
+        _run_lane(
+            tree,
+            records,
+            "gfx942",
+            "-m",
+            selections[entry],
+            statuses=(pytest.ExitCode.NO_TESTS_COLLECTED,),
+        )
+    assert _audit(tree, {"gfx942": records}) == {}
+
+
 def test_an_installed_path_maps_to_its_source_file():
     source_paths = limbo_audit.SourcePaths(
         [
@@ -357,15 +514,60 @@ def test_an_installed_path_maps_to_its_source_file():
     )
     # Two source files of that name and no longer suffix in common: none.
     assert source_paths.source_of("/elsewhere/test_dtypes.py") is None
+    # A path a Windows run wrote maps the same on any reader's OS.
+    assert (
+        source_paths.source_of(r"C:\x\hip_kernel_provider\tests\core\test_dtypes.py")
+        == "platform/tests/core/test_dtypes.py"
+    )
+
+
+def _as_windows_records(records: Path, destination: Path) -> Path:
+    """A copy of the run records in ``records`` with each file path written as
+    a run on Windows writes it without run_records' "/" separators: a drive
+    and backslashes."""
+    destination.mkdir()
+    for path in records.glob("*.jsonl"):
+        lines = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            fields = json.loads(line)
+            if fields["file"]:
+                fields["file"] = "C:" + fields["file"].replace("/", "\\")
+            lines.append(json.dumps(fields))
+        (destination / path.name).write_text("\n".join(lines) + "\n", "utf-8")
+    return destination
+
+
+# A test that skips with a reason no registry entry records.
+_SKIPS_WHY = "def test_skips():\n    import pytest; pytest.skip('why')\n"
+
+
+def test_records_a_windows_run_wrote_are_audited_on_any_os(tmp_path):
+    tree = _tree_with(tmp_path, {UNREGISTERED_FILE: _SKIPS_WHY})
+    records = _run_lane(tree, tmp_path / "gfx1100", "gfx1100")
+    windows = _as_windows_records(records, tmp_path / "windows")
+    assert _audit(tree, {"gfx1100": windows}) == {
+        (UNREGISTERED_FILE, "test_skips"): {"gfx1100": "why"}
+    }
+
+
+def test_a_lane_whose_records_name_no_source_test_file_fails_the_audit(tmp_path):
+    """Records of another tree (or none at all) are no evidence that the lane
+    ran anything: the audit fails rather than reporting no test in limbo."""
+    tree = _tree_with(tmp_path, {UNREGISTERED_FILE: "def test_passes():\n    pass\n"})
+    other = _tree_with(tmp_path / "other", {"tests/test_elsewhere.py": "x = 1\n"})
+    records = _run_lane(tree, tmp_path / "gfx942", "gfx942")
+    report = tmp_path / "limbo.md"
+    arguments = ["--lane", f"gfx942={records}", "--report", str(report)]
+    assert limbo_audit.main([*arguments, "--tree", str(tree)]) == 0
+    assert limbo_audit.main([*arguments, "--tree", str(other)]) == 1
+    assert (
+        "Lanes with no record naming a source test file, so no evidence: gfx942"
+        in report.read_text()
+    )
 
 
 def test_the_command_fails_on_a_test_in_limbo_and_writes_its_report(tmp_path):
-    tree = _tree_with(
-        tmp_path,
-        {
-            UNREGISTERED_FILE: "def test_skips():\n    import pytest; pytest.skip('why')\n"
-        },
-    )
+    tree = _tree_with(tmp_path, {UNREGISTERED_FILE: _SKIPS_WHY})
     records = _run_lane(tree, tmp_path / "gfx942", "gfx942")
     report = tmp_path / "limbo.md"
     arguments = [

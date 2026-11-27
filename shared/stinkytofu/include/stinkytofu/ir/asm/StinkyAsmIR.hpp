@@ -545,6 +545,29 @@ inline bool isImplicitDest(const StinkyRegister& reg, const StinkyInstruction& i
     return false;
 }
 
+inline bool isVccRegType(RegType t) {
+    return t == RegType::VCC || t == RegType::VCC_LO || t == RegType::VCC_HI;
+}
+
+inline bool isExecRegType(RegType t) {
+    return t == RegType::EXEC || t == RegType::EXEC_LO || t == RegType::EXEC_HI;
+}
+
+/// A source register is implicit (not printed) when it was added solely for dependency tracking.
+inline bool isImplicitSrc(const StinkyRegister& reg, const StinkyInstruction& inst) {
+    if (reg.dataType != StinkyRegister::Type::Register) return false;
+
+    RegType t = reg.reg.type;
+
+    if (t == RegType::SCC) return true;
+
+    if (isVccRegType(t) && inst.is(InstFlag::IF_ImplicitReadVCC)) return true;
+
+    if (isExecRegType(t) && inst.is(InstFlag::IF_ImplicitReadEXEC)) return true;
+
+    return false;
+}
+
 /// True iff `inst` is a returning MUBUF/FLAT/GLOBAL atomic -- i.e. one whose
 /// destination is a real (non-pseudo, non-implicit) register that a later
 /// instruction can consume, as opposed to a fire-and-forget atomic with no
@@ -859,6 +882,12 @@ inline bool hasSideEffect(const StinkyInstruction& inst) {
     if ((isGlobalMemStore(inst) && !isGlobalStoreAsyncFromLds(inst)) || isBranch(inst) ||
         isCall(inst) || isWaitCnt(inst) || isHasSideEffect(inst))
         return true;
+    // A fixed outstanding-count contract is relative to tensor issue order;
+    // moving its barrier across even a disjoint producer changes its meaning.
+    if (isBarrier(inst)) {
+        const auto* tensorWait = inst.getModifier<SWaitTensorCntData>();
+        if (tensorWait != nullptr && tensorWait->tlcnt >= 0) return true;
+    }
     if ((isBarrier(inst) || isTensorLoad(inst) || isDSRead(inst) || isDSWrite(inst) ||
          isGlobalStoreAsyncFromLds(inst)) &&
         !hasLdsPseudoRegs(inst))

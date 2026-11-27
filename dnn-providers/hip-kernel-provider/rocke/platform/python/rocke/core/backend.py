@@ -92,7 +92,9 @@ BACKEND_CPP = "cpp"
 BACKEND_BOTH = "both"
 _VALID_BACKENDS = (BACKEND_PYTHON, BACKEND_CPP, BACKEND_BOTH)
 
-_ENV_VAR = "ROCKE_BACKEND"
+# The environment variable that selects a process's backend; public so that
+# every module that sets it names the one resolve_backend reads.
+BACKEND_ENV = "ROCKE_BACKEND"
 
 # Package default backend for Python-authored kernel lowering. Flipped from
 # ``python`` to ``cpp`` after the full guarantee sweep proved the C++ engine
@@ -161,14 +163,14 @@ def resolve_backend(backend: Optional[str] = None) -> str:
     """
     chosen = backend
     if chosen is None:
-        chosen = os.environ.get(_ENV_VAR)
+        chosen = os.environ.get(BACKEND_ENV)
     if chosen is None or chosen == "":
         chosen = _DEFAULT_BACKEND
     chosen = chosen.strip().lower()
     if chosen not in _VALID_BACKENDS:
         raise BackendError(
             f"unknown backend {chosen!r}; expected one of {_VALID_BACKENDS} "
-            f"(via backend= argument or {_ENV_VAR} environment variable)"
+            f"(via backend= argument or {BACKEND_ENV} environment variable)"
         )
     return chosen
 

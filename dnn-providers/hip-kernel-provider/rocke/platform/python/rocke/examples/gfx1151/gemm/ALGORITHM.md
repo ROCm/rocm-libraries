@@ -55,7 +55,7 @@ operands without changing the result.
 
 ## 2. The matrix unit on this part: gfx11 WMMA
 
-gfx1151 (RDNA3.5 / Strix Halo) has **no MFMA** (the CDNA matrix instruction).
+gfx1151 (RDNA3.5) has **no MFMA** (the CDNA matrix instruction).
 Its matrix unit is the RDNA3 **WMMA** instruction, and the only f16 atom is
 
 $$

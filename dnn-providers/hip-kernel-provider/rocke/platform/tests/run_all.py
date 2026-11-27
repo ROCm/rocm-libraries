@@ -12,8 +12,9 @@
 #
 # Usage:
 #   python rocke/platform/tests/run_all.py [--no-guard] [--no-gate] [--no-pytest]
-#       [--no-both] [--no-backend-width] [--only SUBSTR] [--only-ir SUBSTR]
-#       [--build-root DIR] [--config CONFIG] [--pytest-target PATH_OR_NODE_ID]
+#       [--no-both] [--no-backend-width] [--keep-going] [--only SUBSTR]
+#       [--only-ir SUBSTR] [--build-root DIR] [--config CONFIG]
+#       [--pytest-target PATH_OR_NODE_ID]
 #
 # The two filters are separate by *vocabulary*, not by gate. `--only` selects
 # *families* for the byte-identity gate; `--only-ir` selects *case ids*
@@ -27,6 +28,11 @@
 # Filtering is separate from skipping: an unfiltered gate still runs in full;
 # use `--no-gate` / `--no-ir-validity` / `--no-arch-domain` /
 # `--no-backend-width` to opt out of one.
+#
+# The backend access-width gate is resource-bound (it compiles kernels), so it
+# does not start once an earlier stage has failed (TESTING.md, section 5.0.1);
+# `--keep-going` runs it anyway, to gather more failures in one run. It holds
+# that gate only: the ctest stage after it runs whatever came before.
 
 from __future__ import annotations
 
@@ -233,13 +239,16 @@ def _native_executable(
 
 
 def _cmake_home(build_root: Path) -> Path | None:
-    cache = build_root / "CMakeCache.txt"
-    if not cache.is_file():
+    """The source tree ``build_root`` was configured from, or None when it is
+    not a configured tree."""
+    if not (build_root / "CMakeCache.txt").is_file():
         return None
-    for line in cache.read_text(errors="ignore").splitlines():
-        if line.startswith("CMAKE_HOME_DIRECTORY:INTERNAL="):
-            return Path(line.split("=", 1)[1]).resolve()
-    return None
+    # Imported here, not at the top: the runner must start where rocke is not
+    # importable (an isolated `--help`).
+    from rocke.tests.platform_build import cmake_cache_entries
+
+    home = cmake_cache_entries(build_root).get("CMAKE_HOME_DIRECTORY")
+    return None if home is None else Path(home).resolve()
 
 
 def configure_pytest_build(build_root: Path, config: str) -> None:
@@ -292,6 +301,17 @@ def _built_test_program(build_root: Path, config: str, name: str) -> Path | None
     )
 
 
+def _recorded_program(build_root: Path, config: str, target: str) -> Path | None:
+    """The program ``target`` as the configure of ``build_root`` recorded it
+    (rocke_record_program_path in platform/CMakeLists.txt): its path, whatever
+    the build mode named it and wherever it put it, or None when the configure
+    recorded none."""
+    record = _built_file(build_root, config, (f"{target}.path",))
+    if record is None:
+        return None
+    return Path(record.read_text(encoding="utf-8").strip())
+
+
 def native_pytest_env(build_root: Path, config: str) -> dict[str, str]:
     """Build the configured suite and supply its native artifacts to pytest."""
     env = dict(os.environ)
@@ -335,7 +355,7 @@ def native_pytest_env(build_root: Path, config: str) -> dict[str, str]:
     # rocke_hip_lowering_parity CTests supply the same variable.
     from rocke.tests.engines import IR_LOWER_CLI_ENV
 
-    ir_lower_cli = env.get(IR_LOWER_CLI_ENV) or _built_test_program(
+    ir_lower_cli = env.get(IR_LOWER_CLI_ENV) or _recorded_program(
         build_root, config, "rocke_ir_lower_cli"
     )
     _export_native_executable(
@@ -561,6 +581,12 @@ def main() -> int:
         "COMGR and check the width of every global access)",
     )
     ap.add_argument(
+        "--keep-going",
+        action="store_true",
+        help="run the backend access-width gate even after an earlier stage "
+        "failed (it holds that gate only; the ctest stage runs either way)",
+    )
+    ap.add_argument(
         "--only",
         default="",
         help="restrict byte-identity gate to families containing SUBSTR "
@@ -664,7 +690,13 @@ def main() -> int:
         status |= differential_pytest_pass(pytest_env, selected_pytests)
 
     if not args.no_backend_width:
-        status |= backend_width_gate()
+        if status and not args.keep_going:
+            print(
+                "\n== backend access-width gate: NOT RUN (an earlier stage failed; "
+                "pass --keep-going to run it) =="
+            )
+        else:
+            status |= backend_width_gate()
 
     build_root = Path(args.build_root)
     # Run the entire registered suite once any executable is built; partial

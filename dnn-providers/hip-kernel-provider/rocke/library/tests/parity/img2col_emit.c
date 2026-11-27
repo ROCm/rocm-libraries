@@ -113,6 +113,37 @@ static int make_spec(int idx, rocke_img2col_spec_t* spec)
         spec->block_tile_k = 128;
         spec->vec_k = 4;
         break;
+    case 6: /* grouped: both engines' spec checks refuse it (single group only) */
+        p.N = 2;
+        p.Hi = 16;
+        p.Wi = 16;
+        p.C = 32;
+        p.K = 32;
+        p.Y = 3;
+        p.X = 3;
+        p.groups = 2;
+        spec->block_tile_m = 8;
+        spec->block_tile_k = 128;
+        spec->vec_k = 4;
+        break;
+    case 7: /* 3-D: both engines' spec checks refuse it (2-D only) */
+        p.N = 1;
+        p.Hi = 8;
+        p.Wi = 8;
+        p.C = 16;
+        p.K = 16;
+        p.Y = 3;
+        p.X = 3;
+        p.is_3d = true;
+        p.Di = 4;
+        p.Z = 3;
+        p.sD = 1;
+        p.pD = 0;
+        p.dD = 1;
+        spec->block_tile_m = 4;
+        spec->block_tile_k = 64;
+        spec->vec_k = 1;
+        break;
     default:
         return -1;
     }
@@ -147,8 +178,10 @@ int main(int argc, char** argv)
     rocke_kernel_def_t* kernel = rocke_build_img2col_new(&b, &spec, "gfx950");
     if(kernel == NULL)
     {
+        /* "builder error: " is the prefix the parity gate reads a refusal
+         * message behind, to compare it with the Python engine's. */
         const char* m = rocke_ir_builder_error(&b);
-        fprintf(stderr, "build failed: %s\n", m ? m : "(no message)");
+        fprintf(stderr, "builder error: %s\n", m ? m : "(no message)");
         rocke_ir_builder_free(&b);
         return 1;
     }

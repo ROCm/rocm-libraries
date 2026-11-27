@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 #
 # tests/parity/gfx1151_wmma_gemm_int8_emit.py -- Python reference emitter for the
-# gfx1151 (RDNA3.5 / Strix Halo) INT8-storage / f16-compute WMMA GEMM parity
+# gfx1151 (RDNA3.5) INT8-storage / f16-compute WMMA GEMM parity
 # harness. Selects one of 6 sampled WmmaGemmInt8Spec configs by argv[1] (0..5),
 # builds it via build_wmma_gemm_int8 and prints
 # lower_kernel_to_llvm(arch='gfx1151') to stdout so it can be byte-compared with

@@ -17,6 +17,7 @@ from types import MappingProxyType, SimpleNamespace
 
 import numpy as np
 import pytest
+from rocke.tests.torch_uses import TorchUse, torch_uses_in_python
 
 from ._analytical import (
     _FORMAT,
@@ -1161,82 +1162,17 @@ def test_oracle_free_sources_have_no_complete_attention_dependency() -> None:
 
 # TheRock's provider test environment has NumPy and ml_dtypes but no torch, so a
 # torch dependency anywhere in this suite would turn the GPU gate into a skip.
-# The module name is held in one constant and compared by equality, so the
-# checker below does not flag its own source.
-_TORCH = "torch"
-_IMPORT_CALLS = frozenset({"importorskip", "import_module", "__import__", "find_spec"})
-
-
-def _is_torch_module(name: str) -> bool:
-    return name.split(".")[0] == _TORCH
-
-
-def _torch_dependency_violations(source: str, filename: str) -> list[str]:
-    """Flag torch imports at any nesting, torch-loading calls, and torch names."""
-    tree = ast.parse(source, filename=filename)
-    violations: list[str] = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            violations.extend(
-                f"line {node.lineno}: import {imported.name}"
-                for imported in node.names
-                if _is_torch_module(imported.name)
-            )
-        elif isinstance(node, ast.ImportFrom):
-            if node.level == 0 and _is_torch_module(node.module or ""):
-                violations.append(f"line {node.lineno}: from {node.module}")
-        elif isinstance(node, ast.Call):
-            name = _dotted_name(node.func)
-            argument = node.args[0] if node.args else None
-            if (
-                name.split(".")[-1] in _IMPORT_CALLS
-                and isinstance(argument, ast.Constant)
-                and isinstance(argument.value, str)
-                and _is_torch_module(argument.value)
-            ):
-                violations.append(f"line {node.lineno}: {name}({argument.value!r})")
-        elif isinstance(node, ast.Name) and node.id == _TORCH:
-            violations.append(f"line {node.lineno}: name {node.id}")
-    return violations
-
-
+# Unlike the tree-wide gate, this suite allows no kind of use at all.
 def test_oracle_free_sources_have_no_torch_dependency() -> None:
     root = Path(__file__).parent
     sources = sorted(root.glob("*.py"))
     assert {"__init__.py", Path(__file__).name} <= {path.name for path in sources}
-    violations: dict[str, list[str]] = {}
+    violations: dict[str, list[TorchUse]] = {}
     for path in sources:
         source = path.read_text(encoding="utf-8")
-        if found := _torch_dependency_violations(source, str(path)):
+        if found := torch_uses_in_python(source, str(path)):
             violations[path.name] = found
     assert not violations
-
-
-@pytest.mark.parametrize(
-    "source",
-    [
-        "import torch\n",
-        "import torch.cuda as cuda\n",
-        "def load():\n    from torch import nn\n    return nn\n",
-        "import pytest\npytest.importorskip('torch')\n",
-        "import importlib\nimportlib.import_module('torch.cuda')\n",
-        "import importlib.util\nimportlib.util.find_spec('torch')\n",
-        "__import__('torch')\n",
-        "torch.zeros(1)\n",
-    ],
-)
-def test_torch_checker_flags_every_dependency_form(source: str) -> None:
-    assert _torch_dependency_violations(source, "<synthetic>")
-
-
-def test_torch_checker_accepts_torch_free_source() -> None:
-    clean = (
-        "import numpy as np\n"
-        "FORBIDDEN = ('torch.nn.functional.scaled_dot_product_attention',)\n"
-        "def run(module):\n"
-        "    return np.zeros(1), module.torch_free\n"
-    )
-    assert _torch_dependency_violations(clean, "<synthetic>") == []
 
 
 _SKIP_CALLS = frozenset({"skip", "skipif", "importorskip", "xfail"})

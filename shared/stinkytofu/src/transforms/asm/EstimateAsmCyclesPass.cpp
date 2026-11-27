@@ -22,182 +22,286 @@
  * ************************************************************************ */
 #include "stinkytofu/transforms/asm/EstimateAsmCyclesPass.hpp"
 
+#include <algorithm>
 #include <cassert>
 #include <cstdint>
+#include <deque>
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <queue>
+#include <set>
+#include <span>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
+#include "dag/ReadyQueue.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/HWModel.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 #include "stinkytofu/support/Casting.hpp"
+#include "stinkytofu/support/LoopDetection.hpp"
 
 #define DEBUG_TYPE "EstimateAsmCyclesPass"
 
 namespace {
 using namespace stinkytofu;
 constexpr const char* kEstimateAsmTotalCyclesMetadataKey = "EstimateAsmCyclesPass.totalCycles";
+constexpr const char* kEstimateAsmPreLoopCyclesMetadataKey = "EstimateAsmCyclesPass.preLoopCycles";
+constexpr const char* kEstimateAsmMainLoopCyclesMetadataKey =
+    "EstimateAsmCyclesPass.mainLoopCycles";
+constexpr const char* kEstimateAsmPostLoopCyclesMetadataKey =
+    "EstimateAsmCyclesPass.postLoopCycles";
 
-class AsmCycleEstimator {
-   public:
-    void setLocalReadLatencyByArch(stinkytofu::GfxArchID arch) {
-        // The gfx12.5 branch is intentionally identical to the default for now. It is a
-        // placeholder for future measured gfx12.5 local read/write latencies (the v0 and v1
-        // steppings may differ here), kept as its own branch so those values can land without
-        // reintroducing arch branching. FIXME: populate with measured gfx12.5 values.
-        if (isGfx125(arch)) {
-            LocalReadBaseLatencyB128 = 1;
-            LocalReadBaseLatencyB64 = 1;
-            LocalReadBaseLatencyB32 = 1;
-            LocalReadConflictMultiplierB128 = 1;
-            LocalReadConflictMultiplierB64 = 1;
-            LocalReadConflictMultiplierB32 = 1;
-            LocalWriteBaseLatencyB128 = 1;
-            LocalWriteBaseLatencyB64 = 1;
-            LocalWriteBaseLatencyB32 = 1;
-            LocalWriteConflictMultiplierB128 = 1;
-            LocalWriteConflictMultiplierB64 = 1;
-            LocalWriteConflictMultiplierB32 = 1;
-        } else {
-            // default setting
-            LocalReadBaseLatencyB128 = 1;
-            LocalReadBaseLatencyB64 = 1;
-            LocalReadBaseLatencyB32 = 1;
-            LocalReadConflictMultiplierB128 = 1;
-            LocalReadConflictMultiplierB64 = 1;
-            LocalReadConflictMultiplierB32 = 1;
-            LocalWriteBaseLatencyB128 = 1;
-            LocalWriteBaseLatencyB64 = 1;
-            LocalWriteBaseLatencyB32 = 1;
-            LocalWriteConflictMultiplierB128 = 1;
-            LocalWriteConflictMultiplierB64 = 1;
-            LocalWriteConflictMultiplierB32 = 1;
+// The unrolled K loop, not a peeled InitC clone or the tail loop. Those labels
+// also contain "LoopBeginL", so a substring match picks the wrong boundary.
+bool isPrimaryLoopHeader(stinkytofu::BasicBlock const& bb) {
+    auto const& label = bb.getLabel();
+    return label == "label_LoopBeginL" || label == "LoopBeginL";
+}
+
+// InsertClusterBarrierPass keeps the dispatch block named label_LoopBeginL and
+// retargets the wave-0 latch to label_LoopBeginL_CBWave0. That branch still
+// closes the primary loop. A peeled InitC clone does not use this exact name.
+bool isPrimaryLoopBackTarget(std::string const& target) {
+    return target == "label_LoopBeginL" || target == "LoopBeginL" ||
+           target == "label_LoopBeginL_CBWave0" || target == "LoopBeginL_CBWave0";
+}
+
+// The non-zero-wave copy is the same iteration as wave 0. Counting it again in
+// the epilogue would add a second copy of the body. The name alone is not
+// enough: label_skipCBPreSignal_LCL_* is the LoopCounterL == 0 join, and
+// CFGBuilder names the straight-line piece after it with the same prefix.
+// Only a branch at or after the block, back to that block, marks the copy.
+bool isAlternateWaveHeader(std::string const& label) {
+    return label.starts_with("label_skipCBPreSignal_");
+}
+
+void markAlternateWaveLoopBlocks(std::vector<BasicBlock*> const& ordered,
+                                 std::vector<char>& excluded) {
+    for (size_t headerIdx = 0; headerIdx < ordered.size(); ++headerIdx) {
+        std::string const& header = ordered[headerIdx]->getLabel();
+        if (!isAlternateWaveHeader(header)) continue;
+        std::optional<size_t> latch;
+        for (size_t i = headerIdx; i < ordered.size(); ++i) {
+            for (IRBase& irNode : *ordered[i]) {
+                StinkyInstruction* inst = dyn_cast<StinkyInstruction>(&irNode);
+                if (inst == nullptr || !isBranch(*inst)) continue;
+                if (getBranchTarget(*inst) == header) latch = i;
+            }
         }
+        if (!latch.has_value()) continue;
+        for (size_t i = headerIdx; i <= *latch; ++i) excluded[i] = 1;
     }
-    int getLocalWriteLatency(int baseLatency, int conflictMultiplier, double bankConflict) {
-        int conflictPenalty = bankConflict * conflictMultiplier;
-        return baseLatency + conflictPenalty;
-    }
-    int getLocalReadLatency(int baseLatency, int conflictMultiplier, double bankConflict) {
-        int conflictPenalty = (bankConflict - 1) * conflictMultiplier;
-        return baseLatency + conflictPenalty;
-    }
-    int getLocalReadQueueFullStallCycles(int currentCycle, std::queue<int>& fifo, int bpRead,
-                                         int numWaves, bool isStall, double bankConflict) {
-        int lrStallLatencyBuffer;
-        if (!isStall) {
-            lrStallLatencyBuffer = 1;
-        } else if (bpRead == 16) {
-            lrStallLatencyBuffer = getLocalReadLatency(
-                LocalReadBaseLatencyB128, LocalReadConflictMultiplierB128, bankConflict);
-        } else if (bpRead == 8) {
-            lrStallLatencyBuffer = getLocalReadLatency(
-                LocalReadBaseLatencyB64, LocalReadConflictMultiplierB64, bankConflict);
-        } else {
-            lrStallLatencyBuffer = getLocalReadLatency(
-                LocalReadBaseLatencyB32, LocalReadConflictMultiplierB32, bankConflict);
-        }
-        return getLocalReadStallCycles(currentCycle, fifo, bpRead, numWaves, lrStallLatencyBuffer);
-    }
-    void pushLocalReadWrite(int currentCycle, std::queue<int>& fifo, int bpr, double bankConflict,
-                            bool isLocalRead, int numPreviousLRs) {
-        int lrMemLatency;
-        if (isLocalRead) {
-            if (bpr == 16) {
-                lrMemLatency = getLocalReadLatency(LocalReadBaseLatencyB128,
-                                                   LocalReadConflictMultiplierB128, bankConflict);
-                if (numPreviousLRs <= 4) {
-                    lrMemLatency += 2 * numPreviousLRs;
-                } else {
-                    // Maximum 4 * 2 latency for previous local reads
-                    lrMemLatency += 2 * 4;
+}
+
+// Global-write edge fork. NonEdge is the full tile. Then/Else are the
+// partial-tile stores, reached by a short cbranch or by an annotated
+// s_setpc_b64. The estimate always keeps NonEdge.
+bool isGlobalWriteEdgeTarget(std::string const& target) {
+    bool const globalWrite = target.find("GW_") != std::string::npos;
+    auto endsWith = [](std::string const& s, std::string const& suffix) {
+        return s.size() >= suffix.size() &&
+               s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
+    };
+    return globalWrite && (endsWith(target, "_Then") || endsWith(target, "_Else"));
+}
+
+// Longest path in one phase. Back-edges are dropped, so a loop body counts once.
+// Exclusive edges contribute only the heavier side.
+uint32_t longestPathCycles(std::vector<BasicBlock*> const& nodes,
+                           std::unordered_map<BasicBlock*, std::vector<BasicBlock*>> const& succ,
+                           std::unordered_map<BasicBlock*, uint32_t> const& cost,
+                           std::unordered_set<BasicBlock*> const& ignoredRoots) {
+    std::unordered_set<BasicBlock*> inSet(nodes.begin(), nodes.end());
+    std::unordered_map<BasicBlock*, int> color;
+    std::set<std::pair<BasicBlock*, BasicBlock*>> backEdges;
+    auto dfs = [&](auto const& self, BasicBlock* bb) -> void {
+        color[bb] = 1;
+        auto const it = succ.find(bb);
+        if (it != succ.end()) {
+            for (BasicBlock* next : it->second) {
+                if (inSet.count(next) == 0) continue;
+                if (color[next] == 1) {
+                    backEdges.insert({bb, next});
+                } else if (color[next] == 0) {
+                    self(self, next);
                 }
-            } else if (bpr == 8) {
-                lrMemLatency = getLocalReadLatency(LocalReadBaseLatencyB64,
-                                                   LocalReadConflictMultiplierB64, bankConflict);
-            } else {
-                lrMemLatency = getLocalReadLatency(LocalReadBaseLatencyB32,
-                                                   LocalReadConflictMultiplierB32, bankConflict);
-            }
-        } else {
-            // Local write latency
-            if (bpr == 16) {
-                lrMemLatency = getLocalWriteLatency(LocalWriteBaseLatencyB128,
-                                                    LocalWriteConflictMultiplierB128, bankConflict);
-            } else if (bpr == 8) {
-                lrMemLatency = getLocalWriteLatency(LocalWriteBaseLatencyB64,
-                                                    LocalWriteConflictMultiplierB64, bankConflict);
-            } else {
-                lrMemLatency = getLocalWriteLatency(LocalWriteBaseLatencyB32,
-                                                    LocalWriteConflictMultiplierB32, bankConflict);
             }
         }
-        fifo.push(currentCycle + lrMemLatency);
-    }
-    int getGlobalReadQueueFullStallCycles(int currentCycle, std::deque<int>& fifo, int bpRead,
-                                          int numWaves, bool isStall, bool isSgprOffset) {
-        int extraIssueCycles = 0;
-        if (isSgprOffset) {
-            extraIssueCycles = 1;
-        }
-        (void)fifo;
-        (void)bpRead;
-        (void)numWaves;
-        (void)isStall;
-        return currentCycle + extraIssueCycles;
-    }
-    int getLocalWriteQueueFullStallCycles(int currentCycle, int previousLW, int issueCycles,
-                                          int bpr, int numWaves) {
-        return currentCycle;
-    }
-    int getLocalReadCompletionCycle(int currentCycle, std::queue<int>& fifo, std::size_t numLR) {
-        if (fifo.size() <= numLR) return currentCycle;
-        int finalCycle = currentCycle;
-        // pop finisned LR
-        while (fifo.size() > numLR) {
-            int oldCycle = fifo.front();
-            if (oldCycle < currentCycle)
-                fifo.pop();
-            else
-                break;
-        }
-        // check non-finished LR
-        while (fifo.size() > numLR) {
-            int oldCycle = fifo.front();
-            finalCycle = std::max(finalCycle, oldCycle);
-            fifo.pop();
-        }
-        return finalCycle;
-    }
-    int getLocalReadStallCycles(int currentCycle, std::queue<int>& fifo, int bpRead, int numWaves,
-                                int lrStallLatencyBuffer) {
-        (void)bpRead;
-        (void)numWaves;
-        int finalCycle = currentCycle + lrStallLatencyBuffer;
-        fifo.push(finalCycle);
-        return currentCycle;
+        color[bb] = 2;
+    };
+    for (BasicBlock* bb : nodes) {
+        if (color[bb] == 0) dfs(dfs, bb);
     }
 
-   private:
-    int LocalReadBaseLatencyB128;
-    int LocalReadBaseLatencyB64;
-    int LocalReadBaseLatencyB32;
-    int LocalReadConflictMultiplierB128;
-    int LocalReadConflictMultiplierB64;
-    int LocalReadConflictMultiplierB32;
-    int LocalWriteBaseLatencyB128;
-    int LocalWriteBaseLatencyB64;
-    int LocalWriteBaseLatencyB32;
-    int LocalWriteConflictMultiplierB128;
-    int LocalWriteConflictMultiplierB64;
-    int LocalWriteConflictMultiplierB32;
+    std::unordered_map<BasicBlock*, int> indegree;
+    std::unordered_map<BasicBlock*, std::vector<BasicBlock*>> forward;
+    for (BasicBlock* bb : nodes) indegree[bb] = 0;
+    for (BasicBlock* bb : nodes) {
+        auto const it = succ.find(bb);
+        if (it == succ.end()) continue;
+        for (BasicBlock* next : it->second) {
+            if (inSet.count(next) == 0 || backEdges.count({bb, next}) != 0) continue;
+            forward[bb].push_back(next);
+            indegree[next] += 1;
+        }
+    }
+
+    // A skipped global-write edge leaves its target with no predecessor. That
+    // block is not an alternate entry; only blocks reachable from a real entry
+    // contribute. Other indegree-0 blocks stay entries, so an unmodeled fork
+    // still keeps its heavier side.
+    // Membership stays in a set. Iteration uses a vector so the order does not
+    // depend on pointer values (bugprone-nondeterministic-pointer-iteration-order).
+    std::unordered_set<BasicBlock*> reachableSet;
+    std::vector<BasicBlock*> reachable;
+    std::queue<BasicBlock*> walk;
+    for (BasicBlock* bb : nodes) {
+        if (indegree[bb] == 0 && ignoredRoots.count(bb) == 0) {
+            reachableSet.insert(bb);
+            reachable.push_back(bb);
+            walk.push(bb);
+        }
+    }
+    while (!walk.empty()) {
+        BasicBlock* bb = walk.front();
+        walk.pop();
+        for (BasicBlock* next : forward[bb]) {
+            if (reachableSet.insert(next).second) {
+                reachable.push_back(next);
+                walk.push(next);
+            }
+        }
+    }
+
+    std::unordered_map<BasicBlock*, int> reachIndegree;
+    for (BasicBlock* bb : reachable) reachIndegree[bb] = 0;
+    for (BasicBlock* bb : reachable) {
+        for (BasicBlock* next : forward[bb]) {
+            if (reachableSet.count(next) != 0) reachIndegree[next] += 1;
+        }
+    }
+
+    std::queue<BasicBlock*> ready;
+    std::unordered_map<BasicBlock*, uint32_t> dist;
+    for (BasicBlock* bb : reachable) {
+        auto const costIt = cost.find(bb);
+        uint32_t const blockCost = costIt == cost.end() ? 0 : costIt->second;
+        dist[bb] = reachIndegree[bb] == 0 ? blockCost : 0;
+        if (reachIndegree[bb] == 0) ready.push(bb);
+    }
+    while (!ready.empty()) {
+        BasicBlock* bb = ready.front();
+        ready.pop();
+        for (BasicBlock* next : forward[bb]) {
+            if (reachableSet.count(next) == 0) continue;
+            uint32_t const nextCost = cost.count(next) ? cost.at(next) : 0;
+            dist[next] = std::max(dist[next], dist[bb] + nextCost);
+            reachIndegree[next] -= 1;
+            if (reachIndegree[next] == 0) ready.push(next);
+        }
+    }
+    uint32_t best = 0;
+    for (BasicBlock* bb : reachable) best = std::max(best, dist[bb]);
+    return best;
+}
+
+// Legacy keeps the per-instruction query on the old loop-body slice.
+// LoopBody counts one iteration of a block in the primary-loop range and stops
+// at the back-edge. EntireBlock counts every instruction, which is what
+// prologue and epilogue blocks contribute.
+enum class BlockCycleScope { Legacy, LoopBody, EntireBlock };
+
+// The DAG issue model charges s_set_vgpr_msb its own issue cycle. On gfx1250 it can
+// issue in the same cycle as the instruction immediately before it when that
+// instruction is a SALU other than a barrier, a VALU, or a v_wmma (including the
+// scaled v_wmma forms).
+bool isSetVgprMsb(const StinkyInstruction& inst) {
+    return inst.getUnifiedOpcode() == GFX::s_set_vgpr_msb;
+}
+
+bool msbCoIssuesWith(const StinkyInstruction& prev) {
+    if (isBarrier(prev)) return false;
+    return isScalarALU(prev) || isVectorALU(prev) || isWMMA(prev) || isMXWMMA(prev);
+}
+
+// One LDS op the DS counter still has to retire. issueClock is the replay clock at which the
+// op starts issuing. The drain entry is that one op: computeDynamicDrainLatencyForLoads on a
+// single entry returns its own latency, capped by maxDrain.
+struct IssuedDsOp {
+    int issueClock = 0;
+    DsLoadDrainEntry entry;
 };
+
+// Issue state for one basic block. It is not carried to the next block: a
+// predecessor may be on another side of a branch, and longest-path adds the
+// block costs after the fact.
+struct CycleReplay {
+    std::unique_ptr<dag::ReadyQueue> queue;
+    std::deque<IssuedDsOp> inflightDs;
+    const StinkyInstruction* prevIssued = nullptr;
+    int cycles = 0;
+};
+
+// s_wait_dscnt(N) / the ds half of s_wait_loadcnt_dscnt. N is how many LDS ops may still be
+// outstanding when the wait completes. Absent when this instruction does not wait on dscnt.
+std::optional<int> dsWaitKeepCount(const StinkyInstruction& inst) {
+    if (!isWaitCnt(inst)) return std::nullopt;
+    const uint16_t op = inst.getUnifiedOpcode();
+    if (op != GFX::s_wait_dscnt && op != GFX::s_wait_loadcnt_dscnt) return std::nullopt;
+
+    if (const SWaitCntData* w = inst.getModifier<SWaitCntData>()) {
+        const int dl = w->dlcnt;
+        const int ds = w->dscnt;
+        if (dl >= 0 && ds >= 0) return std::min(dl, ds);
+        if (dl >= 0) return dl;
+        if (ds >= 0) return ds;
+    }
+    const auto& srcs = inst.getSrcRegs();
+    if (!srcs.empty() && srcs[0].dataType == StinkyRegister::Type::LiteralInt) {
+        const int imm = srcs[0].getLiteralInt();
+        if (op == GFX::s_wait_loadcnt_dscnt) return unpackDsWaitCnt(imm);
+        return imm;
+    }
+    return std::nullopt;
+}
+
+int dsOpRemaining(const HWModel& hw, const IssuedDsOp& op, int now, int numWaves) {
+    const int drain = computeDynamicDrainLatencyForLoads(
+        hw, std::span<const DsLoadDrainEntry>(&op.entry, 1), numWaves);
+    return drain - (now - op.issueClock);
+}
+
+// Cycles until the oldest outstanding ops have returned and only \p keep remain.
+// ds_load, ds_load, s_wait_dscnt 1 waits for the first load: its drain minus the cycles
+// already spent since that load started issuing.
+int dsWaitStallCycles(const HWModel& hw, const std::deque<IssuedDsOp>& inflight, int keep, int now,
+                      int numWaves) {
+    std::vector<int> outstanding;
+    outstanding.reserve(inflight.size());
+    for (const IssuedDsOp& op : inflight) {
+        const int left = dsOpRemaining(hw, op, now, numWaves);
+        if (left > 0) outstanding.push_back(left);
+    }
+    if (keep < 0) keep = 0;
+    if (static_cast<int>(outstanding.size()) <= keep) return 0;
+    const size_t mustFinish = outstanding.size() - static_cast<size_t>(keep);
+    int stall = 0;
+    for (size_t i = 0; i < mustFinish; ++i) stall = std::max(stall, outstanding[i]);
+    return stall;
+}
+
+void retireReturnedDsOps(const HWModel& hw, std::deque<IssuedDsOp>& inflight, int now,
+                         int numWaves) {
+    while (!inflight.empty() && dsOpRemaining(hw, inflight.front(), now, numWaves) <= 0)
+        inflight.pop_front();
+}
 
 /// Implementation of the EstimateAsmCycles pass
 ///
@@ -218,34 +322,159 @@ class EstimateAsmCyclesPassImpl : public Pass {
 
     PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& AM) override {
         (void)AM;
-        // Reset total cycles before processing
+        // Reset total and phase cycles before processing.
         totalCycles_ = 0;
+        phaseCycles_ = {};
 
-        // Process all basic blocks
-        for (BasicBlock& bb : func) {
-            // Skip filtered basic blocks
-            if (!passCtx.shouldProcessBasicBlock(bb)) continue;
-
-            // std::cout << "Processing basic block: " << bb.getLabel() << "\n";
-            // Only process the loopWithPrefetch block
-
-            // if(bb.getLabel() == "LocalReadDoA_I0" || bb.getLabel() == "LocalReadDoB_I0")
-            // {
-            //     calculateLocalReadBytes(bb, passCtx);
-
-            // }
-            // else if(bb.getLabel() == "LocalRead")
-            // {
-            //     analyzeBankConflicts(bb, passCtx);
-            // }
-            // else if(bb.getLabel() == "label_LoopBeginL")
-            // {
-            //     calculateMathClocksInUnrolledLoop(bb, passCtx);
-            // }
-            calculateMathClocksInUnrolledLoop(bb, passCtx);
+        // The per-instruction query is a read-only slice of the unrolled loop.
+        // Phase totals are for the publishing pass, which sees the whole kernel.
+        if (perInstructionCycleQuery_) {
+            for (BasicBlock& bb : func) {
+                if (!passCtx.shouldProcessBasicBlock(bb)) continue;
+                calculateMathClocksInUnrolledLoop(bb, passCtx, BlockCycleScope::Legacy);
+            }
+            PASS_DEBUG(std::cerr << "[EstimateAsmCyclesPass] totalCycles=" << totalCycles_ << "\n");
+            return PreservedAnalyses::all();
         }
-        // std::cout << "[EstimateAsmCycles] Total Asm Cycles: " << totalCycles_ << "\n";
-        if (publishMetadata_) func.setMetaData(kEstimateAsmTotalCyclesMetadataKey, totalCycles_);
+
+        // detectLoops walks CFG successor edges. The K-loop back-edge is the
+        // branch to label_LoopBeginL, or to label_LoopBeginL_CBWave0 after
+        // InsertClusterBarrierPass retargets the wave-0 latch. That edge is often
+        // missing after later passes split the body. Close the range on the branch
+        // instruction itself: every block from the header through the block that
+        // branches back is the loop. detectLoops still contributes when its edges
+        // are present.
+        std::vector<BasicBlock*> ordered;
+        ordered.reserve(func.size());
+        for (BasicBlock& bb : func) ordered.push_back(&bb);
+
+        std::unordered_set<BasicBlock*> loopBlocks;
+        for (const Loop& loop : detectLoops(func)) {
+            if (loop.headerBB != nullptr && isPrimaryLoopHeader(*loop.headerBB)) {
+                loopBlocks.insert(loop.bodyBBs.begin(), loop.bodyBBs.end());
+            }
+        }
+
+        auto branchesToPrimaryLoop = [](BasicBlock& bb) {
+            for (IRBase& irNode : bb) {
+                StinkyInstruction* inst = dyn_cast<StinkyInstruction>(&irNode);
+                if (inst == nullptr || !isBranch(*inst)) continue;
+                std::string const target = getBranchTarget(*inst);
+                if (isPrimaryLoopBackTarget(target)) return true;
+            }
+            return false;
+        };
+
+        std::optional<size_t> headerIdx;
+        std::optional<size_t> latchIdx;
+        for (size_t i = 0; i < ordered.size(); ++i) {
+            if (!headerIdx.has_value() && isPrimaryLoopHeader(*ordered[i])) headerIdx = i;
+            if (branchesToPrimaryLoop(*ordered[i])) latchIdx = i;
+        }
+        if (headerIdx.has_value() && latchIdx.has_value() && *latchIdx >= *headerIdx) {
+            for (size_t i = *headerIdx; i <= *latchIdx; ++i) loopBlocks.insert(ordered[i]);
+        } else if (loopBlocks.empty() && headerIdx.has_value()) {
+            loopBlocks.insert(ordered[*headerIdx]);
+        }
+
+        std::optional<size_t> rangeBegin;
+        std::optional<size_t> rangeEnd;
+        for (size_t i = 0; i < ordered.size(); ++i) {
+            if (loopBlocks.count(ordered[i]) == 0) continue;
+            if (!rangeBegin.has_value()) rangeBegin = i;
+            rangeEnd = i;
+        }
+
+        std::unordered_map<std::string, BasicBlock*> labelMap;
+        for (BasicBlock* bb : ordered) {
+            if (!bb->getLabel().empty()) labelMap.emplace(bb->getLabel(), bb);
+        }
+        std::unordered_map<BasicBlock*, std::vector<BasicBlock*>> succ;
+        std::unordered_set<BasicBlock*> ignoredEdgeRoots;
+        for (BasicBlock* bb : ordered) {
+            if (isGlobalWriteEdgeTarget(bb->getLabel())) ignoredEdgeRoots.insert(bb);
+        }
+        for (size_t i = 0; i < ordered.size(); ++i) {
+            BasicBlock* bb = ordered[i];
+            StinkyInstruction* term = nullptr;
+            for (auto it = bb->rbegin(); it != bb->rend(); ++it) {
+                if (StinkyInstruction* inst = dyn_cast<StinkyInstruction>(it.getNodePtr())) {
+                    term = inst;
+                    break;
+                }
+            }
+            bool fallsThrough = true;
+            if (term != nullptr && isBranch(*term)) {
+                std::string const target = getBranchTarget(*term);
+                // Branch to the partial-tile store, either a short cbranch or a
+                // long s_setpc_b64. Leave it untaken so the path stays on NonEdge.
+                bool const skipEdgeStore = isGlobalWriteEdgeTarget(target);
+                auto const targetIt = labelMap.find(target);
+                if (skipEdgeStore && targetIt != labelMap.end())
+                    ignoredEdgeRoots.insert(targetIt->second);
+                if (!skipEdgeStore && targetIt != labelMap.end())
+                    succ[bb].push_back(targetIt->second);
+                if (!isConditionalBranch(*term)) fallsThrough = false;
+            }
+            if (term != nullptr && isEndOfFunction(*term)) fallsThrough = false;
+            if (fallsThrough && i + 1 < ordered.size()) {
+                BasicBlock* next = ordered[i + 1];
+                if (std::find(succ[bb].begin(), succ[bb].end(), next) == succ[bb].end()) {
+                    succ[bb].push_back(next);
+                }
+            }
+        }
+
+        std::vector<char> excluded(ordered.size(), 0);
+        markAlternateWaveLoopBlocks(ordered, excluded);
+
+        // Each block is replayed from empty issue state. The other wave's copy is
+        // skipped so its instructions are not added to the epilogue.
+        std::unordered_map<BasicBlock*, uint32_t> blockCost;
+        std::string primaryLoopLabels;
+        std::vector<BasicBlock*> preBlocks;
+        std::vector<BasicBlock*> postBlocks;
+        for (size_t i = 0; i < ordered.size(); ++i) {
+            BasicBlock& bb = *ordered[i];
+            bool const inLoop = rangeBegin.has_value() && i >= *rangeBegin && i <= *rangeEnd;
+            uint32_t blockCycles = 0;
+            if (excluded[i] == 0 && passCtx.shouldProcessBasicBlock(bb)) {
+                if (inLoop) {
+                    if (!primaryLoopLabels.empty()) primaryLoopLabels += ',';
+                    primaryLoopLabels += bb.getLabel();
+                }
+                calculateMathClocksInUnrolledLoop(
+                    bb, passCtx, inLoop ? BlockCycleScope::LoopBody : BlockCycleScope::EntireBlock);
+                blockCycles = totalCycles_;
+            }
+            blockCost[&bb] = blockCycles;
+            if (excluded[i] != 0) continue;
+            if (inLoop) {
+                phaseCycles_.mainLoopCycles += blockCycles;
+            } else if (rangeBegin.has_value() && i > *rangeEnd) {
+                postBlocks.push_back(&bb);
+            } else {
+                preBlocks.push_back(&bb);
+            }
+        }
+        phaseCycles_.preLoopCycles =
+            longestPathCycles(preBlocks, succ, blockCost, ignoredEdgeRoots);
+        phaseCycles_.postLoopCycles =
+            longestPathCycles(postBlocks, succ, blockCost, ignoredEdgeRoots);
+        PASS_DEBUG(std::cerr << "[EstimateAsmCyclesPass] primaryLoop=" << primaryLoopLabels
+                             << "\n");
+        totalCycles_ =
+            phaseCycles_.preLoopCycles + phaseCycles_.mainLoopCycles + phaseCycles_.postLoopCycles;
+        PASS_DEBUG(
+            std::cerr << "[EstimateAsmCyclesPass] preLoopCycles=" << phaseCycles_.preLoopCycles
+                      << " mainLoopCycles=" << phaseCycles_.mainLoopCycles << " postLoopCycles="
+                      << phaseCycles_.postLoopCycles << " totalCycles=" << totalCycles_ << "\n");
+        if (publishMetadata_) {
+            func.setMetaData(kEstimateAsmTotalCyclesMetadataKey, totalCycles_);
+            func.setMetaData(kEstimateAsmPreLoopCyclesMetadataKey, phaseCycles_.preLoopCycles);
+            func.setMetaData(kEstimateAsmMainLoopCyclesMetadataKey, phaseCycles_.mainLoopCycles);
+            func.setMetaData(kEstimateAsmPostLoopCyclesMetadataKey, phaseCycles_.postLoopCycles);
+        }
 
         return PreservedAnalyses::all();
     }
@@ -253,6 +482,10 @@ class EstimateAsmCyclesPassImpl : public Pass {
     /// Get the total cycles calculated by this pass
     unsigned int getTotalCycles() const {
         return totalCycles_;
+    }
+
+    EstimateAsmCyclePhases getPhaseCycles() const {
+        return phaseCycles_;
     }
 
     /// Per-instruction cumulative cycle positions recorded during the last run.
@@ -289,488 +522,18 @@ class EstimateAsmCyclesPassImpl : public Pass {
     void appendComment(StinkyInstruction* inst, const std::string& suffix) {
         if (!inst || suffix.empty()) return;
         if (auto* c = inst->getModifier<CommentData>()) {
-            if (!c->comment.empty()) c->comment += " ";
+            if (!c->comment.empty()) c->comment += ' ';
             c->comment += suffix;
         } else {
             inst->addModifier<CommentData>(CommentData{suffix});
         }
     }
 
-    struct WmmaCoExecProfile {
-        int windowCycles = 0;
-        std::vector<bool> valuCoExecSlots;
-    };
-
-    static std::string toUpperASCII(std::string_view s) {
-        std::string out;
-        out.reserve(s.size());
-        for (char c : s) {
-            if (c >= 'a' && c <= 'z')
-                out.push_back(static_cast<char>(c - ('a' - 'A')));
-            else
-                out.push_back(c);
-        }
-        return out;
-    }
-
-    static std::optional<WmmaCoExecProfile> getWmmaCoExecProfile(const StinkyInstruction& inst) {
-        WmmaCoExecProfile profile;
-        // Default profile for unknown/non-WMMA instructions:
-        // one-cycle window with no co-exec slot.
-        profile.windowCycles = 1;
-        profile.valuCoExecSlots.assign(1, false);
-
-        if (!inst.getHwInstDesc()) return profile;
-
-        const std::string mnemonic = toUpperASCII(inst.getHwInstDesc()->mnemonic);
-        if (!mnemonic.starts_with("V_WMMA_")) return profile;
-
-        // Keep a valid default when latency is absent/invalid.
-        if (inst.latencyCycles <= 0) return profile;
-
-        profile.windowCycles = inst.latencyCycles;
-        profile.valuCoExecSlots.assign(static_cast<size_t>(profile.windowCycles), true);
-        // First execute cycle is non-insertable, the remaining cycles are co-exec slots.
-        profile.valuCoExecSlots[0] = false;
-        profile.windowCycles = static_cast<int>(profile.valuCoExecSlots.size());
-        if (profile.windowCycles == 0) {
-            profile.windowCycles = 1;
-            profile.valuCoExecSlots.assign(1, false);
-        }
-        return profile;
-    }
-
-    static int getActiveWmmaElapsedCycle(int cycles, int activeWmmaStartCycle,
-                                         int activeWmmaCoExecAdvance) {
-        if (activeWmmaStartCycle < 0) return -1;
-        return (cycles - activeWmmaStartCycle) + activeWmmaCoExecAdvance;
-    }
-
-    static bool canCoExecAtCurrentCycle(int cycles, int activeWmmaStartCycle,
-                                        int& activeWmmaCoExecAdvance,
-                                        const std::vector<bool>& valuSlots, bool isValu) {
-        if (activeWmmaStartCycle < 0 || valuSlots.empty()) return false;
-        if (!isValu) return true;
-        int elapsed =
-            getActiveWmmaElapsedCycle(cycles, activeWmmaStartCycle, activeWmmaCoExecAdvance);
-        if (elapsed < 0 || elapsed >= static_cast<int>(valuSlots.size())) return false;
-        if (valuSlots[static_cast<size_t>(elapsed)]) return true;
-
-        // For VALU, skip forward to the next insertable co-exec slot.
-        for (int idx = elapsed + 1; idx < static_cast<int>(valuSlots.size()); ++idx) {
-            if (valuSlots[static_cast<size_t>(idx)]) {
-                activeWmmaCoExecAdvance += (idx - elapsed);
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /// Get a string key for a StinkyRegister for use in vgprState/sgprState maps.
-    /// Uses symbolic name if set, otherwise "prefix" + reg index (e.g. "v0", "s1").
-    static std::string getRegisterKey(const StinkyRegister& reg) {
-        if (reg.dataType != StinkyRegister::Type::Register) return "";
-        if (reg.hasSymbolicName()) return reg.getSymbolicName();
-        return regTypeToString(reg.reg.type) + std::to_string(reg.reg.idx);
-    }
-
-    /// Resolve an instruction source operand to an int64 value for simulation.
-    /// - LiteralInt/LiteralDouble: returns the literal value.
-    /// - Register: looks up current value in vgprState (V/AGPR) or sgprState (S); returns 0 if not
-    /// found.
-    /// - Other types: returns 0.
-    static int64_t getInstructionInputValue(
-        const StinkyRegister& src, const std::unordered_map<std::string, int64_t>& vgprState,
-        const std::unordered_map<std::string, int64_t>& sgprState) {
-        switch (src.dataType) {
-            case StinkyRegister::Type::LiteralInt:
-                return static_cast<int64_t>(src.getLiteralInt());
-            case StinkyRegister::Type::LiteralDouble:
-                return static_cast<int64_t>(src.getLiteralDouble());
-            case StinkyRegister::Type::Register: {
-                std::string key = getRegisterKey(src);
-                if (key.empty()) return 0;
-                // VGPR/AGPR: per-thread state
-                if (src.reg.type == RegType::V || src.reg.type == RegType::AGPR) {
-                    auto it = vgprState.find(key);
-                    return it != vgprState.end() ? it->second : 0;
-                }
-                // SGPR and other scalar-like: shared state
-                auto it = sgprState.find(key);
-                return it != sgprState.end() ? it->second : 0;
-            }
-            case StinkyRegister::Type::LiteralString:
-            case StinkyRegister::Type::Invalid:
-            default:
-                return 0;
-        }
-    }
-
-    // Simulate VALU instruction using dynamic casting (type-safe approach)
-    void simulateInstructionTyped(StinkyInstruction* inst,
-                                  std::unordered_map<std::string, int64_t>& vgprState,
-                                  const std::unordered_map<std::string, int64_t>& sgprState) {
-        // Try to cast to CommonInstruction first (most VALU instructions inherit from this)
-        const auto& dstReg = inst->getDestRegs();
-
-        // v_add_co_u32: dst = src0 + src1 (with carry out, dst1 is vcc)
-        if (GFX::v_add_co_u32 == inst->getUnifiedOpcode()) {
-            if (inst->getSrcRegs().size() >= 2) {
-                int64_t src0 =
-                    getInstructionInputValue(inst->getSrcRegs()[0], vgprState, sgprState);
-                int64_t src1 =
-                    getInstructionInputValue(inst->getSrcRegs()[1], vgprState, sgprState);
-                vgprState[getRegisterKey(dstReg[0])] = src0 + src1;
-            }
-        }
-        // v_add_u32, v_add_i32
-        // else if(GFX::v_add_u32 == inst->getUnifiedOpcode() || GFX::v_add_i32 ==
-        // inst->getUnifiedOpcode())
-        // {
-        //     if(inst->getSrcRegs().size() >= 2)
-        //     {
-        //         int64_t src0 = getInstructionInputValue(inst->getSrcRegs()[0], vgprState,
-        //         sgprState); int64_t src1 = getInstructionInputValue(inst->getSrcRegs()[1],
-        //         vgprState, sgprState); vgprState[getRegisterKey(dstReg[0])] = src0 + src1;
-        //     }
-        // }
-        // else if(GFX::v_add_i32 == inst->getUnifiedOpcode())
-        // {
-        //     if(inst->getSrcRegs().size() >= 2)
-        //     {
-        //         int64_t src0 = getInstructionInputValue(inst->getSrcRegs()[0], vgprState,
-        //         sgprState); int64_t src1 = getInstructionInputValue(inst->getSrcRegs()[1],
-        //         vgprState, sgprState); vgprState[getRegisterKey(dstReg[0])] = src0 + src1;
-        //     }
-        // }
-        // v_sub_u32, v_sub_i32
-        else if (GFX::v_sub_u32 == inst->getUnifiedOpcode() ||
-                 GFX::v_sub_i32 == inst->getUnifiedOpcode()) {
-            if (inst->getSrcRegs().size() >= 2) {
-                int64_t src0 =
-                    getInstructionInputValue(inst->getSrcRegs()[0], vgprState, sgprState);
-                int64_t src1 =
-                    getInstructionInputValue(inst->getSrcRegs()[1], vgprState, sgprState);
-                vgprState[getRegisterKey(dstReg[0])] = src0 - src1;
-            }
-        } else if (GFX::v_sub_i32 == inst->getUnifiedOpcode()) {
-            if (inst->getSrcRegs().size() >= 2) {
-                int64_t src0 =
-                    getInstructionInputValue(inst->getSrcRegs()[0], vgprState, sgprState);
-                int64_t src1 =
-                    getInstructionInputValue(inst->getSrcRegs()[1], vgprState, sgprState);
-                vgprState[getRegisterKey(dstReg[0])] = src0 - src1;
-            }
-        }
-        // v_mul_lo_u32
-        else if (GFX::v_mul_lo_u32 == inst->getUnifiedOpcode()) {
-            if (inst->getSrcRegs().size() >= 2) {
-                int64_t src0 =
-                    getInstructionInputValue(inst->getSrcRegs()[0], vgprState, sgprState);
-                int64_t src1 =
-                    getInstructionInputValue(inst->getSrcRegs()[1], vgprState, sgprState);
-                vgprState[getRegisterKey(dstReg[0])] = src0 * src1;
-            }
-        }
-        // v_mul_hi_u32: dst = high 32 bits of (src0 * src1)
-        else if (GFX::v_mul_hi_u32 == inst->getUnifiedOpcode()) {
-            if (inst->getSrcRegs().size() >= 2) {
-                int64_t src0 =
-                    getInstructionInputValue(inst->getSrcRegs()[0], vgprState, sgprState);
-                int64_t src1 =
-                    getInstructionInputValue(inst->getSrcRegs()[1], vgprState, sgprState);
-                // Cast to uint64_t for unsigned multiplication, then take high 32 bits
-                uint64_t result = static_cast<uint64_t>(static_cast<uint32_t>(src0)) *
-                                  static_cast<uint64_t>(static_cast<uint32_t>(src1));
-                vgprState[getRegisterKey(dstReg[0])] = static_cast<int64_t>(result >> 32);
-            }
-        }
-        // v_mul_hi_i32: dst = high 32 bits of (src0 * src1) signed
-        else if (GFX::v_mul_hi_i32 == inst->getUnifiedOpcode()) {
-            if (inst->getSrcRegs().size() >= 2) {
-                int64_t src0 =
-                    getInstructionInputValue(inst->getSrcRegs()[0], vgprState, sgprState);
-                int64_t src1 =
-                    getInstructionInputValue(inst->getSrcRegs()[1], vgprState, sgprState);
-                // Cast to int64_t for signed multiplication, then take high 32 bits
-                int64_t result = static_cast<int64_t>(static_cast<int32_t>(src0)) *
-                                 static_cast<int64_t>(static_cast<int32_t>(src1));
-                vgprState[getRegisterKey(dstReg[0])] = result >> 32;
-            }
-        }
-        // v_lshlrev_b32 or v_lshl_b32: logical shift left
-        else if (GFX::v_lshlrev_b32 == inst->getUnifiedOpcode()) {
-            if (inst->getSrcRegs().size() >= 2) {
-                // VLShiftLeftB32 format: dst, shiftAmount, src
-                int64_t shiftAmount =
-                    getInstructionInputValue(inst->getSrcRegs()[0], vgprState, sgprState);
-                int64_t src = getInstructionInputValue(inst->getSrcRegs()[1], vgprState, sgprState);
-                vgprState[getRegisterKey(dstReg[0])] = src << shiftAmount;
-            }
-        }
-        // v_lshrrev_b32 or v_lshr_b32: logical shift right (32-bit)
-        else if (GFX::v_lshrrev_b32 == inst->getUnifiedOpcode()) {
-            if (inst->getSrcRegs().size() >= 2) {
-                // VLShiftRightB32 format: dst, shiftAmount, src
-                int64_t shiftAmount =
-                    getInstructionInputValue(inst->getSrcRegs()[0], vgprState, sgprState);
-                int64_t src = getInstructionInputValue(inst->getSrcRegs()[1], vgprState, sgprState);
-                vgprState[getRegisterKey(dstReg[0])] = (uint64_t)src >> (uint64_t)shiftAmount;
-            }
-        }
-        // v_lshlrev_b64 or v_lshl_b64: logical shift left (64-bit)
-        else if (GFX::v_lshlrev_b64 == inst->getUnifiedOpcode()) {
-            if (inst->getSrcRegs().size() >= 2) {
-                // VLShiftLeftB64 format: dst, shiftAmount, src
-                int64_t shiftAmount =
-                    getInstructionInputValue(inst->getSrcRegs()[0], vgprState, sgprState);
-                int64_t src = getInstructionInputValue(inst->getSrcRegs()[1], vgprState, sgprState);
-                vgprState[getRegisterKey(dstReg[0])] =
-                    static_cast<int64_t>(static_cast<uint64_t>(src) << shiftAmount);
-            }
-        }
-        // v_lshrrev_b64 or v_lshr_b64: logical shift right (64-bit)
-        else if (GFX::v_lshrrev_b64 == inst->getUnifiedOpcode()) {
-            if (inst->getSrcRegs().size() >= 2) {
-                // VLShiftRightB64 format: dst, shiftAmount, src
-                int64_t shiftAmount =
-                    getInstructionInputValue(inst->getSrcRegs()[0], vgprState, sgprState);
-                int64_t src = getInstructionInputValue(inst->getSrcRegs()[1], vgprState, sgprState);
-                vgprState[getRegisterKey(dstReg[0])] =
-                    static_cast<int64_t>(static_cast<uint64_t>(src) >> shiftAmount);
-            }
-        }
-        // v_and_b32
-        else if (GFX::v_and_b32 == inst->getUnifiedOpcode()) {
-            if (inst->getSrcRegs().size() >= 2) {
-                int64_t src0 =
-                    getInstructionInputValue(inst->getSrcRegs()[0], vgprState, sgprState);
-                int64_t src1 =
-                    getInstructionInputValue(inst->getSrcRegs()[1], vgprState, sgprState);
-                vgprState[getRegisterKey(dstReg[0])] = src0 & src1;
-            }
-        }
-        // v_or_b32
-        else if (GFX::v_or_b32 == inst->getUnifiedOpcode()) {
-            if (inst->getSrcRegs().size() >= 2) {
-                int64_t src0 =
-                    getInstructionInputValue(inst->getSrcRegs()[0], vgprState, sgprState);
-                int64_t src1 =
-                    getInstructionInputValue(inst->getSrcRegs()[1], vgprState, sgprState);
-                vgprState[getRegisterKey(dstReg[0])] = src0 | src1;
-            }
-        }
-        // v_xor_b32
-        else if (GFX::v_xor_b32 == inst->getUnifiedOpcode()) {
-            if (inst->getSrcRegs().size() >= 2) {
-                int64_t src0 =
-                    getInstructionInputValue(inst->getSrcRegs()[0], vgprState, sgprState);
-                int64_t src1 =
-                    getInstructionInputValue(inst->getSrcRegs()[1], vgprState, sgprState);
-                vgprState[getRegisterKey(dstReg[0])] = src0 ^ src1;
-            }
-        }
-        // v_mad_u32_u24: dst = src0 * src1 + src2
-        else if (GFX::v_mad_u32_u24 == inst->getUnifiedOpcode()) {
-            if (inst->getSrcRegs().size() >= 3) {
-                int64_t src0 =
-                    getInstructionInputValue(inst->getSrcRegs()[0], vgprState, sgprState);
-                int64_t src1 =
-                    getInstructionInputValue(inst->getSrcRegs()[1], vgprState, sgprState);
-                int64_t src2 =
-                    getInstructionInputValue(inst->getSrcRegs()[2], vgprState, sgprState);
-                vgprState[getRegisterKey(dstReg[0])] = src0 * src1 + src2;
-            }
-        }
-        // v_mad_i32_i24: dst = src0 * src1 + src2
-        else if (GFX::v_mad_i32_i24 == inst->getUnifiedOpcode()) {
-            if (inst->getSrcRegs().size() >= 3) {
-                int64_t src0 =
-                    getInstructionInputValue(inst->getSrcRegs()[0], vgprState, sgprState);
-                int64_t src1 =
-                    getInstructionInputValue(inst->getSrcRegs()[1], vgprState, sgprState);
-                int64_t src2 =
-                    getInstructionInputValue(inst->getSrcRegs()[2], vgprState, sgprState);
-                vgprState[getRegisterKey(dstReg[0])] = src0 * src1 + src2;
-            }
-        }
-        // v_mov_b32: dst = src0
-        else if (GFX::v_mov_b32 == inst->getUnifiedOpcode()) {
-            if (inst->getSrcRegs().size() >= 1) {
-                int64_t src0 =
-                    getInstructionInputValue(inst->getSrcRegs()[0], vgprState, sgprState);
-                vgprState[getRegisterKey(dstReg[0])] = src0;
-            }
-        }
-        // v_lshl_add_u32 (actual instruction, CommonInstruction): dst = (src0 << shiftAmount) +
-        // src1 srcs = {src0, shiftHex, src1} - note the order!
-        else if (GFX::v_lshl_add_u32 == inst->getUnifiedOpcode()) {
-            if (inst->getSrcRegs().size() >= 3) {
-                int64_t src0 =
-                    getInstructionInputValue(inst->getSrcRegs()[0], vgprState, sgprState);
-                int64_t shiftAmount =
-                    getInstructionInputValue(inst->getSrcRegs()[1], vgprState, sgprState);
-                int64_t src1 =
-                    getInstructionInputValue(inst->getSrcRegs()[2], vgprState, sgprState);
-                vgprState[getRegisterKey(dstReg[0])] = (src0 << shiftAmount) + src1;
-            }
-        }
-        // v_add_lshl_u32 (actual instruction, CommonInstruction): dst = (src0 + src1) <<
-        // shiftAmount srcs = {src0, src1, shiftHex} - standard order
-        else if (GFX::v_add_lshl_u32 == inst->getUnifiedOpcode()) {
-            if (inst->getSrcRegs().size() >= 3) {
-                int64_t src0 =
-                    getInstructionInputValue(inst->getSrcRegs()[0], vgprState, sgprState);
-                int64_t src1 =
-                    getInstructionInputValue(inst->getSrcRegs()[1], vgprState, sgprState);
-                int64_t shiftAmount =
-                    getInstructionInputValue(inst->getSrcRegs()[2], vgprState, sgprState);
-                vgprState[getRegisterKey(dstReg[0])] = (src0 + src1) << shiftAmount;
-            }
-        }
-        // v_lshl_add_u32 (CompositeInstruction wrapper): dst = (src0 << shiftAmount) + src1
-        // srcs = {src0, src1, shiftHex} based on constructor
-        else if (GFX::v_lshl_add_u32 == inst->getUnifiedOpcode()) {
-            if (inst->getSrcRegs().size() >= 3) {
-                int64_t src0 =
-                    getInstructionInputValue(inst->getSrcRegs()[0], vgprState, sgprState);
-                int64_t src1 =
-                    getInstructionInputValue(inst->getSrcRegs()[1], vgprState, sgprState);
-                int64_t shiftAmount =
-                    getInstructionInputValue(inst->getSrcRegs()[2], vgprState, sgprState);
-                vgprState[getRegisterKey(dstReg[0])] = (src0 << shiftAmount) + src1;
-            }
-        }
-        // v_add_lshl_u32 (CompositeInstruction wrapper): dst = (src0 + src1) << shiftAmount
-        // srcs = {src0, src1, shiftHex} based on constructor
-        else if (GFX::v_add_lshl_u32 == inst->getUnifiedOpcode()) {
-            if (inst->getSrcRegs().size() >= 3) {
-                int64_t src0 =
-                    getInstructionInputValue(inst->getSrcRegs()[0], vgprState, sgprState);
-                int64_t src1 =
-                    getInstructionInputValue(inst->getSrcRegs()[1], vgprState, sgprState);
-                int64_t shiftAmount =
-                    getInstructionInputValue(inst->getSrcRegs()[2], vgprState, sgprState);
-                vgprState[getRegisterKey(dstReg[0])] = (src0 + src1) << shiftAmount;
-            }
-        } else {
-            std::cout << "Unsupported instruction: " << (inst->getHwInstDesc()->mnemonic)
-                      << ", Opcode: " << inst->getUnifiedOpcode() << "\n";
-        }
-    }
-    void analyzeBankConflicts(BasicBlock& bb, PassContext& passCtx) {
-        // default bank conflicts
-        bankConflictA_ = 1.0;
-        bankConflictB_ = 1.0;
-
-        std::vector<std::unordered_map<std::string, int64_t>> vgprState(getWaveFrontSize(arch_));
-        std::unordered_map<std::string, int64_t> sgprState;  // SGPRs are shared across all threads
-
-        // Initialize thread IDs (v[vgprSerial])
-        std::string vgprSerial = "vgprSerial";
-        // parse the basic block to find the local read addresses
-        std::vector<StinkyInstruction*> instructions;
-        for (IRBase& irNode : bb) {
-            if (irNode.getType() == IRBase::IRType::StinkyTofu) {
-                instructions.push_back(cast<StinkyInstruction>(&irNode));
-            }
-        }
-
-        // Simulate real behavior: propagate vgpr/sgpr state as instructions are executed.
-        // 'sgprState' is a map<string, int64_t>
-        // 'vgprState' is a vector<map<string, int64_t>>, one for each lane/thread
-
-        // initial vgprSerial
-        const auto waveFrontSize = getWaveFrontSize(arch_);
-        for (uint32_t tid = 0; tid < waveFrontSize; tid++) {
-            vgprState[tid][vgprSerial] = tid;
-        }
-
-        for (StinkyInstruction* inst : instructions) {
-            // Simplified simulation: handle basic assignment and arithmetic for sgpr/vgpr
-            const std::string& opcode = inst->getHwInstDesc()->mnemonic;
-            const auto& dsts = inst->getDestRegs();
-            const auto& srcs = inst->getSrcRegs();
-            // std::cout << "Instruction: " << opcode << "\n";
-
-            // Handle SGPR assignments (global)
-            if (opcode.find("s_mov") != std::string::npos) {
-                sgprState[getRegisterKey(dsts[0])] =
-                    getInstructionInputValue(srcs[0], vgprState[0], sgprState);
-            }
-            // Handle VGPR assignments (per-thread)
-            else if (opcode.find("v_") != std::string::npos) {
-                // Simulate for each thread using type-safe dynamic casting
-                for (uint32_t tid = 0; tid < waveFrontSize; tid++) {
-                    simulateInstructionTyped(inst, vgprState[tid], sgprState);
-                }
-            }
-            // (ignore operations that do not write to sgpr/vgpr)
-
-            // Additional behaviors (address, etc.) could be simulated here if needed.
-
-            // print all registers
-            // std::cout << "Registers: ";
-            // for(int tid = 0; tid < getWaveFrontSize(arch_); tid++)
-            // {
-            //     std::cout << "Thread " << tid << ": ";
-            //     for(const auto& vgpr : vgprState[tid])
-            //     {
-            //         std::cout << vgpr.first << " = " << vgpr.second << " " << std::endl;
-            //     }
-            //     std::cout << std::endl;
-            // }
-        }
-    }
-
-    void calculateLocalReadBytes(BasicBlock& bb, PassContext& passCtx) {
-        if (bb.getLabel() == "LocalReadDoA_I0") {
-            LocalReadBytesA_ = 16;
-            for (IRBase& irNode : bb) {
-                if (irNode.getType() == IRBase::IRType::StinkyTofu) {
-                    StinkyInstruction* inst = cast<StinkyInstruction>(&irNode);
-                    auto dstRegs = inst->getDestRegs();
-                    if (dstRegs[0].reg.num == 4) {
-                        LocalReadBytesA_ = 16;
-                    } else if (dstRegs[0].reg.num == 2) {
-                        LocalReadBytesA_ = 8;
-                    } else {
-                        LocalReadBytesA_ = 4;
-                    }
-                }
-            }
-        } else if (bb.getLabel() == "LocalReadDoB_I0") {
-            LocalReadBytesB_ = 16;
-            for (IRBase& irNode : bb) {
-                if (irNode.getType() == IRBase::IRType::StinkyTofu) {
-                    StinkyInstruction* inst = cast<StinkyInstruction>(&irNode);
-                    auto dstRegs = inst->getDestRegs();
-                    if (dstRegs[0].reg.num == 4) {
-                        LocalReadBytesB_ = 16;
-                    } else if (dstRegs[0].reg.num == 2) {
-                        LocalReadBytesB_ = 8;
-                    } else {
-                        LocalReadBytesB_ = 4;
-                    }
-                }
-            }
-        }
-    }
-
-    /// Process a single basic block to estimate asm cycles
-    void calculateMathClocksInUnrolledLoop(BasicBlock& bb, PassContext& passCtx) {
-        arch_ =
-            getGfxArchID(passCtx.getGemmTileConfig().arch[0], passCtx.getGemmTileConfig().arch[1],
-                         passCtx.getGemmTileConfig().arch[2]);
-
-        AsmCycleEstimator asmCycleEstimator;
-        asmCycleEstimator.setLocalReadLatencyByArch(arch_);
-
-        if (!isGfx125(arch_)) {
-            // FIXME: Add support for gfx1201
-            return;
-        }
-
+    /// Process a single basic block to estimate asm cycles. Issue state starts
+    /// empty here and is discarded when the block ends.
+    void calculateMathClocksInUnrolledLoop(BasicBlock& bb, PassContext& passCtx,
+                                           BlockCycleScope scope) {
+        totalCycles_ = 0;
         // Collect all instructions in this basic block
         std::vector<StinkyInstruction*> instructions;
         for (IRBase& irNode : bb) {
@@ -781,36 +544,17 @@ class EstimateAsmCyclesPassImpl : public Pass {
 
         if (instructions.empty()) return;
 
-        const HWModel& hw = passCtx.getHWModel();
-        const int barrierSignalToWait = hw.barrier.signalToWaitLatency;
-
-        // Estimate cycles for each instruction
-        // initial values
-        int cycles = 0;
-        int hwMFMA = -99;
-        int jumpOverhead = hw.barrier.jumpOverheadCycles;
-        int previousLW = 0;
-        std::queue<int> hwLRFIFO;
-        std::queue<int> lgkmLRFIFO;
-        std::deque<int> hwGRFIFO;
-        int numPreviousLRs = 0;
-        // Seeded to -latency so that before any signal is seen, the wait clamp
-        // (previousBarrierSignal + latency) is 0 and therefore never binding.
-        int previousBarrierSignal = -barrierSignalToWait;
-        int activeWmmaStartCycle = -1;
-        int activeWmmaCoExecAdvance = 0;
-        std::vector<bool> activeWmmaValuSlots;
-
-        // Find vgprLocalReadAddrA and vgprLocalReadAddrB names
-        std::string vgprLocalReadAddrA = "vgprLocalReadAddrA";
-        std::string vgprLocalReadAddrB = "vgprLocalReadAddrB";
-
-        uint32_t totalCycles = 0;
-        // Loop-body modelling runs in the LoopBeginL basic block (tensilelite names the block
-        // ^label_LoopBeginL and the leading label instruction matches bb.getLabel()).
-        // computeEstimatedCyclesPerInstruction() also covers blocks that embed that label.
+        CycleReplay replay;
+        replay.queue = dag::chooseReadyQueue(passCtx);
+        int const blockStart = replay.cycles;
+        // Loop-body modelling runs in any basic block whose label contains label_LoopBeginL
+        // (tensilelite names the block ^label_LoopBeginL, and the rocisa split adds suffixes
+        // such as _CBWave0). computeEstimatedCyclesPerInstruction() also covers blocks that
+        // embed that label.
         std::size_t startIdx = 0;
-        if (bb.getLabel() != "label_LoopBeginL" && bb.getLabel() != "LoopBeginL") {
+        if (scope == BlockCycleScope::Legacy &&
+            bb.getLabel().find("label_LoopBeginL") == std::string::npos &&
+            bb.getLabel() != "LoopBeginL") {
             startIdx = instructions.size();
             if (perInstructionCycleQuery_) {
                 for (std::size_t i = 0; i < instructions.size(); ++i) {
@@ -823,197 +567,75 @@ class EstimateAsmCyclesPassImpl : public Pass {
                 }
             }
         }
+        // chooseReadyQueue is the only arch switch. A queue with no issue model
+        // (anything other than CDNA5 today) leaves the total at 0.
+        const bool useSchedulerTiming = replay.queue->modelsIssueTiming();
+        const HWModel& hw = passCtx.getHWModel();
+        const int numWaves = static_cast<int>(passCtx.getGemmTileConfig().NumWaves);
         for (std::size_t idx = startIdx; idx < instructions.size(); ++idx) {
             StinkyInstruction* inst = instructions[idx];
-            bool isCoIssued =
-                (!isMatrixInstruction(*inst) &&
-                 canCoExecAtCurrentCycle(cycles, activeWmmaStartCycle, activeWmmaCoExecAdvance,
-                                         activeWmmaValuSlots, isVectorALU(*inst)));
-            if (isCoIssued) {
-                // VALU is inserted into an "I" slot in active WMMA window, so this instruction does
-                // not advance the global cycle counter.
-                activeWmmaCoExecAdvance += std::max(1, inst->issueCycles);
-            } else if (isBarrier(*inst)) {
-                const std::string& opcode = inst->getHwInstDesc()->mnemonic;
-                if (opcode.find("s_barrier_signal") != std::string::npos)
-                    previousBarrierSignal = cycles;
-                if (opcode.find("s_barrier_wait") != std::string::npos)
-                    cycles = std::max(cycles + inst->issueCycles,
-                                      previousBarrierSignal + barrierSignalToWait);
-                else
-                    cycles += inst->issueCycles;
-            } else if (isDSRead(*inst)) {
-                // get bpr of destination register
-                auto dstRegs = inst->getDestRegs();
-                int bpr = dstRegs.empty() ? 16 : (dstRegs[0].reg.num * 4);
-
-                // get bank conflict from source address registers
-                auto srcRegs = inst->getSrcRegs();
-                std::string srcStr;
-                double bankConflict = 1.0;
-                for (const auto& srcReg : srcRegs) {
-                    if (srcReg.isRegister()) {
-                        srcStr = srcReg.getSymbolicName();
-                        if (srcStr.find(vgprLocalReadAddrA) != std::string::npos) {
-                            bankConflict = bankConflictA_;  // Use A's bank conflict
-                            break;
-                        } else if (srcStr.find(vgprLocalReadAddrB) != std::string::npos) {
-                            bankConflict = bankConflictB_;  // Use B's bank conflict
-                            break;
-                        }
-                    }
-                }
-                // Determine which bank conflict value to use based on source register
-                int stallcycle = asmCycleEstimator.getLocalReadQueueFullStallCycles(
-                    cycles, hwLRFIFO, bpr, passCtx.getGemmTileConfig().NumWaves, true,
-                    bankConflict);
-                if (stallcycle == cycles) {
-                    // no stall
-                    // heck LR fifo
-                    auto currCycles = cycles + inst->issueCycles;
-                    if (numPreviousLRs > 0 &&
-                        bpr >= 4) {  // Access to LDS is shared by a pair of SIMDs
-                        currCycles += inst->issueCycles;
-                    }
-                    cycles = currCycles;
-                } else {
-                    cycles = stallcycle;
-                }
-                asmCycleEstimator.pushLocalReadWrite(cycles, lgkmLRFIFO, bpr, bankConflict, true,
-                                                     numPreviousLRs);
-            } else if (isMatrixInstruction(*inst)) {
-                auto mfmaLatency = inst->latencyCycles;
-                if (cycles - hwMFMA >= (mfmaLatency - 1)) {
-                    cycles += inst->issueCycles;
-                } else {
-                    cycles = hwMFMA + mfmaLatency;
-                }
-                hwMFMA = cycles;
-
-                auto wmmaCoExec = getWmmaCoExecProfile(*inst);
-                assert(wmmaCoExec.has_value() &&
-                       "Missing WMMA co-exec profile. Add this WMMA type into slot table.");
-                activeWmmaStartCycle = cycles;
-                activeWmmaCoExecAdvance = 0;
-                activeWmmaValuSlots = wmmaCoExec->valuCoExecSlots;
-            } else if (isBranch(*inst) || isCall(*inst)) {
-                cycles = std::max(cycles + jumpOverhead, hwMFMA + 4);
-                // End of loop (LabelData set when branch comes from rocisa; IR-from-string may omit
-                // it)
-                const LabelData* labelData = inst->getModifier<LabelData>();
-                if (labelData != nullptr) {
-                    const std::string& labelName = labelData->label;
-                    auto pos = labelName.find("label_LoopBeginL");
-                    if (pos == 0) {
+            if (useSchedulerTiming) {
+                // A back-edge to this loop ends the unroll body. The branch itself
+                // is not part of the total.
+                if (scope != BlockCycleScope::EntireBlock && (isBranch(*inst) || isCall(*inst))) {
+                    const LabelData* labelData = inst->getModifier<LabelData>();
+                    if (labelData != nullptr && labelData->label.find("label_LoopBeginL") == 0) {
                         break;
                     }
                 }
-            } else if (isWaitCnt(*inst)) {
-                // std::cout << "Estimate WaitCnt: " << inst->getHwInstDesc()->mnemonic << "\n";
-                auto waitCntData = inst->getModifier<SWaitCntData>();
-                auto tensorCntData = inst->getModifier<SWaitTensorCntData>();
-                auto storeCntData = inst->getModifier<SWaitStoreCntData>();
-                if (waitCntData != nullptr) {
-                    int dlcnt = waitCntData->dlcnt;
-                    int dscnt = waitCntData->dscnt;
-                    std::size_t numWaits =
-                        static_cast<std::size_t>(dlcnt) + static_cast<std::size_t>(dscnt);
-                    cycles = asmCycleEstimator.getLocalReadCompletionCycle(cycles + 1, lgkmLRFIFO,
-                                                                           numWaits);
-                } else if (tensorCntData != nullptr) {
-                    cycles += inst->issueCycles;
-                } else if (storeCntData != nullptr) {
-                    cycles += inst->issueCycles;
+                // Co-issued s_set_vgpr_msb stays on the previous instruction's cycle.
+                const bool coIssuedMsb = !isLabel(*inst) && isSetVgprMsb(*inst) &&
+                                         replay.prevIssued != nullptr &&
+                                         msbCoIssuesWith(*replay.prevIssued);
+                if (coIssuedMsb) {
+                    // Clock stays on the previous instruction.
+                } else if (const std::optional<int> keep = dsWaitKeepCount(*inst)) {
+                    // The stall is how long the waited-for LDS op still has left. The
+                    // instruction still issues in one cycle when that op has already returned.
+                    const int stall =
+                        dsWaitStallCycles(hw, replay.inflightDs, *keep, replay.cycles, numWaves);
+                    const int savedIssue = inst->issueCycles;
+                    inst->issueCycles = std::max(stall, savedIssue);
+                    replay.queue->replayIssue(*inst);
+                    inst->issueCycles = savedIssue;
+                    replay.cycles = replay.queue->elapsedCycles();
+                    retireReturnedDsOps(hw, replay.inflightDs, replay.cycles, numWaves);
                 } else {
-                    // std::cout << "Estimate WaitCnt: " << inst->getHwInstDesc()->mnemonic << "\n";
-                    // std::cout << "WaitCntData is nullptr\n";
-                    cycles += inst->issueCycles;
-                }
-            } else if (isTensorLoad(*inst)) {
-                // TODO: Estimate cycles for TensorLoad
-                cycles += inst->issueCycles;
-            } else if (isDSWrite(*inst)) {
-                // get bpr of data size (ds_write_b128 = 16 bytes); dest may be address or data
-                // depending on IR
-                auto dstRegs = inst->getDestRegs();
-                int bpr = 16;
-                if (!dstRegs.empty()) bpr = dstRegs[0].reg.num * 4;
-                cycles = asmCycleEstimator.getLocalWriteQueueFullStallCycles(
-                    cycles, previousLW, inst->issueCycles, bpr, getWaveFrontSize(arch_));
-                previousLW = cycles;
-                asmCycleEstimator.pushLocalReadWrite(cycles, lgkmLRFIFO, bpr, 1.0, false, 0);
-            } else if (isGlobalMemLoad(*inst)) {
-                auto currCycles = cycles + inst->issueCycles;
-                // get bpr of destination register
-                auto dstRegs = inst->getDestRegs();
-                int bpr = dstRegs.empty() ? 16 : (dstRegs[0].reg.num * 4);
-
-                bool hasSgprOffset = false;
-                auto srcRegs = inst->getSrcRegs();
-                for (const auto& srcReg : srcRegs) {
-                    // std::cout<<"srcReg: "<<srcReg.getSymbolicName()<<std::endl;
-                    if (srcReg.isRegister()) {
-                        auto srcStr = srcReg.getSymbolicName();
-                        if (srcStr.find('s') != std::string::npos) {
-                            hasSgprOffset = true;
-                        }
+                    const bool dsOp = isDSRead(*inst) || isDSWrite(*inst);
+                    const int issueClock = replay.cycles;
+                    DsLoadDrainEntry entry;
+                    if (dsOp) {
+                        const HwInstDesc* desc = inst->getHwInstDesc();
+                        entry = makeDsLoadDrainEntry(hw, inst->latencyCycles,
+                                                     desc != nullptr ? desc->dsThroughput : 0,
+                                                     desc != nullptr ? desc->dsMaxDrain : 0);
                     }
+                    replay.queue->replayIssue(*inst);
+                    replay.cycles = replay.queue->elapsedCycles();
+                    if (dsOp) replay.inflightDs.push_back(IssuedDsOp{issueClock, entry});
                 }
-                cycles = asmCycleEstimator.getGlobalReadQueueFullStallCycles(
-                    currCycles, hwGRFIFO, bpr, getWaveFrontSize(arch_),
-                    passCtx.getGemmTileConfig().arch[0] == 9, hasSgprOffset);
-            } else if (isLabel(*inst)) {
-                // TODO: Estimate cycles for Label
-            } else {
-                cycles += inst->issueCycles;
             }
-
-            // Set Flags
-            if (isMatrixInstruction(*inst)) {
-                numPreviousLRs = 0;
-            } else if (isDSRead(*inst)) {
-                numPreviousLRs++;
-            } else if (isVectorALU(*inst)) {
-                numPreviousLRs = 0;
-            } else if (isScalarALU(*inst)) {
-                numPreviousLRs = 0;
-            } else {
-                numPreviousLRs = 0;
-            }
-            // Accumulate issue cycles from each instruction
-            // totalCycles += estimateInstructionCycles(inst, passCtx);
+            if (!isLabel(*inst)) replay.prevIssued = inst;
 
             // Record the cumulative cycle position of every processed
             // instruction so other passes can query it (see
             // computeEstimatedCyclesPerInstruction).
-            perInstCycles_[inst] = static_cast<uint32_t>(cycles < 0 ? 0 : cycles);
+            perInstCycles_[inst] = static_cast<uint32_t>(replay.cycles < 0 ? 0 : replay.cycles);
 
-            // Update total cycles
-            if (annotateComments_ && !isLabel(*inst)) {
-                // inst->dump(std::cout, false, "AsmCycles "+std::to_string(cycles - totalCycles));
-                appendComment(inst, "<This is " + std::to_string(cycles) + "-cycle>");
+            // Annotate only the primary loop. Prologue, epilogue, and the
+            // persistent-loop handoff keep the comments callers match exactly.
+            if (annotateComments_ && scope == BlockCycleScope::LoopBody && !isLabel(*inst)) {
+                appendComment(inst, "<This is " + std::to_string(replay.cycles) + "-cycle>");
             }
-            // std::cout << "cycles: " << cycles - totalCycles << std::endl;
-            totalCycles = cycles;
         }
-        totalCycles_ = totalCycles;
+        int const blockCycles = replay.cycles - blockStart;
+        totalCycles_ = static_cast<uint32_t>(blockCycles < 0 ? 0 : blockCycles);
+        if (totalCycles_ > 0 || bb.getLabel().find("LoopBegin") != std::string::npos) {
+            PASS_DEBUG(std::cerr << "[EstimateAsmCyclesPass] bb=" << bb.getLabel()
+                                 << " cycles=" << totalCycles_ << " publish=" << publishMetadata_
+                                 << " perInstQuery=" << perInstructionCycleQuery_ << "\n");
+        }
     }
-
-    /// Estimate cycles for a single instruction
-    /// Returns the issueCycles from the StinkyInstruction
-    unsigned estimateInstructionCycles(StinkyInstruction* inst, PassContext& passCtx) {
-        if (!inst) return 0;
-
-        // Return the issueCycles from the instruction
-        // issueCycles is an int, convert to unsigned (clamp negative values to 0)
-        return static_cast<unsigned>(inst->issueCycles > 0 ? inst->issueCycles : 0);
-    }
-
-    // Placeholder only; overwritten from the tile config in
-    // calculateMathClocksInUnrolledLoop before any use. Index 0 is the single
-    // registered stepping in any build, so this cannot name a specific enumerator
-    // without breaking the build that did not select it.
-    GfxArchID arch_ = static_cast<GfxArchID>(0);
 
     bool annotateComments_ = true;
     bool perInstructionCycleQuery_ = false;
@@ -1021,11 +643,7 @@ class EstimateAsmCyclesPassImpl : public Pass {
     std::unordered_map<const StinkyInstruction*, uint32_t> perInstCycles_;
 
     unsigned int totalCycles_ = 0;
-
-    double bankConflictA_ = 0.0;
-    double bankConflictB_ = 0.0;
-    int LocalReadBytesA_ = 4;
-    int LocalReadBytesB_ = 4;
+    EstimateAsmCyclePhases phaseCycles_{};
 };
 
 char EstimateAsmCyclesPassImpl::ID = 0;
@@ -1046,6 +664,15 @@ EstimateAsmCyclesAnalysis::Result EstimateAsmCyclesAnalysis::run(Function& func,
     return calculateEstimateAsmCycles(func, passCtx);
 }
 
+EstimateAsmCyclePhasesAnalysis::Result EstimateAsmCyclePhasesAnalysis::run(Function& func,
+                                                                           AnalysisManager& AM) {
+    (void)AM;
+    PassContext passCtx;
+    passCtx.setGemmTileConfig(func.getGemmTileConfig());
+    passCtx.setBasicBlockFilter(BasicBlockFilterBuilder::all());
+    return calculateEstimateAsmCyclePhases(func, passCtx);
+}
+
 EstimateAsmCyclesPerInstructionAnalysis::Result EstimateAsmCyclesPerInstructionAnalysis::run(
     Function& func, AnalysisManager& AM) {
     (void)AM;
@@ -1062,6 +689,15 @@ unsigned int calculateEstimateAsmCycles(Function& func, PassContext& passCtx) {
     AnalysisManager AM;
     (void)pass.run(func, passCtx, AM);
     return pass.getTotalCycles();
+}
+
+EstimateAsmCyclePhases calculateEstimateAsmCyclePhases(Function& func, PassContext& passCtx) {
+    EstimateAsmCyclesPassImpl pass;
+    pass.setAnnotateComments(false);
+    pass.setPublishMetadata(false);
+    AnalysisManager AM;
+    (void)pass.run(func, passCtx, AM);
+    return pass.getPhaseCycles();
 }
 
 std::unordered_map<const StinkyInstruction*, uint32_t> computeEstimatedCyclesPerInstruction(

@@ -13,7 +13,9 @@ toolchain, not a kernel defect.
 A CI lane that must run a test on a given arch sets ``ROCKE_REQUIRE_<ARCH>=1`` (for
 example ``ROCKE_REQUIRE_GFX942=1``). A test that names that arch then fails instead of
 skipping when the current GPU is a different arch or there is no GPU, so a lane that
-lost its GPU does not pass with no coverage.
+lost its GPU does not pass with no coverage. That is per test and per arch; that a GPU
+entry finds any GPU at all is checked once for the whole entry by the
+``rocke.tests.require_gpu`` plugin.
 """
 
 from __future__ import annotations
@@ -33,11 +35,13 @@ if TYPE_CHECKING:
     from rocke.helpers.compile import KernelArtifact
 
 __all__ = [
+    "DEVICE_MEMORY_HEADROOM_BYTES",
     "current_device_arch",
     "current_device_arch_in",
     "launch_with_buffers",
     "probe_device_arch",
     "run_on_device",
+    "skip_without_device_memory",
     "supported_device_arch",
 ]
 
@@ -46,6 +50,7 @@ _SIGNATURE_DTYPE = {
     np.float64: "f64",
     np.float32: "f32",
     np.float16: "f16",
+    np.int64: "i64",
     np.int32: "i32",
     np.int16: "i16",
     np.int8: "i8",
@@ -79,7 +84,7 @@ def current_device_arch() -> str:
 
 def current_device_arch_in(arches: Collection[str], subject: str = "this test") -> str:
     """The current GPU's arch when it is one of `arches`; otherwise skip, naming `subject`
-    and the GPU found, as waiting for the runner lanes of `arches` when no CI runner has
+    and the GPU found, as waiting for the runner hardware when no CI runner has
     any of them (``rocke.tests.lanes.arch_skip_reason``). Fails instead when
     ``ROCKE_REQUIRE_<ARCH>=1`` is set for an arch in `arches` and the current GPU is not
     that arch (see the module docstring)."""
@@ -96,6 +101,33 @@ def current_device_arch_in(arches: Collection[str], subject: str = "this test") 
             )
         )
     return arch
+
+
+#: Device memory a large-allocation test leaves for the rest of its launch (the
+#: outputs, code objects and the runtime's own allocations), on top of what it
+#: allocates itself (:func:`skip_without_device_memory`).
+DEVICE_MEMORY_HEADROOM_BYTES = 1 << 30
+
+
+def skip_without_device_memory(
+    allocated_bytes: int, subject: str = "this test"
+) -> None:
+    """Skip unless HIP's current device has room for ``allocated_bytes`` plus
+    :data:`DEVICE_MEMORY_HEADROOM_BYTES` of total memory, naming `subject` and
+    the GiB it needs. Judged on the device's total, not its free memory, so
+    whether a case runs does not depend on what else holds memory on the device;
+    a test that needs most of it also runs alone (the ``rocke_run_alone`` mark,
+    ``rocke.tests.ctest_workers``)."""
+    from rocke.runtime.hip_module import get_device_total_memory
+
+    needed = allocated_bytes + DEVICE_MEMORY_HEADROOM_BYTES
+    total = get_device_total_memory()
+    if total is None or total < needed:
+        found = "an unknown amount" if total is None else f"{total / 2**30:.1f} GiB"
+        pytest.skip(
+            f"{subject} needs a device with {needed / 2**30:.1f} GiB of memory; "
+            f"found {found}"
+        )
 
 
 def supported_device_arch(kernel: KernelDef, arches: Collection[str]) -> str:

@@ -188,7 +188,7 @@ quantize_scalar_f32, quantize_prescaled_f32, dequantize_scalar_to_f32
 quant_ir_type, quant_max_abs, ir_to_qdtype
 
 # Chiplet swizzle (helpers/grid.py)
-NUM_XCDS_MI300X, NUM_XCDS_MI325X, NUM_XCDS_MI350X
+NUM_XCDS_GFX942, NUM_XCDS_GFX950
 SuperTileSwizzleResult
 chiplet_aware_super_tile, chiplet_aware_super_tile_dynamic
 chiplet_transform_chunked, chiplet_transform_chunked_dynamic, chiplet_transform_chunked_runtime

@@ -4,7 +4,7 @@
  * instance_gfx1151_wmma_gemm_iu8_dequant.c -- C99 port of
  * rocke/instances/gfx1151/wmma_gemm_iu8_dequant.py.
  *
- * The gfx1151 (RDNA3.5 / Strix Halo) true-INT8 WMMA GEMM with f16 dequant
+ * The gfx1151 (RDNA3.5) true-INT8 WMMA GEMM with f16 dequant
  * output: one wave32 per 16x16 output tile, no LDS, RCR layout (C = A @ B.T).
  * Runs the hardware wmma_i32_16x16x16_iu8 instruction (int8 x int8 -> int32
  * accumulate); A/B are passed packed as i32 (4 int8 per i32), the <8 x i32>

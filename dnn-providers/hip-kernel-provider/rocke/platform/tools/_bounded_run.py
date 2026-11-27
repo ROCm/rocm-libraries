@@ -32,6 +32,7 @@ _stopped = False
 _HAS_PARENT_DEATH_SIGNAL = sys.platform.startswith("linux")
 _PR_SET_PDEATHSIG = 1
 _PR_SET_DUMPABLE = 4
+_PR_SET_CHILD_SUBREAPER = 36
 
 # What the leader writes to its report pipe: the command started, or it could
 # not be started (followed by the errno).
@@ -65,7 +66,9 @@ def run_bounded(
     The same isolation keeps the group alive when the caller is killed outright
     (a CTest timeout, an outer `timeout`, SIGKILL) and so never gets to end it.
     On Linux the group's leader is `_lead_session`, which ends the group when
-    the caller dies. Elsewhere the command keeps running after such a death.
+    the caller dies; it stays alive until every process left in the group has
+    ended, so this holds even after the command itself has exited and left a
+    child running. Elsewhere the command keeps running after such a death.
     """
     if os.name == "nt":
         group = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
@@ -229,12 +232,24 @@ def _lead_session(caller_pid: int, report_fd: int, argv: list[str]) -> NoReturn:
     the whole caller; `run_bounded` holds that thread until the command is
     done, so the two coincide.
 
-    The command's standard streams are the leader's, and the leader exits as
-    the command did, with its status or by the same signal. Whether the
-    command started is written to `report_fd` (see `_Launch`).
+    The death signal is only of use while the leader is alive, and the command
+    can exit before a child it started: the clang driver before its
+    `clang -cc1`, or any program that leaves a child holding its output open,
+    which keeps `run_bounded` waiting. So the leader is a child subreaper
+    (`PR_SET_CHILD_SUBREAPER`): every orphaned descendant becomes its child,
+    and it reaps every one still in its process group before it exits. A
+    descendant that has left the group (a detached daemon in a session of its
+    own) is not waited for, so it does not hold `run_bounded` up; neither a
+    timeout nor the caller's death ends it, and it escapes, as the module says.
+
+    The command's standard streams are the leader's, and once its group has no
+    other member left the leader exits as the command did, with its status or by the
+    same signal. Whether the command started is written to `report_fd` (see
+    `_Launch`).
     """
     signal.signal(signal.SIGTERM, _kill_own_group)
     _prctl(_PR_SET_PDEATHSIG, signal.SIGTERM)
+    _prctl(_PR_SET_CHILD_SUBREAPER, 1)
     if os.getppid() != caller_pid:
         _kill_own_group()  # the caller died before the death signal was armed
     os.set_inheritable(report_fd, False)
@@ -252,7 +267,20 @@ def _lead_session(caller_pid: int, report_fd: int, argv: list[str]) -> NoReturn:
     os.write(report_fd, _STARTED.encode())
     os.close(report_fd)
     _, status = os.waitpid(pid, 0)
-    _exit_as(os.waitstatus_to_exitcode(status))
+    command_exit_code = os.waitstatus_to_exitcode(status)
+    _reap_group_members()
+    _exit_as(command_exit_code)
+
+
+def _reap_group_members() -> None:
+    """Wait until no child of this process is left in its process group: the
+    descendants the command left behind, adopted as orphans by the subreaper
+    flag. A child that has left the group is not waited for."""
+    while True:
+        try:
+            os.waitpid(-os.getpgrp(), 0)
+        except ChildProcessError:
+            return
 
 
 def _kill_own_group(*_signal_handler_args: object) -> None:

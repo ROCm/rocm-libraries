@@ -110,6 +110,7 @@ def _assert_both_engines_refuse(spec, arch, reason):
         assert native.gemm_is_valid(spec_dict, arch=arch) == (admitted, verdict)
 
 
+@pytest.mark.gpu
 @arch_specific(
     _F64_GEMM_HARDWARE_VERIFIED_ARCHS,
     reason="fp64 GEMM numerics have passed on hardware for these targets only",
@@ -189,6 +190,7 @@ def test_f64_gemm_numeric(tile, pipeline, epilogue, pad, trait):
         assert np.max(error) < k * np.finfo(np.float64).eps
 
 
+@pytest.mark.gpu
 @arch_specific(
     _F64_GEMM_HARDWARE_VERIFIED_ARCHS,
     reason="fp64 GEMM numerics have passed on hardware for these targets only",

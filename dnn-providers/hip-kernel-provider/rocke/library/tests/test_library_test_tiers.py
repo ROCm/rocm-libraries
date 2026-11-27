@@ -387,7 +387,7 @@ def test_required_compiler_gate_cannot_inherit_optional_policy(monkeypatch):
 
 def test_compiler_preflight_accepts_reference_toolchain():
     assert (
-        gate_config._qualification_gap(
+        gate_config._preflight_outcome(
             "llvm22",
             "llvm22",
             "comgr3.0/rocm7.2",
@@ -399,52 +399,51 @@ def test_compiler_preflight_accepts_reference_toolchain():
 
 
 @pytest.mark.parametrize(
-    "requested,active,comgr,targets,match",
+    "requested,active,comgr,match",
     [
-        (
-            "llvm24",
-            "llvm24",
-            "comgr3.5/rocm10.3",
-            frozenset(("gfx942",)),
-            "requires LLVM flavor llvm22",
-        ),
-        (
-            "llvm22",
-            "llvm23",
-            "comgr3.0/rocm7.2",
-            frozenset(("gfx942",)),
-            "does not match",
-        ),
-        (
-            "llvm22",
-            None,
-            "comgr3.0/rocm7.2",
-            frozenset(("gfx942",)),
-            "could not query",
-        ),
-        (
-            "llvm22",
-            "llvm22",
-            "comgr3.5/rocm10.3",
-            frozenset(("gfx942",)),
-            "requires ROCm 7.2 comgr",
-        ),
-        ("llvm22", "llvm22", None, frozenset(("gfx942",)), "requires ROCm 7.2"),
-        ("llvm22", "llvm22", "comgr3.0/rocm7.2", None, "ISA targets"),
-        (
-            "llvm22",
-            "llvm22",
-            "comgr3.0/rocm7.2",
-            frozenset(("gfx950",)),
-            "gfx942",
-        ),
+        ("llvm24", "llvm24", "comgr3.5/rocm10.3", "requires LLVM flavor llvm22"),
+        ("llvm22", "llvm23", "comgr3.0/rocm7.2", "does not match"),
+        ("llvm22", "llvm22", "comgr3.5/rocm10.3", "requires ROCm 7.2 comgr"),
+        ("llvm22", "llvm22", None, "requires ROCm 7.2"),
     ],
 )
-def test_compiler_preflight_rejects_unqualified_toolchain(
-    requested, active, comgr, targets, match
+def test_a_toolchain_that_is_not_the_reference_skips_the_gate(
+    requested, active, comgr, match
 ):
-    gap = gate_config._qualification_gap(requested, active, comgr, targets, ("gfx942",))
-    assert match in gap
+    """Another LLVM flavor or comgr is a fact about the host, not a defect:
+    the preflight skips the gate, saying how the toolchain differs."""
+    action, why = gate_config._preflight_outcome(
+        requested, active, comgr, frozenset(("gfx942",)), ("gfx942",)
+    )
+    assert action == gate_config._SKIP
+    assert match in why
+
+
+@pytest.mark.parametrize(
+    "active,targets,match",
+    [
+        (None, frozenset(("gfx942",)), "could not query the active comgr"),
+        ("llvm22", None, "could not query comgr ISA targets"),
+        ("llvm22", frozenset(("gfx950",)), "does not support gfx942"),
+    ],
+)
+def test_a_broken_toolchain_fails_the_gate(active, targets, match):
+    """A toolchain query that fails, or the reference toolchain without a gate
+    arch, is broken, not merely another toolchain: the preflight fails."""
+    action, why = gate_config._preflight_outcome(
+        "llvm22", active, "comgr3.0/rocm7.2", targets, ("gfx942",)
+    )
+    assert action == gate_config._STOP
+    assert match in why
+
+
+def test_a_skipped_gate_ends_the_session_with_77():
+    """The skip ends the session with exit 77, which the CTest entry reports as
+    a skip, and says why."""
+    with pytest.raises(pytest.exit.Exception) as ended:
+        gate_config._skip_off_reference("counted ISA gate requires LLVM flavor llvm22")
+    assert ended.value.returncode == 77
+    assert "runs only on its reference toolchain (skipped)" in str(ended.value)
 
 
 @pytest.mark.parametrize(

@@ -6,9 +6,10 @@
 ``compliance_patterns.json`` beside this module is the single list of patterns that
 must never reach a tracked file of the public tree or a pull-request post (internal
 hosts, internal tracker and document links, local editor links, cluster and machine
-ids). Every consumer reads it through this module, so no two checkers can disagree about
-what a leak is. The policy behind the patterns lives in ``platform/AGENTS.md``
-§Compliance; this file only encodes the patterns that a regular expression can catch.
+ids, internal site and node names, product names and chip codenames). Every consumer
+reads it through this module, so no two checkers can disagree about what a leak is.
+The policy behind the patterns lives in ``platform/AGENTS.md`` §Compliance; this file
+only encodes the patterns that a regular expression can catch.
 
 Usage (stdlib only, from any directory)::
 

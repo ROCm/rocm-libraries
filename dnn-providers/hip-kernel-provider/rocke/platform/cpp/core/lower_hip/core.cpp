@@ -451,6 +451,10 @@ const char* rocke_h_vec_prefix(const char* ir_scalar_name, bool full_map)
             {
                 return "f64x";
             }
+            if(strcmp(ir_scalar_name, "i64") == 0)
+            {
+                return "i64x";
+            }
             if(strcmp(ir_scalar_name, "i32") == 0 || strcmp(ir_scalar_name, "tf32") == 0)
             {
                 return "i32x";
@@ -490,8 +494,9 @@ static bool rocke_h_scalar_in_vec_map(const char* name, bool full_map)
         return false;
     }
     return strcmp(name, "tf32") == 0 || strcmp(name, "f32") == 0 || strcmp(name, "f64") == 0
-           || strcmp(name, "i32") == 0 || strcmp(name, "i16") == 0 || strcmp(name, "i8") == 0
-           || strcmp(name, "fp8e4m3") == 0 || strcmp(name, "bf8e5m2") == 0;
+           || strcmp(name, "i64") == 0 || strcmp(name, "i32") == 0 || strcmp(name, "i16") == 0
+           || strcmp(name, "i8") == 0 || strcmp(name, "fp8e4m3") == 0
+           || strcmp(name, "bf8e5m2") == 0;
 }
 
 const char* rocke_h_vec_prefix_checked(rocke_h_lowerer_t* lw,
@@ -563,16 +568,13 @@ const char* rocke_h_type_to_hip(rocke_h_lowerer_t* lw, const rocke_type_t* t)
         }
         else
         {
-            /* full 8-entry map; fp8/bf8 fold to i8x as in Python. */
+            /* full map; fp8/bf8 fold to i8x as in Python. */
             pfx = rocke_h_vec_prefix(elem, /*full_map=*/true);
             /* vec_prefix falls back to "f16x" for unknown elems, but the
              * Python code only emits the listed elems and otherwise falls
-             * through to the KeyError. Detect the listed set explicitly so an
-             * unknown vector elem is an error rather than silently "f16x". */
-            if(strcmp(elem, "f16") != 0 && strcmp(elem, "bf16") != 0 && strcmp(elem, "f32") != 0
-               && strcmp(elem, "tf32") != 0 && strcmp(elem, "f64") != 0 && strcmp(elem, "i32") != 0
-               && strcmp(elem, "i16") != 0 && strcmp(elem, "i8") != 0
-               && strcmp(elem, "fp8e4m3") != 0 && strcmp(elem, "bf8e5m2") != 0)
+             * through to the KeyError. Check the mapped set so an unknown
+             * vector elem is an error rather than silently "f16x". */
+            if(!rocke_h_scalar_in_vec_map(elem, /*full_map=*/true))
             {
                 /* Python falls through to the scalar map, which refuses the
                  * vector type by its own name. */

@@ -18,7 +18,7 @@ stride_a, stride_b, stride_c)``; grid ``(ceil(N/TN), ceil(M/TM), E)`` with
 C ``[M,N]`` row-major, per expert, packed contiguously over E).
 
 Levers are command-line flags (defaults = the measured sweet spot for
-M/E=8192, N=1024, K=512, E=64 on gfx950 / MI355X); use ``--no-<flag>`` to
+M/E=8192, N=1024, K=512, E=64 on gfx950); use ``--no-<flag>`` to
 disable a boolean lever:
 
 * ``--dtl``   async direct-to-LDS DMA (``async_buffer_load_lds_addr``,
@@ -97,9 +97,17 @@ def _parse_args(argv=None) -> argparse.Namespace:
 
 
 def _main(argv=None) -> int:
-    import torch  # local import: only the benchmark/verify path needs torch
-    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
+    import numpy as np
+
     from rocke.instances.gfx950.grouped_gemm import GroupedGemmSpec, build_grouped_gemm
+    from rocke.numeric import storage
+    from rocke.runtime.device_array import DeviceArray
+    from rocke.runtime.launcher import (
+        KernelLauncher,
+        LaunchConfig,
+        synchronize_and_release,
+        time_launches,
+    )
 
     args = _parse_args(argv)
     M_total, N, K, E = args.m_total, args.n, args.k, args.e
@@ -150,16 +158,14 @@ def _main(argv=None) -> int:
         signature=grouped_gemm_signature(),
         cache_key=(kernel.name,),
     )
-    dt = torch.bfloat16
-    A = torch.randn(E, m, K, dtype=dt, device="cuda")
-    C = torch.empty(E, m, N, dtype=dt, device="cuda")
-    if spec.b_rrr:
-        # RRR: weights as [E,K,N] (N-contiguous), like the Triton/CK references.
-        B = torch.randn(E, K, N, dtype=dt, device="cuda") * 0.05
-        ref = torch.bmm(A.float(), B.float())  # A[m,K] @ B[K,N]
-    else:
-        B = torch.randn(E, N, K, dtype=dt, device="cuda") * 0.05
-        ref = torch.bmm(A.float(), B.float().transpose(-1, -2))
+    rng = np.random.default_rng(0)
+    A_host = storage.encode(rng.standard_normal((E, m, K)), "bf16")
+    # RRR (--brrr): weights as [E,K,N] (N-contiguous), like the Triton/CK
+    # references; otherwise [E,N,K].
+    B_shape = (E, K, N) if spec.b_rrr else (E, N, K)
+    B_host = storage.encode(0.05 * rng.standard_normal(B_shape), "bf16")
+    A, B = DeviceArray(A_host, "bf16"), DeviceArray(B_host, "bf16")
+    C = DeviceArray.zeros((E, m, N), "bf16")
     if spec.tpb > 1:
         total_tiles = E * math.ceil(N / tn) * math.ceil(m / tm)
         grid = (math.ceil(total_tiles / spec.tpb), 1, 1)
@@ -183,27 +189,19 @@ def _main(argv=None) -> int:
             config=LaunchConfig(stream=0, grid=grid, block=blk),
         )
 
-    C.zero_()
     call()
-    torch.cuda.synchronize()
-    err = (C.float() - ref).abs().max().item()
+    synchronize_and_release()
+    A_f32, B_f32 = storage.decode(A_host, "bf16"), storage.decode(B_host, "bf16")
+    ref = A_f32 @ (B_f32 if spec.b_rrr else B_f32.transpose(0, 2, 1))
+    err = float(np.abs(storage.decode(C.values(), "bf16") - ref).max())
     print(f"[ggemm] grid={grid} max_abs={err:.4f}  {'PASS' if err < 0.1 else 'FAIL'}")
     if err >= 0.1:
         return 1
     for _ in range(20):
         call()
-    torch.cuda.synchronize()
-    ts = []
-    for _ in range(5):
-        s = torch.cuda.Event(enable_timing=True)
-        e = torch.cuda.Event(enable_timing=True)
-        s.record()
-        for _ in range(50):
-            call()
-        e.record()
-        torch.cuda.synchronize()
-        ts.append(s.elapsed_time(e) / 50)
-    ts.sort()
+    synchronize_and_release()
+    # Five repeats of 50 launches each, in ms per launch.
+    ts = sorted(time_launches(call, warmup=0, iters=50) for _ in range(5))
     print(
         f"[ggemm] med={flops / (ts[2] * 1e9):.1f} TF  peak={flops / (ts[0] * 1e9):.1f} TF"
     )

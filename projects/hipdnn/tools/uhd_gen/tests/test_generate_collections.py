@@ -86,6 +86,11 @@ def world(tmp_path, monkeypatch):
                 "trained_against": {
                     **provenance,
                     "selector_revision": engine["revision"],
+                    **(
+                        {"codegen_revision": engine["codegen"]}
+                        if engine.get("codegen")
+                        else {}
+                    ),
                 },
                 **(
                     {"provider_build": engine["provider_build"]}
@@ -393,6 +398,118 @@ def test_a_rebuilt_provider_measures_repeats_not_another_binding(world, evaluato
         (output / "generation_manifest.json").read_text(encoding="utf-8")
     )
     assert manifest["superseded_rows"] == GRAPHS
+
+
+@pytest.mark.parametrize(
+    "older, newer, recorded",
+    [
+        ("cg-A", "cg-A", "cg-A"),
+        ("cg-A", "cg-B", None),
+        (None, "cg-B", None),
+        (None, None, None),
+    ],
+    ids=["one_compiler", "two_compilers", "one_unrecorded", "none_recorded"],
+)
+def test_a_model_records_the_codegen_revision_every_contribution_shares(
+    world, evaluator, caplog, older, newer, recorded
+):
+    """`trained_against.codegen_revision` names the code objects, not the selector contract:
+    collections built by two compilers form one dataset and their repeats compete. The
+    model records a codegen revision only when every contribution records the same one;
+    otherwise the run warns once and the report says so."""
+    first = _collect(
+        world, "older", collected_at="2026-09-28T10:00:00+00:00", codegen=older
+    )
+    second = _collect(
+        world,
+        "newer",
+        collected_at="2026-09-30T10:00:00+00:00",
+        codegen=newer,
+        scale=0.5,
+    )
+    dataset = _dataset(world, "compilers", [first, second])
+    caplog.clear()
+    code, output = _train(world, "compilers", evaluator, dataset=dataset)
+    assert code == 0
+    mixed = older != newer
+    logged = [r for r in caplog.records if "code generations" in r.getMessage()]
+    assert len(logged) == mixed, [r.getMessage() for r in logged]
+    assert _labels(output) == _labels(second), "the newer build's faster repeat"
+    from uhd_gen.dataset import store
+
+    kept = [
+        c["trained_against"].get("codegen_revision")
+        for c in store.read_manifest(dataset)["contributions"]
+    ]
+    assert kept == [older, newer], "each contribution keeps its own"
+    (model,) = (output / "model").glob("*.uhd.json")
+    trained = json.loads(model.read_text(encoding="utf-8"))["trained_against"]
+    assert trained.get("codegen_revision") == recorded
+    assert trained["selector_revision"] == "provider-1"
+    generation = json.loads(
+        (output / "generation_manifest.json").read_text(encoding="utf-8")
+    )
+    assert generation["trained_against"].get("codegen_revision") == recorded
+    warnings = json.loads(
+        (output / "model" / "eval_report.json").read_text(encoding="utf-8")
+    )["warnings"]
+    assert [w for w in warnings if "code generations" in w] == [
+        r.getMessage() for r in logged
+    ]
+
+
+def test_labels_taken_on_two_compilers_are_warned_about_once(world, evaluator, caplog):
+    """Each build wins some shapes, so the rows that train mix code generations: the run
+    says so once, and the model records none."""
+    first = _collect(
+        world, "older", collected_at="2026-09-28T10:00:00+00:00", codegen="cg-A"
+    )
+    # Faster on the first graphs measured, slower on the rest.
+    second = _collect(
+        world,
+        "newer",
+        collected_at="2026-09-30T10:00:00+00:00",
+        codegen="cg-B",
+        scale=0.5,
+        drift=1.3,
+    )
+    dataset = _dataset(world, "labels_mixed", [first, second])
+    caplog.clear()
+    code, output = _train(world, "labels_mixed", evaluator, dataset=dataset)
+    assert code == 0
+    labelled = {
+        json.loads(row["binding"])["trained_against"]["codegen_revision"]
+        for row in json.loads((output / "corpus.json").read_text(encoding="utf-8"))
+    }
+    assert labelled == {"cg-A", "cg-B"}
+    logged = [r for r in caplog.records if "code generations" in r.getMessage()]
+    assert len(logged) == 1, [r.getMessage() for r in logged]
+    (model,) = (output / "model").glob("*.uhd.json")
+    trained = json.loads(model.read_text(encoding="utf-8"))["trained_against"]
+    assert "codegen_revision" not in trained
+
+
+def test_metric_collections_from_two_builds_name_each_code_generation_once():
+    """One decision over every collection: no collection reads as unrecorded because an
+    earlier pair already disagreed."""
+    from uhd_gen.generate import _join_provenance
+
+    def collection(codegen):
+        binding = {
+            "engine": "provider:engine7",
+            "role": "predict_engine",
+            "arch": "gfx942",
+            "metric": "tflops",
+            "selector_revision": "r",
+            "trained_against": {"selector_revision": "r", "codegen_revision": codegen},
+        }
+        return pd.DataFrame({"binding": [json.dumps(binding)]}), binding, None
+
+    provenance, warning = _join_provenance(
+        None, [collection("cg-A"), collection("cg-B"), collection("cg-B")]
+    )
+    assert provenance == {"selector_revision": "r"}
+    assert "2 code generations (cg-A, cg-B)" in warning
 
 
 def test_a_shape_measured_on_two_gpus_of_one_kind_is_trained_on_once(world, evaluator):

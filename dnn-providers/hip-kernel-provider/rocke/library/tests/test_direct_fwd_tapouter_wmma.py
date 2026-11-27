@@ -18,8 +18,9 @@ from __future__ import annotations
 
 import unittest
 
+import pytest
 from rocke.runtime.hip_module import get_device_arch
-from rocke.tests.lanes import BINDING_LANE, arch_skip_reason, import_or_skip_until
+from rocke.tests.lanes import BUILD_VARIANT, arch_skip_reason, import_or_skip_until
 
 from kernels.common.conv_direct_fwd_tapouter_wmma import (
     DirectFwdTapOuterSpec,
@@ -113,7 +114,7 @@ class TestTapOuterSpec(unittest.TestCase):
     def test_engines_agree_on_specs(self):
         """The C++ engine's validator, kernel name, grid and LDS size match
         Python's over the AOT grid and a set of rejected specs."""
-        eng = import_or_skip_until("rocke_library_engine", BINDING_LANE)
+        eng = import_or_skip_until("rocke_library_engine", BUILD_VARIANT)
         from kernels.conv.direct_aot_jobs import (
             DIRECT_CAPABILITIES,
             _knob_grid,
@@ -218,6 +219,7 @@ _CASES = (
 )
 
 
+@pytest.mark.gpu
 @unittest.skipUnless(not _gpu_skip(), _gpu_skip() or "no GPU")
 class TestTapOuterGpu(unittest.TestCase):
     def _check(self, pkw, knobs):

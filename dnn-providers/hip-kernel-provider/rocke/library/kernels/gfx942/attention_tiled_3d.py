@@ -7,7 +7,7 @@ This is the gfx942 sibling of ``instances/gfx950/attention_tiled_3d.py``. The
 *structure* (split-KV segment kernel + online-softmax reduce) is identical to
 the gfx950 version; only the three gfx950-only ISA spots are swapped for the
 gfx942-legal forms that the 2D gfx942 kernel
-(``instances/gfx942_mi300/attention_tiled_2d.py``) already validates:
+(``kernels/gfx942/attention_tiled_2d.py``) already validates:
 
   * **QK MFMA**: gfx942 has no wide-K ``mfma_f32_16x16x32`` f16/bf16 atom, so
     the QK matmul uses the narrow ``16x16x16`` atom with a K-step of 16

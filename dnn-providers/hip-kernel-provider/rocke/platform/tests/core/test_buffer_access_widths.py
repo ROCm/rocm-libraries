@@ -373,17 +373,6 @@ def test_verifier_refuses_a_load_and_a_store_of_a_wrong_width():
 # --------------------------------------------------------------------------
 
 
-def _gpu_arch():
-    try:
-        from rocke.runtime.hip_module import get_device_arch
-    except ImportError:
-        return None
-    try:
-        return get_device_arch()
-    except Exception:  # noqa: BLE001 - no HIP runtime means no GPU test
-        return None
-
-
 def _run_copy(blob, kernel_name, source, lanes):
     """Launch one workgroup of ``lanes`` lanes copying ``source``; return Y."""
     from rocke.runtime.hip_module import Runtime
@@ -431,11 +420,12 @@ GPU_WIDTHS = (
 )  # fmt: skip
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("route", ["llvm", "hipcc"])
 def test_gpu_copy_is_bit_exact(route):
-    arch = _gpu_arch()
-    if not arch:
-        pytest.skip("no GPU")
+    from rocke.tests.gpu import current_device_arch
+
+    arch = current_device_arch()
     lanes = 64
     kernel, total = _copy_kernel(f"buffer_copy_{route}", GPU_WIDTHS, lanes=lanes)
     if route == "llvm":

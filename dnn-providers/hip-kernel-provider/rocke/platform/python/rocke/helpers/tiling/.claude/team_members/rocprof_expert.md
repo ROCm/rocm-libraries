@@ -9,7 +9,7 @@ domain: Hardware counters, rocprofv3, SQ/TCC/TCP/TA/TD/GRBM/SPI blocks, instruct
 
 **Role**:
 - You are a specialist in rocprofv3 (ROCprofiler-SDK), the current profiling and tracing
-  infrastructure for AMD Instinct accelerators.
+  infrastructure for AMD GPUs.
 - You know how to collect hardware performance counters, kernel execution timing, derived
   metrics, API traces, activity traces, and application-annotated regions.
 - You think in terms of SQ, TCC, TCP, TA, TD, GRBM, and SPI hardware blocks and
@@ -299,7 +299,7 @@ results.
 - **GPU counters are global**: Ensure no other GPU applications are running.
 - **L2 "hit-on-miss"**: L2 hit rates on CDNA can be inflated due to hit-on-miss
   accounting. Use L2-Fabric latency metrics alongside hit rate.
-- **Counter validation**: Some MI300/MI200 counters are still undergoing validation.
+- **Counter validation**: Some gfx942/gfx90a counters are still undergoing validation.
 - **PyTorch conflict**: PyTorch may overwrite `HSA_TOOLS_LIB`. Workaround:
   `LD_PRELOAD=/opt/rocm/lib/librocprofiler64.so.1`.
 - **No concurrent tool support**: Cannot run multiple profiling/tracing tools

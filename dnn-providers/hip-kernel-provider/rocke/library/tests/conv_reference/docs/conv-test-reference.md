@@ -87,19 +87,9 @@ while the accumulation and random corpus differ from Torch's implementation.
 Analytic grouping and spatial cases validate the oracle independently of rocKE's
 geometry helpers.
 
-Optional `qualify --torch-reference` also runs CPU
-`torch.nn.functional.conv2d` in float64 and float32, using the same quantized
-inputs with explicit NHWC/KYXC to NCHW/KCYX conversion. Torch rounds its own
-outputs through float32 to FP16/BF16. The NumPy–Torch gap is diagnostic.
-Qualification uses the largest baseline error
-against any enabled oracle, with the same frozen NumPy scale, to set the
-comparison budget. Per-case Torch version, implementation, answer digests,
-oracle disagreement, and baseline errors are authenticated by the manifest lock.
-Torch is imported only when this option is requested; a missing installation
-fails qualification rather than skipping the check. No Torch answers or
-dependency are needed by replay or installed CI. Reference worker interpreters
-block Torch imports even when it is installed. The optional oracle checks are
-excluded from installation and normal pytest discovery.
+Qualification uses the baseline error against the NumPy oracle, with its
+frozen scale, to set the comparison budget; per-case baseline errors are
+authenticated by the manifest lock.
 
 For independent reference R, qualified baseline O, and current output N, define
 S = max(max(abs(R)), 1). S is recorded in the locked manifest. Both offline and
@@ -133,9 +123,7 @@ atomic workspaces need initialization rather than indiscriminate NaN poisoning.
 
 Follow [Adding or updating a pinned GPU reference](../../reference_common/docs/gpu-reference-workflow.md)
 for the authoritative snapshot, qualification, candidate verification, DVC
-publication, and installation procedure. Select operation `conv`. The workflow
-includes optional offline CPU Torch cross-checks and requires a separate
-Torch-free verification environment.
+publication, and installation procedure. Select operation `conv`.
 
 Adding geometries changes the locked cohort and requires a replacement bundle
 qualified over the complete resulting cohort. The multi-tile and odd-channel

@@ -47,6 +47,9 @@ if(BUILD_TESTING)
         TIMEOUT ${ROCKE_TEST_TIMEOUT_TOOLCHAIN}
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/..")
 
+    # The next two entries are kept in step with the
+    # rocke-arch-table-engine-parity and rocke-gemm-spec-dict-binding-parity
+    # hooks in the root .pre-commit-config.yaml.
     # The arch-table parity test reads cpp/core/arch/data.cpp, which the
     # installed test tree does not carry, so CMakeLists.txt keeps it out of the
     # installed pytest cohort; run it here, from the source tree, instead.
@@ -76,21 +79,62 @@ if(BUILD_TESTING)
         TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU}
         ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python")
 
-    # Every test file runs in a CI-run entry or is listed, with its reason, in
+    # The next three entries are kept in step with the rocke-* hooks in the
+    # root .pre-commit-config.yaml.
+    # Every test file is assigned to a CI entry or is listed, with its reason, in
     # rocke.tests.pending_lanes. The check configures this source tree and reads
     # the provider categories, which the installed test tree does not carry.
     # The registration it audits is the same on every platform, so it runs
     # where the provider's install paths are POSIX paths only. The entry also
     # runs the tests of tools/limbo_audit.py, the per-test audit of CI runs
-    # against the same registry, which lives in the source tree only.
+    # against the same registry, which lives in the source tree only, and the
+    # check that no host entry runs a GPU test, which configures this tree too.
     if(NOT WIN32)
       add_test(
         NAME rocke_pending_lanes_check
         COMMAND "${Python3_EXECUTABLE}" -m pytest
                 "${CMAKE_CURRENT_SOURCE_DIR}/tools/test_pending_lanes.py"
-                "${CMAKE_CURRENT_SOURCE_DIR}/tools/test_limbo_audit.py" -q)
+                "${CMAKE_CURRENT_SOURCE_DIR}/tools/test_limbo_audit.py"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tools/test_gpu_work_placement.py" -q)
       set_tests_properties(
         rocke_pending_lanes_check
+        PROPERTIES
+          LABELS "ckc;python;host"
+          TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU}
+          ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python")
+    endif()
+
+    # Checks that the compliance patterns load, that they find each leak they
+    # name, and that no git-tracked file of rocke holds a hit, so a product name
+    # or internal link added anywhere in the tree fails here. The tests read
+    # rocke/tools and the git checkout, which the installed test tree does not
+    # carry. Guarded on the pattern module so a platform-only copy of this
+    # directory still configures.
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/compliance_patterns.py")
+      add_test(
+        NAME rocke_compliance_pytest
+        COMMAND "${Python3_EXECUTABLE}" -m pytest
+                "${CMAKE_CURRENT_SOURCE_DIR}/tools/test_compliance_patterns.py" -q)
+      set_tests_properties(
+        rocke_compliance_pytest
+        PROPERTIES
+          LABELS "ckc;python;host"
+          TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU}
+          ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python")
+    endif()
+
+    # No new use of PyTorch anywhere under rocke/: each remaining use is on the
+    # allowlist beside the test, which only shrinks. The check lists the source
+    # checkout through git, which the installed test tree is not, so it runs here.
+    # The allowlist covers the whole rocke tree, so a platform-only copy of this
+    # directory, which has no library/ beside it, does not register it.
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../library")
+      add_test(
+        NAME rocke_no_torch_check
+        COMMAND "${Python3_EXECUTABLE}" -m pytest
+                "${CMAKE_CURRENT_SOURCE_DIR}/tools/test_no_torch.py" -q)
+      set_tests_properties(
+        rocke_no_torch_check
         PROPERTIES
           LABELS "ckc;python;host"
           TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU}
@@ -103,6 +147,10 @@ if(BUILD_TESTING)
             "registered")
   endif()
 
+  # The rocke_optimization_barrier_hip_pair and
+  # rocke_coalesced_loader_async_refusals entries and their emitter targets are
+  # kept in step with the rocke-emitter-pair-parity hook in the root
+  # .pre-commit-config.yaml.
   # The binding consumes Python-built IR; this binary exercises the independent
   # C builder as well, including compiler-dependent argument evaluation order.
   set_source_files_properties(instances/parity/optimization_barrier_emit.c
@@ -136,9 +184,10 @@ if(BUILD_TESTING)
               "${_rocke_python_root}/rocke/tests/subprocess_launcher.py"
               --emitter
               "${_rocke_parity_dir}/optimization_barrier_emit.py"
-              --count 17)
+              --count 17 --rocke-shard-from-gtest-env)
     set_tests_properties(rocke_optimization_barrier_hip_pair
                          PROPERTIES LABELS "ckc;python;host;quick"
+                                    ENVIRONMENT "PYTHONPATH=${_rocke_python_root}"
                                     TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})
   endif()
 
@@ -253,7 +302,9 @@ if(BUILD_TESTING)
   # HIP source. The HIP source identity gate runs the C++ lowering through it,
   # via ROCKE_IR_LOWER_CLI, where the rocke_engine binding is not built, as in
   # the installed test tree. It is installed beside the tests but kept out of
-  # ROCKE_INSTALL_TEST_TARGETS, which registers each binary as a test.
+  # ROCKE_INSTALL_TEST_TARGETS, which registers each binary as a test. Not
+  # being a test, CTest cannot name its path to tests/run_all.py, so the build
+  # records it (rocke_record_program_path).
   add_executable(rocke_ir_lower_cli core/ir_lower_cli.cpp)
   target_link_libraries(rocke_ir_lower_cli PRIVATE rocke_core)
   rocke_cxx_test_installed_name(_rocke_installed_name rocke_ir_lower_cli)
@@ -261,6 +312,7 @@ if(BUILD_TESTING)
                         PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
   install(TARGETS rocke_ir_lower_cli
           RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
+  rocke_record_program_path(rocke_ir_lower_cli)
 
   # The engine entry rocke_ir_lower_cli and the binding share, called with and
   # without its optional message buffer. Not built on Windows: the Windows CI

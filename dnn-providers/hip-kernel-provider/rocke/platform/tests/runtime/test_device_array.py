@@ -17,23 +17,28 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from rocke.numeric.storage import encode
+from rocke.numeric.storage import element_type_of, encode
 from rocke.runtime.device_array import (
     ArrayInfo,
     DescribedArray,
     DeviceArray,
+    _names_each_element_once,
+    _row_blocks,
+    _Rows,
     array_info,
+    copy_elements,
     dense_strides,
     device_values,
     device_workspace,
     host_values,
     strided_extent,
     strided_view,
+    zero_elements,
 )
 from rocke.runtime.torch_interop import torch_array_info
 from rocke.tests.gpu import current_device_arch
 from rocke.tests.host_arrays import HostArray
-from rocke.tests.lanes import TORCH_IN_CI, import_or_skip_until
+from rocke.tests.lanes import TICKET, import_or_skip_until
 
 
 def _info(shape, strides, element_size=4, data_ptr=1024):
@@ -121,9 +126,23 @@ def test_raw_bit_hosts_need_an_element_type():
         DeviceArray(np.zeros(4, np.uint16))
 
 
-def test_element_type_must_match_the_host_width():
-    with pytest.raises(ValueError, match=r"dtype='bf16' is 2 bytes, expected the host"):
-        DeviceArray(np.zeros(4, np.float32), "bf16")
+@pytest.mark.parametrize(
+    "host, dtype, expected",
+    [
+        (np.float16, "bf16", "uint16 or a 2-byte"),
+        (np.float32, "bf16", "uint16 or a 2-byte"),
+        (np.float32, "i32", "int32 or a 4-byte"),
+        (np.int8, "fp16", "float16 or a 2-byte"),
+    ],
+)
+def test_element_type_must_match_the_host_dtype(host, dtype, expected):
+    # float16 data named bf16 has the right width but would be read as bf16 bits.
+    with pytest.raises(
+        ValueError,
+        match=rf"dtype={dtype!r}, host dtype={np.dtype(host)}, expected {expected} "
+        "integer type holding its raw bits",
+    ):
+        DeviceArray(np.zeros(4, host), dtype)
 
 
 def test_view_shape_must_fit_the_host():
@@ -175,9 +194,144 @@ def test_host_values_and_device_workspace_refuse_other_objects():
         strided_view(HostArray((2,), "fp32"), (2,), (1,))
 
 
+def _host_info(array: np.ndarray) -> ArrayInfo:
+    """The ``ArrayInfo`` of a host numpy array's memory (``device`` None)."""
+    base = array.base if array.base is not None else array
+    return ArrayInfo(
+        shape=array.shape,
+        strides=tuple(s // array.itemsize for s in array.strides),
+        dtype=element_type_of(array.dtype),
+        element_size=array.itemsize,
+        data_ptr=array.ctypes.data,
+        device=None,
+        backed_elements=(base.ctypes.data + base.nbytes - array.ctypes.data)
+        // array.itemsize,
+    )
+
+
+def test_a_view_describes_part_of_an_array_and_stays_inside_it():
+    whole = _info((4, 6), (6, 1))
+    rows = whole.view((2, 3), (6, 1), offset=7)
+    assert rows.data_ptr == whole.data_ptr + 7 * 4
+    assert rows.backed_elements == whole.backed_elements - 7
+    assert (rows.shape, rows.strides, rows.dtype) == ((2, 3), (6, 1), "fp32")
+    with pytest.raises(
+        ValueError, match=r"reaches past the 24 elements from its origin"
+    ):
+        whole.view((2, 6), (6, 1), offset=13)
+    with pytest.raises(ValueError, match=r"expected one non-negative stride"):
+        whole.view((2,), (-1,))
+
+
+def test_dense_layouts_are_one_block_of_one_row():
+    assert list(_row_blocks((2, 3, 4), ((12, 4, 1), (12, 4, 1)))) == [
+        _Rows(width=24, height=1, pitches=(24, 24), starts=(0, 0))
+    ]
+
+
+def test_a_transpose_of_outer_axes_is_one_block_per_outer_position():
+    # [2, 3, 4] read dense, written as [3, 2, 4]: rows of 4 along the longer of
+    # the two outer axes (extent 3), one block per position of the other.
+    assert list(_row_blocks((2, 3, 4), ((4, 8, 1), (12, 4, 1)))) == [
+        _Rows(width=4, height=3, pitches=(8, 4), starts=(0, 0)),
+        _Rows(width=4, height=3, pitches=(8, 4), starts=(4, 12)),
+    ]
+
+
+def test_a_transpose_of_the_inner_axis_moves_single_elements_along_the_longest_axis():
+    # The [B, H, S, 1] stats against a token-major [S, H, 1] buffer: no axis is
+    # contiguous in both, so rows are one element; they run along S (the
+    # longest), one block per head instead of one call per element.
+    blocks = list(_row_blocks((5, 3, 1), ((1, 8, 1), (3, 1, 1))))
+    assert blocks == [
+        _Rows(width=1, height=5, pitches=(1, 3), starts=(8 * head, head))
+        for head in range(3)
+    ]
+
+
+def test_a_row_never_overlaps_the_next_of_its_block():
+    # The middle axis's dst stride (2) is shorter than the 4-element row, so
+    # it cannot carry rows; the outer axis does.
+    assert list(_row_blocks((3, 2, 4), ((40, 2, 1), (8, 4, 1)))) == [
+        _Rows(width=4, height=3, pitches=(40, 8), starts=(0, 0)),
+        _Rows(width=4, height=3, pitches=(40, 8), starts=(2, 4)),
+    ]
+
+
+def test_a_broadcast_source_axis_reads_one_row_per_block():
+    # The source repeats one row of 4 along the outer axis (stride 0): it cannot
+    # carry rows (its stride is shorter than the row), so each outer position is
+    # one block of one row.
+    assert list(_row_blocks((3, 4), ((4, 1), (0, 1)))) == [
+        _Rows(width=4, height=1, pitches=(4, 4), starts=(4 * row, 0))
+        for row in range(3)
+    ]
+
+
+def test_the_longest_axis_cannot_carry_rows_when_its_stride_is_too_short():
+    # Rows of 4; the longest outer axis (extent 5) steps 2 in the destination,
+    # shorter than a row, so the rows run along the extent-3 axis instead.
+    assert list(_row_blocks((3, 5, 4), ((40, 2, 1), (20, 4, 1)))) == [
+        _Rows(width=4, height=3, pitches=(40, 20), starts=(2 * i, 4 * i))
+        for i in range(5)
+    ]
+
+
+def test_a_layout_with_one_element_is_one_block():
+    assert list(_row_blocks((1, 1), ((5, 7),))) == [
+        _Rows(width=1, height=1, pitches=(1,), starts=(0,))
+    ]
+
+
+def test_host_copy_moves_strided_elements_and_zero_clears_them():
+    source = np.arange(24, dtype=np.float32).reshape(2, 3, 4)
+    target = np.full((3, 2, 4), -1.0, np.float32)
+    copy_elements(_host_info(target.transpose(1, 0, 2)), _host_info(source))
+    np.testing.assert_array_equal(target, source.transpose(1, 0, 2))
+    zero_elements(_host_info(target[:, 1, 1:]))
+    expected = source.transpose(1, 0, 2).copy()
+    expected[:, 1, 1:] = 0
+    np.testing.assert_array_equal(target, expected)
+
+
+def test_a_destination_must_name_each_element_once():
+    """Every overlap of a destination's elements is refused, not only a zero
+    stride: [2, 2] with strides (1, 1) names element 1 twice."""
+    square = _info((2, 2), (2, 1))
+    with pytest.raises(ValueError, match=r"names each element once"):
+        copy_elements(_info((2, 2), (1, 1), data_ptr=4096), square)
+    assert _names_each_element_once((2, 2), (2, 1))
+    assert _names_each_element_once((2, 3), (1, 2))  # column-major
+    assert _names_each_element_once((4, 1), (1, 0))  # a unit axis may repeat
+    assert not _names_each_element_once((2, 2), (1, 1))
+    # Sufficient, not exact: offsets 0, 2, 4, 3, 5, 7 are distinct, but the axis
+    # of stride 3 starts inside the span (6) of the axis below it.
+    assert not _names_each_element_once((3, 2), (2, 3))
+    assert not _names_each_element_once((2,), (0,))
+
+
+def test_copy_refuses_other_shapes_types_and_devices():
+    four = _info((4,), (1,))
+    with pytest.raises(ValueError, match=r"expected one shape and element type"):
+        copy_elements(four, _info((5,), (1,)))
+    with pytest.raises(ValueError, match=r"expected both on one device"):
+        copy_elements(four, _host_info(np.zeros(4, np.float32)))
+    with pytest.raises(ValueError, match=r"names each element once"):
+        copy_elements(_info((4,), (0,), data_ptr=4096), four)
+    with pytest.raises(ValueError, match=r"expected non-negative strides"):
+        copy_elements(_info((4,), (-1,), data_ptr=4096), four)
+    with pytest.raises(ValueError, match=r"expected non-negative strides"):
+        copy_elements(_info((4,), (1,), data_ptr=4096), _info((4,), (-1,)))
+    with pytest.raises(ValueError, match=r"expected non-negative strides"):
+        zero_elements(_info((4,), (-1,)))
+    with pytest.raises(ValueError, match=r"expected no overlap"):
+        copy_elements(_info((4,), (1,), data_ptr=1028), four)
+
+
 # --- on the GPU ----------------------------------------------------------------------------------
 
 
+@pytest.mark.gpu
 def test_gpu_round_trip_and_tensor_methods():
     current_device_arch()
     host = encode(np.arange(12.0).reshape(3, 4), "bf16")
@@ -194,6 +348,18 @@ def test_gpu_round_trip_and_tensor_methods():
     assert info.dtype == "bf16" and info.device == array.device
 
 
+@pytest.mark.gpu
+@pytest.mark.parametrize(
+    "host, dtype",
+    [(np.uint16, "bf16"), (np.int16, "fp16"), (np.uint32, "i32"), (np.int8, "fp8e4m3")],
+)
+def test_gpu_a_named_element_type_takes_its_raw_bits(host, dtype):
+    current_device_arch()
+    array = DeviceArray(np.zeros(4, host), dtype)
+    assert array.dtype == dtype and array.element_size() == np.dtype(host).itemsize
+
+
+@pytest.mark.gpu
 def test_gpu_column_view_keeps_the_host_strides():
     current_device_arch()
     table = DeviceArray(np.zeros((3, 10), np.int32), shape=(3, 4))
@@ -203,6 +369,7 @@ def test_gpu_column_view_keeps_the_host_strides():
     assert table.info().backed_elements == 30
 
 
+@pytest.mark.gpu
 def test_gpu_view_shares_the_buffer_with_its_own_layout():
     current_device_arch()
     host = np.arange(24, dtype=np.float32).reshape(2, 3, 4)
@@ -220,6 +387,7 @@ def test_gpu_view_shares_the_buffer_with_its_own_layout():
     np.testing.assert_array_equal(view.values(), expected + 100)
 
 
+@pytest.mark.gpu
 def test_gpu_strided_view_keeps_the_view_start():
     current_device_arch()
     host = np.arange(12, dtype=np.int32)
@@ -230,6 +398,25 @@ def test_gpu_strided_view_keeps_the_view_start():
     np.testing.assert_array_equal(host_values(pairs), host[4:].reshape(2, 4).T)
 
 
+@pytest.mark.gpu
+@pytest.mark.parametrize("offset", [64, 65], ids=["offset_exact", "offset_short"])
+def test_gpu_an_offset_view_backs_the_elements_from_its_start(offset):
+    """A launch check bounds an index by ``backed_elements``, so a view that
+    starts ``offset`` elements into a buffer backs only the elements from its
+    start, never the buffer's whole size; and it cannot reach past the
+    buffer."""
+    current_device_arch()
+    buffer = DeviceArray(np.zeros(320, np.float32))
+    view = buffer.view((320 - offset,), offset=offset)
+    assert view.info().backed_elements == 320 - offset
+    assert array_info(view).backed_elements == 320 - offset
+    with pytest.raises(
+        ValueError, match=r"reaches past the 320 elements from its origin"
+    ):
+        buffer.view((321 - offset,), offset=offset)
+
+
+@pytest.mark.gpu
 def test_gpu_device_values_of_a_device_array_kind():
     current_device_arch()
     lengths = device_values(
@@ -239,6 +426,7 @@ def test_gpu_device_values_of_a_device_array_kind():
     np.testing.assert_array_equal(host_values(lengths), [3, 1, 2])
 
 
+@pytest.mark.gpu
 def test_gpu_view_defaults_to_dense_strides():
     current_device_arch()
     host = np.arange(12, dtype=np.int32)
@@ -247,15 +435,19 @@ def test_gpu_view_defaults_to_dense_strides():
     np.testing.assert_array_equal(rows.values(), host[6:].reshape(2, 3))
 
 
+@pytest.mark.gpu
 def test_gpu_view_must_stay_inside_the_buffer():
     current_device_arch()
     array = DeviceArray(np.zeros(8, np.float32))
-    with pytest.raises(ValueError, match=r"reaches past the 8-element buffer"):
+    with pytest.raises(
+        ValueError, match=r"reaches past the 8 elements from its origin"
+    ):
         array.view((4,), (2,), offset=2)
     with pytest.raises(ValueError, match=r"expected one non-negative stride"):
         array.view((4,), (-1,))
 
 
+@pytest.mark.gpu
 def test_gpu_zeros():
     current_device_arch()
     array = DeviceArray.zeros((2, 3), "fp8e4m3")
@@ -263,6 +455,7 @@ def test_gpu_zeros():
     np.testing.assert_array_equal(array.read(), np.zeros((2, 3), np.uint8))
 
 
+@pytest.mark.gpu
 def test_gpu_write_refuses_another_shape():
     current_device_arch()
     array = DeviceArray(np.zeros(4, np.float32))
@@ -270,6 +463,7 @@ def test_gpu_write_refuses_another_shape():
         array.write(np.zeros(5, np.float32))
 
 
+@pytest.mark.gpu
 def test_gpu_host_values_of_a_column_view():
     current_device_arch()
     host = np.arange(30, dtype=np.int32).reshape(3, 10)
@@ -277,6 +471,7 @@ def test_gpu_host_values_of_a_column_view():
     np.testing.assert_array_equal(host_values(table), host[:, :4])
 
 
+@pytest.mark.gpu
 def test_gpu_device_workspace_matches_a_device_array():
     current_device_arch()
     like = DeviceArray(np.zeros(4, np.float16))
@@ -286,11 +481,31 @@ def test_gpu_device_workspace_matches_a_device_array():
     assert scratch.device == like.device
 
 
+@pytest.mark.gpu
+def test_gpu_copy_and_zero_follow_each_layout():
+    current_device_arch()
+    host = np.arange(24, dtype=np.float32).reshape(2, 3, 4)
+    source = DeviceArray(host)
+    target = DeviceArray.zeros((3, 2, 4), "fp32")
+    copy_elements(target.view((2, 3, 4), (4, 8, 1)).info(), source.info(), stream=0)
+    np.testing.assert_array_equal(target.read(), host.transpose(1, 0, 2))
+    zero_elements(target.info().view((3, 3), (8, 1), offset=5))
+    expected = host.transpose(1, 0, 2).copy().reshape(3, 8)
+    expected[:, 5:] = 0
+    np.testing.assert_array_equal(target.read().reshape(3, 8), expected)
+    # An inner-axis transpose: single elements in rows along the longest axis.
+    stats = DeviceArray(np.arange(15, dtype=np.float32).reshape(3, 5))
+    tokens = DeviceArray.zeros((5, 3), "fp32")
+    copy_elements(tokens.view((3, 5), (1, 3)).info(), stats.info())
+    np.testing.assert_array_equal(tokens.read(), stats.read().T)
+
+
 # --- torch callers (optional: runs only where torch with a GPU is installed) ---------------------
 
 
+@pytest.mark.gpu
 def test_gpu_torch_tensors_get_torch_values_and_workspaces():
-    torch = import_or_skip_until("torch", TORCH_IN_CI)
+    torch = import_or_skip_until("torch", TICKET)
     if not torch.cuda.is_available():
         pytest.skip("torch has no GPU here")
     lengths = torch.arange(6, dtype=torch.int32, device="cuda").reshape(2, 3)

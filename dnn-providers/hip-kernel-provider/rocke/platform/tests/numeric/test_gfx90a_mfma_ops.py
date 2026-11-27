@@ -26,6 +26,8 @@ from rocke.core.ir import (
 from rocke.tests.gpu import run_on_device
 from rocke.tests.lane_maps import lane_placements
 
+pytestmark = pytest.mark.gpu
+
 _WAVE = 64
 
 # gfx90a catalog rows checked here.

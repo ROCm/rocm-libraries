@@ -28,7 +28,6 @@ numpy is the only hard dependency; no torch.
 from __future__ import annotations
 
 import ctypes
-import os
 import re
 import tempfile
 import unittest
@@ -37,6 +36,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 from rocke.runtime.hip_module import get_device_arch
+from rocke.tests.host_cpus import available_cpus
 
 GPU_ARCH = get_device_arch(0)
 _FUSED = "direct_grouped_dgrad_fused"
@@ -293,7 +293,7 @@ def _fill_cache(cache, caps_list, dtype, select=None):
         arch=GPU_ARCH,
         dtype=dtype,
         directions=["direct_dgrad"],
-        jobs=os.cpu_count() or 1,
+        jobs=available_cpus(),
         log=lambda *_: None,
     )
     return len(jobs)

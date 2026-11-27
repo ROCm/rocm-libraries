@@ -343,7 +343,7 @@ ROCKE="$REPO/dnn-providers/hip-kernel-provider/rocke"
 VENV="$ROOT/venvs"
 ENV="$ROOT/env"
 
-AMD_INDEX=https://stable.repo.amd.com/rocm/whl-next/
+AMD_INDEX="${ROCM_WHEEL_INDEX:?set ROCM_WHEEL_INDEX to the ROCm Python wheel index}"
 
 mkdir -p "$VENV" "$ENV"
 

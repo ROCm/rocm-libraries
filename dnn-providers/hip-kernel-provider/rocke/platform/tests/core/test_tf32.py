@@ -41,7 +41,7 @@ from rocke.instances.gfx942.tf32_mma_probe import (
     Tf32MmaProbeSpec,
     build_tf32_mma_probe,
 )
-from rocke.tests.lanes import BINDING_LANE, import_or_skip_until
+from rocke.tests.lanes import BUILD_VARIANT, import_or_skip_until, skip_until
 
 pytestmark = pytest.mark.filterwarnings(
     "error::rocke.core.lower_llvm.ArchDomainWarning"
@@ -217,7 +217,7 @@ def test_probe_rejects_incompatible_result_layout(m, mode, field):
 @pytest.mark.parametrize("m", [16, 32])
 @pytest.mark.parametrize("mode", PREPARATIONS)
 def test_both_builders_and_lowerers(m, mode):
-    native = import_or_skip_until("rocke_engine", BINDING_LANE)
+    native = import_or_skip_until("rocke_engine", BUILD_VARIANT)
     kernel = build_tf32_mma_probe(Tf32MmaProbeSpec(m, mode))
     ir = serialize(kernel)
     assert serialize(parse(ir)) == ir
@@ -271,18 +271,24 @@ def test_concrete_xf32_uses_catalog_target_diagnostic(m, gfx, flavor):
         _lower_kernel_to_llvm_python(kernel, arch=gfx, llvm_flavor=flavor)
 
 
+@pytest.mark.parametrize("engine", ENGINES)
 @pytest.mark.parametrize("arch", COVERED_ARCHES)
 @pytest.mark.parametrize("flavor", LLVM_FLAVORS)
-def test_arithmetic_rejected_after_serialization(arch, flavor):
+def test_arithmetic_rejected_after_serialization(arch, flavor, engine):
+    """Each engine refuses TF32 arithmetic with the same message; the C++
+    engine reads the kernel as serialized IR."""
     b = IRBuilder("bad_arithmetic")
     v = b.param("x", TF32)
     b.add(v, v)
     b.ret()
-    with pytest.raises(ValueError, match="TF32 arithmetic"):
-        _lower_kernel_to_llvm_python(b.kernel, arch=arch, llvm_flavor=flavor)
-    native = native_engine_or_skip()
-    with pytest.raises(Exception):
-        native.lower_serialized_ir(serialize(b.kernel), arch=arch, flavor=flavor)
+    assert_engine_rejects(
+        b.kernel,
+        arch,
+        engine=engine,
+        error_type=ValueError,
+        message="TF32 arithmetic requires an explicit conversion to f32",
+        llvm_flavor=flavor,
+    )
 
 
 @pytest.mark.parametrize("arch", COVERED_ARCHES)
@@ -519,16 +525,20 @@ def test_fp32_atom_rejects_tf32_carrier():
     reason="the probe builds the native gfx942 xf32 MFMA; gfx950 emulates xf32 with bf16x3 rows",
 )
 @pytest.mark.parametrize("flavor", LLVM_FLAVORS)
-def test_parsed_mma_rejects_wrong_operands(flavor):
-    native = native_engine_or_skip()
-    for bad in ("vec<i32x2>", "vec<f32x2>", "vec<tf32x4>"):
-        ir = serialize(build_tf32_mma_probe(Tf32MmaProbeSpec())).replace(
-            "vec<tf32x2>", bad
-        )
-        with pytest.raises(ValueError, match="XF32 MMA requires"):
-            _lower_kernel_to_llvm_python(parse(ir), arch="gfx942", llvm_flavor=flavor)
-        with pytest.raises(Exception):
-            native.lower_serialized_ir(ir, arch="gfx942", flavor=flavor)
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize("bad", ["vec<i32x2>", "vec<f32x2>", "vec<tf32x4>"])
+def test_parsed_mma_rejects_wrong_operands(flavor, bad, engine):
+    """Each engine refuses an XF32 MMA whose serialized operands are not two
+    vec<tf32x2> with the same message."""
+    ir = serialize(build_tf32_mma_probe(Tf32MmaProbeSpec())).replace("vec<tf32x2>", bad)
+    assert_engine_rejects(
+        parse(ir),
+        "gfx942",
+        engine=engine,
+        error_type=ValueError,
+        message="XF32 MMA requires two vec<tf32x2> operands and its FP32 accumulator",
+        llvm_flavor=flavor,
+    )
 
 
 @pytest.fixture(scope="module")
@@ -540,7 +550,10 @@ def tf32_recipe_replay_cli():
 
     resolved = online.resolve_replay_cli_path(build=False)
     if resolved is None:
-        pytest.skip("Set ROCKE_REPLAY_CLI to the prebuilt native replay CLI")
+        skip_until(
+            BUILD_VARIANT,
+            reason="Set ROCKE_REPLAY_CLI to the prebuilt native replay CLI",
+        )
     return Path(resolved)
 
 
