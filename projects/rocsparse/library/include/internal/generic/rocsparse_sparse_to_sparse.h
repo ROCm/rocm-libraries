@@ -54,10 +54,21 @@ extern "C" {
 *
 *  \retval      rocsparse_status_success the operation completed successfully.
 *  \retval      rocsparse_status_invalid_handle the library context was not initialized.
-*  \retval      rocsparse_status_invalid_value if any required enumeration is invalid.
-*  \retval      rocsparse_status_invalid_pointer \p mat_A, \p mat_B, or \p buffer_size_in_bytes
-*               pointer is invalid.
-*  \retval      rocsparse_status_not_implemented the conversion is not supported for the formats or data types of \p source and \p target.
+*  \retval      rocsparse_status_invalid_value \p stage or another required enumeration is
+*               invalid.
+*  \retval      rocsparse_status_invalid_pointer \p descr, \p source, \p target, or
+*               \p buffer_size_in_bytes pointer is invalid.
+*  \retval      rocsparse_status_invalid_size \p source has a batch count greater than one.
+*  \retval      rocsparse_status_type_mismatch \p source and \p target differ in matrix type,
+*               fill mode, diagonal type, index base, or storage mode.
+*  \retval      rocsparse_status_not_implemented the conversion is not supported for the
+*               formats or data types of \p source and \p target. A conversion that does
+*               not need \ref rocsparse_sparse_to_sparse_permissive checks the data types
+*               only in \ref rocsparse_sparse_to_sparse. A permissive conversion converts
+*               \p source into its intermediate CSR matrix during this query for
+*               \ref rocsparse_sparse_to_sparse_stage_analysis, so this query returns
+*               the status when that conversion does not support the data type of
+*               \p source.
 */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_sparse_to_sparse_buffer_size(rocsparse_handle                 handle,
@@ -134,11 +145,16 @@ rocsparse_status rocsparse_sparse_to_sparse_buffer_size(rocsparse_handle        
 *  \p target. A permissive conversion to BSR does the same when the conversion into the
 *  intermediate CSR matrix succeeds.
 *
-*  A Mixed conversion of a matrix with zero nonzeros returns \ref rocsparse_status_success for
-*  any data type pair. The CSR to CSC and CSC to CSR conversions compare data types only when
-*  both value arrays are set, and otherwise dispatch on the source data type. BSR to CSR
-*  compares data types only when both value arrays are set and dispatches on the target data
-*  type. A dispatched type that the routine does not implement still returns an error.
+*  A conversion that writes values returns \ref rocsparse_status_not_implemented for an
+*  unsupported data type pair even when the matrix has zero nonzeros, if both value arrays
+*  are set. This includes the permissive conversions, which check the data types of
+*  \p source and \p target in the \ref rocsparse_sparse_to_sparse_stage_compute stage: a
+*  COO or COO AoS target needs a supported conversion between them, and a CSC, ELL or BSR
+*  target needs the same data type. The CSR to CSC and CSC to CSR conversions compare data
+*  types only when both value arrays are set, and otherwise dispatch on the source data
+*  type. BSR to CSR compares data types only when both value arrays are set and dispatches
+*  on the target data type. A dispatched type that the routine does not implement still
+*  returns an error.
 *
 *  Conversions to a single-precision type round each value (each real and imaginary part) to
 *  nearest. Values that overflow single precision become infinity of the same sign, NaN is
@@ -153,9 +169,30 @@ rocsparse_status rocsparse_sparse_to_sparse_buffer_size(rocsparse_handle        
 *  <tr><td>rocsparse_datatype_f64_r <td>rocsparse_datatype_f32_r
 *  <tr><td>rocsparse_datatype_f32_r <td>rocsparse_datatype_f32_c
 *  <tr><td>rocsparse_datatype_f64_r <td>rocsparse_datatype_f32_c
+*  <tr><td>rocsparse_datatype_f32_r <td>rocsparse_datatype_f64_c
+*  <tr><td>rocsparse_datatype_f64_r <td>rocsparse_datatype_f64_c
 *  <tr><td>rocsparse_datatype_f32_c <td>rocsparse_datatype_f64_c
 *  <tr><td>rocsparse_datatype_f64_c <td>rocsparse_datatype_f32_c
+*  <tr><td>rocsparse_datatype_f16_r <td>rocsparse_datatype_f32_r
+*  <tr><td>rocsparse_datatype_f16_r <td>rocsparse_datatype_f64_r
+*  <tr><td>rocsparse_datatype_f16_r <td>rocsparse_datatype_f32_c
+*  <tr><td>rocsparse_datatype_f16_r <td>rocsparse_datatype_f64_c
+*  <tr><td>rocsparse_datatype_bf16_r <td>rocsparse_datatype_f32_r
+*  <tr><td>rocsparse_datatype_bf16_r <td>rocsparse_datatype_f64_r
+*  <tr><td>rocsparse_datatype_bf16_r <td>rocsparse_datatype_f32_c
+*  <tr><td>rocsparse_datatype_bf16_r <td>rocsparse_datatype_f64_c
 *  </table>
+*
+*  The rows with a \ref rocsparse_datatype_f16_r or \ref rocsparse_datatype_bf16_r source,
+*  \ref rocsparse_datatype_f32_r into \ref rocsparse_datatype_f64_r,
+*  \ref rocsparse_datatype_f32_c, or \ref rocsparse_datatype_f64_c,
+*  \ref rocsparse_datatype_f32_c into \ref rocsparse_datatype_f64_c, and
+*  \ref rocsparse_datatype_f64_r into \ref rocsparse_datatype_f64_c are exact: every source
+*  value is representable in the target, and a real value stored in a complex target has an
+*  imaginary part of zero. The rows with a double-precision source and a single-precision
+*  target, \ref rocsparse_datatype_f64_r into \ref rocsparse_datatype_f32_r or
+*  \ref rocsparse_datatype_f32_c, and \ref rocsparse_datatype_f64_c into
+*  \ref rocsparse_datatype_f32_c, round as described above.
 *
 *  \subsection sparse_to_sparse_same_a Same (a)
 *  <table>
@@ -198,9 +235,22 @@ rocsparse_status rocsparse_sparse_to_sparse_buffer_size(rocsparse_handle        
 *  <tr><td>rocsparse_datatype_f64_r <td>rocsparse_datatype_f32_r
 *  <tr><td>rocsparse_datatype_f32_r <td>rocsparse_datatype_f32_c
 *  <tr><td>rocsparse_datatype_f64_r <td>rocsparse_datatype_f32_c
+*  <tr><td>rocsparse_datatype_f32_r <td>rocsparse_datatype_f64_c
+*  <tr><td>rocsparse_datatype_f64_r <td>rocsparse_datatype_f64_c
 *  <tr><td>rocsparse_datatype_f32_c <td>rocsparse_datatype_f64_c
 *  <tr><td>rocsparse_datatype_f64_c <td>rocsparse_datatype_f32_c
 *  </table>
+*
+*  The rows with a double-precision source and a single-precision target round as described
+*  above. The other rows are exact, as in
+*  \ref sparse_to_sparse_mixed_conversions "Mixed conversions".
+*
+*  CSC, ELL, and BSR to COO or COO AoS do not support a \ref rocsparse_datatype_f16_r or
+*  \ref rocsparse_datatype_bf16_r source. The intermediate CSR matrix keeps the source
+*  data type, and the conversion into it does not support these two types:
+*  \ref rocsparse_sparse_to_sparse_buffer_size for
+*  \ref rocsparse_sparse_to_sparse_stage_analysis returns
+*  \ref rocsparse_status_not_implemented.
 *
 *  \subsection sparse_to_sparse_permissive_a Permissive (a)
 *  These pairs require \ref rocsparse_sparse_to_sparse_permissive. The conversion goes through
@@ -263,7 +313,17 @@ rocsparse_status rocsparse_sparse_to_sparse_buffer_size(rocsparse_handle        
 *  buffer  temporary storage buffer allocated by the user.
 *
 *  \retval      rocsparse_status_success the operation completed successfully.
-*  \retval      rocsparse_status_not_implemented the conversion is not supported for the formats or data types of \p source and \p target.
+*  \retval      rocsparse_status_invalid_handle the library context was not initialized.
+*  \retval      rocsparse_status_invalid_pointer \p descr, \p source, \p target, or \p buffer
+*               is invalid.
+*  \retval      rocsparse_status_invalid_value \p stage is not a valid enumeration.
+*  \retval      rocsparse_status_invalid_size a conversion to the same format has a
+*               \p source and a \p target with different numbers of rows or columns.
+*  \retval      rocsparse_status_type_mismatch \p source and \p target differ in matrix type,
+*               fill mode, diagonal type, index base, or storage mode, or an index value
+*               does not fit in the target index type.
+*  \retval      rocsparse_status_not_implemented the conversion is not supported for the formats
+*               or data types of \p source and \p target, or the matrix is batched.
 *  \par Example
 *  This example converts a CSR matrix into an ELL matrix.
 *  \snippet example_rocsparse_sparse_to_sparse.cpp doc example

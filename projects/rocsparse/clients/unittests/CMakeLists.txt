@@ -487,6 +487,12 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_internal_spmat_print.cpp
 )
 
+# Keep f32 subnormals in convert_array, as library/CMakeLists.txt does for the library.
+set_source_files_properties(
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_convert_array.cpp PROPERTIES
+  COMPILE_OPTIONS "-fno-gpu-flush-denormals-to-zero"
+)
+
 # Internal rocsparse::primitives building blocks under test. Like the host-pure
 # utilities compiled into rocsparse-unit-test, these template instantiations are
 # hidden in librocsparse (CXX_VISIBILITY_PRESET "hidden") and cannot be reached

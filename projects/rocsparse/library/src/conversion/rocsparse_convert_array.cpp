@@ -410,14 +410,32 @@ namespace rocsparse
     };
 
     //
-    // Specialized conversion from float to float complex.
+    // The pairs that use the shared real-widening kernel below: f16 and bf16 into f32, f64,
+    // f32 complex and f64 complex, f32 into either complex type, and f64 into f64 complex.
+    // Complex targets get an imaginary part of zero. Every pair is exact, but not every
+    // exact real widening is here: f32 into f64 keeps its specialization above. This trait
+    // also selects the launch in convert_data_array_compute_core that does not read back a
+    // conversion error, so only the pairs listed here skip it. f64 into f32 complex rounds
+    // and stays the specialization below, which records the rounding error.
+    // CMake builds this file with -fno-gpu-flush-denormals-to-zero to keep f32 subnormals.
     //
-    template <>
-    struct copy_farray_mix_safe_kernel_t<rocsparse_float_complex, float>
-    {
-        using SOURCE = float;
-        using TARGET = rocsparse_float_complex;
+    template <typename TARGET, typename SOURCE>
+    static constexpr bool uses_shared_real_widening_kernel_v
+        = ((std::is_same<TARGET, float>{} || std::is_same<TARGET, double>{}
+            || std::is_same<TARGET, rocsparse_float_complex>{})
+           && (std::is_same<SOURCE, _Float16>{} || std::is_same<SOURCE, rocsparse_bfloat16>{}))
+          || (std::is_same<TARGET, rocsparse_float_complex>{} && std::is_same<SOURCE, float>{})
+          || (std::is_same<TARGET, rocsparse_double_complex>{}
+              && (std::is_same<SOURCE, float>{} || std::is_same<SOURCE, double>{}
+                  || std::is_same<SOURCE, _Float16>{}
+                  || std::is_same<SOURCE, rocsparse_bfloat16>{}));
 
+    template <typename TARGET, typename SOURCE>
+    struct copy_farray_mix_safe_kernel_t<
+        TARGET,
+        SOURCE,
+        std::enable_if_t<rocsparse::uses_shared_real_widening_kernel_v<TARGET, SOURCE>>>
+    {
         template <uint32_t BLOCKSIZE>
         ROCSPARSE_KERNEL(BLOCKSIZE)
         void run(const size_t             nitems_,
@@ -425,11 +443,6 @@ namespace rocsparse
                  const SOURCE*            source_,
                  floating_data_t<SOURCE>* conversion_error_)
         {
-            // AISPARSE-686. `BLOCKSIZE * hipBlockIdx_x` is unsigned-int arithmetic, so
-            // it wrapped at 2^32 before it was ever assigned to a size_t, and there
-            // was no grid-stride loop behind a clamped grid.x. Block-uniform bound:
-            // hipBlockIdx_x, hipGridDim_x, a kernel argument and a compile-time
-            // constant only.
             const size_t stride = static_cast<size_t>(BLOCKSIZE) * hipGridDim_x;
             for(size_t base = static_cast<size_t>(BLOCKSIZE) * hipBlockIdx_x; base < nitems_;
                 base += stride)
@@ -437,8 +450,16 @@ namespace rocsparse
                 const size_t tid = base + hipThreadIdx_x;
                 if(tid < nitems_)
                 {
-                    target_[tid] = {static_cast<floating_data_t<TARGET>>(source_[tid]),
-                                    static_cast<floating_data_t<TARGET>>(0)};
+                    const floating_data_t<TARGET> value
+                        = static_cast<floating_data_t<TARGET>>(source_[tid]);
+                    if constexpr(std::is_same<TARGET, floating_data_t<TARGET>>{})
+                    {
+                        target_[tid] = value;
+                    }
+                    else
+                    {
+                        target_[tid] = {value, static_cast<floating_data_t<TARGET>>(0)};
+                    }
                 }
             }
         }
@@ -477,12 +498,11 @@ namespace rocsparse
                 const size_t gid = base + tid;
                 if(gid < nitems_)
                 {
-                    const SOURCE s  = source_[gid];
-                    const SOURCE sf = floating_data_t<SOURCE>(s);
-                    const TARGET t{static_cast<floating_data_t<TARGET>>(sf),
-                                   static_cast<floating_data_t<TARGET>>(0)};
+                    const SOURCE                  s    = source_[gid];
+                    const floating_data_t<TARGET> real = static_cast<floating_data_t<TARGET>>(s);
+                    const TARGET                  t{real, static_cast<floating_data_t<TARGET>>(0)};
 
-                    const floating_data_t<SOURCE> e = rocsparse::abs(s - sf);
+                    const floating_data_t<SOURCE> e = rocsparse::abs(s - static_cast<SOURCE>(real));
                     err                             = (e > err) ? e : err;
                     target_[gid]                    = t;
                 }
@@ -661,19 +681,36 @@ namespace rocsparse
     {
         ROCSPARSE_ROUTINE_TRACE;
 
-        if(nitems_ == 0)
-        {
-            host_error[0] = 0;
-            return rocsparse_status_success;
-        }
-
         using kernel_t = rocsparse::copy_farray_mix_safe_kernel_t<TARGET, SOURCE>;
         static constexpr uint32_t BLOCKSIZE = 1024;
+        // Reject an unsupported pair before the empty-array shortcut, so the
+        // answer depends on the types and not on nnz.
         if constexpr(!rocsparse::has_run_kernel_t<kernel_t, BLOCKSIZE>::value)
         {
             RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
                 rocsparse_status_not_implemented,
                 "the conversion between these two data types is not implemented");
+        }
+        else if(nitems_ == 0)
+        {
+            host_error[0] = 0;
+            return rocsparse_status_success;
+        }
+        else if constexpr(rocsparse::uses_shared_real_widening_kernel_v<TARGET, SOURCE>)
+        {
+            // The shared real-widening kernel never writes conversion_error_.
+            // Skip the memset, the readback and the stream sync.
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                (kernel_t::template run<BLOCKSIZE>),
+                dim3(rocsparse::get_grid_size_x(handle_, (nitems_ - 1) / BLOCKSIZE + 1, BLOCKSIZE)),
+                dim3(BLOCKSIZE),
+                0,
+                handle_->stream,
+                nitems_,
+                (TARGET*)target__,
+                (const SOURCE*)source__,
+                (floating_data_t<SOURCE>*)nullptr);
+            host_error[0] = 0;
         }
         else
         {
@@ -700,6 +737,26 @@ namespace rocsparse
                                                          handle_->stream));
             RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle_->stream));
             host_error[0] = static_cast<double>(herr);
+        }
+        return rocsparse_status_success;
+    }
+
+    struct convert_data_array_supported_t
+    {
+    };
+
+    template <typename TARGET, typename SOURCE>
+    static rocsparse_status convert_data_array_compute_core(convert_data_array_supported_t)
+    {
+        ROCSPARSE_ROUTINE_TRACE;
+
+        using kernel_t = rocsparse::copy_farray_mix_safe_kernel_t<TARGET, SOURCE>;
+        static constexpr uint32_t BLOCKSIZE = 1024;
+        if constexpr(!rocsparse::has_run_kernel_t<kernel_t, BLOCKSIZE>::value)
+        {
+            RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                rocsparse_status_not_implemented,
+                "the conversion between these two data types is not implemented");
         }
         return rocsparse_status_success;
     }
@@ -1016,6 +1073,16 @@ rocsparse_status rocsparse::convert_array(rocsparse_handle   handle_,
         rocsparse::log_debug(handle_, message.str());
         return rocsparse_status_success;
     }
+}
+
+rocsparse_status rocsparse::convert_array_supported(rocsparse_datatype target_datatype_,
+                                                    rocsparse_datatype source_datatype_)
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::convert_data_array_compute(
+        target_datatype_, source_datatype_, rocsparse::convert_data_array_supported_t{}));
+    return rocsparse_status_success;
 }
 
 rocsparse_status rocsparse::dnvec_transfer_from(rocsparse_handle            handle,
