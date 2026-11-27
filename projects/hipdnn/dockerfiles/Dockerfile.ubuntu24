@@ -209,14 +209,18 @@ WORKDIR /workspace
 # Prebuilt stage - installs a current per-family multi-arch tarball through
 # TheRock's install_rocm_from_artifacts.py.
 #
-# Example: Default build (latest nightly for gfx94X-dcgpu):
+# Example: Default build (newest Quartz-selected nightly for gfx94X-dcgpu):
 #   docker build -f Dockerfile.ubuntu24 -t hipdnn:prebuilt .
+#
+# Example: Unvetted newest nightly directly from the tarball index:
+#   docker build -f Dockerfile.ubuntu24 \
+#       --build-arg THEROCK_RELEASE=latest \
+#       -t hipdnn:prebuilt .
 #
 # Example: Specific release version:
 #   docker build -f Dockerfile.ubuntu24 \
-#       --build-arg THEROCK_RELEASE=7.12.0a20260202 \
+#       --build-arg THEROCK_RELEASE=10.3.0a20261125 \
 #       -t hipdnn:prebuilt .
-#
 # Example: MI200 (gfx90a):
 #   docker build -f Dockerfile.ubuntu24 \
 #       --build-arg THEROCK_ARTIFACT_GROUP=gfx90a \
@@ -232,10 +236,11 @@ FROM base AS install_therock_prebuilt
 # Build args for release selection
 ARG THEROCK_ASIC=gfx94X
 ARG THEROCK_ASIC_VARIANT=dcgpu
-ARG THEROCK_RELEASE=latest
+ARG THEROCK_RELEASE=quartz
+ARG QUARTZ_MAX_AGE_DAYS=14
+ARG QUARTZ_RESOLVER_REF=develop
 # Full artifact group (combines ASIC and variant)
 ARG THEROCK_ARTIFACT_GROUP=$THEROCK_ASIC-$THEROCK_ASIC_VARIANT
-
 
 # Clone TheRock for build tools
 RUN git clone --depth 1 https://github.com/ROCm/TheRock.git /TheRock
@@ -244,9 +249,28 @@ WORKDIR /TheRock
 
 RUN python3 -m venv /venv && /venv/bin/pip install -r requirements.txt
 
-# Install ROCm through TheRock's installer. It selects the appropriate current
-# multi-arch feed for a nightly or `.dev0+` release.
-RUN if [ "$THEROCK_RELEASE" = "latest" ]; then \
+# Install ROCm through TheRock's installer. When THEROCK_RELEASE=quartz
+# (default), fetch the shared hipDNN Quartz resolver so this Dockerfile stays
+# self-contained with an empty build context.
+RUN if [ "$THEROCK_RELEASE" = "quartz" ]; then \
+        curl -fsSL \
+            "https://raw.githubusercontent.com/ROCm/rocm-libraries/${QUARTZ_RESOLVER_REF}/projects/hipdnn/scripts/resolve_quartz_rocm.py" \
+            -o /tmp/resolve_quartz_rocm.py && \
+        resolved_version=$(python3 /tmp/resolve_quartz_rocm.py \
+            --platform linux \
+            --gpu-target "$THEROCK_ARTIFACT_GROUP" \
+            --artifact tarballs \
+            --max-age-days "$QUARTZ_MAX_AGE_DAYS" \
+            --allow-build-only-fallback \
+            --version-only) && \
+        rm -f /tmp/resolve_quartz_rocm.py && \
+        echo "Installing Quartz-selected release $resolved_version for $THEROCK_ARTIFACT_GROUP" && \
+        /venv/bin/python build_tools/install_rocm_from_artifacts.py \
+            --release "$resolved_version" \
+            --artifact-group "$THEROCK_ARTIFACT_GROUP" \
+            --output-dir /opt/rocm && \
+        echo "$resolved_version" > /opt/rocm/THEROCK_VERSION; \
+    elif [ "$THEROCK_RELEASE" = "latest" ]; then \
         echo "Installing latest nightly for $THEROCK_ARTIFACT_GROUP"; \
         /venv/bin/python build_tools/install_rocm_from_artifacts.py \
             --latest-release \

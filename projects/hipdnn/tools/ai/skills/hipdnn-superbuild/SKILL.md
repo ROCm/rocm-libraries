@@ -18,7 +18,7 @@ Infer options from the user request:
 - **ROCm path**: optional `ROCM_PATH=<path>` override; Linux defaults to `/opt/rocm`. On Windows, when omitted it is derived from the wheel venv (`<venv>/Lib/site-packages/_rocm_sdk_devel`, venv default `D:/develop/latest_wheels`)
 - **Clang path**: optional Windows `CLANG_PATH=<path>` override; default `D:/develop/dist/clang/bin`. Clang is a prerequisite and is not provisioned; install it via `projects/hipdnn/scripts/windows/windows_build_setup.ps1` (repo-relative) if missing
 - **GPU targets**: optional `GPU_TARGETS=<arch>` override; Windows wheel setup defaults to `gfx1151`
-- **Wheel SHA**: optional Windows `SHA=<commit>` to install pinned S3 staging wheels instead of nightlies
+- **ROCm version / Wheel SHA**: optional Windows `--rocm-version quartz|latest|<version>` (default `quartz` selects the newest passing nightly via Quartz), or `SHA=<commit>` to install pinned S3 staging wheels instead of nightlies
 - **Provision mode**: Windows `--provision auto|always|never`; default `auto` provisions (creates the venv and pip-installs the ROCm SDK wheels) only when the SDK is missing, `always` forces a fresh wheel pull, `never` validates existing paths only
 - **Jobs**: optional explicit parallelism only when the user requests it and active workspace instructions permit it; otherwise let Ninja auto-detect
 
@@ -56,7 +56,7 @@ on Windows the wheel venv's `_rocm_sdk_devel/bin`.
 
 4. Resolve ROCm and Clang paths (Windows also provisions the ROCm SDK wheels when missing):
    ```bash
-   python3 <scripts>/windows_rocm_setup.py --repo-root <repo-root> [--venv-path <path>] [--rocm-path <path>] [--clang-path <path>] [--gpu-targets <arch>] [--sha <commit>] [--provision auto|always|never]
+   python3 <scripts>/windows_rocm_setup.py --repo-root <repo-root> [--venv-path <path>] [--rocm-path <path>] [--clang-path <path>] [--gpu-targets <arch>] [--rocm-version quartz|latest|<version>] [--sha <commit>] [--provision auto|always|never]
    ```
    On Linux this echoes only provided overrides. On Windows it validates the wheel-based ROCm install and, when the SDK is absent (or `--provision always`), creates the venv and pip-installs the ROCm SDK wheels before printing `KEY=VALUE` lines on stdout. Progress goes to stderr, so stdout carries only the `ROCM_PATH=`/`CLANG_PATH=`/`GPU_TARGETS=` lines. Clang is a prerequisite and is not provisioned; a missing clang is reported as an error.
 

@@ -97,14 +97,16 @@ https://github.com/ROCm/TheRock/issues/2179
 
 | Argument | Default | Description |
 |----------|---------|-------------|
-| `THEROCK_RELEASE` | `latest` | Release version to install. Use `latest` to automatically fetch the newest nightly build, or specify a nightly version such as `7.12.0a20260202` or a commit-addressed dev version such as `7.15.0.dev0+<sha>`. TheRock selects the appropriate multi-arch feed. |
+| `THEROCK_RELEASE` | `quartz` | Release version to install. `quartz` (default) resolves the newest [Quartz](https://github.com/ROCm/quartz)-selected Linux nightly for `THEROCK_ARTIFACT_GROUP` via `projects/hipdnn/scripts/resolve_quartz_rocm.py` (preferring passing ROCm tests, then newest build-passing for untested architectures such as `gfx950-dcgpu` or `multiarch`, with a build-only fallback warning if no tests passed within `QUARTZ_MAX_AGE_DAYS`). Pass `latest` for the unvetted newest nightly, or specify an explicit version such as `10.3.0a20261125` or `7.15.0.dev0+<sha>`. |
+| `QUARTZ_MAX_AGE_DAYS` | `14` | Maximum lookback window in days when `THEROCK_RELEASE=quartz`. |
+| `QUARTZ_RESOLVER_REF` | `develop` | `ROCm/rocm-libraries` git ref used to fetch `projects/hipdnn/scripts/resolve_quartz_rocm.py` when `THEROCK_RELEASE=quartz`. |
 | `THEROCK_ASIC` | `gfx94X` | GPU architecture family prefix. Combined with `THEROCK_ASIC_VARIANT` to form the artifact group. |
 | `THEROCK_ASIC_VARIANT` | `dcgpu` | GPU variant suffix (e.g., `dcgpu`, `all`, `dgpu`). Combined with `THEROCK_ASIC` to form the artifact group. |
 | `THEROCK_ARTIFACT_GROUP` | `$THEROCK_ASIC-$THEROCK_ASIC_VARIANT` | Full artifact group override. The default `gfx94X-dcgpu` selects the current per-family multi-arch tarball. Use `multiarch` only when all GPU kernel packs are required; it is substantially larger. Choose other per-family group names from the [tarball feed](https://nightly.repo.amd.com/rocm/core/tarball/). |
 
 #### Version Logging
 
-The prebuilt stage writes the installed TheRock version to `/opt/rocm/THEROCK_VERSION` inside the image. For pinned releases, this contains the exact version string. For `latest` builds, it captures version information from the install output.
+The prebuilt stage writes the installed TheRock version to `/opt/rocm/THEROCK_VERSION` inside the image. For `quartz` and pinned releases, this contains the exact version string. For `latest` builds, it captures version information from the install output.
 
 #### 🏗️ Fullbuild-Only Arguments
 
@@ -124,12 +126,12 @@ The prebuilt stage writes the installed TheRock version to `/opt/rocm/THEROCK_VE
 
 #### 📦 Prebuilt Mode (Recommended)
 
-**Default prebuilt** (latest nightly current per-family multi-arch tarball for gfx94X-dcgpu):
+**Default prebuilt** (newest Quartz-selected nightly per-family multi-arch tarball for gfx94X-dcgpu):
 ```bash
 docker build -f Dockerfile.ubuntu24 -t hipdnn:prebuilt .
 ```
 
-This automatically downloads and installs the latest nightly `gfx94X-dcgpu` artifact group. It does not use the heavyweight `multiarch` group, which is only for images that need all GPU kernel packs.
+This queries [Quartz](https://github.com/ROCm/quartz) via `projects/hipdnn/scripts/resolve_quartz_rocm.py` for the newest passing `gfx94X-dcgpu` nightly and installs that exact version. Pass `--build-arg THEROCK_RELEASE=latest` to bypass Quartz and pull the unvetted newest nightly directly from the tarball index. It does not use the heavyweight `multiarch` group, which is only for images that need all GPU kernel packs.
 
 **Specific release version**:
 ```bash

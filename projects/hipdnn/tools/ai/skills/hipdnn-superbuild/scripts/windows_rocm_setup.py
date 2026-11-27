@@ -13,13 +13,12 @@ KEY=VALUE lines the calling skill parses.
 
 Provisioning (Windows only): when the ROCm SDK devel wheel is not present in
 the target venv, this script creates the venv, pip-installs the ROCm SDK
-wheels (multi-arch nightlies, or S3 staging when --sha is given), and runs
-`python -m rocm_sdk init`. This is a Python port of the install logic in
-projects/hipdnn/scripts/windows/wheel_build_setup.ps1; that PowerShell script
-is intentionally left in place for its existing consumers (interactive users
-and tools/dnn-benchmarking/setup.ps1, which relies on its in-shell venv
-activation and the ROCM_WHEEL_VENV it publishes -- neither of which a child
-Python process can do for a parent shell).
+wheels (Quartz-selected multi-arch nightlies via
+``projects/hipdnn/scripts/resolve_quartz_rocm.py`` by default, unvetted latest
+via ``--rocm-version latest``, an explicit nightly via ``--rocm-version <ver>``,
+or S3 staging when ``--sha`` is given), and runs ``python -m rocm_sdk init``.
+This is a Python port of the install logic in
+projects/hipdnn/scripts/windows/wheel_build_setup.ps1; keep both in sync.
 
 Clang is NOT provisioned here: the wheel setup never installed it. If clang is
 missing, this script errors and points at windows_build_setup.ps1.
@@ -28,6 +27,7 @@ On Linux this is a no-op that echoes any provided overrides.
 """
 
 import argparse
+import importlib.util
 import platform
 import re
 import shutil
@@ -47,6 +47,7 @@ DEFAULT_GPU_TARGET = "gfx1151"
 WHEEL_VERSION = "7.12.0.dev0"
 NIGHTLY_INDEX_URL = "https://nightly.repo.amd.com/rocm/whl-next/"
 S3_STAGING_BASE = "https://therock-dev-python.s3.amazonaws.com/v2-staging"
+_RESOLVER_REL_PATH = Path("projects/hipdnn/scripts/resolve_quartz_rocm.py")
 
 # GPU targets with published wheels. Matches wheel_build_setup.ps1.
 _VERIFIED_TARGET_RE = r"^(gfx115[0-9]|gfx(120[0-9]|110[0-9]|103[0-9]|90[0-9])(-all)?)$"
@@ -76,7 +77,64 @@ def resolve_artifact_group(target):
     return target
 
 
-def pip_install_command(venv_python, gpu_target, sha):
+def _find_quartz_resolver(repo_root=None):
+    """Locate the shared projects/hipdnn/scripts/resolve_quartz_rocm.py helper."""
+    candidates = []
+    if repo_root:
+        candidates.append(Path(repo_root) / _RESOLVER_REL_PATH)
+    resolved = Path(__file__).resolve()
+    if len(resolved.parents) > 5:
+        candidates.append(resolved.parents[5] / "scripts" / "resolve_quartz_rocm.py")
+    for path in candidates:
+        if path.is_file():
+            return path
+    raise RuntimeError(
+        f"Shared Quartz resolver not found at {_RESOLVER_REL_PATH}; "
+        "pass --rocm-version <ver|latest> explicitly."
+    )
+
+
+def _load_quartz_resolver(repo_root=None):
+    script = _find_quartz_resolver(repo_root)
+    spec = importlib.util.spec_from_file_location("hipdnn_resolve_quartz_rocm", script)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Unable to load Quartz resolver from {script}")
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def resolve_quartz_windows_rocm(gpu_target, *, repo_root=None):
+    """Delegate Windows nightly resolution to the shared Quartz resolver."""
+    mod = _load_quartz_resolver(repo_root)
+    sel = mod.resolve_quartz_rocm(
+        platform_name="windows",
+        gpu_target=gpu_target,
+        artifact="wheels",
+        allow_build_only_fallback=True,
+    )
+    return sel.rocm_version, sel.wheels_url, sel.test_status, sel.fallback_used
+
+
+def _normalize_rocm_version(rocm_version):
+    if rocm_version is None:
+        return None
+    stripped = rocm_version.strip()
+    lowered = stripped.lower()
+    if lowered in ("quartz", "latest"):
+        return lowered
+    return stripped
+
+
+def pip_install_command(
+    venv_python,
+    gpu_target,
+    sha,
+    *,
+    rocm_version=None,
+    index_url=NIGHTLY_INDEX_URL,
+):
     """Build the `pip install` argv for the ROCm SDK wheels."""
     if sha:
         group = resolve_artifact_group(gpu_target)
@@ -97,14 +155,18 @@ def pip_install_command(venv_python, gpu_target, sha):
     device_target = gpu_target.lower()
     if device_target.endswith("-all"):
         device_target = device_target[: -len("-all")]
+    pkg = f"rocm[libraries,devel,device-{device_target}]"
+    norm_ver = _normalize_rocm_version(rocm_version)
+    if norm_ver and norm_ver != "latest":
+        pkg = f"{pkg}=={norm_ver}"
     return [
         str(venv_python),
         "-m",
         "pip",
         "install",
         "--index-url",
-        NIGHTLY_INDEX_URL,
-        f"rocm[libraries,devel,device-{device_target}]",
+        index_url,
+        pkg,
     ]
 
 
@@ -115,7 +177,9 @@ def run(cmd):
     return subprocess.call(cmd, stdout=sys.stderr, stderr=sys.stderr)
 
 
-def provision(venv_path, gpu_target, sha, force):
+def provision(
+    venv_path, gpu_target, sha, force, *, rocm_version="quartz", repo_root=None
+):
     """Create the venv, install ROCm SDK wheels, and init the SDK. Returns 0 on
     success, nonzero on failure."""
     if not re.match(_VERIFIED_TARGET_RE, gpu_target.lower()):
@@ -124,6 +188,35 @@ def provision(venv_path, gpu_target, sha, force):
             "(gfx115x, gfx120x[-all], gfx110x[-all], gfx103x[-all], gfx90x[-all]). "
             "Wheel install may not work."
         )
+
+    resolved_version = None
+    index_url = NIGHTLY_INDEX_URL
+    norm_ver = _normalize_rocm_version(rocm_version) or "quartz"
+    device_target = gpu_target.lower()
+    if device_target.endswith("-all"):
+        device_target = device_target[: -len("-all")]
+    if not sha:
+        if norm_ver == "quartz":
+            try:
+                resolved_version, index_url, test_status, fallback = (
+                    resolve_quartz_windows_rocm(device_target, repo_root=repo_root)
+                )
+            except RuntimeError as exc:
+                log(f"ERROR: failed to resolve ROCm nightly from Quartz: {exc}")
+                return 1
+            if fallback:
+                log(
+                    f"WARNING: no Quartz Windows nightly passed ROCm tests for "
+                    f"{device_target}; falling back to build-passing {resolved_version} "
+                    f"(test status: {test_status})."
+                )
+            else:
+                log(
+                    f"Quartz selected {resolved_version} for windows/{device_target} "
+                    f"(rocm.test={test_status})."
+                )
+        elif norm_ver != "latest":
+            resolved_version = norm_ver
 
     if force and venv_path.exists():
         log(f"Removing existing venv at {venv_path} (--provision always)...")
@@ -137,9 +230,22 @@ def provision(venv_path, gpu_target, sha, force):
             log("ERROR: failed to create virtual environment.")
             return rc
 
-    source = f"S3 staging (SHA {sha})" if sha else "ROCm multi-arch nightlies"
+    if sha:
+        source = f"S3 staging (SHA {sha})"
+    elif resolved_version:
+        source = f"ROCm nightlies ({resolved_version} from {index_url})"
+    else:
+        source = f"ROCm multi-arch nightlies (unpinned latest from {index_url})"
     log(f"Installing ROCm wheels from {source}...")
-    rc = run(pip_install_command(venv_python, gpu_target, sha))
+    rc = run(
+        pip_install_command(
+            venv_python,
+            gpu_target,
+            sha,
+            rocm_version=resolved_version,
+            index_url=index_url,
+        )
+    )
     if rc != 0:
         log("ERROR: failed to install ROCm wheels.")
         return rc
@@ -153,7 +259,7 @@ def provision(venv_path, gpu_target, sha, force):
     return 0
 
 
-def main():
+def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument(
         "--repo-root", required=True, help="Path to the rocm-libraries repository root"
@@ -176,13 +282,20 @@ def main():
         "--sha", help="Optional S3 staging SHA; installs pinned staging wheels"
     )
     p.add_argument(
+        "--rocm-version",
+        default="quartz",
+        help="ROCm nightly version to install when --sha is omitted: "
+        "'quartz' (default, newest Quartz-selected Windows nightly), "
+        "'latest' (unvetted newest wheel), or an explicit version string.",
+    )
+    p.add_argument(
         "--provision",
         choices=["auto", "always", "never"],
         default="auto",
         help="auto: provision if the SDK is missing (default). "
         "always: force a fresh wheel pull. never: validate only.",
     )
-    args = p.parse_args()
+    args = p.parse_args(argv)
 
     if platform.system() != "Windows":
         emit(args.rocm_path, None, args.gpu_targets)
@@ -211,7 +324,12 @@ def main():
             )
             return 1
         rc = provision(
-            venv_path, gpu_targets, args.sha, force=args.provision == "always"
+            venv_path,
+            gpu_targets,
+            args.sha,
+            force=args.provision == "always",
+            rocm_version=args.rocm_version,
+            repo_root=args.repo_root,
         )
         if rc != 0:
             return rc

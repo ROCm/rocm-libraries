@@ -26,10 +26,16 @@ Does **not** require Administrator privileges.
 
 #### Usage
 
-Install from ROCm nightlies (default):
+Install the newest Quartz-selected ROCm nightly (default):
 
 ```powershell
 .\wheel_build_setup.ps1
+```
+
+Install an explicit ROCm nightly version (or unvetted `latest`):
+
+```powershell
+.\wheel_build_setup.ps1 -RocmVersion "10.3.0a20261120"
 ```
 
 Install from S3 staging with a specific build SHA:
@@ -46,12 +52,13 @@ Override default paths and GPU target:
 
 #### Parameters
 
-| Parameter    | Default                        | Description                                      |
-|--------------|--------------------------------|--------------------------------------------------|
-| `-SHA`       | *(empty)*                      | Build SHA for S3 staging. Omit to use nightlies. |
-| `-VenvPath`  | `D:\develop\latest_wheels`     | Where to create the Python virtual environment.  |
-| `-ClangPath` | `D:\develop\dist\clang\bin`    | Path to the Clang toolchain bin directory.        |
-| `-GpuTarget` | `gfx1151`                      | GPU architecture for wheel selection and CMake output. |
+| Parameter      | Default                     | Description                                                                 |
+|----------------|-----------------------------|-----------------------------------------------------------------------------|
+| `-SHA`         | *(empty)*                   | Build SHA for S3 staging. Omit to use nightlies.                            |
+| `-RocmVersion` | `quartz`                    | Nightly selection when `-SHA` is omitted: `quartz`, `latest`, or exact ver. |
+| `-VenvPath`    | `D:\develop\latest_wheels`  | Where to create the Python virtual environment.                             |
+| `-ClangPath`   | `D:\develop\dist\clang\bin` | Path to the Clang toolchain bin directory.                                  |
+| `-GpuTarget`   | `gfx1151`                   | GPU architecture for wheel selection and CMake output.                      |
 
 For the full built-in help, run:
 

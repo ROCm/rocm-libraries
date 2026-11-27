@@ -6,12 +6,11 @@
 # Python in:
 #   projects/hipdnn/tools/ai/skills/hipdnn-superbuild/scripts/windows_rocm_setup.py
 # That port is what the hipdnn-superbuild / hipdnn-superbuild-test skills use so
-# they can provision without PowerShell. This file is intentionally left
-# untouched otherwise: its existing consumers -- interactive users and
-# tools/dnn-benchmarking/setup.ps1 (which depends on the in-shell venv
-# activation and the ROCM_WHEEL_VENV env var this script publishes, neither of
-# which a child Python process can do for a parent shell) -- must keep working
-# unchanged. Keep the install logic here and in windows_rocm_setup.py in sync.
+# they can provision without PowerShell. Keep this PowerShell wrapper intact for
+# interactive users and tools/dnn-benchmarking/setup.ps1 (which depends on the
+# in-shell venv activation and the ROCM_WHEEL_VENV env var this script publishes,
+# neither of which a child Python process can do for a parent shell), and keep
+# the install logic here and in windows_rocm_setup.py in sync.
 
 <#
 .SYNOPSIS
@@ -20,8 +19,9 @@
 .DESCRIPTION
     Creates a Python virtual environment and installs ROCm SDK wheels for
     building hipDNN on Windows. Supports installing from either:
-      - ROCm nightlies (default)
-      - S3 staging with a specific SHA
+      - ROCm nightlies selected via Quartz (default, -RocmVersion "quartz")
+      - Unvetted latest nightly (-RocmVersion "latest") or an explicit version
+      - S3 staging with a specific SHA (-SHA)
 
     After installation, the script initializes the ROCm SDK and prints
     the CMake variables needed to build hipDNN.
@@ -29,6 +29,12 @@
 .PARAMETER SHA
     Optional. A specific build SHA to install from S3 staging.
     When omitted, wheels are installed from the ROCm nightlies index.
+
+.PARAMETER RocmVersion
+    Optional. ROCm nightly version to install when -SHA is omitted:
+    "quartz" (default, resolves the newest Quartz-selected Windows nightly),
+    "latest" (unvetted newest wheel on the nightly index), or an explicit
+    version string (e.g. "10.3.0a20261120").
 
 .PARAMETER VenvPath
     Path where the Python virtual environment will be created.
@@ -44,7 +50,11 @@
 
 .EXAMPLE
     .\wheel_build_setup.ps1
-    Installs from ROCm nightlies using default paths.
+    Installs the newest Quartz-selected ROCm nightly using default paths.
+
+.EXAMPLE
+    .\wheel_build_setup.ps1 -RocmVersion "latest"
+    Installs the unvetted newest wheel from the ROCm nightly index.
 
 .EXAMPLE
     .\wheel_build_setup.ps1 -SHA "abc123"
@@ -52,14 +62,15 @@
 
 .EXAMPLE
     .\wheel_build_setup.ps1 -VenvPath "C:\my_venv" -ClangPath "C:\clang\bin" -GpuTarget "gfx1151"
-    Installs from nightlies with custom paths and GPU target.
+    Installs from Quartz-selected nightlies with custom paths and GPU target.
 #>
 
 param(
     [string]$SHA = "",
     [string]$VenvPath = "D:\develop\latest_wheels",
     [string]$ClangPath = "D:\develop\dist\clang\bin",
-    [string]$GpuTarget = "gfx1151"
+    [string]$GpuTarget = "gfx1151",
+    [string]$RocmVersion = "quartz"
 )
 
 $ErrorActionPreference = "Stop"
@@ -93,26 +104,26 @@ if (-not $VerifiedGpuTarget) {
 Write-Host ""
 Write-Host "=== ROCm Wheel Build Setup ===" -ForegroundColor Cyan
 if ($SHA) {
-    Write-Host "  SHA:        $SHA"
+    Write-Host "  SHA:              $SHA"
 } else {
-    Write-Host "  SHA:        (not provided - using nightlies)"
+    Write-Host "  SHA:              (not provided - using nightlies: $RocmVersion)"
 }
-Write-Host "  Venv Path:  $VenvPath"
-Write-Host "  Clang Path: $ClangPath"
-Write-Host "  GPU Target: $GpuTarget"
+Write-Host "  Venv Path:        $VenvPath"
+Write-Host "  Clang Path:       $ClangPath"
+Write-Host "  GPU Target:       $GpuTarget"
 Write-Host "  Device (nightly): device-$DeviceTarget"
-Write-Host "  Wheel Group: $RocmArtifactGroup"
+Write-Host "  Wheel Group:      $RocmArtifactGroup"
 Write-Host ""
 
 # --- Create or reuse virtual environment ---
 
 $SkipInstall = $false
+$RemoveExistingVenv = $false
 if (Test-Path $VenvPath) {
     Write-Host "Existing environment found at $VenvPath" -ForegroundColor Yellow
     $response = Read-Host "Pull new wheels? (Y/N, default: N)"
     if ($response -eq 'Y') {
-        Write-Host "  Removing existing venv..."
-        Remove-Item -Recurse -Force $VenvPath
+        $RemoveExistingVenv = $true
     } else {
         Write-Host "  Using existing wheels." -ForegroundColor Green
         Write-Host "Activating virtual environment..." -ForegroundColor Yellow
@@ -124,6 +135,59 @@ if (Test-Path $VenvPath) {
 }
 
 if (-not $SkipInstall) {
+    # Resolve Quartz before removing any existing venv so a resolution failure
+    # never leaves the user without a working environment.
+    $IndexUrl = "https://nightly.repo.amd.com/rocm/whl-next/"
+    $PackageSpec = "rocm[libraries,devel,device-$DeviceTarget]"
+    $InstallSourceDesc = "ROCm multi-arch nightlies (unpinned latest, device: $DeviceTarget)"
+
+    if (-not $SHA) {
+        if ($RocmVersion -eq "quartz") {
+            $ResolverScript = Join-Path $PSScriptRoot "..\resolve_quartz_rocm.py"
+            if (-not (Test-Path $ResolverScript)) {
+                Write-Host "Failed to locate Quartz resolver script at $ResolverScript. Pass -RocmVersion <ver|latest> explicitly." -ForegroundColor Red
+                exit 1
+            }
+            Write-Host "Resolving ROCm nightly via Quartz (windows/$DeviceTarget)..." -ForegroundColor Yellow
+            # Temporarily relax ErrorActionPreference around native python invocation:
+            # Windows PowerShell 5.1 turns native stderr progress lines into terminating
+            # NativeCommandError records under "Stop" in non-console / redirected hosts.
+            $SavedErrorActionPreference = $ErrorActionPreference
+            try {
+                $ErrorActionPreference = "Continue"
+                $ResolvedLines = & python $ResolverScript --platform windows --gpu-target $DeviceTarget --allow-build-only-fallback
+                $ResolverExitCode = $LASTEXITCODE
+            } finally {
+                $ErrorActionPreference = $SavedErrorActionPreference
+            }
+            if ($ResolverExitCode -ne 0) {
+                Write-Host "Failed to resolve ROCm nightly from Quartz. Pass -RocmVersion latest or an explicit version to override." -ForegroundColor Red
+                exit 1
+            }
+            $ResolvedVersion = ""
+            $ResolvedIndex = ""
+            foreach ($line in $ResolvedLines) {
+                if ($line -match '^ROCM_VERSION=(.+)$') { $ResolvedVersion = $Matches[1].Trim() }
+                elseif ($line -match '^ROCM_WHEELS_URL=(.+)$') { $ResolvedIndex = $Matches[1].Trim() }
+            }
+            if (-not $ResolvedVersion -or -not $ResolvedIndex) {
+                Write-Host "Quartz resolver did not return ROCM_VERSION and ROCM_WHEELS_URL." -ForegroundColor Red
+                exit 1
+            }
+            $IndexUrl = $ResolvedIndex
+            $PackageSpec = "rocm[libraries,devel,device-$DeviceTarget]==$ResolvedVersion"
+            $InstallSourceDesc = "Quartz-selected nightly ($ResolvedVersion from $IndexUrl)"
+        } elseif ($RocmVersion -and $RocmVersion -ne "latest") {
+            $PackageSpec = "rocm[libraries,devel,device-$DeviceTarget]==$RocmVersion"
+            $InstallSourceDesc = "ROCm nightly ($RocmVersion from $IndexUrl)"
+        }
+    }
+
+    if ($RemoveExistingVenv) {
+        Write-Host "  Removing existing venv..."
+        Remove-Item -Recurse -Force $VenvPath
+    }
+
     Write-Host "Creating Python virtual environment..." -ForegroundColor Yellow
     python -m venv $VenvPath
 
@@ -146,10 +210,9 @@ if (-not $SkipInstall) {
             "$BaseUrl/rocm_sdk_libraries_$LibrariesWheelTarget-7.12.0.dev0%2B$SHA-py3-none-win_amd64.whl" `
             "$BaseUrl/rocm_sdk_devel-7.12.0.dev0%2B$SHA-py3-none-win_amd64.whl"
     } else {
-        Write-Host "  Source: ROCm multi-arch nightlies (device: $DeviceTarget)" -ForegroundColor Yellow
-        pip install --index-url "https://nightly.repo.amd.com/rocm/whl-next/" "rocm[libraries,devel,device-$DeviceTarget]"
+        Write-Host "  Source: $InstallSourceDesc" -ForegroundColor Yellow
+        pip install --index-url $IndexUrl $PackageSpec
     }
-
     if ($LASTEXITCODE -ne 0) {
         Write-Host "Failed to install ROCm wheels." -ForegroundColor Red
         exit 1
