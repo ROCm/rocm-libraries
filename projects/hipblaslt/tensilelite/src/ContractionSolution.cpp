@@ -5129,6 +5129,9 @@ namespace TensileLite
                                    ContractionSolution::Inputs const&  inputs,
                                    Hardware const&                     hardware) const
     {
+        if(problemType.fusedA2A != problem.fusedA2A())
+            throw std::runtime_error("[fused-a2a] solution is " + ToString(problemType.fusedA2A)
+                                     + ", problem is " + ToString(problem.fusedA2A()));
         calculateAutoGSU(problem, &hardware);
         if(Debug::Instance().printWinningKernelName())
             std::cout << "Running kernel: " << this->KernelName()
