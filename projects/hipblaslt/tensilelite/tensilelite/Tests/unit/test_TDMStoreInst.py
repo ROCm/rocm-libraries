@@ -1237,29 +1237,52 @@ def test_solution_rejects_tdm_store_with_suppress_no_load_loop_on_tdm_loads(gp_g
   assert not sol.get("Valid") and _SNLL_REASON in out, out
 
 
+def _writesVgpr(code, reg):
+  """Whether the VALU instruction `code` writes VGPR `reg` (vN), alone or inside a v[a:b] range."""
+  if not code.startswith("v_") or " " not in code:
+    return False
+  dst = code.split(None, 1)[1].split(",")[0].strip()
+  m = re.fullmatch(r"v\[(\d+):(\d+)\]", dst)
+  return dst == reg or bool(m and reg[1:].isdigit() and int(m.group(1)) <= int(reg[1:]) <= int(m.group(2)))
+
+
 @pytest.mark.parametrize("stinkytofu", [True, False])
 def test_tdm_staging_fold_waited_under_expert_scheduling(gp_gfx1250, gfx1250_iim, assembler, capsys, monkeypatch,
                                                          stinkytofu):
-  """ExpertSchedulingMode 2 turns off the hardware VA_VDST check, so the VALU that folds a staged-tile offset above
-  64 KiB into tmpVgpr must be waited for before the DS access that reads it. StinkyTofu re-derives the wait, and
-  without the StinkyTofu backend the TDM block emits it. MT256x256 bf16 stages 128 KiB, and with vector widths of 1 a
-  thread's elements span more than 128 of its columns, so the block folds."""
+  """ExpertSchedulingMode 2 turns off the hardware VA_VDST and VM_VSRC checks. So the VALU that folds a staged-tile
+  offset above 64 KiB into tmpVgpr must be waited for before the DS access that reads it, and a C read or staging
+  store that reads tmpVgpr as its address must be waited for before the next write of tmpVgpr, whichever code makes
+  it. StinkyTofu re-derives the VA_VDST wait, and without the StinkyTofu backend the TDM block emits both. MT256x256 bf16
+  stages 128 KiB, and with vector widths of 1 a thread's elements span more than 128 of its columns, so both the C
+  read-back of beta and the staging fold."""
   import rocisa
   if not stinkytofu:
     monkeypatch.setattr(rocisa, "isSupportedByStinkyTofu", lambda version: False)
+  # ExpertSchedulingMode 2 requires _ScheduleIterAlg 3, which ScheduleIterAlg 4 maps to 0, so both arms stay on
+  # ScheduleIterAlg 3: the only scheduling that reaches these waits.
   sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=True, ScheduleIterAlg=3, VectorWidthA=1, VectorWidthB=1,
-                       StoreVectorWidth=1)
+                       StoreVectorWidth=1, ProblemType={"UseBeta": True})
   assert sol.get("Valid"), capsys.readouterr().out
   assert sol["ExpertSchedulingMode"] == 2
   assert ("STINKY_TOTAL_INST_BYTES" in asm) == stinkytofu
-  lines = asm.splitlines()
-  folds = [i for i, line in enumerate(lines) if "LDS offset above 64 KiB" in line]
+  raw = asm.splitlines()
+  lines = [_code(line) for line in raw]
+  folds = [i for i, line in enumerate(raw) if "LDS offset above 64 KiB" in line]
   assert folds
-  for i in folds:
-    dst = _code(lines[i]).split()[1].rstrip(",")
+  kinds = set()
+  for dst in sorted({lines[i].split()[1].rstrip(",") for i in folds}):
     reads = re.compile(r"(?<![\w\[])" + re.escape(dst) + r"(?!\w)")
-    j = next(k for k in range(i + 1, len(lines)) if _code(lines[k]).startswith("ds_") and reads.search(_code(lines[k])))
-    assert any(re.match(r"s_wait_alu\b.*va_vdst\(0\)", _code(lines[k])) for k in range(i + 1, j)), lines[i:j + 1]
+    for i in (i for i in folds if lines[i].split()[1].rstrip(",") == dst):
+      j = next(k for k in range(i + 1, len(lines)) if lines[k].startswith("ds_") and reads.search(lines[k]))
+      assert any(re.match(r"s_wait_alu\b.*va_vdst\(0\)", lines[k]) for k in range(i + 1, j)), raw[i:j + 1]
+    accesses = [i for i, line in enumerate(lines) if line.startswith("ds_") and reads.search(line)
+                and ("load C element" in raw[i] or "stage D element" in raw[i])]
+    kinds.update(raw[i].rpartition("//")[2].split()[0] for i in accesses)
+    for i in ([] if stinkytofu else accesses):
+      k = next((k for k in range(i + 1, len(lines)) if _writesVgpr(lines[k], dst)), None)
+      if k is not None:
+        assert any(re.match(r"s_wait_alu\b.*vm_vsrc\(0\)", lines[n]) for n in range(i + 1, k)), raw[i:k + 1]
+  assert kinds == {"load", "stage"}, kinds
 
 
 @pytest.mark.parametrize("streamk", [0, 3])

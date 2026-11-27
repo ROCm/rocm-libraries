@@ -368,20 +368,32 @@ def tdmStoreLdsSplit(offset, span=0):
   return high, offset - high
 
 
-def _tdmStoreLdsAddress(gwb, module: Module, coordOffset0, coordOffset1, span=0, folded=None):
+def _tdmStoreLdsAddress(gwb, module: Module, coordOffset0, coordOffset1, span=0, folded=None, foldRead=False):
   """Return the VGPR and DS offset of element (coordOffset0, coordOffset1) of the staged tile, and the fold tmpVgpr
   then holds. folded is the fold tmpVgpr already holds, base + folded, when the caller knows that nothing has written
-  tmpVgpr since; an element with that fold reuses it."""
+  tmpVgpr since; an element with that fold reuses it. foldRead says that a DS access issued since the last wait for
+  VM_VSRC may still be reading tmpVgpr as its address."""
   offset = (coordOffset1 * gwb.kernel["MacroTile0"] + coordOffset0) * gwb.parentWriter.states.bpeCexternalGSU1
   high, low = tdmStoreLdsSplit(offset, span)
   if not high:
     return gwb.tdmStoreLdsBase, low, folded
   if high != folded:
+    # Expert scheduling turns off the hardware VM_VSRC and VA_VDST checks: the fold must not overwrite tmpVgpr before
+    # an earlier DS access has read it as its address, and the next DS access reads the new fold.
+    expert = gwb.kernel.get("ExpertSchedulingMode", 0) > 0
+    if expert and foldRead:
+      module.add(SWaitAlu(vm_vsrc=0, comment="DS accesses done reading the previous fold"))
     module.add(VAddU32(dst=vgpr(gwb.tmpVgpr), src0=hex(high), src1=vgpr(gwb.tdmStoreLdsBase), comment="LDS offset above 64 KiB"))
-    if gwb.kernel.get("ExpertSchedulingMode", 0) > 0:
-      # Expert scheduling turns off the hardware VA_VDST check, and the next DS access reads the fold.
+    if expert:
       module.add(SWaitAlu(va_vdst=0, comment="fold written before a DS access reads it"))
   return gwb.tmpVgpr, low, high
+
+
+def _foldReadDone(gwb, module: Module, comment):
+  """Wait until the DS accesses issued so far have read tmpVgpr, their address, before code outside the TDM block
+  writes it: expert scheduling turns off the hardware VM_VSRC check."""
+  if gwb.kernel.get("ExpertSchedulingMode", 0) > 0:
+    module.add(SWaitAlu(vm_vsrc=0, comment=comment))
 
 
 def _handoffBarriersLds(kernel):
@@ -450,16 +462,18 @@ def emitTDMStoreLoadCElement(gwb, addrCalc, data, vc0) -> Module:
     inst = DSLoadD16HIU16(dst=vgpr(data), src=vgpr(addr), ds=DSModifiers(offset=offset), comment=comment)
     inst.setMemToken(memToken)
     module.add(inst)
-    return module
-  if bpl == 1:
+  elif bpl == 1:
     inst = DSLoadU8(dst=vgpr(data), src=vgpr(addr), ds=DSModifiers(offset=offset), comment=comment)
     inst.setMemToken(memToken)
     module.add(inst)
-    return module
-  width = min(bpl, 16)
-  for piece in range(bpl // width):
-    module.add(dsLoad(width, dst=vgpr(data + piece * width // kw.states.bpr, max(1, width // kw.states.bpr)),
-                      src=vgpr(addr), ds=DSModifiers(offset=offset + piece * width), comment=comment, memToken=memToken))
+  else:
+    width = min(bpl, 16)
+    for piece in range(bpl // width):
+      module.add(dsLoad(width, dst=vgpr(data + piece * width // kw.states.bpr, max(1, width // kw.states.bpr)),
+                        src=vgpr(addr), ds=DSModifiers(offset=offset + piece * width), comment=comment,
+                        memToken=memToken))
+  if addr == gwb.tmpVgpr:
+    _foldReadDone(gwb, module, "C read done with tmpVgpr before other code writes it")
   return module
 
 
@@ -479,18 +493,22 @@ def emitTDMStoreStaging(gwb, stagedElements) -> Module:
   regsPerElement = max(1, kw.states.bpeCexternalGSU1 // kw.states.bpr)
   # Only the DS stores below run between the elements of the batch, and they write no VGPR, so a fold added to
   # tmpVgpr for one element still holds for the next.
-  folded = None
+  folded, foldRead = None, False
   for sumIdx, coordOffset0, coordOffset1 in stagedElements:
     # dsStore writes at most 32 bytes, so a wider vector is staged at offset + piece * width; the last piece
     # is what has to fit the 16-bit field. A 32-byte piece is itself two 16-byte stores, the second of them
     # at a further 16, so the span is measured in the 16 bytes one DS instruction really writes.
-    addr, offset, folded = _tdmStoreLdsAddress(gwb, module, coordOffset0, coordOffset1,
-                                               span=max(0, bps - min(width, 16)), folded=folded)
+    addr, offset, fold = _tdmStoreLdsAddress(gwb, module, coordOffset0, coordOffset1,
+                                             span=max(0, bps - min(width, 16)), folded=folded, foldRead=foldRead)
+    foldRead = (foldRead and fold == folded) or addr == gwb.tmpVgpr
+    folded = fold
     for piece in range(bps // width):
       src = vgpr(formatting(sumIdx * regsPerElement + piece * numRegs, "ValuC+", kw.states.c.startVgprValu), numRegs)
       module.add(dsStore(width, dstAddr=vgpr(addr), src=src, ds=DSModifiers(offset=offset + piece * width),
                          comment="stage D element (%u, %u)" % (coordOffset0, coordOffset1),
                          memToken=MemTokenData([_stagedTileToken(gwb)])))
+  if foldRead:
+    _foldReadDone(gwb, module, "staging done with tmpVgpr before other code writes it")
   return module
 
 
