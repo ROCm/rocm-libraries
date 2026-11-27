@@ -1509,25 +1509,50 @@ namespace
         }
     }
 
-    // CSR -> CSR with a supported value conversion (f32 -> f64) into a target created with
-    // zero nonzeros and no column index array: the analysis stage gives the target the
-    // nonzeros of the source, and the pointer check fails before any target array is
-    // written.
+    // f -> f from f32 values into a target with values of type T, created with zero
+    // nonzeros and with its index array a (null_a) or b of S2sArrays left null: the
+    // analysis stage gives the target the nonzeros of the source, and the pointer check
+    // fails before any target array is written.
+    template <typename T>
+    void sparse_to_sparse_checks_pointers_first(rocsparse_handle   handle,
+                                                rocsparse_format   f,
+                                                bool               null_a,
+                                                rocsparse_datatype dt)
+    {
+        SCOPED_TRACE(testing::Message() << "format " << f << (null_a ? " null a" : " null b")
+                                        << ", target data type " << dt);
+        S2sMat<float>              source(f, f32, false);
+        const std::vector<int32_t> a_guard(source.host.a.size(), -7);
+        const std::vector<int32_t> b_guard(source.host.b.size(), -7);
+        const std::vector<T>       val_guard(source.host.val.size(), T(-7));
+        DevBuf<int32_t>            t_a(a_guard);
+        DevBuf<int32_t>            t_b(b_guard);
+        DevBuf<T>                  t_val(val_guard);
+        Spmat                      target;
+        ASSERT_EQ(create_s2s(target,
+                             f,
+                             dt,
+                             0,
+                             null_a ? nullptr : t_a.get(),
+                             null_a ? t_b.get() : nullptr,
+                             t_val),
+                  st_ok);
+        EXPECT_EQ(sparse_to_sparse(handle, source.descr, target), st_ptr);
+        EXPECT_EQ(t_a.read(a_guard.size()), a_guard);
+        EXPECT_EQ(t_b.read(b_guard.size()), b_guard);
+        EXPECT_EQ(t_val.read(), val_guard);
+    }
+
+    // CSR with a null column array, with a value conversion (f32 -> f64) and with a
+    // same-type copy (f32 -> f32), COO with a null row array, and COO AoS with a null
+    // index array.
     TEST_F(ConvInternal, SparseToSparseChecksPointersFirst)
     {
-        Silence                    silence;
-        S2sMat<float>              source(rocsparse_format_csr, f32, false);
-        const std::vector<int32_t> ptr_guard(s2s_m + 1, -7);
-        const std::vector<double>  val_guard(source.host.nnz, -7.0);
-        DevBuf<int32_t>            t_ptr(ptr_guard);
-        DevBuf<double>             t_val(val_guard);
-        Spmat                      target;
-        ASSERT_EQ(
-            create_s2s(
-                target, rocsparse_format_csr, rocsparse_datatype_f64_r, 0, t_ptr, nullptr, t_val),
-            st_ok);
-        EXPECT_EQ(sparse_to_sparse(handle, source.descr, target), st_ptr);
-        EXPECT_EQ(t_ptr.read(), ptr_guard);
-        EXPECT_EQ(t_val.read(), val_guard);
+        Silence silence;
+        sparse_to_sparse_checks_pointers_first<double>(
+            handle, rocsparse_format_csr, false, rocsparse_datatype_f64_r);
+        sparse_to_sparse_checks_pointers_first<float>(handle, rocsparse_format_csr, false, f32);
+        sparse_to_sparse_checks_pointers_first<float>(handle, rocsparse_format_coo, true, f32);
+        sparse_to_sparse_checks_pointers_first<float>(handle, rocsparse_format_coo_aos, true, f32);
     }
 } // namespace

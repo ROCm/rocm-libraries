@@ -1044,6 +1044,24 @@ static convert_type s_conversion_table[7][7]{
 
 };
 
+// Every enumerator strictly below SELL indexes this table. A new enumerator
+// inserted ahead of SELL, or a renumber, fails these asserts. A new enumerator
+// after SELL is rejected at runtime because its value is >= the table extent.
+static_assert(static_cast<int>(rocsparse_format_coo) == 0, "coo indexes row 0");
+static_assert(static_cast<int>(rocsparse_format_coo_aos) == 1, "coo_aos indexes row 1");
+static_assert(static_cast<int>(rocsparse_format_csr) == 2, "csr indexes row 2");
+static_assert(static_cast<int>(rocsparse_format_csc) == 3, "csc indexes row 3");
+static_assert(static_cast<int>(rocsparse_format_ell) == 4, "ell indexes row 4");
+static_assert(static_cast<int>(rocsparse_format_bell) == 5, "bell indexes row 5");
+static_assert(static_cast<int>(rocsparse_format_bsr) == 6, "bsr indexes row 6");
+static_assert(static_cast<int>(rocsparse_format_sell) == 7, "sell is outside the table");
+static_assert(sizeof(s_conversion_table) / sizeof(s_conversion_table[0])
+                  == static_cast<size_t>(rocsparse_format_sell),
+              "conversion table rows must cover every format below sell");
+static_assert(sizeof(s_conversion_table[0]) / sizeof(s_conversion_table[0][0])
+                  == static_cast<size_t>(rocsparse_format_sell),
+              "conversion table columns must cover every format below sell");
+
 rocsparse_status rocsparse_mat_descr_are_same(const rocsparse_mat_descr source,
                                               const rocsparse_mat_descr target)
 {
@@ -1116,6 +1134,12 @@ rocsparse_status rocsparse::internal_sparse_to_sparse(rocsparse_handle          
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_spmat_get_format(source, &source_format));
     rocsparse_format target_format;
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_spmat_get_format(target, &target_format));
+
+    // SELL and anything past it are not in s_conversion_table.
+    RETURN_ROCSPARSE_ERROR_IF(
+        rocsparse_status_not_implemented,
+        source_format < rocsparse_format_coo || source_format >= rocsparse_format_sell
+            || target_format < rocsparse_format_coo || target_format >= rocsparse_format_sell);
 
     RETURN_IF_ROCSPARSE_ERROR(s_conversion_table[source_format][target_format](
         handle, descr, source, target, internal_stage, buffer_size, buffer));

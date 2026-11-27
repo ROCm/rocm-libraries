@@ -36,5 +36,6 @@ list(APPEND ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_device_conv_edges.cpp
   unit_test_device_conv_check.cpp
   unit_test_device_conv_dense.cpp
+  unit_test_device_conv_s2s_control.cpp
   unit_test_device_conv_const_source.cpp
 )

@@ -103,13 +103,11 @@ rocsparse_status rocsparse::internal_spmat_transfer_from(rocsparse_handle       
     }
 
     //
-    // Every target array that will be written, then VAL_DATA: an invalid pointer or an
-    // unsupported data type pair is rejected before anything is written.
+    // Index pointers are checked before any array is written. A null target value
+    // array is a symbolic conversion, so it is not an error. When both value
+    // arrays are set, the values are converted first: an unsupported data type
+    // pair is rejected before the index arrays are written.
     //
-    ROCSPARSE_CHECKARG(1,
-                       target,
-                       ((source->const_val_data != nullptr) && (target->val_data == nullptr)),
-                       rocsparse_status_invalid_pointer);
     ROCSPARSE_CHECKARG(1,
                        target,
                        ((source->const_row_data != nullptr) && (target->row_data == nullptr)),
@@ -123,7 +121,7 @@ rocsparse_status rocsparse::internal_spmat_transfer_from(rocsparse_handle       
                        ((source->const_ind_data != nullptr) && (target->ind_data == nullptr)),
                        rocsparse_status_invalid_pointer);
 
-    if(source->const_val_data != nullptr)
+    if(source->const_val_data != nullptr && target->val_data != nullptr)
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::convert_array(handle,
                                                            size_val_data,
