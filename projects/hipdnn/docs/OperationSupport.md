@@ -22,6 +22,7 @@ hipDNN operations are implemented through plugins. Each plugin provides its own 
   - Standalone pointwise activation
   - Standalone pointwise binary elementwise (ADD, SUB, MUL, MAX_OP, MIN_OP; the frontend spells the last two MAX and MIN)
   - Standalone reduction (ADD, MUL, MIN, MAX, AMAX, AVG, NORM1, NORM2)
+  - Standalone resample forward (also served by the HIP MLops engine; the static engine ordering ranks `MIOPEN_ENGINE` first, so graphs both engines accept run on MIOpen, and when the HIP kernel provider is installed, graphs MIOpen declines fall through to HIP MLops if it accepts them)
 
 - **[hipBLASLt Provider Plugin](../../../dnn-providers/hipblaslt-provider/docs/OperationSupport.md)** - Integration with AMD's hipBLASLt library that provides optimized GEMM operations.
   - Stand-alone Matmul (FP32/FP16/BF16 inputs and outputs, with optional fused bias and activation)

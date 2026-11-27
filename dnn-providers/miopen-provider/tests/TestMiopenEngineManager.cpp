@@ -4,16 +4,21 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <memory>
+#include <optional>
 #include <set>
 
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/EngineManager.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "HipdnnMiopenContext.hpp"
 #include "HipdnnMiopenHandle.hpp"
+#include "MiopenContainer.hpp"
 #include "mocks/MockEngine.hpp"
 #include "mocks/MockHipdnnMiopenContext.hpp"
 
@@ -242,4 +247,35 @@ TEST(TestMiopenEngineManager, InitializeExecutionContextThrowsOnInvalidEngineId)
     EXPECT_THROW(
         manager.initializeExecutionContext(dummyHandle, mockGraph, mockEngineConfig, execCtx),
         hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+// The real engine set: MIOpen's pooling forward is bit-reproducible (one thread per output, no
+// atomics), so both the default and the deterministic engine take a ResampleFwd graph.
+TEST(TestGpuMiopenContainer, DefaultAndDeterministicEnginesAcceptResampleFwd)
+{
+    SKIP_IF_NO_DEVICES();
+
+    using hipdnn_data_sdk::utilities::MIOPEN_ENGINE_DETERMINISTIC_ID;
+    using hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID;
+    using hipdnn_flatbuffers_sdk::data_objects::PaddingMode;
+    using hipdnn_flatbuffers_sdk::data_objects::ResampleMode;
+    using hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper;
+
+    MiopenContainer container;
+    HipdnnMiopenHandle handle;
+    auto& manager = container.getEngineManager();
+
+    for(const auto mode : {ResampleMode::MAXPOOL, ResampleMode::AVGPOOL_EXCLUDE_PADDING})
+    {
+        SCOPED_TRACE(hipdnn_flatbuffers_sdk::data_objects::EnumNameResampleMode(mode));
+        auto fbb = createValidResampleFwdGraph(
+            mode == ResampleMode::MAXPOOL ? std::optional<bool>(true) : std::nullopt,
+            mode,
+            mode == ResampleMode::MAXPOOL ? PaddingMode::NEG_INF_PAD : PaddingMode::ZERO_PAD);
+        const GraphWrapper graph(fbb.GetBufferPointer(), fbb.GetSize());
+
+        const auto applicable = manager.getApplicableEngineIds(handle, graph);
+        EXPECT_THAT(applicable, ::testing::Contains(MIOPEN_ENGINE_ID));
+        EXPECT_THAT(applicable, ::testing::Contains(MIOPEN_ENGINE_DETERMINISTIC_ID));
+    }
 }

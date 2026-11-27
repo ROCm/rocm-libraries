@@ -91,10 +91,14 @@ This table lists all operations supported in hipDNN:
      - ``FP16``, ``FP32``
      - Any, rank 1-5
      - Single-node graph⁸
+   * - Resample Forward (pooling, standalone)
+     - ``FP16``, ``BFP16``, ``FP32``
+     - NCHW, NHWC, NCDHW, NDHWC
+     - Single-node graph¹⁰
 
 .. note::
 
-  - For annotations ¹ through ⁴ and ⁶ through ⁹, see :ref:`operations`.
+  - For annotations ¹ through ⁴ and ⁶ through ¹⁰, see :ref:`operations`.
   - For annotation ⁵, see :ref:`detailed` for more information.
 
 .. _detailed:
@@ -169,6 +173,8 @@ Operation notes
   - **Packing, plain Convolution Dgrad and Wgrad**: a channels-first non-packed tensor is accepted; a channels-last non-packed tensor is declined.
   - **Size, plain Convolution Dgrad**: ``dy`` and ``dx`` must each have at most 2^31 - 1 elements.
   - **Fused Convolution Forward + (Bias) + Activation**: none of the rules above is applied to its ``x``, ``w`` and ``y``. The graph is declined when the bias operand does not meet the requirements under :ref:`detailed` (dims, channel stride and data type), or when the final activation output does not have the data type of ``x`` and the dims of the convolution output, packed in the same layout as ``x``. An ADD with any other operand, for example a residual of the output's shape, is not treated as a bias and the graph is declined.
+
+- ¹⁰ **Standalone Resample Forward**: A single-node graph supports ``MAXPOOL``, ``AVGPOOL_EXCLUDE_PADDING`` and ``AVGPOOL_INCLUDE_PADDING`` across ranks 4-5, with packed X and Y sharing one datatype and layout, and an ``FP32`` compute type. Padding must be symmetric and smaller than the window, and each spatial input size plus its padding may not exceed INT_MAX (a known MIOpen limitation); unless the padding is all zero, ``MAXPOOL`` needs ``NEG_INF_PAD`` and the average modes need ``ZERO_PAD``. An ``AVGPOOL_INCLUDE_PADDING`` window may hold at most UINT32_MAX positions (a known MIOpen limitation). Y must have the floor-mode output size, and its spatial sizes may not exceed INT_MAX - 127 (a known MIOpen limitation). The index output (``generate_index``) is supported for ``MAXPOOL`` in NCHW/NCDHW only, as ``INT8`` or ``INT32``; with ``INT8`` the input spatial size may not exceed 128, and on ``BFLOAT16`` tensors the padding must be zero (a known MIOpen limitation). The index tensor needs ``generate_index``, Y's dimensions and packed NCHW/NCDHW strides, and must not alias X or Y. On channels-last tensors, graphs whose window, stride, datatype and rank need a per-thread tile above the scratch limit of MIOpen's tiled kernels (about 128 KiB) aren't supported; on channels-first tensors, graphs whose window and stride overflow the tile-size estimate of those kernels aren't supported (a known MIOpen limitation). Pass-by-value and ragged tensors, in-place execution and override-shape graphs aren't supported.
 - **Sparse Support**: All operations only work with dense tensors.
 
 Knobs

@@ -25,6 +25,7 @@ The following table lists all operations currently supported in hipDNN:
 | Pointwise Activation (standalone) | FP16, FP32 | Rank 1-4, any dimension order | Single-node graph<sup>7</sup> |
 | Pointwise Binary Elementwise (standalone) | FP16, FP32 | NCHW, NCDHW | Single-node graph<sup>8</sup> |
 | Reduction (standalone) | FP16, FP32 | Any, rank 1-5 | Single-node graph<sup>9</sup> |
+| Resample Forward (pooling, standalone) | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Single-node graph<sup>11</sup>, Deterministic<sup>5</sup> |
 
 ¹ See Batchnorm Operations note below
 ² See Convolution Operations note below
@@ -36,6 +37,7 @@ The following table lists all operations currently supported in hipDNN:
 ⁸ See Standalone Binary Elementwise note below
 ⁹ See Standalone Reduction note below
 ¹⁰ See Convolution Applicability note below
+¹¹ See Standalone Resample Forward note below
 
 ## Detailed Requirements
 
@@ -139,6 +141,24 @@ The following table lists all operations currently supported in hipDNN:
 > 2^30) input elements.
 
 > [!NOTE]
+> **Standalone Resample Forward:** A single-node graph supports MAXPOOL, AVGPOOL_EXCLUDE_PADDING
+> and AVGPOOL_INCLUDE_PADDING across ranks 4-5, with packed X and Y sharing one datatype and
+> layout, and an FP32 compute type. Padding must be symmetric and smaller than the window, and
+> each spatial input size plus its padding may not exceed INT_MAX (a known MIOpen limitation);
+> unless the padding is all zero, MAXPOOL needs NEG_INF_PAD and the average modes need ZERO_PAD.
+> An AVGPOOL_INCLUDE_PADDING window may hold at most UINT32_MAX positions (a known MIOpen
+> limitation). Y must have the floor-mode output size, and its spatial sizes may not exceed
+> INT_MAX - 127 (a known MIOpen limitation). The index output (`generate_index`) is supported for
+> MAXPOOL in NCHW/NCDHW only, as INT8 or INT32; with INT8 the input spatial size may not exceed 128,
+> and on BFLOAT16 tensors the padding must be zero (a known MIOpen limitation). The index tensor
+> needs `generate_index`, Y's dimensions and packed NCHW/NCDHW strides, and must not alias X or Y.
+> On channels-last tensors, graphs whose window, stride, datatype and rank need a per-thread tile
+> above the scratch limit of MIOpen's tiled kernels (about 128 KiB) are not supported; on
+> channels-first tensors, graphs whose window and stride overflow the tile-size estimate of those
+> kernels are not supported (a known MIOpen limitation). Pass-by-value and ragged tensors, in-place
+> execution and override-shape graphs are not supported.
+
+> [!NOTE]
 > **Sparse Support:** All operations currently work with dense tensors only.
 
 > [!NOTE]
@@ -146,7 +166,7 @@ The following table lists all operations currently supported in hipDNN:
 
 ## Deterministic Engine Support
 
-The MIOpen provider offers a deterministic execution engine (`MIOPEN_ENGINE_DETERMINISTIC`) for convolution, unary activation, and binary pointwise operations. This engine guarantees bit-reproducible results across multiple executions with the same inputs.
+The MIOpen provider offers a deterministic execution engine (`MIOPEN_ENGINE_DETERMINISTIC`) for convolution, unary activation, binary pointwise and resample forward (pooling) operations. This engine guarantees bit-reproducible results across multiple executions with the same inputs.
 
 To use the deterministic engine, set it as the preferred engine on your graph before building:
 

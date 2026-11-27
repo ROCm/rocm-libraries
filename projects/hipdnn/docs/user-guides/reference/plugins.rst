@@ -20,6 +20,7 @@ Plugins
   - Fused operation graphs
   - Standalone pointwise activation and binary elementwise operations
   - Standalone reduction
+  - Standalone resample forward
 
 - :ref:`hipblaslt`: Provides integration with AMD's `hipBLASLt library <https://rocm.docs.amd.com/projects/hipBLASLt/en/latest/index.html>`_ that provides optimized GEMM operations.
 

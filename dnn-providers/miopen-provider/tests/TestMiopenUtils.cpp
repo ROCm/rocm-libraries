@@ -35,6 +35,25 @@ TEST(TestMiopenUtils, TensorDataTypeToMiopenDataTypeThrowsOnUnsupported)
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
+TEST(TestMiopenUtils, ThrowOnHipFailureAcceptsSuccess)
+{
+    EXPECT_NO_THROW(THROW_ON_HIP_FAILURE(hipSuccess));
+}
+
+TEST(TestMiopenUtils, ThrowOnHipFailureThrowsInternalErrorOnFailure)
+{
+    try
+    {
+        THROW_ON_HIP_FAILURE(hipErrorInvalidValue);
+        FAIL() << "THROW_ON_HIP_FAILURE did not throw for hipErrorInvalidValue";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
+    {
+        EXPECT_EQ(e.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
+        EXPECT_NE(std::string(e.what()).find("HIP error occurred"), std::string::npos);
+    }
+}
+
 TEST(TestMiopenUtils, FindTensorAttributesReturnsCorrectValue)
 {
     flatbuffers::FlatBufferBuilder builder1;

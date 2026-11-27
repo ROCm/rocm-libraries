@@ -40,6 +40,22 @@
           ]
         }
       }
+    ],
+    "MIOPEN_ENGINE": [
+      {
+        "cases": [
+          "1_2_3_2_2_fp16_ncdhw_padding_modeneg_inf_pad_postpad0x0x0_prepad0x0x0",
+          "2_3_3_2_bfp16_nchw_padding_modeneg_inf_pad_postpad0x0_prepad0x0"
+        ],
+        "support": {
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ]
+        }
+      }
     ]
   },
   "version": 1

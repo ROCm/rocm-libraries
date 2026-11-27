@@ -120,10 +120,23 @@ When requested to build/test:
 - Use CMake for managing C/C++ dependencies
 - Use Flatbuffers for serialization (via Flatbuffers SDK wrapper classes: IGraph, GraphWrapper, etc.)
 
+### MIOpen Workarounds
+Known MIOpen problems the provider works around live in two headers, each keyed by its tracking issue so the workaround is easy to find and remove once MIOpen is fixed. In a key, `ISSUE_<n>` is the GitHub issue ROCm/rocm-libraries#<n> and `ALMIOPEN_<n>` is the Jira ticket ALMIOPEN-<n>.
+- `Workarounds.hpp` (production side): makes a plan builder's applicability decline the affected graphs, so engine selection skips them. A macro either returns `false` from a `bool` function, such as `REJECT_IF_WORKAROUND_ISSUE_5409(handle)`, or is a predicate the checks turn into a decline, such as `WORKAROUND_ALMIOPEN_3295_DECLINES_INDEX(dataType, hasPadding)`.
+- `tests/common/TestWorkarounds.hpp` (test side, kept separate so production code never pulls in gtest): predicates and skips for tests that hit a known gap, such as `IS_WORKAROUND_ISSUE_6979(result)` and `SKIP_IF_WORKAROUND_ISSUE_6979(result)`. Use them only in tests of the affected path, so other failures still surface.
+- Each workaround is a commented section: the problem and where it is in MIOpen, the graphs or tests it affects, the macro's contract, and the steps to remove it. Tests that exist because of a workaround mention its key, so `git grep` on the key (for example `WORKAROUND_ISSUE_5409` or `ALMIOPEN.3295`) finds every site.
+- User-facing docs describe a declined case as "a known MIOpen limitation". They may link a public GitHub issue (ROCm/rocm-libraries#<n>); they never name an internal Jira key.
+
 ### Testing
 - Use Google Test (gtest) framework for all C/C++ tests
 - Never generate a `main()` function in test files — `tests/main.cpp` and `integration_tests/main.cpp` provide it
 - Use TEST(), TEST_F(), or TEST_P() macros as appropriate
+
+#### What to Test
+
+The provider is plumbing between hipDNN and MIOpen. Its tests cover the provider's own code paths, not MIOpen's behavior.
+
+- **Do not test MIOpen:** never write a test whose expected values pin MIOpen's numerics or edge-case behavior (NaN handling, values chosen for windows with no finite input, rounding). Execution tests use small inputs whose result is unambiguous, so they prove that the provider builds the right descriptors, passes the right buffers and copies outputs.
 
 #### Test Suite Naming
 

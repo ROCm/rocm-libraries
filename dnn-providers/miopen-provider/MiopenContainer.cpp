@@ -9,6 +9,7 @@
 #include "engines/plans/MiopenConvFwdBiasActivPlanBuilder.hpp"
 #include "engines/plans/MiopenConvPlanBuilder.hpp"
 #include "engines/plans/MiopenReductionPlanBuilder.hpp"
+#include "engines/plans/MiopenResampleFwdPlanBuilder.hpp"
 #include "engines/plans/MiopenUnaryActivationPlanBuilder.hpp"
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
@@ -54,6 +55,7 @@ const std::vector<MiopenContainer::EngineDefinition>& MiopenContainer::getEngine
              engine->addPlanBuilder(std::make_unique<MiopenUnaryActivationPlanBuilder>());
              engine->addPlanBuilder(std::make_unique<MiopenBinaryPointwisePlanBuilder>());
              engine->addPlanBuilder(std::make_unique<MiopenReductionPlanBuilder>());
+             engine->addPlanBuilder(std::make_unique<MiopenResampleFwdPlanBuilder>());
 
              return engine;
          }},
@@ -71,6 +73,7 @@ const std::vector<MiopenContainer::EngineDefinition>& MiopenContainer::getEngine
              engine->addPlanBuilder(std::make_unique<MiopenConvFwdBiasActivPlanBuilder>(true));
              engine->addPlanBuilder(std::make_unique<MiopenUnaryActivationPlanBuilder>());
              engine->addPlanBuilder(std::make_unique<MiopenBinaryPointwisePlanBuilder>());
+             engine->addPlanBuilder(std::make_unique<MiopenResampleFwdPlanBuilder>());
              return engine;
          }}
 
