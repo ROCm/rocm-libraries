@@ -172,6 +172,7 @@ const BoolField k_bool_fields[] = {
     {"paged", &rocke_attention_dense_spec_t::paged},
     {"use_sinks", &rocke_attention_dense_spec_t::use_sinks},
     {"causal_bottom_right", &rocke_attention_dense_spec_t::causal_bottom_right},
+    {"use_i64_kv_addr", &rocke_attention_dense_spec_t::use_i64_kv_addr},
 };
 const StrField k_str_fields[] = {
     {"dtype", &rocke_attention_dense_spec_t::dtype},

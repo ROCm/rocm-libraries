@@ -232,8 +232,58 @@ _CASES: tuple[dict, ...] = (
         num_kv_heads=-8,
         sliding_window=256,
     ),
+    dict(paged=True, block_size=16, num_kv_blocks=1 << 20, use_i64_kv_addr=True),
+    dict(use_i64_kv_addr=True),
+    # The i32 K/V bound itself (8 KiB pages): a cache of exactly
+    # I32_KV_BUFFER_BYTES stays on i32 pages, one page more needs i64.
+    dict(paged=True, block_size=16, num_kv_blocks=262136),
+    dict(paged=True, block_size=16, num_kv_blocks=262137),
+    # Paged K/V is bounded by its cache, not the logical extent: a short chunk over
+    # 2 GiB of keys is valid on i64 pages, refused contiguous.
+    dict(
+        paged=True,
+        block_size=16,
+        num_kv_blocks=1 << 18,
+        use_i64_kv_addr=True,
+        varlen=True,
+        causal_bottom_right=True,
+        seqlen_kv=1 << 22,
+    ),
+    dict(causal_bottom_right=True, seqlen_kv=1 << 22),
     dict(paged=True, block_size=16, num_kv_blocks=64, batch=2),
     dict(paged=True, block_size=16, num_kv_blocks=64, varlen=True),
+    dict(paged=True, block_size=16, num_kv_blocks=64, varlen=True, seqlen_kv=1024),
+    # Top-left paged varlen with longer queries than keys, windowed: rows past
+    # kv_len + window have no key.
+    dict(
+        paged=True,
+        block_size=16,
+        num_kv_blocks=64,
+        varlen=True,
+        batch=2,
+        seqlen_q=1024,
+        sliding_window=256,
+    ),
+    # Paged varlen: lengths are maxima (no whole-tile rule), and several sequences
+    # take the head-band order, or qb_minor when the heads do not fill the XCDs.
+    dict(
+        paged=True,
+        block_size=16,
+        num_kv_blocks=64,
+        varlen=True,
+        batch=3,
+        seqlen_q=1000,
+        seqlen_kv=1000,
+    ),
+    dict(
+        paged=True,
+        block_size=16,
+        num_kv_blocks=64,
+        varlen=True,
+        batch=3,
+        num_query_heads=12,
+        num_kv_heads=2,
+    ),
     dict(paged=True, block_size=16, num_kv_blocks=64, persistent=True),
     dict(paged=True, block_size=16, num_kv_blocks=64, head_size=64),
     dict(paged=True, block_size=16, num_kv_blocks=64),
@@ -244,6 +294,23 @@ _CASES: tuple[dict, ...] = (
     dict(paged=True, block_size=16, num_kv_blocks=64, ragged=True, seqlen_kv=544),
     dict(paged=True, block_size=16, num_kv_blocks=64, causal=False),
     dict(paged=True, block_size=16, num_kv_blocks=64, causal_bottom_right=True),
+    # Paged varlen shifts each sequence's diagonal: unequal maxima pass, q > kv not.
+    dict(
+        paged=True,
+        block_size=16,
+        num_kv_blocks=64,
+        varlen=True,
+        seqlen_kv=1024,
+        causal_bottom_right=True,
+    ),
+    dict(
+        paged=True,
+        block_size=16,
+        num_kv_blocks=64,
+        varlen=True,
+        seqlen_q=1024,
+        causal_bottom_right=True,
+    ),
     # Swizzled Head-first auto order: contiguous takes it, paged keeps bt_hkv_minor.
     dict(
         seqlen_q=8192,
@@ -265,7 +332,19 @@ _CASES: tuple[dict, ...] = (
     dict(
         use_sinks=True, paged=True, block_size=16, num_kv_blocks=64, sliding_window=256
     ),
+    dict(
+        use_sinks=True,
+        paged=True,
+        varlen=True,
+        causal_bottom_right=True,
+        block_size=16,
+        num_kv_blocks=64,
+        seqlen_q=256,
+        seqlen_kv=1024,
+    ),
     dict(use_sinks=True, varlen=True),
+    dict(use_sinks=True, varlen=True, causal_bottom_right=True, seqlen_kv=1024),
+    dict(use_sinks=True, varlen=True, sliding_window=128),
     # ---- one step either side of a validator comparison ----
     dict(num_kv_heads=7),
     dict(seqlen_q=320),
@@ -297,6 +376,26 @@ _CASES: tuple[dict, ...] = (
     dict(batch=2048, seqlen_q=65536, seqlen_kv=64, num_query_heads=8, num_kv_heads=8),
     dict(seqlen_q=131072, seqlen_kv=64, num_query_heads=128, num_kv_heads=1),
     dict(batch=1953125),
+    # The byte-addressed Q of the ragged and paged varlen bodies: 2 * Q/O elements
+    # at the limit while the element count and K/V stay under theirs.
+    dict(
+        ragged=True,
+        seqlen_q=65500,
+        seqlen_kv=65500,
+        num_query_heads=256,
+        num_kv_heads=2,
+    ),
+    dict(
+        paged=True,
+        block_size=16,
+        num_kv_blocks=64,
+        varlen=True,
+        seqlen_q=65500,
+        seqlen_kv=65500,
+        num_query_heads=256,
+        num_kv_heads=2,
+    ),
+    dict(seqlen_q=65536, seqlen_kv=65536, num_query_heads=256, num_kv_heads=2),
     dict(batch=2147483647, seqlen_kv=1048576, num_kv_heads=8),
     # A ragged Q is bounded in BYTES, so it rejects at half the element count the
     # element-addressed paths take. Q/O is 1310720000 elements (under the limit) and
@@ -501,6 +600,19 @@ _HOOK_CASES: dict[type, tuple[dict, ...]] = {
         # Auto-decode boundaries (review, 10-29).
         dict(seqlen_q=512, seqlen_kv=512, sliding_window=512, persistent=True),
         dict(causal_bottom_right=True, seqlen_q=256, seqlen_kv=1024),
+        # Runtime-shape paged: shape parts off, so no nb token.
+        dict(paged=True, block_size=16, num_kv_blocks=64, sliding_window=256),
+        # Paged varlen bottom-right shifts per sequence: shape parts off.
+        dict(
+            paged=True,
+            varlen=True,
+            batch=3,
+            block_size=16,
+            num_kv_blocks=64,
+            causal_bottom_right=True,
+            seqlen_q=256,
+            seqlen_kv=1024,
+        ),
     ),
     _G942: (
         {},  # runtime shape: head and shape parts off
@@ -513,6 +625,8 @@ _HOOK_CASES: dict[type, tuple[dict, ...]] = {
         dict(nonpersist_decode="bt_hkv_minor"),
         dict(causal=False, sliding_window=128),  # no noncausal window on gfx942
         dict(batch=0),  # preflight-only reject, with gfx942's validator
+        # Runtime-shape paged: shape parts off, so no nb token.
+        dict(paged=True, block_size=16, num_kv_blocks=64, sliding_window=256),
     ),
 }
 
@@ -832,6 +946,27 @@ def test_hook_tables_match_the_current_python():
             )
 
 
+def test_nb_name_token_follows_the_cache_key():
+    """Python names ``nb`` when the cache key keeps ``num_kv_blocks``; the C port
+    gates it on its shape parts instead, so both conditions must agree on every
+    paged spec of each subclass, baked shape and runtime shape alike."""
+    seen = set()
+    for cls, overrides in _HOOK_CASES.items():
+        # A partial Q tile keeps the paged shape baked.
+        for extra in (*overrides, dict(ragged=True, seqlen_q=500)):
+            kw = {**_BASE, **extra, "paged": True, "block_size": 16}
+            kw.setdefault("num_kv_blocks", 64)
+            try:
+                spec = cls(**kw)
+            except ValueError:
+                continue
+            baked = "num_kv_blocks" not in spec.runtime_param_fields
+            assert baked == bool(spec._shape_name_parts()), (cls.__name__, extra)
+            assert (f"_nb{spec.num_kv_blocks}_" in spec.kernel_name()) == baked
+            seen.add(baked)
+    assert seen == {True, False}
+
+
 def _reject_sites() -> tuple[set, set]:
     """(file, line) of every reject the C++ port mirrors, as two sets.
 
@@ -926,15 +1061,23 @@ def test_cases_reach_every_reject_site():
     decides on its own (as the varlen and paged pair-decode rows do)."""
     # Unreachable in both engines: __post_init__ already rejects any dtype other
     # than bf16 / fp16 before the paged block, so no spec reaches this re-check.
-    # The C struct's ``paged`` is a bool, so the Python-only type check has no
-    # C counterpart.
-    unreachable = ("paged not yet implemented for dtype", "paged must be a bool")
+    # The C struct's ``paged`` and ``use_i64_kv_addr`` are bools, so the Python-only
+    # type checks have no C counterpart.
+    unreachable = (
+        "paged not yet implemented for dtype",
+        "paged must be a bool",
+        "use_i64_kv_addr must be a bool",
+    )
     all_sites, divisions = _reject_sites()
     sites = {
         (path, line)
         for path, line in all_sites
+        # The reject's text: on its raise line, or on the next when it wraps.
         if not any(
-            text in Path(path).read_text(encoding="utf-8").splitlines()[line - 1]
+            text
+            in "\n".join(
+                Path(path).read_text(encoding="utf-8").splitlines()[line - 1 : line + 1]
+            )
             for text in unreachable
         )
     }

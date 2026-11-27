@@ -224,7 +224,8 @@ bool balance_causal(const rocke_attention_dense_spec_t* s)
 bool aligned_causal(const rocke_attention_dense_spec_t* s, bool lookahead)
 {
     const bool moving_diagonal = s->causal_bottom_right && s->seqlen_q != s->seqlen_kv;
-    return balance_causal(s) && !moving_diagonal && !s->ragged && !s->varlen && !lookahead;
+    return balance_causal(s) && !moving_diagonal && !s->ragged && !(s->varlen && !s->paged)
+           && !lookahead;
 }
 
 /* A decode's extra constraint (Python Decode.check); NULL when it has none. */
@@ -428,6 +429,7 @@ rocke_attention_dense_spec_t rocke_attention_dense_spec_default(void)
     s.use_sinks = false;
     s.causal_bottom_right = false;
     s.nonpersist_decode = "auto";
+    s.use_i64_kv_addr = false;
     s.chiplet_num_xcds = 8;
     return s;
 }
@@ -507,8 +509,10 @@ bool rocke_attention_dense_spec_validate(const rocke_attention_dense_spec_t* s,
                             "window mask)",
                             partial_tile_reason(s).c_str());
     }
-    else
+    else if(!(s->paged && s->varlen))
     {
+        /* Paged varlen handles each sequence's Q and KV tails in the kernel; its
+         * seqlen_q / seqlen_kv are only the per-sequence maxima. */
         if(s->seqlen_q % s->block_m != 0)
             ROCKE_SPEC_FAIL(reason,
                             cap,
@@ -624,28 +628,33 @@ bool rocke_attention_dense_spec_validate(const rocke_attention_dense_spec_t* s,
                             rows_per_wave);
         if(s->num_kv_blocks <= 0)
             ROCKE_SPEC_FAIL(reason, cap, "paged=True requires num_kv_blocks > 0");
+        /* kv_cache_needs_i64_addr: past I32_KV_BUFFER_BYTES (0x7FFF0000), the
+         * whole cache no longer fits one i32-addressed buffer resource. */
         const ExactProduct cache_bytes(
             {s->num_kv_blocks, s->block_size, s->num_kv_heads, s->head_size, 2});
-        if(cache_bytes.at_least(2147483648u))
+        if(cache_bytes.at_least(ROCKE_ATTENTION_DENSE_I32_KV_BUFFER_BYTES + 1)
+           && !s->use_i64_kv_addr)
         {
             char num[64];
             cache_bytes.str(num, sizeof(num));
-            ROCKE_SPEC_FAIL(reason, cap, "paged cache %s B exceeds i32 addressing (2 GiB)", num);
-        }
-        if(s->batch != 1)
-            ROCKE_SPEC_FAIL(reason, cap, "paged multi-sequence (batch>1) not yet implemented");
-        if(s->varlen)
-            ROCKE_SPEC_FAIL(reason, cap, "paged varlen not yet implemented (single-seq only)");
-        if(s->persistent)
             ROCKE_SPEC_FAIL(reason,
                             cap,
-                            "paged + persistent not yet implemented (persistent builder is "
-                            "contiguous-only)");
+                            "paged cache %s B is past the i32 K/V buffer range (%#llx B): set "
+                            "use_i64_kv_addr",
+                            num,
+                            (unsigned long long)ROCKE_ATTENTION_DENSE_I32_KV_BUFFER_BYTES);
+        }
+        if(!s->varlen && s->batch != 1)
+            ROCKE_SPEC_FAIL(reason,
+                            cap,
+                            "paged multi-sequence (batch>1) needs varlen=True (packed Q + "
+                            "cu_seqlens_q)");
         if(!streq(s->dtype, "fp16") && !streq(s->dtype, "bf16"))
             ROCKE_SPEC_FAIL(reason, cap, "paged not yet implemented for dtype=%s", s->dtype);
         /* The padded keys of a partial KV tile would read stale page rows (or block 0)
-         * instead of the zeros the contiguous bound gives. */
-        if(s->seqlen_kv % s->block_n != 0)
+         * instead of the zeros the contiguous bound gives. Paged varlen zeroes them in
+         * its V loads. */
+        if(!s->varlen && s->seqlen_kv % s->block_n != 0)
             ROCKE_SPEC_FAIL(reason,
                             cap,
                             "paged needs whole KV tiles: seqlen_kv (%d) must be a multiple of "
@@ -654,14 +663,16 @@ bool rocke_attention_dense_spec_validate(const rocke_attention_dense_spec_t* s,
                             s->block_n);
         if(!s->causal)
             ROCKE_SPEC_FAIL(reason, cap, "paged attention is causal-only");
-        /* The shifted diagonal is untested with paged K/V on both arches. */
-        if(s->causal_bottom_right)
-            ROCKE_SPEC_FAIL(reason, cap, "causal_bottom_right is not yet supported with paged KV");
+        /* The single-sequence paged body has no shifted diagonal; the varlen body
+         * shifts it per sequence. */
+        if(s->causal_bottom_right && !s->varlen)
+            ROCKE_SPEC_FAIL(reason,
+                            cap,
+                            "causal_bottom_right is not supported with paged=True unless "
+                            "varlen=True");
     }
-    if(s->use_sinks && s->paged)
-        ROCKE_SPEC_FAIL(reason, cap, "use_sinks is not yet supported with paged KV");
-    if(s->use_sinks && s->varlen)
-        ROCKE_SPEC_FAIL(reason, cap, "use_sinks is not yet supported with varlen");
+    else if(s->use_i64_kv_addr)
+        ROCKE_SPEC_FAIL(reason, cap, "use_i64_kv_addr requires paged=True");
     return true;
 }
 
@@ -718,6 +729,15 @@ const char*
         return NULL;
     if(!streq(s->nonpersist_decode, "auto"))
         return s->nonpersist_decode;
+    if(s->paged && s->varlen && s->batch > 1)
+    {
+        /* Packed sequences of different lengths: an order with the sequence as the
+         * fastest digit puts each sequence on one XCD, so a long one runs on a
+         * fraction of the GPU. A head band per XCD spreads every sequence. */
+        if(s->num_query_heads % s->chiplet_num_xcds == 0)
+            return "hq_minor_swz";
+        return "qb_minor";
+    }
     if(!aligned_causal(s, lookahead))
         return "qb_minor";
 
@@ -845,7 +865,13 @@ rocke_status_t rocke_attention_dense_kernel_name(const rocke_attention_dense_spe
     if(s->paged)
     {
         add("pgd%d", s->block_size);
-        add("nb%d", s->num_kv_blocks);
+        /* Python names nb when num_kv_blocks is not a runtime param; every arch
+         * body takes it as a kernarg together with the shape, so that is exactly
+         * when the shape parts are on. */
+        if(np->shape_parts)
+            add("nb%d", s->num_kv_blocks);
+        if(s->use_i64_kv_addr)
+            add("i64kv");
     }
     add_list(np->algorithm, np->num_algorithm);
     if(s->persistent)
@@ -913,9 +939,10 @@ bool rocke_attention_dense_spec_preflight(const rocke_attention_dense_spec_t* s,
                         s->block_n,
                         s->block_m);
 
-    /* 4. 32-bit addressing. */
+    /* 4. 32-bit addressing. Paged K/V is addressed per page: the cache bound above
+     * covers the i32 path, and use_i64_kv_addr lifts it. */
     const ExactProduct kv_bytes({s->batch, s->seqlen_kv, s->num_kv_heads, s->head_size, 2});
-    if(kv_bytes.at_least((uint64_t)ROCKE_ATTENTION_DENSE_INT32_LIMIT))
+    if(!s->paged && kv_bytes.at_least((uint64_t)ROCKE_ATTENTION_DENSE_INT32_LIMIT))
     {
         char num[64];
         kv_bytes.str(num, sizeof(num));
@@ -925,10 +952,12 @@ bool rocke_attention_dense_spec_preflight(const rocke_attention_dense_spec_t* s,
                         num,
                         ROCKE_ATTENTION_DENSE_INT32_LIMIT);
     }
-    /* A ragged Q goes through a buffer resource whose num_records AND voffset are both
-     * i32 BYTES, so the ceiling is half the element count the element-offset paths get.
-     * O stays element-addressed even here. */
-    if(s->ragged)
+    /* A ragged or paged varlen Q goes through a buffer resource whose num_records AND
+     * voffset are both i32 BYTES, so the ceiling is half the element count the
+     * element-offset paths get. O stays element-addressed even here. gfx942 paged
+     * varlen clamps its Q rows instead but keeps the limit, so both arches admit the
+     * same specs. */
+    if(s->ragged || (s->paged && s->varlen))
     {
         const ExactProduct qo_bytes({s->batch, s->seqlen_q, s->num_query_heads, s->head_size, 2});
         if(qo_bytes.at_least((uint64_t)ROCKE_ATTENTION_DENSE_INT32_LIMIT))

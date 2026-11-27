@@ -68,9 +68,11 @@ _UNIFIED_CAPABILITY = Capability(
     # Unified kernels shift the causal diagonal by the runtime difference
     # between each sequence's KV and query lengths (bottom-right); top-left
     # cross-length selects the ``causal_top_left`` kernel variant on gfx950 and
-    # the scalar kernel elsewhere (tiled gates reject it off gfx950). Additive
-    # bias runs on the tiled kernels only; the tiled gate limits it to gfx950.
-    supports_features=ATTENTION_FEATURES | {"attn_bias"},
+    # the scalar kernel elsewhere (tiled gates reject it off gfx950). Every
+    # unified kernel reads paged K/V, so an explicit ``layout="paged"`` request
+    # that no dense kernel takes falls back here. Additive bias runs on the
+    # tiled kernels only; the tiled gate limits it to gfx950.
+    supports_features=ATTENTION_FEATURES | {"layout_paged", "attn_bias"},
 )
 # Both unified paths write the optional LSE output; each path's own gate (run
 # by ``_unified_path_coverage`` in ``support`` below) still refuses it on

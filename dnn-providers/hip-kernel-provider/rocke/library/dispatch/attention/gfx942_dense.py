@@ -26,13 +26,17 @@ kernel's own ``supports_attention_dense``.
 
 from __future__ import annotations
 
+from typing import Mapping, Tuple
+
 from rocke.dispatch.core import CandidateRegistry, KernelCandidate
 
 from .candidate import make_dense_candidate
-from .dense_rules import dense_paged_fields, dense_paged_tile_fits
+from .dense_rules import dense_paged_fields, dense_paged_tile_fits, dense_paged_varlen
 from .common import (
+    Alignment,
     AttentionMaskType,
     AttentionRequest,
+    _implied_alignment,
     _parse_attention_mask_type,
 )
 
@@ -135,6 +139,40 @@ def _narrow_window_geometry(head_size, dtype):
     if dtype == "bf16":
         return 64, _DENSE_BLOCK_N, False
     return 128, _DENSE_BLOCK_N, False
+
+
+def _paged_varlen(
+    batch: int,
+    sq: int,
+    sk: int,
+    block_m: int,
+    block_n: int,
+    *,
+    bottom_right: bool = False,
+) -> bool:
+    """Whether a paged problem takes the varlen body on this tile."""
+    # No ragged body on gfx942: the paged varlen body bounds a partial Q tile. Only
+    # the varlen body shifts the diagonal of a paged cache.
+    return bottom_right or dense_paged_varlen(batch, sk, block_n) or sq % block_m != 0
+
+
+def _derived(base, knobs: Mapping[str, object]) -> Mapping[str, object]:
+    """Paged ``varlen`` for the tile the knobs choose."""
+    if not base.paged:
+        return {}
+    block_m = int(knobs.get("block_m", base.block_m))
+    block_n = int(knobs.get("block_n", base.block_n))
+    sq, sk = int(base.seqlen_q), int(base.seqlen_kv)
+    return {
+        "varlen": _paged_varlen(
+            int(base.batch),
+            sq,
+            sk,
+            block_m,
+            block_n,
+            bottom_right=bool(base.causal_bottom_right),
+        )
+    }
 
 
 # Additive-bias geometry (see :func:`_bias_geometry_spec`).
@@ -249,14 +287,21 @@ def tuned_base_spec(req: AttentionRequest):
         return _bias_geometry_spec(req)
     head_size = int(req.hdim_q)
     # The persistent grid measured ahead at D128 for every batch and mask; at
-    # D64 the non-persistent grid did. Paged K/V runs on the default grid.
-    paged = bool(dense_paged_fields(req))
-    spec = _make_spec(
-        req,
-        _default_block_m(req),
-        _DENSE_BLOCK_N,
-        persistent=head_size == 128 and not paged,
-    )
+    # D64 the non-persistent grid did. Paged K/V: see _paged_persistent.
+    paged = dense_paged_fields(req, _DENSE_BLOCK_N)
+    block_m = _default_block_m(req)
+    spec = None
+    if paged and _paged_persistent(req):
+        try:
+            spec = _make_spec(req, block_m, _DENSE_BLOCK_N, persistent=True)
+        except ValueError:
+            # No varlen path on the persistent body (several sequences, a
+            # partial query tile): the grid serves those.
+            pass
+    if spec is None:
+        spec = _make_spec(
+            req, block_m, _DENSE_BLOCK_N, persistent=head_size == 128 and not paged
+        )
     # Not with a bias: the segment store returns before the bias epilogue.
     if spec.causal_bottom_right and not spec.use_additive_bias:
         from kernels.common.attention_dense_kv_split import (
@@ -368,13 +413,31 @@ def _make_spec(
     mask_type = _parse_attention_mask_type(req.mask_type)
     # on-chip ragged padding for ragged self-attention lengths (seqlen_q==seqlen_kv,
     # not a block_m/block_n multiple). Cross-attention ragged is left to the
-    # validator.
-    ragged = (sq == sk) and ((sq % bm != 0) or (sk % bn != 0))
+    # validator. Paged varlen handles each sequence's tails itself; its lengths
+    # are maxima.
+    paged = dense_paged_fields(req, bn)
     # Bottom-right causal with seqlen_q != seqlen_k: the same predicate the router
     # matches against ``features`` below, so a band this body cannot shift (a
     # bottom-right window) reaches ``supports_attention_dense`` and is rejected
     # there instead of running top-left.
     bottom_right = "causal_bottom_right" in req.features()
+    if paged and int(req.batch) > 1 and mask_type != AttentionMaskType.NO_MASK:
+        # Several sequences: the lengths are maxima, and equal ones do not make
+        # each q_len == kv_len, so the requested alignment stands; the varlen body
+        # shifts each sequence's diagonal at run time.
+        alignment = (
+            _implied_alignment(mask_type)
+            if req.diagonal_alignment is None
+            else Alignment(int(req.diagonal_alignment))
+        )
+        bottom_right = alignment is Alignment.BOTTOM_RIGHT
+    if paged and _paged_varlen(
+        int(req.batch), sq, sk, bm, bn, bottom_right=bottom_right
+    ):
+        paged["varlen"] = True
+    ragged = (
+        (sq == sk) and ((sq % bm != 0) or (sk % bn != 0)) and not paged.get("varlen")
+    )
     if bottom_right and mask_type == AttentionMaskType.NO_MASK:
         # The band normalizer maps a cross-length NO_MASK request on this arch to
         # the bottom-right causal band; the dense body serves only explicit
@@ -414,8 +477,37 @@ def _make_spec(
         causal_diag_split=diag_split,
         window_wave_skip=window_wave_skip,
         use_additive_bias=req.use_attn_bias,
-        **dense_paged_fields(req),
+        **paged,
     )
+
+
+def _paged_persistent(req: AttentionRequest) -> bool:
+    """Whether a D128 paged request defaults to the persistent grid.
+
+    Paged K/V moves the D128 trade-off: the persistent grid stays ahead for
+    bf16 and under sliding windows, while plain causal fp16 runs faster on the
+    one-CTA-per-block grid. Only the top-left diagonal was measured there, and
+    narrow windows keep their own grid geometry. Varlen problems fall back to
+    the grid in :func:`tuned_base_spec`.
+    """
+    if int(req.hdim_q) != 128 or int(req.mask_type) != 1:
+        return False
+    window = int(req.sliding_window)
+    if window:
+        return window > _NARROW_WINDOW
+    return req.dtype.lower() == "bf16"
+
+
+def dense_paged_auto_order(req: AttentionRequest) -> Tuple[str, ...]:
+    """Candidate names for an unpinned paged request; a request the candidate
+    refuses goes to unified.
+
+    One candidate, as for contiguous requests: its default spec picks the body
+    (grid or persistent). Unified serves top-left with its bottom-right body
+    (wrong for any sequence with q_len != kv_len) or, for unequal maxima, its
+    scalar kernel, so dense keeps every paged request it supports.
+    """
+    return (CANDIDATE_NAME,)
 
 
 def _supports(spec, *, arch):
@@ -470,6 +562,7 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
         recorded=frozenset(
             {"persistent", "waves_per_eu", "block_m", "block_n", "window_wave_skip"}
         ),
+        derived=_derived,
     )
 
 

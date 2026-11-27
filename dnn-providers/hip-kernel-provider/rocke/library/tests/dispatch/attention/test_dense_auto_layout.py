@@ -1,11 +1,14 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Auto dispatch of contiguous-layout (``layout='dense'``) requests (host only).
+"""Auto dispatch of contiguous-layout (``layout='dense'``) and paged-layout
+(``layout='paged'``) requests (host only).
 
 An unpinned request that declares contiguous tensors and has more than one
-query row gets the dense kernel's default body; paged / unspecified layouts keep
-the unified route, and single-row requests take the strided decode kernel.
+query row gets the dense kernel's default body, and single-row requests take
+the strided decode kernel. A paged request goes to a dense paged body where its
+arch's paged order takes it and falls back to unified elsewhere; an unspecified
+layout keeps the unified route.
 """
 
 import dataclasses
@@ -81,6 +84,123 @@ def test_gfx950_dense_layout_picks_default_body(overrides, candidate):
     assert pinned.spec.kernel_spec == result.spec.kernel_spec
 
 
+@pytest.mark.parametrize(
+    "overrides, candidate",
+    [
+        # Each body's own admission sends what it refuses down the order.
+        ({}, "attention_gfx950_dense_persist_widedma"),
+        # Wide DMA needs a page per KV tile at least.
+        ({"kv_block_size": 16}, "attention_gfx950_dense_persist"),
+        ({"sliding_window": 1024}, "attention_gfx950_dense_persist_widedma"),
+        (
+            {"seqlen_q": 512, "seqlen_k": 512, "sliding_window": 128},
+            "attention_gfx950_dense_persist_widedma",
+        ),
+        (
+            {"sliding_window": 1024, "kv_block_size": 16},
+            "attention_gfx950_dense_persist",
+        ),
+        ({"sliding_window": 1024, "use_sinks": True}, "attention_gfx950_dense_persist"),
+        ({"sliding_window": 1024, "batch": 4}, "attention_gfx950_dense_grid"),
+        (
+            {"seqlen_q": 512, "seqlen_k": 512, "hdim_q": 64, "hdim_v": 64},
+            "attention_gfx950_dense_persist",
+        ),
+        (
+            {
+                "seqlen_q": 512,
+                "seqlen_k": 512,
+                "hdim_q": 64,
+                "hdim_v": 64,
+                "sliding_window": 128,
+                "kv_block_size": 16,
+            },
+            "attention_gfx950_dense_persist",
+        ),
+        (
+            {"seqlen_q": 512, "seqlen_k": 512, "hdim_q": 64, "hdim_v": 64, "batch": 4},
+            "attention_gfx950_dense_grid",
+        ),
+        # The moving bottom-right diagonal runs only on the grid body.
+        (
+            {
+                "seqlen_q": 512,
+                "seqlen_k": 8192,
+                "hdim_q": 64,
+                "hdim_v": 64,
+                "mask_type": 2,
+            },
+            "attention_gfx950_dense_grid",
+        ),
+        # Sinks rule out wide DMA, as for contiguous K/V.
+        ({"use_sinks": True}, "attention_gfx950_dense_persist"),
+        # The persistent bodies take one sequence.
+        ({"batch": 4}, "attention_gfx950_dense_grid"),
+        ({"batch": 4, "use_sinks": True}, "attention_gfx950_dense_grid"),
+        ({"seqlen_q": 512, "seqlen_k": 512}, "attention_gfx950_dense_persist_widedma"),
+        (
+            {"seqlen_q": 512, "seqlen_k": 512, "kv_block_size": 16},
+            "attention_gfx950_dense_grid",
+        ),
+    ],
+)
+def test_gfx950_paged_layout_picks_default_body(overrides, candidate):
+    req = _request("gfx950", layout="paged", **overrides)
+    result = dispatch_attention(req)
+    assert result.candidate.name == candidate
+    assert result.spec.path == "dense"
+    pinned = dispatch_attention(
+        dataclasses.replace(
+            req, algorithm=result.candidate.algorithm, spec_id=result.candidate.spec_id
+        )
+    )
+    assert pinned.spec.kernel_spec == result.spec.kernel_spec
+
+
+@pytest.mark.parametrize(
+    "overrides, persistent",
+    [
+        ({}, True),
+        # Plain causal fp16 runs faster on the grid, windowed fp16 does not;
+        # narrow windows keep their grid geometry.
+        ({"dtype": "fp16"}, False),
+        ({"dtype": "fp16", "sliding_window": 4096}, True),
+        # Sinks leave the choice as it is without them.
+        ({"use_sinks": True}, True),
+        ({"use_sinks": True, "dtype": "fp16"}, False),
+        ({"use_sinks": True, "batch": 4}, False),
+        ({"dtype": "fp16", "sliding_window": 256}, False),
+        ({"sliding_window": 128}, False),
+        ({"hdim_q": 64, "hdim_v": 64}, False),
+        # The persistent body takes one sequence on whole KV tiles.
+        ({"batch": 4}, False),
+        ({"seqlen_q": 4000, "seqlen_k": 4000}, False),
+        ({"batch": 4, "sliding_window": 1024, "hdim_q": 64, "hdim_v": 64}, False),
+    ],
+)
+def test_gfx942_paged_layout_picks_default_body(overrides, persistent):
+    req = _request("gfx942", layout="paged", **overrides)
+    result = dispatch_attention(req)
+    assert result.candidate.name == "attention_gfx942_dense"
+    assert ("_persist" in result.spec.kernel_name()) == persistent
+    pinned = dispatch_attention(
+        dataclasses.replace(
+            req, algorithm=result.candidate.algorithm, spec_id=result.candidate.spec_id
+        )
+    )
+    assert pinned.spec.kernel_spec == result.spec.kernel_spec
+
+
+@pytest.mark.parametrize("use_sinks", [False, True])
+def test_gfx942_paged_several_windowed_d128_sequences_take_dense(use_sinks):
+    result = dispatch_attention(
+        _request(
+            "gfx942", layout="paged", batch=4, sliding_window=1024, use_sinks=use_sinks
+        )
+    )
+    assert result.candidate.name == "attention_gfx942_dense"
+
+
 def test_gfx942_dense_layout_picks_dense():
     result = dispatch_attention(_request("gfx942"))
     assert result.candidate.name == "attention_gfx942_dense"
@@ -132,8 +252,45 @@ def test_fp8_dense_layout_auto_pins_to_the_grid_body():
 def test_fp8_keeps_the_unified_route_off_the_dense_layout():
     """The fp8 auto-pin above is scoped to ``layout='dense'``.
 
-    Only ``auto`` is checked: ``paged`` and the unset layout are refused for
-    every dtype on this path, so they say nothing about fp8 either way.
+    The dense paged body has no fp8 K/V, so a paged fp8 request falls back to
+    unified too.
     """
-    result = dispatch_attention(_request("gfx950", use_fp8=True, layout="auto"))
-    assert result.candidate.name == "attention_unified_2d"
+    for layout in ("auto", "paged"):
+        result = dispatch_attention(_request("gfx950", use_fp8=True, layout=layout))
+        assert result.candidate.name == "attention_unified_2d"
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        # Paged dense is causal-only, with or without sinks.
+        pytest.param({"use_sinks": True, "mask_type": 0}, id="non_causal_sinks"),
+        pytest.param({"seqlen_q": 1, "mask_type": 0}, id="decode"),
+        pytest.param({"batch": 4, "emit_lse": True}, id="multiseq_lse"),
+    ],
+)
+def test_paged_outside_dense_falls_back_to_unified(arch, overrides):
+    result = dispatch_attention(_request(arch, layout="paged", **overrides))
+    assert result.candidate.name in ("attention_unified_2d", "attention_unified_3d")
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+@pytest.mark.parametrize(
+    "lengths",
+    [{"seqlen_q": 512}, {"seqlen_k": 1024}],
+    ids=["q_lt_kv", "q_gt_kv"],
+)
+def test_paged_top_left_cross_length_routes_to_dense(arch, lengths):
+    # gfx942 unified folds top-left into bottom-right (normalize_band), so dense is
+    # the only correct body there.
+    result = dispatch_attention(_request(arch, layout="paged", batch=4, **lengths))
+    spec = result.spec.kernel_spec
+    assert spec.paged and spec.varlen and not spec.causal_bottom_right
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_paged_page_size_no_kernel_serves_is_refused(arch):
+    # Page size 8: below dense's minimum and outside unified's block sizes.
+    with pytest.raises(ValueError):
+        dispatch_attention(_request(arch, layout="paged", kv_block_size=8))

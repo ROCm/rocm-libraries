@@ -368,6 +368,33 @@ def _resolve_fp8_scale(name: str, kwargs: Mapping[str, Any], label: str) -> floa
     return require_fp8_kv_scale(name, kwargs.get(name), label)
 
 
+def _check_single_sequence_cu_seqlens_q(
+    cu_seqlens_q, seqlen_q: int, kv_device, *, values: bool
+):
+    # Dropped before the runner, so it gets the runner's metadata rules here: a
+    # caller's malformed tensor must not pass silently on one sequence only.
+    from kernels.common._attention_dense_paged import check_paged_metadata
+
+    if _shape(cu_seqlens_q, "cu_seqlens_q") != (2,):
+        raise ValueError(
+            "cu_seqlens_q for one packed paged sequence must have shape (2,), got "
+            f"{_shape(cu_seqlens_q, 'cu_seqlens_q')}"
+        )
+    check_paged_metadata("cu_seqlens_q", cu_seqlens_q, kv_device)
+    if values and [int(v) for v in cu_seqlens_q.tolist()] != [0, seqlen_q]:
+        raise ValueError(
+            f"cu_seqlens_q for one packed paged sequence must be [0, {seqlen_q}], "
+            f"got {cu_seqlens_q.tolist()}"
+        )
+
+
+def _one_sequence_cu_seqlens_q(q):
+    """``cu_seqlens_q`` of one packed sequence ``q`` [total_q, Hq, D], on its device."""
+    import torch
+
+    return torch.tensor([0, int(q.shape[0])], dtype=torch.int32, device=q.device)
+
+
 def bind_dense_attention_torch(
     request, tuning_spec, tensors: Mapping[str, Any], **kwargs
 ) -> TorchBinding:
@@ -377,11 +404,19 @@ def bind_dense_attention_torch(
     An ``emit_lse`` spec also needs ``tensors["lse"]``: a caller-owned FP32
     buffer the kernel fills in place (the runner validates it). An additive-bias
     spec needs ``tensors["attn_bias"]``, the fp32 ``[B|1, Hq|1, Sq|1, Skv]`` bias
-    (the runner derives its strides). For a paged spec,
+    (the runner derives its strides). A paged spec takes
+    ``q``/``out`` packed ``[total_q, Hq, D]`` plus ``cu_seqlens_q`` as the unified
+    binding does (optional for one sequence, which also accepts
+    ``[1, Sq, Hq, D]``; for one sequence on the varlen body it is then built once,
+    at bind time, on the Q device).
     ``unsafe_skip_paged_value_validation=True`` skips the runner's synchronized
-    block-table/kv_lens value checks (graph capture, hot paths), as for the
-    unified binding; the structural checks stay. Only for callers that guarantee
-    ``kv_lens[i] == seqlen_kv`` and in-range block ids: the kernel trusts both.
+    block-table/length value checks (graph capture, hot paths), as for the
+    unified binding; the structural checks stay. Only for
+    callers that meet the runner's value rules (in-range block ids, each
+    sequence's ``kv_len`` equal to its query length, or at least it under
+    bottom-right): the kernel trusts them, and an out-of-range id reads a wrong
+    page (zeros or a wrapped i32 offset; clamped to the last block with
+    ``use_i64_kv_addr``).
     """
     fp8_scales = (
         _DENSE_FP8_SCALE_OPTIONS
@@ -389,6 +424,12 @@ def bind_dense_attention_torch(
         else frozenset()
     )
     _refuse_unknown_keywords("bind_torch()", kwargs, _DENSE_BIND_OPTIONS | fp8_scales)
+    unsafe_skip = kwargs.get("unsafe_skip_paged_value_validation", False)
+    if type(unsafe_skip) is not bool:
+        raise ValueError(
+            "unsafe_skip_paged_value_validation must be a bool, got "
+            f"{type(unsafe_skip).__name__}"
+        )
     run = _dense_runner(str(getattr(request, "arch", "")))
     if tuning_spec.kernel_spec.paged:
         tuning_spec = tuning_spec.with_num_kv_blocks(int(tensors["k"].shape[0]))
@@ -397,16 +438,28 @@ def bind_dense_attention_torch(
         from kernels.common.attention_dense_spec import require_ocp_fp8_kv
 
         require_ocp_fp8_kv((name, tensors[name]) for name in ("k", "v"))
+    q, out = tensors["q"], tensors["out"]
+    packed_single = spec.paged and not spec.varlen and len(_shape(q, "q")) == 3
+    if packed_single:
+        # One packed sequence is the single-sequence kernel's [1, Sq, Hq, D].
+        if _shape(q, "q")[0] != spec.seqlen_q or _shape(out, "out") != _shape(q, "q"):
+            raise ValueError(
+                f"packed paged q/out {_shape(q, 'q')}/{_shape(out, 'out')} must "
+                f"hold seqlen_q={spec.seqlen_q} tokens"
+            )
+        q, out = q.unsqueeze(0), out.unsqueeze(0)
+    # One sequence on the varlen body (keys ending inside a KV tile): its
+    # [1, Sq, Hq, D] form is the packed layout, and its offsets are known here.
+    one_seq_cu_q = None
+    if spec.paged and spec.varlen and spec.batch == 1:
+        if len(_shape(q, "q")) == 4:
+            q, out = q.squeeze(0), out.squeeze(0)
+        if tensors.get("cu_seqlens_q") is None:
+            one_seq_cu_q = _one_sequence_cu_seqlens_q(q)
     scale = kwargs.get("scale")
     if scale is None:
         scale = 1.0 / math.sqrt(int(getattr(request, "hdim_q", spec.head_size)))
     stream = kwargs.get("stream", 0)
-    unsafe_skip = kwargs.get("unsafe_skip_paged_value_validation", False)
-    if type(unsafe_skip) is not bool:
-        raise ValueError(
-            "unsafe_skip_paged_value_validation must be a bool, got "
-            f"{type(unsafe_skip).__name__}"
-        )
     bind_k_scale = bind_v_scale = None
     if getattr(spec, "kv_storage_dtype", None) is not None:
         bind_k_scale = _resolve_fp8_scale("k_scale", kwargs, "fp8 dense")
@@ -416,10 +469,10 @@ def bind_dense_attention_torch(
         _refuse_unknown_keywords("launch()", _kw, _DENSE_LAUNCH_OPTIONS | fp8_scales)
         call = {
             "spec": spec,
-            "q": tensors["q"],
+            "q": q,
             "k": tensors["k"],
             "v": tensors["v"],
-            "out": tensors["out"],
+            "out": out,
             "scale": float(_kw.get("scale", scale)),
             "stream": int(_kw.get("stream", stream)),
             "arch": str(request.arch),
@@ -438,6 +491,17 @@ def bind_dense_attention_torch(
             "lse": _kw.get("lse", tensors.get("lse")),
             "additive_bias": _kw.get("additive_bias", tensors.get("attn_bias")),
         }
+        if optional["cu_seqlens_q"] is None:
+            optional["cu_seqlens_q"] = one_seq_cu_q
+        if packed_single and optional["cu_seqlens_q"] is not None:
+            # Unified-style callers pass cu_seqlens_q also for one sequence; the
+            # single-sequence kernel takes none, so check it and drop it.
+            _check_single_sequence_cu_seqlens_q(
+                optional.pop("cu_seqlens_q"),
+                spec.seqlen_q,
+                tensors["k"].device,
+                values=not unsafe_skip,
+            )
         accepted = _DENSE_OPTIONAL_INPUTS[str(request.arch)]
         for name, value in optional.items():
             if value is None:

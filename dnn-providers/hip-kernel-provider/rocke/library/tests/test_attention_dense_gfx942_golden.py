@@ -14,8 +14,8 @@ fixture is re-blessed.
 
 Covers the acceptance matrix: D64/D128 x bf16/fp16 x default/persistent x GQA, causal
 and full, plus sliding-window (W128/W256, both grids, D64/D128) and sinks (alone and
-combined). Every case is in the gfx942 supported set; varlen and ragged are rejected on
-gfx942, so unlike the gfx950 sibling they are absent here. The opt-in bf16 D128
+combined). Every case is in the gfx942 supported set; contiguous varlen and ragged are
+rejected on gfx942, so unlike the gfx950 sibling they are absent here. The opt-in bf16 D128
 K-double-buffer (``lds_num_buffers=2``) and V-register-prefetch
 (``v_reg_prefetch=True``) knobs are pinned individually and together on supported
 persistent grids (including LSE); no shipped default reaches the new pipeline paths.

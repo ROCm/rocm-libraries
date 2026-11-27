@@ -7,7 +7,7 @@ the specification, the data layout, and the two kernel strategies (2D and 3D
 split-KV) the production dispatcher chooses between. §8 additionally documents the
 **dense prefill kernel** — a compile-time-sized peak-TFLOPS sibling
 (persistent grid-stride + on-chip ragged support) for the contiguous
-`[B, S, H, d]` prefill regime, with a single-sequence paged K/V mode.
+`[B, S, H, d]` prefill regime, with a paged K/V mode (§8.4).
 
 > The harness in this folder benchmarks against AITER's Triton
 > `unified_attention`; the CK DSL kernels mirror that Triton reference 1:1 in
@@ -434,13 +434,17 @@ fed on the long-context, large-cache regime where it wins (§ README).
 
 A paged-KV byte offset is `physical_block · (block_size · num_kv_heads ·
 head_size · dtype_bytes)`. That product overflows a 32-bit hardware buffer
-voffset once the cache exceeds **2 GiB** (~65 K bf16 / ~131 K fp8 blocks) — and
-production caches are far larger (captured traces ~350 K blocks ≈ 11 GiB).
+voffset once the cache reaches about **2 GiB** (~65 K bf16 / ~131 K fp8 blocks) —
+and production caches are far larger (captured traces ~350 K blocks ≈ 11 GiB).
 `_enable_i64_kv_addr` switches the load paths to fold `block · stride` into a
 **64-bit base** (only a small within-block offset stays in the 32-bit field)
-when `num_kv_blocks · block_stride > 2³¹`, so small caches keep the exact fast
-i32 path and only large caches pay the tiny per-block-base cost. Without it,
-large caches silently read garbage (verified `max_abs ≈ 1.4`).
+when `kv_cache_needs_i64_addr` holds: `num_kv_blocks · block_stride` bytes above
+`I32_KV_BUFFER_BYTES` (`kernels/common/_spec_checks.py`, `0x7FFF0000`, just
+under 2 GiB: the i32 path bounds its
+K/V buffer resources at that many `num_records`, and a load past them returns
+zero). Small caches keep the exact fast i32 path and only large caches pay the
+tiny per-block-base cost. Without it, large caches silently read garbage
+(verified `max_abs ≈ 1.4`).
 
 ### 7.3 fp8 KV cache (bf16-Q + fp8-KV)
 
@@ -471,8 +475,12 @@ throughput**. It computes the exact same streaming-softmax core (§2) but bakes
 the shape into the kernel and reshapes the schedule around a 256-row query tile.
 
 - **Compile-time-sized ABI.** `batch / seqlen / heads / head_size / causal /
-  dtype` are constants baked at build time (dense, statically-sized). The only
-  runtime args are the `q/k/v/o` pointers and the `f32` softmax scale $\tau$.
+  dtype` are constants baked at build time (dense, statically-sized). A
+  contiguous persistent kernel's only runtime args are the `q/k/v/o` pointers
+  and the `f32` softmax scale $\tau$; non-persistent kernels also take the shape
+  parameters (prefill README), and paged kernels add `block_tables`, `kv_lens`
+  and the table stride, and take the cache size `num_kv_blocks` at run time
+  wherever they take the shape (§8.4).
   The supported scale range is `DENSE_MIN_SCALE`..`DENSE_MAX_SCALE` in
   `kernels/common/attention_dense_spec.py`: `check_dense_scale` there makes
   `run_attention_dense_torch` raise `ValueError` for a NaN or infinite scale and
@@ -506,6 +514,15 @@ the shape into the kernel and reshapes the schedule around a 256-row query tile.
 mask (~94% of tiles at $S = 8192$); the KV loop is split into a mask-free body
 `[1, diag)` and a masked diagonal tail `[diag, n_upper)`, and the causal row
 limit clamps `n_upper` so fully-future tiles are never visited.
+
+**Bottom-right causal** (`causal_bottom_right`, plain causal on the default grid)
+shifts the diagonal by $S_k - S_q$: key $k$ is visible to query $q$ iff
+$k \le q + S_k - S_q$. The shift moves the mask compare, `n_upper` (ceil), `diag`
+(floor) and the LSE row mask together. With fixed lengths it is baked. With
+`varlen` the spec lengths are only maxima, so each sequence's shift
+$\text{kv\_len}_b - \text{q\_len}_b$ is computed at run time from its own
+lengths (§8.4), and the launcher checks $\text{q\_len}_b \le \text{kv\_len}_b$:
+a negative shift would hide keys the row should see.
 
 **head_size and the DMA loader.** One `async_buffer_load_lds` instruction moves
 64 lanes × 2 bf16 = 128 elements. At **D=128** that is exactly one padded K/V row
@@ -572,8 +589,9 @@ block-id → work-item map:
 - **`hq_minor_swz`** — Swizzled Head-first (arXiv 2511.02132): grid
   `(M·⌈S_q/256⌉, H_q/M, B)`, $M$ = `chiplet_num_xcds`, so each XCD owns a
   contiguous band of query heads; longest-first under causal masking.
-- **`auto`** (default) — `hq_minor_swz` for large causal MHA, `bt_hkv_minor`
-  for other aligned causal attention, else `qb_minor`.
+- **`auto`** (default) — `hq_minor_swz` for large causal MHA and for packed
+  paged sequences (§8.4), `bt_hkv_minor` for other aligned causal attention, else
+  `qb_minor`.
 
 Both grids balance causal work (longest-first, fold, pair fold) only without a
 sliding window shorter than the keys: such a window gives every query block
@@ -634,6 +652,59 @@ window (the validator rejects those). The aligned path is emitted
 **byte-identically** when `ragged=False`, so ragged support costs the aligned
 schedule nothing; the ragged kernel itself runs at **~890 TFLOPS** (≈94% of the
 948 aligned headline), the delta being the bounds-checked load + guarded store.
+
+### 8.4 Paged K/V
+
+`paged=True` reads K and V from the serving page cache through `block_tables`
+(the layout of the unified kernels, §0) instead of a contiguous `[B, S, H_k, d]`
+buffer. A wave's rows of one KV tile stay inside one page, so each wave looks up
+its page once per tile and the §8.1 schedule is otherwise unchanged. Every lookup
+is bounded by the sequence's live page count $⌈\text{kv\_len}/b⌉$: a lookup past
+it reads block 0, never an unused table column. The cache size (`num_kv_blocks`)
+is a kernel argument wherever the shape is (baked only with it, as on the
+single-sequence ragged body), and one buffer resource with i32 byte offsets
+covers the whole cache (§7.2 for caches past that range).
+
+- **One sequence** (`varlen=False`, $B = 1$): Q/O stay `[1, S_q, H_q, d]` and
+  `kv_lens[0]` must be $S_k$. Keys must fill whole KV tiles: the padded keys of a
+  partial tile would come from stale page rows (or block 0), not the zeros the
+  contiguous buffer bound gives. A partial query tile takes the §8.3 ragged path.
+- **Packed sequences** (`varlen=True`, any $B$): Q/O are packed
+  `[total_q, H_q, d]` with `cu_seqlens_q`; each sequence's KV length is
+  `kv_lens[b]` (no `cu_seqlens_kv`). Top-left takes any pair of lengths: each
+  sequence's diagonal starts at its first key; under a window $W$ a row at or
+  past $\text{kv\_len}_b + W - 1$, and at $\text{kv\_len}_b = 0$ every row,
+  sees no key and stores zeros. Bottom-right allows $\text{q\_len}_b \le
+  \text{kv\_len}_b$ (prefix caching, chunked prefill) and shifts each sequence's
+  diagonal (§8.1). The spec's
+  $S_q$/$S_k$ are the maxima and size the grid; query blocks past a sequence's end
+  exit at once. Each sequence's tails are bounded in the kernel:
+  - Q rows past the sequence load through a buffer resource bounded by the
+    packed total (they read the next sequence's queries or zeros) and their
+    stores are guarded off.
+  - The last KV tile is visited ($⌈\text{kv\_len}/\text{block\_n}⌉$ tiles). Under
+    bottom-right its keys past `kv_len` lie above every live row's diagonal (row
+    $q$ sees keys up to $q + \text{kv\_len} - \text{q\_len} < \text{kv\_len}$), so
+    the causal select drops their scores. Top-left rows past `kv_len` would reach
+    them, so there the causal bound is clamped to $\text{kv\_len} - 1$ and that
+    tile is kept out of the mask-free loop phases; K needs no other mask.
+  - V rows past `kv_len` are not covered by that mask: $P = 0$ times a NaN in a
+    stale page row is still NaN. Their DMA offset is pushed past the buffer bound,
+    so the copy writes zeros into LDS.
+
+  Dispatch also sends one sequence here when the one-sequence form cannot bound
+  it: keys ending inside a KV tile, or a partial query tile with a sliding window
+  (the ragged path takes no window). Packed sequences take `hq_minor_swz`
+  (`qb_minor` when the query heads do not split evenly over the XCDs): with the
+  sequence as the fastest grid digit, each sequence would run on one XCD.
+
+That holds up to the i32 K/V buffer range that dense and unified share
+(`kv_cache_needs_i64_addr`). Past it, `use_i64_kv_addr` (dispatch sets it at
+binding from the cache size) moves the page into a 64-bit base, as §7.2 does
+for the unified kernels: each wave builds one resource per K/V tile over its
+page, and only the in-page offset stays 32-bit. The page id is clamped to the
+last block first, because an unchecked id in a 64-bit base is an arbitrary
+address: a corrupt table reads a real page instead of faulting.
 
 ---
 

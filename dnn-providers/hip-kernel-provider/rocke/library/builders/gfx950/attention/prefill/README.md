@@ -42,6 +42,15 @@ CTA count is a formula of the shape) — keep per-shape identity. Baked grid ker
 still take batch and both seqlens as parameters; that ABI does not make a baked
 diagonal safe to reuse for a different sequence-length difference.
 
+Paged K/V (single sequence) reads the cache through one buffer resource over the
+whole cache with i32 offsets. A cache past the i32 K/V buffer range (the unified
+kernels' threshold, `kv_cache_needs_i64_addr`) needs `use_i64_kv_addr`; the spec
+refuses it otherwise, and dispatch sets it at binding from the cache size. Each
+wave then builds one resource per K/V tile over its page, shared by its row copies,
+with a 64-bit page base. The page id is clamped to the last block, since an
+unchecked id in a 64-bit base is an arbitrary address: a corrupt block table reads
+a real page instead of faulting.
+
 Tile/resource knobs are `block_n`, `waves_per_eu`, and `lds_k_group_pad`;
 persistent scheduling knobs are `num_persistent`, `interleave`, and `wide_lds_dma`;
 block-order knobs are `persist_decode`, `nonpersist_decode`, and
@@ -394,8 +403,11 @@ routes it to the unified kernels.
 Per-sequence alignment: for the paged unified kernels `seqlen_q` / `seqlen_k` are
 the batch maxima and the diagonal is derived per sequence at runtime, so on gfx950
 `TOP_LEFT_CAUSAL` (or the top-left alignment of the band fields) selects the `_tl`
-body even when the two maxima are equal; it is never folded into bottom-right. Only
-dense, which takes uniform lengths, folds the alignments at equal length. On arches
+body even when the two maxima are equal; it is never folded into bottom-right. Dense
+folds the alignments at equal length only for one sequence; for several packed
+sequences it keeps the requested alignment of plain causal and places each diagonal
+at run time, as the paged unified kernels do (a bottom-right window or lookahead is
+refused there). On arches
 without a top-left kernel (gfx942 / gfx1250) the legacy equal-length shortcut remains
 and serves top-left with the bottom-right body, which is correct only when every
 sequence has `q_len == kv_len`.

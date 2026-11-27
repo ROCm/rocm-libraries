@@ -45,6 +45,59 @@ class TestDensePagedLaunch(unittest.TestCase):
                     self.assertIn(req, names)
                 self.assertIsNotNone(build_attention_dense(spec, arch=arch))
 
+    def test_one_binary_serves_every_cache_size_batch_and_head_count(self):
+        """Paged is runtime-shape: specs that differ only in the cache size, the
+        batch, the lengths or the head counts share one name, one cache key and one
+        IR, and differ only in their kernarg values."""
+        from dataclasses import replace
+
+        from kernels.common.attention_dense_spec import attention_dense_cache_key
+        from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+        for arch in ("gfx942", "gfx950"):
+            ad = importlib.import_module(f"kernels.{arch}.attention_dense")
+            base = dense_arch_spec_class(ad)(
+                batch=2,
+                seqlen_q=1024,
+                seqlen_kv=1024,
+                num_query_heads=16,
+                num_kv_heads=8,
+                head_size=128,
+                causal=True,
+                dtype="bf16",
+                varlen=True,
+                paged=True,
+                block_size=16,
+                num_kv_blocks=256,
+            )
+            for variant in (
+                dict(num_kv_blocks=4096),
+                dict(batch=5, seqlen_q=640, seqlen_kv=640),
+                dict(num_query_heads=32, num_kv_heads=4),
+            ):
+                with self.subTest(arch=arch, variant=variant):
+                    other = replace(base, **variant)
+                    self.assertTrue(other.runtime_shape)
+                    self.assertEqual(other.kernel_name(), base.kernel_name())
+                    self.assertEqual(
+                        attention_dense_cache_key(other, arch=arch),
+                        attention_dense_cache_key(base, arch=arch),
+                    )
+                    irs = {
+                        _lower_kernel_to_llvm_python(
+                            ad.build_attention_dense(s, arch=arch),
+                            arch=arch,
+                            llvm_flavor="llvm22",
+                        )
+                        for s in (base, other)
+                    }
+                    self.assertEqual(len(irs), 1)
+                    args = ad.attention_dense_runtime_args(other)
+                    self.assertEqual(
+                        {f: args[f] for f in variant},
+                        variant,
+                    )
+
     def test_dense_paged_launcher_rejects_kv_cache_shape_mismatch(self):
         """The launcher must reject a paged K/V cache whose shape disagrees with
         the spec that sizes the buffer-resource bound
@@ -147,6 +200,61 @@ class TestDensePagedLaunch(unittest.TestCase):
                             kv_lens=kv_lens,
                             validate_paged=False,
                         )
+                    self.assertIs(ok_ctx.exception, sentinel)
+
+    def test_dense_paged_launcher_takes_sinks(self):
+        """A paged spec with sinks passes the launcher's host checks with a sink
+        tensor and reaches compile; without one it is refused."""
+        from types import SimpleNamespace
+        from unittest import mock
+
+        for arch in ("gfx942", "gfx950"):
+            ad = importlib.import_module(f"kernels.{arch}.attention_dense")
+            spec = dense_arch_spec_class(ad)(
+                batch=1,
+                seqlen_q=1024,
+                seqlen_kv=1024,
+                num_query_heads=32,
+                num_kv_heads=8,
+                head_size=128,
+                causal=True,
+                dtype="fp16",
+                sliding_window=256,
+                block_n=64,
+                paged=True,
+                block_size=16,
+                num_kv_blocks=64,
+                use_sinks=True,
+            )
+            qshape = (1, spec.seqlen_q, spec.num_query_heads, spec.head_size)
+            cache = (spec.num_kv_blocks, spec.block_size, spec.num_kv_heads, 128)
+            q = SimpleNamespace(shape=qshape, dtype="f16")
+            sinks = SimpleNamespace(
+                shape=(spec.num_query_heads,),
+                dtype="f16",
+                is_contiguous=lambda: True,
+                is_cuda=True,
+            )
+            kw = dict(
+                spec=spec,
+                q=q,
+                k=CacheStandIn(shape=cache),
+                v=CacheStandIn(shape=cache),
+                out=SimpleNamespace(shape=qshape, dtype="f16"),
+                scale=1.0,
+                block_tables=I32DeviceTensor([list(range(64))]),
+                kv_lens=I32DeviceTensor([spec.seqlen_kv]),
+                validate_paged=False,
+            )
+            with self.subTest(arch=arch):
+                with self.assertRaisesRegex(ValueError, "requires sinks"):
+                    ad.run_attention_dense_torch(**kw)
+                sentinel = RuntimeError("reached-compile")
+                with mock.patch.dict(ad._DENSE_LAUNCHER_CACHE, clear=True), mock.patch(
+                    "rocke.helpers.compile.compile_kernel", side_effect=sentinel
+                ):
+                    with self.assertRaises(RuntimeError) as ok_ctx:
+                        ad.run_attention_dense_torch(sinks=sinks, **kw)
                     self.assertIs(ok_ctx.exception, sentinel)
 
     def test_dense_paged_launcher_rejects_malformed_block_metadata(self):

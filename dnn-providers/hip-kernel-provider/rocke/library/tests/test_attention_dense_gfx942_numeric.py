@@ -34,13 +34,29 @@ from kernels.gfx942.attention_dense import (
     run_attention_dense_torch,
     supports_attention_dense,
 )
+from ._dense_paged_varlen_inputs import (
+    PAGED_VARLEN_EDGES,
+    PAGED_VARLEN_RAGGED,
+    PAGED_VARLEN_TOP_LEFT_CROSS,
+    check_bad_block_id_reads_the_last_block,
+    check_i64_matches_i32,
+    check_one_kernel_serves_two_caches,
+    check_paged_varlen,
+    check_top_left_cross_length,
+    check_whole_tile_sequences,
+    paged_varlen_lengths,
+)
 
 from _gpu_gate import requires_gpu
 
 
 torch = pytest.importorskip("torch", reason="ROCm torch required")
 
-from ._dense_paged_gpu import paged_cache, run_dispatched_paged  # noqa: E402
+from ._dense_paged_gpu import (  # noqa: E402
+    check_one_single_sequence_kernel_serves_two_caches,
+    paged_cache,
+    run_dispatched_paged,
+)
 
 
 requires_gfx942_gpu = requires_gpu("gfx942")
@@ -1512,12 +1528,12 @@ def _tolerance(dtype):
     return 2e-2 if dtype == "fp16" else 4e-2
 
 
-def _lse_reference(q, k, v, scale, *, causal, window=0, sinks=None):
+def _lse_reference(q, k, v, scale, *, causal, diagonal=0, window=0, sinks=None):
     """Independent FP32 O and natural-log LSE, including truly empty rows.
 
     Scores use FP32 Q/K with the softmax scale applied in FP32. ``sinks`` adds one
     logit per query head with no value row, so a row with no key has the sink as
-    its LSE.
+    its LSE. ``diagonal`` shifts the causal diagonal (bottom-right: kv_len - q_len).
     """
     batch, sq, hq = q.shape[:3]
     skv, hkv = k.shape[1:3]
@@ -1525,7 +1541,7 @@ def _lse_reference(q, k, v, scale, *, causal, window=0, sinks=None):
     kh = k.transpose(1, 2).float().repeat_interleave(hq // hkv, dim=1)
     vh = v.transpose(1, 2).float().repeat_interleave(hq // hkv, dim=1)
     scores = torch.matmul(qh, kh.transpose(-1, -2)) * scale
-    qi = torch.arange(sq, device=q.device).view(-1, 1)
+    qi = torch.arange(sq, device=q.device).view(-1, 1) + diagonal
     ki = torch.arange(skv, device=q.device).view(1, -1)
     allowed = torch.ones((sq, skv), device=q.device, dtype=torch.bool)
     if causal:
@@ -2250,6 +2266,16 @@ class TestDensePagedNumeric:
 
     @requires_gfx942_gpu
     @pytest.mark.gpu
+    def test_one_kernel_serves_two_cache_sizes(self):
+        def reference(q, k, v, scale):
+            return _lse_reference(q, k, v, scale, causal=True)[0]
+
+        check_one_single_sequence_kernel_serves_two_caches(
+            _spec, run_attention_dense_torch, reference, _tolerance, _launcher_for
+        )
+
+    @requires_gfx942_gpu
+    @pytest.mark.gpu
     @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
     @pytest.mark.parametrize("block_size", [16, 32, 64])
     @pytest.mark.parametrize("sq,window", [(1024, 256), (2048, 1024), (1024, 0)])
@@ -2261,10 +2287,29 @@ class TestDensePagedNumeric:
         The pages land at randomly permuted physical ids in a cache twice the
         needed size, and every unused page is NaN, so a wrong page or in-page row
         reads a NaN page or the wrong keys rather than a near miss. block_size
-        16/32/64 covers 4, 2 and 1 pages per 64-key tile. Paged V never takes the
-        cfvst path, so the dense run turns it off too, for identical arithmetic.
+        16/32/64 covers 4, 2 and 1 pages per 64-key tile. The dense run takes the
+        paged spec's V path (cfvst at D128), for identical arithmetic.
         """
         self._check_paged(dtype, block_size, sq, sq, window, d)
+
+    @requires_gfx942_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+    @pytest.mark.parametrize("block_size", [16, 64])
+    @pytest.mark.parametrize("sq,window", [(1024, 256), (2048, 0)])
+    @pytest.mark.parametrize("d", [128, 64])
+    def test_paged_persistent_matches_dense_bit_exact(
+        self, dtype, block_size, sq, window, d
+    ):
+        """Paged on the persistent body: the same bits as contiguous K/V there."""
+        self._check_paged(dtype, block_size, sq, sq, window, d, persistent=True)
+
+    @requires_gfx942_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+    def test_paged_dma_v_matches_dense_bit_exact(self, dtype):
+        """D128 with cfvst off: V takes the async DMA copy and its page lookup."""
+        self._check_paged(dtype, 16, 1024, 1024, 256, 128, use_cfvst=False)
 
     @requires_gfx942_gpu
     @pytest.mark.gpu
@@ -2287,7 +2332,7 @@ class TestDensePagedNumeric:
         """Request -> dispatch -> bind -> launch, with the block count taken from the
         cache at bind."""
         window = 1024
-        q, k, v, out = run_dispatched_paged("gfx942", "gfx942_dense", window=window)
+        _, q, k, v, out = run_dispatched_paged("gfx942", "gfx942_dense", window=window)
         assert torch.isfinite(out).all()
         scale = 1.0 / math.sqrt(q.shape[-1])
         sq = q.shape[1]
@@ -2297,8 +2342,52 @@ class TestDensePagedNumeric:
         ref = _sdpa_reference(q, k, v, scale, attn_mask=keep)
         assert (out.float() - ref).abs().max().item() < _tolerance("fp16")
 
+    @requires_gfx942_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+    @pytest.mark.parametrize("persistent", [False, True], ids=["grid", "persist"])
+    @pytest.mark.parametrize("emit_lse", [False, True], ids=["out", "lse"])
+    @pytest.mark.parametrize(
+        "sq,sk,window,d",
+        [
+            pytest.param(1024, 1024, 256, 128, id="swa-d128"),
+            pytest.param(2048, 2048, 0, 64, id="causal-d64"),
+            pytest.param(1024, 512, 128, 128, id="swa-empty-rows-1024x512"),
+        ],
+    )
+    def test_paged_sinks_matches_dense_bit_exact(
+        self, dtype, persistent, emit_lse, sq, sk, window, d
+    ):
+        """Sinks with paged K/V: the same O (and LSE) bits as contiguous K/V with
+        sinks, and the sink reference; rows whose window holds no key give O = 0
+        and LSE = the sink logit."""
+        if persistent and sq != sk:
+            pytest.skip("the persistent body takes whole query tiles of one length")
+        self._check_paged(
+            dtype,
+            16,
+            sq,
+            sk,
+            window,
+            d,
+            persistent=persistent,
+            sinks=True,
+            emit_lse=emit_lse,
+        )
+
     @staticmethod
-    def _check_paged(dtype, block_size, sq, sk, window, d):
+    def _check_paged(
+        dtype,
+        block_size,
+        sq,
+        sk,
+        window,
+        d,
+        use_cfvst=None,
+        persistent=False,
+        sinks=False,
+        emit_lse=False,
+    ):
         hq, hkv, B = 16, 4, 1
         tdt = getattr(torch, _TORCH_DT[dtype])
         scale = 1.0 / math.sqrt(d)
@@ -2324,31 +2413,78 @@ class TestDensePagedNumeric:
             sliding_window=window,
             kv_block_size=block_size,
         )
-        paged_spec = dataclasses.replace(shipped, num_kv_blocks=num_kv_blocks)
+        paged_spec = dataclasses.replace(
+            shipped, num_kv_blocks=num_kv_blocks, use_cfvst=use_cfvst
+        )
         dense_spec = dataclasses.replace(
-            shipped, paged=False, block_size=0, num_kv_blocks=0, use_cfvst=False
+            paged_spec,
+            paged=False,
+            block_size=0,
+            num_kv_blocks=0,
+            use_cfvst=paged_spec.resolved_use_cfvst(),
         )
+        if persistent:
+            # Paged on the persistent body against contiguous on the same body.
+            paged_spec = dataclasses.replace(paged_spec, persistent=True)
+            dense_spec = dataclasses.replace(dense_spec, persistent=True)
+        assert sinks or not emit_lse, "the LSE checks below run with sinks only"
+        knobs = dict(use_sinks=sinks, emit_lse=emit_lse)
+        paged_spec = dataclasses.replace(paged_spec, **knobs)
+        dense_spec = dataclasses.replace(dense_spec, **knobs)
+        # Large enough that a dropped sink moves every row.
+        sink = (2.0 * torch.randn(hq, device="cuda")).to(tdt) if sinks else None
 
-        dense_out = torch.empty_like(q)
-        run_attention_dense_torch(
-            spec=dense_spec, q=q, k=k, v=v, out=dense_out, scale=scale
-        )
-        paged_out = torch.empty_like(q)
-        run_attention_dense_torch(
-            spec=paged_spec,
-            q=q,
-            k=k_cache,
-            v=v_cache,
-            out=paged_out,
-            scale=scale,
-            block_tables=block_tables,
-            kv_lens=kv_lens,
+        def launch(spec, k, v, **paged_kw):
+            out = torch.empty_like(q)
+            lse = None
+            if emit_lse:
+                lse = torch.full(
+                    (B, hq, sq, 1), float("nan"), device="cuda", dtype=torch.float32
+                )
+            run_attention_dense_torch(
+                spec=spec,
+                q=q,
+                k=k,
+                v=v,
+                out=out,
+                scale=scale,
+                sinks=sink,
+                lse=lse,
+                **paged_kw,
+            )
+            return out, lse
+
+        dense_out, dense_lse = launch(dense_spec, k, v)
+        paged_out, paged_lse = launch(
+            paged_spec, k_cache, v_cache, block_tables=block_tables, kv_lens=kv_lens
         )
         torch.cuda.synchronize()
 
-        name = f"{dtype} D{d} pgd{block_size} sq{sq} sk{sk} swa{window}"
+        name = (
+            f"{dtype} D{d} pgd{block_size} sq{sq} sk{sk} swa{window} {persistent=} "
+            f"{use_cfvst=} {sinks=} {emit_lse=}"
+        )
         assert torch.isfinite(paged_out).all(), f"{name}: read a NaN (unused) page"
         assert torch.equal(paged_out, dense_out), f"{name}: paged != dense bits"
+        if sinks:
+            # Every row has the sink's mass, so the reference is defined everywhere:
+            # a row with no key is O = 0 and LSE = the sink logit.
+            ref, ref_lse = _lse_reference(
+                q, k, v, scale, causal=True, window=window, sinks=sink
+            )
+            max_abs = (ref - paged_out.float()).abs().max().item()
+            assert max_abs < _tolerance(dtype), f"{name}: max_abs={max_abs:.3e}"
+            qi = torch.arange(sq, device="cuda").view(-1, 1)
+            ki = torch.arange(sk, device="cuda").view(1, -1)
+            keyless = ~((ki <= qi) & ((ki > qi - window) if window else True)).any(1)
+            if keyless.any():
+                worst = paged_out.float()[:, keyless].abs().max().item()
+                assert worst == 0.0, f"{name}: keyless rows: {worst}"
+            if emit_lse:
+                assert torch.equal(paged_lse, dense_lse), f"{name}: LSE bits differ"
+                lse_gap = (ref_lse - paged_lse).abs().max().item()
+                assert lse_gap < 1e-2, f"{name}: LSE max_abs={lse_gap:.3e}"
+            return
         qi = torch.arange(sq, device="cuda").view(-1, 1)
         ki = torch.arange(sk, device="cuda").view(1, -1)
         keep = ki <= qi  # top-left diagonal
@@ -2553,6 +2689,534 @@ def test_cfvst_kdb_vpf_pipeline_reuses_runtime_shape_binary():
         _DENSE_LAUNCHER_CACHE.pop(keys[0], None)
         if old_entry is not None:
             _DENSE_LAUNCHER_CACHE[keys[0]] = old_entry
+
+
+def _paged_varlen_spec(lens, block_size, d, dtype, num_kv_blocks, window=0):
+    """The shipped spec of a paged request for ``lens`` (dispatch picks varlen for
+    several sequences or a partial last KV tile), on a cache of ``num_kv_blocks``."""
+    from dispatch.attention import AttentionRequest, tuning_spec_with_knobs
+
+    longest = max(lens)
+    spec = tuning_spec_with_knobs(
+        AttentionRequest(
+            batch=len(lens),
+            nhead_q=16,
+            nhead_k=4,
+            seqlen_q=longest,
+            seqlen_k=longest,
+            hdim_q=d,
+            hdim_v=d,
+            arch="gfx942",
+            mask_type=1,
+            dtype=dtype,
+            sliding_window=window,
+            layout="paged",
+            kv_block_size=block_size,
+        ),
+        "gfx942_dense",
+        {},
+    ).kernel_spec
+    return dataclasses.replace(spec, num_kv_blocks=num_kv_blocks)
+
+
+class TestDensePagedVarlenNumeric:
+    """Packed sequences (``cu_seqlens_q``) over a paged K/V cache with per-sequence
+    ``kv_lens``: Q and KV tails inside a sequence, empty sequences."""
+
+    @requires_gfx942_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("lengths", ["edges", "single", "random3"])
+    @pytest.mark.parametrize("block_size", [16, 32, 64])
+    @pytest.mark.parametrize("d", [128, 64])
+    def test_paged_varlen_matches_reference(self, lengths, block_size, d):
+        self._check(paged_varlen_lengths(lengths), block_size, d, "fp16", 0)
+
+    @requires_gfx942_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize(
+        "dtype,window,d",
+        [("fp16", 256, 128), ("fp16", 256, 64), ("bf16", 0, 128), ("bf16", 256, 64)],
+    )
+    def test_paged_varlen_window_and_bf16(self, dtype, window, d):
+        self._check(list(PAGED_VARLEN_EDGES), 16, d, dtype, window)
+
+    @requires_gfx942_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("dtype,window,d", [("fp16", 256, 128), ("bf16", 0, 64)])
+    def test_paged_varlen_sinks_matches_reference(self, dtype, window, d):
+        def reference(q, k, v, scale, window, sinks):
+            return _lse_reference(
+                q, k, v, scale, causal=True, window=window, sinks=sinks
+            )[0]
+
+        check_paged_varlen(
+            run_attention_dense_torch,
+            _paged_varlen_spec,
+            reference,
+            _tolerance,
+            list(PAGED_VARLEN_EDGES),
+            16,
+            d,
+            dtype,
+            window,
+            sinks=True,
+        )
+
+    @requires_gfx942_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("case", list(PAGED_VARLEN_TOP_LEFT_CROSS))
+    @pytest.mark.parametrize(
+        "dtype,window,d,sinks",
+        [
+            ("fp16", 0, 128, False),
+            ("bf16", 128, 64, False),
+            ("fp16", 256, 128, False),
+            ("fp16", 128, 128, True),
+        ],
+    )
+    def test_paged_varlen_top_left_cross_length(self, case, dtype, window, d, sinks):
+        """Top-left starts each sequence's diagonal at its first key whatever its
+        lengths; rows without keys output zeros (SEM-010)."""
+
+        def reference(q, k, v, scale, window, **kw):
+            return _lse_reference(q, k, v, scale, causal=True, window=window, **kw)[0]
+
+        check_top_left_cross_length(
+            run_attention_dense_torch,
+            _paged_varlen_spec,
+            reference,
+            _tolerance,
+            case,
+            16,
+            d,
+            dtype,
+            window,
+            sinks,
+        )
+
+    @staticmethod
+    def _check(lens, block_size, d, dtype, window):
+        def reference(q, k, v, scale, window):
+            qi = torch.arange(q.shape[1], device="cuda").view(-1, 1)
+            ki = torch.arange(k.shape[1], device="cuda").view(1, -1)
+            keep = ki <= qi
+            if window:
+                keep &= ki > qi - window
+            return _sdpa_reference(q, k, v, scale, attn_mask=keep)
+
+        check_paged_varlen(
+            run_attention_dense_torch,
+            _paged_varlen_spec,
+            reference,
+            _tolerance,
+            lens,
+            block_size,
+            d,
+            dtype,
+            window,
+        )
+
+    @requires_gfx942_gpu
+    @pytest.mark.gpu
+    def test_one_kernel_serves_two_cache_sizes_and_batches(self):
+        from kernels.common.attention_dense_spec import attention_dense_cache_key
+        from kernels.gfx942.attention_dense import _DENSE_LAUNCHER_CACHE
+
+        def reference(q, k, v, scale, window):
+            qi = torch.arange(q.shape[1], device="cuda").view(-1, 1)
+            ki = torch.arange(k.shape[1], device="cuda").view(1, -1)
+            return _sdpa_reference(q, k, v, scale, attn_mask=ki <= qi)
+
+        check_one_kernel_serves_two_caches(
+            run_attention_dense_torch,
+            _paged_varlen_spec,
+            reference,
+            _tolerance,
+            _DENSE_LAUNCHER_CACHE,
+            lambda spec: attention_dense_cache_key(spec, arch="gfx942"),
+        )
+
+    @requires_gfx942_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("d", [128, 64])
+    def test_whole_tile_sequences_match_the_single_sequence_kernel(self, d):
+        """Sequences of whole KV tiles take the same path as the single-sequence
+        paged kernel, so each must give the same bits. Whole query tiles too: the
+        gfx942 single-sequence kernel has no ragged Q path."""
+        block_size = 16
+
+        def single_spec(n, num_kv_blocks):
+            spec = _paged_varlen_spec([n], block_size, d, "fp16", num_kv_blocks)
+            assert not spec.varlen
+            return spec
+
+        check_whole_tile_sequences(
+            run_attention_dense_torch,
+            _paged_varlen_spec,
+            single_spec,
+            [256, 768, 512],
+            block_size,
+            d,
+        )
+
+
+class TestDensePagedVarlenBottomRightNumeric:
+    """Paged varlen + ``causal_bottom_right``: each sequence's diagonal is shifted
+    by its own ``kv_len - q_len`` at run time (reference ``ki <= qi + kv_len -
+    q_len``)."""
+
+    # A mid-tile shift first, shift 0 on a sequence spanning several query blocks,
+    # an empty query over cached keys, a large shift on a 17-row query, a whole-tile
+    # shift, and a mid-tile shift on several query blocks with a partial last one.
+    _Q_LENS = [100, 300, 0, 17, 65, 300]
+    _KV_LENS = [491, 300, 50, 1017, 129, 777]
+
+    @classmethod
+    def _make_spec(cls, diag_split=True):
+        """The shipped spec of a bottom-right paged request (dispatch turns on
+        ``causal_diag_split``); ``diag_split=False`` takes the all-masked loop."""
+        from dispatch.attention import AttentionRequest, tuning_spec_with_knobs
+
+        def make_spec(lens, block_size, d, dtype, num_kv_blocks, window=0):
+            spec = tuning_spec_with_knobs(
+                AttentionRequest(
+                    batch=len(lens),
+                    nhead_q=16,
+                    nhead_k=4,
+                    seqlen_q=max(cls._Q_LENS),
+                    seqlen_k=max(lens),
+                    hdim_q=d,
+                    hdim_v=d,
+                    arch="gfx942",
+                    mask_type=2,
+                    dtype=dtype,
+                    sliding_window=window,
+                    layout="paged",
+                    kv_block_size=block_size,
+                ),
+                "gfx942_dense",
+                {},
+            ).kernel_spec
+            assert spec.varlen and spec.causal_bottom_right and spec.causal_diag_split
+            return dataclasses.replace(
+                spec, num_kv_blocks=num_kv_blocks, causal_diag_split=diag_split
+            )
+
+        return make_spec
+
+    @staticmethod
+    def _reference(q, k, v, scale, window, shift=None):
+        if shift is None:
+            shift = k.shape[1] - q.shape[1]
+        qi = torch.arange(q.shape[1], device="cuda").view(-1, 1)
+        ki = torch.arange(k.shape[1], device="cuda").view(1, -1)
+        return _sdpa_reference(q, k, v, scale, attn_mask=ki <= qi + shift)
+
+    @requires_gfx942_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize(
+        "dtype,d,block_size,diag_split",
+        [
+            ("fp16", 128, 16, True),
+            ("fp16", 64, 64, True),
+            ("bf16", 128, 32, True),
+            ("fp16", 128, 16, False),
+        ],
+    )
+    def test_paged_varlen_matches_per_sequence_reference(
+        self, dtype, d, block_size, diag_split
+    ):
+        """Over the poisoned paged cache: the diagonal start, KV bound and mask of
+        later blocks, dead rows over a partial KV tile. A kernel that applied one
+        shift to every sequence, or none, must not also match."""
+        q_lens, kv_lens = self._Q_LENS, self._KV_LENS
+        q, ks, vs, out, cu, scale = check_paged_varlen(
+            run_attention_dense_torch,
+            self._make_spec(diag_split),
+            self._reference,
+            _tolerance,
+            kv_lens,
+            block_size,
+            d,
+            dtype,
+            0,
+            q_lens=q_lens,
+        )
+        first_shift = kv_lens[0] - q_lens[0]
+        for b, (q_len, kv_len) in enumerate(zip(q_lens, kv_lens)):
+            if q_len == 0:
+                continue
+            rows = slice(int(cu[b]), int(cu[b + 1]))
+            name = f"{dtype} D{d} pgd{block_size} seq{b} {q_len}x{kv_len}"
+            for control, shift in (("top-left", 0), ("first-sequence", first_shift)):
+                if shift == kv_len - q_len:
+                    continue
+                ref = self._reference(
+                    q[None, rows], ks[b][None], vs[b][None], scale, 0, shift
+                )
+                gap = (ref[0] - out[rows].float()).abs().max().item()
+                assert gap > 0.1, f"{name}: output also matches the {control} shift"
+
+    @requires_gfx942_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("dtype,d", [("fp16", 128), ("bf16", 64)])
+    def test_paged_varlen_sinks_matches_per_sequence_reference(self, dtype, d):
+        """Sinks with the per-sequence shift: each row's softmax also holds the sink."""
+
+        def reference(q, k, v, scale, window, sinks):
+            shift = k.shape[1] - q.shape[1]
+            return _lse_reference(
+                q, k, v, scale, causal=True, diagonal=shift, sinks=sinks
+            )[0]
+
+        check_paged_varlen(
+            run_attention_dense_torch,
+            self._make_spec(),
+            reference,
+            _tolerance,
+            self._KV_LENS,
+            16,
+            d,
+            dtype,
+            0,
+            q_lens=self._Q_LENS,
+            sinks=True,
+        )
+
+    @requires_gfx942_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("dtype,d", [("fp16", 128), ("bf16", 64)])
+    def test_paged_varlen_forced_i64_matches_i32_bit_exact(self, dtype, d):
+        """The per-sequence shift with i64 page bases reads the same pages as with
+        i32 ones."""
+        check_i64_matches_i32(
+            run_attention_dense_torch,
+            self._make_spec(),
+            self._KV_LENS,
+            16,
+            d,
+            dtype,
+            0,
+            q_lens=self._Q_LENS,
+        )
+
+
+class TestDensePagedI64Numeric:
+    """Paged K/V with ``use_i64_kv_addr``: per-page buffer resources with a 64-bit
+    page base, on small caches (forced) and on caches past the i32 range."""
+
+    _HQ, _HKV, _D, _BS = 16, 4, 128, 16
+    _PAGE_BYTES = _BS * _HKV * _D * 2
+
+    @requires_gfx942_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("block_size", [16, 64])
+    @pytest.mark.parametrize("window", [256, 0])
+    @pytest.mark.parametrize("d", [128, 64])
+    @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+    def test_forced_i64_matches_i32_bit_exact(self, dtype, block_size, window, d):
+        """The same small permuted cache (unused pages NaN) through the i64 and
+        the i32 form: an in-page offset or page base off by anything reads a NaN
+        page or wrong keys, so the bits differ."""
+        self._check_forced_i64(dtype, block_size, window, d)
+
+    @requires_gfx942_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("d", [128, 64])
+    @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+    def test_forced_i64_persistent_matches_i32_bit_exact(self, dtype, d):
+        """The same check on the persistent body, whose page lookup is its own."""
+        self._check_forced_i64(dtype, 16, 256, d, persistent=True)
+
+    def _check_forced_i64(self, dtype, block_size, window, d, persistent=False):
+        sq, hq, hkv = 1024, self._HQ, self._HKV
+        tdt = getattr(torch, _TORCH_DT[dtype])
+        torch.manual_seed(0)
+        q = torch.randn(1, sq, hq, d, device="cuda", dtype=tdt)
+        npages = sq // block_size
+        num_kv_blocks = 2 * npages
+        phys = torch.randperm(num_kv_blocks, device="cuda")[:npages]
+        k_cache = torch.full(
+            (num_kv_blocks, block_size, hkv, d), float("nan"), device="cuda", dtype=tdt
+        )
+        v_cache = torch.full_like(k_cache, float("nan"))
+        k_cache[phys] = torch.randn(
+            npages, block_size, hkv, d, device="cuda", dtype=tdt
+        )
+        v_cache[phys] = torch.randn(
+            npages, block_size, hkv, d, device="cuda", dtype=tdt
+        )
+        block_tables = phys.to(torch.int32).view(1, npages).contiguous()
+
+        spec = dataclasses.replace(
+            _spec(
+                dtype,
+                d,
+                hq,
+                hkv,
+                False,
+                sq=sq,
+                sliding_window=window,
+                kv_block_size=block_size,
+            ),
+            num_kv_blocks=num_kv_blocks,
+            persistent=persistent,
+        )
+        outs = [
+            self._run_paged(
+                dataclasses.replace(spec, use_i64_kv_addr=i64),
+                q,
+                k_cache,
+                v_cache,
+                block_tables,
+            )
+            for i64 in (False, True)
+        ]
+        assert torch.isfinite(outs[1]).all(), "i64 read a NaN (unused) page"
+        assert torch.equal(outs[0], outs[1]), "i64 != i32 bits"
+
+    @requires_gfx942_gpu
+    @pytest.mark.gpu
+    def test_reads_the_top_pages_past_the_i32_buffer_range(self):
+        """A cache one page past 0x7FFF0000 bytes with the sequence in its top
+        pages: the last page starts at that offset, which an i32 resource bounded
+        there would read as zeros."""
+        num_kv_blocks = 0x7FFF_0000 // self._PAGE_BYTES + 1
+        self._check_large_cache(num_kv_blocks, first_block=num_kv_blocks - 64)
+
+    @requires_gfx942_gpu
+    @pytest.mark.gpu
+    def test_reads_pages_straddling_2gib(self):
+        """Pages on both sides of 2^31 bytes: a sign-extended or wrapped i32 page
+        offset reads the wrong half."""
+        first_past = 2**31 // self._PAGE_BYTES
+        self._check_large_cache(first_past + 64, first_block=first_past - 32)
+
+    @requires_gfx942_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("bad_id", [64, -1, 0x7FFF_FFFF], ids=["nb", "neg", "max"])
+    def test_out_of_range_block_id_reads_the_last_block(self, bad_id):
+        """With ``validate_paged=False`` a corrupt block id is clamped to the last
+        block (no fault): the output equals that of a table naming it."""
+        sq, hq, hkv, d = 512, self._HQ, self._HKV, self._D
+        num_kv_blocks = 64
+        tdt = torch.float16
+        torch.manual_seed(0)
+        q = torch.randn(1, sq, hq, d, device="cuda", dtype=tdt)
+        k_cache = torch.randn(num_kv_blocks, self._BS, hkv, d, device="cuda", dtype=tdt)
+        v_cache = torch.randn_like(k_cache)
+        npages = sq // self._BS
+        table = torch.arange(npages, dtype=torch.int32, device="cuda").view(1, npages)
+        spec = dataclasses.replace(
+            _spec("fp16", d, hq, hkv, False, sq=sq, kv_block_size=self._BS),
+            num_kv_blocks=num_kv_blocks,
+            use_i64_kv_addr=True,
+        )
+        bad, clamped = table.clone(), table.clone()
+        bad[0, 3] = bad_id
+        clamped[0, 3] = num_kv_blocks - 1
+        out_bad = self._run_paged(spec, q, k_cache, v_cache, bad, validate_paged=False)
+        out_clamped = self._run_paged(spec, q, k_cache, v_cache, clamped)
+        assert torch.equal(out_bad, out_clamped)
+
+    @requires_gfx942_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("window", [256, 0])
+    @pytest.mark.parametrize("d", [128, 64])
+    @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+    def test_paged_varlen_forced_i64_matches_i32_bit_exact(self, dtype, d, window):
+        check_i64_matches_i32(
+            run_attention_dense_torch,
+            _paged_varlen_spec,
+            PAGED_VARLEN_RAGGED,
+            16,
+            d,
+            dtype,
+            window,
+        )
+
+    @requires_gfx942_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize(
+        "bad_id", ["nb", -1, 0x7FFF_FFFF], ids=["nb", "neg", "max"]
+    )
+    def test_paged_varlen_out_of_range_block_id_reads_the_last_block(self, bad_id):
+        """The bad id sits in the sixth page of the last sequence, so the clamp
+        must hold past the first sequence's table row."""
+        check_bad_block_id_reads_the_last_block(
+            run_attention_dense_torch,
+            _paged_varlen_spec,
+            PAGED_VARLEN_RAGGED,
+            seq=3,
+            column=5,
+            bad_id=bad_id,
+        )
+
+    def _check_large_cache(self, num_kv_blocks, first_block):
+        """The sequence's pages at permuted ids in ``[first_block, +npages)`` of a
+        cache of ``num_kv_blocks`` pages; only those pages are written. V holds
+        each page's logical index, so a read of the wrong page shows up in the
+        output rather than averaging out as random V would. Compared bit-exact
+        against the contiguous kernel on the same K/V and V path (cfvst), for
+        identical arithmetic."""
+        sq, hq, hkv, d, bs = 1024, self._HQ, self._HKV, self._D, self._BS
+        npages = sq // bs
+        cache_bytes = num_kv_blocks * self._PAGE_BYTES
+        free, _ = torch.cuda.mem_get_info()
+        if free < 2 * cache_bytes + (1 << 30):
+            pytest.skip(f"needs {2 * cache_bytes + (1 << 30)} B free, have {free}")
+        tdt = torch.float16
+        torch.manual_seed(0)
+        q = torch.randn(1, sq, hq, d, device="cuda", dtype=tdt)
+        k = torch.randn(1, sq, hkv, d, device="cuda", dtype=tdt)
+        page_of_key = torch.arange(sq, device="cuda") // bs
+        v = (page_of_key.to(tdt) / npages).view(1, sq, 1, 1).expand(1, sq, hkv, d)
+        v = v.contiguous()
+
+        phys = first_block + torch.randperm(npages, device="cuda")
+        k_cache = torch.empty((num_kv_blocks, bs, hkv, d), device="cuda", dtype=tdt)
+        v_cache = torch.empty_like(k_cache)
+        k_cache[phys] = k[0].view(npages, bs, hkv, d)
+        v_cache[phys] = v[0].view(npages, bs, hkv, d)
+        block_tables = phys.to(torch.int32).view(1, npages).contiguous()
+
+        shipped = _spec("fp16", d, hq, hkv, False, sq=sq)
+        dense_out = torch.empty_like(q)
+        run_attention_dense_torch(
+            spec=shipped,
+            q=q,
+            k=k,
+            v=v,
+            out=dense_out,
+            scale=1.0 / math.sqrt(d),
+        )
+        spec = dataclasses.replace(
+            shipped,
+            paged=True,
+            block_size=bs,
+            num_kv_blocks=num_kv_blocks,
+            use_i64_kv_addr=True,
+        )
+        paged_out = self._run_paged(spec, q, k_cache, v_cache, block_tables)
+        del k_cache, v_cache
+        assert torch.equal(paged_out, dense_out), "paged i64 != dense bits"
+
+    @staticmethod
+    def _run_paged(spec, q, k_cache, v_cache, block_tables, validate_paged=True):
+        out = torch.empty_like(q)
+        run_attention_dense_torch(
+            spec=spec,
+            q=q,
+            k=k_cache,
+            v=v_cache,
+            out=out,
+            scale=1.0 / math.sqrt(spec.head_size),
+            block_tables=block_tables,
+            kv_lens=torch.tensor([spec.seqlen_kv], device="cuda", dtype=torch.int32),
+            validate_paged=validate_paged,
+        )
+        torch.cuda.synchronize()
+        return out
 
 
 if __name__ == "__main__":

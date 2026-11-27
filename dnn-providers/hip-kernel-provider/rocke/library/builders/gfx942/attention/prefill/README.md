@@ -32,17 +32,27 @@ split matters when you build a spec by hand:
 The gfx950 golden is untouched either way: this is a separate kernel module emitting
 its own symbol against its own fixture, not an arch branch in the gfx950 file.
 
-Still rejected with a structured reason by `supports_attention_dense`: varlen and ragged.
+Still rejected with a structured reason by `supports_attention_dense`: ragged, and varlen
+without paged K/V.
 A sliding window that leaves query rows no key (`seqlen_q - seqlen_kv >= W`, or a last
 query block whose window starts past `seqlen_kv`) is supported: those rows write O = 0,
 with or without sinks or the LSE output.
-Sliding-window and attention sinks are supported, alone or combined. Paged K/V runs on
-the default grid for the shared spec's paged cohort, with the same per-wave block-table
-lookup as gfx950; paged V always takes the async-DMA path, never conflict-free V. Sinks seed the
-online-softmax state once per work item (`m = sink * log2(e)`, `l = 1`) before the KV
-loop and add a trailing `sink_ptr` ([Hq], q dtype) kernel argument. The
-deferred-findings backlog lives in the optimization plan for this port, which is kept
-outside the repo.
+Sliding-window and attention sinks are supported, alone or combined, also with paged
+K/V. Paged K/V runs on the default grid for the shared spec's paged cohort, with the
+same per-wave block-table lookup as gfx950. Paged V takes conflict-free V at D128 as
+contiguous does: each wave loads the rows of its async K copy, so one lookup per wave
+serves its V loads too (the K/V double-buffer and V-prefetch pipeline stays
+contiguous-only). A cache past the i32 K/V buffer range takes the same `use_i64_kv_addr`
+path as gfx950, paged varlen included (one resource per wave and K/V tile over its page;
+see the gfx950 prefill README). Paged varlen (packed Q + `cu_seqlens_q`, each sequence's
+KV length from `kv_lens`) bounds each sequence's tails in the kernel, so dispatch also
+uses it for one paged sequence with a partial Q or KV tile: there is no ragged body.
+Tail Q rows re-read the sequence's last row and their stores are dropped (a bounded
+buffer load as on gfx950 spills at fp16 D128), and V rows past `kv_len` are zeroed,
+since P = 0 times a stale NaN row is still NaN. Sinks seed the online-softmax state once
+per work item (`m = sink * log2(e)`, `l = 1`) before the KV loop and add a `sink_ptr`
+([Hq], q dtype) kernel argument after the shape arguments. The deferred-findings backlog lives in the
+optimization plan for this port, which is kept outside the repo.
 
 ### Gain over the unified-attention baseline
 

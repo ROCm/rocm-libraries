@@ -150,11 +150,39 @@ _KERNEL_RESOURCE_BUDGETS = {
         "max_scratch_bytes": 64,
         "min_waves_per_simd": 2,
     },
-    # gfx942 fp16 D128 paged prefill: paged V always takes the DMA path (no cfvst),
-    # where the ROCm 7.1 comgr caps VGPR at 256 and spills 28 B; contiguous with
-    # use_cfvst=False spills the same there. ROCm 7.2 and later fit with no scratch.
-    "rocke_attention_dense_d128_hq32_kv8_bn64_fp16_sq8192_sk8192_causal_swa4096_pgd16_nb512_lazyrs_gfx942_b1_wpe2": {
-        "max_scratch_bytes": 32,
+    # gfx942 bf16 D128 paged (single sequence and varlen, i32 and i64 page bases):
+    # conflict-free V, where the ROCm 7.1 comgr caps VGPR at 256 and spills 56-72 B,
+    # as on contiguous bf16 D128 with conflict-free V. ROCm 7.2 and later fit with no
+    # scratch.
+    "rocke_attention_dense_d128_bn64_bf16_causal_swa4096_pgd16_lazyrs_gfx942_wpe2": {
+        "max_scratch_bytes": 80,
+        "min_waves_per_simd": 2,
+    },
+    "rocke_attention_dense_d128_bn64_bf16_causal_swa4096_pgd16_i64kv_lazyrs_gfx942_wpe2": {
+        "max_scratch_bytes": 80,
+        "min_waves_per_simd": 2,
+    },
+    "rocke_attention_dense_d128_bn64_bf16_causal_varlen_pgd16_lazyrs_nphqminswz_gfx942_wpe2": {
+        "max_scratch_bytes": 80,
+        "min_waves_per_simd": 2,
+    },
+    "rocke_attention_dense_d128_bn64_bf16_causal_varlen_pgd16_i64kv_lazyrs_nphqminswz_gfx942_wpe2": {
+        "max_scratch_bytes": 80,
+        "min_waves_per_simd": 2,
+    },
+    # gfx950 D128 paged on the persistent body: the page lookup leaves it within a few
+    # VGPRs of the 256 ceiling on every comgr, so pin the 2-wave occupancy it shares
+    # with the contiguous persistent body (no spill: the default budget).
+    "rocke_attention_dense_d128_bn64_fp16_causal_swa4096_pgd16_lazyrs_persist256": {
+        "min_waves_per_simd": 2,
+    },
+    "rocke_attention_dense_d128_bn64_fp16_causal_swa4096_pgd16_i64kv_lazyrs_persist256": {
+        "min_waves_per_simd": 2,
+    },
+    "rocke_attention_dense_d128_bn64_bf16_causal_swa4096_pgd16_lazyrs_persist256": {
+        "min_waves_per_simd": 2,
+    },
+    "rocke_attention_dense_d128_bn64_bf16_causal_swa4096_pgd16_i64kv_lazyrs_persist256": {
         "min_waves_per_simd": 2,
     },
 }
@@ -1508,18 +1536,17 @@ class TestAttentionHelpers(unittest.TestCase):
                 paged=True, block_size=16, num_kv_blocks=512, **base
             ).kernel_name(),
         )
-        # num_kv_blocks is IR-live (sets the paged buffer-rsrc bound) so it MUST be part
-        # of the kernel identity -- else two cache sizes collide in the launcher cache and
-        # the larger reads later blocks as 0. Assert distinctness.
+        # num_kv_blocks is a kernarg (the paged buffer bound), so one binary serves
+        # every cache size: no nb token (test_attention_dense_paged_launch.py checks
+        # the IR).
         n512 = AttentionDenseSpec(
             paged=True, block_size=16, num_kv_blocks=512, **base
         ).kernel_name()
         n1024 = AttentionDenseSpec(
             paged=True, block_size=16, num_kv_blocks=1024, **base
         ).kernel_name()
-        self.assertNotEqual(n512, n1024)
-        self.assertIn("nb512", n512)
-        self.assertIn("nb1024", n1024)
+        self.assertEqual(n512, n1024)
+        self.assertNotRegex(n512, r"_nb\d+")
         # Accept: bf16 too -- the paged mechanism is dtype-generic (both 2-byte).
         ok_bf, why_bf = supports_attention_dense(
             AttentionDenseSpec(
@@ -1539,10 +1566,11 @@ class TestAttentionHelpers(unittest.TestCase):
             ),  # non-power-of-two (shift/mask gate)
             dict(block_size=4, num_kv_blocks=512),  # < ROWS_PER_WAVE (8)
             dict(block_size=16, num_kv_blocks=0),  # num_kv_blocks 0
-            dict(block_size=16, num_kv_blocks=70000),  # cache > 2 GiB (i32 overflow)
-            dict(block_size=16, num_kv_blocks=512, batch=2),  # multi-seq
-            dict(block_size=16, num_kv_blocks=512, varlen=True),
-            dict(block_size=16, num_kv_blocks=512, persistent=True),
+            # Cache past the i32 range without use_i64_kv_addr.
+            dict(block_size=16, num_kv_blocks=70000),
+            dict(block_size=16, num_kv_blocks=512, batch=2),  # multi-seq, not varlen
+            # Wide DMA needs the KV tile in one page (block_size >= block_n).
+            dict(block_size=16, num_kv_blocks=512, persistent=True, wide_lds_dma=True),
             dict(
                 block_size=16, num_kv_blocks=512, causal=False, sliding_window=0
             ),  # causal-only
@@ -1552,19 +1580,176 @@ class TestAttentionHelpers(unittest.TestCase):
         ):
             with self.subTest(kw=kw), self.assertRaises(ValueError):
                 AttentionDenseSpec(paged=True, **{**base, **kw})
-        # Accept: plain causal (no window) and D64.
-        for kw in (dict(sliding_window=0), dict(head_size=64)):
+        # Accept: plain causal (no window), D64, the persistent body, and wide DMA
+        # with tile-sized pages.
+        for kw in (
+            dict(sliding_window=0),
+            dict(head_size=64),
+            dict(persistent=True, num_persistent=256),
+            dict(
+                block_size=64,
+                num_kv_blocks=128,
+                persistent=True,
+                num_persistent=256,
+                wide_lds_dma=True,
+            ),
+        ):
             with self.subTest(kw=kw):
+                kw = {"block_size": 16, "num_kv_blocks": 512, **kw}
                 ok, why = supports_attention_dense(
-                    AttentionDenseSpec(
-                        paged=True, block_size=16, num_kv_blocks=512, **{**base, **kw}
-                    )
+                    AttentionDenseSpec(paged=True, **{**base, **kw})
                 )
                 self.assertTrue(ok, why)
         # 0-cost when off: a non-paged spec is unaffected.
         s = AttentionDenseSpec(**base)
         self.assertFalse(s.paged)
         self.assertNotIn("pgd", s.kernel_name())
+
+    def test_dense_paged_varlen_spec_admission(self):
+        """Paged varlen: any number of packed sequences, maxima that need not be tile
+        multiples (each sequence's tails are handled in the kernel), unequal maxima
+        under top-left too; sinks admitted; LSE and persistent stay refused."""
+        for arch in ("gfx942", "gfx950"):
+            with self.subTest(arch=arch):
+                self._check_dense_paged_varlen_spec_admission(arch)
+
+    def _check_dense_paged_varlen_spec_admission(self, arch):
+        ad = importlib.import_module(f"kernels.{arch}.attention_dense")
+        AttentionDenseSpec = dense_arch_spec_class(ad)
+        supports_attention_dense = ad.supports_attention_dense
+
+        base = dict(
+            batch=3,
+            seqlen_q=1000,
+            seqlen_kv=1000,
+            num_query_heads=16,
+            num_kv_heads=4,
+            head_size=128,
+            causal=True,
+            dtype="fp16",
+            varlen=True,
+            paged=True,
+            block_size=16,
+            num_kv_blocks=256,
+        )
+        for kw in (
+            dict(),
+            dict(batch=1),
+            dict(batch=8),
+            dict(head_size=64),
+            dict(dtype="bf16"),
+            dict(sliding_window=256),
+            dict(seqlen_q=4096, seqlen_kv=4096),
+            dict(seqlen_kv=1024),
+            dict(seqlen_q=2048, sliding_window=256),
+            dict(block_size=64),
+            dict(use_sinks=True),
+        ):
+            with self.subTest(accept=kw):
+                ok, why = supports_attention_dense(AttentionDenseSpec(**{**base, **kw}))
+                self.assertTrue(ok, why)
+        for kw, error in (
+            (dict(emit_lse=True), "emit_lse"),
+            (dict(persistent=True), "persistent"),
+            (dict(causal=False), "causal"),
+            (dict(varlen=False, seqlen_q=1024, seqlen_kv=1024), "needs varlen"),
+            (dict(ragged=True), "ragged"),
+        ):
+            with self.subTest(reject=kw), self.assertRaisesRegex(ValueError, error):
+                AttentionDenseSpec(**{**base, **kw})
+        # Non-paged varlen keeps its tile-aligned maxima.
+        with self.assertRaisesRegex(ValueError, "multiple of block_m"):
+            AttentionDenseSpec(**{**base, "paged": False, "block_size": 0})
+        if arch == "gfx942":
+            # gfx942 has no contiguous varlen body.
+            aligned = {**base, "seqlen_q": 1024, "seqlen_kv": 1024}
+            ok, why = supports_attention_dense(
+                AttentionDenseSpec(**{**aligned, "paged": False, "block_size": 0})
+            )
+            self.assertFalse(ok)
+            self.assertIn("only supported with paged", why)
+
+    def test_dense_byte_addressed_q_stays_below_2_gib(self):
+        """Paged varlen must keep its Q bytes (not only elements) within i32, as
+        ragged does: gfx950 addresses Q in bytes for its bounded loads, and gfx942
+        paged varlen keeps the same limit. The aligned body keeps the element
+        bound."""
+        base = dict(
+            seqlen_q=8000,
+            seqlen_kv=8000,
+            num_query_heads=64,
+            num_kv_heads=8,
+            head_size=128,
+            causal=True,
+            dtype="fp16",
+        )
+        paged_varlen = dict(varlen=True, paged=True, block_size=16, num_kv_blocks=256)
+        for arch in ("gfx942", "gfx950"):
+            ad = importlib.import_module(f"kernels.{arch}.attention_dense")
+            AttentionDenseSpec = dense_arch_spec_class(ad)
+            supports_attention_dense = ad.supports_attention_dense
+            with self.subTest(arch=arch, mode="paged_varlen"):
+                ok, why = supports_attention_dense(
+                    AttentionDenseSpec(batch=32, **base, **paged_varlen)
+                )
+                self.assertFalse(ok)
+                self.assertIn("Q/O extent is 4194304000 B", why)
+                ok, why = supports_attention_dense(
+                    AttentionDenseSpec(batch=16, **base, **paged_varlen)
+                )
+                self.assertTrue(ok, why)
+            aligned = {**base, "seqlen_q": 7936, "seqlen_kv": 7936}
+            with self.subTest(arch=arch, mode="aligned"):
+                ok, why = supports_attention_dense(
+                    AttentionDenseSpec(batch=32, **aligned)
+                )
+                self.assertTrue(ok, why)
+
+    @pytest.mark.compiler_integration
+    def test_dense_paged_varlen_compiles_and_fits_budget(self):
+        """comgr build + resource budget for paged varlen (D128 / D64, causal /
+        sliding window, fp16 / bf16, i32 / i64 page bases): the Q tail handling,
+        the V tail select and the guarded store must still fit without spilling."""
+        from dataclasses import replace
+
+        for arch, head_size, window, dtype in (
+            (arch, *arm)
+            for arch in ("gfx942", "gfx950")
+            for arm in (
+                (128, 0, "fp16"),
+                (128, 256, "fp16"),
+                (64, 256, "fp16"),
+                (128, 0, "bf16"),
+            )
+        ):
+            ad = importlib.import_module(f"kernels.{arch}.attention_dense")
+            spec = dense_arch_spec_class(ad)(
+                batch=3,
+                seqlen_q=1000,
+                seqlen_kv=1000,
+                num_query_heads=16,
+                num_kv_heads=4,
+                head_size=head_size,
+                causal=True,
+                dtype=dtype,
+                sliding_window=window,
+                varlen=True,
+                paged=True,
+                block_size=16,
+                num_kv_blocks=256,
+            )
+            for variant in (spec, replace(spec, use_i64_kv_addr=True)):
+                with self.subTest(
+                    arch=arch,
+                    head_size=head_size,
+                    window=window,
+                    dtype=dtype,
+                    i64=variant.use_i64_kv_addr,
+                ):
+                    k = ad.build_attention_dense(variant, arch=arch)
+                    art = _compile_or_skip(k, arch=arch)
+                    self.assertGreater(art.hsaco_bytes, 0)
+                    _assert_resources_fit(art, arch=arch, kernel_name=k.name)
 
     def test_gfx950_signature_matches_the_built_kernels_params(self):
         """gfx950 ``attention_dense_signature`` matches the built kernel's params.
@@ -1583,14 +1768,16 @@ class TestAttentionHelpers(unittest.TestCase):
             build_attention_dense,
         )
 
-        # The i32 shape/head scalars; every other kernarg is a pointer, scale, or
-        # the paged block-table stride, none of which the launcher reads off the spec.
+        # The i32 shape/head scalars and the paged cache size; every other kernarg
+        # is a pointer, scale, or the paged block-table stride, none of which the
+        # launcher reads off the spec.
         shape_scalars = (
             "batch",
             "seqlen_q",
             "seqlen_kv",
             "num_query_heads",
             "num_kv_heads",
+            "num_kv_blocks",
         )
 
         def type_str(param):
@@ -1637,6 +1824,28 @@ class TestAttentionHelpers(unittest.TestCase):
                 num_kv_blocks=128,
             ),
             "fp8-kv": AttentionDenseSpec(**base, kv_storage_dtype="fp8e4m3"),
+            # Paged varlen takes no cu_seqlens_kv: kv_lens holds the KV lengths.
+            "paged-varlen": AttentionDenseSpec(
+                **base, varlen=True, paged=True, block_size=16, num_kv_blocks=256
+            ),
+            # sink_ptr sits between the shape kernargs and the paged params.
+            "paged-varlen-sinks": AttentionDenseSpec(
+                **base,
+                varlen=True,
+                paged=True,
+                block_size=16,
+                num_kv_blocks=256,
+                use_sinks=True,
+            ),
+            "persistent-paged-sinks": AttentionDenseSpec(
+                **{**base, "batch": 1},
+                persistent=True,
+                num_persistent=256,
+                paged=True,
+                block_size=16,
+                num_kv_blocks=128,
+                use_sinks=True,
+            ),
         }
         for arm, spec in arms.items():
             with self.subTest(arm=arm):
@@ -1899,6 +2108,8 @@ class TestAttentionHelpers(unittest.TestCase):
         """comgr build + resource-budget net for the PAGED dense prefill
         (fp16/bf16 D128 sliding-window, single-seq). Mirrors the non-paged dense
         budget test; the block_tables indirection adds a load but must still fit."""
+        from dataclasses import replace
+
         for arch in ("gfx942", "gfx950"):
             ad = importlib.import_module(f"kernels.{arch}.attention_dense")
             AttentionDenseSpec = dense_arch_spec_class(ad)
@@ -1920,12 +2131,67 @@ class TestAttentionHelpers(unittest.TestCase):
                         block_size=16,
                         num_kv_blocks=512,
                     )
-                    with self.subTest(dtype=dt):
-                        self.assertIn("pgd16", spec.kernel_name())
-                        k = build_attention_dense(spec, arch=arch)
-                        art = _compile_or_skip(k, arch=arch)
-                        self.assertGreater(art.hsaco_bytes, 0)
-                        _assert_resources_fit(art, arch=arch, kernel_name=k.name)
+                    # Also with per-page i64 K/V resources.
+                    for variant in (spec, replace(spec, use_i64_kv_addr=True)):
+                        with self.subTest(dtype=dt, i64=variant.use_i64_kv_addr):
+                            self.assertIn("pgd16", variant.kernel_name())
+                            k = build_attention_dense(variant, arch=arch)
+                            art = _compile_or_skip(k, arch=arch)
+                            self.assertGreater(art.hsaco_bytes, 0)
+                            _assert_resources_fit(art, arch=arch, kernel_name=k.name)
+
+    def test_dense_paged_persistent_compiles_and_fits_budget(self):
+        """comgr build + resource-budget net for paged K/V on the persistent body
+        (one sequence): fp16/bf16 D128 with i32 and i64 page bases, and D64; on
+        gfx950 also the wide-DMA body with tile-sized pages."""
+        from dataclasses import replace
+
+        for arch in ("gfx942", "gfx950"):
+            ad = importlib.import_module(f"kernels.{arch}.attention_dense")
+            AttentionDenseSpec = dense_arch_spec_class(ad)
+            with self.subTest(arch=arch):
+                for dt in ("fp16", "bf16"):
+                    for d in (128, 64):
+                        spec = AttentionDenseSpec(
+                            batch=1,
+                            seqlen_q=8192,
+                            seqlen_kv=8192,
+                            num_query_heads=32,
+                            num_kv_heads=8,
+                            head_size=d,
+                            causal=True,
+                            dtype=dt,
+                            sliding_window=4096,
+                            block_n=64,
+                            persistent=True,
+                            paged=True,
+                            block_size=16,
+                            num_kv_blocks=512,
+                        )
+                        variants = [spec]
+                        if d == 128:
+                            variants.append(replace(spec, use_i64_kv_addr=True))
+                        if d == 128 and arch == "gfx950":
+                            wide = replace(
+                                spec,
+                                block_size=64,
+                                num_kv_blocks=128,
+                                wide_lds_dma=True,
+                            )
+                            variants += [wide, replace(wide, use_i64_kv_addr=True)]
+                        for variant in variants:
+                            with self.subTest(
+                                dtype=dt,
+                                d=d,
+                                i64=variant.use_i64_kv_addr,
+                                wide=getattr(variant, "wide_lds_dma", False),
+                            ):
+                                k = ad.build_attention_dense(variant, arch=arch)
+                                art = _compile_or_skip(k, arch=arch)
+                                self.assertGreater(art.hsaco_bytes, 0)
+                                _assert_resources_fit(
+                                    art, arch=arch, kernel_name=k.name
+                                )
 
     def test_dense_paged_smaller_tiles_compile_and_fit_budget(self):
         """comgr build + resource-budget net for paged K/V on the smaller dense
@@ -2124,8 +2390,8 @@ class TestAttentionHelpers(unittest.TestCase):
                 )
             self.assertIs(ok.exception, sentinel)
 
-    def test_gfx950_dense_sinks_rejected_with_paged(self):
-        """AttentionDenseSpec.__post_init__ rejects use_sinks with paged."""
+    def test_gfx950_dense_sinks_with_paged(self):
+        """Sinks combine with paged K/V: one sequence and packed varlen sequences."""
         from kernels.gfx950.attention_dense import AttentionDenseSpec
 
         base = dict(
@@ -2140,44 +2406,17 @@ class TestAttentionHelpers(unittest.TestCase):
             use_sinks=True,
         )
 
-        # Valid: sinks without paged
-        spec = AttentionDenseSpec(**base)
-        self.assertTrue(spec.use_sinks)
-
-        # Reject: use_sinks + paged
-        with self.assertRaises(ValueError) as ctx:
+        self.assertTrue(AttentionDenseSpec(**base).use_sinks)
+        self.assertTrue(
             AttentionDenseSpec(
                 paged=True, block_size=16, num_kv_blocks=512, sliding_window=128, **base
-            )
-        self.assertEqual(
-            str(ctx.exception), "use_sinks is not yet supported with paged KV"
+            ).use_sinks
         )
-
-    def test_gfx950_dense_sinks_rejected_with_varlen(self):
-        """AttentionDenseSpec.__post_init__ rejects use_sinks with varlen."""
-        from kernels.gfx950.attention_dense import AttentionDenseSpec
-
-        base = dict(
-            batch=1,
-            seqlen_q=256,
-            seqlen_kv=256,
-            num_query_heads=32,
-            num_kv_heads=8,
-            head_size=128,
-            causal=True,
-            dtype="bf16",
-            use_sinks=True,
-        )
-
-        # Valid: sinks without varlen
-        spec = AttentionDenseSpec(**base)
-        self.assertTrue(spec.use_sinks)
-
-        # Reject: use_sinks + varlen
-        with self.assertRaises(ValueError) as ctx:
-            AttentionDenseSpec(varlen=True, **base)
-        self.assertEqual(
-            str(ctx.exception), "use_sinks is not yet supported with varlen"
+        self.assertTrue(AttentionDenseSpec(varlen=True, **base).use_sinks)
+        self.assertTrue(
+            AttentionDenseSpec(
+                varlen=True, paged=True, block_size=16, num_kv_blocks=64, **base
+            ).use_sinks
         )
 
     def test_attention_3d_workspace_size_matches_shapes(self):
@@ -4870,6 +5109,8 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
         other would feed the decode the wrong divisors. Each arm is also checked
         with ``use_sinks``, which appends ``sink_ptr`` after all of those.
         """
+        from dataclasses import replace
+
         from rocke.core.ir import PtrType
         from rocke.helpers.spec import ptr_type_str
         from kernels.gfx942.attention_dense import (
@@ -4902,11 +5143,23 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
             for v, (kw, _) in self._PERSIST_VARIANTS.items()
         }
 
+        paged_kw = dict(paged=True, block_size=16, num_kv_blocks=256)
+        paged = self._spec(**self._BASE_KWARGS, **paged_kw)
+        # Paged varlen adds cu_seqlens_q only: kv_lens holds the KV lengths.
+        paged_varlen = self._spec(
+            **{**self._BASE_KWARGS, "batch": 3}, varlen=True, **paged_kw
+        )
+
         for arm, spec in (
             ("runtime-shape", rt),
             *persist.items(),
             ("runtime-shape+sinks", rt_sinks),
             *((f"{v}+sinks", s) for v, s in persist_sinks.items()),
+            ("paged", paged),
+            ("paged-varlen", paged_varlen),
+            # sink_ptr sits between the shape kernargs and the paged params.
+            ("paged+sinks", replace(paged, use_sinks=True)),
+            ("paged-varlen+sinks", replace(paged_varlen, use_sinks=True)),
         ):
             with self.subTest(arm=arm):
                 params = build_attention_dense(spec, arch="gfx942").params
@@ -4947,6 +5200,16 @@ class TestAttentionDenseGfx942RuntimeShapeCollision(unittest.TestCase):
                     f"{variant}: persistent ABI is not the default ABI plus its "
                     "decode's magic/shift pairs",
                 )
+
+        # Paged is runtime-shape too: the shape args, then the cache size.
+        paged_names = [a["name"] for a in attention_dense_signature(paged)]
+        self.assertEqual(paged_names[: len(rt_names) + 1], rt_names + ["num_kv_blocks"])
+        self.assertEqual(
+            [a["name"] for a in attention_dense_signature(paged_varlen)],
+            paged_names[: len(rt_names) + 1]
+            + ["cu_seqlens_q"]
+            + paged_names[len(rt_names) + 1 :],
+        )
 
         # Sinks append exactly one kernarg, last, after any fast-division pairs.
         for plain, with_sinks in (

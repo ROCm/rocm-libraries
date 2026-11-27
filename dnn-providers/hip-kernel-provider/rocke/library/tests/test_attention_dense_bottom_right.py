@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
 
 from kernels.common.attention_dense_spec import (
@@ -138,27 +140,151 @@ def test_ragged_cross_length_top_left_accepted(sq, sk, persistent):
     assert ok, why
 
 
+_PAGED = {"paged": True, "block_size": 16, "num_kv_blocks": 64, "dtype": "fp16"}
+
+
 @pytest.mark.parametrize(
     "feature,over",
     [
         ("persistent", {"persistent": True}),
         ("sliding_window", {"sliding_window": 64}),
-        ("varlen", {"varlen": True}),
-        (
-            "paged KV",
-            {
-                # Otherwise-valid paged dense: paging itself requires an SWA window.
-                "paged": True,
-                "block_size": 16,
-                "num_kv_blocks": 64,
-                "sliding_window": 64,
-            },
-        ),
+        # The single-sequence paged body has no shifted diagonal.
+        ("paged=True unless varlen", _PAGED),
+        ("right_bound", {"varlen": True, "right_bound": 64}),
+        ("seqlen_q <= seqlen_kv", {**_PAGED, "varlen": True, "seqlen_q": 2048}),
     ],
 )
 def test_gfx950_rejects_each_unimplemented_bottom_right_mode(feature, over):
     with pytest.raises(ValueError, match=feature):
         _spec(causal_bottom_right=True, **over)
+
+
+# Varlen bottom-right: the spec lengths are maxima and each sequence's diagonal
+# shift kv_len - q_len is read at run time.
+_VARLEN_LAYOUTS = {"contiguous": {"varlen": True}, "paged": {**_PAGED, "varlen": True}}
+
+
+@pytest.mark.parametrize("geometry", _GEOMETRIES)
+@pytest.mark.parametrize("layout", sorted(_VARLEN_LAYOUTS))
+def test_varlen_bottom_right_is_accepted(geometry, layout):
+    spec = _spec(geometry=geometry, causal_bottom_right=True, **_VARLEN_LAYOUTS[layout])
+    ok, why = supports_attention_dense(spec, arch="gfx950")
+    assert ok, why
+    assert "_br_" in spec.kernel_name() and "_varlen" in spec.kernel_name()
+    top_left = _spec(geometry=geometry, **_VARLEN_LAYOUTS[layout], seqlen_kv=512)
+    assert attention_dense_cache_key(spec, arch="gfx950") != attention_dense_cache_key(
+        top_left, arch="gfx950"
+    )
+
+
+def test_bottom_right_varlen_keeps_its_baked_maxima():
+    """Varlen bakes its maxima, so the bottom-right body keeps per-shape identity."""
+    spec = _spec(causal_bottom_right=True, varlen=True)
+    assert not spec.runtime_shape
+    assert dataclasses.replace(spec, seqlen_kv=2496).kernel_name() != spec.kernel_name()
+
+
+def test_paged_varlen_top_left_allows_unequal_maxima():
+    """Top-left starts every sequence's diagonal at its first key, whatever its
+    lengths."""
+    spec = _spec(**_PAGED, varlen=True)
+    assert spec.seqlen_q != spec.seqlen_kv and not spec.causal_bottom_right
+
+
+def test_gfx942_supports_paged_varlen_bottom_right():
+    from kernels.gfx942.attention_dense import Gfx942AttentionDenseSpec
+    from kernels.gfx942.attention_dense import (
+        supports_attention_dense as supports_gfx942,
+    )
+
+    ok, why = supports_gfx942(
+        Gfx942AttentionDenseSpec(
+            batch=3,
+            seqlen_q=512,
+            seqlen_kv=1024,
+            num_query_heads=4,
+            num_kv_heads=1,
+            head_size=128,
+            causal=True,
+            varlen=True,
+            causal_bottom_right=True,
+            **_PAGED,
+        ),
+        arch="gfx942",
+    )
+    assert ok, why
+
+
+@pytest.mark.parametrize(
+    "over",
+    [
+        pytest.param({"varlen": True}, id="contiguous"),
+        pytest.param({"varlen": True, "emit_lse": True}, id="contiguous_lse"),
+        pytest.param({**_PAGED, "num_kv_blocks": 2048, "varlen": True}, id="paged"),
+    ],
+)
+def test_varlen_bottom_right_bakes_no_diagonal(over):
+    """With maxima Sq=2048, Skv=8192 a baked shift would be the constant 6144; the
+    static bottom-right body has it, the varlen body must not."""
+    import re
+
+    shape = {"batch": 4, "seqlen_q": 2048, "seqlen_kv": 8192}
+    baked = _lowered_body(_spec(causal_bottom_right=True, **shape))
+    runtime = _lowered_body(_spec(causal_bottom_right=True, **shape, **over))
+    assert re.search(r"\b6144\b", baked)
+    assert not re.search(r"\b6144\b", runtime)
+
+
+@pytest.mark.parametrize(
+    "over",
+    [
+        pytest.param({"varlen": True}, id="contiguous"),
+        pytest.param({**_PAGED, "varlen": True}, id="paged"),
+    ],
+)
+def test_varlen_bottom_right_shifts_by_the_sequence_lengths(over):
+    """The shift is kv_len - q_len from the per-sequence lengths: it changes the
+    body even where the maxima are equal (each sequence may still differ)."""
+    spec = _spec(causal_bottom_right=True, seqlen_kv=512, **over)
+    kernel = build_attention_dense(spec, arch="gfx950")
+    top_left = _lowered_body(_spec(seqlen_kv=512, **over))
+    assert _lowered_kernel(kernel) != top_left
+    # The masked diagonal tail starts at max(1, qb * n_per + shift // block_n).
+    loops = [
+        op
+        for op in _walk_ops(kernel.body)
+        if op.name == "scf.for" and op.attrs.get("iv") == "%nt"
+    ]
+    assert len(loops) == 1
+    lower = loops[0].operands[0].op
+    assert lower is not None and lower.name == "arith.select"
+    diag_start = lower.operands[2].op
+    assert diag_start is not None and diag_start.name == "arith.add"
+    tiles = diag_start.operands[1].op
+    assert tiles is not None and tiles.name == "arith.div"
+    shift, block_n = tiles.operands
+    assert shift.op is not None and shift.op.name == "arith.sub"
+    assert _const_i32(block_n) == spec.block_n
+
+
+def test_paged_varlen_bottom_right_keeps_the_i64_page_addressing():
+    """The shift moves the diagonal, not the K/V addresses: with
+    ``use_i64_kv_addr`` the bottom-right body has the top-left body's per-page
+    resources, page bases and block-table lookups."""
+    import re
+
+    over = {**_PAGED, "varlen": True, "seqlen_kv": 512, "use_i64_kv_addr": True}
+    spec = _spec(causal_bottom_right=True, **over)
+    assert supports_attention_dense(spec, arch="gfx950") == (True, "")
+    bottom_right, top_left = _lowered_body(spec), _lowered_body(_spec(**over))
+    assert bottom_right != top_left
+    for pattern in (
+        r"@llvm\.amdgcn\.make\.buffer\.rsrc\.",
+        r"getelementptr inbounds i8, ptr addrspace\(1\) %[kv]_ptr, i64 ",
+        r"getelementptr inbounds i32, ptr addrspace\(1\) %block_tables",
+    ):
+        count = len(re.findall(pattern, bottom_right))
+        assert count > 0 and count == len(re.findall(pattern, top_left)), pattern
 
 
 @pytest.mark.parametrize("geometry", _GEOMETRIES)

@@ -269,7 +269,6 @@ def test_kernel_name_pins_the_two_shipped_cache_collisions():
 # test_supports_rejects_modes_deferred_to_later_phases.
 _UNBUILDABLE_SPEC_FIELDS = frozenset(
     {
-        "varlen",
         "ragged",
     }
 )
@@ -301,10 +300,11 @@ _SPEC_PERTURBATIONS = {
     "dtype": ("bf16", "fp16"),
     "sliding_window": (64, 128),  # multiples of block_n=64; base is causal
     "ragged": (),  # unbuildable
-    "varlen": (),  # unbuildable
+    "varlen": (True,),  # legal only at the paged base
     "paged": (False, True),  # legal only at the paged base
     "block_size": (32, 64),  # paged-only
     "num_kv_blocks": (128, 512),  # paged-only
+    "use_i64_kv_addr": (True,),  # paged-only
     "block_m": (128, 512),
     "block_n": (32, 128),
     "waves_per_eu": (3, 4),
@@ -363,8 +363,10 @@ _PERTURBATIONS = {**_SPEC_PERTURBATIONS, **_PRIVATE_PERTURBATIONS}
 # lds_num_buffers no longer implicitly enables V prefetch. Every other knob is
 # also perturbed inside the combined pipeline body,
 # including iglp_mode (iglp base) and the persistent-grid fields (persistent base).
-# The paged base is the one baked-shape arm, and the only one paged/block_size/
-# num_kv_blocks can be perturbed at.
+# The paged bases are the only ones paged/block_size/num_kv_blocks/varlen/
+# use_i64_kv_addr can be perturbed at, and the only ones where num_kv_blocks is a
+# runtime field; the paged varlen one runs every field, use_i64_kv_addr included, on
+# the multi-sequence body.
 _INJECTIVITY_BASES = {
     "d128_fp16_cfvst": dict(head_size=128, dtype="fp16"),
     "d128_fp16_cfvst_iglp": dict(head_size=128, dtype="fp16", iglp=True),
@@ -456,12 +458,28 @@ _INJECTIVITY_BASES = {
         block_size=16,
         num_kv_blocks=256,
     ),
+    "paged_varlen_d64_fp16": dict(
+        batch=3,
+        seqlen_q=1000,
+        seqlen_kv=1000,
+        head_size=64,
+        dtype="fp16",
+        sliding_window=256,
+        varlen=True,
+        paged=True,
+        block_size=16,
+        num_kv_blocks=256,
+    ),
 }
 
 
 # The shape fields the gfx942 body reads only from kernel params. Reflected off the
 # spec rather than restated, so the injectivity test follows the kernel's own ABI.
 _RUNTIME_PARAM_FIELDS = frozenset(_spec().runtime_param_fields)
+# Paged adds the cache size.
+_PAGED_RUNTIME_PARAM_FIELDS = frozenset(
+    _spec(**_INJECTIVITY_BASES["paged_d128_fp16"]).runtime_param_fields
+)
 
 
 # Every persistent decode order the gfx942 body emits.
@@ -562,7 +580,7 @@ def test_kernel_name_covers_every_baked_parameter(field):
     (:func:`test_ir_body_probe_detects_a_baked_shape_on_the_gfx950_control`).
     """
     candidates = _PERTURBATIONS[field]
-    runtime_field = field in _RUNTIME_PARAM_FIELDS
+    runtime_field = field in _PAGED_RUNTIME_PARAM_FIELDS
     tried = 0
     ir_moved = 0
     violations = []
@@ -573,7 +591,9 @@ def test_kernel_name_covers_every_baked_parameter(field):
         base_spec = _spec(**base_kw)
         ok, why = supports_attention_dense(base_spec, arch="gfx942")
         assert ok, f"base {base_id} must be in scope: {why}"
-        expected_runtime = _RUNTIME_PARAM_FIELDS if not base_spec.paged else set()
+        expected_runtime = (
+            _PAGED_RUNTIME_PARAM_FIELDS if base_spec.paged else _RUNTIME_PARAM_FIELDS
+        )
         assert set(base_spec.runtime_param_fields) == expected_runtime, (
             f"base {base_id} declares runtime fields "
             f"{base_spec.runtime_param_fields}, expected {sorted(expected_runtime)}"
@@ -603,7 +623,7 @@ def test_kernel_name_covers_every_baked_parameter(field):
             decode_flipped = alt_spec.persistent and (
                 alt_spec.resolved_persist_decode != base_spec.resolved_persist_decode
             )
-            if runtime_field and base_spec.runtime_shape and not decode_flipped:
+            if field in base_spec.runtime_param_fields and not decode_flipped:
                 runtime_tried += 1
                 runtime_tried_persistent += int(alt_spec.persistent)
                 moved = [
@@ -653,8 +673,10 @@ def test_kernel_name_covers_every_baked_parameter(field):
             f"{runtime_violations} -- the body is baking it again (one binary no "
             f"longer serves every shape) or the kernarg no longer carries it"
         )
-        # Anti-vacuity: the two-way property must have run, and on BOTH grids.
-        assert runtime_tried and runtime_tried_persistent, (
+        # Anti-vacuity: the two-way property must have run, and on BOTH grids for
+        # the fields the persistent grid takes (paged is grid-only).
+        on_persistent = field in _RUNTIME_PARAM_FIELDS
+        assert runtime_tried and (runtime_tried_persistent or not on_persistent), (
             f"{field}: the runtime-param property was exercised {runtime_tried} "
             f"time(s), {runtime_tried_persistent} on the persistent base -- "
             f"strengthen the candidates"
@@ -903,24 +925,36 @@ _PAGED = dict(sliding_window=256, paged=True, block_size=16, num_kv_blocks=256)
 
 
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
-def test_paged_is_supported_and_takes_the_dma_v_path(dtype):
-    """Paged builds at both dtypes and resolves cfvst off by policy, so its name
-    carries no ``cfvst0`` override tag."""
+def test_paged_is_supported_and_takes_the_cfvst_v_path(dtype):
+    """Paged builds at both dtypes and resolves cfvst on by policy, as contiguous
+    D128 does, so its name carries no cfvst override tag."""
     spec = _spec(dtype=dtype, **_PAGED)
     ok, why = supports_attention_dense(spec, arch="gfx942")
     assert ok, why
-    assert not spec.resolved_use_cfvst()
-    assert not spec.resolved_use_v_swizzle()
+    assert spec.resolved_use_cfvst()
+    assert spec.resolved_use_v_swizzle()
     assert "cfvst" not in gfx942_kernel_name(spec)
     params = [p.name for p in build_attention_dense(spec, arch="gfx942").params]
     assert params[-3:] == ["block_tables", "kv_lens", "block_table_stride"]
 
 
-def test_paged_rejects_forced_cfvst():
-    ok, why = supports_attention_dense(
-        _spec(dtype="fp16", use_cfvst=True, **_PAGED), arch="gfx942"
-    )
-    assert not ok and "paged" in why
+def test_paged_takes_the_dma_v_path_with_cfvst_off():
+    spec = _spec(dtype="fp16", use_cfvst=False, **_PAGED)
+    ok, why = supports_attention_dense(spec, arch="gfx942")
+    assert ok, why
+    assert "cfvst0" in gfx942_kernel_name(spec)
+    build_attention_dense(spec, arch="gfx942")
+
+
+@pytest.mark.parametrize("knob", [dict(lds_num_buffers=2), dict(v_reg_prefetch=True)])
+def test_paged_refuses_the_pipelined_v_loader(knob):
+    paged = dict(_PAGED, sliding_window=0)
+    assert supports_attention_dense(
+        _spec(dtype="bf16", persistent=True, **paged), arch="gfx942"
+    )[0]
+    spec = _spec(dtype="bf16", persistent=True, **paged, **knob)
+    ok, why = supports_attention_dense(spec, arch="gfx942")
+    assert not ok and "paged K/V" in why
 
 
 def test_bottom_right_is_supported_without_a_window():
@@ -2199,7 +2233,7 @@ def test_v_row_pad_policy_matches_the_cfvst_swizzle_matrix(
     any tile width; 8 (no swizzle) everywhere else. This
     pins the derived values so a future edit that flips one arm updates this on purpose.
     """
-    assert _v_row_pad(head_size, dtype, block_n, False) == expected
+    assert _v_row_pad(head_size, dtype, block_n) == expected
 
 
 @pytest.mark.parametrize("block_n", [32, 64, 128])
@@ -2209,10 +2243,10 @@ def test_cfvst_swizzle_engages_at_every_block_n(block_n):
     turns off (a constant pad dropped it + wasted LDS at block_n != 64). The non-cfvst
     path stays unpadded (no swizzle)."""
     for dtype in ("fp16", "bf16"):
-        v_ldrow = block_n + _v_row_pad(128, dtype, block_n, False)
+        v_ldrow = block_n + _v_row_pad(128, dtype, block_n)
         assert v_ldrow == _v_swizzle_width(block_n), (dtype, block_n, v_ldrow)
         assert v_ldrow >= 64 and (v_ldrow & (v_ldrow - 1)) == 0, (block_n, v_ldrow)
-    assert _v_row_pad(64, "bf16", block_n, False) == 8
+    assert _v_row_pad(64, "bf16", block_n) == 8
 
 
 @pytest.mark.parametrize("block_n", [64, 32])
@@ -2232,7 +2266,7 @@ def test_cfvst_swizzle_is_emitted_in_ir_with_matching_store_read_mask(block_n):
     import re
 
     spec = _spec(head_size=128, dtype="fp16", block_n=block_n)
-    expected_mask = (block_n + _v_row_pad(128, "fp16", block_n, False)) // 4 - 1
+    expected_mask = (block_n + _v_row_pad(128, "fp16", block_n)) // 4 - 1
 
     def _swz_masks(ir):
         consts = {int(c) for c in re.findall(r"\band i32 [^,]+, (\d+)", ir)}
@@ -3065,8 +3099,8 @@ def test_run_attention_dense_torch_rejects_unsupported_spec():
 
 
 def test_run_attention_dense_torch_rejects_cu_seqlens():
-    """gfx942 attention_dense is dense-only (varlen rejected), so the ABI has no
-    cu_seqlens args; passing them is a caller error, not a silently-ignored kwarg."""
+    """Only the paged varlen ABI has a cu_seqlens_q arg; passing cu_seqlens to any
+    other spec is a caller error, not a silently-ignored kwarg."""
     spec = _spec(head_size=128, dtype="fp16")
     with pytest.raises(ValueError, match="cu_seqlens"):
         run_attention_dense_torch(

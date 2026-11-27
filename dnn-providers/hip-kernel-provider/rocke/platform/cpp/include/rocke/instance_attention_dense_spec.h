@@ -9,6 +9,7 @@
  *   -------------------------------------------   -------------------------------------
  *   DENSE_TILE_GEOMETRIES                         ROCKE_DENSE_TILE_GEOMETRIES
  *   INT32_LIMIT                                   ROCKE_ATTENTION_DENSE_INT32_LIMIT
+ *   _spec_checks.I32_KV_BUFFER_BYTES              ROCKE_ATTENTION_DENSE_I32_KV_BUFFER_BYTES
  *   @dataclass AttentionDenseSpec                 rocke_attention_dense_spec_t
  *                                                   + rocke_attention_dense_spec_default()
  *   AttentionDenseSpec.__post_init__              rocke_attention_dense_spec_validate()
@@ -106,6 +107,9 @@ extern const rocke_dense_tile_geometry_t
 
 /* INT32_LIMIT = 2**31: signed 32-bit ceiling for tensor extents. */
 #define ROCKE_ATTENTION_DENSE_INT32_LIMIT 2147483648LL
+/* _spec_checks.I32_KV_BUFFER_BYTES: the largest K/V cache one i32-addressed
+ * buffer resource covers; a paged cache past it needs use_i64_kv_addr. */
+#define ROCKE_ATTENTION_DENSE_I32_KV_BUFFER_BYTES 0x7FFF0000ULL
 
 /* Reason / message buffers: every reject reason fits. */
 #define ROCKE_ATTENTION_DENSE_REASON_CAP 512
@@ -146,6 +150,7 @@ typedef struct rocke_attention_dense_spec
     bool use_sinks; /* False */
     bool causal_bottom_right; /* False (kw_only) */
     const char* nonpersist_decode; /* "auto" */
+    bool use_i64_kv_addr; /* False (kw_only) */
     int chiplet_num_xcds; /* 8 */
 } rocke_attention_dense_spec_t;
 
@@ -208,7 +213,8 @@ typedef struct rocke_attention_dense_name_parts
 {
     /* _head_name_parts(): hq{num_query_heads}, kv{num_kv_heads} when true. */
     bool head_parts;
-    /* _shape_name_parts(): sq{seqlen_q}, sk{seqlen_kv} when true. */
+    /* _shape_name_parts(): sq{seqlen_q}, sk{seqlen_kv} when true; also gates the
+     * paged nb{num_kv_blocks} token. */
     bool shape_parts;
     /* _layout_name_parts(), _band_name_parts(), _algorithm_name_parts(). */
     char layout[ROCKE_ATTENTION_DENSE_MAX_NAME_PARTS][ROCKE_ATTENTION_DENSE_NAME_PART_CAP];

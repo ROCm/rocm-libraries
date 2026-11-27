@@ -71,7 +71,8 @@ from ._attention_additive_bias import (
     check_additive_bias_tensor,
 )
 from ._lse_store import validate_unified_lse
-from ._spec_checks import require_bool
+from ._spec_checks import I32_KV_BUFFER_BYTES as _I32_KV_BUFFER_BYTES
+from ._spec_checks import kv_cache_needs_i64_addr, require_bool
 
 # Alias the promoted log2-domain softcap helper under the local name used by
 # the scalar reference kernels (matches the gfx950 tiled modules' convention).
@@ -3001,23 +3002,10 @@ def _enable_fast_paged_kv_desc(problem: UnifiedAttentionProblem, arch: str) -> b
     )
 
 
-# Largest paged KV cache, in bytes, that i32 addressing reads correctly on the
-# tiled builders. They bound K/V buffer loads at num_records=0x7FFF0000, so a
-# load at or past that offset returns zero.
-_I32_KV_BUFFER_BYTES = 0x7FFF_0000
-# Kernels that index K/V with an i32 element offset instead (scalar 2D, gfx942
-# 4-warp GQA, gfx1250 tiled 2D) have no i64 path and wrap past 2^31 elements.
+# The tiled builders bound K/V buffer loads at _I32_KV_BUFFER_BYTES. Kernels that
+# index K/V with an i32 element offset instead (scalar 2D, gfx942 4-warp GQA,
+# gfx1250 tiled 2D) have no i64 path and wrap past 2^31 elements.
 _I32_KV_ELEMENTS = 0x8000_0000
-
-
-def kv_cache_needs_i64_addr(num_kv_blocks: int, block_bytes: int) -> bool:
-    """True when ``num_kv_blocks`` blocks of ``block_bytes`` each need i64 addressing.
-
-    The single threshold for the spec builders, the dispatcher's tuning specs
-    and the launch guard, so they cannot disagree. ``num_kv_blocks <= 0`` means
-    the cache size is unknown, so assume small.
-    """
-    return num_kv_blocks > 0 and num_kv_blocks * block_bytes > _I32_KV_BUFFER_BYTES
 
 
 # Tuning builder kinds with no i64 KV path: K/V are i32 element offsets, so the

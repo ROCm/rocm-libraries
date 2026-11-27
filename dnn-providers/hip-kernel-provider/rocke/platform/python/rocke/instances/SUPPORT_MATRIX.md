@@ -158,7 +158,7 @@ be smaller than 2 GiB.
 | `unified_attention_2d` | ✅ | ✅ | ✅ | scalar (no matrix core) |
 | `unified_attention_3d` | ✅ | ✅ | ✅ | scalar |
 | `unified_attention_reduce` | ✅ | ✅ | ✅ | scalar |
-| `attention_dense` | ✅ | ✅ | ❌ | dense (non-paged) flash prefill, separate per-arch bodies; bf16/fp16 D64/D128. gfx950 grid body also takes fp8 e4m3 (OCP) K/V with per-tensor scales (aligned contiguous KV, no sinks). Lives in `library/kernels/{gfx942,gfx950}/attention_dense.py` |
+| `attention_dense` (prefill) | ✅ | ✅ | ❌ | flash prefill; K/V contiguous or paged, paged for one sequence or for packed varlen sequences (`cu_seqlens_q`, per-sequence `kv_lens`), including caches past the i32 K/V buffer range (`use_i64_kv_addr`, set at binding). gfx950 grid body also takes fp8 e4m3 (OCP) K/V with per-tensor scales (aligned contiguous KV, no sinks). Lives in `library/kernels/<arch>/attention_dense.py`, dispatched by `dispatch.attention` |
 | tiled 3D `kv_layout="strided"` | ✅ | ✅ | ❌ | non-paged Sq=1, fp16/bf16 D64/128/256, aligned unit-D KV views; existing tiled segment/reduce pipeline |
 | tiled 2D/3D `use_attn_bias=True` | ❌ | ✅ | ❌ | f32 additive bias only, added to the log2-domain score; every gfx950 tiled geometry except the non-transposed wide32 2D path (see `dispatch.attention.gfx950_unified._variant_features`) |
 | `mla_prefill_fwd` | ✅ | ❌ | ❌ | bf16 only; paged compressed KV, `W_UK` absorbed into the query and `W_UV` applied in the epilogue (the latent KV is never expanded). Takes an already projected, RoPE-rotated query. Lives in `library/kernels/mla/`, dispatched by the separate `dispatch.mla` registry (not `dispatch.attention`). gfx950 is a later phase. |

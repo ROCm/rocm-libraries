@@ -209,7 +209,8 @@ endif()
 
 # Library attention CPU tests (no GPU required): the gfx950 and gfx942 dense
 # additive-bias host contracts, gfx950 LDS budget model, dense block-order decodes,
-# the dense paged launch checks, spec-wrapper parity gate, the 3D decode split rule
+# the dense paged and paged varlen launch checks and i64 page bases, spec-wrapper
+# parity gate, the 3D decode split rule
 # and K/V cache policy, the scalar fallback's cache key and block-table stride
 # kernarg, the unified attention running-max carry and keyless guards on the
 # emitted IR, the tiled 2D LSE store on the emitted IR, the
@@ -246,9 +247,12 @@ set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_attention_dense_bias_gfx942.py"
     "tests/library/tests/test_attention_dense_bias_gfx950.py"
     "tests/library/tests/test_attention_dense_decode.py"
+    "tests/library/tests/test_attention_dense_bottom_right.py"
     "tests/library/tests/test_attention_dense_gfx942_golden.py"
     "tests/library/tests/test_attention_dense_gfx950_lds.py"
+    "tests/library/tests/test_attention_dense_paged_i64.py"
     "tests/library/tests/test_attention_dense_paged_launch.py"
+    "tests/library/tests/test_attention_dense_paged_varlen_launch.py"
     "tests/library/tests/test_attention_dense_gfx950_varlen_kv_bound.py"
     "tests/library/tests/test_attention_dense_spec_vectors.py"
     "tests/library/tests/test_attention_dense_gfx942_golden.py"
@@ -485,8 +489,8 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
 # tests/dispatch/attention DIRECTORY, not a file list, so a new file there runs
 # automatically; the RDNA WMMA spec tests and the unified LSE host contract sit
 # outside it and are named beside it.
-# The directory's GPU numerics file runs in rocke_library_gpu_pytest, so it is
-# ignored here. Same PYTHONPATH rule as the conv entry.
+# The directory's GPU numerics files run in the GPU entries, so they are ignored
+# here. Same PYTHONPATH rule as the conv entry.
 #
 # tests/dispatch/attention/ cannot shadow the real dispatch.attention package
 # because library/tests/conftest.py puts the library root ahead of the test
@@ -499,6 +503,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_unified_lse.py\""
        " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/dispatch/attention\""
        " --ignore \"${ROCKE_TEST_CTEST_REL}tests/library/tests/dispatch/attention/test_gfx1151_attention_dispatch_numeric.py\""
+       " --ignore \"${ROCKE_TEST_CTEST_REL}tests/library/tests/dispatch/attention/test_dense_paged_dispatch_numeric.py\""
        " -v -rs --timeout=60)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_attention_pytest PROPERTIES\n"
@@ -581,7 +586,7 @@ else()
          "  TIMEOUT 600)\n")
 endif()
 
-# Library attention GPU numeric tests (gfx950-specific; require a GPU).
+# Library attention GPU numeric tests (require a GPU).
 # Separate from the omnibus GPU suite so it can be targeted on its own when only
 # attention hardware is available. Select it by name (`ctest -R
 # rocke_library_attention_gpu_pytest`), not by label: the ROCKE_ENGINE YAML
@@ -591,7 +596,8 @@ endif()
 set(_ROCKE_LIBRARY_ATTENTION_GPU_TEST_RELPATHS
     "tests/library/tests/test_attention_dense_gfx950_numeric.py"
     "tests/library/tests/test_attn_tiled_2d_gfx950_fp8_k_lds_numeric.py"
-    "tests/library/tests/test_extended_parity_attention.py")
+    "tests/library/tests/test_extended_parity_attention.py"
+    "tests/library/tests/dispatch/attention/test_dense_paged_dispatch_numeric.py")
 set(_ROCKE_LIBRARY_ATTENTION_GPU_TESTS "")
 foreach(_rocke_attn_gpu_test ${_ROCKE_LIBRARY_ATTENTION_GPU_TEST_RELPATHS})
   string(APPEND _ROCKE_LIBRARY_ATTENTION_GPU_TESTS

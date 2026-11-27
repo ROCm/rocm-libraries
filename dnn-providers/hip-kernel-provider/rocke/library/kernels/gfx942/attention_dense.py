@@ -189,6 +189,7 @@ never sets a gfx942-private knob -- and every shape-only caller are unchanged.
 
 from __future__ import annotations
 
+from contextlib import nullcontext as _nullcontext
 from dataclasses import dataclass, field, fields as _dataclass_fields
 
 from rocke.core.ir import (
@@ -231,10 +232,14 @@ from kernels.common.attention_dense_spec import (
 from kernels.gfx942.attention_tiled_2d import _mfma_32x32_c_row, _mfma_32x32_c_col
 from kernels.common._attention_dense_paged import (
     declare_paged_params,
-    paged_cache_bytes,
+    paged_cache_bytes_ir,
+    paged_page_bytes_ir,
     paged_kv_row,
+    paged_in_page_row,
     paged_launch_args,
     paged_seq_setup,
+    paged_v_tail_offset,
+    paged_wave_page_rsrc,
     paged_wave_row_base,
     validate_paged_launch,
 )
@@ -577,6 +582,8 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
     def __post_init__(self) -> None:
         super().__post_init__()
         require_bool("emit_lse", self.emit_lse)
+        if self.emit_lse and self.paged and self.varlen:
+            raise ValueError("emit_lse is not yet supported with paged varlen")
         # Reject, never coerce: bool("false") is True, so a truthiness read would
         # silently build the CFVST kernel the caller asked to turn off.
         if self.use_cfvst is not None and type(self.use_cfvst) is not bool:
@@ -609,7 +616,7 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
     def resolved_use_cfvst(self) -> bool:
         """Resolved conflict-free-V decision (``None`` -> :func:`default_use_cfvst`)."""
         if self.use_cfvst is None:
-            return default_use_cfvst(self.head_size, self.dtype, self.paged)
+            return default_use_cfvst(self.head_size, self.dtype)
         return bool(self.use_cfvst)
 
     def resolved_v_row_pad(self) -> int:
@@ -618,7 +625,7 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
         Read by both the builder's ``V_lds`` alloc and the :func:`_lds_bytes` budget, so
         the two cannot drift."""
         if self.v_row_pad is None:
-            return _v_row_pad(self.head_size, self.dtype, self.block_n, self.paged)
+            return _v_row_pad(self.head_size, self.dtype, self.block_n)
         return int(self.v_row_pad)
 
     def resolved_use_v_swizzle(self) -> bool:
@@ -629,7 +636,7 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
         if not self.resolved_use_cfvst():
             return False
         if self.use_v_swizzle is None:
-            return _use_v_swizzle(self.head_size, self.dtype, self.paged)
+            return _use_v_swizzle(self.head_size, self.dtype)
         return bool(self.use_v_swizzle)
 
     def resolved_use_exp2_fast(self) -> bool:
@@ -673,11 +680,13 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
         block, the window and the runtime trip count, and the epilogue zeroes the rows
         that see no key from the runtime ``seqlen_kv``, so a window needs no
         window-specific per-shape guard ahead of the cache lookup.
-        ``paged`` takes the baked path, as on the gfx950 twin: the K/V buffer bound
-        is the whole page cache, baked from ``num_kv_blocks``. ``ragged``/``varlen``
-        never reach the builder (:func:`supports_attention_dense` rejects them) but
-        stay in the predicate, identical to the gfx950 twin, so a later admit lands
-        already excluded.
+        ``paged`` is on it too, single- and multi-sequence: the K/V bound (the whole
+        page cache, or the i64 page clamp) reads the ``num_kv_blocks`` kernarg, and
+        packed varlen reads each sequence's lengths from ``cu_seqlens_q`` and
+        ``kv_lens`` (the spec's seqlens are maxima that size only the grid).
+        ``ragged`` never reaches the builder (:func:`supports_attention_dense` rejects
+        it) and ``varlen`` only with ``paged``, but both stay in the predicate,
+        identical to the gfx950 twin, so a later admit lands already excluded.
 
         Every other knob that forks the body -- :func:`default_use_exp2_fast`
         included -- is a function of compile-time config only, never of the problem
@@ -685,7 +694,7 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
         that way: a policy that reads a shape field would make two shapes share a
         cache key AND a kernel name while lowering to different IR, which neither the
         name assert nor this predicate can catch."""
-        return not (self.ragged or self.varlen or self.paged)
+        return not (self.ragged or (self.varlen and not self.paged))
 
     @property
     def runtime_param_fields(self) -> tuple[str, ...]:
@@ -700,10 +709,12 @@ class Gfx942AttentionDenseSpec(AttentionDenseSpec):
         which drops ``sq``/``sk`` (via :meth:`_shape_name_parts`), ``hq``/``kv`` (via
         :meth:`_head_name_parts`) and ``b{batch}`` for exactly this tuple. A field
         declared here but still baked anywhere would be a cache collision serving one
-        shape's binary to another."""
+        shape's binary to another. Paged adds ``num_kv_blocks``, the cache size, whose
+        ``nb`` name token the shared name drops with the shape tokens."""
         if not self.runtime_shape:
             return ()
-        return ("batch", "seqlen_q", "seqlen_kv", "num_query_heads", "num_kv_heads")
+        fields = ("batch", "seqlen_q", "seqlen_kv", "num_query_heads", "num_kv_heads")
+        return fields + ("num_kv_blocks",) if self.paged else fields
 
     def _shape_name_parts(self) -> tuple[str, ...]:
         return () if self.runtime_shape else super()._shape_name_parts()
@@ -827,15 +838,14 @@ def _tuning_name_tags(spec: "Gfx942AttentionDenseSpec") -> str:
     if spec.lds_row_pad != _DEFAULT_LDS_ROW_PAD:
         parts.append(f"krowpad{spec.lds_row_pad}")
     vp = spec.resolved_v_row_pad()
-    if vp != _v_row_pad(spec.head_size, spec.dtype, spec.block_n, spec.paged):
+    if vp != _v_row_pad(spec.head_size, spec.dtype, spec.block_n):
         parts.append(f"vrowpad{vp}")
     cfvst = spec.resolved_use_cfvst()
-    if cfvst != default_use_cfvst(spec.head_size, spec.dtype, spec.paged):
+    if cfvst != default_use_cfvst(spec.head_size, spec.dtype):
         parts.append("cfvst1" if cfvst else "cfvst0")
     swz = spec.resolved_use_v_swizzle()
     if swz != (
-        spec.resolved_use_cfvst()
-        and default_use_cfvst(spec.head_size, spec.dtype, spec.paged)
+        spec.resolved_use_cfvst() and default_use_cfvst(spec.head_size, spec.dtype)
     ):
         parts.append("vswz1" if swz else "vswz0")
     e2f = spec.resolved_use_exp2_fast()
@@ -961,7 +971,7 @@ def default_use_exp2_fast(head_size: int, dtype: str, persistent: bool) -> bool:
     return True
 
 
-def default_use_cfvst(head_size: int, dtype: str, paged: bool = False) -> bool:
+def default_use_cfvst(head_size: int, dtype: str) -> bool:
     """Whether to feed V through the P1 conflict-free perm_b32 store-path transpose.
 
     D128 only (both dtypes). Measured on gfx942:
@@ -973,12 +983,11 @@ def default_use_cfvst(head_size: int, dtype: str, paged: bool = False) -> bool:
         LLVM 23), and replaces the naive path's 128 element-wise ds_read_u16 per tile
         with 32 ds_read_b64, as on fp16.
     Gate on rows-per-DMA == 1 (D128) so the LDS budget and the body agree.
-    Never for paged K/V: the cfvst V loads are per thread across the whole tile, so
-    they would need their own block-table lookups; paged V takes the async DMA path,
-    with the same per-wave page lookup as K.
+    Paged K/V too: its loader gives each wave the rows of its async K copy, so one
+    block-table lookup per wave serves them.
     """
     del dtype  # both 2-byte dtypes take the same transposed-V path
-    return _rows_per_instr(head_size) == 1 and not paged
+    return _rows_per_instr(head_size) == 1
 
 
 def _use_bias_x4(spec: "Gfx942AttentionDenseSpec") -> bool:
@@ -1085,13 +1094,13 @@ def _v_swizzle_width(block_n: int) -> int:
     return max(64, 1 << (block_n - 1).bit_length())
 
 
-def _use_v_swizzle(head_size: int, dtype: str, paged: bool) -> bool:
+def _use_v_swizzle(head_size: int, dtype: str) -> bool:
     """Policy for the V^T bank-conflict swizzle: rides the :func:`default_use_cfvst` gate,
     since only the transposed-V (D128) store has a V_lds to swizzle."""
-    return default_use_cfvst(head_size, dtype, paged)
+    return default_use_cfvst(head_size, dtype)
 
 
-def _v_row_pad(head_size: int, dtype: str, block_n: int, paged: bool) -> int:
+def _v_row_pad(head_size: int, dtype: str, block_n: int) -> int:
     """V^T row (token-axis) pad, in elements, on the cfvst path (D128); 8 (no
     swizzle, original layout) everywhere else. On the cfvst path the row is widened to
     :func:`_v_swizzle_width` so the XOR swizzle (``col' = key ^ ((dim & (V_LDROW//4-1))
@@ -1104,7 +1113,7 @@ def _v_row_pad(head_size: int, dtype: str, block_n: int, paged: bool) -> int:
     separate, independently-sweepable decision (:meth:`resolved_use_v_swizzle`), so the
     pad value and the swizzle no longer silently toggle each other.
     """
-    if not default_use_cfvst(head_size, dtype, paged):
+    if not default_use_cfvst(head_size, dtype):
         return 8
     return _v_swizzle_width(block_n) - block_n
 
@@ -1272,8 +1281,9 @@ def supports_attention_dense(
     non-power-of-2 groups, causal or full, the default grid AND the P4 persistent
     grid-stride variant, ``block_n`` dividing the ``block_m`` query tile, within the
     LDS budget and 32-bit addressing, sliding-window (KV-loop prune + window mask), and
-    attention sinks (alone or with sliding-window). varlen / ragged are later
-    follow-ups (rejected below).
+    attention sinks (alone or with sliding-window), and paged K/V (sinks included),
+    one sequence or packed varlen sequences. Contiguous varlen and ragged are later follow-ups
+    (rejected below).
     """
     if arch != "gfx942":
         return False, f"kernels.gfx942.attention_dense is gfx942-only (got {arch})"
@@ -1282,9 +1292,10 @@ def supports_attention_dense(
     # returning the structured rejection the contract promises.
     if not isinstance(spec, AttentionDenseSpec):
         return False, f"spec must be an AttentionDenseSpec, got {type(spec).__name__}"
-    # Bottom-right causal shifts the diagonal by seqlen_kv - seqlen_q (a runtime value
-    # on the runtime-shape path). Only the plain causal band has that shifted form:
-    # the window prune is anchored on the top-left diagonal.
+    # Bottom-right causal shifts the diagonal by seqlen_kv - seqlen_q (a runtime
+    # value on the runtime-shape path; under paged varlen each sequence's own).
+    # Only the plain causal band has that shifted form: the window prune is
+    # anchored on the top-left diagonal.
     if spec.causal_bottom_right and spec.sliding_window:
         return False, (
             "gfx942 attention_dense: causal_bottom_right is not supported with "
@@ -1331,8 +1342,10 @@ def supports_attention_dense(
     # W = (Sq // block_m) * Hq * B floors); ragged (the ceil case) is rejected
     # just below, and the seqlen_q check under "Tuning struct" then makes the floor
     # exact for every spec that reaches the persistent builder.
-    if spec.varlen:
-        return False, "gfx942 attention_dense: varlen not yet supported"
+    if spec.varlen and not spec.paged:
+        return False, (
+            "gfx942 attention_dense: varlen is only supported with paged K/V"
+        )
     if spec.ragged:
         # The factory sets ragged for any graph whose lengths leave a partial tile;
         # name the length and the tile rather than calling an ordinary graph ragged.
@@ -1342,8 +1355,8 @@ def supports_attention_dense(
         )
     # sliding_window is supported (KV-loop prune + window mask); the shared spec
     # __post_init__ re-run above enforces its constraints (W % block_n, causal).
-    # use_sinks is supported here (m/l seed per work item). The shared __post_init__
-    # still rejects it combined with paged or varlen.
+    # use_sinks is supported here (m/l seed per work item), paged K/V included;
+    # contiguous varlen is refused above.
     # use_additive_bias runs on both grids. It is refused where the body cannot honour
     # it: the KV-segment store returns before the epilogue that zeroes a row with no
     # live key, paged K/V has no bias-indexing rule, and the opt-in KDB/VPF pipeline
@@ -1394,7 +1407,8 @@ def supports_attention_dense(
     # Q is read with a plain global_load_vN (no buffer bound), and the epilogue stores
     # the same rows, so a query tile that runs past seqlen_q reads and writes out of
     # bounds. Implied by the dataclass (seqlen_q % 256 == 0) at the default block_m.
-    if spec.seqlen_q % spec.block_m != 0:
+    # Paged varlen clamps its Q rows and guards its store per sequence instead.
+    if spec.seqlen_q % spec.block_m != 0 and not spec.varlen:
         return False, (
             f"seqlen_q={spec.seqlen_q} must be a multiple of "
             f"block_m={spec.block_m}: the last query tile would otherwise "
@@ -1425,14 +1439,7 @@ def supports_attention_dense(
     # packed async-DMA layout the naive path relies on. Turning cfvst OFF is always
     # legal (it is the naive path), so only the ON direction is gated. See
     # default_use_cfvst.
-    if spec.resolved_use_cfvst() and not default_use_cfvst(
-        spec.head_size, spec.dtype, spec.paged
-    ):
-        if spec.paged:
-            return False, (
-                "use_cfvst=True is rejected with paged K/V: the conflict-free-V "
-                "loader has no block-table lookup -- see default_use_cfvst"
-            )
+    if spec.resolved_use_cfvst() and not default_use_cfvst(spec.head_size, spec.dtype):
         return False, (
             f"use_cfvst=True is rejected at D{spec.head_size}/{spec.dtype}: "
             f"the conflict-free-V store is measured-negative there (D64 is VGPR-bound "
@@ -1456,6 +1463,7 @@ def supports_attention_dense(
     # the other tile sizes have not been validated for these pipeline modes.
     if (_use_kdb(spec) or _use_vpf(spec)) and not (
         spec.persistent
+        and not spec.paged  # the pipelined V loader has no block-table lookup
         and bf16_cfvst_supported(spec)
         and spec.resolved_use_cfvst()
         and spec.block_n == 64
@@ -1463,7 +1471,7 @@ def supports_attention_dense(
         return False, (
             "NOT_YET_IMPLEMENTED: lds_num_buffers=2 or v_reg_prefetch=True requires "
             "persistent=True, bf16 D128 top-left causal CFVST at block_n=64, without "
-            "sliding_window or sinks"
+            "sliding_window, sinks or paged K/V"
         )
     if spec.iglp_mode not in (0, 1):
         return False, f"iglp_mode must be 0 or 1, got {spec.iglp_mode}"
@@ -1699,6 +1707,7 @@ def _build_attention_dense_single_buffer(
         rt = {f: b.param(f, I32) for f in spec.runtime_kernarg_fields}
         batch_p, seqlen_q_p, seqlen_kv_p = rt["batch"], rt["seqlen_q"], rt["seqlen_kv"]
         hq_p, hkv_p = rt["num_query_heads"], rt["num_kv_heads"]
+        num_kv_blocks_p = rt.get("num_kv_blocks")
         # Uniform (SGPR) values, computed once: the token strides feed per-lane
         # address math inside the KV loop, the GQA ratio one divide per CTA.
         gqa_p = b.div(hq_p, hkv_p)
@@ -1723,6 +1732,13 @@ def _build_attention_dense_single_buffer(
     if spec.use_sinks:
         sinks = b.param(
             "sink_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
+        )
+    # Packed sequences (paged only, see supports_attention_dense): per-sequence Q
+    # offsets; each sequence's KV length is its kv_lens entry.
+    varlen = spec.varlen
+    if varlen:
+        cu_q = b.param(
+            "cu_seqlens_q", PtrType(I32, "global"), noalias=True, readonly=True, align=4
         )
     block_tables = kv_lens = bt_stride = None
     if spec.paged:
@@ -1840,7 +1856,15 @@ def _build_attention_dense_single_buffer(
     # Bottom-right causal: query row q sees keys k <= q + (seqlen_kv - seqlen_q).
     # The offset is read from the shape params on the runtime-shape path, so one
     # binary serves every chunk length. Off (plain top-left causal) emits nothing.
+    # Under (paged) varlen the spec lengths are only maxima, so each sequence's
+    # own kv_len - q_len is read at run time instead (BR_RUNTIME).
     BR = causal and spec.causal_bottom_right
+    BR_RUNTIME = BR and spec.varlen
+    # Top-left paged varlen: a row past its sequence's kv_len reaches the partial
+    # last KV tile, whose keys past kv_len causal no longer hides (it does only for
+    # q_len <= kv_len). The causal bound is clamped to kv_len - 1 and that tile kept
+    # out of the phases without the causal mask.
+    KV_CLAMP = causal and spec.varlen and not BR
 
     def _diag_off():
         if spec.runtime_shape:
@@ -1877,14 +1901,28 @@ def _build_attention_dense_single_buffer(
     # valid reads for a larger one (buffer loads past num_records return 0 with no
     # fault). The baked branch keeps const_i32(B*Skv*...) verbatim.
     _kv_elem_bytes = Hkv * D * 2
-    if spec.runtime_shape:
+    PAGED_I64 = spec.paged and spec.use_i64_kv_addr
+    if spec.paged:
+        # Paged is runtime-shape only: the cache size is the num_kv_blocks kernarg.
+        if not spec.runtime_shape:
+            raise ValueError("paged K/V needs the runtime-shape body")
+        page_bytes = paged_page_bytes_ir(
+            b, spec.block_size, b.mul(hkv_p, b.const_i32(D * 2))
+        )
+    if PAGED_I64:
+        # One resource per page, built per wave and tile in _async_load: the whole
+        # cache is past what an i32 num_records and voffset can address.
+        k_rsrc = v_rsrc = None
+        page_bounds = (num_kv_blocks_p, page_bytes)
+    elif spec.paged:
+        # The whole cache: any page id the table can name is in range.
+        cache_bytes = paged_cache_bytes_ir(b, num_kv_blocks_p, page_bytes)
+        k_rsrc = b.buffer_rsrc(k, cache_bytes)
+        v_rsrc = b.buffer_rsrc(v, cache_bytes)
+    elif spec.runtime_shape:
         kv_bytes = b.mul(b.mul(b.mul(batch_p, seqlen_kv_p), hkv_p), b.const_i32(D * 2))
         k_rsrc = b.buffer_rsrc(k, kv_bytes)
         v_rsrc = b.buffer_rsrc(v, kv_bytes)
-    elif spec.paged:
-        # One num_records node per rsrc, as in the baked branch below.
-        k_rsrc = b.buffer_rsrc(k, b.const_i32(paged_cache_bytes(spec)))
-        v_rsrc = b.buffer_rsrc(v, b.const_i32(paged_cache_bytes(spec)))
     else:
         k_rsrc = b.buffer_rsrc(k, b.const_i32(B * Skv * _kv_elem_bytes))
         v_rsrc = b.buffer_rsrc(v, b.const_i32(B * Skv * _kv_elem_bytes))
@@ -2017,27 +2055,44 @@ def _build_attention_dense_single_buffer(
         it ``None`` and takes the one divide per CTA here."""
         if hkv is None:
             hkv = b.div(hq, gqa_p if spec.runtime_shape else b.const_i32(gqa))
-        diag_off = _diag_off() if BR else None
+        diag_off = _diag_off() if BR and not BR_RUNTIME else None
         q_tok0 = b.add(b.mul(qb, b.const_i32(BLOCK_M)), b.mul(wave, b.const_i32(32)))
-        # NOT hoisted into a local shared with o_base below: the IR builder is
-        # side-effecting, so `b.const_i32(Sq)` EMITS a node at the point it is
-        # written. Hoisting moves that node earlier and lets the second use CSE
-        # away -- semantically identical, but it renumbers every SSA value after it
-        # and moves the golden hashes of any baked path. Emit in place on the baked
-        # branch.
-        q_base = b.add(
-            b.mul(
-                b.mul(bt, seqlen_q_p if spec.runtime_shape else b.const_i32(Sq)),
-                _stride_q(),
-            ),
-            b.mul(hq, b.const_i32(D)),
-        )
+        if varlen:
+            # Per-sequence token base from cu_seqlens_q; early-exit q-blocks past
+            # this sequence's length (packed [total_tok, H, D] layout).
+            q_seq0 = b.global_load_i32(cu_q, bt)
+            q_seq1 = b.global_load_i32(cu_q, b.add(bt, b.const_i32(1)))
+            seqlen_q_b = b.sub(q_seq1, q_seq0)
+            with b.scf_if(b.cmp_ge(b.mul(qb, b.const_i32(BLOCK_M)), seqlen_q_b)):
+                b.ret()
+            q_base = b.add(b.mul(q_seq0, _stride_q()), b.mul(hq, b.const_i32(D)))
+        else:
+            # NOT hoisted into a local shared with o_base below: the IR builder is
+            # side-effecting, so `b.const_i32(Sq)` EMITS a node at the point it is
+            # written. Hoisting moves that node earlier and lets the second use CSE
+            # away -- semantically identical, but it renumbers every SSA value after
+            # it and moves the golden hashes of any baked path. Emit in place on the
+            # baked branch.
+            q_base = b.add(
+                b.mul(
+                    b.mul(bt, seqlen_q_p if spec.runtime_shape else b.const_i32(Sq)),
+                    _stride_q(),
+                ),
+                b.mul(hq, b.const_i32(D)),
+            )
         if spec.paged:
             # The block table places the sequence's keys; no batch term.
             k_base = b.mul(hkv, b.const_i32(D))
-            _pg_seq_base, _pg_n_pages = paged_seq_setup(
+            _pg_seq_base, _pg_n_pages, _pg_kv_len = paged_seq_setup(
                 b, bt, kv_lens, bt_stride, spec.block_size
             )
+            if varlen:
+                seqlen_kv_b = _pg_kv_len
+            if BR_RUNTIME:
+                # The host checks q_len <= kv_len per sequence under bottom-right,
+                # so the shift is non-negative and the tile divides below round
+                # like shifts.
+                diag_off = b.sub(seqlen_kv_b, seqlen_q_b)
         else:
             k_base = b.add(
                 b.mul(
@@ -2053,13 +2108,30 @@ def _build_attention_dense_single_buffer(
         # relative error per element (bf16), and the score error it causes grows
         # with the scale.
         q_tok = b.add(q_tok0, lane_m)
+        q_row = q_tok
+        if varlen:
+            # The sequence's tail rows (output dropped) re-read its last row, so the
+            # last sequence never reads past the packed Q. Not a bounded buffer load
+            # as on gfx950: here that form spills at fp16 D128, while the clamped row
+            # is shared with the O store address below.
+            q_row = b.smin(q_tok, b.sub(seqlen_q_b, b.const_i32(1)))
         q_packs = []
         for ks in range(K_STEPS):
             col = b.add(b.const_i32(ks * 8), d_base)
-            addr = b.add(b.add(q_base, b.mul(q_tok, _stride_q())), col)
+            addr = b.add(b.add(q_base, b.mul(q_row, _stride_q())), col)
             q_packs.append(b.global_load_vN(q, addr, dtype, 4, align=8))
 
-        def _async_load(rsrc, lds_base, tile_key0, group_pad=False, kbuf=None):
+        def _async_load(
+            src,
+            rsrc,
+            lds_base,
+            tile_key0,
+            group_pad=False,
+            kbuf=None,
+            tail_len=None,
+        ):
+            """Async DMA one K/V tile into LDS. With ``tail_len``, keys at or past
+            it copy zeros (:func:`paged_v_tail_offset`)."""
             # Only the pipelined K path passes kbuf; the default emission is
             # unchanged (no extra IR operations and the same LDS addresses).
             buf_off = (
@@ -2067,7 +2139,18 @@ def _build_attention_dense_single_buffer(
                 if kbuf is not None
                 else None
             )
-            if spec.paged:
+            if PAGED_I64:
+                rsrc = paged_wave_page_rsrc(
+                    b,
+                    src,
+                    block_tables,
+                    _pg_seq_base,
+                    _pg_n_pages,
+                    b.add(tile_key0, b.mul(wave, b.const_i32(ROWS_PER_WAVE))),
+                    spec.block_size,
+                    page_bounds,
+                )
+            elif spec.paged:
                 # A wave's rows of the tile sit in one page (spec paged
                 # validation): one block-table lookup per wave.
                 _wphys_base = paged_wave_row_base(
@@ -2087,17 +2170,18 @@ def _build_attention_dense_single_buffer(
                     row_base = b.smem_ptr_add(lds_base, row_lds_off)
                     gkey = b.add(tile_key0, row)
                     gcol = b.mul(lane, b.const_i32(2))
-                    if spec.paged:
+                    if PAGED_I64:
+                        kv_row = paged_in_page_row(b, gkey, spec.block_size)
+                    elif spec.paged:
                         kv_row = paged_kv_row(b, _wphys_base, gkey, spec.block_size)
                     else:
                         kv_row = gkey
                     voff = b.add(b.add(k_base, b.mul(kv_row, _stride_k())), gcol)
+                    voff_bytes = b.mul(voff, b.const_i32(2))
+                    if tail_len is not None:
+                        voff_bytes = paged_v_tail_offset(b, voff_bytes, gkey, tail_len)
                     b.async_buffer_load_lds_addr(
-                        rsrc,
-                        row_base,
-                        b.mul(voff, b.const_i32(2)),
-                        zero_soff,
-                        _DMA_DWORDS,
+                        rsrc, row_base, voff_bytes, zero_soff, _DMA_DWORDS
                     )
             else:
                 lanes_per_row = D // 2
@@ -2129,16 +2213,18 @@ def _build_attention_dense_single_buffer(
                             b.mul(row0, b.const_i32(K_LDROW_BYTES)), I64
                         )
                     row_base = b.smem_ptr_add(lds_base, row_lds_off)
-                    gkey = b.add(b.add(tile_key0, row0), sub_row)
-                    if spec.paged:
+                    key = b.add(b.add(tile_key0, row0), sub_row)
+                    gkey = key
+                    if PAGED_I64:
+                        gkey = paged_in_page_row(b, gkey, spec.block_size)
+                    elif spec.paged:
                         gkey = paged_kv_row(b, _wphys_base, gkey, spec.block_size)
                     voff = b.add(b.add(k_base, b.mul(gkey, _stride_k())), col)
+                    voff_bytes = b.mul(voff, b.const_i32(2))
+                    if tail_len is not None:
+                        voff_bytes = paged_v_tail_offset(b, voff_bytes, key, tail_len)
                     b.async_buffer_load_lds_addr(
-                        rsrc,
-                        row_base,
-                        b.mul(voff, b.const_i32(2)),
-                        zero_soff,
-                        _DMA_DWORDS,
+                        rsrc, row_base, voff_bytes, zero_soff, _DMA_DWORDS
                     )
 
         def load_tile(tile_idx):
@@ -2147,14 +2233,20 @@ def _build_attention_dense_single_buffer(
             # conflict-free read). Naive (D64): K and V both via async DMA, natural
             # [token, dim].
             tk0 = b.mul(tile_idx, b.const_i32(BN))
-            _async_load(k_rsrc, K_lds_addr, tk0, group_pad=KPAD_D64)
+            _async_load(k, k_rsrc, K_lds_addr, tk0, group_pad=KPAD_D64)
             if not USE_CFVST:
-                _async_load(v_rsrc, V_lds_addr, tk0)
+                _async_load(
+                    v,
+                    v_rsrc,
+                    V_lds_addr,
+                    tk0,
+                    tail_len=_pg_kv_len if varlen else None,
+                )
 
         def load_pipeline_k(kbuf, tile_idx):
             """Issue K(tile_idx) DMA into the selected K LDS slot."""
             tk0 = b.mul(tile_idx, b.const_i32(BN))
-            _async_load(k_rsrc, K_lds_addr, tk0, kbuf=kbuf)
+            _async_load(k, k_rsrc, K_lds_addr, tk0, kbuf=kbuf)
 
         def _cfvst_load_v(tile_idx):
             """Issue the cfvst VMEM loads and keep each thread's V tile in VGPRs.
@@ -2164,6 +2256,8 @@ def _build_attention_dense_single_buffer(
             the contiguous dim pair ``(d0, d0+1)``. Loads go through ``v_rsrc`` so an
             out-of-range token is hardware-clamped to 0 (matches the async path)."""
             tile_tok0 = b.mul(tile_idx, b.const_i32(BN))
+            if spec.paged:
+                return _cfvst_load_v_paged(tile_tok0)
             payload = []
             for it in range(V_ITEMS):
                 blk = b.add(b.mul(b.const_i32(it), b.const_i32(THREADS)), tid)
@@ -2185,6 +2279,62 @@ def _build_attention_dense_single_buffer(
                     v_rsrc, b.mul(eoff1, b.const_i32(2)), zero_soff, dtype, 2
                 )
                 payload.append((d0, t0, b.bitcast(x0, I32), b.bitcast(x1, I32)))
+            return payload
+
+        def _cfvst_load_v_paged(tile_tok0):
+            """:func:`_cfvst_load_v` for paged K/V.
+
+            Wave ``w`` loads the tile's keys ``[w * ROWS_PER_WAVE, (w + 1) *
+            ROWS_PER_WAVE)``, two per item (``2 * V_ITEMS == ROWS_PER_WAVE`` at
+            D128), with the lane as the dim pair. Those are the rows its async K copy
+            takes, so they sit in one page (spec paged validation) and one block-table
+            lookup per wave serves them, instead of one per thread and item. Paged
+            varlen zeroes V past the sequence's ``kv_len``
+            (:func:`paged_v_tail_offset`)."""
+            if V_DIM_PAIRS != 64:
+                raise ValueError("paged cfvst V needs one dim pair per lane (D=128)")
+            w_row0 = b.mul(wave, b.const_i32(ROWS_PER_WAVE))
+            wave_key0 = b.add(tile_tok0, w_row0)
+            rsrc = v_rsrc
+            if PAGED_I64:
+                rsrc = paged_wave_page_rsrc(
+                    b,
+                    v,
+                    block_tables,
+                    _pg_seq_base,
+                    _pg_n_pages,
+                    wave_key0,
+                    spec.block_size,
+                    page_bounds,
+                )
+            else:
+                row_base = paged_wave_row_base(
+                    b,
+                    block_tables,
+                    _pg_seq_base,
+                    _pg_n_pages,
+                    wave_key0,
+                    spec.block_size,
+                )
+            d0 = b.mul(lane, b.const_i32(2))
+            payload = []
+            for it in range(V_ITEMS):
+                t0 = b.add(w_row0, b.const_i32(2 * it))
+                xs = []
+                gk0 = b.add(tile_tok0, t0)
+                gks = (gk0, b.add(gk0, b.const_i32(1)))
+                for gk in gks:
+                    if PAGED_I64:
+                        row = paged_in_page_row(b, gk, spec.block_size)
+                    else:
+                        row = paged_kv_row(b, row_base, gk, spec.block_size)
+                    eoff = b.add(b.add(k_base, b.mul(row, _stride_k())), d0)
+                    off = b.mul(eoff, b.const_i32(2))
+                    if varlen:
+                        off = paged_v_tail_offset(b, off, gk, _pg_kv_len)
+                    x = b.buffer_load_vN(rsrc, off, zero_soff, dtype, 2)
+                    xs.append(b.bitcast(x, I32))
+                payload.append((d0, t0, xs[0], xs[1]))
             return payload
 
         def _cfvst_load_v_pipeline(tile_idx):
@@ -2284,13 +2434,16 @@ def _build_attention_dense_single_buffer(
             if BR:
                 query_tok = b.add(query_tok, diag_off)
             win_lo = b.sub(query_tok, b.const_i32(SW)) if lower else None
+            up_tok = query_tok
+            if KV_CLAMP:
+                up_tok = b.smin(up_tok, b.sub(seqlen_kv_b, b.const_i32(1)))
             for nsub in range(N_SUB):
                 sub_base = b.add(tile_key0, b.const_i32(nsub * 32))
                 for i in range(16):
                     ktok = b.add(sub_base, _mfma_32x32_c_row(b, lane, i))
                     if upper:
                         s_reg[nsub][i] = b.select(
-                            b.cmp_le(ktok, query_tok), s_reg[nsub][i], neg_inf
+                            b.cmp_le(ktok, up_tok), s_reg[nsub][i], neg_inf
                         )
                     if lower:
                         s_reg[nsub][i] = b.select(
@@ -2303,11 +2456,16 @@ def _build_attention_dense_single_buffer(
         # BN is a power of two, so the runtime divide lowers to a shift. The causal
         # clamp below needs no further edit -- it consumes n_ktiles_c, so converting
         # the trip count carries it.
-        n_ktiles_c = (
-            b.div(seqlen_kv_p, b.const_i32(BN))
-            if spec.runtime_shape
-            else b.const_i32(n_ktiles)
-        )
+        if varlen:
+            # Ceil: the partial last tile is visited; the upper mask drops its keys
+            # past kv_len (KV_CLAMP; bottom-right rows never reach them).
+            n_ktiles_c = b.div(b.add(seqlen_kv_b, b.const_i32(BN - 1)), b.const_i32(BN))
+        else:
+            n_ktiles_c = (
+                b.div(seqlen_kv_p, b.const_i32(BN))
+                if spec.runtime_shape
+                else b.const_i32(n_ktiles)
+            )
         if BR:
             # Last visible key of the block is qb*BLOCK_M + BLOCK_M - 1 + diag_off;
             # ceil it to a KV-tile count (all terms are non-negative).
@@ -2327,6 +2485,14 @@ def _build_attention_dense_single_buffer(
             n_up = b.select(b.cmp_lt(n_up, n_ktiles_c), n_up, n_ktiles_c)
         else:
             n_up = n_ktiles_c
+
+        def _below_kv_tail(tile):
+            """``tile`` capped at the first KV tile that holds a key past kv_len,
+            for the bounds of the phases without the causal mask."""
+            if not KV_CLAMP:
+                return tile
+            full = b.div(seqlen_kv_b, b.const_i32(BN))
+            return b.select(b.cmp_lt(tile, full), tile, full)
 
         # start_tile: sliding-window lower bound on the KV loop. Tiles fully below
         # the window (< diag_start - Wt) are all -inf, so the loop skips them. Uses
@@ -2737,7 +2903,7 @@ def _build_attention_dense_single_buffer(
                 # publishes K/V tile j+1 across the loop transition, and the
                 # final tile remains safely masked even when it is below the
                 # diagonal (e.g. seqlen_kv < seqlen_q).
-                diag_start = b.mul(qb, b.const_i32(n_per))
+                diag_start = _below_kv_tail(b.mul(qb, b.const_i32(n_per)))
                 body_upper = b.select(b.cmp_lt(diag_start, last_j), diag_start, last_j)
                 body = b.scf_for_iter(
                     zero,
@@ -2799,7 +2965,7 @@ def _build_attention_dense_single_buffer(
                     b.const_i32(BN),
                 )
             else:
-                diag_start = b.mul(qb, b.const_i32(n_per))
+                diag_start = _below_kv_tail(b.mul(qb, b.const_i32(n_per)))
             if KVS > 1:
                 body_lower = loop_lo
                 body_upper = b.select(
@@ -2855,9 +3021,10 @@ def _build_attention_dense_single_buffer(
                 return b.select(b.cmp_lt(x, hi), x, hi)  # min(x, hi)
 
             mid_lo = _clamp(left_end, start_tile, n_up)
-            mid_hi = _clamp(diag_start, mid_lo, n_up)
+            mid_hi = _clamp(_below_kv_tail(diag_start), mid_lo, n_up)
+            # The window-edge tiles can hold the partial last KV tile too.
             phases = (
-                ("kl", start_tile, mid_lo, True, False),
+                ("kl", start_tile, mid_lo, True, KV_CLAMP),
                 ("km", mid_lo, mid_hi, False, False),
                 ("kt", mid_hi, n_up, False, True),
             )
@@ -2943,28 +3110,43 @@ def _build_attention_dense_single_buffer(
             if not spec.emit_lse:
                 rcp_zero = b.const_f32(0.0)
                 rcp_l = b.select(bias_row_live, rcp_l, rcp_zero)
-        o_base = b.add(
-            b.mul(
-                b.mul(bt, seqlen_q_p if spec.runtime_shape else b.const_i32(Sq)),
-                _stride_q(),
-            ),
-            b.mul(hq, b.const_i32(D)),
-        )
+        if varlen:
+            o_base = b.add(b.mul(q_seq0, _stride_q()), b.mul(hq, b.const_i32(D)))
+        else:
+            o_base = b.add(
+                b.mul(
+                    b.mul(bt, seqlen_q_p if spec.runtime_shape else b.const_i32(Sq)),
+                    _stride_q(),
+                ),
+                b.mul(hq, b.const_i32(D)),
+            )
         qtok = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
-        q_row_byte = b.add(o_base, b.mul(qtok, _stride_q()))
+        # Varlen: q_row is this lane's clamped Q row (the C column is lane % 32 like
+        # lane_m); the guard below drops the clamped tail rows.
+        q_row_byte = b.add(o_base, b.mul(q_row if varlen else qtok, _stride_q()))
         d_half = b.mul(lane_h, b.const_i32(4))
         # A sliding window can leave the last query rows (seqlen_q - seqlen_kv >= SW)
         # with no key at all. Their running max never leaves the finite mask sentinel,
         # so every masked score exps to 1 and O is mean(V); a zero-trip KV loop leaves
         # l == 0 and 0 * rcp(0) is NaN. Those rows are zeroed in the O store with the
         # same predicate and integer AND the LSE path uses. Sinks seed l = 1 and P = 0,
-        # so their keyless rows are already 0. Specs without a window emit no new IR.
+        # so their keyless rows are already 0. Specs without a window emit no new IR,
+        # except top-left paged varlen: its runtime lengths can leave a row without
+        # keys (kv_len 0, or a window past the sequence's last key), so it reads each
+        # sequence's own kv_len. Bottom-right has q_len <= kv_len: no such row.
         row_has_key = None
-        if spec.emit_lse or (SW and not spec.use_sinks):
+        paged_keyless = varlen and not spec.causal_bottom_right
+        if spec.emit_lse or (SW and not spec.use_sinks) or paged_keyless:
+            if varlen:
+                row_kv_len = seqlen_kv_b
+            elif spec.runtime_shape:
+                row_kv_len = seqlen_kv_p
+            else:
+                row_kv_len = b.const_i32(Skv)
             row_has_key = dense_row_has_key(
                 b,
                 qtok,
-                seqlen_kv_p if spec.runtime_shape else b.const_i32(Skv),
+                row_kv_len,
                 causal=causal,
                 diagonal=0,
                 window=SW,
@@ -2995,18 +3177,22 @@ def _build_attention_dense_single_buffer(
             # Both half-waves hold the same query row; one of them writes its LSE.
             with b.scf_if(b.cmp_eq(lane_h, b.const_i32(0))):
                 lse_store(b, lse, lse_index, m_i, l_i, row_has_mass=row_has_mass)
-        _emit_o_store(
-            b,
-            o,
-            q_row_byte,
-            d_half,
-            o_acc,
-            rcp_l,
-            dtype,
-            D_TILES,
-            spec.o_store_width,
-            row_has_key=row_has_key,
-        )
+        # Varlen: the sequence's partial last q-block; its tail rows are the next
+        # sequence's tokens.
+        o_store_ctx = b.scf_if(b.cmp_lt(qtok, seqlen_q_b)) if varlen else _nullcontext()
+        with o_store_ctx:
+            _emit_o_store(
+                b,
+                o,
+                q_row_byte,
+                d_half,
+                o_acc,
+                rcp_l,
+                dtype,
+                D_TILES,
+                spec.o_store_width,
+                row_has_key=row_has_key,
+            )
 
     # ---- grid dispatch: default (one CTA per work item) vs persistent (P4) ----
     if spec.persistent:
@@ -3026,7 +3212,7 @@ def _build_attention_dense_single_buffer(
         if not spec.runtime_shape:
             raise ValueError(
                 "gfx942 attention_dense: the persistent grid needs runtime_shape "
-                "(ragged/varlen/paged are not supported)"
+                "(ragged and contiguous varlen are not supported)"
             )
         NP = spec.num_persistent
         # ragged rejected -> Sq % BLOCK_M == 0, exact. BLOCK_M is a compile-time
@@ -3114,18 +3300,19 @@ def attention_dense_signature(spec: AttentionDenseSpec):
     ``spec.runtime_kernarg_fields`` entry: the shape (batch, seqlen_q, seqlen_kv,
     num_query_heads, num_kv_heads), then on the persistent grid a magic/shift pair
     per work-decode divisor. Then a ``sink_ptr`` ([Hq], q dtype) when
-    ``spec.use_sinks``, ``block_tables``/``kv_lens`` (i32 pointers) and
-    ``block_table_stride`` (i32) when ``spec.paged``, and an f32 ``lse_ptr`` when
-    ``spec.emit_lse``, in that order, then the KV-segment workspace pointers when
-    ``spec.kv_segments > 1``, and last the additive-bias pointer and its three i32
-    strides when ``spec.use_additive_bias``.
+    ``spec.use_sinks``, a ``cu_seqlens_q`` i32 pointer when ``spec.varlen``,
+    ``block_tables``/``kv_lens`` (i32 pointers) and ``block_table_stride`` (i32)
+    when ``spec.paged``, and an f32 ``lse_ptr`` when ``spec.emit_lse``, in that
+    order (the gfx950 paged varlen order), then the KV-segment workspace pointers
+    when ``spec.kv_segments > 1``, and last the additive-bias pointer and its
+    three i32 strides when ``spec.use_additive_bias``.
 
     THE single definition of this kernel's ABI -- the builder and the benchmark both
     call it rather than re-deriving the parameter list, so a reordering cannot drift
     between the emitted kernel and the launcher packing arguments for it.
 
-    No ``cu_seqlens`` pair: varlen is rejected by :func:`supports_attention_dense`, so
-    there is no varlen kernel to describe. Those pointers land when varlen does.
+    No ``cu_seqlens_kv``: varlen comes only with paged K/V
+    (:func:`supports_attention_dense`), which takes the KV lengths from ``kv_lens``.
     """
     from rocke.helpers.spec import SignatureBuilder
 
@@ -3146,6 +3333,8 @@ def attention_dense_signature(spec: AttentionDenseSpec):
     if spec.use_sinks:
         # Mirrors the sink_ptr param declared after the runtime kernarg fields.
         sig = sig.ptr("sink_ptr", spec.dtype)
+    if spec.varlen:
+        sig = sig.ptr("cu_seqlens_q", "i32")
     if spec.paged:
         sig = (
             sig.ptr("block_tables", "i32")
@@ -3204,8 +3393,12 @@ def run_attention_dense_torch(
     ``sinks`` is the per-query-head sink logit ``[Hq]`` in q's dtype, required iff
     ``spec.use_sinks``. With ``spec.paged``, ``k``/``v`` are the page caches
     ``[num_kv_blocks, block_size, Hkv, D]`` and ``block_tables`` ([B, max_pages] i32)
-    / ``kv_lens`` ([B] i32) are required; ``validate_paged=False`` skips the host check
-    of their contents (a device->host sync), see
+    / ``kv_lens`` ([B] i32) are required; with ``spec.varlen`` too, ``q``/``out`` are
+    packed [total_q, Hq, D] with ``cu_seqlens_q`` (int32 [B+1]) only: each sequence's
+    KV length is its ``kv_lens`` entry, any length under top-left, at least its
+    query length under bottom-right.
+    ``validate_paged=False`` skips the host check of the table and length contents
+    (a device->host sync), see
     :func:`kernels.common._attention_dense_paged.validate_paged_launch`.
     Returns ``out``. torch is imported lazily by the launcher, so this module stays
     torch-free at import time. Serves both the default and the P4 persistent grid
@@ -3219,9 +3412,10 @@ def run_attention_dense_torch(
     participates without relying on manual name tokens. On the persistent grid the
     key carries the resolved decode order, so one binary serves each order.
 
-    varlen / ragged are rejected by :func:`supports_attention_dense` on gfx942, so the
-    ABI has no ``cu_seqlens`` args (:func:`attention_dense_signature`); passing
-    ``cu_seqlens_*`` is a caller error rather than a silently-ignored argument.
+    Contiguous varlen and ragged are rejected by :func:`supports_attention_dense` on
+    gfx942, so only paged varlen takes ``cu_seqlens_q``
+    (:func:`attention_dense_signature`); passing ``cu_seqlens_*`` elsewhere is a
+    caller error rather than a silently-ignored argument.
 
     ``spec.emit_lse=True`` requires a caller-owned contiguous FP32 ``lse`` tensor
     [B, Hq, Sq, 1] on the same GPU, separate from every input and output. The kernel
@@ -3252,12 +3446,24 @@ def run_attention_dense_torch(
     if not ok:
         raise NotImplementedError(f"attention_dense unsupported for spec: {why}")
     check_dense_scale(scale)
-    if cu_seqlens_q is not None or cu_seqlens_kv is not None:
+    if spec.varlen and cu_seqlens_kv is not None:
         raise ValueError(
-            "cu_seqlens_* provided but gfx942 attention_dense is dense-only (varlen "
-            "is rejected by supports_attention_dense); the ABI has no cu_seqlens args"
+            "paged varlen takes the KV lengths from kv_lens; cu_seqlens_kv "
+            "must not be provided"
         )
-    validate_paged_launch(spec, k, v, block_tables, kv_lens, validate_paged)
+    if not spec.varlen and (cu_seqlens_q is not None or cu_seqlens_kv is not None):
+        raise ValueError("cu_seqlens_* provided but spec.varlen is False")
+    validate_paged_launch(
+        spec,
+        k,
+        v,
+        block_tables,
+        kv_lens,
+        validate_paged,
+        q=q,
+        out=out,
+        cu_seqlens_q=cu_seqlens_q,
+    )
     if not spec.use_sinks and sinks is not None:
         raise ValueError("sinks provided but spec.use_sinks is False")
     if spec.use_sinks:
@@ -3317,6 +3523,8 @@ def run_attention_dense_torch(
     vals.update(attention_dense_runtime_args(spec))
     if spec.use_sinks:
         vals["sink_ptr"] = sinks
+    if spec.varlen:
+        vals["cu_seqlens_q"] = cu_seqlens_q
     if spec.paged:
         vals.update(paged_launch_args(block_tables, kv_lens))
     if spec.emit_lse:

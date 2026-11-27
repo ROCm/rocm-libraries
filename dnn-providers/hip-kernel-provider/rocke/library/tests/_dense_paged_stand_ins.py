@@ -73,7 +73,8 @@ class I32DeviceTensor:
 
 
 class CacheStandIn:
-    """A paged K or V cache: only its shape, dtype, layout and device are read."""
+    """A paged K or V cache, or a packed Q/out: only its shape, dtype, layout and
+    device are read."""
 
     def __init__(
         self,
@@ -92,3 +93,19 @@ class CacheStandIn:
 
     def is_contiguous(self):
         return self._contiguous
+
+    def unsqueeze(self, dim):
+        shape = list(self.shape)
+        shape.insert(dim, 1)
+        return self._reshaped(shape)
+
+    def squeeze(self, dim):
+        shape = list(self.shape)
+        if shape[dim] == 1:
+            del shape[dim]
+        return self._reshaped(shape)
+
+    def _reshaped(self, shape):
+        return CacheStandIn(
+            shape, contiguous=self._contiguous, device=self.device, dtype=self.dtype
+        )

@@ -412,9 +412,11 @@ class TestRdnaAttentionSelection(unittest.TestCase):
             _request(arch="gfx950", layout="dense", seqlen_q=1)
         )
         self.assertEqual(single_row.candidate.name, "attention_strided_decode")
+        # Paged K/V goes to gfx950's dense paged body or to unified.
+        paged = dispatch_attention(_request(arch="gfx950", layout="paged"))
+        self.assertNotIn("wmma", paged.candidate.name)
         for changes in (
             {"layout": "ragged"},
-            {"layout": "paged"},
             {"use_softcap": True},
             {"use_alibi": True},
             {"use_qq_bias": True},

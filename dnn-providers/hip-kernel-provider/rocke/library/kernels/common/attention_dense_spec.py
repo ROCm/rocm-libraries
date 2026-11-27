@@ -17,7 +17,11 @@ from types import MappingProxyType
 from rocke.core.ir import BF16, F16
 from rocke.helpers.spec import kernel_name_join
 
-from kernels.common._attention_dense_paged import paged_cache_bytes, paged_tile_check
+from kernels.common._attention_dense_paged import (
+    paged_cache_bytes,
+    paged_page_bytes,
+    paged_tile_check,
+)
 from kernels.common.attention_dense_decode import (
     NONPERSIST_DECODES,
     PERSIST_DECODES,
@@ -30,6 +34,7 @@ from kernels.common.attention_dense_decode import (
     PersistQbMajor,
     balance_causal,
 )
+from kernels.common._spec_checks import I32_KV_BUFFER_BYTES, kv_cache_needs_i64_addr
 
 
 _DTYPE_IR = {"bf16": BF16, "fp16": F16}
@@ -140,6 +145,12 @@ class AttentionDenseSpec:
     causal_bottom_right: bool = field(default=False, kw_only=True)
     # Block order of the non-persistent grid; ignored on the persistent one.
     nonpersist_decode: str = field(default="auto", kw_only=True)
+    # Paged only: one buffer resource per page with a 64-bit page base instead of
+    # one i32-addressed resource over the whole cache. Required past the i32 range
+    # (see ``__post_init__``); dispatch sets it at binding from the cache size. A
+    # field rather than derived from it so a small cache can be forced onto the i64
+    # path.
+    use_i64_kv_addr: bool = field(default=False, kw_only=True)
     # XCDs the hardware round-robins workgroups over. A wrong value keeps results
     # correct and only weakens the L2 locality of the XCD-aware block orders.
     chiplet_num_xcds: int = field(default=8, kw_only=True)
@@ -220,7 +231,9 @@ class AttentionDenseSpec:
                     f"{partial_tile_reason(self)} (the partial-tile path has no "
                     "window mask)"
                 )
-        else:
+        elif not (self.paged and self.varlen):
+            # Paged varlen handles each sequence's Q and KV tails in the kernel;
+            # its seqlen_q / seqlen_kv are only the per-sequence maxima.
             if self.seqlen_q % self.block_m != 0:
                 raise ValueError(
                     f"seqlen_q must be a multiple of block_m={self.block_m}, "
@@ -288,6 +301,11 @@ class AttentionDenseSpec:
 
         if type(self.paged) is not bool:
             raise ValueError(f"paged must be a bool, got {type(self.paged).__name__}")
+        if type(self.use_i64_kv_addr) is not bool:
+            raise ValueError(
+                "use_i64_kv_addr must be a bool, got "
+                f"{type(self.use_i64_kv_addr).__name__}"
+            )
         if self.paged:
             if self.block_size <= 0:
                 raise ValueError("paged=True requires block_size > 0")
@@ -302,40 +320,40 @@ class AttentionDenseSpec:
                 raise ValueError(why)
             if self.num_kv_blocks <= 0:
                 raise ValueError("paged=True requires num_kv_blocks > 0")
-            cache_bytes = paged_cache_bytes(self)
-            if cache_bytes > 2**31 - 1:
+            if (
+                kv_cache_needs_i64_addr(self.num_kv_blocks, paged_page_bytes(self))
+                and not self.use_i64_kv_addr
+            ):
                 raise ValueError(
-                    f"paged cache {cache_bytes} B exceeds i32 addressing (2 GiB)"
+                    f"paged cache {paged_cache_bytes(self)} B is past the i32 K/V "
+                    f"buffer range ({I32_KV_BUFFER_BYTES:#x} B): set use_i64_kv_addr"
                 )
-            if self.batch != 1:
-                raise ValueError("paged multi-sequence (batch>1) not yet implemented")
-            if self.varlen:
-                raise ValueError("paged varlen not yet implemented (single-seq only)")
-            if self.persistent:
+            if not self.varlen and self.batch != 1:
                 raise ValueError(
-                    "paged + persistent not yet implemented "
-                    "(persistent builder is contiguous-only)"
+                    "paged multi-sequence (batch>1) needs varlen=True "
+                    "(packed Q + cu_seqlens_q)"
                 )
             if self.dtype not in ("fp16", "bf16"):
                 raise ValueError(f"paged not yet implemented for dtype={self.dtype}")
-            if self.seqlen_kv % self.block_n:
+            if not self.varlen and self.seqlen_kv % self.block_n:
                 # The padded keys of a partial KV tile would read stale page rows
                 # (or block 0) instead of the zeros the contiguous bound gives.
+                # Paged varlen zeroes them in its V loads.
                 raise ValueError(
                     f"paged needs whole KV tiles: seqlen_kv ({self.seqlen_kv}) must be "
                     f"a multiple of block_n ({self.block_n})"
                 )
             if not self.causal:
                 raise ValueError("paged attention is causal-only")
-            if self.causal_bottom_right:
-                # The shifted diagonal is untested with paged K/V on both arches.
+            if self.causal_bottom_right and not self.varlen:
+                # The single-sequence paged body has no shifted diagonal; the varlen
+                # body shifts it per sequence.
                 raise ValueError(
-                    "causal_bottom_right is not yet supported with paged KV"
+                    "causal_bottom_right is not supported with paged=True unless "
+                    "varlen=True"
                 )
-        if self.use_sinks and self.paged:
-            raise ValueError("use_sinks is not yet supported with paged KV")
-        if self.use_sinks and self.varlen:
-            raise ValueError("use_sinks is not yet supported with varlen")
+        elif self.use_i64_kv_addr:
+            raise ValueError("use_i64_kv_addr requires paged=True")
 
     @property
     def num_waves(self) -> int:
@@ -377,7 +395,7 @@ class AttentionDenseSpec:
             balance_causal(self)
             and not moving_diagonal
             and not self.ragged
-            and not self.varlen
+            and not (self.varlen and not self.paged)
         )
 
     @property
@@ -416,6 +434,13 @@ class AttentionDenseSpec:
         stays the best measured order without causal masking."""
         if self.nonpersist_decode != "auto":
             return self.nonpersist_decode
+        if self.paged and self.varlen and self.batch > 1:
+            # Packed sequences of different lengths: an order with the sequence as
+            # the fastest digit puts each sequence on one XCD, so a long one runs on
+            # a fraction of the GPU. A head band per XCD spreads every sequence.
+            if self.num_query_heads % self.chiplet_num_xcds == 0:
+                return NonpersistHqMinorSwz.name
+            return NonpersistQbMinor.name
         if not self._aligned_causal:
             return NonpersistQbMinor.name
         # Swizzled Head-first measured ahead of every other order, persistent
@@ -562,7 +587,14 @@ class AttentionDenseSpec:
         if self.varlen:
             parts.append("varlen")
         if self.paged:
-            parts.extend((f"pgd{self.block_size}", f"nb{self.num_kv_blocks}"))
+            parts.append(f"pgd{self.block_size}")
+            # Named exactly when the cache key keeps it. The C port gates the token
+            # on its shape-parts flag: every arch body takes num_kv_blocks as a
+            # kernarg together with the shape.
+            if "num_kv_blocks" not in self.runtime_param_fields:
+                parts.append(f"nb{self.num_kv_blocks}")
+            if self.use_i64_kv_addr:
+                parts.append("i64kv")
         parts.extend(self._algorithm_name_parts())
         if self.persistent:
             parts.append(f"persist{self.num_persistent}")
@@ -671,8 +703,8 @@ def check_dense_spec_preflight(spec: AttentionDenseSpec) -> tuple[bool, str]:
     divisibility its own DMA imposes). A check belongs HERE only if it reads
     base-spec fields only AND its verdict is the same for every dense body -- which
     is why the LDS budget stays per-arch (it needs the arch capacity and the body's
-    tile math) and the mode rejections stay per-arch (gfx942 defers varlen, gfx950
-    ships it).
+    tile math) and the mode rejections stay per-arch (gfx942 refuses contiguous
+    varlen and ragged, which gfx950 ships).
 
     The four checks, in a load-bearing order:
 
@@ -699,7 +731,9 @@ def check_dense_spec_preflight(spec: AttentionDenseSpec) -> tuple[bool, str]:
        signed i32 arithmetic, so the signed bound is the binding one on both paths.
 
        The UNIT differs per operand and is not cosmetic. K/V always go through a
-       buffer resource, so they are bounded in bytes. Q is bounded in bytes only
+       buffer resource, so they are bounded in bytes; paged K/V by the cache
+       bound of the spec instead, since a page id, not the logical row, builds
+       its offset. Q is bounded in bytes only
        when ``ragged`` (the buffer-resource path, whose voffset is ``addr * 2``)
        and in elements otherwise (``global_load_vN`` takes an element index). O is
        element-addressed in every mode, despite ``_emit_o_store`` naming its
@@ -748,16 +782,20 @@ def check_dense_spec_preflight(spec: AttentionDenseSpec) -> tuple[bool, str]:
         * spec.head_size
         * spec.kv_elem_bytes
     )
-    if kv_bytes >= INT32_LIMIT:
+    # Paged K/V is addressed per page: the cache bound in the spec covers the
+    # i32 path, and use_i64_kv_addr lifts it.
+    if not spec.paged and kv_bytes >= INT32_LIMIT:
         return False, (
             f"K/V extent is {kv_bytes} B, at or past the 32-bit buffer-resource "
             f"limit ({INT32_LIMIT} B)"
         )
     qo_elems = spec.batch * spec.seqlen_q * spec.num_query_heads * spec.head_size
-    if spec.ragged:
-        # A ragged Q goes through a buffer resource whose num_records AND voffset
-        # are both i32 BYTES, so the ceiling is half the element count the
-        # element-offset paths get. O stays element-addressed even here.
+    if spec.ragged or (spec.paged and spec.varlen):
+        # A ragged or paged varlen Q goes through a buffer resource whose
+        # num_records AND voffset are both i32 BYTES, so the ceiling is half the
+        # element count the element-offset paths get. O stays element-addressed
+        # even here. gfx942 paged varlen clamps its Q rows instead but keeps the
+        # limit, so both arches admit the same specs.
         qo_bytes = qo_elems * 2
         if qo_bytes >= INT32_LIMIT:
             return False, (

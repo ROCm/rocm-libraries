@@ -1790,6 +1790,33 @@ def cases():
                 "kv_segments": 4,
             },
         ),
+        # Varlen bottom-right: the shift is each sequence's kv_len - q_len, read at
+        # run time instead of baked from the maxima.
+        (
+            "varlen_bottom_right_sq512",
+            {
+                "batch": 3,
+                "seqlen_kv": 1024,
+                "varlen": True,
+                "causal_bottom_right": True,
+            },
+        ),
+        # Varlen + sinks: the sink seeds each sequence's softmax, so keyless rows
+        # (empty KV, or past the window) come out as 0 with no host refusal.
+        (
+            "varlen_sinks_sq512",
+            {"batch": 3, "varlen": True, "use_sinks": True},
+        ),
+        (
+            "varlen_bottom_right_sinks_sq512",
+            {
+                "batch": 3,
+                "seqlen_kv": 1024,
+                "varlen": True,
+                "causal_bottom_right": True,
+                "use_sinks": True,
+            },
+        ),
         # --- persistent (grid-stride) grid + decode variants ---
         ("persistent_causal_sq512", {"persistent": True, "num_persistent": 256}),
         (
@@ -1900,6 +1927,197 @@ def cases():
                 "block_size": 16,
                 "num_kv_blocks": 32,
                 "sliding_window": 256,
+            },
+        ),
+        # Paged varlen: packed sequences with per-sequence Q/KV tails (bounded Q
+        # loads, zeroed V tail rows, guarded store). sq500 adds maxima that are no
+        # tile multiple, which the varlen body takes instead of the ragged one.
+        (
+            "paged_varlen_causal_fp16_sq512",
+            {
+                "dtype": "fp16",
+                "batch": 3,
+                "varlen": True,
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 96,
+            },
+        ),
+        (
+            "paged_varlen_swa_fp16_d64_sq500",
+            {
+                "dtype": "fp16",
+                "batch": 3,
+                "seqlen_q": 500,
+                "seqlen_kv": 500,
+                "head_size": 64,
+                "varlen": True,
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 96,
+                "sliding_window": 256,
+            },
+        ),
+        # Per-page i64 K/V resources, forced on a small cache.
+        (
+            "paged_i64_swa_fp16_sq512",
+            {
+                "dtype": "fp16",
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 32,
+                "sliding_window": 256,
+                "use_i64_kv_addr": True,
+            },
+        ),
+        # ... and on the varlen body, at D64, where the V tail tests the logical
+        # key while the i64 address takes its in-page row.
+        (
+            "paged_varlen_i64_swa_fp16_d64_sq500",
+            {
+                "dtype": "fp16",
+                "batch": 3,
+                "seqlen_q": 500,
+                "seqlen_kv": 500,
+                "head_size": 64,
+                "varlen": True,
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 96,
+                "sliding_window": 256,
+                "use_i64_kv_addr": True,
+            },
+        ),
+        # Paged varlen bottom-right: per-sequence shift kv_lens[b] - q_len.
+        (
+            "paged_varlen_bottom_right_fp16_sq512",
+            {
+                "dtype": "fp16",
+                "batch": 3,
+                "seqlen_kv": 1024,
+                "varlen": True,
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 192,
+                "causal_bottom_right": True,
+            },
+        ),
+        # Paged K/V on the plain persistent body (one sequence): the runtime-shape
+        # path at D128 and D64, per-page i64 resources, and ragged Q, whose baked
+        # shape bakes the cache bound too.
+        (
+            "persist_paged_causal_fp16_sq512",
+            {
+                "dtype": "fp16",
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 32,
+                "persistent": True,
+                "num_persistent": 256,
+            },
+        ),
+        (
+            "persist_paged_swa_fp16_d64_sq512",
+            {
+                "dtype": "fp16",
+                "head_size": 64,
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 32,
+                "sliding_window": 256,
+                "persistent": True,
+                "num_persistent": 256,
+            },
+        ),
+        (
+            "persist_paged_i64_swa_fp16_sq512",
+            {
+                "dtype": "fp16",
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 32,
+                "sliding_window": 256,
+                "use_i64_kv_addr": True,
+                "persistent": True,
+                "num_persistent": 256,
+            },
+        ),
+        (
+            "persist_paged_ragged_causal_fp16_sq500",
+            {
+                "dtype": "fp16",
+                "seqlen_q": 500,
+                "ragged": True,
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 32,
+                "persistent": True,
+                "num_persistent": 256,
+            },
+        ),
+        # Wide DMA on paged K/V: one page per KV tile, looked up once per tile.
+        (
+            "persist_wdma_paged_causal_fp16_sq512",
+            {
+                "dtype": "fp16",
+                "paged": True,
+                "block_size": 64,
+                "num_kv_blocks": 8,
+                "persistent": True,
+                "num_persistent": 256,
+                "wide_lds_dma": True,
+            },
+        ),
+        (
+            "persist_wdma_paged_i64_swa_bf16_sq512",
+            {
+                "dtype": "bf16",
+                "paged": True,
+                "block_size": 64,
+                "num_kv_blocks": 8,
+                "sliding_window": 256,
+                "use_i64_kv_addr": True,
+                "persistent": True,
+                "num_persistent": 256,
+                "wide_lds_dma": True,
+            },
+        ),
+        # Paged + sinks: sink_ptr precedes the paged params.
+        (
+            "paged_swa_sinks_fp16_sq512",
+            {
+                "dtype": "fp16",
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 32,
+                "sliding_window": 256,
+                "use_sinks": True,
+            },
+        ),
+        (
+            "paged_varlen_bottom_right_sinks_fp16_sq512",
+            {
+                "dtype": "fp16",
+                "batch": 3,
+                "seqlen_kv": 1024,
+                "varlen": True,
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 192,
+                "causal_bottom_right": True,
+                "use_sinks": True,
+            },
+        ),
+        (
+            "persist_paged_sinks_causal_bf16_sq512",
+            {
+                "dtype": "bf16",
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 32,
+                "persistent": True,
+                "num_persistent": 256,
+                "use_sinks": True,
             },
         ),
         # --- Attention band: the cuDNN (left = sliding_window, right = right_bound)
@@ -2270,6 +2488,157 @@ def cases():
                 "sliding_window": 256,
                 "block_m": 64,
                 "waves_per_eu": 4,
+            },
+        ),
+        # Paged varlen, the same cases as the gfx950 ones of these names.
+        (
+            "paged_varlen_causal_fp16_sq512",
+            {
+                "dtype": "fp16",
+                "batch": 3,
+                "varlen": True,
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 96,
+            },
+        ),
+        (
+            "paged_varlen_swa_fp16_d64_sq500",
+            {
+                "dtype": "fp16",
+                "batch": 3,
+                "seqlen_q": 500,
+                "seqlen_kv": 500,
+                "head_size": 64,
+                "varlen": True,
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 96,
+                "sliding_window": 256,
+            },
+        ),
+        (
+            "paged_i64_swa_fp16_sq512",
+            {
+                "dtype": "fp16",
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 32,
+                "sliding_window": 256,
+                "use_i64_kv_addr": True,
+            },
+        ),
+        (
+            "paged_varlen_i64_swa_fp16_d64_sq500",
+            {
+                "dtype": "fp16",
+                "batch": 3,
+                "seqlen_q": 500,
+                "seqlen_kv": 500,
+                "head_size": 64,
+                "varlen": True,
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 96,
+                "sliding_window": 256,
+                "use_i64_kv_addr": True,
+            },
+        ),
+        # Paged varlen bottom-right: per-sequence shift kv_lens[b] - q_len, with
+        # the masked diagonal tail dispatch builds (causal_diag_split).
+        (
+            "paged_varlen_bottom_right_fp16_sq512",
+            {
+                "dtype": "fp16",
+                "batch": 3,
+                "seqlen_kv": 1024,
+                "varlen": True,
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 192,
+                "causal_bottom_right": True,
+                "causal_diag_split": True,
+            },
+        ),
+        # bf16 paged D128: takes conflict-free V with its per-wave page lookup.
+        (
+            "paged_swa_bf16_sq512",
+            {
+                "dtype": "bf16",
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 32,
+                "sliding_window": 256,
+            },
+        ),
+        # Paged on the persistent grid (one sequence): fp16, bf16 D128 with
+        # conflict-free V, and per-page i64 resources.
+        (
+            "persist_paged_causal_fp16_sq512",
+            {
+                **_persist942,
+                "dtype": "fp16",
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 32,
+            },
+        ),
+        (
+            "persist_paged_swa_bf16_sq512",
+            {
+                **_persist942,
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 32,
+                "sliding_window": 256,
+            },
+        ),
+        (
+            "persist_paged_i64_causal_fp16_sq512",
+            {
+                **_persist942,
+                "dtype": "fp16",
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 32,
+                "use_i64_kv_addr": True,
+            },
+        ),
+        # Paged + sinks, the same cases as the gfx950 entries of these names.
+        (
+            "paged_swa_sinks_fp16_sq512",
+            {
+                "dtype": "fp16",
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 32,
+                "sliding_window": 256,
+                "use_sinks": True,
+            },
+        ),
+        (
+            "paged_varlen_bottom_right_sinks_fp16_sq512",
+            {
+                "dtype": "fp16",
+                "batch": 3,
+                "seqlen_kv": 1024,
+                "varlen": True,
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 192,
+                "causal_bottom_right": True,
+                "causal_diag_split": True,
+                "use_sinks": True,
+            },
+        ),
+        (
+            "persist_paged_sinks_causal_bf16_sq512",
+            {
+                **_persist942,
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 32,
+                "use_sinks": True,
             },
         ),
     ):

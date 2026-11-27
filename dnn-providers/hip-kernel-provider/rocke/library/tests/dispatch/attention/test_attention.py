@@ -120,8 +120,9 @@ EXPECTED_FEATURES = {
     },
     "attention_gfx950_dense_grid": set(_GFX950_DENSE_GRID_FEATURES),
     "attention_gfx950_dense_qbminor": set(_GFX950_DENSE_GRID_BODY_FEATURES),
-    "attention_gfx950_dense_persist": set(_GFX950_DENSE_FEATURES),
-    "attention_gfx950_dense_persist_widedma": set(_GFX950_DENSE_FEATURES),
+    "attention_gfx950_dense_persist": set(_GFX950_DENSE_FEATURES) | {"layout_paged"},
+    "attention_gfx950_dense_persist_widedma": set(_GFX950_DENSE_FEATURES)
+    | {"layout_paged"},
     "attention_d256_decode": {"causal", "causal_bottom_right"},
     "attention_gfx1250_wmma": {"causal"},
     "attention_rdna_wmma_prefill": _RDNA_WMMA_FEATURES,
@@ -150,6 +151,8 @@ EXPECTED_FEATURES = {
         "sinks",
         "sliding_window",
         "lse",
+        # Unified reads paged K/V: the fallback for explicit paged requests.
+        "layout_paged",
     },
     "attention_unified_3d": {
         "attn_bias",
@@ -162,6 +165,7 @@ EXPECTED_FEATURES = {
         "sliding_window",
         # Both unified paths write LSE (tiled 2D and split-KV).
         "lse",
+        "layout_paged",
     },
 }
 

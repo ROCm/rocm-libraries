@@ -65,7 +65,7 @@ All remaining shapes.  Key knob decisions:
 | `use_sched_barrier` | `_enable_sched_barrier` (gfx950 spec only; field-presence guard) |
 | `use_k_single_buffer` | `_enable_k_single_buffer`: d128 small-tile cohort + env opt-in (gfx950 spec only) |
 | `use_fp8_mfma_qk` | `_enable_fp8_mfma_qk`: decode fp8 path only |
-| `use_i64_kv_addr` | cache size > 2 GiB (see gfx950 README "Paged-cache size" section) |
+| `use_i64_kv_addr` | `kv_cache_needs_i64_addr` (see the [Knob reference](#knob-reference)) |
 | `use_additive_bias` | `problem.use_additive_bias` (gfx950 spec only; passed directly by `_spec_gfx950_generic`) |
 
 ### Tiled-3D dispatch cases
@@ -234,3 +234,17 @@ tuning bindings take the bias as `tensors["attn_bias"]`
 (`[B|1, H|1, Sq|1, Sk]`, unit key stride) and derive the three strides from it
 (0 on a size-1 dimension).  Numeric coverage:
 [test_attention_additive_bias_gfx950_numeric.py](../../tests/test_attention_additive_bias_gfx950_numeric.py).
+
+**`use_i64_kv_addr`** — Feature flag, not a perf lever.  Moves the paged
+K/V block offset into a 64-bit buffer base, so only the in-block offset stays in
+the 32-bit field; without it a load past the i32 K/V buffer range returns zero.
+Set from the cache size by `kv_cache_needs_i64_addr` in
+[`_spec_checks.py`](../../kernels/common/_spec_checks.py): above
+`0x7FFF0000` bytes, the `num_records` the i32 path bounds its K/V resources at.
+`num_kv_blocks == 0` (size unknown) keeps the i32 path.  The unified specs take
+it from `_enable_i64_kv_addr` / `_enable_i64_kv_addr_3d` (kernels with no i64
+path, such as the gfx942 tiled 3D, refuse it).  The gfx942/gfx950 dense
+prefill spec (`AttentionDenseSpec`, paged only) gets it at binding, where the
+cache tensor is first known, and refuses a paged cache past the range without it.  Do not sweep: it follows the cache, not the shape.  See
+the gfx950 attention [README](../gfx950/attention/README.md) "Paged-cache size"
+section and `ALGORITHM.md` §7.2 and §8.4.

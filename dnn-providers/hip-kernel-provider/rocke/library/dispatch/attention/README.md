@@ -105,8 +105,10 @@ pinned to the arch's dense kernel at its default spec (the gfx950 body --
 grid, persistent, or persistent with wide DMA -- comes from
 `gfx950_dense.dense_auto_order`). A single-row `layout="dense"` request goes
 to `attention_strided_decode`, which reads the contiguous K/V as a strided view
-and takes the dense tensor ABI (`q`/`k`/`v`/`out`, BSHD or BHSD). Paged or
-unspecified layouts keep the unified route.
+and takes the dense tensor ABI (`q`/`k`/`v`/`out`, BSHD or BHSD). A `layout="paged"`
+request with more than one query row takes the first dense body of
+`gfx942_dense.dense_paged_auto_order` / `gfx950_dense.dense_paged_auto_order`
+that admits it, else the unified route, as does an unspecified layout.
 
 ## Tuning knob space
 
@@ -153,17 +155,51 @@ problem.
 
 A `layout="paged"` request reaches the non-persistent dense body on both arches
 (`layout_paged`: the gfx950 grid variants and the gfx942 candidate, which then
-starts on the default grid). It takes the same tile as a contiguous request where
+starts on the default grid). One paged sequence also runs on the persistent body
+when pinned (`gfx950_dense_persist`, or the gfx942 `persistent` knob); the gfx950
+wide-DMA body (`gfx950_dense_persist_widedma`) takes it only with pages of at least
+one KV tile, and several sequences need the varlen body, which has no persistent
+form. It takes the same tile as a contiguous request where
 its pages fit that tile (whole pages per KV tile, each wave's rows in one page),
-else the default 256×64 tile. The paged kernel bakes the cache extent, so binding
-retargets `num_kv_blocks` from `k.shape[0]`; `block_tables` and `kv_lens` come
-in with the tensors. The request carries no cache size, so a cache past the 2 GiB
-i32 limit is refused at binding, not at selection. As for the unified path, the
-structural checks always run, and `unsafe_skip_paged_value_validation=True` skips
-only the runner's synchronized value checks. It is only for trusted callers that
-guarantee the dense kernel's contract themselves: `kv_lens[i] == seqlen_kv` and
-every used block id in `[0, num_kv_blocks)`; the kernel does not mask keys past
-`kv_lens`. The cohort is the kernel's own `supports_attention_dense`.
+else the default 256×64 tile. Binding sets `num_kv_blocks` (the cache extent, a
+kernarg on the runtime-shape path) from `k.shape[0]`; `block_tables` and `kv_lens` come
+in with the tensors. A cache past the i32 K/V buffer range (the unified
+threshold, `kv_cache_needs_i64_addr`) also switches the spec to
+`use_i64_kv_addr` there, keeping `tuning_id`. That lifts only the cache-pool
+limit: the request's own K/V extent from the spec maxima (`batch` × the longest
+length × Hkv × D × 2 B) must still stay below 2 GiB, as must its Q extent (below).
+
+`q`/`out` may be packed `[total_q, Hq, D]` with `cu_seqlens_q`, as for the
+unified path. A request with `batch > 1` builds a varlen spec: its lengths are
+the maxima, and top-left takes any per-sequence query and KV lengths (each
+sequence's diagonal starts at its first key). Plain causal at bottom-right
+alignment (`mask_type` 2, or `diagonal_alignment` 1) needs `q_len <= kv_len`
+(prefix caching, chunked prefill) on both arches, whose varlen bodies shift each
+sequence's diagonal by its own `kv_len - q_len`;
+dispatch keeps that body even at equal maxima, since the sequences may still
+differ, and takes it for one sequence with `seqlen_q < seqlen_k` too. That body
+anchors a window or lookahead top-left, so bottom-right with either is declined
+for several sequences even at equal maxima. gfx942 serves bottom-right only
+through `mask_type` 2 (its dense candidate refuses cross-length `mask_type` 0
+requests). One sequence takes the varlen body too when the single-sequence body cannot bound its tails:
+keys ending inside a KV tile (that body would read the padded keys from stale
+page rows, the varlen body zeroes them), or queries ending inside a Q tile where
+the single-sequence body has no ragged form (gfx942; gfx950 with a sliding
+window). For one sequence `cu_seqlens_q` is optional, and `[1, Sq, Hq, D]` is
+accepted as well; the binding builds `cu_seqlens_q` when the varlen body needs
+it. Selection checks the Q extent from the spec maxima (`batch` × the longest
+length), since the request carries no packed size, so a batch with one long
+sequence can be refused although its packed Q is small.
+
+As for the unified path, the structural checks always run, and
+`unsafe_skip_paged_value_validation=True` skips only the runner's synchronized
+value checks. It is only for trusted callers that guarantee the dense kernel's
+contract themselves: block ids in `[0, num_kv_blocks)` over each sequence's
+first `ceil(kv_len / block_size)` table columns, and `kv_lens[0] == seqlen_kv` on the single-sequence body
+(it does not mask keys past `kv_lens`), or `cu_seqlens_q` spanning the packed Q in
+order with `q_len <= seqlen_q` and `kv_len <= seqlen_kv` per sequence on the varlen
+body (bottom-right also `q_len <= kv_len`). The cohort is the kernel's own
+`supports_attention_dense`.
 
 Unified variant names are `attention_{arch}_u{path}_{variant_id}`, for example
 `attention_gfx950_u2d_narrow_nw1_mw16_t1xb_llvm` (the `spec_id` drops the

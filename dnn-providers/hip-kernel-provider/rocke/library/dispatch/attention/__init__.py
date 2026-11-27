@@ -384,15 +384,25 @@ _DENSE_AUTO_ORDER = {
     "gfx950": gfx950_dense.dense_auto_order,
 }
 
+# The same for unpinned paged requests; an empty order keeps unified. Each
+# body's admission (one sequence for the persistent bodies, pages of at least a
+# KV tile for wide DMA) leaves the rest to the grid.
+_DENSE_PAGED_AUTO_ORDER = {
+    "gfx942": gfx942_dense.dense_paged_auto_order,
+    "gfx950": gfx950_dense.dense_paged_auto_order,
+}
+
 
 def _dense_auto_pin(req: AttentionRequest) -> Optional[AttentionRequest]:
-    """Pin an unpinned ``layout='dense'`` request with more than one query row
-    to the first dense candidate of its arch's order that admits it.
+    """Pin an unpinned ``layout='dense'`` or ``layout='paged'`` request with
+    more than one query row to the first dense candidate of its arch's order
+    that admits it.
 
-    Contiguous tensors are the only layout the dense kernels read, so a paged
-    (or unspecified) layout never reaches them. Single-row (decode) requests
-    go to the strided split-KV decode kernel, which reads contiguous K/V as a
-    strided view.
+    An unspecified layout never reaches the dense kernels. A paged request no
+    candidate of its arch's paged order admits keeps the unified route, which
+    reads paged K/V too. Single-row (decode) requests go to the strided
+    split-KV decode kernel (contiguous K/V, read as a strided view) or to
+    unified (paged K/V).
     """
     if any(
         str(getattr(req, field, "auto")).strip().lower() not in ("auto", "")
@@ -400,9 +410,10 @@ def _dense_auto_pin(req: AttentionRequest) -> Optional[AttentionRequest]:
     ):
         return None
     layout = req.layout.strip().lower() if isinstance(req.layout, str) else ""
-    if layout != "dense" or int(req.seqlen_q) <= 1:
+    if layout not in ("dense", "paged") or int(req.seqlen_q) <= 1:
         return None
-    order = _DENSE_AUTO_ORDER.get(req.arch)
+    orders = _DENSE_PAGED_AUTO_ORDER if layout == "paged" else _DENSE_AUTO_ORDER
+    order = orders.get(req.arch)
     if order is None:
         return None
     for name in order(req):
@@ -420,11 +431,13 @@ def dispatch_attention(
 
     Unpinned (``algorithm`` / ``spec_id`` left at ``auto``) it returns the
     unified 2D-tiled or 3D split-KV path, a pure function of the problem whose
-    CTA geometry the instance builder resolves (see :mod:`.common`). The one
-    exception is a request for contiguous tensors (``layout='dense'``): with
-    more than one query row on an arch with a dense kernel it gets that
-    kernel's default spec (see :func:`_dense_auto_pin`), and with one query
-    row on gfx942/gfx950 the strided split-KV decode kernel. Otherwise a tuned
+    CTA geometry the instance builder resolves (see :mod:`.common`). The
+    exceptions are prefill on an arch with a dense kernel: a request for
+    contiguous tensors (``layout='dense'``) with more than one query row gets that
+    kernel's default spec, and a ``layout='paged'`` request the first dense paged
+    candidate that admits it (see :func:`_dense_auto_pin`); with one query row and
+    contiguous tensors gfx942/gfx950 take the strided split-KV decode kernel.
+    Otherwise a tuned
     kernel -- a dense candidate or a unified tuning geometry -- is selected only
     by pinning ``algorithm`` + ``spec_id``; ``tuning_id`` (with the knobs
     recorded next to it in ``tuning_knobs``) then names one configuration of
