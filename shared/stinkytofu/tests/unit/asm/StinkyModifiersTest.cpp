@@ -29,6 +29,8 @@
 #include "ModifierSerializer.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
+#include "stinkytofu/serialization/asm/IRConverter.hpp"
+#include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
 
 using namespace stinkytofu;
 
@@ -352,7 +354,8 @@ TEST(GirActionData, SerializerRoundTripsStableId) {
 
     const auto* parsed = inst->getModifier<GirActionData>();
     ASSERT_NE(parsed, nullptr);
-    EXPECT_EQ(parsed->actionId, 17u);
+    // The text on both sides is the producer's numbering; the field holds the internal id.
+    EXPECT_EQ(parsed->actionId, girInternalActionId(17u));
 }
 
 // The contract parser rejects a malformed record, so the modifier reader must too: a defaulted
@@ -374,4 +377,31 @@ TEST(GirActionDataDeathTest, DeserializeRejectsAMissingActionAndAnUnknownKind) {
     unknownKind["mod.gir_action"]["action"] = "3";
     unknownKind["mod.gir_action"]["kind"] = "dss";
     EXPECT_DEATH(deserialize(unknownKind), "unknown kind");
+}
+
+// Wait insertion behavior is covered by waitcnt_insertion_barrier_tensor_contract.stir.
+// Keep the native parse -> print -> parse contract separate from pass behavior.
+TEST(SWaitTensorCntData, BarrierContractRoundTripsThroughText) {
+    for (int count : {1, 2}) {
+        SCOPED_TRACE(count);
+        const std::string input =
+            "st.func @barrier_tensor_contract() {\n^entry:\n"
+            "  LDS1 = \"st.s_barrier_signal\"(-1, LDS1) { mod.memtoken = { tokens = [1] }, "
+            "mod.swaittensorcnt = { tlcnt = " +
+            std::to_string(count) + " } }\n}\n";
+        StinkyIRConverter converter({12, 5, 0});
+        const auto* original = converter.convertToFunction(input);
+        ASSERT_NE(original, nullptr);
+        StinkyIRConverter roundTrip({12, 5, 0});
+        const auto* restored = roundTrip.convertToFunction(toString(*original));
+        ASSERT_NE(restored, nullptr);
+        const auto& signal = static_cast<const StinkyInstruction&>(*restored->begin()->begin());
+        EXPECT_EQ(signal.getUnifiedOpcode(), GFX::s_barrier_signal);
+        const auto* contract = signal.getModifier<SWaitTensorCntData>();
+        ASSERT_NE(contract, nullptr);
+        EXPECT_EQ(contract->tlcnt, count);
+        const auto* provenance = signal.getModifier<MemTokenData>();
+        ASSERT_NE(provenance, nullptr);
+        EXPECT_EQ(provenance->tokens, std::vector<int>({1}));
+    }
 }

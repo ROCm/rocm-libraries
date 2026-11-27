@@ -370,6 +370,24 @@ def test_a_1_0_uhd_cannot_carry_slot_provenance(tmp_path):
         build_plan(_model(tmp_path / "model", tree, version="1.0"), tree)
 
 
+def test_a_codegen_revision_needs_uhd_1_2(tmp_path):
+    """UHD 1.2 adds `trained_against.codegen_revision` and keeps the 1.1 slot forms."""
+    tree = _tree(tmp_path / "tree")
+    provenance = {
+        **snapshot_provenance(tree, arch="gfx942", slot="dkdv"),
+        "codegen_revision": "cg-A",
+    }
+    with pytest.raises(
+        PromoteError, match="records codegen_revision, which requires UHD version 1.2"
+    ):
+        build_plan(
+            _model(tmp_path / "old", tree, provenance=provenance, version="1.1"), tree
+        )
+    build_plan(
+        _model(tmp_path / "new", tree, provenance=provenance, version="1.2"), tree
+    )
+
+
 def test_an_unslotted_engine_refuses_a_slot_ranker(tmp_path):
     tree = tmp_path / "tree"
     slotted_provenance = snapshot_provenance(

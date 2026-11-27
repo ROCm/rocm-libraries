@@ -188,6 +188,8 @@ typedef enum rocblaslt_epilogue_
     ROCBLASLT_EPILOGUE_SIGMOID            = 1024,
     ROCBLASLT_EPILOGUE_SWISH_EXT          = 65536,
     ROCBLASLT_EPILOGUE_SWISH_BIAS_EXT     = 65540,
+    ROCBLASLT_EPILOGUE_SWISH_AUX_EXT      = 65664,
+    ROCBLASLT_EPILOGUE_SWISH_AUX_BIAS_EXT = 65668,
     ROCBLASLT_EPILOGUE_CLAMP_EXT          = 131072,
     ROCBLASLT_EPILOGUE_CLAMP_BIAS_EXT     = 131076,
     ROCBLASLT_EPILOGUE_CLAMP_AUX_EXT      = 131200,
@@ -272,7 +274,8 @@ typedef enum rocblaslt_status_
     rocblaslt_status_not_initialized         = 10, /**< descriptor has not been initialized. */
     rocblaslt_status_type_mismatch           = 11, /**< index types do not match. */
     rocblaslt_status_requires_sorted_storage = 12, /**< sorted storage required. */
-    rocblaslt_status_continue                = 13  /**< nothing preventing function to proceed. */
+    rocblaslt_status_continue                = 13, /**< nothing preventing function to proceed. */
+    rocblaslt_status_not_supported           = 14  /**< no algorithm supports the problem. */
 } rocblaslt_status;
 
 /*! \ingroup types_module
@@ -757,7 +760,7 @@ struct RocblasltContractionProblem
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
 // Fields of hipblasLtFusionDescriptor, flattened for this layer.
-struct RocblasltFusedEpilogueInfo
+struct RocblasltFusionInfo
 {
     enum class Mode
     {
@@ -781,23 +784,23 @@ struct RocblasltFusedEpilogueInfo
 };
 
 // Returns false when both descriptors are nullptr.
-bool rocblaslt_resolve_fused_epilogue(const struct hipblasLtFusionDescriptor* epilogue,
-                                      const struct hipblasLtFusionDescriptor* prologue,
-                                      RocblasltFusedEpilogueInfo&             out);
+bool rocblaslt_resolve_fusion(const struct hipblasLtFusionDescriptor* epilogue,
+                              const struct hipblasLtFusionDescriptor* prologue,
+                              RocblasltFusionInfo&                    out);
 
 // Returns false unless prob requests a fused all-to-all.
 inline bool rocblaslt_resolve_fused_a2a(const RocblasltContractionProblem& prob,
-                                        RocblasltFusedEpilogueInfo&        out)
+                                        RocblasltFusionInfo&               out)
 {
-    return rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, prob.fused_prologue, out)
-           && out.mode != RocblasltFusedEpilogueInfo::Mode::Disabled;
+    return rocblaslt_resolve_fusion(prob.fused_epilogue, prob.fused_prologue, out)
+           && out.mode != RocblasltFusionInfo::Mode::Disabled;
 }
 
 // Every rejection is reported as rocblaslt_status_invalid_value.
-rocblaslt_status rocblaslt_validate_fused_epilogue_dispatch(rocblaslt_handle        handle,
-                                                            rocblaslt_matmul_desc   matmulDesc,
-                                                            rocblaslt_matrix_layout matB,
-                                                            rocblaslt_matrix_layout matD);
+rocblaslt_status rocblaslt_validate_fusion_dispatch(rocblaslt_handle        handle,
+                                                    rocblaslt_matmul_desc   matmulDesc,
+                                                    rocblaslt_matrix_layout matB,
+                                                    rocblaslt_matrix_layout matD);
 #endif
 
 namespace rocblaslt

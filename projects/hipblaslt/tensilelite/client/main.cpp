@@ -75,6 +75,12 @@
 #include <elf.h>
 #include <limits> // std::numeric_limits<> sentinel
 #endif
+#if defined(__linux__)
+#include <cerrno>
+#include <linux/mempolicy.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+#endif
 #include <fstream>
 #include <iostream>
 #include <map>
@@ -277,6 +283,8 @@ namespace TensileLite
                 ("pristine-on-gpu",          po::value<bool>()->default_value(true), "Keep a pristine copy of inputs on GPU for performance")
                 ("c-equal-d",                po::value<bool>()->default_value(false), "C equals D")
                 ("print-valids",             po::value<bool>()->default_value(false), "Print values that pass validation")
+                ("verify-reference-reuse",   po::value<bool>()->default_value(false), "Recompute the CPU reference even when its inputs are unchanged and fail if the result differs (also: TENSILELITE_VERIFY_REFERENCE_REUSE=1)")
+                ("verify-upload-skip",       po::value<bool>()->default_value(false), "Read back every GPU input upload skipped because the GPU copy is current and fail if it differs from the host data, and every skipped batched-pointer array upload and fail if it differs from the recomputed pointers (also: TENSILELITE_VERIFY_UPLOAD_SKIP=1)")
                 ("print-max",                po::value<int>()->default_value(-1), "Max number of values to print")
                 ("num-elements-to-validate", po::value<int>()->default_value(0), "Number of elements to validate")
                 ("check-synchronizer",       po::value<bool>()->default_value(true),
@@ -310,6 +318,7 @@ namespace TensileLite
                 ("fused-a2a-drain-recv",     po::value<int>()->default_value(1), "Runtime drainRecv flag passed to the fused kernel (1=on): the kernel exits only once this card's recv buffer is complete.")
                 ("fused-a2a-drain-send",     po::value<int>()->default_value(1), "Runtime drainSend flag passed to the fused kernel (1=on): the kernel exits only once this card's engines have finished reading D[0:AM), so D can be reused on stream order alone. Independent of --fused-a2a-drain-recv.")
                 ("fused-a2a-sdma-rotate",    po::value<int>(), "Fused A2A, gfx942 and gfx950: move each remote peer SDMA queue this many steps along the even xGMI engines 2,4,...,14 from its KFD recommendation; nonzero requires 14 xGMI SDMA engines. Ignored on other architectures, which spread the remote peer queues over the recommended engines. The loopback queue uses engine 0. Defaults to -1.")
+                ("numa-bind",                po::value<int>(), "nonzero: the process allocates with MPOL_LOCAL (memory stays on the node it is first touched from, out of automatic NUMA balancing); 0: system default policy. Defaults to 1 with --fused-a2a, else 0.")
                 ("use-default-stream",       po::value<bool>()->default_value(false), "Use default Hip stream to run kernels.")
 
                 ("num-warmups",              po::value<int>()->default_value(0), "Number of warmups to run")
@@ -331,6 +340,9 @@ namespace TensileLite
                 ("csv-export-extra-cols",    po::value<bool>()->default_value(false), "CSV exports winner information")
                 ("csv-merge-same-problems",  po::value<bool>()->default_value(false), "CSV merge rows of same problem id")
                 ("PrintWinnersOnly",         po::value<bool>()->default_value(false), "PrintWinnersOnly")
+                ("print-rejected-predicates", po::value<bool>()->default_value(false), "Log the evaluation of every predicate of "
+                                                                                       "solutions rejected by their predicates (needs "
+                                                                                       "log-level Verbose or Debug).")
 
                 ("problem-size,p",           vector_default_empty<std::string>(), "Specify a problem size.  Comma-separated list of "
                                                                                   "sizes, in the order of the Einstein notation.")
@@ -381,6 +393,7 @@ namespace TensileLite
                                                                                        "running library solution 0.")
 
                 ("results-file",             po::value<std::string>()->default_value("results.csv"), "File name to write results.")
+                ("no-results-file",          po::value<bool>()->default_value(false),                "Write no results file (results-file is ignored).")
                 ("log-file",                 po::value<std::string>(),                               "File name for output log.")
                 ("log-file-append",          po::value<bool>()->default_value(false),                "Append to log file.")
                 ("log-level",                po::value<LogLevel>()->default_value(LogLevel::Debug),  "Log level")
@@ -875,6 +888,27 @@ namespace TensileLite
 #endif
         }
 
+        // Sets MPOL_LOCAL on the calling thread; only threads created after this inherit it.
+        void useLocalMemoryPolicy()
+        {
+#if defined(__linux__)
+            if(syscall(SYS_set_mempolicy, MPOL_LOCAL, nullptr, 0) == 0)
+            {
+                std::clog << "NUMA: mempolicy=local" << std::endl;
+                std::ifstream status("/proc/self/status");
+                for(std::string line; std::getline(status, line);)
+                    if(line.rfind("Threads:", 0) == 0 && std::stoi(line.substr(8)) > 1)
+                        std::cerr << "warning: other threads were already running and keep the"
+                                  << " default NUMA policy" << std::endl;
+                return;
+            }
+            const int err = errno;
+            std::cerr << "warning: set_mempolicy(MPOL_LOCAL) -> errno " << err
+                      << "; automatic NUMA balancing still applies"
+                      << " (in a container, add --cap-add SYS_NICE)" << std::endl;
+#endif
+        }
+
     } // namespace Client
 } // namespace TensileLite
 
@@ -929,6 +963,10 @@ int main(int argc, const char* argv[])
 
     auto args = parse_args(argc, argv);
     auto const argsParsed = TimingClock::now();
+
+    if(args.count("numa-bind") ? args["numa-bind"].as<int>() != 0
+                               : args["fused-a2a"].as<FusedA2A>() != FusedA2A::Disabled)
+        useLocalMemoryPolicy();
 
     // Enable timing instrumentation if requested
     g_timingInstrumentationEnabled = args["timing-instrumentation"].as<bool>();
