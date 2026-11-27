@@ -216,6 +216,16 @@ def test_mx_block_selects_the_scale_encoding(mxBlock, expected):
     assert mnemonic([16, 16, 128, 1], "float8", mxBlock=mxBlock) == expected
 
 
+@pytest.mark.parametrize("dtype", ["float6", "bfloat6", "float8", "bfloat8"])
+def test_32x16_mx_wmma_keeps_non_fp4_suffix(dtype):
+    """32x16x128 has an fp4 scaled opcode only; non-fp4 types must name the
+    missing f8f6f4 form so the StinkyTofu-backed validator rejects them."""
+    mi4 = [32, 16, 128, 1]
+    expected = "v_wmma_scale_f32_32x16x128_f8f6f4"
+    assert mnemonic(mi4, dtype, mxBlock=32) == expected
+    assert unsupported(solutionFor(dtype, problemType={"MXBlockA": 32, "MXBlockB": 32}), mi4) == expected
+
+
 @pytest.mark.parametrize(
     "mi4,dtype",
     [
