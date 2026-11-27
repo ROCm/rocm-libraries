@@ -15,6 +15,8 @@
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/hipblaslt.h>
 
+#include "rocblaslt_fused_a2a_peers.hpp"
+
 #include <cstdlib>
 #include <cstring>
 #include <memory>
@@ -29,6 +31,15 @@ namespace
     {
         int deviceCount = 0;
         return hipGetDeviceCount(&deviceCount) == hipSuccess && deviceCount > 0;
+    }
+
+    bool onGfx1250()
+    {
+        int             device = 0;
+        hipDeviceProp_t prop{};
+        return hipGetDevice(&device) == hipSuccess
+               && hipGetDeviceProperties(&prop, device) == hipSuccess
+               && std::string(prop.gcnArchName).find("gfx1250") != std::string::npos;
     }
 
     // A zeroed, fine-grained flag region on the current device, sized for
@@ -431,6 +442,20 @@ namespace
 
         EXPECT_EQ(hipblasLtFusionDestroy(prologue), HIPBLAS_STATUS_SUCCESS);
         EXPECT_EQ(hipblasLtMatmulDescDestroy(matmulDesc), HIPBLAS_STATUS_SUCCESS);
+    }
+
+    /************************************************************************
+     * Empty queue entries: the ranks a gfx1250 epilogue writes directly.
+     ***********************************************************************/
+
+    TEST(FusedA2AEmptyQueues_pre_checkin, OnlyAnAllNullEntryIsEmpty)
+    {
+        hipblasLtSdmaQueue_t partial = fakeQueue(0x30000);
+        partial.queueBuf             = nullptr;
+        const hipblasLtSdmaQueue_t queues[3] = {fakeQueue(0x10000), partial, hipblasLtSdmaQueue_t{}};
+        EXPECT_FALSE(rocblaslt::anySdmaQueueEmpty(queues, 2));
+        EXPECT_TRUE(rocblaslt::anySdmaQueueEmpty(queues, 3));
+        EXPECT_FALSE(rocblaslt::anySdmaQueueEmpty(nullptr, 3));
     }
 
     /************************************************************************
@@ -1136,6 +1161,27 @@ namespace
                   HIPBLAS_STATUS_SUCCESS);
 
         EXPECT_EQ(heuristic(), HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
+    TEST_F(FusedA2ADispatch_pre_checkin, EmptyQueueEntryIsADirectRankOnGfx1250Only)
+    {
+        transposeA();
+        registerOneRank();
+        completeAndAttach();
+        makeD();
+
+        hipblasLtMatmulHeuristicResult_t result   = {};
+        int                              returned = 0;
+        ASSERT_EQ(heuristic(&result, &returned), HIPBLAS_STATUS_SUCCESS);
+        if(returned == 0)
+            GTEST_SKIP() << "no fused BF16 TN solution in the loaded library";
+
+        const hipblasLtSdmaQueue_t empty{};
+        ASSERT_EQ(hipblasLtFusionSetAttribute(
+                      fused, HIPBLASLT_FUSION_A2A_SDMA_QUEUES, &empty, sizeof(empty)),
+                  HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(heuristic(&result, &returned),
+                  onGfx1250() ? HIPBLAS_STATUS_SUCCESS : HIPBLAS_STATUS_INVALID_VALUE);
     }
 
     TEST_F(FusedA2ADispatch_pre_checkin, RejectsMissingCommunicator)

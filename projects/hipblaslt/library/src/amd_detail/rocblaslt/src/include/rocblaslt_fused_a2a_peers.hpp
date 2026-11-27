@@ -25,6 +25,20 @@ namespace rocblaslt
                              == 0,
                   "HIPBLASLT_DEVICE_COMM_FLAG_ALIGNMENT no longer matches the flag block layout");
 
+    constexpr bool sdmaQueueEmpty(const hipblasLtSdmaQueue_t& q)
+    {
+        return q.queueBuf == nullptr && q.rptr == nullptr && q.wptr == nullptr
+               && q.doorbell == nullptr;
+    }
+
+    inline bool anySdmaQueueEmpty(const hipblasLtSdmaQueue_t* queues, uint32_t world)
+    {
+        for(uint32_t j = 0; queues != nullptr && j < world; ++j)
+            if(sdmaQueueEmpty(queues[j]))
+                return true;
+        return false;
+    }
+
     // The drain bits this layer asks for. IN_KERNEL_FULL maps to both.
     constexpr uint32_t fusedA2ADrainFor(hipblasLtA2ACompletionMode_t mode)
     {

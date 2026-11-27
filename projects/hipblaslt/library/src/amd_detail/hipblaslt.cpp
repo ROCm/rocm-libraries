@@ -31,6 +31,7 @@
 #include "handle.h"
 #include "hipblaslt/hipblaslt-ext-op.h"
 #include "hipblaslt_internal.hpp"
+#include "rocblaslt_fused_a2a_peers.hpp"
 #include "rocblaslt_mat_utils.hpp"
 
 #include <hip/hip_runtime_api.h>
@@ -448,8 +449,9 @@ namespace
         for(size_t j = 0; j < desc->a2a_queues.size(); ++j)
         {
             const hipblasLtSdmaQueue_t& q = desc->a2a_queues[j];
-            if(q.queueBuf == nullptr || q.rptr == nullptr || q.wptr == nullptr
-               || q.doorbell == nullptr)
+            if(!rocblaslt::sdmaQueueEmpty(q)
+               && (q.queueBuf == nullptr || q.rptr == nullptr || q.wptr == nullptr
+                   || q.doorbell == nullptr))
             {
                 log_error(__func__, "incomplete all-to-all SDMA queue for rank", (int)j);
                 return HIPBLAS_STATUS_INVALID_VALUE;
@@ -491,6 +493,13 @@ namespace
         if(desc->a2a_recv_ptrs.size() != world || desc->a2a_queues.size() != world)
         {
             log_error(__func__, "all-to-all per-rank arrays do not have world entries");
+            return HIPBLAS_STATUS_INVALID_VALUE;
+        }
+
+        if(rocblaslt::anySdmaQueueEmpty(desc->a2a_queues.data(), world)
+           && rocblaslt_internal_get_arch_name(handle->device).find("gfx1250") == std::string::npos)
+        {
+            log_error(__func__, "empty all-to-all SDMA queue entries need gfx1250");
             return HIPBLAS_STATUS_INVALID_VALUE;
         }
 
