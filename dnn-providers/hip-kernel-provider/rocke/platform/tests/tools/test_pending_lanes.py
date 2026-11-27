@@ -100,6 +100,7 @@ from rocke.tests.pending_lanes import (
     QuarantinedTest,
     measured_budget_kernels,
     measured_scratch_allowance,
+    quarantined_test,
     tree_test_files,
     utc_today,
     waiting_entry,
@@ -107,6 +108,7 @@ from rocke.tests.pending_lanes import (
 from rocke.tests.provider_categories import provider_category_labels
 from rocke.tests.quarantine import (
     quarantine_plugin_name,
+    quarantine_skip_reason,
     register_quarantine,
     skip_quarantined_items,
 )
@@ -1304,6 +1306,85 @@ def test_a_quarantined_test_is_skipped_with_its_issue(tmp_path):
     assert " passed" not in result.stdout and " failed" not in result.stdout
 
 
+def _never_probed() -> None:
+    raise AssertionError("probed a fact the quarantine entry does not name")
+
+
+def _probe(fact: object) -> Callable[[], object]:
+    """A probe of this process that finds ``fact``."""
+    return lambda: fact
+
+
+def test_a_quarantine_skip_reason_names_the_scope_it_holds_its_test_out_in():
+    """An entry holds its test out only on the arches and with the compilers
+    it names, says which in the reason, and probes only what it names."""
+    gfx950_build = CompilerBuild(24, "424729dba65359a5e521ab2e729af131c8a5b0d4")
+    unscoped = _quarantined("library/tests/test_x.py::test_y", issue="AICK-1")
+    assert (
+        quarantine_skip_reason(
+            unscoped, device_arch=_never_probed, compiler_build=_never_probed
+        )
+        == "quarantined: AICK-1"
+    )
+    on_gfx950 = _quarantined(
+        "library/tests/test_x.py::test_y", issue="AICK-2", arches=("gfx950",)
+    )
+    assert (
+        quarantine_skip_reason(
+            on_gfx950, device_arch=_probe("gfx950"), compiler_build=_never_probed
+        )
+        == "quarantined: AICK-2 on gfx950"
+    )
+    for arch in ("gfx942", None):
+        assert (
+            quarantine_skip_reason(
+                on_gfx950, device_arch=_probe(arch), compiler_build=_never_probed
+            )
+            is None
+        )
+    with_build = _quarantined(
+        "library/tests/test_x.py::test_y",
+        issue="AICK-3",
+        arches=("gfx950",),
+        compilers=Compilers(llvm_commits=("424729dba653",)),
+    )
+    assert (
+        quarantine_skip_reason(
+            with_build,
+            device_arch=_probe("gfx950"),
+            compiler_build=_probe(gfx950_build),
+        )
+        == f"quarantined: AICK-3 on gfx950 with llvm-project {gfx950_build.llvm_commit}"
+    )
+    # Another compiler, or one that cannot be identified, holds nothing out
+    # and leaves the GPU unprobed.
+    for other_build in (
+        CompilerBuild(24, "d6f6cb691863e9258034ab48c1dfce21689d5606"),
+        CompilerBuild(None, None),
+    ):
+        assert (
+            quarantine_skip_reason(
+                with_build,
+                device_arch=_never_probed,
+                compiler_build=_probe(other_build),
+            )
+            is None
+        )
+    by_major = _quarantined(
+        "library/tests/test_x.py::test_y",
+        issue="AICK-4",
+        compilers=Compilers(llvm_major=24),
+    )
+    assert (
+        quarantine_skip_reason(
+            by_major,
+            device_arch=_never_probed,
+            compiler_build=_probe(CompilerBuild(24, None)),
+        )
+        == "quarantined: AICK-4 with LLVM 24"
+    )
+
+
 def _names_cases(node: str, params: tuple[str, ...] = ()) -> bool:
     """Whether a record's test node names cases by their parameter ids."""
     return "[" in node or bool(params)
@@ -1383,6 +1464,65 @@ def test_every_record_that_names_cases_covers_a_collected_case(collected_cases):
         if entry.node not in collected_cases[entry.path]
     ]
     assert not dead, f"records that name cases no file collects: {dead}"
+
+
+def test_a_registered_quarantine_skips_its_collected_cases_in_its_scope(
+    collected_cases,
+):
+    """Each recorded quarantine, on the cases its file collects: the cases it
+    covers are found as its own and skipped where it holds them out (on an
+    arch it names, with a compiler it names), and kept elsewhere; the cases of
+    its file it does not cover are not its own."""
+    unidentified = CompilerBuild(None, None)
+    other_arch = next(
+        arch
+        for arch in ("gfx942", "gfx1100")
+        if arch not in {named for entry in QUARANTINED for named in entry.arches}
+    )
+    for entry in QUARANTINED:
+        covered = [
+            case
+            for case in collected_cases[entry.path]
+            if entry.covers(entry.path, case)
+        ]
+        assert covered, f"{entry.test_id} covers no collected case"
+        for case in collected_cases[entry.path]:
+            found = quarantined_test(entry.path, case)
+            assert (found is entry) == (case in covered), (entry.test_id, case)
+        build = (
+            CompilerBuild(
+                entry.compilers.llvm_major,
+                (
+                    entry.compilers.llvm_commits[0]
+                    if entry.compilers.llvm_commits
+                    else None
+                ),
+            )
+            if entry.compilers
+            else unidentified
+        )
+        arch = entry.arches[0] if entry.arches else other_arch
+        reason = quarantine_skip_reason(
+            entry, device_arch=_probe(arch), compiler_build=_probe(build)
+        )
+        assert reason is not None and reason.startswith(
+            f"quarantined: {entry.issue}"
+        ), (entry.test_id, reason)
+        if entry.arches:
+            assert f" on {arch}" in reason, reason
+            assert (
+                quarantine_skip_reason(
+                    entry, device_arch=_probe(other_arch), compiler_build=_probe(build)
+                )
+                is None
+            ), entry.test_id
+        if entry.compilers:
+            assert (
+                quarantine_skip_reason(
+                    entry, device_arch=_probe(arch), compiler_build=_probe(unidentified)
+                )
+                is None
+            ), entry.test_id
 
 
 def _defines_test(test_file: Path, node_name: str) -> bool:

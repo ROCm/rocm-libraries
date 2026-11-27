@@ -36,7 +36,7 @@ from __future__ import annotations
 
 import functools
 import os
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 
 import pytest
@@ -47,12 +47,14 @@ from .pending_lanes import (
     QUARANTINE_SKIP_PREFIX,
     QUARANTINE_TREES,
     QUARANTINED,
+    QuarantinedTest,
     quarantined_test,
 )
 
 __all__ = [
     "QUARANTINE_ENV",
     "quarantine_plugin_name",
+    "quarantine_skip_reason",
     "register_quarantine",
     "skip_quarantined_items",
 ]
@@ -138,23 +140,40 @@ def skip_quarantined_items(
         entry = quarantined_test(path, item.nodeid.partition("::")[2])
         if entry is None:
             continue
-        # The compiler first: probing the GPU loads HIP (see the docstring).
-        build = _loaded_compiler_build() if entry.compilers else None
-        if build is not None and not entry.holds_out_with(build):
-            continue
-        arch = _device_arch() if entry.arches else None
-        if not entry.holds_out_on(arch):
-            continue
-        reason = f"{QUARANTINE_SKIP_PREFIX}{entry.issue}"
-        if entry.arches:
-            reason += f" on {arch}"
-        if build is not None:
-            reason += (
-                f" with llvm-project {build.llvm_commit}"
-                if build.llvm_commit
-                else f" with LLVM {build.llvm_major}"
-            )
-        item.add_marker(pytest.mark.skip(reason=reason))
+        reason = quarantine_skip_reason(
+            entry, device_arch=_device_arch, compiler_build=_loaded_compiler_build
+        )
+        if reason is not None:
+            item.add_marker(pytest.mark.skip(reason=reason))
+
+
+def quarantine_skip_reason(
+    entry: QuarantinedTest,
+    *,
+    device_arch: Callable[[], str | None],
+    compiler_build: Callable[[], CompilerBuild],
+) -> str | None:
+    """The reason ``entry`` skips the items it covers in this process, or None
+    where it does not hold them out. ``device_arch`` (None: no GPU) and
+    ``compiler_build`` probe this process; each is called only when ``entry``
+    names arches or compilers, the compiler first (see the module docstring).
+    The decision under :func:`skip_quarantined_items`."""
+    build = compiler_build() if entry.compilers else None
+    if build is not None and not entry.holds_out_with(build):
+        return None
+    arch = device_arch() if entry.arches else None
+    if not entry.holds_out_on(arch):
+        return None
+    reason = f"{QUARANTINE_SKIP_PREFIX}{entry.issue}"
+    if entry.arches:
+        reason += f" on {arch}"
+    if build is not None:
+        reason += (
+            f" with llvm-project {build.llvm_commit}"
+            if build.llvm_commit
+            else f" with LLVM {build.llvm_major}"
+        )
+    return reason
 
 
 @functools.cache
