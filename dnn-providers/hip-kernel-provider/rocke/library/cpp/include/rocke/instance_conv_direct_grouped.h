@@ -539,6 +539,10 @@ typedef struct rocke_direct_depthwise_spatial_spec
      * filter, reading dY and writing dX through the dgrad kernarg block
      * (Python: DirectDepthwiseSpatialSpec.dgrad). Default 0. */
     int dgrad;
+    /* Output rows per block (grid y), 0 = the whole image (Python:
+     * DirectDepthwiseSpatialSpec.block_h). A block streams
+     * (block_h - 1) * stride + KH input rows. Default 0. */
+    int block_h;
 } rocke_direct_depthwise_spatial_spec_t;
 
 rocke_direct_depthwise_spatial_spec_t rocke_direct_depthwise_spatial_spec_default(void);

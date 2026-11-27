@@ -193,15 +193,8 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_tiled(
     {
         /* Read dY, write dX: the forward roles of the extents swap. The dgrad
          * block already binds the dY strides to the A slot. */
-        rocke_value_t* t;
-        rocke_dconv_emit_params(
-            b, &params, "dgrad", rocke_dconv_io_type(b, rocke_direct_conv_problem_dtype(p)));
-        t = params.p_Hi;
-        params.p_Hi = params.p_Ho;
-        params.p_Ho = t;
-        t = params.p_Wi;
-        params.p_Wi = params.p_Wo;
-        params.p_Wo = t;
+        rocke_dconv_emit_dgrad_as_forward_params(
+            b, &params, rocke_dconv_io_type(b, rocke_direct_conv_problem_dtype(p)));
         PAD = KH - 1 - p->PAD;
         PAD_W = KW - 1 - rocke_direct_conv_problem_pad_w(p);
     }

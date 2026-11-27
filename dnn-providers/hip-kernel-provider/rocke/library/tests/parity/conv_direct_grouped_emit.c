@@ -178,6 +178,10 @@ static int make_4c_bf16_cfg(int idx, rocke_direct_conv_4c_spec_t* s4, const char
 #define SPATIAL_DGRAD_CFG_BASE 371
 /* DirectDepthwiseSpec stride_skip + block_h parity configs (gfx1250, cpl 2). */
 #define DW_CPL_SS_CFG_BASE 375
+/* DirectDepthwiseSpatialSpec block_h configs (gfx1250, wave 32). */
+#define SPATIAL_BH_CFG_BASE 379
+/* DirectDepthwiseSpec stride_skip on a 5x5 stride-2 filter (gfx1250, cpl 2). */
+#define DW_SS5_CFG_BASE 383
 
 /* Problem helper mirroring prob() in the Python _dw_wgrad_spec: N=2, H=9,
  * W=13, groups = C, cpg = kpg. */
@@ -3602,6 +3606,84 @@ static int make_dw_cpl_ss_cfg(int idx, rocke_direct_depthwise_spec_t* s, const c
     }
 }
 
+/* DirectDepthwiseSpatialSpec block_h configs, emitted as
+ * SPATIAL_BH_CFG_BASE + idx (mirrors _spatial_bh_spec in the Python emitter).
+ * idx 2 and 3 are BOTH_REJECTED. */
+static int
+    make_spatial_bh_cfg(int idx, rocke_direct_depthwise_spatial_spec_t* ssp, const char** arch)
+{
+    int kh = 3, kw = 3, pad_w = -1, dgrad = 0, block_h = 0;
+    const char* dtype = "fp16";
+    rocke_direct_conv_problem_t p = rocke_direct_conv_problem_default();
+    switch(idx)
+    {
+    case 0:
+        block_h = 4;
+        break;
+    case 1:
+        kh = 5, kw = 5, dtype = "bf16", dgrad = 1, block_h = 4;
+        break;
+    case 2:
+        /* Both engines reject: the dgrad mode needs a square filter */
+        kw = 5, dgrad = 1;
+        break;
+    case 3:
+        /* Both engines reject: a column padding of its own */
+        pad_w = 0;
+        break;
+    default:
+        return -1;
+    }
+    *arch = "gfx1250";
+    p.N = 2;
+    p.H = 14;
+    p.W = 17;
+    p.groups = 3;
+    p.cpg = 1;
+    p.kpg = 1;
+    p.KH = kh;
+    p.KW = kw;
+    p.PAD = (kh - 1) / 2;
+    p.pad_w = pad_w;
+    p.stride = 1;
+    p.dtype = dtype;
+    *ssp = rocke_direct_depthwise_spatial_spec_default();
+    ssp->problem = p;
+    ssp->block_waves = 1;
+    ssp->wave_size = 32;
+    ssp->dgrad = dgrad;
+    ssp->block_h = block_h;
+    return 0;
+}
+
+/* stride_skip, 5x5 stride-2 (mirrors _dw_ss5_spec), emitted as DW_SS5_CFG_BASE. */
+static int make_dw_ss5_cfg(int idx, rocke_direct_depthwise_spec_t* s, const char** arch)
+{
+    rocke_direct_conv_problem_t p = rocke_direct_conv_problem_default();
+    if(idx != 0)
+        return -1;
+    *arch = "gfx1250";
+    p.N = 2;
+    p.H = 14;
+    p.W = 17;
+    p.groups = 64;
+    p.cpg = 1;
+    p.kpg = 1;
+    p.KH = 5;
+    p.KW = 5;
+    p.PAD = 2;
+    p.stride = 2;
+    p.dtype = "fp16";
+    *s = rocke_direct_depthwise_spec_default();
+    s->problem = p;
+    s->block_w = 4;
+    s->block_waves = 1;
+    s->wave_size = 32;
+    s->cpl = 2;
+    s->stride_skip = true;
+    return 0;
+}
+
 int main(int argc, char** argv)
 {
     if(argc < 2)
@@ -3633,7 +3715,25 @@ int main(int argc, char** argv)
     rocke_direct_depthwise_dgrad_stream_spec_t sdgs;
     rocke_direct_depthwise_wgrad_spec_t sdww;
     const char* arch = "gfx950";
-    if(idx >= DW_CPL_SS_CFG_BASE)
+    if(idx >= DW_SS5_CFG_BASE)
+    {
+        if(make_dw_ss5_cfg(idx - DW_SS5_CFG_BASE, &sdw, &arch) != 0)
+        {
+            fprintf(stderr, "unknown config index %d\n", idx);
+            return 2;
+        }
+        kind = KIND_DW;
+    }
+    else if(idx >= SPATIAL_BH_CFG_BASE)
+    {
+        if(make_spatial_bh_cfg(idx - SPATIAL_BH_CFG_BASE, &ssp, &arch) != 0)
+        {
+            fprintf(stderr, "unknown config index %d\n", idx);
+            return 2;
+        }
+        kind = KIND_SPATIAL;
+    }
+    else if(idx >= DW_CPL_SS_CFG_BASE)
     {
         if(make_dw_cpl_ss_cfg(idx - DW_CPL_SS_CFG_BASE, &sdw, &arch) != 0)
         {

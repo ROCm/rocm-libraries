@@ -2620,8 +2620,94 @@ def _dw_cpl_ss_spec(idx: int):
     return None
 
 
+# ---------------------------------------------------------------------------
+# DirectDepthwiseSpatialSpec block_h (row blocks) parity configs (gfx1250,
+# wave 32): a forward row block, a dgrad row block, and two refusals both
+# engines must agree on (a non-square dgrad filter, a column padding of its
+# own). Follows the 4 stride_skip / block_h configs of DirectDepthwiseSpec.
+# ---------------------------------------------------------------------------
+_SPATIAL_BH_CFG_BASE = 379
+
+
+def _spatial_bh_spec(idx: int):
+    """Return (kind, spec, arch) for config ``_SPATIAL_BH_CFG_BASE + idx``, or None."""
+
+    def prob(kh, kw, dtype, pad_w=-1):
+        return DirectConvProblem(
+            N=2,
+            H=14,
+            W=17,
+            groups=3,
+            cpg=1,
+            kpg=1,
+            KH=kh,
+            KW=kw,
+            PAD=(kh - 1) // 2,
+            stride=1,
+            dtype=dtype,
+            pad_w=pad_w,
+        )
+
+    S = DirectDepthwiseSpatialSpec
+    table = {
+        0: S(problem=prob(3, 3, "fp16"), block_waves=1, wave_size=32, block_h=4),
+        1: S(
+            problem=prob(5, 5, "bf16"),
+            block_waves=1,
+            wave_size=32,
+            dgrad=True,
+            block_h=4,
+        ),
+        # Both engines reject: the dgrad mode needs a square filter.
+        2: S(problem=prob(3, 5, "fp16"), block_waves=1, wave_size=32, dgrad=True),
+        # Both engines reject: a column padding of its own.
+        3: S(problem=prob(3, 3, "fp16", pad_w=0), block_waves=1, wave_size=32),
+    }
+    spec = table.get(idx)
+    if spec is None:
+        return None
+    return ("spatial", spec, "gfx1250")
+
+
+# ---------------------------------------------------------------------------
+# DirectDepthwiseSpec stride_skip on a 5x5 stride-2 filter (gfx1250, cpl 2):
+# the first output rows map to negative accumulator rows, whose slot wraps
+# modulo the slot count (a floor modulo, not C's truncating one).
+# ---------------------------------------------------------------------------
+_DW_SS5_CFG_BASE = 383
+
+
+def _dw_ss5_spec(idx: int):
+    """Return (kind, spec, arch) for config ``_DW_SS5_CFG_BASE + idx``, or None."""
+    if idx != 0:
+        return None
+    p = _dwp_fwd(2, 14, 17, 64, 5, 2, 2, "fp16")
+    return (
+        "dw",
+        DirectDepthwiseSpec(
+            problem=p,
+            block_w=4,
+            block_waves=1,
+            wave_size=32,
+            cpl=2,
+            stride_skip=True,
+        ),
+        "gfx1250",
+    )
+
+
 def _spec(idx: int):
     """Return (kind, spec, arch) for config index `idx`."""
+    if idx >= _DW_SS5_CFG_BASE:
+        sel = _dw_ss5_spec(idx - _DW_SS5_CFG_BASE)
+        if sel is not None:
+            return sel
+        raise SystemExit(f"unknown config index {idx}")
+    if idx >= _SPATIAL_BH_CFG_BASE:
+        sel = _spatial_bh_spec(idx - _SPATIAL_BH_CFG_BASE)
+        if sel is not None:
+            return sel
+        raise SystemExit(f"unknown config index {idx}")
     if idx >= _DW_CPL_SS_CFG_BASE:
         sel = _dw_cpl_ss_spec(idx - _DW_CPL_SS_CFG_BASE)
         if sel is not None:

@@ -79,6 +79,7 @@ static void sp_load_row(rocke_ir_builder_t* bld,
                         rocke_value_t* oob_sentinel,
                         rocke_value_t* c0,
                         const char* dtype,
+                        rocke_value_t* y0,
                         rocke_value_t** out)
 {
     rocke_value_t* hi;
@@ -86,6 +87,9 @@ static void sp_load_row(rocke_ir_builder_t* bld,
     rocke_value_t* row_off;
     int s_const;
 
+    /* Row block: the block-local row y is image streaming row y0 + y. */
+    if(y0 != NULL)
+        y = rocke_b_add(bld, y0, y);
     {
         rocke_value_t* c_pad = rocke_b_const_i32(bld, -PAD);
         hi = rocke_b_add(bld, y, c_pad);
@@ -220,14 +224,7 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
         {
             /* Read dY, write dX: the forward roles of the extents swap. The
              * dgrad block already binds the dY strides to the A slot. */
-            rocke_value_t* t;
-            rocke_dconv_emit_params(bld, &params, "dgrad", rocke_dconv_io_type(bld, dtype));
-            t = params.p_Hi;
-            params.p_Hi = params.p_Ho;
-            params.p_Ho = t;
-            t = params.p_Wi;
-            params.p_Wi = params.p_Wo;
-            params.p_Wo = t;
+            rocke_dconv_emit_dgrad_as_forward_params(bld, &params, rocke_dconv_io_type(bld, dtype));
         }
         else
         {
@@ -366,6 +363,8 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
         rocke_value_t* c_stride_rv;
         rocke_value_t* n_iters_v;
         rocke_value_t* n_groups_v;
+        rocke_value_t* y0 = NULL;
+        const int BH = spec->block_h;
         int j;
 
         window = (rocke_value_t**)alloca((size_t)(PF + 1) * KW * sizeof(rocke_value_t*));
@@ -375,6 +374,20 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
         c_stride_rv = rocke_b_const_i32(bld, c_stride_dw);
         /* n_iters = Hi + KH - 1 rows; the loop walks them KH at a time. */
         n_iters_v = rocke_b_add(bld, params.p_Hi, rocke_b_const_i32(bld, KH - 1));
+        if(BH)
+        {
+            /* Row block by: output rows [by * BH, by * BH + BH) are the streaming
+             * rows [y0, y0 + (BH - 1) * stride + KH), clipped to the image. The
+             * loop counts block-local rows from 0 (Python: y0, y_end). */
+            rocke_value_t* by = rocke_b_block_id_y(bld);
+            rocke_value_t* c_bh = rocke_b_const_i32(bld, BH);
+            rocke_value_t* y_end;
+            rocke_value_t* c_span;
+            y0 = rocke_b_mul(bld, rocke_b_mul(bld, by, c_bh), c_stride_rv);
+            c_span = rocke_b_const_i32(bld, (BH - 1) * c_stride_dw + KH);
+            y_end = rocke_b_smin(bld, n_iters_v, rocke_b_add(bld, y0, c_span));
+            n_iters_v = rocke_b_sub(bld, y_end, y0);
+        }
         n_groups_v
             = rocke_b_div(bld, rocke_b_add(bld, n_iters_v, rocke_b_const_i32(bld, KH - 1)), c_KH);
 
@@ -433,6 +446,7 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
                             oob_sentinel,
                             c0,
                             dtype,
+                            y0,
                             window + k * KW);
                 for(s_const = 0; s_const < KW; ++s_const)
                 {
@@ -506,6 +520,7 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
                             oob_sentinel,
                             c0,
                             dtype,
+                            y0,
                             window + PF * KW);
             }
             for(s_const = 0; s_const < KW; ++s_const)
@@ -526,6 +541,8 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
 
             /* Flush / store */
             p_flush_rv = rocke_b_add(bld, y_j, rocke_b_const_i32(bld, -(KH - 1)));
+            if(BH)
+                p_flush_rv = rocke_b_add(bld, y0, p_flush_rv);
 
             if(j >= KH - 1)
             {

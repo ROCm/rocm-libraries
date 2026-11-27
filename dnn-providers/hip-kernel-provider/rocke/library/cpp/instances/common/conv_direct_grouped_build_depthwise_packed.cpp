@@ -393,6 +393,9 @@ rocke_kernel_def_t* rocke_dconv_build_depthwise_packed(rocke_ir_builder_t* b,
         rocke_value_t* m = rocke_b_mul(b, grp_iv, c_KH);
         return rocke_b_add(b, m, rocke_b_const_i32(b, Y0 + j));
     };
+    /* Python's `%` floors: a slot of a negative output row (rel / S < 0, e.g.
+     * a 5x5 stride-2 filter at j = 0) wraps to NA - 1, not to a negative index. */
+    auto ss_slot = [](int q, int na) { return ((q % na) + na) % na; };
     /* Python: flush(grp_iv, j, y_j, slots); slots is flat [f * NP + k].
      * SS: only rows where (Y0 + j - (KH-1)) % S == 0 are output rows; skip others.
      * BH: p_flush_rv is relative to y0, so we add y0_v before dividing. */
@@ -404,7 +407,7 @@ rocke_kernel_def_t* rocke_dconv_build_depthwise_packed(rocke_ir_builder_t* b,
             rel = Y0 + j - (KH - 1);
             if(rel % S)
                 return; /* not an output row for this j */
-            P_FLUSH_j = (rel / S) % NA;
+            P_FLUSH_j = ss_slot(rel / S, NA);
         }
         else
         {
@@ -529,7 +532,7 @@ rocke_kernel_def_t* rocke_dconv_build_depthwise_packed(rocke_ir_builder_t* b,
                             const int rel = Y0 + j - r_const;
                             if(rel % S)
                                 continue;
-                            idx = ((rel / S) % NA) * BLOCK_W + w_out;
+                            idx = ss_slot(rel / S, NA) * BLOCK_W + w_out;
                         }
                         else
                         {

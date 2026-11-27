@@ -139,6 +139,20 @@ void rocke_dconv_emit_params(rocke_ir_builder_t* b,
         b, &abi, dconv_declare_ptr, &decl, slots, (int)(sizeof(slots) / sizeof(slots[0])));
 }
 
+void rocke_dconv_emit_dgrad_as_forward_params(rocke_ir_builder_t* b,
+                                              rocke_dconv_params_t* params,
+                                              const rocke_type_t* io_type)
+{
+    rocke_value_t* t;
+    rocke_dconv_emit_params(b, params, "dgrad", io_type);
+    t = params->p_Hi;
+    params->p_Hi = params->p_Ho;
+    params->p_Ho = t;
+    t = params->p_Wi;
+    params->p_Wi = params->p_Wo;
+    params->p_Wo = t;
+}
+
 /* ===================================================================== *
  *  direct_a_descriptor_dynamic
  *
