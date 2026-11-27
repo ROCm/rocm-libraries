@@ -51,7 +51,9 @@ def batchnorm_combos(
     *, n: int, c: int, h: int, w: int, dtype: str, arch: str, training: bool
 ) -> Sequence[Combo]:
     """Every ``(candidate, spec)`` pair the batchnorm2d family admits for this shape."""
-    req = BatchNormRequest(n=n, c=c, h=h, w=w, arch=arch, training=training, dtype=dtype)
+    req = BatchNormRequest(
+        n=n, c=c, h=h, w=w, arch=arch, training=training, dtype=dtype
+    )
     return registered_batchnorm_combos(req)
 
 
@@ -85,7 +87,9 @@ def batchnorm_dynamic_combos(
     :func:`norm_dynamic_combos` for why this queries the ungated list
     directly.
     """
-    req = BatchNormRequest(n=n, c=c, h=h, w=w, arch=arch, training=training, dtype=dtype)
+    req = BatchNormRequest(
+        n=n, c=c, h=h, w=w, arch=arch, training=training, dtype=dtype
+    )
     out = []
     for candidate in dynamic_batchnorm_candidates():
         ok, _why = candidate.admits(req)
@@ -149,7 +153,15 @@ def batchnorm_nhwc_combos(
 
 
 def batchnorm_mcw_combos(
-    *, n: int, c: int, h: int, w: int, dtype: str, arch: str, mode: str, full: bool = False
+    *,
+    n: int,
+    c: int,
+    h: int,
+    w: int,
+    dtype: str,
+    arch: str,
+    mode: str,
+    full: bool = False,
 ) -> Sequence[object]:
     """Multi-channel-per-wave candidates of ``mode`` ("train" / "bwd") admitting this shape.
 
@@ -157,6 +169,7 @@ def batchnorm_mcw_combos(
     from rocke.dispatch.families.batchnorm import dynamic_batchnorm_mcw_candidates
 
     return [
-        cand for cand in dynamic_batchnorm_mcw_candidates(mode)
+        cand
+        for cand in dynamic_batchnorm_mcw_candidates(mode)
         if (full or cand.shipped(dtype)) and cand.admits(n, c, h, w, dtype, arch)
     ]

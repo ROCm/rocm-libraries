@@ -57,7 +57,9 @@ from rocke.runtime import time_launches, time_launches_staged
 VALIDATE_TOL = {"fp16": 5e-3, "bf16": 4e-2, "fp32": 1e-4}
 
 
-def case_key(dims: Mapping[str, int], *, dtype: str, family: str, extra: str = "") -> str:
+def case_key(
+    dims: Mapping[str, int], *, dtype: str, family: str, extra: str = ""
+) -> str:
     """One joinable key for a norm/batchnorm case: family + dims + dtype (+ extra)."""
     fields = ",".join(f"{k}={v}" for k, v in sorted(dims.items()))
     tail = f",{extra}" if extra else ""
@@ -153,7 +155,8 @@ def add_fast_rank_args(parser) -> None:
     from benchmarks.common import batched_timing as bt
 
     parser.add_argument(
-        "--fast-rank", action="store_true",
+        "--fast-rank",
+        action="store_true",
         help="rank candidates with one device drain per chunk instead of "
         "timing every one in full; only the best --fast-rank-finalists are "
         "then measured with the full --warmup/--iters protocol. Use when the "
@@ -174,9 +177,7 @@ def add_fast_rank_args(parser) -> None:
 Plan = Tuple[str, Any, Tuple[int, int, int], Tuple[int, int, int], Any]
 
 
-def rank_candidates(
-    plans: Sequence[Plan], *, args: Any, timing: str
-) -> List[Any]:
+def rank_candidates(plans: Sequence[Plan], *, args: Any, timing: str) -> List[Any]:
     """Rank already-compiled ``plans`` with :mod:`benchmarks.common.batched_timing`.
 
     Mirrors ``benchmark_direct_conv.py``'s ``_fast_rank_plans``: every plan is

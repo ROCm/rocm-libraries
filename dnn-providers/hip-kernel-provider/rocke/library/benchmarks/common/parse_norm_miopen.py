@@ -52,7 +52,9 @@ class ParsedCase:
     """One in-scope case, ready to become an AOT script's argv."""
 
     family: str  # "bnorm" | "lnorm"
-    dims: Tuple[Tuple[str, int], ...]  # sorted dims.items(), e.g. (("c", 64), ("h", 28), ...)
+    dims: Tuple[
+        Tuple[str, int], ...
+    ]  # sorted dims.items(), e.g. (("c", 64), ("h", 28), ...)
     dtype: str  # "fp16" | "bf16"
     mode: str  # "training" | "inference" (bnorm) | "forward" (lnorm)
     layout: str = "NCHW"  # "NHWC" only from parse_bnorm_line(..., nhwc=True)
@@ -112,7 +114,16 @@ def parse_bnorm_line(line: str, backward: bool = False, nhwc: bool = False):
         # NCDHW is contiguous N,C,(D,H,W): the same memory as NCHW with the depth folded into the height.
         h *= depth
     dims = tuple(sorted({"n": n, "c": c, "h": h, "w": w}.items()))
-    return ParsedCase(family="bnorm", dims=dims, dtype=dtype, mode=mode, layout="NHWC" if layout == "NHWC" else "NCHW"), None
+    return (
+        ParsedCase(
+            family="bnorm",
+            dims=dims,
+            dtype=dtype,
+            mode=mode,
+            layout="NHWC" if layout == "NHWC" else "NCHW",
+        ),
+        None,
+    )
 
 
 def parse_lnorm_line(line: str):
@@ -123,7 +134,11 @@ def parse_lnorm_line(line: str):
     token = m.group(1)
     dtype = _LNORM_DTYPES.get(token)
     if dtype is None:
-        return None, "unsupported-dtype(fp32)" if token == "layernorm" else f"unknown-token({token})"
+        return None, (
+            "unsupported-dtype(fp32)"
+            if token == "layernorm"
+            else f"unknown-token({token})"
+        )
 
     layout = _str_flag(line, "L")
     if layout != "NW":

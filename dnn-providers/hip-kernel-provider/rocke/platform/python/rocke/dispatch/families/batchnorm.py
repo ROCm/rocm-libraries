@@ -584,7 +584,9 @@ def _make_flat_infer_candidate(
         ok, why = _bn.is_valid_flat_infer_spec(spec, arch=req.arch)
         if not ok:
             return False, why
-        return _bn.flat_infer_admits(spec, int(req.n), int(req.c), int(req.h), int(req.w))
+        return _bn.flat_infer_admits(
+            spec, int(req.n), int(req.c), int(req.h), int(req.w)
+        )
 
     def select(req: OperatorRequest) -> _bn.BatchNorm2DFlatInferSpec:
         ok, why = candidate.admits(req)
@@ -628,7 +630,11 @@ def _build_flat_infer_candidates() -> Tuple[KernelCandidate, ...]:
                 for bs in _FLAT_BLOCK_SIZES:
                     cands.append(
                         _make_flat_infer_candidate(
-                            block_size=bs, vec=vec, unroll=unroll, aligned=aligned, priority=prio
+                            block_size=bs,
+                            vec=vec,
+                            unroll=unroll,
+                            aligned=aligned,
+                            priority=prio,
                         )
                     )
                     prio += 1
@@ -708,7 +714,11 @@ class BatchNormSplitCandidate:
         return f"batchnorm2d_{self.spec_id}"
 
     def spec(self, dtype: str, arch: str) -> _bn.BatchNorm2DSplitDynSpec:
-        cls = _bn.BatchNorm2DBwdSplitSpec if self.backward else _bn.BatchNorm2DSplitDynSpec
+        cls = (
+            _bn.BatchNorm2DBwdSplitSpec
+            if self.backward
+            else _bn.BatchNorm2DSplitDynSpec
+        )
         return cls(
             block_size=self.block_size,
             vec=self.vec,
@@ -748,8 +758,12 @@ class BatchNormSplitCandidate:
         for sn_req in _SPLIT_SN_REQ:
             for sh_req in _SPLIT_SH_REQ:
                 plan = _bn.batchnorm2d_split_plan(
-                    spec, int(req.n), int(req.h), int(req.w),
-                    sn_req=sn_req, sh_req=sh_req,
+                    spec,
+                    int(req.n),
+                    int(req.h),
+                    int(req.w),
+                    sn_req=sn_req,
+                    sh_req=sh_req,
                 )
                 if plan is None or plan in out:
                     continue
@@ -809,13 +823,20 @@ _BWD_VARIANTS = ((1, 1), (1, 2), (1, 4), (1, 8), (2, 1), (4, 1), (8, 1))
 
 
 def _make_bwd_candidate(
-    *, block_size: int, vec: int, channels_per_block: int, n_groups: int,
-    fast_reduce: bool, priority: int,
+    *,
+    block_size: int,
+    vec: int,
+    channels_per_block: int,
+    n_groups: int,
+    fast_reduce: bool,
+    priority: int,
 ) -> KernelCandidate:
     cpb_suffix = f"_cpb{channels_per_block}" if channels_per_block != 1 else ""
     ng_suffix = f"_ng{n_groups}" if n_groups != 1 else ""
     fr_suffix = "_fr" if fast_reduce else ""
-    spec_id = f"batchnorm_bwd_dyn_b{block_size}_v{vec}{cpb_suffix}{ng_suffix}{fr_suffix}"
+    spec_id = (
+        f"batchnorm_bwd_dyn_b{block_size}_v{vec}{cpb_suffix}{ng_suffix}{fr_suffix}"
+    )
     name = f"batchnorm2d_{spec_id}"
 
     def _spec(req: BatchNormRequest) -> _bn.BatchNorm2DBwdSpec:
@@ -884,8 +905,12 @@ def _build_bwd_candidates() -> Tuple[KernelCandidate, ...]:
                 for v in _BWD_VECS:
                     cands.append(
                         _make_bwd_candidate(
-                            block_size=bs, vec=v, channels_per_block=cpb, n_groups=ng,
-                            fast_reduce=fr, priority=prio + var_rank * 1000,
+                            block_size=bs,
+                            vec=v,
+                            channels_per_block=cpb,
+                            n_groups=ng,
+                            fast_reduce=fr,
+                            priority=prio + var_rank * 1000,
                         )
                     )
                     prio += 1
@@ -915,18 +940,50 @@ def dynamic_batchnorm_bwd_candidates() -> Tuple[KernelCandidate, ...]:
 # default set (its builder stays available).
 _NHWC_GEOMS = {
     "infer": (
-        (256, 4, 8, 2), (256, 8, 8, 2), (256, 16, 8, 4), (256, 32, 8, 2), (256, 8, 8, 4), (256, 32, 8, 8),
-        (256, 64, 4, 2), (256, 32, 8, 4), (256, 4, 8, 4), (256, 8, 8, 8), (256, 32, 8, 16), (256, 64, 8, 4),
+        (256, 4, 8, 2),
+        (256, 8, 8, 2),
+        (256, 16, 8, 4),
+        (256, 32, 8, 2),
+        (256, 8, 8, 4),
+        (256, 32, 8, 8),
+        (256, 64, 4, 2),
+        (256, 32, 8, 4),
+        (256, 4, 8, 4),
+        (256, 8, 8, 8),
+        (256, 32, 8, 16),
+        (256, 64, 8, 4),
     ),
     "train": (
-        (256, 8, 4, 4), (1024, 16, 4, 4), (1024, 8, 4, 4), (1024, 32, 4, 16), (512, 8, 8, 16),
-        (1024, 32, 2, 4), (1024, 16, 2, 4), (512, 4, 8, 16), (1024, 32, 8, 16), (1024, 16, 4, 16),
-        (512, 16, 8, 16), (1024, 8, 2, 4), (1024, 32, 2, 16), (512, 32, 2, 16),
+        (256, 8, 4, 4),
+        (1024, 16, 4, 4),
+        (1024, 8, 4, 4),
+        (1024, 32, 4, 16),
+        (512, 8, 8, 16),
+        (1024, 32, 2, 4),
+        (1024, 16, 2, 4),
+        (512, 4, 8, 16),
+        (1024, 32, 8, 16),
+        (1024, 16, 4, 16),
+        (512, 16, 8, 16),
+        (1024, 8, 2, 4),
+        (1024, 32, 2, 16),
+        (512, 32, 2, 16),
     ),
     "bwd": (
-        (512, 16, 2, 4), (1024, 16, 4, 4), (1024, 32, 4, 8), (1024, 8, 4, 4), (1024, 32, 2, 4),
-        (1024, 64, 4, 4), (1024, 32, 2, 16), (512, 16, 4, 8), (1024, 16, 2, 4), (512, 16, 8, 8),
-        (512, 8, 8, 8), (1024, 32, 2, 8), (1024, 32, 2, 2), (1024, 8, 2, 8),
+        (512, 16, 2, 4),
+        (1024, 16, 4, 4),
+        (1024, 32, 4, 8),
+        (1024, 8, 4, 4),
+        (1024, 32, 2, 4),
+        (1024, 64, 4, 4),
+        (1024, 32, 2, 16),
+        (512, 16, 4, 8),
+        (1024, 16, 2, 4),
+        (512, 16, 8, 8),
+        (512, 8, 8, 8),
+        (1024, 32, 2, 8),
+        (1024, 32, 2, 2),
+        (1024, 8, 2, 8),
     ),
 }
 _NHWC_VARIANTS = {"infer": ("infer",), "train": ("split",), "bwd": ("split",)}
@@ -972,9 +1029,15 @@ class BatchNormNhwcCandidate:
         return _bn.build_batchnorm2d_nhwc(spec or self.spec("fp16", arch), kind)
 
     def workspace_floats(self, c: int, plan) -> int:
-        return _bn.batchnorm2d_nhwc_workspace_floats(c, plan) if self.variant == "split" else 0
+        return (
+            _bn.batchnorm2d_nhwc_workspace_floats(c, plan)
+            if self.variant == "split"
+            else 0
+        )
 
-    def plans(self, n: int, c: int, h: int, w: int, dtype: str, arch: str) -> Tuple[_bn.BatchNorm2DNhwcPlan, ...]:
+    def plans(
+        self, n: int, c: int, h: int, w: int, dtype: str, arch: str
+    ) -> Tuple[_bn.BatchNorm2DNhwcPlan, ...]:
         spec = self.spec(dtype, arch)
         if not _bn.is_valid_nhwc_spec(spec, arch)[0]:
             return ()
@@ -1032,15 +1095,34 @@ class BatchNormRoCandidate:
 
     def spec(self, dtype: str, arch: str = "gfx950") -> _ro.BatchNorm2DRoSpec:
         return _ro.BatchNorm2DRoSpec(
-            block_size=self.block_size, vec=self.vec, regs=self.regs,
-            dtype={"fp16": "f16", "fp32": "f32"}.get(dtype, dtype), fast_reduce=self.fast_reduce,
+            block_size=self.block_size,
+            vec=self.vec,
+            regs=self.regs,
+            dtype={"fp16": "f16", "fp32": "f32"}.get(dtype, dtype),
+            fast_reduce=self.fast_reduce,
         )
 
     def build(self, spec):
-        return _ro.build_batchnorm2d_ro_bwd(spec) if self.backward else _ro.build_batchnorm2d_ro_train(spec)
+        return (
+            _ro.build_batchnorm2d_ro_bwd(spec)
+            if self.backward
+            else _ro.build_batchnorm2d_ro_train(spec)
+        )
 
-    def plans(self, dtype: str, n: int, c: int, h: int, w: int, max_resident: int, rule: bool = True):
-        if rule and (dtype not in _RO_ELEM_BYTES or n * c * h * w * _RO_ELEM_BYTES[dtype] < RO_MIN_BYTES):
+    def plans(
+        self,
+        dtype: str,
+        n: int,
+        c: int,
+        h: int,
+        w: int,
+        max_resident: int,
+        rule: bool = True,
+    ):
+        if rule and (
+            dtype not in _RO_ELEM_BYTES
+            or n * c * h * w * _RO_ELEM_BYTES[dtype] < RO_MIN_BYTES
+        ):
             return []
         spec = self.spec(dtype)
         if not _ro.is_valid_ro_spec(spec)[0]:
@@ -1048,7 +1130,16 @@ class BatchNormRoCandidate:
         out = []
         for sn_req in _RO_SN_REQ:
             for sh_req in _RO_SH_REQ:
-                p = _ro.batchnorm2d_ro_plan(spec, n, c, h, w, sn_req=sn_req, sh_req=sh_req, max_resident=max_resident)
+                p = _ro.batchnorm2d_ro_plan(
+                    spec,
+                    n,
+                    c,
+                    h,
+                    w,
+                    sn_req=sn_req,
+                    sh_req=sh_req,
+                    max_resident=max_resident,
+                )
                 if p is None or p in out:
                     continue
                 if rule and not RO_MIN_SPLIT <= p.sn * p.sh <= RO_MAX_SPLIT:
@@ -1057,11 +1148,15 @@ class BatchNormRoCandidate:
         return out
 
 
-def dynamic_batchnorm_ro_candidates(backward: bool, dtype: str = "f16") -> Tuple[BatchNormRoCandidate, ...]:
+def dynamic_batchnorm_ro_candidates(
+    backward: bool, dtype: str = "f16"
+) -> Tuple[BatchNormRoCandidate, ...]:
     vecs = (4, 2) if dtype in ("f32", "fp32") else (8, 4)
     return tuple(
         BatchNormRoCandidate(bs, v, r, False, backward)
-        for bs in RO_BLOCKS for v in vecs for r in RO_REGS
+        for bs in RO_BLOCKS
+        for v in vecs
+        for r in RO_REGS
     )
 
 
@@ -1171,7 +1266,10 @@ class BatchNormMcwCandidate:
 
     @property
     def spec_id(self) -> str:
-        return f"batchnorm_mcw_{self.mode}_w{self.waves}_cp{self.cpw}_n{self.npw}_s{self.slots}" + (f"_v{self.vec}" if self.vec != 1 else "")
+        return (
+            f"batchnorm_mcw_{self.mode}_w{self.waves}_cp{self.cpw}_n{self.npw}_s{self.slots}"
+            + (f"_v{self.vec}" if self.vec != 1 else "")
+        )
 
     @property
     def name(self) -> str:
@@ -1183,8 +1281,14 @@ class BatchNormMcwCandidate:
 
     def spec(self, dtype: str, arch: str) -> _bn.BatchNorm2DMcwSpec:
         return _bn.BatchNorm2DMcwSpec(
-            mode=self.mode, waves=self.waves, cpw=self.cpw, npw=self.npw, slots=self.slots, vec=self.vec,
-            dtype=_bn_dtype(dtype), wave_size=ArchTarget.from_gfx(arch).wave_size,
+            mode=self.mode,
+            waves=self.waves,
+            cpw=self.cpw,
+            npw=self.npw,
+            slots=self.slots,
+            vec=self.vec,
+            dtype=_bn_dtype(dtype),
+            wave_size=ArchTarget.from_gfx(arch).wave_size,
         )
 
     def build(self, kind: str, spec=None, arch: str = "gfx950"):
@@ -1192,12 +1296,14 @@ class BatchNormMcwCandidate:
 
     def admits(self, n: int, c: int, h: int, w: int, dtype: str, arch: str) -> bool:
         spec = self.spec(dtype, arch)
-        return _bn.is_valid_mcw_spec(spec, arch)[0] and _bn.mcw_admits(spec, n, c, h, w)[0]
+        return (
+            _bn.is_valid_mcw_spec(spec, arch)[0] and _bn.mcw_admits(spec, n, c, h, w)[0]
+        )
 
     def shipped(self, dtype: str) -> bool:
         """True when this candidate is part of the shipped set of ``dtype``."""
         prefix = f"batchnorm2d_batchnorm_mcw_{self.mode}_"
-        return self.name[len(prefix):] in _MCW_SHIPPED.get((dtype, self.mode), ())
+        return self.name[len(prefix) :] in _MCW_SHIPPED.get((dtype, self.mode), ())
 
 
 def dynamic_batchnorm_mcw_candidates(mode: str) -> Tuple[BatchNormMcwCandidate, ...]:
@@ -1214,6 +1320,8 @@ def dynamic_batchnorm_mcw_candidates(mode: str) -> Tuple[BatchNormMcwCandidate, 
     return tuple(out)
 
 
-def shipped_batchnorm_mcw_candidates(mode: str, dtype: str) -> Tuple[BatchNormMcwCandidate, ...]:
+def shipped_batchnorm_mcw_candidates(
+    mode: str, dtype: str
+) -> Tuple[BatchNormMcwCandidate, ...]:
     """The shipped multi-channel-per-wave candidates of ``mode`` / ``dtype``."""
     return tuple(c for c in dynamic_batchnorm_mcw_candidates(mode) if c.shipped(dtype))
