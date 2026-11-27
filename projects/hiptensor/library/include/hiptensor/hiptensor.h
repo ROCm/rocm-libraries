@@ -160,12 +160,21 @@ HIPTENSOR_EXPORT hiptensorStatus_t
     hiptensorDestroyOperationDescriptor(hiptensorOperationDescriptor_t desc);
 
 //! @brief Configures an attribute in a `hiptensorOperationDescriptor_t` object.
+//!
+//! @details `sizeInBytes` must match the attribute: the size of its value for
+//! `HIPTENSOR_OPERATION_DESCRIPTOR_TAG` (`uint32_t`), `SCALAR_TYPE` (`hiptensorDataType_t`),
+//! `FLOPS` and `MOVED_BYTES` (`float`); one `uint32_t` per mode of the output tensor for
+//! `PADDING_LEFT` and `PADDING_RIGHT`; and one element of the output tensor's data type for
+//! `PADDING_VALUE`.
 //! @param[in] handle Opaque handle for the hipTensor library context.
 //! @param[in] desc The `hiptensorOperationDescriptor_t` object being modified.
 //! @param[in] attr The attribute to configure.
 //! @param[in] buf Pointer to the buffer containing the attribute's new value.
 //! @param[in] sizeInBytes Size of the `buf` in bytes.
-//! @returns `HIPTENSOR_STATUS_SUCCESS` when successful, otherwise returns an error code.
+//! @retval `HIPTENSOR_STATUS_SUCCESS` When the attribute is set.
+//! @retval `HIPTENSOR_STATUS_NOT_INITIALIZED` When `handle` or `desc` is `NULL`.
+//! @retval `HIPTENSOR_STATUS_INVALID_VALUE` When `buf` is `NULL` or `sizeInBytes` doesn't match the attribute.
+//! @retval `HIPTENSOR_STATUS_NOT_SUPPORTED` When the attribute is unknown.
 HIPTENSOR_EXPORT hiptensorStatus_t
     hiptensorOperationDescriptorSetAttribute(const hiptensorHandle_t                 handle,
                                              hiptensorOperationDescriptor_t          desc,
@@ -174,12 +183,19 @@ HIPTENSOR_EXPORT hiptensorStatus_t
                                              size_t                                  sizeInBytes);
 
 //! @brief Extracts an attribute from a `hiptensorOperationDescriptor_t` object.
+//!
+//! @details `sizeInBytes` must match the attribute, as for
+//! `hiptensorOperationDescriptorSetAttribute`. The padding attributes read as zero until they are
+//! set.
 //! @param[in] handle Opaque handle representing the hipTensor library context.
 //! @param[in] desc The `hiptensorOperationDescriptor_t` object to examine.
 //! @param[in] attr The attribute to extract.
 //! @param[out] buf Pointer to the buffer where the attribute value will be written.
 //! @param[in] sizeInBytes The buffer size in bytes.
-//! @returns `HIPTENSOR_STATUS_SUCCESS` when successful, otherwise returns an error code.
+//! @retval `HIPTENSOR_STATUS_SUCCESS` When the attribute is read.
+//! @retval `HIPTENSOR_STATUS_NOT_INITIALIZED` When `handle` or `desc` is `NULL`.
+//! @retval `HIPTENSOR_STATUS_INVALID_VALUE` When `buf` is `NULL` or `sizeInBytes` doesn't match the attribute.
+//! @retval `HIPTENSOR_STATUS_NOT_SUPPORTED` When the attribute is unknown.
 HIPTENSOR_EXPORT hiptensorStatus_t
     hiptensorOperationDescriptorGetAttribute(const hiptensorHandle_t                 handle,
                                              hiptensorOperationDescriptor_t          desc,
@@ -208,10 +224,11 @@ HIPTENSOR_EXPORT hiptensorStatus_t hiptensorDestroyPlanPreference(hiptensorPlanP
 //! @param[in,out] pref Opaque structure that narrows the search space for viable kernel candidates.
 //! @param[in] attr The attribute to configure.
 //! @param[in] buf Buffer (of size `sizeInBytes`) containing the new value for `attr`.
-//! @param[in] sizeInBytes Size of `buf` in bytes.
+//! @param[in] sizeInBytes Size of `buf` in bytes; must be the size of the attribute's value.
 //! @retval `HIPTENSOR_STATUS_SUCCESS` When the operation completes successfully.
-//! @retval `HIPTENSOR_STATUS_NOT_INITIALIZED` When the handle isn't initialized.
-//! @retval `HIPTENSOR_STATUS_INVALID_VALUE` When input data is invalid (typically user error).
+//! @retval `HIPTENSOR_STATUS_NOT_INITIALIZED` When `handle` or `pref` is `NULL`.
+//! @retval `HIPTENSOR_STATUS_INVALID_VALUE` When `buf` is `NULL` or `sizeInBytes` doesn't match the attribute.
+//! @retval `HIPTENSOR_STATUS_NOT_SUPPORTED` When the attribute is unknown.
 HIPTENSOR_EXPORT hiptensorStatus_t
     hiptensorPlanPreferenceSetAttribute(const hiptensorHandle_t            handle,
                                         hiptensorPlanPreference_t          pref,
@@ -224,9 +241,11 @@ HIPTENSOR_EXPORT hiptensorStatus_t
 //! @param[in] plan The existing plan (created via `hiptensorCreatePlan` or `hiptensorCreatePlanAutotuned`).
 //! @param[in] attr The attribute to retrieve.
 //! @param[out] buf Buffer that will contain the requested attribute information upon successful return.
-//! @param[in] sizeInBytes Size of `buf` in bytes.
+//! @param[in] sizeInBytes Size of `buf` in bytes; must be the size of the attribute's value (`uint64_t` for `HIPTENSOR_PLAN_REQUIRED_WORKSPACE`).
 //! @retval `HIPTENSOR_STATUS_SUCCESS` When the operation completes successfully.
-//! @retval `HIPTENSOR_STATUS_INVALID_VALUE` When input data is invalid (typically user error).
+//! @retval `HIPTENSOR_STATUS_NOT_INITIALIZED` When `handle` or `plan` is `NULL`.
+//! @retval `HIPTENSOR_STATUS_INVALID_VALUE` When `buf` is `NULL` or `sizeInBytes` doesn't match the attribute.
+//! @retval `HIPTENSOR_STATUS_NOT_SUPPORTED` When the attribute is unknown.
 HIPTENSOR_EXPORT hiptensorStatus_t hiptensorPlanGetAttribute(const hiptensorHandle_t  handle,
                                                              const hiptensorPlan_t    plan,
                                                              hiptensorPlanAttribute_t attr,

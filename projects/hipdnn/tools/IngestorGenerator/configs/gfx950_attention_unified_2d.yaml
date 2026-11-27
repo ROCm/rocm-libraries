@@ -5,6 +5,7 @@ engine:
   slug: gfx950_attention_unified_2d
   census_name_symbol: GFX950_ATTENTION_UNIFIED_2D_ENGINE_NAME
   sdk_version: 1.0.0
+  numerical_notes: []
   knobs:
   - tile_size
   - num_warps
