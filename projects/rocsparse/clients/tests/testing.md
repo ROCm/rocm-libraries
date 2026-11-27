@@ -3,7 +3,7 @@
 **Status:** Draft
 **Owner:** @doctorcolinsmith
 **Technical Lead:** @ntrost57
-**Last Updated:** 2026-11-17
+**Last Updated:** 2026-11-23
 
 This document describes how rocSPARSE is tested today, which signals actually gate a merge, and
 where the gaps are. It follows the ROCm-wide TESTING.md template and is written as a description of
@@ -369,7 +369,7 @@ Jenkins first runs `dvc pull -R projects/rocsparse/clients/matrices` (`pullMatri
 | Status | Applies to |
 |---|---|
 | Trusted gate | TheRock CI `standard` category on changed projects: `quick`+`pre_checkin` on `rocsparse-test` (excluding `*known_bug*`) and both unit-test binaries via their `standard` CTest label. Jenkins `precheckin` launches both unit binaries directly |
-| Codecov project status | `rocSPARSE` and `rocSPARSE-unit` fail when coverage is under the 80% target in `codecov.yml`. TheRock does not run this status, and `develop` branch protection has not been confirmed to require it. |
+| Codecov project status | `rocSPARSE` and `rocSPARSE-unit` fail when coverage is under the 80% target in `codecov.yml`. TheRock does not run this status. It is not a required check on PRs today. This is a known gap; making it required would apply to all libraries. |
 | Informational | Unit-test failures inside `coverage_analysis` (ignored so the upload continues); nightly `*nightly*` / comprehensive results; ASAN lane |
 | Unstable / flaky | `known_bug`-tagged cases (excluded from gating) |
 
@@ -562,6 +562,96 @@ device configurations are not ASAN-covered.
 
 ---
 
+## Testing Effectiveness Since This Document
+
+This section records what happened to coverage and to library bug fixes after this document
+merged on 2026-09-23. The unit-test layer landed earlier, on 2026-08-12. The numbers are
+measurements.
+
+### Coverage history
+
+The blue line is the develop coverage job, the `rocSPARSE` Codecov flag. The green line is the
+`rocSPARSE-unit` flag, which has no reading before 2026-10-14. The two flags do not measure the same
+files, so they cannot be added, averaged, or subtracted. The dashed horizontal line is the 80%
+project target in [`codecov.yml`](../../../../codecov.yml). Codecov reports a failing status below it,
+but that status is not a required check on PRs today. This is a known gap. Making it required would
+apply to all libraries, not only rocSPARSE.
+
+Each point is the upload that the `codecov/rocsparse/develop` Jenkins job made for the latest
+develop commit of that day that has a qualifying upload for both flags. Carried-forward Codecov
+readings are not points. When a build uploaded two reports of a flag, the chart keeps the higher one.
+An upload that covers fewer than 100 files is skipped, because Codecov sometimes processes only part of a report. Builds from 380 (2026-11-18)
+upload the union of the reports from two wavefront sizes (see [Coverage](#coverage)), so the step
+on that date is a change of measurement as well as a change in tests.
+
+The vertical lines mark 2026-08-12 (the unit-test layer merged), 2026-09-23 (this document
+merged), 2026-11-12 (#15395: unit tests that were behind macros nothing defined now compile and
+run), and 2026-11-18 (#15569, the union above).
+
+<!-- metrics:start -->
+_Measured on 2026-11-23._
+
+**Latest develop coverage reading** (2026-11-23, build 384): `rocSPARSE` flag
+85.88%, `rocSPARSE-unit` flag 82.73%,
+against an 80% target.
+
+![Line chart of rocSPARSE develop coverage by day: combined (blue) and unit-only (green) against the 80% target, with vertical markers for the unit-test layer, this document, #15395, and #15569.](testing_coverage_history.svg)
+
+**Library fixes and whether they added tests:**
+
+| Period | Library fixes | Added a unit test | Added any new test |
+|---|---:|---:|---:|
+| Before the unit-test layer, 2025-07-01 to 2026-08-11 | 41 | 0 of 41 (0%) | 15 of 41 (37%) |
+| Unit tests existed, 2026-08-12 to 2026-09-22 | 20 | 4 of 20 (20%) | 11 of 20 (55%) |
+| Since this document, 2026-09-23 to 2026-11-06 | 15 | 9 of 15 (60%) | 12 of 15 (80%) |
+| Since this document, 2026-11-07 to 2026-11-23 | 22 | 20 of 22 (91%) | 21 of 22 (95%) |
+| **Since this document, 2026-09-23 to 2026-11-23** | 37 | 29 of 37 (78%) | 33 of 37 (89%) |
+| &nbsp;&nbsp;of which fix a bug the unit tests found | 14 | 14 of 14 (100%) | 14 of 14 (100%) |
+| &nbsp;&nbsp;all other fixes | 23 | 15 of 23 (65%) | 19 of 23 (83%) |
+
+29 unit-tested fixes since this document were opened by 4 different authors; the most active opened 24 of them.
+
+**Fixes for bugs the unit tests found:** 18 pull requests, 14 merged.
+
+| PR | Ticket | Status | Bug |
+|---|---|---|---|
+| #14429 | AISPARSE-900 | Merged | csric0_set_tolerance dereferences a null info |
+| #14430 | AISPARSE-901 | Merged | CSC check_matrix applies the fill mode to the transpose |
+| #14461 | AISPARSE-897 | Merged | spgeam uses the scalar type instead of the compute type |
+| #14462 | AISPARSE-898 | Merged | csritilu0 async_split faults on a null residual norm |
+| #14477 | AISPARSE-904 | Merged | three headers document a status the function does not return |
+| #14478 | AISPARSE-905 | Merged | sptrsv ignores a device alpha when the types differ |
+| #14480 | AISPARSE-906 | Merged | csxsldu_preprocess leaves the column-direction base unset |
+| #14481 | AISPARSE-907 | Merged | spgemm ignores transposed operands |
+| #14482 | AISPARSE-908 | Merged | spgeam ignores transposed operands |
+| #14487 | AISPARSE-910 | Merged | convert_array returns success for pairs it does not convert |
+| #14488 | AISPARSE-911 | Merged | ell2csr_nnz writes nothing on an empty matrix |
+| #14490 | AISPARSE-909 | Merged | spildlt0 ignores the descriptor boost |
+| #15497 | AISPARSE-926 | Merged | empty spgeam analysis writes through a null C |
+| #15814 | AISPARSE-903 | Merged | csric0 conjugates the wrong operand in the inner sum |
+| #14427 | AISPARSE-896 | Open | csric0 / csrildlt0 hash lookup hangs when the table is exactly full |
+| #14428 | AISPARSE-899 | Open | empty csritsv reads a null tolerance |
+| #14431 | AISPARSE-902 | Open | BSR-to-BSR sparse_to_sparse does not convert direction or block size |
+| #15566 | AISPARSE-924 | Open | blocked ELL SpMM scales the wrong rows of C |
+<!-- metrics:end -->
+
+### How to read the fix table
+
+A fix is a merged pull request whose title contains the word `fix`, `fixes` or `fixed`, and whose
+diff touches `projects/rocsparse/library/`. The title does not have to name rocSPARSE.
+It counts as adding a unit test when it adds lines to a C or C++ file under `clients/unittests/`,
+and as adding any new test when it also adds YAML or C/C++ lines under `clients/tests/`,
+`clients/testings/`, or `clients/include/testing_*`.
+
+* Every fix for a bug the unit tests found that is merged so far added a unit test, so the "all other
+  fixes" row is the fairer measure of whether fixes now come with tests.
+* The first period since this document has 15 fixes, so one pull request moves its rate by about
+  seven points.
+* The periods differ in length, so compare rates and not counts.
+* A library change whose title does not contain one of those words is not counted as a fix.
+
+---
+
 ## Owners and Review Cadence
 
 **Review this document and the described testing strategy when:**
@@ -571,3 +661,4 @@ device configurations are not ASAN-covered.
 * Before a major release, alongside the known-gap review.
 
 The effectiveness of this testing strategy is measured by the reduction of entries in the Known Gaps Summary table over time.
+The measured coverage and fix history is in [Testing Effectiveness Since This Document](#testing-effectiveness-since-this-document).
