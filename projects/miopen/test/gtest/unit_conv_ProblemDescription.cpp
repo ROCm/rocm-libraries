@@ -27,10 +27,12 @@
 #include <gtest/gtest.h>
 #include <miopen/conv/problem_description.hpp>
 #include <miopen/db_record.hpp>
+#include <miopen/execution_context.hpp>
 
 #include <sstream>
 
 #include "unit_TensorDescriptor.hpp"
+#include "get_handle.hpp"
 #include "unit_conv_ConvolutionDescriptor.hpp"
 
 namespace {
@@ -547,3 +549,81 @@ TEST_P(CPU_ConvProblemDescriptionPerfDbKey_NONE, SameForDeterministicMode)
 }
 
 INSTANTIATE_TEST_SUITE_P(Quick, CPU_ConvProblemDescriptionPerfDbKey_NONE, testing::Values(0));
+
+namespace {
+
+miopen::conv::ProblemDescription MakeSetupFloatsProblem(miopenDataType_t in_type,
+                                                        miopenDataType_t out_type)
+{
+    return miopen::conv::ProblemDescription{
+        miopen::unit_tests::TensorDescriptorParams{in_type, miopenTensorNCHW, {1, 8, 8, 8}}
+            .GetTensorDescriptor(),
+        miopen::unit_tests::TensorDescriptorParams{in_type, miopenTensorNCHW, {8, 8, 3, 3}}
+            .GetTensorDescriptor(),
+        miopen::unit_tests::TensorDescriptorParams{out_type, miopenTensorNCHW, {1, 8, 6, 6}}
+            .GetTensorDescriptor(),
+        miopen::unit_tests::ConvolutionDescriptorParams{{0, 0}, {1, 1}, {1, 1}}
+            .GetConvolutionDescriptor(),
+        miopen::conv::Direction::Forward};
+}
+
+struct TestCaseSetupFloats
+{
+    miopenDataType_t in_type;
+    miopenDataType_t out_type;
+
+    friend std::ostream& operator<<(std::ostream& os, const TestCaseSetupFloats& tc)
+    {
+        return os << "(" << miopen::GetDataTypeName(tc.in_type) << ", "
+                  << miopen::GetDataTypeName(tc.out_type) << ")";
+    }
+};
+
+} // namespace
+
+using CPU_ConvProblemDescriptionSetupFloats_NONE = testing::TestWithParam<TestCaseSetupFloats>;
+
+// SetupFloats() adds the data type defines to the kernel build options, which key the kernel
+// binary cache. PrepareInvoker() calls it again on a context that already has them (after
+// CompileSolution() and on the find-db hit path), so the second call must keep the options.
+TEST_P(CPU_ConvProblemDescriptionSetupFloats_NONE, SecondCallKeepsBuildOptions)
+{
+    const auto problem = MakeSetupFloatsProblem(GetParam().in_type, GetParam().out_type);
+    auto ctx           = miopen::ExecutionContext{&get_handle()};
+
+    problem.SetupFloats(ctx);
+    const auto once = ctx.general_compile_options;
+    ASSERT_FALSE(once.empty());
+
+    problem.SetupFloats(ctx);
+    EXPECT_EQ(ctx.general_compile_options, once);
+}
+
+// The defines of another data type are still appended after the earlier ones, so the later
+// data type takes effect. The Winograd xdlops transform sets up an fp32 problem on a copy of
+// the context of the original problem.
+TEST_P(CPU_ConvProblemDescriptionSetupFloats_NONE, OtherDataTypeIsAppended)
+{
+    const auto problem    = MakeSetupFloatsProblem(GetParam().in_type, GetParam().out_type);
+    const auto other_type = GetParam().in_type == miopenHalf ? miopenFloat : miopenHalf;
+    const auto other      = MakeSetupFloatsProblem(other_type, other_type);
+
+    auto alone = miopen::ExecutionContext{&get_handle()};
+    problem.SetupFloats(alone);
+
+    auto ctx = miopen::ExecutionContext{&get_handle()};
+    other.SetupFloats(ctx);
+    const auto other_options = ctx.general_compile_options;
+    problem.SetupFloats(ctx);
+    EXPECT_EQ(ctx.general_compile_options, other_options + alone.general_compile_options);
+}
+
+INSTANTIATE_TEST_SUITE_P(Quick,
+                         CPU_ConvProblemDescriptionSetupFloats_NONE,
+                         testing::Values(TestCaseSetupFloats{miopenFloat, miopenFloat},
+                                         TestCaseSetupFloats{miopenHalf, miopenHalf},
+                                         TestCaseSetupFloats{miopenBFloat16, miopenBFloat16},
+                                         TestCaseSetupFloats{miopenInt8, miopenInt32},
+                                         TestCaseSetupFloats{miopenFloat8_fnuz, miopenFloat8_fnuz},
+                                         TestCaseSetupFloats{miopenBFloat8_fnuz,
+                                                             miopenBFloat8_fnuz}));
