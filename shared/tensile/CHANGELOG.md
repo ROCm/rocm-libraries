@@ -1,5 +1,7 @@
 # Changelog for Tensile
 
+## Tensile 4.51.0
+
 ## Tensile 4.50.0
 
 ## Tensile 4.49.0
