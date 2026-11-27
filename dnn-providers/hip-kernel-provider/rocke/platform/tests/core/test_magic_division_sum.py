@@ -163,6 +163,7 @@ def gpu_arch():
     return arch
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("divisor", DIVISORS)
 def test_static_quotients_match_numpy(gpu_arch, divisor):
     dividends = np.array(DIVIDENDS, dtype=np.int32)
@@ -170,6 +171,7 @@ def test_static_quotients_match_numpy(gpu_arch, divisor):
     np.testing.assert_array_equal(got, dividends // divisor)
 
 
+@pytest.mark.gpu
 def test_dynamic_quotients_match_numpy(gpu_arch):
     cases = [(n, d) for d in DIVISORS for n in DIVIDENDS]
     dividends = np.array([n for n, _ in cases], dtype=np.int32)

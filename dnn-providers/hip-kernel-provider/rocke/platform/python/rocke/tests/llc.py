@@ -27,7 +27,7 @@ from pathlib import Path
 
 from ..analysis import read_code_object_notes
 from .compiler_tools import require_tools_or_skip
-from .lanes import CI_TEST_TOOLS, skip_until_reason
+from .lanes import BUILD_VARIANT, skip_until_reason
 
 __all__ = [
     "checked_llc_output",
@@ -89,18 +89,18 @@ def require_amdgpu_llc(*, with_readelf: bool = True) -> str:
 
     ``with_readelf`` also requires llvm-readelf, which reads the notes of the
     code objects that llc builds. Raises ``unittest.SkipTest`` naming what is
-    missing, as waiting for the CI test environment's tools (``CI_TEST_TOOLS``).
+    missing, as waiting for the CI test environment's tools (``BUILD_VARIANT``).
     """
     llc = find_amdgpu_llc()
     if llc is None:
         raise unittest.SkipTest(
             skip_until_reason(
-                CI_TEST_TOOLS, reason="no llc with the AMDGPU backend found"
+                BUILD_VARIANT, reason="no llc with the AMDGPU backend found"
             )
         )
     if with_readelf and find_llvm_tool("llvm-readelf") is None:
         raise unittest.SkipTest(
-            skip_until_reason(CI_TEST_TOOLS, reason="no llvm-readelf found")
+            skip_until_reason(BUILD_VARIANT, reason="no llvm-readelf found")
         )
     return llc
 

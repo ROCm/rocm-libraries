@@ -1,7 +1,7 @@
 /* Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
  * SPDX-License-Identifier: MIT
  *
- * rocke/instance_gfx1201_wmma_gemm.h -- C99 port of the gfx1201 (RDNA4 / Navi48)
+ * rocke/instance_gfx1201_wmma_gemm.h -- C99 port of the gfx1201 (RDNA4)
  * WMMA GEMM kernel instance builder rocke/instances/gfx1201/wmma_gemm.py.
  *
  *   Python (gfx1201/wmma_gemm.py)         C99 (this header)

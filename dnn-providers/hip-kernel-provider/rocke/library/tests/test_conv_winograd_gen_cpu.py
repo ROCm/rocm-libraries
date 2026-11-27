@@ -8,7 +8,7 @@ from fractions import Fraction
 
 import numpy as np
 import pytest
-from rocke.tests.lanes import BINDING_LANE, import_or_skip_until
+from rocke.tests.lanes import BUILD_VARIANT, import_or_skip_until
 
 from kernels.common._conv_implicit_gemm_common import ConvProblem
 from kernels.common import conv_winograd_gen as WG
@@ -58,7 +58,7 @@ def test_cpp_toom_cook_tables_match_generator():
     the same reduced ``(numerator, denominator)`` of every coefficient, so a
     transcription error in any entry fails here whether or not a parity case
     happens to use that ``F(m, r)``."""
-    eng = import_or_skip_until("rocke_library_engine", BINDING_LANE)
+    eng = import_or_skip_until("rocke_library_engine", BUILD_VARIANT)
     tables = eng.conv_winograd_toom_cook_tables()
     assert set(tables) == set(WG.POINTS), (
         f"only in C++: {sorted(set(tables) - set(WG.POINTS))}, "
@@ -359,7 +359,7 @@ def _binding_cases():
     from kernels.common.conv_winograd_fwd import WinogradFwdSpec
     from kernels.common.conv_winograd_gemm_wmma import WinogradGemmWmmaSpec
 
-    eng = import_or_skip_until("rocke_library_engine", BINDING_LANE)
+    eng = import_or_skip_until("rocke_library_engine", BUILD_VARIANT)
     p3 = ConvProblem(N=1, Hi=8, Wi=8, C=16, K=16, Y=3, X=3, pH=1, pW=1)
     p1 = ConvProblem(N=1, Hi=1, Wi=64, C=32, K=32, Y=1, X=3, pW=1)
     gen = WG.WinogradGenSpec(problem=p1, ax_y=WG.WinoAxis(1, 1), ax_x=WG.WinoAxis(4, 3))

@@ -144,7 +144,7 @@ __all__ = [
 def _default_gemm_tile() -> TileSpec:
     """Tuned MFMA tile for the fused-MoE batched GEMMs.
 
-    Sweep result on MI355X (``examples/gfx950/moe/tune_gate_up_silu.py``):
+    Sweep result on gfx950 (``examples/gfx950/moe/tune_gate_up_silu.py``):
     ``tile_m=32, tile_n=128, tile_k=64, warp_m=1, warp_n=2,
     atom=32x32x16`` is the fastest correctness-clean tile for the
     graph-captured packed path on both small and decode shapes:
@@ -287,7 +287,7 @@ def _sparse_batch_gemm_tile() -> TileSpec:
     padded GEMM work.
 
     Sweep result (perf_moe, best-of-5, datacenter T128/E32/K5/H8192/I8192,
-    dynamic path on gfx950 / MI355X):
+    dynamic path on gfx950):
 
     * ``_large_batch_gemm_tile`` (t64n128k64 w2x2): 3.91 ms
     * t32n256k64 w1x4:                              3.48 ms
@@ -444,7 +444,7 @@ class FusedMoeForwardSpec:
     use_experimental_fused_gate_up_silu: bool = False
     """Use the experimental dual-B MFMA gate+up+silu kernel.
 
-    Default False because measurements on MI355X show the graph-
+    Default False because measurements on gfx950 show the graph-
     captured packed path (one N=2I batched GEMM + packed silu_mul
     streaming kernel) is faster today. The experimental kernel is
     correctness-clean and kept as a research/tuning target.
@@ -456,7 +456,7 @@ class FusedMoeForwardSpec:
     single-B GEMM, and performs SiLU in the cshuffle epilogue from LDS
     pairs. This crosses the activation barrier inside the GEMM kernel
     without the GateUpPacked HBM round-trip. Promoted as the default
-    after tuning on MI355X:
+    after tuning on gfx950:
 
     * small: 0.0388 ms vs packed 0.0391 ms
     * decode1: 0.4401 ms vs packed 0.4495 ms
@@ -491,7 +491,7 @@ class FusedMoeForwardSpec:
     use_experimental_static_scatter_gather: bool = False
     """Fuse static scatter and gather into one streaming kernel.
 
-    Correctness-clean but slower on MI355X in measurements:
+    Correctness-clean but slower on gfx950 in measurements:
     the one-CTA-per-routed-pair kernel copies the full hidden row and
     loses to the older two-kernel ``scatter -> gather`` sequence's
     memory pattern. Kept opt-in for further tuning.
@@ -556,7 +556,7 @@ class FusedMoeForwardSpec:
     ``E * MAX_PADDED_M`` to ``sum_e ceil(count[e]/tile_m) * tile_m``
     (~total routed tokens rounded to ``tile_m``).
 
-    Measured on gfx950 / MI355X (perf_moe, best-of-5, datacenter
+    Measured on gfx950 (perf_moe, best-of-5, datacenter
     T128/E32/K5/H8192/I8192): the GEMM row count drops ~2x and the
     forward speeds up correspondingly. Numerically parity-clean
     (max_abs unchanged). Strict win for sparse routing; for dense
@@ -569,7 +569,7 @@ class FusedMoeForwardSpec:
     active_tile_skip_gemms: bool = True
     """Use ``trait.active_tile_skip=True`` MoE GEMM kernels.
 
-    Default-on after tuning on MI355X (gfx950): inactive expert slots
+    Default-on after tuning on gfx950: inactive expert slots
     (``-1`` sentinel rows in the over-padded static-offset layout) skip
     all MFMAs / LDS reads / HBM stores via one ``scf.if`` at CTA entry.
     Measured (perf_moe, best-of-5, graph-replay):
@@ -704,7 +704,7 @@ class FusedMoeForwardSpec:
         :meth:`to_gemm_spec` so the same MFMA kernel body is reused.
 
         Note: tried ``chiplet_swizzle=True`` + ``waves_per_eu=2`` on
-        MI355X (matching CK Tile's ``fmoe_<traits>_uk`` template
+        gfx950 (matching CK Tile's ``fmoe_<traits>_uk`` template
         default), measured no improvement over the simpler
         ``pad_m=True`` configuration on the benchmark scenarios; the
         swizzle is left off to keep the kernel name surface minimal
@@ -881,7 +881,7 @@ class FusedMoeForward:
         # cost much. Tuning sweep result:
         # * batch32 (T*K*E=512): static wins (0.5356 ms vs 0.8268 ms)
         # * prefill128 (T*K*E=2048): dynamic wins (0.9074 ms vs 1.3656 ms)
-        # So 512 is the measured cutoff on MI355X for the current tile
+        # So 512 is the measured cutoff on gfx950 for the current tile
         # family. ``spec.use_static_offsets`` lets decode shapes with a
         # tighter fixed-slot contract opt in explicitly.
         if spec.use_static_offsets is None:
@@ -2541,7 +2541,7 @@ class FusedMoeForward:
             # GateUpPacked HBM round-trip and the separate silu_mul
             # launch. It is experimental because the current dual-B
             # kernel is correctness-clean but still slower than the
-            # graph-captured packed path on MI355X.
+            # graph-captured packed path on gfx950.
             gate_stage_callables = [
                 make_kernel(
                     gate_up_silu_launcher,

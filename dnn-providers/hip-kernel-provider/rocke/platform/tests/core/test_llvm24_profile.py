@@ -33,7 +33,7 @@ def test_lane_order_and_llvm24_barrier_profile() -> None:
         "s.wakeup.barrier",
     }
     assert all("addrspace(15)" in llvm24_decls[key] for key in changed)
-    assert lower_llvm._supports_llvm23_target_ops("llvm24")
+    assert lower_llvm.supports_llvm23_target_ops("llvm24")
 
 
 def test_explicit_llvm24_emission_does_not_query_comgr(monkeypatch) -> None:

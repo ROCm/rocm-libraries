@@ -1246,7 +1246,7 @@ class TestConvWgradVectorLoad(unittest.TestCase):
         )
 
     def test_gfx1250_wgrad_vectorized_dual_engine(self):
-        # gfx1250 (MI400/MI450 gen, wave32 WMMA) uses the 16x16x32 hero atom.
+        # gfx1250 (wave32 WMMA) uses the 16x16x32 hero atom.
         # Lower through the backend dispatcher (not the python-only lowerer) so
         # that under ROCKE_BACKEND=both this also asserts Python == C++ on the
         # gfx1250 serialized-IR path -- the actual runtime cpp backend. No GPU /
@@ -2563,8 +2563,9 @@ class TestWgradWmmaCShuffle(unittest.TestCase):
 
     def _sweep(self, **knobs) -> None:
         if GPU_ARCH != "gfx1250":
-            self.skipTest(
-                f"the WMMA cshuffle epilogue is gfx1250-tested; on {GPU_ARCH}"
+            skip_needing_arch(
+                ("gfx1250",),
+                reason=f"the WMMA cshuffle epilogue is gfx1250-tested; on {GPU_ARCH}",
             )
         from kernels.common._conv_implicit_gemm_common import ConvProblem
         from kernels.common.conv_implicit_gemm import ConvDataSpec

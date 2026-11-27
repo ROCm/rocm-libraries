@@ -31,6 +31,8 @@ import pytest
 from rocke.core.ir import I8, I32, IRBuilder, PtrType
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
+pytestmark = pytest.mark.gpu
+
 _LANE_STRIDE = 16  # bytes per lane in the load results and the store sources
 _SOURCE_BYTES = 4096
 

@@ -4,7 +4,7 @@
  * instance_gfx1201_wmma_gemm.c -- C99 port of
  * rocke/instances/gfx1201/wmma_gemm.py.
  *
- * The gfx1201 (RDNA4 / Navi48) WMMA GEMM kernel: one wave32 per 16x16 output
+ * The gfx1201 (RDNA4) WMMA GEMM kernel: one wave32 per 16x16 output
  * tile, no LDS, RCR layout (C = A @ B.T). The build op order tracks
  * build_wmma_gemm() top-to-bottom so a reviewer can diff line by line.
  */

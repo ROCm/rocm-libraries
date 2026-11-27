@@ -26,7 +26,7 @@ class GroupedConvFeatureEngine(FeatureEngine):
 
     def __init__(
         self,
-        num_cus: int = 256,  # gfx950 MI300 default
+        num_cus: int = 256,  # gfx950 default
         lds_capacity: int = 65536,
         max_clock_mhz: int = 2400,
         simds_per_cu: int = 4,

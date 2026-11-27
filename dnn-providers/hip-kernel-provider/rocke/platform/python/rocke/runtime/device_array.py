@@ -14,6 +14,10 @@ Three pieces, one per responsibility:
   :func:`rocke.runtime.torch_interop.torch_array_info`, which never imports
   torch). Host-side launch checks (dtype, shape, contiguity, same device, no
   overlap) read an ``ArrayInfo`` and so accept any of these.
+* :func:`copy_elements` and :func:`zero_elements` move or clear the elements
+  an ``ArrayInfo`` describes, strided or not, with the runtime's 2D memcpy and
+  memset (``ctypes.memmove`` / ``memset`` for host memory), and
+  :meth:`ArrayInfo.view` describes part of an array for them.
 * :func:`host_values` copies an array's elements to the host;
   :func:`device_workspace`, :func:`device_values` and :func:`strided_view` make a
   scratch array, a filled array and a re-described view of the same kind as a
@@ -32,8 +36,10 @@ explicitly; the element type <-> host dtype map is
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from dataclasses import dataclass
+import ctypes
+import itertools
+from collections.abc import Iterator, Sequence
+from dataclasses import dataclass, replace
 from typing import Protocol, runtime_checkable
 
 import numpy as np
@@ -57,12 +63,14 @@ __all__ = [
     "DescribedArray",
     "DeviceArray",
     "array_info",
-    "device_values",
+    "copy_elements",
     "dense_strides",
+    "device_values",
     "device_workspace",
     "host_values",
     "strided_extent",
     "strided_view",
+    "zero_elements",
 ]
 
 
@@ -105,6 +113,70 @@ class ArrayInfo:
         reach = strided_extent(self.shape, self.strides)
         return self.data_ptr, self.data_ptr + reach * self.element_size
 
+    def view(
+        self, shape: Sequence[int], strides: Sequence[int], offset: int = 0
+    ) -> ArrayInfo:
+        """The same memory, from ``offset`` elements past **this array's first
+        element**, described as ``shape`` with element ``strides``
+        (:meth:`DeviceArray.view` counts its offset from the start of the
+        buffer instead). Strides and the offset are non-negative and the view
+        must stay inside :attr:`backed_elements` (:func:`_checked_layout`)."""
+        shape, strides, offset = _checked_layout(
+            "ArrayInfo.view", shape, strides, offset, self.backed_elements
+        )
+        return replace(
+            self,
+            shape=shape,
+            strides=strides,
+            data_ptr=self.data_ptr + offset * self.element_size,
+            backed_elements=self.backed_elements - offset,
+        )
+
+
+def _checked_layout(
+    caller: str,
+    shape: Sequence[int],
+    strides: Sequence[int],
+    offset: int,
+    room: int,
+) -> tuple[tuple[int, ...], tuple[int, ...], int]:
+    """``(shape, strides, offset)`` as ints, for a view of ``room`` elements
+    from its origin: one non-negative stride per axis, a non-negative offset,
+    and every element inside ``room``. Raises ``ValueError`` naming ``caller``
+    otherwise. The one check both :meth:`ArrayInfo.view` and
+    :meth:`DeviceArray.view` make."""
+    shape = tuple(int(extent) for extent in shape)
+    strides = tuple(int(stride) for stride in strides)
+    offset = int(offset)
+    if len(strides) != len(shape) or min((*strides, offset), default=0) < 0:
+        raise ValueError(
+            f"{caller} failed - shape={shape} strides={strides} offset={offset}, "
+            "expected one non-negative stride per axis and a non-negative offset"
+        )
+    if offset + strided_extent(shape, strides) > room:
+        raise ValueError(
+            f"{caller} failed - shape={shape} strides={strides} offset={offset} "
+            f"reaches past the {room} elements from its origin"
+        )
+    return shape, strides, offset
+
+
+def _names_each_element_once(shape: Sequence[int], strides: Sequence[int]) -> bool:
+    """Whether a layout reaches a distinct element for every index: with its
+    axes longer than 1 sorted by stride, the first stride is at least 1 and
+    each other stride at least the span (extent times stride) of the axis
+    before it. A sufficient check: a layout it refuses may still be
+    one-to-one, but none it accepts names an element twice."""
+    axes = sorted(
+        (stride, extent) for extent, stride in zip(shape, strides) if extent > 1
+    )
+    reach = 1
+    for stride, extent in axes:
+        if stride < reach:
+            return False
+        reach = stride * extent
+    return True
+
 
 def dense_strides(shape: Sequence[int]) -> tuple[int, ...]:
     """Row-major element strides of a dense array of ``shape``."""
@@ -121,6 +193,161 @@ def strided_extent(shape: Sequence[int], strides: Sequence[int]) -> int:
     if not all(shape):
         return 0
     return 1 + sum((extent - 1) * stride for extent, stride in zip(shape, strides))
+
+
+@dataclass(frozen=True)
+class _Rows:
+    """One 2D call of a copy or fill: ``height`` rows of ``width`` elements,
+    row ``r`` starting ``starts[k] + r * pitches[k]`` elements into layout
+    ``k``. Every row is contiguous in every layout, and every pitch is at least
+    ``width``, so the rows of one layout never overlap."""
+
+    width: int
+    height: int
+    pitches: tuple[int, ...]
+    starts: tuple[int, ...]
+
+
+def _row_blocks(
+    shape: tuple[int, ...], strides: Sequence[tuple[int, ...]]
+) -> Iterator[_Rows]:
+    """Walk ``shape`` in each of the stride sets ``strides`` at once, as 2D
+    blocks of rows: every element lies in exactly one row of one block.
+
+    Axes of extent 1 are dropped and neighbours contiguous in every set
+    merged. The row is the innermost merged axis when it is contiguous in
+    every set (one element otherwise); the rows of a block run along the
+    longest other merged axis whose stride, in every set, is at least the row
+    (an axis's stride is uniform by construction); each remaining position of
+    the other axes is one block. So two dense layouts are one block of one
+    row, a transpose of the outer axes is one block per outer position, and a
+    transpose of the innermost axis is one block of single elements per
+    position of all but the longest axis."""
+    axes = [
+        (extent, tuple(s[axis] for s in strides))
+        for axis, extent in enumerate(shape)
+        if extent != 1
+    ]
+    merged: list[tuple[int, tuple[int, ...]]] = []
+    for extent, steps in axes:
+        if merged and all(
+            outer == extent * inner for outer, inner in zip(merged[-1][1], steps)
+        ):
+            merged[-1] = (merged[-1][0] * extent, steps)
+        else:
+            merged.append((extent, steps))
+    width = 1
+    if merged and all(step == 1 for step in merged[-1][1]):
+        width = merged.pop()[0]
+    rows = [axis for axis in merged if all(step >= width for step in axis[1])]
+    height, pitches = 1, tuple(width for _ in strides)
+    if rows:
+        longest = max(rows, key=lambda axis: axis[0])
+        merged.remove(longest)
+        height, pitches = longest
+    for position in itertools.product(*(range(extent) for extent, _ in merged)):
+        yield _Rows(
+            width,
+            height,
+            pitches,
+            tuple(
+                sum(index * steps[k] for index, (_, steps) in zip(position, merged))
+                for k in range(len(strides))
+            ),
+        )
+
+
+def copy_elements(dst: ArrayInfo, src: ArrayInfo, *, stream: int = 0) -> None:
+    """Copy the elements ``src`` describes into those ``dst`` describes.
+
+    The two have one shape and element type and live on one device (copied
+    by ``hipMemcpy2DAsync`` queued on ``stream``) or both in host memory
+    (copied at once with ``ctypes.memmove``, one row at a time). Each 2D block
+    of rows contiguous in both (:func:`_row_blocks`) is one device call, so
+    two dense arrays are one call and a transposing copy is one per outer
+    position. Negative strides, a destination that may name one element twice
+    (:func:`_names_each_element_once`) and arrays whose byte spans overlap are
+    refused: the result would depend on the order of the copies."""
+    if (dst.shape, dst.dtype, dst.element_size) != (
+        src.shape,
+        src.dtype,
+        src.element_size,
+    ):
+        raise ValueError(
+            f"copy_elements failed - dst {dst.shape} {dst.dtype}, src {src.shape} "
+            f"{src.dtype}, expected one shape and element type"
+        )
+    if dst.device != src.device:
+        raise ValueError(
+            f"copy_elements failed - dst on device {dst.device}, src on device "
+            f"{src.device}, expected both on one device or both in host memory"
+        )
+    if min((*dst.strides, *src.strides), default=0) < 0:
+        raise ValueError(
+            f"copy_elements failed - dst strides {dst.strides}, src strides "
+            f"{src.strides}, expected non-negative strides"
+        )
+    if not _names_each_element_once(dst.shape, dst.strides):
+        raise ValueError(
+            f"copy_elements failed - dst shape {dst.shape} strides {dst.strides}, "
+            "expected a destination that names each element once"
+        )
+    (dst_start, dst_end), (src_start, src_end) = dst.byte_span(), src.byte_span()
+    if dst_start < src_end and src_start < dst_end:
+        raise ValueError(
+            f"copy_elements failed - dst bytes [{dst_start:#x}, {dst_end:#x}) and src "
+            f"bytes [{src_start:#x}, {src_end:#x}), expected no overlap"
+        )
+    if not all(dst.shape):
+        return
+    size = dst.element_size
+    runtime = None if dst.device is None else Runtime()
+    for block in _row_blocks(dst.shape, (dst.strides, src.strides)):
+        (dst_pitch, src_pitch), (to, start) = block.pitches, block.starts
+        to_ptr, from_ptr = dst.data_ptr + to * size, src.data_ptr + start * size
+        if runtime is not None:
+            runtime.memcpy2d_d2d_async(
+                to_ptr,
+                dst_pitch * size,
+                from_ptr,
+                src_pitch * size,
+                block.width * size,
+                block.height,
+                stream,
+            )
+            continue
+        for row in range(block.height):
+            ctypes.memmove(
+                to_ptr + row * dst_pitch * size,
+                from_ptr + row * src_pitch * size,
+                block.width * size,
+            )
+
+
+def zero_elements(dst: ArrayInfo, *, stream: int = 0) -> None:
+    """Set the elements ``dst`` describes to zero bytes: ``hipMemset2DAsync``
+    queued on ``stream`` for device memory, ``ctypes.memset`` at once for host
+    memory, one call per 2D block of rows (:func:`_row_blocks`). Negative
+    strides are refused."""
+    if min(dst.strides, default=0) < 0:
+        raise ValueError(
+            f"zero_elements failed - dst strides {dst.strides}, expected "
+            "non-negative strides"
+        )
+    if not all(dst.shape):
+        return
+    size = dst.element_size
+    runtime = None if dst.device is None else Runtime()
+    for block in _row_blocks(dst.shape, (dst.strides,)):
+        ((pitch,), (to,)) = block.pitches, block.starts
+        to_ptr = dst.data_ptr + to * size
+        if runtime is not None:
+            runtime.memset2d_async(
+                to_ptr, pitch * size, 0, block.width * size, block.height, stream
+            )
+            continue
+        for row in range(block.height):
+            ctypes.memset(to_ptr + row * pitch * size, 0, block.width * size)
 
 
 @runtime_checkable
@@ -230,7 +457,10 @@ class DeviceArray:
 
     ``dtype`` names the element type the device sees; it defaults from the host
     dtype (``float16`` -> ``"fp16"``, ``int32`` -> ``"i32"``, ...) and must be
-    given for raw-bit hosts such as bf16 (``uint16``). ``shape`` may be narrower
+    given for raw-bit hosts such as bf16 (``uint16``). A given ``dtype`` must
+    match the host dtype (:func:`rocke.numeric.storage.host_dtype`), or the host
+    must be an integer type of the same width holding its raw bits: ``float16``
+    data named ``"bf16"`` is refused. ``shape`` may be narrower
     than the host array along its axes, which views the leading part of each
     axis with the host's strides (e.g. a column slice); it defaults to the host
     shape. :meth:`view` describes the same buffer another way (a transposed or
@@ -262,29 +492,20 @@ class DeviceArray:
         offset: int | None = None,
     ) -> DeviceArray:
         """This array's buffer as ``shape`` with element ``strides`` (``None``:
-        row-major dense), starting ``offset`` elements into the buffer (``None``:
-        where this array starts), as ``torch.as_strided`` describes a storage.
-        The view shares the device memory, so a kernel's writes through either
-        array show in both. Strides are non-negative and the view must stay
-        inside the buffer."""
-        shape = tuple(int(extent) for extent in shape)
-        strides = (
-            dense_strides(shape)
-            if strides is None
-            else tuple(int(stride) for stride in strides)
+        row-major dense), starting ``offset`` elements into **the buffer**
+        (``None``: where this array starts), as ``torch.as_strided`` describes a
+        storage (:meth:`ArrayInfo.view` counts its offset from the array's first
+        element instead). The view shares the device memory, so a kernel's
+        writes through either array show in both. Strides and the offset are
+        non-negative and the view must stay inside the buffer
+        (:func:`_checked_layout`)."""
+        shape, strides, offset = _checked_layout(
+            "DeviceArray.view",
+            shape,
+            dense_strides(shape) if strides is None else strides,
+            self._offset if offset is None else offset,
+            self._host.size,
         )
-        offset = self._offset if offset is None else int(offset)
-        if len(strides) != len(shape) or min((*strides, offset), default=0) < 0:
-            raise ValueError(
-                f"DeviceArray.view failed - shape={shape} strides={strides} "
-                f"offset={offset}, expected one non-negative stride per axis and "
-                "a non-negative offset"
-            )
-        if offset + strided_extent(shape, strides) > self._host.size:
-            raise ValueError(
-                f"DeviceArray.view failed - shape={shape} strides={strides} "
-                f"offset={offset} reaches past the {self._host.size}-element buffer"
-            )
         view = object.__new__(DeviceArray)
         view._host, view._memory = self._host, self._memory
         view.dtype, view.device = self.dtype, self.device
@@ -301,11 +522,15 @@ class DeviceArray:
         if dtype is None:
             return element_type_of(array_dtype)
         name = dtype_info(dtype).name
-        if host_dtype(name).itemsize != array_dtype.itemsize:
+        expected = host_dtype(name)
+        raw_bits = (
+            array_dtype.kind in "iu" and array_dtype.itemsize == expected.itemsize
+        )
+        if array_dtype != expected and not raw_bits:
             raise ValueError(
-                f"DeviceArray failed - dtype={name!r} is {host_dtype(name).itemsize} "
-                f"bytes, expected the host element size {array_dtype.itemsize} "
-                f"({array_dtype})"
+                f"DeviceArray failed - dtype={name!r}, host dtype={array_dtype}, "
+                f"expected {expected} or a {expected.itemsize}-byte integer type "
+                "holding its raw bits"
             )
         return name
 

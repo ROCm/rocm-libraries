@@ -2,7 +2,7 @@
 
 A single-geometry optimization case study that takes a square `fp16` GEMM from
 the stock CK DSL universal-GEMM tile pipeline up toward the matrix-unit throughput
-ceiling on **MI355X / gfx950 (CDNA4)** — one measured, correctness-gated technique
+ceiling on **gfx950 (CDNA4)** — one measured, correctness-gated technique
 at a time. The kernel is the production `UniversalGemmSpec` driven at a fixed
 geometry (`256×256×64`, `4×4` warps, `8192³`, RCR `fp16`); the example demonstrates
 and reproduces a six-rung performance **ladder** (A–F) where each rung enables one
@@ -36,7 +36,7 @@ additional `TraitSpec` lever.
 
 | | |
 |---|---|
-| GPU | AMD Instinct MI355X (gfx950, CDNA4), 160 KB LDS/CU, 32 LDS banks, wave64 |
+| GPU | gfx950 (CDNA4), 160 KB LDS/CU, 32 LDS banks, wave64 |
 | ROCm | 7.2 |
 | atom | `v_mfma_f32_16x16x32` (CDNA4 wide-K) |
 | shape | square `fp16`, RCR, `8192³` (`S = 8192`) |
@@ -52,7 +52,7 @@ additional `TraitSpec` lever.
 
 ## Prerequisites
 
-- A **gfx950** GPU (this study is pinned to MI355X / CDNA4).
+- A **gfx950** GPU (this study is pinned to gfx950 / CDNA4).
 - `rocke` on `PYTHONPATH` (the example imports `compile_kernel`, `Runtime`, and
   `build_universal_gemm` from the package).
 - `torch` built with HIP (used both for the rocBLAS reference and for the

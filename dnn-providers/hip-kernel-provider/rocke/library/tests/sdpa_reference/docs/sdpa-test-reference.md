@@ -264,8 +264,7 @@ uses exact rational arithmetic and rounds the comparison limit downward. The
 comparison limit is strictly below the exact remainder `T - B`; this preserves
 the original strict threshold without a fixed percentage reserve. A baseline
 with `B >= T` fails qualification; the original tolerance cannot be increased
-by its manifest. When Torch is enabled, B is the maximum baseline error bound
-against NumPy and both recorded Torch answers.
+by its manifest.
 
 Qualification records input and old-output digests. CI executes the old kernels
 and requires those same digests before using the offline bounds. An unknown old
@@ -293,60 +292,6 @@ without this policy marker keep their authenticated 5% reserve and comparison
 limits; loading them does not silently widen their gate. Requalify and publish
 through the normal workflow to adopt the new policy. The reserve did not add
 input, shape, dtype, or architecture coverage.
-
-## Optional Torch reference agreement during qualification
-
-The original gfx942/gfx950 dense numeric tests use Torch FP32 SDPA. The default
-pinned qualification instead measures B against NumPy float64 on a portable,
-quantized input corpus. These references and input samples are not interchangeable.
-Existing published certificates do not acquire Torch evidence retroactively.
-
-To measure their agreement on exactly the qualified inputs, add
-`--torch-reference` (CPU) or `--torch-reference cuda` (ROCm GPU) to the offline
-`qualify` command. Both Torch float64 and float32 SDPA answers are checked, using
-explicit GQA expansion and the original tests' Python `1/sqrt(D)` scale. NumPy
-retains the float32 ABI scale. The measured gap therefore includes that scale
-representation difference. Torch outputs retain their computation dtype; they
-are not rounded to FP16/BF16 output storage. The default Torch SDPA backend
-selection is used, and its device, version, precision settings, checker digest,
-answer digests, and conservative disagreement bounds are recorded in the locked
-manifest. Requesting unavailable Torch or a missing/wrong ROCm GPU fails.
-
-For each enabled reference R_j, measure the pinned output directly:
-
-```text
-B = max_j upper_bound(norm(O - R_j))
-C < T - B
-D <= C implies norm(N - R_j) <= D + B < T for every enabled R_j
-```
-
-The measured NumPy–Torch gap is retained as diagnostic evidence, not compared
-against an arbitrary margin. A large baseline-to-reference error reduces the
-comparison budget; `B >= T` fails qualification. This preserves the same
-reference coverage without a fixed 5% reserve. Conservative arithmetic and
-authenticated replay are still required.
-
-CPU evidence applies only to the recorded CPU Torch answers. It does not qualify
-the original GPU Torch backend, a different Torch version, different inputs, or
-arbitrary future Torch outputs. Use `cuda` on the corresponding ROCm processor
-for GPU reference evidence. This comparison also does not prove exact-real
-arithmetic accuracy or accuracy no-regression. Existing Torch tests remain useful.
-
-A reference-only audit can run without compiling or executing rocKE. It checks
-one variant's cases and records the variant in its report; `--variant` may be
-omitted while the architecture has only one:
-
-```bash
-PYTHONPATH=library/tests:platform/python python -m sdpa_reference.torch_reference \
-  --arch gfx942 --variant dense --device cpu --output oracle-agreement.json
-python -m pytest library/tests/sdpa_reference/check_torch_reference.py -q
-```
-
-This audit is not baseline qualification and cannot replace a published bundle.
-To include the evidence in a certificate, rerun complete-cohort qualification
-with the option, then follow the shared candidate verification and publication
-workflow. Ordinary replay does not import Torch or run the independent references;
-the optional checker is not copied into the frozen replay payload.
 
 ## Developer verification
 

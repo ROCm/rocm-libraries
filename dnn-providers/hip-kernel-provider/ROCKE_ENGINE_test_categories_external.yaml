@@ -169,9 +169,7 @@ test_categories:
       - "rocke_differential_golden_ll"
       - "rocke_differential_golden_canonical"
       - "rocke_oracle_free_pytest"
-      - "rocke_library_dsa_pytest"
       - "rocke_contracts_pytest"
-      - "rocke_entry_time_check"
       - "rocke_reference_common_pytest"
       - "rocke_[a-z0-9_]+_reference_unit_pytest"
       - "rocke_[a-z0-9_]+_gpu_gfx[0-9a-z]+_pytest"
@@ -289,6 +287,7 @@ test_categories:
       - "rocke_tiling_pytest"
       - "rocke_library_gpu_pytest"
       - "rocke_tiling_gpu_pytest"
+      - "rocke_platform_gpu_pytest"
       - "rocke_reference_common_pytest"
       - "rocke_[a-z0-9_]+_reference_unit_pytest"
       - "rocke_[a-z0-9_]+_gpu_gfx[0-9a-z]+_pytest"
@@ -323,6 +322,7 @@ test_categories:
       - "rocke_library_attention_cache_key_pytest"
       - "rocke_library_attention_pytest"
       - "rocke_library_mla_pytest"
+      - "rocke_library_dsa_pytest"
       - "rocke_library_sdpa_pytest"
       # Not registered on Windows (see rocke/library/tests/ctest_lists.cmake); the
       # parser ignores a listed name that has no registered test.
@@ -338,6 +338,12 @@ test_categories:
       # Not registered on Windows (see rocke/platform/CMakeLists.txt).
       - "rocke_hip_source_identity"
       - "rocke_hip_lowering_parity"
+      # Registered only in the build tree: they list the source checkout through
+      # git (see rocke/platform/tests/cmake/CoreTests.cmake).
+      - "rocke_compliance_pytest"
+      - "rocke_no_torch_check"
+      # Lists every split entry to project each shard: seconds, not quick.
+      - "rocke_entry_time_check"
     labels:
       - "standard"
       - "comprehensive"
@@ -351,6 +357,7 @@ test_categories:
     description: "rocKE GPU numeric checks that start at the standard tier, not quick"
     test_patterns:
       - "rocke_tiling_gpu_pytest"
+      - "rocke_platform_gpu_pytest"
       - "rocke_library_gpu_pytest"
       - "rocke_library_attention_gpu_pytest"
       - "rocke_library_attention_bias_gpu_pytest"
@@ -422,9 +429,13 @@ test_categories:
     description: "rocKE checks run by scheduled CI only"
     test_patterns:
       - "rocke_tiling_visualization_pytest"
+      # Needs the packages of rocke/heuristics/tests/requirements.txt; skips without them.
+      - "rocke_heuristics_pytest"
       - "rocke_library_conv_exhaustive_pytest"
       - "rocke_library_attention_cache_key_sweep_pytest"
       # Not registered on Windows (see rocke/library/tests/ctest_lists.cmake).
       - "rocke_library_engine_parity_exhaustive_pytest"
       # gfx950 GPU; the score-modifier mixes (each modifier once runs in standard).
       - "rocke_library_attention_biased_mixes_gpu_pytest"
+      # GPU; the fp32/tf32 direct-conv sweep sampler (its fixed cases run in standard).
+      - "rocke_library_conv_sweep_gpu_pytest"

@@ -9,6 +9,47 @@
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 
+namespace
+{
+Error preValidateWithScale(const std::vector<int64_t>& xDims,
+                           const std::vector<int32_t>& blockSize,
+                           const std::vector<int64_t>& scaleDims)
+{
+    BlockScaleDequantizeAttributes attrs;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim(xDims);
+    attrs.set_x(xTensor);
+
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_dim(scaleDims);
+    attrs.set_scale(scaleTensor);
+
+    auto yTensor = std::make_shared<TensorAttributes>();
+    yTensor->set_is_virtual(true);
+    attrs.set_y(yTensor);
+    attrs.set_block_size(blockSize);
+
+    const GraphAttributes graphAttributes;
+    const BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
+    return node.pre_validate_node();
+}
+
+// Passes when the error is INVALID_VALUE and its message contains expectedMessage, so a
+// rejection by a different rule fails the assertion.
+::testing::AssertionResult isInvalidValueWith(const Error& error,
+                                              const std::string& expectedMessage)
+{
+    if(error.code == ErrorCode::INVALID_VALUE
+       && error.get_message().find(expectedMessage) != std::string::npos)
+    {
+        return ::testing::AssertionSuccess();
+    }
+    return ::testing::AssertionFailure()
+           << "expected INVALID_VALUE containing \"" << expectedMessage << "\", got " << error;
+}
+} // namespace
+
 TEST(TestBlockScaleDequantizeNode, PreValidateNode)
 {
     BlockScaleDequantizeAttributes attrs;
@@ -18,7 +59,7 @@ TEST(TestBlockScaleDequantizeNode, PreValidateNode)
     attrs.set_x(xTensor);
 
     auto scaleTensor = std::make_shared<TensorAttributes>();
-    scaleTensor->set_dim({2, 2, 32, 32});
+    scaleTensor->set_dim({2, 64, 32, 1});
     attrs.set_scale(scaleTensor);
 
     auto yTensor = std::make_shared<TensorAttributes>();
@@ -124,7 +165,7 @@ TEST(TestBlockScaleDequantizeNode, PreValidateNodeYShapeMismatch)
     attrs.set_x(xTensor);
 
     auto scaleTensor = std::make_shared<TensorAttributes>();
-    scaleTensor->set_dim({2, 2, 32, 32});
+    scaleTensor->set_dim({2, 64, 32, 1});
     attrs.set_scale(scaleTensor);
 
     auto yTensor = std::make_shared<TensorAttributes>();
@@ -291,6 +332,60 @@ TEST(TestBlockScaleDequantizeNode, PreValidateNodeXDimsNotSetSkipsDimChecks)
     EXPECT_EQ(error.code, ErrorCode::OK);
 }
 
+TEST(TestBlockScaleDequantizeNode, PreValidateNodeScaleCoversTrailingBlocks)
+{
+    // block_size entries apply to the trailing dimensions of x; leading dimensions use block 1
+    EXPECT_EQ(preValidateWithScale({4, 64}, {1, 32}, {4, 2}).code, ErrorCode::OK);
+    EXPECT_EQ(preValidateWithScale({4, 64}, {32}, {4, 2}).code, ErrorCode::OK);
+    EXPECT_EQ(preValidateWithScale({2, 64, 32, 32}, {32}, {2, 64, 32, 1}).code, ErrorCode::OK);
+
+    // A leading-aligned reading of block_size {32} would expect these scale shapes
+    EXPECT_TRUE(isInvalidValueWith(preValidateWithScale({4, 64}, {32}, {1, 64}),
+                                   "scale dim[0] (1) must be at least ceil(4 / 1) = 4"));
+    EXPECT_TRUE(isInvalidValueWith(preValidateWithScale({2, 64, 32, 32}, {32}, {2, 2, 32, 32}),
+                                   "scale dim[1] (2) must be at least ceil(64 / 1) = 64"));
+}
+
+TEST(TestBlockScaleDequantizeNode, PreValidateNodeScaleBlocksNonLastDimension)
+{
+    // block_size {32, 1} blocks dimension 1 of x by 32 and dimension 2 by 1
+    EXPECT_EQ(preValidateWithScale({3, 64, 8}, {32, 1}, {3, 2, 8}).code, ErrorCode::OK);
+
+    EXPECT_TRUE(isInvalidValueWith(preValidateWithScale({3, 64, 8}, {32, 1}, {3, 1, 8}),
+                                   "scale dim[1] (1) must be at least ceil(64 / 32) = 2"));
+    EXPECT_TRUE(isInvalidValueWith(preValidateWithScale({3, 64, 8}, {32, 1}, {3, 2, 7}),
+                                   "scale dim[2] (7) must be at least ceil(8 / 1) = 8"));
+}
+
+TEST(TestBlockScaleDequantizeNode, PreValidateNodeScaleDimAtLeastBlockCount)
+{
+    // Too few scale entries for the blocks of x
+    EXPECT_TRUE(isInvalidValueWith(preValidateWithScale({4, 64}, {1, 32}, {4, 1}),
+                                   "scale dim[1] (1) must be at least ceil(64 / 32) = 2"));
+    EXPECT_TRUE(isInvalidValueWith(preValidateWithScale({4, 64}, {1, 32}, {3, 2}),
+                                   "scale dim[0] (3) must be at least ceil(4 / 1) = 4"));
+
+    // A padded scale layout has more entries than blocks
+    EXPECT_EQ(preValidateWithScale({4, 64}, {1, 32}, {4, 3}).code, ErrorCode::OK);
+    EXPECT_EQ(preValidateWithScale({4, 64}, {1, 32}, {8, 4}).code, ErrorCode::OK);
+}
+
+TEST(TestBlockScaleDequantizeNode, PreValidateNodeScaleDimUsesCeilForPartialBlocks)
+{
+    // 70 elements in blocks of 32 need ceil(70 / 32) = 3 scale entries
+    EXPECT_EQ(preValidateWithScale({4, 70}, {1, 32}, {4, 3}).code, ErrorCode::OK);
+    EXPECT_TRUE(isInvalidValueWith(preValidateWithScale({4, 70}, {1, 32}, {4, 2}),
+                                   "scale dim[1] (2) must be at least ceil(70 / 32) = 3"));
+}
+
+TEST(TestBlockScaleDequantizeNode, PreValidateNodeScaleRankMismatch)
+{
+    EXPECT_TRUE(isInvalidValueWith(preValidateWithScale({4, 64}, {1, 32}, {4, 2, 1}),
+                                   "scale tensor rank (3) must equal input tensor rank (2)"));
+    EXPECT_TRUE(isInvalidValueWith(preValidateWithScale({4, 64}, {1, 32}, {4}),
+                                   "scale tensor rank (1) must equal input tensor rank (2)"));
+}
+
 TEST(TestBlockScaleDequantizeNode, InferPropertiesNode)
 {
     BlockScaleDequantizeAttributes attrs;
@@ -362,7 +457,7 @@ TEST(TestBlockScaleDequantizeNode, GatherHipdnnTensors)
     const GraphAttributes graphAttributes;
     const BlockScaleDequantizeNode node(std::move(attrs), graphAttributes);
 
-    std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
+    hipdnn_frontend::detail::OrderedTensorSet allTensors;
     node.gather_hipdnn_tensors(allTensors);
 
     EXPECT_TRUE(allTensors.find(xTensor) != allTensors.end());

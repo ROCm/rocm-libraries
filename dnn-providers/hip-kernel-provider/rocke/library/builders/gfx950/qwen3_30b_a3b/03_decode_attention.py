@@ -27,7 +27,7 @@ head_dim=128 on gfx950; at head_dim=64 the MFMA utilization is lower and
 the kernel becomes bandwidth-bound sooner.  At kv_len=1024 both DSL and
 Triton deliver ~95% of parity.
 
-Results (MI355X / gfx950, batch=2, nhead_q=32, nhead_k=4, head_dim=64)
+Results (gfx950, batch=2, nhead_q=32, nhead_k=4, head_dim=64)
 ------------------------------------------------------------------------
   kv_len   AITER Triton   DSL 3d (best)   speedup
      512       51.4µs        52.6µs        0.977×

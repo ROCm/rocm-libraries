@@ -5,7 +5,7 @@ ABI: the same text as the Python lowerer, and each refusal with the engine's
 status, its reason and the documented exception type.
 
 The lowering cases need the shared engine and skip, waiting for the
-shared-library lane, where it is not found. The cases about finding the
+build-variant lane, where it is not found. The cases about finding the
 library run a copy of the module and the modules it imports, all standard
 library only, in a child process with a package tree of its own, so the
 library it finds (or does not) is decided by that tree and its environment
@@ -33,7 +33,7 @@ from rocke.core.lower_llvm import (
     _lower_kernel_to_llvm_python,
 )
 from rocke.tests.engines import native_engine_or_skip
-from rocke.tests.lanes import BINDING_LANE, import_or_skip_until
+from rocke.tests.lanes import BUILD_VARIANT, import_or_skip_until
 
 _ARCH = "gfx942"
 
@@ -176,7 +176,7 @@ def test_no_target_is_refused_before_the_engine_is_needed(lower):
 @pytest.mark.parametrize("entry", ["lower_serialized_ir", "lower_serialized_ir_hip"])
 def test_the_binding_refuses_no_target_with_the_same_text(entry):
     """The rocke_engine binding spells the refusal itself, in C++."""
-    binding = import_or_skip_until("rocke_engine", BINDING_LANE)
+    binding = import_or_skip_until("rocke_engine", BUILD_VARIANT)
     with pytest.raises(RuntimeError) as refused:
         getattr(binding, entry)(serialize(_copy_kernel()), arch="")
     assert str(refused.value) == (

@@ -233,7 +233,7 @@ TEST_P(GPU_HipdnnShimConvTranslation_FP32, MatchesCpuReference)
     RunTranslationCase<float>(GetParam());
 }
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_HipdnnShimConvTranslation_FP32,
                          ::testing::ValuesIn(Fp32Cases()),
                          CaseName);
@@ -247,7 +247,7 @@ TEST_P(GPU_HipdnnShimConvTranslation_FP16, MatchesCpuReference)
     RunTranslationCase<half_float::half>(GetParam());
 }
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_HipdnnShimConvTranslation_FP16,
                          ::testing::ValuesIn(Fp16Cases()),
                          CaseName);
@@ -261,7 +261,7 @@ TEST_P(GPU_HipdnnShimConvTranslation_BFP16, MatchesCpuReference)
     RunTranslationCase<bfloat16>(GetParam());
 }
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_HipdnnShimConvTranslation_BFP16,
                          ::testing::ValuesIn(Bf16Cases()),
                          CaseName);

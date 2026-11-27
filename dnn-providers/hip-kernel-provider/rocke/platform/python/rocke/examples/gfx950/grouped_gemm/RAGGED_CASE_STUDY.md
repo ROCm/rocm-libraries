@@ -1,11 +1,11 @@
-# Ragged Grouped GEMM & MoE Case Study (gfx950 / MI355X)
+# Ragged Grouped GEMM & MoE Case Study (gfx950)
 
 Two related ragged bf16 GEMM kernels built on the same dense grouped-GEMM core
 (`grouped_gemm_hip.py`, 805 TF ceiling):
 
 | Kernel | What it does | Builder | Harness | Peak |
 |--------|--------------|---------|---------|------|
-| **ragged_gemm** | Pure ragged grouped GEMM: variable M per expert, **no** gather/scatter/routing. Takes `m_sizes[E]`, builds a per-tile schedule, compares vs torch. | `rocke.instances.gfx950.ragged_gemm.build_ragged_gemm` | `ragged_gemm_hip.py` | ~763 TF (NT) |
+| **ragged_gemm** | Pure ragged grouped GEMM: variable M per expert, **no** gather/scatter/routing. Takes `m_sizes[E]`, builds a per-tile schedule, compares vs a numpy reference. | `rocke.instances.gfx950.ragged_gemm.build_ragged_gemm` | `ragged_gemm_hip.py` | ~763 TF (NT) |
 | **ragged_moe** | Fused **gather + grouped GEMM + weighted scatter** for sparse MoE inference (top_k routing, expert-sorted tokens). | `rocke.instances.gfx950.ragged_moe.build_ragged_moe` | `ragged_moe_hip.py` | ~743 TF (NT) |
 
 **Relationship:** `ragged_gemm` is the *pure* ragged inner loop — the same
@@ -85,7 +85,7 @@ cd <repo>/dnn-providers/hip-kernel-provider/rocke/platform
 export PYTHONPATH=$PWD/python
 
 # NT layout (default, faster)
-python3 python/rocke/examples/gfx950/grouped_gemm/ragged_gemm_hip.py --device 0
+HIP_VISIBLE_DEVICES=0 python3 python/rocke/examples/gfx950/grouped_gemm/ragged_gemm_hip.py
 
 # NN layout
 python3 python/rocke/examples/gfx950/grouped_gemm/ragged_gemm_hip.py --brrr

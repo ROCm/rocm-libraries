@@ -12,6 +12,10 @@ and basic evaluation metric checks.
 import sys
 from pathlib import Path
 
+from ._requirements import skip_without_requirements
+
+skip_without_requirements()
+
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))

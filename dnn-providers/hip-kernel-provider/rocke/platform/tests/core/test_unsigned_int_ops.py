@@ -1117,6 +1117,7 @@ def _gpu_kernel():
     return b.kernel
 
 
+@pytest.mark.gpu
 def test_gpu_values_match_numpy():
     arch = _gpu_arch()
     if not arch:

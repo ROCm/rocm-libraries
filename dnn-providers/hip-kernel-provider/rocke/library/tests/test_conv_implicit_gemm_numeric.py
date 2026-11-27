@@ -3,12 +3,13 @@
 """Implicit-GEMM convolution numeric gate on whatever gfx device this runs on.
 
 Builds the conv bake-off with ``python -m builders.common.bake_off_implicit_gemm``
-and verifies its first hsaco with ``python -m rocke.run_manifest --verify``
+and verifies its first hsaco with
+``python -m rocke.run_manifest --verify --untimed`` (one launch, no timing)
 against the numpy fp32 reference. It moved here from
 ``TestNumericVerification.test_conv_numeric`` in
 ``platform/tests/instances/test_rocke_numeric.py`` because the builder is a
 library module (the dependency rule is ``library -> platform`` only); the test
-name and assertions are unchanged.
+name and its assertions moved with it.
 
 The subprocesses import this process's own ``rocke`` package first
 (``rocke_python_command``), with ``library/`` (``builders.*``, ``kernels.*``,
@@ -31,6 +32,7 @@ import unittest
 
 import pytest
 
+from rocke.run_manifest import UNTIMED_LAUNCH_LINE
 from rocke.runtime.hip_module import get_device_arch
 from rocke.tests.subprocess_launcher import (
     rocke_python_command,
@@ -84,9 +86,12 @@ class TestNumericVerification(unittest.TestCase):
             hsaco[0],
             os.path.join(d, "manifest.json"),
             "--verify",
+            "--untimed",
         )
         self.assertEqual(rc2, 0, f"conv verify failed on {ARCH}:\n{out2[-2500:]}")
         self.assertIn("bad=0", out2)
+        self.assertIn(UNTIMED_LAUNCH_LINE, out2)
+        self.assertNotIn("Perf:", out2)
 
 
 if __name__ == "__main__":

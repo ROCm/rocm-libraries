@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: MIT
  *
  * tests/parity/gfx1151_wmma_gemm_int8_emit.c -- C-side emitter for the gfx1151
- * (RDNA3.5 / Strix Halo) INT8-storage / f16-compute WMMA GEMM parity harness.
+ * (RDNA3.5) INT8-storage / f16-compute WMMA GEMM parity harness.
  * Selects one of 6 sampled WmmaGemmInt8Spec configs by argv[1] (0..5), builds
  * it exactly as the Python emitter gfx1151_wmma_gemm_int8_emit.py does, and
  * lowers to LLVM .ll text at arch=gfx1151 (flavor AUTO) so the two outputs can

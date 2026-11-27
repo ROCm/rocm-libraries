@@ -3,7 +3,7 @@
 /*
  * instance_gfx950_attention_tiled_2d_gfx950_attention_tiled_2d_public_entry_glue.c
  * -- PUBLIC ENTRY / GLUE bucket of the chunked C99 port of the gfx950 / CDNA4
- * (MI355X) WIDE-ATOM tiled-2D unified-attention kernel builder
+ * (gfx950) WIDE-ATOM tiled-2D unified-attention kernel builder
  * (rocke/instances/gfx950/attention_tiled_2d.py).
  *
  * SCOPE (this translation unit):

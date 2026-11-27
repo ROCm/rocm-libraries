@@ -24,8 +24,8 @@ from types import SimpleNamespace
 import pytest
 from rocke.core.arch import domain as arch_domain
 from rocke.tests.lanes import (
-    BINDING_LANE,
-    SOURCE_TREE_CASES,
+    BUILD_VARIANT,
+    SOURCE_TREE,
     import_or_skip_until,
     skip_until_reason,
 )
@@ -39,7 +39,7 @@ CPP_INCLUDE = PLATFORM / "cpp" / "include"
 pytestmark = pytest.mark.skipif(
     not (GENERATOR.exists() and DOMAIN_CPP.exists()),
     reason=skip_until_reason(
-        SOURCE_TREE_CASES,
+        SOURCE_TREE,
         reason="reads the platform sources, which an installed test layout omits",
     ),
 )
@@ -442,7 +442,7 @@ def test_the_generated_table_compiles_into_the_lookup(gen, tmp_path: Path) -> No
 def test_the_engine_carries_the_python_readers_table() -> None:
     """The copy compiled into ``rocke_engine`` -- the one that will refuse a
     kernel -- not just the generator's output."""
-    engine = import_or_skip_until("rocke_engine", BINDING_LANE)
+    engine = import_or_skip_until("rocke_engine", BUILD_VARIANT)
     view = _python_view()
     for flavor, cells in view.items():
         assert [tuple(c) for c in engine.arch_domain_column(flavor)] == cells, flavor

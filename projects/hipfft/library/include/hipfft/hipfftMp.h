@@ -1,5 +1,5 @@
 /******************************************************************************
- * Copyright (C) 2024 Advanced Micro Devices, Inc. All rights
+ * Copyright (C) 2024 - 2026 Advanced Micro Devices, Inc. All rights
  * reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -25,6 +25,7 @@
 #define HIPFFT_MP_H
 
 #include "hipfft/hipfft.h"
+#include "hipfft/hipfftXt.h"
 
 #ifdef __cplusplus
 extern "C" {

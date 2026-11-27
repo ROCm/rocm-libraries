@@ -9,7 +9,7 @@ AND measures graph-mode kernel time:
   * narrow      : the current shipped bf16 path (16x16x16, the BEFORE)
   * wide        : the bf16 32x32x8 transposed path with the naive strided-V feed
   * wide_cfonly : wide + conflict-free V store (cfvst) -- the PRODUCTION D64
-                  config; ~3% faster than naive-V on D64 (MI300X, steady-state)
+                  config; ~3% faster than naive-V on D64 (gfx942, steady-state)
   * wide_cf     : cfvst + sliced-K ring -- ported from fp16 but the ring
                   REGRESSES bf16 (kept for A/B); not used in production
   * flash       : PyTorch SDPA FLASH_ATTENTION backend (the bar to beat)

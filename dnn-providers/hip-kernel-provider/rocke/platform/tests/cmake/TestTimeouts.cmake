@@ -31,9 +31,12 @@ set(ROCKE_TEST_TIMEOUT_GPU 1800)
 set(ROCKE_TEST_TIMEOUT_COUNTED_COMPILER_GATE 7200)
 
 # The per-test limit of the GPU pytest entries (platform/CMakeLists.txt,
-# _ROCKE_INSTALLED_PYTEST_GPU_TEST_LIMIT, says why): more than twice the slowest
-# GPU test measured with a cold compiler cache, and half the gpu CTest limit.
-set(ROCKE_TEST_ITEM_TIMEOUT_GPU 900)
+# _ROCKE_INSTALLED_PYTEST_GPU_TEST_LIMIT, says why): a small part of a CI
+# shard's time budget, so a stalled test fails under its own name long before
+# the shard runs out of time. A GPU test that needs more than half of it
+# declares its slowest measured CI time with the rocke_measured_seconds mark,
+# which raises that test's limit alone (rocke.tests.item_time_limit).
+set(ROCKE_TEST_ITEM_TIMEOUT_GPU 120)
 
 # Give every test the calling directory registered without a TIMEOUT the cpu
 # limit. Call it after the directory's registrations. It covers the native C++

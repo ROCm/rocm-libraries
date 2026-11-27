@@ -8,7 +8,7 @@ derived relative to each file, so this tree is copy-able verbatim.
 
 Install test dependencies from the platform directory with
 `python -m pip install -r requirements.txt` or `python -m pip install -e '.[dev]'`.
-Both include `ml_dtypes>=0.6.0`, which supplies independent FP4/FP6/FP8 reference
+Both include `ml_dtypes>=0.5.0`, which supplies independent FP4/FP6/FP8 reference
 types. Host tests that need this optional runtime dependency use
 `pytest.importorskip`; a minimal authoring installation can run the remaining
 tests. Required gfx1250 numerical validation needs `ml_dtypes` installed and
@@ -310,7 +310,7 @@ CTests. Legacy violations remain tracked as TESTING.md gap G9.
 
 | CTest entry | Scope | Tier / resources |
 |---|---|---|
-| `rocke_library_attention_cpu_pytest` | Existing attention host units; new counted/resource contracts remain source-only until CI enrollment has capacity | quick and higher |
+| `rocke_library_attention_cpu_pytest` | Existing attention host units; new counted/resource contracts remain source-only until CI enrollment has capacity | standard and higher |
 | `rocke_library_runner_contract_pytest` | Affordable-lane selection, resource defaults, and gate verdict policy | comprehensive and full; excluded from quick/standard pre-merge and post-merge runs |
 | `rocke_library_worker_integration_pytest` | Real file-worker subprocess, timeout, signal, package-identity, and process-ownership lifecycle | comprehensive and full; excluded from quick/standard pre-merge and post-merge runs |
 | `rocke_library_counted_structural_gate` | Exhaustive counted-wait IR model, LDS hazards, step equivalence, lowering and mirror-edge refusal coverage | comprehensive and full; host-only structural gate |
@@ -459,8 +459,8 @@ environment without Torch; they do not invoke the offline CPU oracles.
 | `rocke_reference_common_pytest` | Shared numerical budgets, artifact integrity, worker isolation, that each committed lock pins its adapter's cohort, and that each installed bundle records the enrolled cohort and its frozen runner accepts the current request | Host suite; skips the bundle checks for a bundle that is not installed |
 | `rocke_sdpa_reference_unit_pytest` | SDPA numerical contract and qualification guards | Host suite; independent of bundles |
 | `rocke_conv_reference_unit_pytest` | Convolution numerical contract and qualification guards | Host suite; independent of bundles |
-| `rocke_sdpa_gpu_<arch>_pytest` | For each SDPA variant published for `<arch>`, its enrolled cases and three failure checks | For each published SDPA architecture, when its bundles are installed; five minutes per variant |
-| `rocke_conv_gpu_<arch>_pytest` | For each forward convolution variant published for `<arch>`, its enrolled cases and three failure checks | For each published convolution architecture, when its bundles are installed; five minutes per variant |
+| `rocke_sdpa_gpu_<arch>_pytest` | For each SDPA variant published for `<arch>`, its enrolled cases and three failure checks | For each published SDPA architecture, when its bundles are installed; CTest limit in the [GPU reference workflow](../../library/tests/reference_common/docs/gpu-reference-workflow.md#enroll-provider-test-selection) |
+| `rocke_conv_gpu_<arch>_pytest` | For each forward convolution variant published for `<arch>`, its enrolled cases and three failure checks | For each published convolution architecture, when its bundles are installed; CTest limit in the [GPU reference workflow](../../library/tests/reference_common/docs/gpu-reference-workflow.md#enroll-provider-test-selection) |
 
 `ROCKE_INSTALL_TEST_GPU_REFERENCES` controls installation of every published
 variant and is on by default in provider builds.
@@ -474,9 +474,6 @@ CMake uses the standard archives and committed locks; verify replacement
 candidates with the offline CLI using explicit `--bundle` and `--lock` paths.
 Each variant retains a separate archive, lock, and installed payload.
 
-The optional `conv_reference/check_torch_reference.py` and
-`sdpa_reference/check_torch_reference.py` are explicit offline oracle audits.
-They are excluded from installation and normal pytest discovery.
 For adding cases, replacing bundles, or enrolling targets, follow the
 [authoritative reference workflow](../../library/tests/reference_common/docs/gpu-reference-workflow.md).
 See [the installed reference procedure](../../TESTING.md#running-installed-reference-tests-without-torch)

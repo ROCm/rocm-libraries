@@ -22,10 +22,10 @@ recommended stack pins a recent, consistent ROCm:
 
 **Supported GPUs**
 
-| Family | Examples | ISA | Notes |
-|---|---|---|---|
-| CDNA3/4 | MI300X, MI350X/MI355X | `gfx942`, `gfx950` | Linux only; wave64 |
-| RDNA3.5/4 | Ryzen AI / Radeon | `gfx1151`, `gfx1201` | Linux + Windows (HIP SDK); wave32 |
+| Family | ISA | Notes |
+|---|---|---|
+| CDNA3/4 | `gfx942`, `gfx950` | Linux only; wave64 |
+| RDNA3.5/4 | `gfx1151`, `gfx1201` | Linux + Windows (HIP SDK); wave32 |
 
 > **Why the stack matters.** The example READMEs and performance numbers were
 > produced on ROCm 7.2. The generated IR must match the loaded COMGR compiler’s

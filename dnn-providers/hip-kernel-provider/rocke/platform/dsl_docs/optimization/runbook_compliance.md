@@ -133,7 +133,7 @@ the static analysis.
 ## Empirical pass — bake-off 1 (Implicit-GEMM conv)
 
 Each lever applied to the implicit-GEMM conv kernel, with the
-per-launch TFLOPS that resulted, on MI300X / gfx950:
+per-launch TFLOPS that resulted, on gfx950:
 
 | Lever | TFLOPS (per-launch) | Notes |
 |---|---:|---|
@@ -151,7 +151,7 @@ against the grouped NumPy reference in `rocke.run_manifest`.
 
 ## Empirical pass — bake-off 2 (Direct grouped conv)
 
-Direct grouped conv, `N=32, H=W=200, R=S=3, pad=1`, on MI300X / gfx950:
+Direct grouped conv, `N=32, H=W=200, R=S=3, pad=1`, on gfx950:
 
 | Kernel | Lever | Per-launch TFLOPS |
 |---|---|---:|

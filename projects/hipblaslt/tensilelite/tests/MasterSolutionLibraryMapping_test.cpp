@@ -53,11 +53,11 @@ namespace
         = TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm,
                                              TensileLite::ContractionSolution>;
 
-    // Write a minimal msgpack mapping file in the format
-    // MessagePackLoadLibraryMapping expects: a top-level map of
-    // string-encoded-int -> string.
-    void writeMappingFile(const fs::path&                          path,
-                          const std::map<std::string, std::string>& entries)
+    // Write a msgpack mapping file. MessagePackLoadLibraryMapping expects a
+    // top-level map of string-encoded-int -> string; other value types are
+    // for the malformed-file tests.
+    template <typename Value = std::string>
+    void writeMappingFile(const fs::path& path, const std::map<std::string, Value>& entries)
     {
         msgpack::sbuffer buffer;
         msgpack::pack(buffer, entries);
@@ -183,5 +183,36 @@ TEST_F(MasterSolutionLibraryMappingTest, RejectsMalformedMasterFilename)
 
     TestLibrary lib;
     EXPECT_FALSE(lib.initLibraryMapping(badMaster.string()));
+    EXPECT_TRUE(lib.libraryMapping.empty());
+}
+
+// A well-formed msgpack map with one key that is not a whole integer must
+// reject the whole file, not skip that entry: the valid "0" entry must not
+// survive. Covers both from_chars failures, no digits and trailing characters.
+TEST_F(MasterSolutionLibraryMappingTest, RejectsMappingWithNonIntegerKey)
+{
+    const std::string arch = "gfx9999";
+    for(const std::string badKey : {"abc", "12x"})
+    {
+        SCOPED_TRACE("key \"" + badKey + "\"");
+        writeMappingFile(
+            perArchMappingPath(arch),
+            std::map<std::string, std::string>{{"0", "kernel_a"}, {badKey, "kernel_b"}});
+
+        TestLibrary lib;
+        EXPECT_FALSE(lib.initLibraryMapping(masterPath(arch).string()));
+        EXPECT_TRUE(lib.libraryMapping.empty());
+    }
+}
+
+// A value that is not a string throws inside the loader. The loader must
+// catch it and return an empty mapping instead of letting it escape.
+TEST_F(MasterSolutionLibraryMappingTest, RejectsMappingWithNonStringValue)
+{
+    const std::string arch = "gfx9999";
+    writeMappingFile(perArchMappingPath(arch), std::map<std::string, int>{{"0", 7}});
+
+    TestLibrary lib;
+    EXPECT_FALSE(lib.initLibraryMapping(masterPath(arch).string()));
     EXPECT_TRUE(lib.libraryMapping.empty());
 }

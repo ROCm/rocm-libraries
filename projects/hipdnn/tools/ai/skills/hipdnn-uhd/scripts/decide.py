@@ -18,7 +18,9 @@ An engine predictor (L1) has these gates, each guarding a failure that is otherw
   what shows a model of another metric.
 * **selector_revision** -- the revision the engine reports now is the one the model was
   trained against. The engine refuses a stale model at load time on a user's machine;
-  refusing it here is cheaper.
+  refusing it here is cheaper. The gate also reports the `codegen_revision` (the digest of
+  the engine's code objects) the engine reports and the candidate records, with a note when
+  they differ: the engine binds such a model and warns, so the gate never fails on it.
 * **accuracy** -- candidate median |error| against measured is no worse than the incumbent
   model's by more than `max_regression` (5% by default when measured). Accuracy for both
   models is reported side by side, over the same graphs.
@@ -122,6 +124,7 @@ def decide(
     min_graphs: int = 1,
     incumbent_baseline: bool = True,
     candidate_metric: Optional[str] = None,
+    candidate_codegen_revision: Optional[str] = None,
 ) -> dict[str, Any]:
     """The validation report. `passed` is True only if every enabled gate holds."""
     rows = document.get("rows") or []
@@ -223,11 +226,37 @@ def decide(
             f"engine reports {revisions}; the candidate was trained against "
             f"{candidate_selector_revision}"
         )
+    codegens = sorted(
+        {
+            ((r.get("candidate") or {}).get("trained_against") or {}).get(
+                "codegen_revision"
+            )
+            for r in available
+        }
+        - {None}
+    )
+    codegen_note = None
+    if (
+        candidate_codegen_revision
+        and codegens
+        and codegens != [candidate_codegen_revision]
+    ):
+        codegen_note = (
+            f"engine code objects are {codegens}; the candidate was measured with "
+            f"{candidate_codegen_revision}. The engine binds it and warns; retrain when "
+            "the timings should reflect the current compiler"
+        )
     gates["selector_revision"] = {
         "passed": not revision_problems,
         "engine_reports": revisions,
         "trained_against": candidate_selector_revision,
         "problems": revision_problems,
+        # Not a gate: the engine binds a model measured with other code objects.
+        "codegen_revision": {
+            "engine_reports": codegens,
+            "trained_against": candidate_codegen_revision,
+            "note": codegen_note,
+        },
     }
 
     metrics: dict[str, Any] = {}
@@ -640,6 +669,9 @@ def main(argv: list[str] | None = None) -> int:
             min_graphs=args.min_graphs,
             incumbent_baseline=not args.no_incumbent,
             candidate_metric=(candidate.get("score") or {}).get("metric"),
+            candidate_codegen_revision=(candidate.get("trained_against") or {}).get(
+                "codegen_revision"
+            ),
         )
         note = comparison_warning("predict_engine", report["metrics"].get("paired"))
     else:

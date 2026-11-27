@@ -5,7 +5,7 @@ is the optimization history; this file is the specification, the requant algebra
 the data layout, and the precise per-CTA steps.
 
 The kernel fuses the whole `encoder_0` image-encoder block into a single launch
-on **gfx1151** (Strix Halo / Radeon 8060S, RDNA3.5, wave32, WMMA). It is the
+on **gfx1151** (RDNA3.5, wave32, WMMA). It is the
 wave32/WMMA sibling of the gfx950 (CDNA/MFMA/wave64) prototype in
 `../../gfx950/deep_conv_fusion/`. Two things make it worth a from-the-math-up
 write-up: it is **genuine low-bit** (real int8/int4 in HBM, not fake-quant), and

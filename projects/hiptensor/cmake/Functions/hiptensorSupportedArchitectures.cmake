@@ -18,6 +18,7 @@ set(SUPPORTED_ARCHITECTURES
     gfx1200
     gfx1201
     gfx1250
+    gfx1251
     gfx1250-strict
     gfx12-generic
 )

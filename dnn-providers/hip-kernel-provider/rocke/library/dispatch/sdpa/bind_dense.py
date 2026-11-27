@@ -28,7 +28,12 @@ from typing import TYPE_CHECKING, Any
 
 from rocke.core.arch import known_arches
 from rocke.dispatch.core import TorchBinding, opt_in_probe
-from rocke.runtime.torch_interop import empty_workspace, torch_dtype
+from rocke.runtime.device_array import (
+    array_info,
+    copy_elements,
+    device_workspace,
+    strided_view,
+)
 
 from dispatch.attention import (
     ATTENTION_ROUTE_REGISTRY,
@@ -39,7 +44,7 @@ from dispatch.attention import (
 from dispatch.attention.common import Alignment, AttentionBand
 
 from .bind_shared import (
-    TORCH_DTYPES,
+    ELEMENT_TYPES,
     Operand,
     asked_band,
     band_text,
@@ -47,6 +52,7 @@ from .bind_shared import (
     keeps_asked_keys,
     launch_stream,
     nonfinite_scale_reject,
+    require_one_device,
     to_attention_request,
     usable_in_place,
     value_rejects,
@@ -255,18 +261,14 @@ class _DensePlan:
     and a contiguous FP32 ``[B, H_q, S_q, 1]`` LSE.
 
     An operand already in that form is used in place; any other is copied
-    through a buffer allocated once, at bind time (Q/K/V in before each
-    launch, O and LSE out after).
+    through a buffer of the caller's kind allocated once, at bind time (Q/K/V
+    in before each launch, O and LSE out after), queued on the launch stream.
     """
 
     def __init__(self, req: SdpaRequest, tensors: Mapping[str, Any]) -> None:
-        dtype = torch_dtype(TORCH_DTYPES[req.dtype])
-        device = tensors["q"].device
-        for name in ("k", "v", "o", "stats"):
-            if name in tensors and tensors[name].device != device:
-                raise ValueError(
-                    f"{name}: expected a tensor on {device}, got {tensors[name].device}"
-                )
+        dtype = ELEMENT_TYPES[req.dtype]
+        like = tensors["q"]
+        require_one_device(tensors)
         self.operands = {
             name: Operand(name, getattr(req, name), tensors[name])
             for name in ("q", "k", "v", "o")
@@ -274,13 +276,11 @@ class _DensePlan:
         self.views = {}
         self.copied = set()
         for name, op in self.operands.items():
-            bshd = op.tensor.transpose(1, 2)
+            bshd = op.bshd()
             if usable_in_place(bshd):
-                self.views[name] = bshd
+                self.views[name] = strided_view(op.array, bshd.shape, bshd.strides)
             else:
-                self.views[name] = empty_workspace(
-                    bshd.shape, dtype=dtype, device=device
-                )
+                self.views[name] = device_workspace(bshd.shape, dtype, like=like)
                 self.copied.add(name)
 
         self.stats = None
@@ -288,13 +288,13 @@ class _DensePlan:
         if req.stats is not None:
             # ``Operand`` refuses stats whose dtype is not the request's, so
             # the copy back from the FP32 LSE never narrows silently.
-            self.stats = Operand("stats", req.stats, tensors["stats"]).tensor
-            fp32 = torch_dtype("float32")
-            in_place = self.stats.dtype == fp32 and usable_in_place(self.stats)
+            self.stats = Operand("stats", req.stats, tensors["stats"]).array
+            stats = array_info(self.stats)
+            in_place = stats.dtype == "fp32" and usable_in_place(stats)
             self.lse = (
                 self.stats
                 if in_place
-                else empty_workspace(self.stats.shape, dtype=fp32, device=device)
+                else device_workspace(stats.shape, "fp32", like=like)
             )
 
     def kernel_tensors(self) -> dict[str, Any]:
@@ -308,29 +308,39 @@ class _DensePlan:
             out["lse"] = self.lse
         return out
 
-    def pack(self) -> None:
+    def pack(self, stream: int = 0) -> None:
+        """Copy the caller's Q, K and V into the copied views, queued on
+        ``stream``."""
         for name in ("q", "k", "v"):
             if name in self.copied:
-                self.views[name].copy_(self.operands[name].tensor.transpose(1, 2))
+                copy_elements(
+                    array_info(self.views[name]),
+                    self.operands[name].bshd(),
+                    stream=stream,
+                )
 
-    def unpack(self) -> None:
+    def unpack(self, stream: int = 0) -> None:
+        """Copy O and LSE back to the caller's arrays, queued on ``stream``."""
         if "o" in self.copied:
-            self.operands["o"].tensor.copy_(self.views["o"].transpose(1, 2))
+            copy_elements(
+                self.operands["o"].bshd(), array_info(self.views["o"]), stream=stream
+            )
         if self.lse is not None and self.lse is not self.stats:
-            self.stats.copy_(self.lse)
+            copy_elements(array_info(self.stats), array_info(self.lse), stream=stream)
 
 
 def sdpa_dense_bind(req: SdpaRequest, tensors: Mapping[str, Any]) -> TorchBinding:
-    """Bind an admitted request and its device tensors to a dense launch.
+    """Bind an admitted request and its device arrays to a dense launch.
 
-    ``tensors`` holds ``q``, ``k``, ``v``, ``o`` (each its logical BHSD tensor
-    with the request's strides) and ``stats`` when the request sets it. The
-    launch runs the first dense candidate that serves the request, at its
-    default spec, on Torch's current stream, with the request's scale.
-    Every tensor's dtype must be the one its request descriptor names.
-    Raises ``ValueError`` with the admission reason for a declined request.
-    ``launch(stream=...)`` accepts only the current stream; see
-    :func:`~dispatch.sdpa.bind_shared.launch_stream`.
+    ``tensors`` holds ``q``, ``k``, ``v``, ``o`` (each its logical BHSD array
+    with the request's strides) and ``stats`` when the request sets it: torch
+    tensors or :class:`rocke.runtime.device_array.DeviceArray` s. The launch
+    runs the first dense candidate that serves the request, at its default
+    spec, on the current stream (Torch's, or HIP's null stream without
+    torch), with the request's scale. Every array's element type must be the
+    one its request descriptor names. Raises ``ValueError`` with the admission
+    reason for a declined request. ``launch(stream=...)`` accepts only the
+    current stream; see :func:`~dispatch.sdpa.bind_shared.launch_stream`.
     """
     served, reason = _dense_served(req)
     if not served:
@@ -343,13 +353,13 @@ def sdpa_dense_bind(req: SdpaRequest, tensors: Mapping[str, Any]) -> TorchBindin
     binding = bind_dense_attention_torch(
         probe, spec, plan.kernel_tensors(), scale=float(req.scale)
     )
-    device = plan.views["q"].device
+    device = tensors["q"].device
 
     def launch(*, stream: Any = None) -> None:
-        """Pack, launch and unpack, all on Torch's current stream."""
+        """Pack, launch and unpack, all on the current stream."""
         launch_on = launch_stream(stream, device, "dense")
-        plan.pack()
+        plan.pack(launch_on)
         binding.launch(stream=launch_on)
-        plan.unpack()
+        plan.unpack(launch_on)
 
     return TorchBinding(launch=launch, grid=binding.grid, block=binding.block)

@@ -50,6 +50,6 @@ def test_skips_an_absent_tree_and_names_it(
     with pytest.raises(pytest.skip.Exception) as skip:
         helper()
     assert str(skip.value) == (
-        f"waits for source-tree-cases: source-tree check: no {name} tree at "
+        f"waits for source-tree: source-tree check: no {name} tree at "
         f"{tree}; the installed test payload does not ship it"
     )

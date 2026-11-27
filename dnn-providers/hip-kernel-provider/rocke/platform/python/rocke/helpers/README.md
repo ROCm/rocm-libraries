@@ -799,7 +799,7 @@ helper layering as everything above.
 ### Chiplet-aware grid swizzle (`helpers/grid.py`)
 
 ```python
-from rocke import chiplet_aware_super_tile, NUM_XCDS_MI300X
+from rocke.helpers import chiplet_aware_super_tile, NUM_XCDS_GFX942
 
 # At the very top of the kernel body, before any per-block math:
 result = chiplet_aware_super_tile(
@@ -808,7 +808,7 @@ result = chiplet_aware_super_tile(
  num_pid_m=ceil_div(M, BLOCK_M),
  num_pid_n=ceil_div(N, BLOCK_N),
  wgm=8,
- num_xcds=NUM_XCDS_MI300X,
+ num_xcds=NUM_XCDS_GFX942,
  chunk_size=64)
 pid_m, pid_n = result.row, result.col # use these instead of blockIdx
 ```
@@ -816,7 +816,7 @@ pid_m, pid_n = result.row, result.col # use these instead of blockIdx
 The composition is `chiplet_transform_chunked` (XCD round-robin
 reversal) followed by `super_tile_swizzle` (WGM-style Hilbert order
 inside each XCD). Together they restore L2 locality on the multi-die
-MI300X / MI350X by ensuring every contiguous stripe of workgroups
+gfx942 / gfx950 by ensuring every contiguous stripe of workgroups
 shares one XCD's L2 slice.
 
 `chiplet_transform_chunked_dynamic` takes a runtime `num_wgs` with a

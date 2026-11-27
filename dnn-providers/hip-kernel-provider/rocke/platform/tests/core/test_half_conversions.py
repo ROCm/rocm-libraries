@@ -26,12 +26,15 @@ NaN's sign and payload are left open.
 from __future__ import annotations
 
 import numpy as np
+import pytest
 from rocke.core.ir import BF16, F16, F32, IRBuilder, PtrType
 from rocke.helpers.compile import compile_kernel
 from rocke.helpers.spec import sig_param
 from rocke.numeric.bf16 import bf16_to_f32, f32_to_bf16
 from rocke.tests.gpu import launch_with_buffers, supported_device_arch
 from rocke.tests.ieee_compare import assert_ieee_identical
+
+pytestmark = pytest.mark.gpu
 
 # The arches this test has run on (gfx950 narrows to bf16 with
 # v_cvt_pk_bf16_f32, gfx90a in integer instructions, so the two round

@@ -269,6 +269,7 @@ def _check_against_reference(got, want):
     assert error <= GEMM_TOLERANCE * np.abs(want[finite]).max(), error
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("mantissa", _MANTISSAS)
 @pytest.mark.parametrize("special_values", [False, True], ids=["finite", "inf-nan"])
 def test_row_and_column_scales_on_gpu(gpu_arch, mantissa, special_values):
