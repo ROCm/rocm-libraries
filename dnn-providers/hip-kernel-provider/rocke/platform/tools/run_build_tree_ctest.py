@@ -11,7 +11,8 @@
 # it configures the platform, builds only the targets the entries need, and
 # runs the entries through CTest, so the command each entry runs stays defined
 # in one place, its CMake registration. It needs cmake, ctest and a C++
-# compiler on PATH; a new build tree uses Ninja when it is on PATH.
+# compiler on PATH, and fails with one line naming cmake or ctest when either
+# is missing; a new build tree uses Ninja when it is on PATH.
 #
 # The configure leaves out the sibling library and the install rules, so it
 # reads no CMake file outside the platform. The build tree is kept between runs,
@@ -32,6 +33,7 @@ import getpass
 import hashlib
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -47,6 +49,9 @@ from rocke.tests.platform_build import build_platform_targets, configure_platfor
 
 # Single- and multi-config generators both build and test this configuration.
 CONFIG = "Release"
+
+# The programs the runner starts itself; CMake finds the C++ compiler.
+REQUIRED_PROGRAMS = ("cmake", "ctest")
 
 # The platform alone: its tests, without the sibling library or install rules.
 PLATFORM_ONLY = (
@@ -71,6 +76,11 @@ def default_build_root() -> Path:
     key = f"{_user()}\0{PLATFORM}".encode()
     digest = hashlib.sha256(key).hexdigest()[:12]
     return Path(tempfile.gettempdir()) / f"rocke_build_tree_ctest_{digest}"
+
+
+def missing_programs() -> list[str]:
+    """The programs of ``REQUIRED_PROGRAMS`` that are not on PATH."""
+    return [program for program in REQUIRED_PROGRAMS if shutil.which(program) is None]
 
 
 def _exact_names(tests: Sequence[str]) -> str:
@@ -135,6 +145,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--build-root", type=Path, default=default_build_root())
     args = parser.parse_args(argv)
 
+    if missing := missing_programs():
+        print(
+            f"error: build-tree CTest run failed - missing={missing!r}, expected "
+            f"{' and '.join(REQUIRED_PROGRAMS)} on PATH",
+            file=sys.stderr,
+        )
+        return 1
     try:
         configure_platform(args.build_root, *PLATFORM_ONLY, config=CONFIG)
         require_registered(args.build_root, args.test)

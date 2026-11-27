@@ -7,13 +7,17 @@ sibling library, and runs named CTest entries of that tree. The entries the
 pre-commit hook names must be registered there. A name CTest's ``-R`` filter
 does not match would just leave nothing to run for it, so a renamed or removed
 entry would drop out of the check unnoticed; the runner refuses such a name
-before it builds anything.
+before it builds anything. Without cmake or ctest on PATH it fails with one
+line naming them, before it configures anything.
 """
 
 from __future__ import annotations
 
 import importlib.util
+import os
 import shutil
+import subprocess
+import sys
 
 import pytest
 from rocke.assets import platform_tools_dir
@@ -74,3 +78,32 @@ def test_an_unregistered_entry_is_refused_by_name(runner, configured_tree):
         runner.require_registered(
             configured_tree, [*HOOK_ENTRIES, "rocke_no_such_entry"]
         )
+
+
+def test_a_missing_cmake_and_ctest_fail_with_one_line_naming_them(tmp_path):
+    no_programs = tmp_path / "empty-path"
+    no_programs.mkdir()
+    build_root = tmp_path / "build"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-B",
+            str(RUNNER),
+            "--target",
+            "rocke_core",
+            "--test",
+            HOOK_ENTRIES[0],
+            "--build-root",
+            str(build_root),
+        ],
+        env={**os.environ, "PATH": str(no_programs)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 1
+    assert result.stderr == (
+        "error: build-tree CTest run failed - missing=['cmake', 'ctest'], "
+        "expected cmake and ctest on PATH\n"
+    )
+    assert not build_root.exists()
