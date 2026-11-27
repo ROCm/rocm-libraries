@@ -1105,14 +1105,15 @@ namespace TensileLite
         std::string betaOnlyKernelName(Problem const& problem) const;
 
         template <bool T_Debug, typename KA>
-        void outputConversionCallArgs(Problem const&           problem,
-                                      ContractionInputs const& inputs,
-                                      uint32_t const&          workspaceOffsetInByte,
-                                      KA&                      args,
-                                      PersistentLaunchSettings const&   launch,
-                                      uint32_t                 autoGsuVal,
-                                      size_t                   resolvedGlobalAccumulation,
-                                      uint32_t                 additionalPaddingPerBatchGeneralBatch=0) const;
+        void outputConversionCallArgs(Problem const&                  problem,
+                                      ContractionInputs const&        inputs,
+                                      uint32_t const&                 workspaceOffsetInByte,
+                                      KA&                             args,
+                                      Hardware const&                 hardware,
+                                      PersistentLaunchSettings const& launch,
+                                      uint32_t                        autoGsuVal,
+                                      size_t                          resolvedGlobalAccumulation,
+                                      uint32_t additionalPaddingPerBatchGeneralBatch = 0) const;
 
         template <typename KA>
         inline void calculateConversionCallWorkGroupItems(
@@ -1124,10 +1125,11 @@ namespace TensileLite
             KA&                                              args) const;
 
         template <bool T_Debug>
-        KernelInvocation generateOutputConversionCall(Problem const&           problem,
-                                                      ContractionInputs const& inputs,
-                                                      PersistentLaunchSettings const&   launch,
-                                                      uint32_t                 autoGsuVal,
+        KernelInvocation generateOutputConversionCall(Problem const&                  problem,
+                                                      ContractionInputs const&        inputs,
+                                                      Hardware const&                 hardware,
+                                                      PersistentLaunchSettings const& launch,
+                                                      uint32_t                        autoGsuVal,
                                                       size_t resolvedGlobalAccumulation) const;
 
         template <bool T_Debug, typename KA>
@@ -1178,6 +1180,9 @@ namespace TensileLite
             // tiles split into exactly the parts asked for. Older/custom kernels
             // decode equal parts and leave this false.
             bool dynamicUnevenParts = false;
+            // SupportStreamKDynamicParallel (GlobalParameters.py): the parallel
+            // bit is set only for these. Older/custom kernels leave this false.
+            bool dynamicParallel = false;
             // Kernel takes the ProbeAddr/ProbeEpoch/ProbeGrid tail args (CU-occupancy probe).
             bool occupancyProbe     = false;
             bool useUniversalArgs   = true;

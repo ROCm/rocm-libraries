@@ -22,7 +22,7 @@
 #
 ################################################################################
 
-from ..ExecutionPolicy import isStreamKSpatialCluster, isPersistent, isStreamK, isPersistentDataParallel, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment, requiresPartialReduction, normalize_execution_policy, usesStreamKArrivalFixup
+from ..ExecutionPolicy import isStreamKSpatialCluster, isPersistent, isStreamK, isPersistentDataParallel, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment, requiresPartialReduction, normalize_execution_policy, usesStreamKArrivalFixup, usesStreamKDynamicParallel
 
 import collections
 import copy
@@ -511,6 +511,16 @@ def _supportStreamKDynamicUnevenParts(state):
   uneven parts (StreamK.dynamicPartRange)."""
   return bool(isStreamK(state) and (hasDynamicAssignment(state) or hasHybridAssignment(state))
               and not isCustomKernelConfig(state))
+
+
+def _supportStreamKDynamicParallel(state):
+  """SupportStreamKDynamicParallel: generated StreamK Hybrid kernels where
+  usesStreamKDynamicParallel holds."""
+  return bool(isStreamK(state) and hasHybridAssignment(state)
+              and not isCustomKernelConfig(state)
+              and usesStreamKDynamicParallel(state.get("DebugStreamK", 0),
+                                             state.get("StreamKAtomic", 0),
+                                             state.get("_PrefetchAcrossPersistentEnabled", False)))
 
 
 def _supportOccupancyProbe(state):
@@ -8358,6 +8368,9 @@ class Solution(collections.abc.Mapping):
         _supportStreamKArrivalFixup(state, isaInfoMap[isa].asmCaps["HasSAtomic"])
     state["InternalSupportParams"]["SupportStreamKDynamicUnevenParts"] = \
         _supportStreamKDynamicUnevenParts(state)
+    # Same for the dynamic parallel reduction (StreamKHybrid.usesDynamicParallel).
+    state["InternalSupportParams"]["SupportStreamKDynamicParallel"] = \
+        _supportStreamKDynamicParallel(state)
     state["AssignedDerivedParameters"] = True
 
     # Set E

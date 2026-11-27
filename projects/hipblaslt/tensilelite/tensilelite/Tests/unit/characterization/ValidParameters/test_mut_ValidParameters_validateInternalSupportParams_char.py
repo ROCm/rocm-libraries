@@ -28,7 +28,8 @@ def test_validate_internal_support_params_unknown_key_reports_roster():
         "InternalSupportParams.NoSuchKey: unknown key. "
         "Valid keys are ['KernArgsVersion', 'PersistentLoopArgsVersion', 'SupportCustomStaggerU', "
         "'SupportCustomWGM', 'SupportOccupancyProbe', 'SupportStreamKArrivalFixup', "
-        "'SupportStreamKDynamicUnevenParts', 'SupportStreamKPerTileExtraIters', "
+        "'SupportStreamKDynamicParallel', 'SupportStreamKDynamicUnevenParts', "
+        "'SupportStreamKPerTileExtraIters', "
         "'SupportUserGSU', 'UseSFC', 'UseUniversalArgs']."
     )
 
