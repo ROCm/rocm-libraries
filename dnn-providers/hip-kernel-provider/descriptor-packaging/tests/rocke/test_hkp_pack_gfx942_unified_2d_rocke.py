@@ -106,7 +106,15 @@ def _root(tmp_path, spec):
     return root
 
 
-def _pack(root, tmp_path, hipcc, rocm_kpack_dir, export=None):
+def _pack(
+    root,
+    tmp_path,
+    hip_compiler,
+    rocm_kpack_dir,
+    hip_path=None,
+    device_lib_path=None,
+    export=None,
+):
     override = os.environ.get("HKP_PACK_OUTPUT_DIR")
     out = Path(override) / export if override and export else tmp_path / "out"
     if out.exists():
@@ -115,7 +123,9 @@ def _pack(root, tmp_path, hipcc, rocm_kpack_dir, export=None):
         source_root=root,
         arches=[ARCH],
         out_root=out,
-        hipcc=hipcc,
+        hip_compiler=hip_compiler,
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
         rocm_kpack_dir=rocm_kpack_dir,
         inter_root=tmp_path / "inter",
     )
@@ -130,7 +140,14 @@ def _pack(root, tmp_path, hipcc, rocm_kpack_dir, export=None):
     ],
 )
 def test_a_shipped_geometry_packs_with_the_abi_the_native_pack_marshals(
-    tmp_path, hipcc, rocm_kpack_dir, rocke_available, spec_id, head_size
+    tmp_path,
+    hip_compiler,
+    hip_path,
+    device_lib_path,
+    rocm_kpack_dir,
+    rocke_available,
+    spec_id,
+    head_size,
 ):
     from kernels.gfx942.attention_tiled_2d import build_unified_attention_2d_tiled
 
@@ -138,8 +155,10 @@ def test_a_shipped_geometry_packs_with_the_abi_the_native_pack_marshals(
     out = _pack(
         _root(tmp_path, spec),
         tmp_path,
-        hipcc,
+        hip_compiler,
         rocm_kpack_dir,
+        hip_path=hip_path,
+        device_lib_path=device_lib_path,
         export=f"gfx942_unified_2d_{spec_id}",
     )
     kdp = out / ARCH / "attention.kdp.json"
@@ -163,7 +182,7 @@ def test_a_shipped_geometry_packs_with_the_abi_the_native_pack_marshals(
 
 
 def test_a_spec_the_predicate_refuses_is_refused_at_pack_time(
-    tmp_path, hipcc, rocm_kpack_dir, rocke_available
+    tmp_path, hip_compiler, hip_path, device_lib_path, rocm_kpack_dir, rocke_available
 ):
     from kernels.gfx942.attention_tiled_2d import supports_tiled_2d_spec
 
@@ -175,7 +194,14 @@ def test_a_spec_the_predicate_refuses_is_refused_at_pack_time(
     assert not ok and "LDS" in reason
 
     with pytest.raises(HkpPackError) as excinfo:
-        _pack(_root(tmp_path, spec), tmp_path, hipcc, rocm_kpack_dir)
+        _pack(
+            _root(tmp_path, spec),
+            tmp_path,
+            hip_compiler,
+            rocm_kpack_dir,
+            hip_path=hip_path,
+            device_lib_path=device_lib_path,
+        )
     assert re.search(
         rf"spec rejected by {PREDICATE} for builder '{BUILDER}' @ {ARCH}: "
         + re.escape(reason),
