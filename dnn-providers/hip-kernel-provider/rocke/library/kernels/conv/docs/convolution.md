@@ -980,6 +980,9 @@ the same IR as before; both engines validate them with the same texts):
   into registers. The `vmcnt` waits are derived from the issue order of the
   copies and stores, so a change of the issue order changes the waits
   (C++: the same wait-count log).
+- Stride 2 on the MFMA dgrad form (wave64): the kernel walks the stride-1
+  dgrad over the zero-upsampled dY, so the window loads and the LDS layout are
+  the stride-1 ones (`dma` stays stride-1 only).
 - Up to `DW_DGRAD_MFMA_MAX_WAVES` (16) waves per block.
 
 `DirectDepthwiseSpatialSpec.block_h` (a row tile, 0 = one block walks the
