@@ -56,10 +56,12 @@ MAX_WORKERS = 16
 THREADS_PER_WORKER = 6
 # 16 workers peaked at 151 GB on a 96-core host, about 9.4 GB each.
 MEMORY_PER_WORKER = 10 * 2**30
-# Leaves time inside a 150-minute job step to reap, summarize and exit.
-DEFAULT_SUITE_TIMEOUT = 140 * 60
-# Per test: rocjitsu-quick leaves out configs over 2 h (rocjitsu_slow, pytest.ini).
-DEFAULT_TEST_TIMEOUT = 2 * 60 * 60
+# Per test: rocjitsu-quick leaves out configs over 45 min (rocjitsu_slow), the
+# same 45-minute per-test limit as the ffm-quick category in test_categories.yaml.
+DEFAULT_TEST_TIMEOUT = 45 * 60
+# A ~40-min shard plus one test hung to its timeout, inside TheRock's 100-min
+# step with time left to reap and exit.
+DEFAULT_SUITE_TIMEOUT = 90 * 60
 # After the suite timeout's SIGINT, time for pytest to stop its xdist workers
 # before the clients are killed.
 SUITE_GRACE = 30

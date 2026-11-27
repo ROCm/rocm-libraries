@@ -336,7 +336,7 @@ def test_emulation_setup(tmp_path, rocm):
     assert prefix == [str(rocm / "bin" / "rocjitsu"), "--config", run_config, "--"]
     assert run_env["CU"] == "256"
     assert (run_env["PYTEST_NUM_WORKERS"], run_env["OMP_THREAD_LIMIT"]) == ("16", "6")
-    assert run_env["PYTEST_TEST_TIMEOUT"] == "7200"
+    assert run_env["PYTEST_TEST_TIMEOUT"] == "2700"
     assert run_env["PYTHONPATH"] == f"{EMULATION.resolve()}{os.pathsep}/keep"
     runtime = Path(run_env["ROCJITSU_RUNTIME_DIR"])
     assert runtime.is_dir() and runtime.stat().st_mode & 0o777 == 0o700
@@ -370,12 +370,10 @@ def test_durations_cover_rocjitsu_slow_configs():
     durations = json.loads(plugin.DEFAULT_DURATIONS.read_text())
     common = EMULATION.parent / "common"
     slow = [p for p in common.rglob("*.yaml") if "rocjitsu_slow" in p.read_text()]
-    assert len(slow) == 5
-    # The marker means "over the per-test limit under rocjitsu" (pytest.ini).
-    limit = launcher.DEFAULT_TEST_TIMEOUT
+    assert len(slow) == 7
     for path in slow:
         key = f"test_config[tensilelite/Tests/common/{path.relative_to(common).as_posix()}]"
-        assert durations[key] > limit, key
-    # And every recorded config over the limit is marked.
+        assert durations[key] > launcher.DEFAULT_TEST_TIMEOUT, key
+    # And every recorded config over 45 min is marked.
     marked = {f"test_config[tensilelite/Tests/common/{p.relative_to(common).as_posix()}]" for p in slow}
-    assert {key for key, seconds in durations.items() if seconds > limit} <= marked
+    assert {key for key, seconds in durations.items() if seconds > launcher.DEFAULT_TEST_TIMEOUT} <= marked
