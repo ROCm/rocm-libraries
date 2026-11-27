@@ -161,9 +161,11 @@ extern "C" {
  *     (rocke_build_fused_moe_forward, rocke_fused_moe_forward_free and
  *     rocke_fused_moe_forward_lower_to_llvm) stay. rocke_topk_softmax_spec_t lost
  *     cross_wave_argmax, which no lowering read, so its size changes.
- * 24: rocke_fwd_flex_mfma_spec_t gained name and wave_size at its end and
- *     rocke_direct_grouped_spec_t gained tiled, which changes their sizes and
- *     the offsets of the fields after them. */
+ * 24: rocke_fwd_flex_mfma_spec_t gained 15 knob fields (xcd, kmaj, c_tail, bx,
+ *     cs, wt, ds, h1, zf, zl, k_tail, flat, xt8, grp, sw) before name, so its
+ *     size and the offsets of name and wave_size change.
+ *     rocke_direct_transpose_weights_dgrad_spec_t gained tiled, which changes
+ *     its size. */
 #define ROCKE_ABI_VERSION 24
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.

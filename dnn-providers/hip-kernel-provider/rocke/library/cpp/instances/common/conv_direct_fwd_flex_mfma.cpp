@@ -254,8 +254,9 @@ static void asm_void(rocke_ir_builder_t* b, const char* tmpl, const char* cons, 
 
 void dma_lds(rocke_ir_builder_t* b, V rsrc, V dst, V voff, V soff)
 {
+    V so = rocke_b_readfirstlane(b, soff);
     V t = rocke_b_trunc(b, dst, rocke_i32());
-    V ops[4] = {voff, rsrc, rocke_b_readfirstlane(b, soff), rocke_b_readfirstlane(b, t)};
+    V ops[4] = {voff, rsrc, so, rocke_b_readfirstlane(b, t)};
     asm_void(b,
              "s_mov_b32 m0, $3\n\tbuffer_load_dwordx4 $0, $1, $2 offen lds",
              "v,s,s,s,~{m0},~{memory}",

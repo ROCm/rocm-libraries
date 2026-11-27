@@ -461,6 +461,26 @@ def test_tiled_transpose_refuses_channels_off_a_multiple_of_8():
         direct_launch_geometry(spec)
 
 
+@pytest.mark.parametrize(
+    "prob_kw, runtime_channels",
+    [
+        (dict(C=204, K=72), True),  # cpg off a multiple of 8
+        (dict(C=64, K=72), False),  # channels baked, not runtime
+        (dict(C=64, K=72, dtype="fp32"), True),  # not a 16-bit dtype
+    ],
+    ids=["cpg", "static_channels", "fp32"],
+)
+def test_tiled_transpose_refuses_each_bad_contract_term(prob_kw, runtime_channels):
+    spec = DirectTransposeWeightsDgradSpec(
+        problem=_problem(**prob_kw), runtime_channels=runtime_channels, tiled=True
+    )
+    with pytest.raises(ValueError, match="tiled dgrad filter transpose"):
+        build_direct_transpose_weights_dgrad(spec, arch="gfx950")
+    if "C" in prob_kw and prob_kw["C"] % 8:  # only the channel rule is geometry's
+        with pytest.raises(ValueError, match="tiled dgrad filter transpose"):
+            direct_launch_geometry(spec)
+
+
 def test_tiled_transpose_builds_and_launches_in_tiles():
     for dtype in _DTYPES:
         for KH, KW in ((3, 3), (2, 2)):
@@ -512,6 +532,116 @@ def _flex_labels():
 @pytest.fixture(scope="module")
 def flex_grid():
     return _flex_labels()
+
+
+def _flex_cache(tmp_path_factory, jobs):
+    """A cache holding the flex grid and its helpers (placeholder binary)."""
+    import hashlib
+
+    from benchmarks.common.kernel_cache import KernelCache
+
+    class _Cache(KernelCache):
+        def __init__(self, root, idents):
+            super().__init__(root, "gfx950")
+            key = hashlib.sha256(b"placeholder").hexdigest()
+            self._blob = self.put_blob(key, b"placeholder", idents[0].label())
+            self._metas = {
+                i: {
+                    "identity": i.to_dict(),
+                    "blob": key,
+                    "hsaco_bytes": self._blob.stat().st_size,
+                    "kernel_name": self.blob_kernel_name(key),
+                }
+                for i in idents
+            }
+
+        def meta(self, identity):
+            return self._metas.get(identity)
+
+        def _load(self, subdir):
+            return [
+                (i, self._blob, m)
+                for i, m in self._metas.items()
+                if self._dir_for(i).name == subdir
+            ]
+
+    return _Cache(tmp_path_factory.mktemp("flex_cache"), [j.identity for j in jobs])
+
+
+def _plan_knobs(plan):
+    return json.loads(plan.identity.knobs) if plan.identity.knobs else {}
+
+
+def test_dgrad_plans_through_the_cache_have_the_right_steps(
+    flex_grid, tmp_path_factory
+):
+    """CPU: ``direct_plans`` on a stride-1 dgrad offers the forward kernels
+    over dY: the tiled filter transpose into ``ws_t`` first, then the forward
+    step (dy, ws_t, dx), a split-C fold after it; the own-filter (wt) kernels
+    skip the transpose and read ``w``."""
+    from benchmarks.common import direct_kernel_sweep as dks
+
+    cache = _flex_cache(tmp_path_factory, flex_grid[1])
+    problem = _problem(C=128, K=136, dtype="fp16")
+    plans, _ = dks.direct_plans(cache, problem, "dgrad", "gfx950")
+    via = [p for p in plans if p.identity.algorithm == _FWD]
+    assert via, "no dgrad-through-forward plan"
+    saw_transposed = saw_own = False
+    for plan in via:
+        knobs = _plan_knobs(plan)
+        names = [st.buffers for st in plan.steps]
+        if knobs.get("wt"):
+            saw_own = True
+            assert "ws_t" not in plan.workspaces
+            assert names[0] == ("dy", "w", "dx") or "dy" in names[0]
+            assert all(n != ("w", None, "ws_t") for n in names)
+        else:
+            saw_transposed = True
+            assert names[0] == ("w", None, "ws_t")
+            assert plan.workspaces["ws_t"] > 0
+            assert names[1][:1] == ("dy",) and names[1][1] == "ws_t"
+        if knobs.get("split_c", 1) > 1:
+            assert len(plan.steps) >= 2 + (not knobs.get("wt"))
+            assert any("ws_split" in n for n in names)
+    assert saw_transposed and saw_own
+    # Off by default elsewhere, and under the env switch.
+    assert dks.direct_plans(cache, problem, "dgrad", "gfx942")[0] == []
+    old = dks.DGRAD_VIA_FWD
+    try:
+        dks.DGRAD_VIA_FWD = False
+        off, _ = dks.direct_plans(cache, problem, "dgrad", "gfx950")
+        assert not [p for p in off if p.identity.algorithm == _FWD]
+    finally:
+        dks.DGRAD_VIA_FWD = old
+
+
+def test_strided_dgrad_flex_plans_through_the_cache(flex_grid, tmp_path_factory):
+    """CPU: a stride-2 dgrad runs the strided flex plan: the tiled transpose
+    into ``ws_t`` unless the kernel reads its own filter, then the phase
+    kernel (dy, filter, dx), or with split-C into slabs and a fold to dx."""
+    from benchmarks.common import direct_kernel_sweep as dks
+
+    cache = _flex_cache(tmp_path_factory, flex_grid[1])
+    problem = _problem(C=256, K=128, stride=2, dtype="fp16")
+    plans, _ = dks.direct_plans(cache, problem, "dgrad", "gfx950")
+    flex = [p for p in plans if p.identity.algorithm == _DGRAD]
+    assert flex, "no strided dgrad flex plan"
+    kinds = set()
+    for plan in flex:
+        knobs = _plan_knobs(plan)
+        names = [st.buffers for st in plan.steps]
+        own = bool(knobs.get("wt"))
+        kinds.add((own, knobs.get("split_c", 1) > 1))
+        assert (names[0] == ("w", None, "ws_t")) != own
+        assert ("ws_t" in plan.workspaces) != own
+        phase = names[0 if own else 1]
+        assert phase[0] == "dy" and phase[1] == ("w" if own else "ws_t")
+        if knobs.get("split_c", 1) > 1:
+            assert phase[2] == "ws_split" and "ws_split" in plan.workspaces
+            assert names[-1] == ("ws_split", "w", "dx")
+        else:
+            assert phase[2] == "dx" and len(plan.steps) == (1 if own else 2)
+    assert len(kinds) >= 2
 
 
 def test_aot_grid_counts(flex_grid):

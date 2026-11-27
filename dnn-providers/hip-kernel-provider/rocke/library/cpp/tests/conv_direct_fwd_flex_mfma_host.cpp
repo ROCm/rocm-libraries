@@ -327,7 +327,7 @@ static void test_knob_refusals(void)
     s.cs = 4;
     s.ds = true;
     s.wt = true;
-    expect_refused("cs 4 ds", &s, "gfx950", "ds: no cs 4");
+    expect_refused("cs 4 ds", &s, "gfx950", "ds: no cs 4 (its kernel has no dgrad phases)");
     s = base_spec();
     s.bx = 128;
     s.cs = 2;
