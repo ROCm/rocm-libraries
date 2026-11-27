@@ -970,7 +970,8 @@ static void test_bias(void)
     selector_case_t c;
     size_t i;
 
-    /* Bias rides the combo stack without mask-once / mask-limit. */
+    /* QQ bias, softcap and additive bias ride the combo stack without the VALU
+     * sub-flags; the sub-flags apply ALiBi, so ALiBi keeps the whole stack. */
     for(i = 0; i < sizeof(kinds) / sizeof(kinds[0]); ++i)
     {
         char name[48];
@@ -986,12 +987,12 @@ static void test_bias(void)
         check_gate(name,
                    "transposed_subflags",
                    rocke_unified_attn_enable_transposed_subflags(&c.p, "gfx950"),
-                   false);
+                   i == 0);
         s = rocke_unified_attn_tiled_spec_from_problem(&c.p, "gfx950");
         check_spec_flag(name, "use_transposed_qk_32x32", s.use_transposed_qk_32x32, true);
         check_spec_flag(name, "use_transposed_scalar_state", s.use_transposed_scalar_state, true);
-        check_spec_flag(name, "use_transposed_mask_once", s.use_transposed_mask_once, false);
-        check_spec_flag(name, "use_transposed_mask_limit", s.use_transposed_mask_limit, false);
+        check_spec_flag(name, "use_transposed_mask_once", s.use_transposed_mask_once, i == 0);
+        check_spec_flag(name, "use_transposed_mask_limit", s.use_transposed_mask_limit, i == 0);
         check_spec_flag(name, "use_fast_paged_kv_desc", s.use_fast_paged_kv_desc, true);
     }
 
@@ -1015,8 +1016,7 @@ static void test_bias(void)
         rocke_attention_tiled_2d_spec_t s
             = rocke_unified_attn_tiled_spec_from_problem(&c.p, "gfx950");
         check_spec_flag(c.name, "use_transposed_qk_32x32", s.use_transposed_qk_32x32, true);
-        check_spec_flag(
-            c.name, "use_transposed_scalar_state", s.use_transposed_scalar_state, false);
+        check_spec_flag(c.name, "use_transposed_scalar_state", s.use_transposed_scalar_state, true);
     }
 
     c = make_case("single-batch + qq d64", "gfx950", 128, 4, 32, NA, 1);
