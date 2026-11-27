@@ -23,6 +23,134 @@ to nearest, ties to even, the rounding both rocKE arms use). The parts of
 `qk_lookahead` were measured only together, so every result applies to the whole
 flag, not to any one part.
 
+## Step-0 Lever Sweep
+
+Values swept and the stage each knob is searched in are listed below.
+
+#### Configuration
+
+| Parameter | Value |
+|---|---|
+| GPU | (`gfx942`, 304 CUs) |
+| Repository / branch | [ROCm/rocm-libraries](https://github.com/ROCm/rocm-libraries), `develop` |
+| Kernel source SHA-256 (`kernels/gfx942/attention_dense.py`) | `f61d8fa69be01f9e9b07e2a5ed88c45b528d7e9bf87ae0e35ac1cdf3cfb76afb` |
+| Spec SHA-256 (`kernels/common/attention_dense_spec.py`) | `390a0ca4ff20c265c27d84b91b4a7a813bd80a7a2499d21792ddb7e9e48ddf41` |
+| Decode SHA-256 (`kernels/common/attention_dense_decode.py`) | `432c6233056d5d71f020dfd3476965973c2107ba455268d34dcf16c606b92fdb` |
+| Dispatch SHA-256 (`dispatch/attention/dense_rules.py`) | `72d44b128716fbca9a36ab3aa239b314d5970d6523470273dd7536a3218322a2` |
+| Dispatch SHA-256 (`dispatch/attention/axes.py`) | `1288149acc96be88d97e17e6934c0697484ac90a66c399d0db4aabde75b39160` |
+| Dispatch SHA-256 (`dispatch/attention/gfx942_dense.py`) | `aac4773bcc731d9acb2eb727ca16affa38cb4882f3a29b906a6bf97c4b7e38e3` |
+| Candidate swept | `gfx942_dense_persist_aot` (`spec_id`; persistent grid at 304 CTAs, one KV segment, explicit `persist_decode`) |
+| Baseline | `gfx942_dense` with no knobs (`tuning_id="auto"`), the production dispatch default |
+| Data type | **BF16** |
+| Head dimension (`D`) | **128** |
+| Sequence length (`Sq = Skv = S`) | **1024, 2048, 4096, 8192, 16384** |
+| Batch size (`B`) | **1, 16** |
+| Query heads (`Hq`) | **32** |
+| KV heads (`Hkv`) | **8, 16** |
+| Attention | Dense, causal prefill (bottom-right diagonal, `mask_type=2`) |
+| LLVM flavor | `llvm23`, Python lowerer |
+
+Nine `(B, S, Hkv)` workloads were swept independently (table below); three were skipped.
+
+#### Lever inventory and exclusions
+
+| Lever | Swept? | Group | Values swept | Reason if excluded |
+|---|---|---|---|---|
+| `block_m` | **Yes** | T | 256, 128 | — |
+| `block_n` | **Yes** | T | 64, 32 | — |
+| `waves_per_eu` | **Yes** | T | 1, 2, 3 | — |
+| `lds_num_buffers` (K LDS double buffering) | **Yes** | L | 1, 2 | — |
+| `lds_row_pad` | **Yes** | L | 0, 4, 8, 12, 16, 24, 32 | — |
+| `v_reg_prefetch` (V register prefetch) | **Yes** | L | off, on | — |
+| `use_cfvst` | **Yes** | L | policy (on), off | — |
+| `use_v_swizzle` | **Yes** | L | policy, off | — |
+| `v_row_pad` | **Yes** | L | policy, 8, 16, 32, 64 | — |
+| `iglp` / `iglp_mode` | **Yes** | S1 | off, on mode 0, on mode 1 | — |
+| `pv_sched_fence_mask` | **Yes** | S1 | policy, 0, 0x1, 0x2, 0x4, 0x8, 0x10, 0x20, 0x40, 0x80, 0x100, 0x108, 0x200, 0x400 | — |
+| `pv_priority` | **Yes** | SWE | 0, 1, 2, 3 | — |
+| `pv_loop_order` | **Yes** | SWE | d_major, k_major | — |
+| `use_exp2_fast` | **Yes** | SWE | policy, off | — |
+| `persist_decode` | **Yes** | SWE | bt_hkv_minor, qb_major, hkv_major, hq_minor_swz | — |
+| `causal_diag_split` | **Yes** | SWE | off, on | — |
+| `o_store_width` | **Yes** | SWE | 4, 2, 1 | — |
+| `persistent` | No | — | — | Fixed on by the swept candidate. |
+| `num_persistent` | No | — | — | Fixed at 304 by the swept candidate (scoped out of its knob space). |
+| `kv_segments` | No | — | — | Fixed at 1 by the swept candidate. |
+| `nonpersist_decode` | No | — | — | Not read by the persistent body. |
+| `interleave` | No | — | — | Not in the swept candidate's knob space for these requests. |
+| `lds_k_group_pad` | No | — | — | D64 only; D128 uses `lds_row_pad`. |
+| `window_wave_skip` | No | — | — | Sliding-window requests only. |
+| `lazy_rescale` | No | — | — | Untunable on gfx942 (the kernel body does not read it). |
+| `emit_lse` | No | — | — | Changes the output contract (adds an LSE output). |
+| `qk_lookahead` | No | — | — | Added by this change; not on `develop`. |
+
+**Count: 18 swept** (17 knobs + `waves_per_eu`). Combinations the knob space refuses (for example `lds_num_buffers=2`
+or `v_reg_prefetch=True` outside `block_n=64` CFVST, K + V LDS over capacity, or `use_v_swizzle` with a V row that is
+not a power of two ≥ 64) are recorded as refused and not timed.
+
+#### Grouping the 18 swept knobs
+
+| Group | Purpose | Knobs | Combinations |
+|---|---|---|---|
+| **T — Tile / occupancy** (outer loop) | Tile shape and waves per SIMD | `block_m`, `block_n`, `waves_per_eu` | 2 × 2 × 3 = 12 |
+| **L — LDS layout** | K and V LDS buffering, layout and V prefetch | `lds_num_buffers`, `lds_row_pad`, `v_reg_prefetch`, `use_cfvst`, `use_v_swizzle`, `v_row_pad` | 308 |
+| **S1 — Schedule shape** | IGLP or explicit PV fences | `iglp`, `iglp_mode`, `pv_sched_fence_mask` | 42 |
+| **SWE — PV loop, work order, epilogue** | Searched jointly | `pv_priority`, `pv_loop_order`, `use_exp2_fast`, `persist_decode`, `causal_diag_split`, `o_store_width` | 384 |
+
+#### Staged sweep methodology
+
+For each workload and each T value, an exhaustive block coordinate descent:
+
+| Stage | Procedure |
+|---|---|
+| **Start** | Time the default inner configuration and a warm-start seed (the best inner configuration of the previously swept workload); start from the faster. |
+| **L** | Time every combination of L, with S1 and SWE at the current best. |
+| **S1** | Time every combination of S1, with L (just updated) and SWE at the current best. |
+| **SWE** | Time every combination of SWE, with L and S1 at the current best. |
+| **Repeat** | Repeat L → S1 → SWE until a full pass changes nothing (at most 4 passes). |
+| **Stage 2** | Re-time the workload's 8 fastest distinct configurations (across all T) together with the baseline. |
+
+No combination inside a block is pruned; each block is searched again with the other blocks at their current best,
+so a value that only helps in combination with another block's value is found.
+
+Every configuration is resolved through dispatch (`spec_id` + `tuning_knobs`), host-validated (build, verify, lower)
+and compiled ahead of timing, then checked against an FP32 causal reference (`max|err| ≤ 0.03`; the reference of
+`attention_combo_sweep`) before it is timed. A configuration already timed under the same T value (same `spec_hash`)
+reuses its result instead of being timed again.
+
+| | Stage 1 (screen) | Stage 2 (re-time) |
+|---|---|---|
+| Timer | `rocke.runtime.time_launches` (HIP events, no host sync inside the timed loop) | same |
+| Launch path | dispatch binding (`bind_torch(...).launch()`); for B1 S1024, the dense runner's own `KernelLauncher` with arguments packed once | same |
+| Per sample | 3 batches × (5 warm-up + 20 timed launches); 5 timed launches for B1 S16384 (10 of 12 T values) and B16 | 15 warm-up + 50 timed launches |
+| Statistic | first batch dropped, median of the rest | 30 interleaved rounds per run (order reversed every round, rotated between runs), median per run, median of 3 runs |
+| Early stop | a configuration whose first batch is > 1.2× the block's best so far keeps that batch only | none |
+| Correctness | FP32 check before timing | FP32 check before timing; each arm's `spec_hash` re-checked by replaying its pin |
+
+This is an **exhaustive search within each block, iterated to a fixed point**; it is not an exhaustive Cartesian
+product of all 18 knobs.
+
+#### Production dispatch default vs winning kernels
+
+Stage-2 results: the winner and the baseline were timed in the same interleaved run. Speedup = baseline median /
+winner median; the paired range is the min–max of baseline / winner over the three runs. Every arm passed the FP32
+check (`max|err|` 1.3e-3 to 2.1e-3 across workloads; winner and baseline equal at each workload).
+
+| B | S | Hkv | Winner vs baseline (%) | Latency reduction (%) | Winner vs baseline (×, range) | Baseline kernel | Winning kernel |
+|---:|---:|---:|---:|---:|---|---|---|
+| 1 | 1024 | 8 | **+27.6%** | 21.6% | 1.276× (1.274–1.278) | `rocke_attention_dense_d128_bn64_bf16_bm128_causal_lazyrs_persist304_bthkvmin_gfx942_wpe2` | `rocke_attention_dense_d128_bn64_bf16_bm128_causal_lazyrs_persist304_bthkvmin_gfx942_wpe3_kdb1_vpf1_krowpad4_iglp1_prio2_dsplit` |
+| 1 | 1024 | 16 | **+26.7%** | 21.1% | 1.267× (1.263–1.267) | `rocke_attention_dense_d128_bn64_bf16_bm128_causal_lazyrs_persist304_bthkvmin_gfx942_wpe2` | `rocke_attention_dense_d128_bn64_bf16_bm128_causal_lazyrs_persist304_bthkvmin_gfx942_wpe2_kdb1_vpf1_krowpad12_iglp1_prio1_dsplit` |
+| 1 | 2048 | 8 | **+18.2%** | 15.4% | 1.182× (1.176–1.183) | `rocke_attention_dense_d128_bn64_bf16_bm128_causal_lazyrs_persist304_bthkvmin_gfx942_wpe2` | `rocke_attention_dense_d128_bn64_bf16_bm128_causal_lazyrs_persist304_bthkvmin_gfx942_wpe1_kdb1_vpf1_krowpad4_vrowpad8_vswz0_pvkmaj_dsplit` |
+| 1 | 2048 | 16 | **+16.3%** | 14.0% | 1.163× (1.160–1.163) | `rocke_attention_dense_d128_bn64_bf16_bm128_causal_lazyrs_persist304_bthkvmin_gfx942_wpe2` | `rocke_attention_dense_d128_bn64_bf16_bm128_causal_lazyrs_persist304_hqminswz_gfx942_wpe2_kdb1_vpf1_iglp1_dsplit` |
+| 1 | 4096 | 8 | **+13.3%** | 11.8% | 1.133× (1.133–1.136) | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_bthkvmin_gfx942_wpe2` | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_bthkvmin_gfx942_wpe3_kdb1_vpf1_krowpad4_pvkmaj_fence2_dsplit` |
+| 1 | 4096 | 16 | **+14.0%** | 12.3% | 1.140× (1.137–1.140) | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_bthkvmin_gfx942_wpe2` | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_bthkvmin_gfx942_wpe3_kdb1_vpf1_krowpad12_pvkmaj_fence2_dsplit` |
+| 1 | 8192 | 8 | _skipped_ | _skipped_ | _skipped_ | _skipped_ | _skipped_ |
+| 1 | 8192 | 16 | **+14.4%** | 12.6% | 1.144× (1.144–1.147) | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_bthkvmin_gfx942_wpe2` | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_bthkvmin_gfx942_wpe3_kdb1_vpf1_krowpad4_pvkmaj_fence1_dsplit` |
+| 1 | 16384 | 8 | **+13.5%** | 11.9% | 1.135× (1.134–1.136) | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_bthkvmin_gfx942_wpe2` | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_hqminswz_gfx942_wpe2_kdb1_vpf1_krowpad4_fence1_dsplit` |
+| 16 | 4096 | 8 | _skipped_ | _skipped_ | _skipped_ | _skipped_ | _skipped_ |
+| 16 | 4096 | 16 | **+17.9%** | 15.2% | 1.179× (1.179–1.180) | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_gfx942_wpe2` | `rocke_attention_dense_d128_bn64_bf16_causal_lazyrs_persist304_hkvmaj_gfx942_wpe2_kdb1_vpf1_krowpad12_fence2_dsplit` |
+| 16 | 8192 | 8 | _skipped_ | _skipped_ | _skipped_ | _skipped_ | _skipped_ |
+
 ## Optimization 1: QK lookahead (`qk_lookahead=True`)
 
 | Part | What it does |
@@ -199,21 +327,21 @@ candidate. The percentage columns come first, then the same ratios as × with
 the min–max range. Above 1.000× (a positive percentage) means the candidate is
 faster.
 
-| dtype | B | S | Hkv | qk_lookahead vs gfx942_dense default (%) | qk_lookahead vs AITER RTNA (%) | qk_lookahead vs AITER RTNE (%) | gfx942_dense default vs AITER RTNA (%) | qk_lookahead vs gfx942_dense default (×, range) | qk_lookahead vs AITER RTNA (×, range) | qk_lookahead vs AITER RTNE (×, range) | gfx942_dense default vs AITER RTNA (×, range) |
-|---|---:|---:|---:|---:|---:|---:|---:|---|---|---|---|
-| bf16 | 1 | 1024 | 8 | +33.9% | +32.6% | +39.8% | −0.7% | 1.339× (1.311–1.353) | 1.326× (1.320–1.344) | 1.398× (1.394–1.422) | 0.993× (0.990–1.007) |
-| bf16 | 1 | 1024 | 16 | +36.5% | +34.2% | +41.7% | −1.6% | 1.365× (1.354–1.374) | 1.342× (1.333–1.346) | 1.417× (1.411–1.431) | 0.984× (0.977–0.986) |
-| bf16 | 1 | 2048 | 8 | +30.0% | +8.8% | +13.7% | −15.7% | 1.300× (1.288–1.307) | 1.088× (1.086–1.097) | 1.137× (1.136–1.147) | 0.843× (0.831–0.845) |
-| bf16 | 1 | 2048 | 16 | +33.6% | +10.3% | +13.7% | −18.0% | 1.336× (1.324–1.346) | 1.103× (1.078–1.104) | 1.137× (1.121–1.145) | 0.820× (0.814–0.826) |
-| bf16 | 1 | 4096 | 8 | +35.9% | +4.7% | +8.1% | −22.9% | 1.359× (1.354–1.364) | 1.047× (1.044–1.051) | 1.081× (1.079–1.087) | 0.771× (0.768–0.773) |
-| bf16 | 1 | 4096 | 16 | +37.3% | +4.2% | +8.0% | −24.1% | 1.373× (1.372–1.376) | 1.042× (1.042–1.044) | 1.080× (1.078–1.083) | 0.759× (0.758–0.759) |
-| bf16 | 1 | 8192 | 8 | +36.3% | +5.8% | +10.2% | −22.2% | 1.363× (1.357–1.369) | 1.058× (1.056–1.065) | 1.102× (1.101–1.103) | 0.778× (0.776–0.778) |
-| bf16 | 1 | 8192 | 16 | +36.7% | +5.2% | +9.2% | −23.3% | 1.367× (1.365–1.372) | 1.052× (1.047–1.055) | 1.092× (1.089–1.092) | 0.767× (0.767–0.772) |
-| bf16 | 1 | 16384 | 8 | +46.0% | +13.5% | +19.0% | −22.3% | 1.460× (1.458–1.461) | 1.135× (1.131–1.136) | 1.190× (1.187–1.190) | 0.777× (0.776–0.777) |
-| bf16 | 16 | 4096 | 8 | +29.8% | +2.3% | +5.8% | −21.2% | 1.298× (1.294–1.301) | 1.023× (1.020–1.025) | 1.058× (1.057–1.062) | 0.788× (0.788–0.788) |
-| bf16 | 16 | 4096 | 16 | +39.2% | +1.3% | +5.0% | −27.3% | 1.392× (1.386–1.394) | 1.013× (1.008–1.017) | 1.050× (1.046–1.051) | 0.727× (0.727–0.729) |
-| bf16 | 16 | 8192 | 8 | +29.2% | **−1.7%** | +2.5% | −23.9% | 1.292× (1.288–1.295) | **0.983×** (0.983–0.984) | 1.025× (1.024–1.025) | 0.761× (0.760–0.763) |
-| **geomean** | | | | **+35.3%** | **+9.6%** | **+14.1%** | **−19.0%** | **1.353×** | **1.096×** | **1.141×** | **0.810×** |
+| dtype | B | S | Hkv | qk_lookahead vs gfx942_dense default (%) | qk_lookahead vs Step-0 winner (%) | qk_lookahead vs AITER RTNA (%) | qk_lookahead vs AITER RTNE (%) | gfx942_dense default vs AITER RTNA (%) | qk_lookahead vs gfx942_dense default (×, range) | qk_lookahead vs Step-0 winner (×, range) | qk_lookahead vs AITER RTNA (×, range) | qk_lookahead vs AITER RTNE (×, range) | gfx942_dense default vs AITER RTNA (×, range) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | --- | --- | --- |
+| bf16 | 1 | 1024 | 8 | +33.9% | +5.7% | +32.6% | +39.8% | −0.7% | 1.339× (1.311–1.353) | 1.057× (1.054–1.057) | 1.326× (1.320–1.344) | 1.398× (1.394–1.422) | 0.993× (0.990–1.007) |
+| bf16 | 1 | 1024 | 16 | +36.5% | +6.9% | +34.2% | +41.7% | −1.6% | 1.365× (1.354–1.374) | 1.069× (1.069–1.071) | 1.342× (1.333–1.346) | 1.417× (1.411–1.431) | 0.984× (0.977–0.986) |
+| bf16 | 1 | 2048 | 8 | +30.0% | +10.1% | +8.8% | +13.7% | −15.7% | 1.300× (1.288–1.307) | 1.101× (1.097–1.102) | 1.088× (1.086–1.097) | 1.137× (1.136–1.147) | 0.843× (0.831–0.845) |
+| bf16 | 1 | 2048 | 16 | +33.6% | +13.6% | +10.3% | +13.7% | −18.0% | 1.336× (1.324–1.346) | 1.136× (1.134–1.136) | 1.103× (1.078–1.104) | 1.137× (1.121–1.145) | 0.820× (0.814–0.826) |
+| bf16 | 1 | 4096 | 8 | +35.9% | +22.3% | +4.7% | +8.1% | −22.9% | 1.359× (1.354–1.364) | 1.223× (1.221–1.228) | 1.047× (1.044–1.051) | 1.081× (1.079–1.087) | 0.771× (0.768–0.773) |
+| bf16 | 1 | 4096 | 16 | +37.3% | +22.1% | +4.2% | +8.0% | −24.1% | 1.373× (1.372–1.376) | 1.221× (1.217–1.223) | 1.042× (1.042–1.044) | 1.080× (1.078–1.083) | 0.759× (0.758–0.759) |
+| bf16 | 1 | 8192 | 8 | +36.3% | _skipped_ | +5.8% | +10.2% | −22.2% | 1.363× (1.357–1.369) | _skipped_ | 1.058× (1.056–1.065) | 1.102× (1.101–1.103) | 0.778× (0.776–0.778) |
+| bf16 | 1 | 8192 | 16 | +36.7% | +19.6% | +5.2% | +9.2% | −23.3% | 1.367× (1.365–1.372) | 1.196× (1.195–1.197) | 1.052× (1.047–1.055) | 1.092× (1.089–1.092) | 0.767× (0.767–0.772) |
+| bf16 | 1 | 16384 | 8 | +46.0% | +25.0% | +13.5% | +19.0% | −22.3% | 1.460× (1.458–1.461) | 1.250× (1.249–1.251) | 1.135× (1.131–1.136) | 1.190× (1.187–1.190) | 0.777× (0.776–0.777) |
+| bf16 | 16 | 4096 | 8 | +29.8% | _skipped_ | +2.3% | +5.8% | −21.2% | 1.298× (1.294–1.301) | _skipped_ | 1.023× (1.020–1.025) | 1.058× (1.057–1.062) | 0.788× (0.788–0.788) |
+| bf16 | 16 | 4096 | 16 | +39.2% | +17.6% | +1.3% | +5.0% | −27.3% | 1.392× (1.386–1.394) | 1.176× (1.174–1.179) | 1.013× (1.008–1.017) | 1.050× (1.046–1.051) | 0.727× (0.727–0.729) |
+| bf16 | 16 | 8192 | 8 | +29.2% | _skipped_ | **−1.7%** | +2.5% | −23.9% | 1.292× (1.288–1.295) | _skipped_ | **0.983×** (0.983–0.984) | 1.025× (1.024–1.025) | 0.761× (0.760–0.763) |
+| **geomean** |  |  |  | **+35.3%** | **+15.7%** (9 shapes) | **+9.6%** | **+14.1%** | **−19.0%** | **1.353×** | **1.157×** (9 shapes) | **1.096×** | **1.141×** | **0.810×** |
 
 At these measured configurations only:
 
