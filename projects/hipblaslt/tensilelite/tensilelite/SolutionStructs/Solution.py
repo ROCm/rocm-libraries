@@ -2796,8 +2796,9 @@ class Solution(collections.abc.Mapping):
       if not state["ProblemType"]["DataTypeB"].isBFloat16():
         reject(state, printRejectionReason, "FusedA2A=A2AGemm requires a bf16 B")
         return
-      if state["UseSubtileImpl"]:
-        reject(state, printRejectionReason, "FusedA2A=A2AGemm requires UseSubtileImpl=0")
+      if state["ProblemType"]["SwizzleTensorA"] or state["ProblemType"]["SwizzleTensorB"]:
+        reject(state, printRejectionReason,
+               "FusedA2A=A2AGemm requires SwizzleTensorA=SwizzleTensorB=False")
         return
       if state["DirectToVgprA"] or state["DirectToVgprB"]:
         reject(state, printRejectionReason,
@@ -2815,7 +2816,12 @@ class Solution(collections.abc.Mapping):
       if state["SpaceFillingAlgo"]:
         reject(state, printRejectionReason, "FusedA2A=A2AGemm requires SpaceFillingAlgo=[]")
         return
+      if state["UnrollLoopSwapGlobalReadOrder"] and state.get("AdaptiveGemmNTAB", 0):
+        reject(state, printRejectionReason,
+               "FusedA2A=A2AGemm requires AdaptiveGemmNTAB=0 with UnrollLoopSwapGlobalReadOrder")
+        return
       state["OptNoLoadLoop"] = 0
+      state["SuppressNoLoadLoop"] = False
 
     if state["GlobalSplitU"] == 0 and state["AdaptiveGemmGSUA"] == 1:
       reject(state, printRejectionReason, "AdaptiveGemmGSUA requires GSU enablement")

@@ -73,7 +73,8 @@ def isCustomKernelSolution(solution) -> bool:
   if _solutionField(solution, "CustomKernelName"):
     return True
   custom = _solutionField(solution, "CustomKernel")
-  return isinstance(custom, dict) and bool(custom.get("name") or custom.get("macrotile"))
+  return (isinstance(custom, dict) and not custom.get("generated", False)
+          and bool(custom.get("name") or custom.get("macrotile")))
 
 
 def customKernelTile(solution):

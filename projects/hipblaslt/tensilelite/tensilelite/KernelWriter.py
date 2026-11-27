@@ -3465,7 +3465,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           module.add(self.calculateLoopNumIter(kernel, tensorParametersA, tensorParametersB, i))
           if self.states.actualSummationLoops>1:
             module.add(self.openLoop(kernel, tensorParametersA, tensorParametersB, i))
-        module.add(self.openA2AShardLoop(kernel, tensorParametersA, tensorParametersB))
+        module.add(self.a2aSetupSegments(kernel, tensorParametersA, tensorParametersB))
         module.add(self.calculateLoopNumIter(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx))
 
       if deferInitC:
@@ -5644,6 +5644,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       if kernel["ProblemType"]["MXBlockB"]:
         module.addComment1("global read addresses: addresses mxsb")
         module.add(self.graAddresses(kernel, tensorParametersB["MX"]))
+    module.add(self.a2aSetupSegments(kernel, tensorParametersA, tensorParametersB))
 
 
     # List of tiles that need to be read form
@@ -5808,6 +5809,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       self.states.nonPostLoopSgpr.append("SubtileNGuard")
       self.states.storeAlign8 = True
 
+    module.add(self.a2aExitTally(kernel))
+
     # Start of post-loop code
     if 1:
       module.addComment0(" =============================================================== ")
@@ -5968,6 +5971,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       if isPersistent(kernel):
         processingComponent = Component.TileProcessingStrategy.find(self)
         module.add(processingComponent.kernelEnd(self, kernel))
+      module.add(self.a2aDrainSendWait(kernel))
       module.add(SEndpgm(comment="Kernel End"))
     else:
       # If activation was deferred but no other deferred blocks exist, emit it before functionEnd
@@ -6108,7 +6112,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       # prefetch global read for PGR>=2
       if kernel["PrefetchGlobalRead"] >= 2:
         for idxPgr in range(1, kernel["PrefetchGlobalRead"]):
-          module.add(self.openPrefetchGlobalRead2orMore(kernel, idxPgr))
+          module.add(self.openPrefetchGlobalRead2orMore(kernel, tensorParametersA, tensorParametersB, idxPgr))
           # For UnrollLoopSwapGlobalReadOrder, we also need to swap ds write A/B order.
           # In scheduling, we always schedule lwa first then lwb second,
           # Putting lwb in lwa's code object can easily change the order.
@@ -6478,6 +6482,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                              src1=hex(endCounter), \
                             comment="counteL<=%d"%endCounter))
         loop.add(SCBranchSCC1(labelName=loopLabelToNoGRloopAfterABLoop.getLabelName(), comment="exit LoopL" ))
+        if kernel["ProblemType"]["FusedA2A"] == "A2AGemm":
+          loop.add(self.a2aSecondCopyLabel(kernel, nta, ntb))
         # grBA check for UnrollLoopSwapGlobalReadOrder
         grBA = True if isULSGRO else False
         loop.add(self._loopBody( kernel, tensorParametersA, tensorParametersB, pack, packPre, 1, loopCopies, True , grBA=grBA, nta=nta, ntb=ntb))
@@ -6487,6 +6493,8 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           isDTVGRSecondBuf = True if isDTV and lc == 0 else False
           # loop body code generation
           finalLoop = lc == loopCopies - 1
+          if lc == 1 and kernel["ProblemType"]["FusedA2A"] == "A2AGemm":
+            loop.add(self.a2aSecondCopyLabel(kernel, nta, ntb))
           loop.add(self._loopBody( kernel, tensorParametersA, tensorParametersB, pack, packPre, lc, loopCopies, finalLoop, isDTVGRSecondBuf=isDTVGRSecondBuf, nta=nta, ntb=ntb ))
           if self.states.numItersPLR == 0 and not finalLoop:
             # swap LDS read buffer
@@ -6495,6 +6503,11 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
               self._dcpAdvanceTokens("Read")
 
       module.add(loop)
+      loopChar = self.states.indexChars[kernel["ProblemType"]["IndicesSummation"][self.states.unrollIdx]]
+      strNtab = "" if kernel["AdaptiveGemmNTAB"] == 0 else "_NTA%s_NTB%s" % (nta, ntb)
+      module.add(self.a2aNextSegment(kernel, tensorParametersA, tensorParametersB,
+                                     stepBack=kernel["PrefetchGlobalRead"] >= 2,
+                                     targetLabel=Label(self.rapLabel("LoopBegin%s%s" % (loopChar, strNtab)), "")))
       module.add(self.emitHalfPlrPrefetchAcrossPersistentBlock(
           kernel, tensorParametersA, tensorParametersB))
 
@@ -6653,6 +6666,11 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       # to it to skip that prefetch on its last iteration. Keep that order.
       module.add(Label(self.rapLabel("PrefetchGlobalLastIterEnd"), ""))
 
+    def a2aNextSegmentAfterFirstCopy():
+      # The first copy's early exit lands here; the next segment resumes in the second copy.
+      return self.a2aNextSegment(kernel, tensorParametersA, tensorParametersB, stepBack=True,
+                                 targetLabel=self.a2aSecondCopyLabel(kernel))
+
     for remainPgr in range(kernel["PrefetchGlobalRead"]-1, 0, -1) \
         if not kernel["SuppressNoLoadLoop"] else []:
       # NGLL code generation for PGR>=2
@@ -6663,6 +6681,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         module.add(self.noLoadLoop(kernel, tensorParametersA, tensorParametersB, isOptNLL=False, isNGLL=True, pack=pack, packPre=packPre, \
                                    NLLindex=NGLLindex, NLLnum=NGLLnum, remainPgr=remainPgr))
         module.add(loopLabelToNoGRloopAfterABLoop)
+        module.add(a2aNextSegmentAfterFirstCopy())
         if kernel["ExpertSchedulingMode"] > 0:
           module.add(SSetRegIMM32B32(dst=HWRegContainer(reg="26", value=[0,2]), src=0x0, comment="enable hardware dependency checking"))
         NGLLindex += 1
@@ -6670,6 +6689,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         # generate loopLabelToNoGRloopAfterABLoop at first iteration of remainPgr
         # This is to jump to the same NGLL from even and odd main loop
         module.add(loopLabelToNoGRloopAfterABLoop)
+        module.add(a2aNextSegmentAfterFirstCopy())
       module.add(self.noLoadLoop(kernel, tensorParametersA, tensorParametersB, isOptNLL=False, isNGLL=True, pack=pack, packPre=packPre, \
                                  NLLindex=NGLLindex, NLLnum=NGLLnum, remainPgr=remainPgr))
 
@@ -7568,8 +7588,6 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         self._dcpAdvanceTokens("Tensor")
       module.add(self.closeLoop(kernel, tensorParametersA, tensorParametersB, i, True))
 
-    module.add(self.a2aTransitionPhase(kernel, tensorParametersA, tensorParametersB))
-    module.add(self.closeA2AShardLoop(kernel))
     module.add(self.a2aExitTally(kernel))
 
     # Drop GlobalReadIncs* from the free pool so endSummation's store-phase SRDs don't
@@ -11822,24 +11840,18 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     return ""
 
   ##############################################################################
-  # Open A2A-GEMM Shard Loop
+  # A2A-GEMM Segments
   ##############################################################################
   @abc.abstractmethod
-  def openA2AShardLoop(self, kernel, tPA, tPB):
+  def a2aSetupSegments(self, kernel, tPA, tPB):
     return ""
 
-  ##############################################################################
-  # Close A2A-GEMM Shard Loop
-  ##############################################################################
   @abc.abstractmethod
-  def closeA2AShardLoop(self, kernel):
+  def a2aNextSegment(self, kernel, tPA, tPB, stepBack, targetLabel):
     return ""
 
-  ##############################################################################
-  # A2A-GEMM Transition Phase
-  ##############################################################################
   @abc.abstractmethod
-  def a2aTransitionPhase(self, kernel, tPA, tPB):
+  def a2aSecondCopyLabel(self, kernel, nta=0, ntb=0):
     return ""
 
   ##############################################################################
@@ -12034,7 +12046,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
   # PrefetchGlobalRead2
   ##############################################################################
   @abc.abstractmethod
-  def openPrefetchGlobalRead2orMore(self, kernel, idxPgr):
+  def openPrefetchGlobalRead2orMore(self, kernel, tPA, tPB, idxPgr):
     return ""
 
   @abc.abstractmethod

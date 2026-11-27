@@ -243,7 +243,10 @@ _A2A_GEMM_GUARDS = [
      "TileProcessingStrategy=None", "gfx942"),
     ({"DirectToVgprA": True}, "DirectToVgprA=DirectToVgprB=0", "gfx942"),
     ({"DirectToVgprB": True}, "DirectToVgprA=DirectToVgprB=0", "gfx942"),
-    ({"UseSubtileImpl": True, "DepthU": 64}, "UseSubtileImpl=0", "gfx950"),
+    ({"UseSubtileImpl": True, "DepthU": 64, "ProblemType": {"SwizzleTensorA": True}},
+     "SwizzleTensorA=SwizzleTensorB=False", "gfx950"),
+    ({"UseSubtileImpl": True, "DepthU": 64, "ProblemType": {"SwizzleTensorB": True}},
+     "SwizzleTensorA=SwizzleTensorB=False", "gfx950"),
     ({"BufferLoad": False}, "BufferLoad=1", "gfx942"),
     ({"ProblemType": {"DataTypeA": "b", "DataTypeB": "h"}}, "a bf16 B", "gfx942"),
     ({"mi": list(_MI_MT64)}, "MacroTile0/1 in {128, 256}", "gfx942"),
@@ -271,6 +274,15 @@ def test_a2a_gemm_base_is_accepted(_gp_gfx942, request, assembler, capsys, arch)
     # The shard loop and the block/grid tallies are sized for GSU=1, so a caller
     # must not be able to change GSU at runtime.
     assert sol["InternalSupportParams"]["SupportUserGSU"] is False
+
+
+def test_a2a_gemm_subtile_is_accepted(_gp_gfx942, request, assembler, capsys):
+    sol, out = _derive_a2a_gemm(request, assembler, capsys, arch="gfx950",
+                                UseSubtileImpl=True, DepthU=64)
+    assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
+    assert sol["UseSubtileImpl"] is True
+    assert sol["Use64bShadowLimit"] is False
+    assert sol["NoTailLoop"] is True
 
 
 @pytest.mark.parametrize("overrides, msg, arch", _A2A_GEMM_GUARDS)
