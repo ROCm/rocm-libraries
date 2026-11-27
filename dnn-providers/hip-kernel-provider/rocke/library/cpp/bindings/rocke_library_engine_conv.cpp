@@ -66,6 +66,7 @@ namespace
 
 using rocke_bind::dict_bool;
 using rocke_bind::dict_int;
+using rocke_bind::dict_spec_flag;
 using rocke_bind::dict_str;
 using rocke_bind::serialize_kernel;
 using rocke_bind::take_lowered;
@@ -82,7 +83,7 @@ void fill_conv_acc_epilogue(rocke_conv_acc_epilogue_t* e, const py::dict& d)
         e->bias = d["bias"].cast<double>();
     if(d.contains("scale") && !d["scale"].is_none())
         e->scale = d["scale"].cast<double>();
-    e->relu = dict_bool(d, "relu", e->relu);
+    e->relu = dict_spec_flag(d, "ConvAccumulatorEpilogue", "relu", e->relu);
     if(d.contains("clamp_min") && !d["clamp_min"].is_none())
     {
         e->has_clamp_min = true;

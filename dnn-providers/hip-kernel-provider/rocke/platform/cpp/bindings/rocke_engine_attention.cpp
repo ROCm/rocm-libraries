@@ -61,6 +61,15 @@ namespace py = pybind11;
 namespace
 {
 
+/* A spec flag the Python spec refuses unless it is a bool (family_glue.hpp). */
+using rocke_bind::dict_spec_flag;
+
+/* The Python classes whose flags the spec builders below read with
+ * dict_spec_flag; a refusal names the class as the Python one does. */
+constexpr const char* TILED_2D_SPEC_OWNER = "UnifiedAttention2DTiledSpec";
+constexpr const char* TILED_3D_SPEC_OWNER = "UnifiedAttention3DTiledSpec";
+constexpr const char* PROBLEM_OWNER = "UnifiedAttentionProblem";
+
 /* ----------------------------- dict helpers ----------------------------- */
 int a_int(const py::dict& d, const char* key, int dflt)
 {
@@ -851,7 +860,7 @@ rocke_attention_tiled_2d_spec_t t2d_build(const py::dict& d, Store& st)
     s.use_early_v_schedule = a_bool(d, "use_early_v_schedule", s.use_early_v_schedule);
     s.use_fast_paged_kv_desc = a_bool(d, "use_fast_paged_kv_desc", s.use_fast_paged_kv_desc);
     s.use_qblock_reverse = a_bool(d, "use_qblock_reverse", s.use_qblock_reverse);
-    s.emit_lse = a_bool(d, "emit_lse", s.emit_lse);
+    s.emit_lse = dict_spec_flag(d, TILED_2D_SPEC_OWNER, "emit_lse", s.emit_lse);
     s.lse_head_major = t2d_lse_head_major(d);
     /* Every other field the C struct shares with the Python spec. A field left
      * out here silently keeps its C default, so the native builder would build
@@ -879,8 +888,10 @@ rocke_attention_tiled_2d_spec_t t2d_build(const py::dict& d, Store& st)
     s.use_k_sliced_ldsseq = a_bool(d, "use_k_sliced_ldsseq", s.use_k_sliced_ldsseq);
     s.use_k_sliced_ring = a_bool(d, "use_k_sliced_ring", s.use_k_sliced_ring);
     s.use_q_direct_global = a_bool(d, "use_q_direct_global", s.use_q_direct_global);
-    s.use_v_hbm_direct = a_bool(d, "use_v_hbm_direct", s.use_v_hbm_direct);
-    s.use_k_hbm_direct = a_bool(d, "use_k_hbm_direct", s.use_k_hbm_direct);
+    s.use_v_hbm_direct
+        = dict_spec_flag(d, TILED_2D_SPEC_OWNER, "use_v_hbm_direct", s.use_v_hbm_direct);
+    s.use_k_hbm_direct
+        = dict_spec_flag(d, TILED_2D_SPEC_OWNER, "use_k_hbm_direct", s.use_k_hbm_direct);
     s.use_qk_pv_sched_group_barrier
         = a_bool(d, "use_qk_pv_sched_group_barrier", s.use_qk_pv_sched_group_barrier);
     s.k_slice_hd = a_int(d, "k_slice_hd", s.k_slice_hd);
@@ -1060,7 +1071,7 @@ rocke_attention_tiled_2d_spec_t fkv_build(const py::dict& d, Store& st)
         = a_bool(d, "use_mfma32_skip_legacy_qreg", s.use_mfma32_skip_legacy_qreg);
     s.use_agpr_alloc_zero = a_bool(d, "use_agpr_alloc_zero", s.use_agpr_alloc_zero);
     s.use_grouped_kv2_softmax = a_bool(d, "use_grouped_kv2_softmax", s.use_grouped_kv2_softmax);
-    s.emit_lse = a_bool(d, "emit_lse", s.emit_lse);
+    s.emit_lse = dict_spec_flag(d, TILED_2D_SPEC_OWNER, "emit_lse", s.emit_lse);
     s.lse_head_major = t2d_lse_head_major(d);
     std::string v;
     if(a_str(d, "dtype", v))
@@ -1168,7 +1179,7 @@ rocke_unified_attention_3d_tiled_spec_t t3d_build(const py::dict& d, Store& st)
     s.use_decode_grid = a_bool(d, "use_decode_grid", s.use_decode_grid);
     s.use_kv_lds_swizzle = a_bool(d, "use_kv_lds_swizzle", s.use_kv_lds_swizzle);
     s.use_wave_page_id_load = a_bool(d, "use_wave_page_id_load", s.use_wave_page_id_load);
-    s.emit_lse = a_bool(d, "emit_lse", s.emit_lse);
+    s.emit_lse = dict_spec_flag(d, TILED_3D_SPEC_OWNER, "emit_lse", s.emit_lse);
     std::string v;
     if(a_str(d, "dtype", v))
         s.dtype = st.keep(v);
@@ -1429,11 +1440,13 @@ void reg3(py::module_& m,
 static void require_c_representable_problem(const py::dict& d)
 {
     std::vector<std::string> unsupported;
-    for(const char* flag : {"use_additive_bias", "emit_lse", "causal_top_left"})
+    for(const char* flag : {"emit_lse", "use_additive_bias"})
     {
-        if(a_bool(d, flag, false))
+        if(dict_spec_flag(d, PROBLEM_OWNER, flag, false))
             unsupported.push_back(std::string(flag) + "=True");
     }
+    if(a_bool(d, "causal_top_left", false))
+        unsupported.push_back("causal_top_left=True");
     if(d.contains("waves_per_eu") && !d["waves_per_eu"].is_none())
         unsupported.push_back("waves_per_eu=" + py::str(d["waves_per_eu"]).cast<std::string>());
     if(const int right_bound = a_int(d, "right_bound", 0); right_bound != 0)

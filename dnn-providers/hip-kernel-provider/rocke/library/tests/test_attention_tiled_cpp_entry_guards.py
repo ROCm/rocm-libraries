@@ -16,6 +16,10 @@ the same reason, instead of crashing.
   refuses them with the Python text rather than build the spec, for every rule
   whose fields the entry's binding passes. The gfx942 entry refuses grouped-KV2
   and the fp8 K/V cache outright, as the gfx942 spec does.
+* A spec flag the Python spec refuses unless it is a bool (``emit_lse``, the
+  gfx942 HBM read sources, and the gfx1151 fmha_fwd_v2 entry's ``dense_q`` and
+  ``seqused_q``): every entry that reads it refuses a non-bool with the same
+  ValueError and text, rather than read ``1`` as true.
 """
 
 from __future__ import annotations
@@ -24,6 +28,7 @@ import dataclasses
 import re
 from typing import NamedTuple
 
+import numpy as np
 import pytest
 from kernels.gfx942.attention_tiled_2d import (
     UnifiedAttention2DTiledSpec as Gfx942Spec2D,
@@ -35,6 +40,11 @@ from kernels.gfx950.attention_tiled_2d_fastkv_regp import (
     build_unified_attention_2d_fastkv_register_p,
     make_fastkv_register_p_spec,
 )
+from kernels.gfx950.attention_tiled_3d import (
+    UnifiedAttention3DTiledSpec as Gfx950Spec3D,
+)
+from kernels.gfx1151.wmma_fmha_fwd_v2 import WmmaFmhaFwdV2Spec
+from rocke.tests.bool_flags import bool_flag_refusal
 from rocke.tests.lanes import BUILD_VARIANT, import_or_skip_until
 
 
@@ -606,3 +616,73 @@ def test_gfx950_2d_spec_refuses_additive_bias_with_shared_rule_knobs(
     with pytest.raises(ValueError) as py_err:
         dataclasses.replace(Gfx950Spec2D(**accepted), **change)
     assert str(py_err.value) == reason
+
+
+# Truthy and falsy stand-ins that a read of the flag as a C bool would accept.
+_NOT_BOOLS = ("false", 1, None, np.bool_(True))
+
+
+def _assert_both_engines_refuse_the_flag(rocke_engine, spec, entry_point, arch, flag):
+    """``spec`` with ``flag`` set to each non-bool: the Python spec and the C++
+    entry refuse it with the same ValueError text."""
+    for bad in _NOT_BOOLS:
+        with pytest.raises(ValueError) as py_err:
+            dataclasses.replace(spec, **{flag: bad})
+        assert str(py_err.value) == bool_flag_refusal(
+            flag, bad, what=type(spec).__name__
+        )
+        refused_fields = {**dataclasses.asdict(spec), flag: bad}
+        with pytest.raises(ValueError) as cpp_err:
+            getattr(rocke_engine, entry_point)(refused_fields, arch)
+        assert str(cpp_err.value) == str(py_err.value)
+
+
+_SPEC_FLAG_ENTRIES = [
+    pytest.param(spec, binding, arch, flag, id=f"{binding} on {arch}: {flag}")
+    for spec, binding, archs, flags in (
+        (
+            Gfx942Spec2D(**_PROBLEM_64_8),
+            "gfx942_attention_tiled_2d",
+            ("gfx942", "gfx950"),
+            ("emit_lse", "use_k_hbm_direct", "use_v_hbm_direct"),
+        ),
+        (
+            Gfx950Spec2D(**_GFX950_GKV2),
+            "gfx950_attention_tiled_2d",
+            ("gfx950",),
+            ("emit_lse",),
+        ),
+        (
+            Gfx950Spec2D(**_FASTKV_GKV2),
+            "gfx950_attention_tiled_2d_fastkv_regp",
+            ("gfx950",),
+            ("emit_lse",),
+        ),
+        (
+            Gfx950Spec3D(
+                num_query_heads=8, num_kv_heads=2, num_segments=16, **_PROBLEM
+            ),
+            "gfx950_attention_tiled_3d",
+            ("gfx950",),
+            ("emit_lse",),
+        ),
+        (
+            WmmaFmhaFwdV2Spec(layout="paged", page_block_size=16),
+            "gfx1151_wmma_fmha_fwd_v2",
+            ("gfx1151",),
+            ("dense_q", "seqused_q"),
+        ),
+    )
+    for arch in archs
+    for flag in flags
+]
+
+
+@pytest.mark.parametrize("entry", _ENTRY_POINTS)
+@pytest.mark.parametrize("spec, binding, arch, flag", _SPEC_FLAG_ENTRIES)
+def test_entries_refuse_a_non_bool_spec_flag_like_python(
+    rocke_engine, spec, binding, arch, flag, entry
+):
+    _assert_both_engines_refuse_the_flag(
+        rocke_engine, spec, f"{binding}_{entry}", arch, flag
+    )

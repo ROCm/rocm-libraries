@@ -10,7 +10,8 @@ name.
 
 The binding takes a ``UnifiedAttentionProblem`` as a dict, and its C struct has
 no member for some of the dataclass's fields. A problem that sets one of those
-is refused rather than selected as if the field were at its default.
+is refused rather than selected as if the field were at its default, and a
+non-bool flag the dataclass refuses is refused with its ValueError text.
 
 Needs the ``rocke_engine`` binding (a source build with ``-DROCKE_BUILD_PYBIND=ON``
 on ``PYTHONPATH``); skipped without it.
@@ -24,8 +25,10 @@ from typing import NamedTuple
 from unittest import mock
 
 import kernels.common.attention_unified as _au
+import numpy as np
 import pytest
 from kernels import UnifiedAttentionProblem
+from rocke.tests.bool_flags import bool_flag_refusal
 from rocke.tests.lanes import BUILD_VARIANT, import_or_skip_until
 
 rocke_engine = import_or_skip_until("rocke_engine", BUILD_VARIANT)
@@ -241,3 +244,20 @@ def test_binding_refuses_fields_the_c_problem_cannot_carry(field, value):
     assert _python_spec(problem) != _python_spec(COMBO)
     with pytest.raises(ValueError, match=rf"{field}={value}: .*cannot carry this"):
         _cpp_spec(problem)
+
+
+@pytest.mark.parametrize("flag", ["emit_lse", "use_additive_bias"])
+@pytest.mark.parametrize("bad", ["false", 1, None, np.bool_(True)])
+def test_binding_refuses_a_non_bool_problem_flag_like_python(flag, bad):
+    """The problem refuses a non-bool flag; the binding, reading the same dict,
+    refuses it with the same text rather than read ``1`` as true."""
+    with pytest.raises(ValueError) as python_refusal:
+        replace(COMBO, **{flag: bad})
+    assert str(python_refusal.value) == bool_flag_refusal(
+        flag, bad, what="UnifiedAttentionProblem"
+    )
+    with pytest.raises(ValueError) as cpp_refusal:
+        rocke_engine.gfx950_attn_tiled_spec_from_problem(
+            {**asdict(COMBO), flag: bad}, ARCH
+        )
+    assert str(cpp_refusal.value) == str(python_refusal.value)

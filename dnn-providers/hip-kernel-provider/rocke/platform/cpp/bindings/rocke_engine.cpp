@@ -123,6 +123,7 @@ namespace
  * shared with the library module (family_glue.hpp). */
 using rocke_bind::dict_bool;
 using rocke_bind::dict_int;
+using rocke_bind::dict_spec_flag;
 using rocke_bind::dict_str;
 using rocke_bind::serialize_kernel;
 using rocke_bind::take_lowered;
@@ -2682,8 +2683,8 @@ rocke_wmma_fmha_fwd_v2_spec_t w1151fmha_v2_build_spec(const py::dict& d,
     s.use_alibi = dict_bool(d, "use_alibi", s.use_alibi);
     s.use_qq_bias = dict_bool(d, "use_qq_bias", s.use_qq_bias);
     s.page_block_size = dict_int(d, "page_block_size", s.page_block_size);
-    s.dense_q = dict_bool(d, "dense_q", s.dense_q);
-    s.seqused_q = dict_bool(d, "seqused_q", s.seqused_q);
+    s.dense_q = dict_spec_flag(d, "WmmaFmhaFwdV2Spec", "dense_q", s.dense_q);
+    s.seqused_q = dict_spec_flag(d, "WmmaFmhaFwdV2Spec", "seqused_q", s.seqused_q);
     if(d.contains("wave_pair") && !d["wave_pair"].is_none())
         s.wave_pair = d["wave_pair"].cast<bool>() ? 1 : 0;
     {

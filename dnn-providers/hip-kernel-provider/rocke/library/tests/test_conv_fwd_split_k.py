@@ -1064,6 +1064,26 @@ class TestEngineAgreement(unittest.TestCase):
                     with self.assertRaisesRegex(Exception, "identity acc_epilogue"):
                         lower_conv_implicit_gemm(spec, arch="gfx1250", backend=backend)
 
+    def test_a_non_bool_relu_is_refused_with_the_python_text(self):
+        """The binding reads ``relu`` from the spec dict as the Python epilogue
+        does: a non-bool is a ValueError with the same text, not read as true."""
+        engine = _engine_or_skip(self)
+        from kernels.common.conv_implicit_gemm import ConvAccumulatorEpilogue
+        from kernels.conv.engine_bridge import conv_implicit_gemm_spec_to_dict
+
+        fields = conv_implicit_gemm_spec_to_dict(_spec())
+        for relu in (1, "no", None, np.bool_(True)):
+            with self.subTest(relu=relu):
+                with self.assertRaises(ValueError) as python_refusal:
+                    ConvAccumulatorEpilogue(relu=relu)
+                refused = {**fields, "acc_epilogue": {**fields["acc_epilogue"]}}
+                refused["acc_epilogue"]["relu"] = relu
+                with self.assertRaises(ValueError) as cpp_refusal:
+                    engine.conv_implicit_gemm_lower_llvm(refused, arch="gfx1250")
+                self.assertEqual(
+                    str(cpp_refusal.exception), str(python_refusal.exception)
+                )
+
     def test_unsplit_fused_epilogue_lowers_identically(self):
         _engine_or_skip(self)
         from kernels.common.conv_implicit_gemm import ConvAccumulatorEpilogue

@@ -23,11 +23,12 @@
  * and that serialize_kernel / verify_kernel / require_arch are visible
  * unqualified. require_arch is global (below); serialize_kernel and
  * verify_kernel live in namespace rocke_bind with the other helpers every
- * binding translation unit shares (dict_int / dict_bool / dict_str /
- * take_lowered), and a file that uses the macros brings them into scope with
- * using-declarations. They are namespaced rather than global so a file that
- * defines its own same-named readers (winograd_glue.hpp's rocke_wino_bind,
- * pulled in with a using-directive) does not see two candidates.
+ * binding translation unit shares (dict_int / dict_bool / dict_spec_flag /
+ * dict_str / take_lowered), and a file that uses the macros brings them into
+ * scope with using-declarations. They are namespaced rather than global so a
+ * file that defines its own same-named readers (winograd_glue.hpp's
+ * rocke_wino_bind, pulled in with a using-directive) does not see two
+ * candidates.
  */
 #ifndef ROCKE_BINDINGS_FAMILY_GLUE_HPP
 #define ROCKE_BINDINGS_FAMILY_GLUE_HPP
@@ -103,6 +104,26 @@ inline bool dict_bool(const pybind11::dict& d, const char* key, bool dflt)
     if(d.contains(key))
         return d[key].cast<bool>();
     return dflt;
+}
+
+/* A flag of the Python spec `owner` that the spec refuses unless it is exactly
+ * a bool (rocke.helpers.spec.require_bool). Absent keeps `dflt`. Present, it
+ * must be a Python bool -- an int, None, a string or a numpy.bool_ is refused --
+ * and the refusal is the Python one: a ValueError (pybind11::value_error) with
+ * the text "{owner} failed - {key}={value!r}, expected a bool". dict_bool's
+ * cast would instead read 1 as true and raise a RuntimeError on "false". */
+inline bool dict_spec_flag(const pybind11::dict& d, const char* owner, const char* key, bool dflt)
+{
+    if(!d.contains(key))
+        return dflt;
+    const pybind11::object value = d[key];
+    if(!pybind11::isinstance<pybind11::bool_>(value))
+    {
+        throw pybind11::value_error(std::string(owner) + " failed - " + key + "="
+                                    + pybind11::repr(value).cast<std::string>()
+                                    + ", expected a bool");
+    }
+    return value.cast<bool>();
 }
 
 /* Optional string: returns true + sets `out` if present (non-None). */
