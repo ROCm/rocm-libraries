@@ -20,6 +20,7 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 
 ### Optimizations
 
+* Optimize `warp_reduce` for less than full wavefront size.
 * Added autotuned gfx950 (MI355X) configs for the following device algorithms:
   * `adjacent_find`, `merge`, `partition` (flag, predicate, three-way, two-way flag, two-way predicate), `radix_sort` (block sort), `reduce`, `run_length_encode`, `run_length_encode_non_trivial_runs`, `scan`, `scan_by_key`, `search_n`, `segmented_reduce`, `select` (flag, predicate, predicated flag, unique, unique by key), `transform`, and `transform` (pointer).
 

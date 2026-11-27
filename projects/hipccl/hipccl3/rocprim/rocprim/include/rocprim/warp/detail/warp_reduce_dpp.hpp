@@ -45,7 +45,7 @@ public:
 
     template<class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
-    void reduce_impl(T input, T& output, BinaryFunction reduce_op, std::false_type)
+    void reduce_impl(T input, T& output, BinaryFunction reduce_op)
     {
         output = input;
 
@@ -64,24 +64,24 @@ public:
     #endif
 #endif
 
-        if(VirtualWaveSize > 1)
+        if constexpr(VirtualWaveSize > 1)
         {
             // quad_perm:[1,0,3,2] -> 10110001
             output = reduce_op(warp_move_dpp<T, 0xb1, 0xf, 0xf, bndCtrl>(output), output);
         }
-        if(VirtualWaveSize > 2)
+        if constexpr(VirtualWaveSize > 2)
         {
             // quad_perm:[2,3,0,1] -> 01001110
             output = reduce_op(warp_move_dpp<T, 0x4e, 0xf, 0xf, bndCtrl>(output), output);
         }
-        if(VirtualWaveSize > 4)
+        if constexpr(VirtualWaveSize > 4)
         {
             // row_ror:4
             // Use rotation instead of shift to avoid leaving invalid values in the destination
             // registers (asume warp size of at least hardware warp-size)
             output = reduce_op(warp_move_dpp<T, 0x124, 0xf, 0xf, bndCtrl>(output), output);
         }
-        if(VirtualWaveSize > 8)
+        if constexpr(VirtualWaveSize > 8)
         {
             // row_ror:8
             // Use rotation instead of shift to avoid leaving invalid values in the destination
@@ -93,7 +93,7 @@ public:
         // Swizzle is kept instead of __builtin_amdgcn_permlanex16, as the latter can be slower in some cases.
         if(ROCPRIM_HAS_PERMLANE())
         {
-            if(VirtualWaveSize > 16)
+            if constexpr(VirtualWaveSize > 16)
             {
                 // row_bcast:15
                 output = reduce_op(warp_swizzle<T, 0x1e0>(output), output);
@@ -108,12 +108,12 @@ public:
         }
         else
         {
-            if(VirtualWaveSize > 16)
+            if constexpr(VirtualWaveSize > 16)
             {
                 // row_bcast:15
                 output = reduce_op(warp_move_dpp<T, 0x142, 0xf, 0xf, bndCtrl>(output), output);
             }
-            if(VirtualWaveSize > 32)
+            if constexpr(VirtualWaveSize > 32)
             {
                 // row_bcast:31
                 output = reduce_op(warp_move_dpp<T, 0x143, 0xf, 0xf, bndCtrl>(output), output);
@@ -129,21 +129,21 @@ public:
 
     template<class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
-    void reduce_impl(T input, T& output, BinaryFunction reduce_op, std::true_type)
-    {
-        warp_reduce_shuffle<T, VirtualWaveSize, UseAllReduce>().reduce(input, output, reduce_op);
-    }
-
-    template<class BinaryFunction>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
     void reduce(T input, T& output, BinaryFunction reduce_op)
     {
-        reduce_impl(
-            input,
-            output,
-            reduce_op,
-            std::integral_constant<bool,
-                                   (VirtualWaveSize < ::rocprim::arch::wavefront::min_size())>{});
+        // For u128 and i128, with a virtual wave size, warp_reduce_shuffle is faster.
+        if constexpr(VirtualWaveSize < ::rocprim::arch::wavefront::min_size()
+                     && (std::is_same_v<rocprim::uint128_t, T>
+                         || std::is_same_v<rocprim::int128_t, T>))
+        {
+            warp_reduce_shuffle<T, VirtualWaveSize, UseAllReduce>().reduce(input,
+                                                                           output,
+                                                                           reduce_op);
+        }
+        else
+        {
+            reduce_impl(input, output, reduce_op);
+        }
     }
 
     template<class BinaryFunction>
