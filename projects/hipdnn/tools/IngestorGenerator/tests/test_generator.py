@@ -3803,3 +3803,130 @@ class TestHeuristicBindings:
 
         generator.render(scale_add_config, tmp_path)
         assert json_bytes(bundle) == before
+
+
+class TestNumericalNotesEmission:
+    """``numerical_notes`` reaches the UED exactly when the engine states it: an
+    absent field emits no key, and an explicit ``[]`` is a claim that must survive
+    (a truthiness test would turn it into an absent key)."""
+
+    _SLOTTED = Path(__file__).parent / "fixtures" / "slotted_three_slot.yaml"
+
+    @staticmethod
+    def _with_notes(config, notes):
+        return dataclasses.replace(
+            config, engine=dataclasses.replace(config.engine, numerical_notes=notes)
+        )
+
+    def _slotted_ued(self, generator, tmp_path, notes):
+        from codegen.config_loader import load_config
+
+        config = self._with_notes(load_config(self._SLOTTED), notes)
+        generator.render(config, tmp_path)
+        (path,) = (tmp_path / config.descriptor_dir).glob("*.ued.json")
+        return json.loads(path.read_text("utf-8"))
+
+    def _unslotted_ued(self, scale_add_config, notes):
+        config = self._with_notes(scale_add_config, notes)
+        return build_ued(config, mint_ids(config))
+
+    def test_an_absent_field_emits_no_key(self, scale_add_config):
+        assert "numerical_notes" not in self._unslotted_ued(scale_add_config, None)
+
+    def test_an_empty_list_is_emitted_explicitly(self, scale_add_config):
+        assert self._unslotted_ued(scale_add_config, [])["numerical_notes"] == []
+
+    def test_a_listed_note_is_emitted(self, scale_add_config):
+        ued = self._unslotted_ued(scale_add_config, ["nondeterministic"])
+        assert ued["numerical_notes"] == ["nondeterministic"]
+
+    def test_the_key_sits_after_behavior_notes(self, scale_add_config):
+        config = self._with_notes(scale_add_config, [])
+        config = dataclasses.replace(
+            config,
+            engine=dataclasses.replace(
+                config.engine, behavior_notes=["runtime_compilation"]
+            ),
+        )
+        keys = list(build_ued(config, mint_ids(config)))
+        assert keys.index("numerical_notes") == keys.index("behavior_notes") + 1
+
+    def test_a_slotted_ued_emits_an_absent_field_as_no_key(self, generator, tmp_path):
+        assert "numerical_notes" not in self._slotted_ued(generator, tmp_path, None)
+
+    def test_a_slotted_ued_emits_an_empty_list_explicitly(self, generator, tmp_path):
+        assert self._slotted_ued(generator, tmp_path, [])["numerical_notes"] == []
+
+    def test_a_slotted_ued_emits_a_listed_note(self, generator, tmp_path):
+        ued = self._slotted_ued(generator, tmp_path, ["nondeterministic"])
+        assert ued["numerical_notes"] == ["nondeterministic"]
+
+    def test_the_vocabulary_is_the_packers(self):
+        """The generator's closed vocabulary is the one hkp_pack validates against,
+        in the same order: a name one accepts and the other refuses fails a build."""
+        from codegen.models import NUMERICAL_NOTES
+
+        descriptors = _import_hkp_pack("descriptors")
+        if descriptors is None:
+            pytest.skip("hkp_pack is not importable from this checkout")
+        assert NUMERICAL_NOTES == descriptors._NUMERICAL_NOTES
+
+    # --- the census case the generated Test<Engine>Packs suite renders -------------
+
+    _CENSUS_CASE = "DeclaresItsNumericalNotes"
+
+    def _census(self, generator, scale_add_config, notes):
+        """The rendered census source and its cases, name -> body."""
+        config = self._with_notes(scale_add_config, notes)
+        rendered = generator._render_template("test_packs.cpp.j2", config)
+        suite = f"Test{config.engine.pascal_name}Packs"
+        return rendered, emitted_cases(rendered, "TEST_F", suite)
+
+    def test_the_census_has_no_case_for_an_absent_field(
+        self, generator, scale_add_config
+    ):
+        _, cases = self._census(generator, scale_add_config, None)
+        assert cases, "the suite template rendered no cases at all"
+        assert self._CENSUS_CASE not in cases
+
+    def test_the_census_holds_an_empty_list_to_an_empty_claim(
+        self, generator, scale_add_config
+    ):
+        """``[]`` is a claim, so it renders the case (a truthiness gate would drop
+        it), and the loaded list must be present AND empty: a present list holding
+        any note is a different claim."""
+        _, cases = self._census(generator, scale_add_config, [])
+        body = cases[self._CENSUS_CASE]
+        assert "ASSERT_TRUE(_set->engine.numericalNotes.has_value());" in body
+        assert "EXPECT_TRUE(_set->engine.numericalNotes->empty());" in body
+
+    def test_the_census_finds_each_listed_note_by_the_loaders_enumerator(
+        self, generator, scale_add_config
+    ):
+        """Each name renders the enumerator ``numericalNoteFromString`` maps it to.
+        ``upper()`` is not that mapping: ``winograd_tile_4x4`` is
+        ``HIPDNN_NUMERICAL_NOTE_WINOGRAD_TILE_4x4``."""
+        from codegen.models import NUMERICAL_NOTES
+
+        loader = (
+            Path(__file__).resolve().parents[5]
+            / "projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/ingestor"
+            / "DescriptorLoader.hpp"
+        )
+        if not loader.exists():
+            pytest.skip("the plugin SDK is not in this checkout")
+        table = dict(
+            re.findall(
+                r'\{"(\w+)", (HIPDNN_NUMERICAL_NOTE_\w+)\}', loader.read_text("utf-8")
+            )
+        )
+        assert set(table) == set(NUMERICAL_NOTES), table
+        rendered, cases = self._census(
+            generator, scale_add_config, list(NUMERICAL_NOTES)
+        )
+        body = cases[self._CENSUS_CASE]
+        assert "ASSERT_TRUE(_set->engine.numericalNotes.has_value());" in body
+        assert re.findall(r"static_cast<int32_t>\((\w+)\)", body) == [
+            table[note] for note in NUMERICAL_NOTES
+        ]
+        assert "#include <hipdnn_plugin_sdk/NumericalNote.h>" in rendered

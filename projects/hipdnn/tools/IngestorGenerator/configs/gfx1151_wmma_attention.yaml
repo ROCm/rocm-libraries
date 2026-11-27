@@ -46,6 +46,7 @@ engine:
   # The native matcher declines override-shape graphs (1.1.0).
   sdk_version: 1.4.0
   behavior_notes: [supports_graph_capture]
+  numerical_notes: []
   # The prefill matcher admits every object of the graph's dtype and bias whose
   # buckets cover the graph's widths (mask, decode routing and arch gate further),
   # so one graph can admit several objects. The catalog lists them only if each has

@@ -109,6 +109,15 @@ foreach(_op IN LISTS _flydsl_ops)
     list(REMOVE_DUPLICATES "_flydsl_content_archs_${_op}")
     set("HIPKERNELPROVIDER_FLYDSL_CONTENT_ARCHS_${_op}" "${_flydsl_content_archs_${_op}}"
         CACHE INTERNAL "Architectures FlyDSL has ${_op} objects for, independent of GPU_TARGETS")
+    # The pulled subset of the content set above: archs whose objects this op actually has on
+    # disk (a .dvc pointer alone does not reach FLYDSL_AVAILABLE_ARCHS, see the loop that fills
+    # it). Host/test gates that must agree across every shard of a multi-arch build read this,
+    # not HIPKERNELPROVIDER_FLYDSL_ARCHS_${_op} below: that one is further filtered by
+    # GPU_TARGETS and by whether this configuration packs a product at all, so it is
+    # shard-specific and wrong for anything compiled once and shared by every shard.
+    list(REMOVE_DUPLICATES "_flydsl_op_archs_${_op}")
+    set("HIPKERNELPROVIDER_FLYDSL_PULLED_ARCHS_${_op}" "${_flydsl_op_archs_${_op}}" CACHE INTERNAL
+        "Architectures whose pulled FlyDSL objects exist for ${_op}, independent of GPU_TARGETS")
 endforeach()
 
 # The shipped objects are compiled from Apache-2.0 and MIT sources, whose licenses ask

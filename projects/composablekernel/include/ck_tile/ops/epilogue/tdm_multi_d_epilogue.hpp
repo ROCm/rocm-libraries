@@ -27,8 +27,17 @@ namespace ck_tile {
 //    branch; a trap rather than a static_assert covers kernels that dispatch on k_batch at run
 //    time without reading that marker.
 //
+// Row-broadcast Ds (bit i of DsRowBroadcastMask_ set): D_i is an N-vector added to every row, e.g.
+// a bias, passed as a row-major D with row stride 0 (GemmKernelMultiD rejects any other stride).
+// The accumulator layout gives each lane a strip of rows in one column, so a full-tile load of
+// such a D issues one scalar load per element, all of the same few values. A row-broadcast D is
+// instead read once, as the N-vector each wave needs, and broadcast over M in registers.
+//
 // The Problem is reused from CShuffleEpilogueProblem.
-template <typename Problem_, index_t MIterPerStage_ = 0, index_t NumStageBuffers_ = 2>
+template <typename Problem_,
+          index_t MIterPerStage_      = 0,
+          index_t NumStageBuffers_    = 2,
+          index_t DsRowBroadcastMask_ = 0>
 struct TdmMultiDEpilogueStaged
     : public TdmEpilogueStaged<Problem_, MIterPerStage_, NumStageBuffers_>
 {
@@ -68,6 +77,17 @@ struct TdmMultiDEpilogueStaged
     }
     static_assert(AllDsRowMajor(), "TdmMultiDEpilogue supports only row-major D tensors");
 
+    // Bit i set: D_i is a row-broadcast N-vector (row stride 0); see the file comment.
+    static constexpr index_t kDsRowBroadcastMask = DsRowBroadcastMask_;
+    static_assert(kDsRowBroadcastMask >= 0 && kDsRowBroadcastMask < (index_t{1} << NumDTensor),
+                  "DsRowBroadcastMask may only set bits of existing D tensors");
+
+    template <index_t I>
+    CK_TILE_HOST_DEVICE static constexpr bool IsRowBroadcastD()
+    {
+        return ((kDsRowBroadcastMask >> I) & 1) != 0;
+    }
+
     template <typename ODramWindow,
               typename OAccTile,
               typename DsDramWindows,
@@ -101,24 +121,33 @@ struct TdmMultiDEpilogueStaged
         }
         else if constexpr(Base::kStaged)
         {
+            using AccDstr = remove_cvref_t<decltype(o_acc_tile.get_tile_distribution())>;
+            constexpr auto stage_dstr =
+                Base::template MakeStageDistribution<typename AccDstr::DstrEncode>();
+            // Row-broadcast Ds are the same for every slab: read them once.
+            const auto row_ds = load_row_broadcast_ds(ds_dram_windows, stage_dstr);
+
             this->run_staged(
                 out_dram_window,
                 o_acc_tile,
                 p_smem,
                 [&](const auto& stage_tile, auto& in_lds_window, auto stage) {
-                    const auto stage_dstr = stage_tile.get_tile_distribution();
-
                     // D tiles are loaded per slab to keep their live ranges short.
                     // Rows past M are outside the buffer range and read as zero, as in the
                     // full-tile path.
                     const auto d_tiles = generate_tuple(
                         [&](auto i) {
-                            const auto d_origin = ds_dram_windows[i].get_window_origin();
-                            return load_tile(make_tile_window(
-                                ds_dram_windows[i].get_bottom_tensor_view(),
-                                make_tuple(number<Base::kStageRows>{}, number<kNPerBlock>{}),
-                                {d_origin[0] + stage.value * Base::kStageRows, d_origin[1]},
-                                stage_dstr));
+                            if constexpr(IsRowBroadcastD<i.value>())
+                                return row_ds[i];
+                            else
+                            {
+                                const auto d_origin = ds_dram_windows[i].get_window_origin();
+                                return load_tile(make_tile_window(
+                                    ds_dram_windows[i].get_bottom_tensor_view(),
+                                    make_tuple(number<Base::kStageRows>{}, number<kNPerBlock>{}),
+                                    {d_origin[0] + stage.value * Base::kStageRows, d_origin[1]},
+                                    stage_dstr));
+                            }
                         },
                         number<NumDTensor>{});
 
@@ -151,8 +180,14 @@ struct TdmMultiDEpilogueStaged
             s_wait_tensorcnt_barrier<0 /*tensor_cnt*/, 0 /*lgkmcnt*/>();
 
             // D tiles are loaded after the barrier to keep their live ranges short.
+            const auto row_ds  = load_row_broadcast_ds(ds_dram_windows, acc_dstr);
             const auto d_tiles = generate_tuple(
-                [&](auto i) { return load_tile(make_tile_window(ds_dram_windows[i], acc_dstr)); },
+                [&](auto i) {
+                    if constexpr(IsRowBroadcastD<i.value>())
+                        return row_ds[i];
+                    else
+                        return load_tile(make_tile_window(ds_dram_windows[i], acc_dstr));
+                },
                 number<NumDTensor>{});
 
             fuse_and_store_lds(o_acc_tile, d_tiles, in_lds_window);
@@ -165,6 +200,41 @@ struct TdmMultiDEpilogueStaged
     }
 
     private:
+    // For each row-broadcast D, the N-vector of this block's columns, in the distribution of
+    // `acc_dstr` reduced over M: each lane holds the values of the columns it owns, and every lane
+    // that owns a column reads it. Other Ds get a placeholder.
+    template <typename DsDramWindows, typename AccDstr>
+    CK_TILE_DEVICE static auto load_row_broadcast_ds(const DsDramWindows& ds_dram_windows,
+                                                     const AccDstr&)
+    {
+        constexpr auto n_dstr =
+            make_static_tile_distribution(detail::make_reduce_tile_distribution_encoding(
+                typename remove_cvref_t<AccDstr>::DstrEncode{}, sequence<0>{}));
+        return generate_tuple(
+            [&](auto i) {
+                if constexpr(IsRowBroadcastD<i.value>())
+                {
+                    // Every row of D_i is the same N-vector: read row 0. The view keeps the
+                    // kernel's N padding, so columns past N read as zero as in the full path.
+                    const auto& d_view = ds_dram_windows[i].get_bottom_tensor_view();
+                    const auto n_view  = transform_tensor_view(
+                        d_view,
+                        make_tuple(make_freeze_transform(number<0>{}),
+                                   make_pass_through_transform(
+                                       d_view.get_tensor_descriptor().get_length(number<1>{}))),
+                        make_tuple(sequence<0>{}, sequence<1>{}),
+                        make_tuple(sequence<>{}, sequence<0>{}));
+                    return load_tile(make_tile_window(n_view,
+                                                      make_tuple(number<kNPerBlock>{}),
+                                                      {ds_dram_windows[i].get_window_origin()[1]},
+                                                      n_dstr));
+                }
+                else
+                    return number<0>{};
+            },
+            number<NumDTensor>{});
+    }
+
     // E = CDElementwise(C, D0, D1, ...), written to LDS as ODataType.
     template <typename OAccTile, typename DTiles, typename InLdsWindow>
     CK_TILE_DEVICE static void fuse_and_store_lds(const OAccTile& o_acc_tile,
@@ -173,29 +243,59 @@ struct TdmMultiDEpilogueStaged
     {
         auto e_tile = make_static_distributed_tensor<ODataType>(o_acc_tile.get_tile_distribution());
 
-        tile_elementwise_inout_unpack(
-            CDElementwise{},
-            concat_tuple_of_reference(
-                tie(e_tile, o_acc_tile),
-                generate_tie([&](auto i) -> const auto& { return d_tiles[i]; },
-                             number<NumDTensor>{})));
+        if constexpr(kDsRowBroadcastMask == 0)
+        {
+            tile_elementwise_inout_unpack(
+                CDElementwise{},
+                concat_tuple_of_reference(
+                    tie(e_tile, o_acc_tile),
+                    generate_tie([&](auto i) -> const auto& { return d_tiles[i]; },
+                                 number<NumDTensor>{})));
+        }
+        else
+        {
+            // A row-broadcast D is indexed by the column alone.
+            constexpr auto spans = OAccTile::get_distributed_spans();
+            sweep_tile_span(spans[number<0>{}], [&](auto idx0) {
+                sweep_tile_span(spans[number<1>{}], [&](auto idx1) {
+                    constexpr auto i_j = make_tuple(idx0, idx1);
+                    constexpr auto j   = make_tuple(idx1);
+                    unpack(
+                        [&](const auto&... ds) {
+                            CDElementwise{}(e_tile(i_j), o_acc_tile[i_j], ds...);
+                        },
+                        generate_tuple(
+                            [&](auto i) {
+                                if constexpr(IsRowBroadcastD<i.value>())
+                                    return d_tiles[i][j];
+                                else
+                                    return d_tiles[i][i_j];
+                            },
+                            number<NumDTensor>{}));
+                });
+            });
+        }
 
         store_tile(in_lds_window, e_tile);
     }
 };
 
 // Full-tile TdmMultiDEpilogue
-template <typename Problem_>
-using TdmMultiDEpilogue = TdmMultiDEpilogueStaged<Problem_>;
+template <typename Problem_, index_t DsRowBroadcastMask_ = 0>
+using TdmMultiDEpilogue = TdmMultiDEpilogueStaged<Problem_, 0, 2, DsRowBroadcastMask_>;
 
 // TdmMultiDEpilogueStaged with as many slab buffers as fit in GemmPipeline_'s LDS.
 // Takes the pipeline type for the reason given at TdmEpilogueStagedForPipeline.
-template <typename Problem_, index_t MIterPerStage_, typename GemmPipeline_>
+template <typename Problem_,
+          index_t MIterPerStage_,
+          typename GemmPipeline_,
+          index_t DsRowBroadcastMask_ = 0>
 struct TdmMultiDEpilogueStagedForPipeline
     : public TdmMultiDEpilogueStaged<Problem_,
                                      MIterPerStage_,
                                      tdm_stage_buffers_for_lds<Problem_, MIterPerStage_>(
-                                         GemmPipeline_::GetSmemSize())>
+                                         GemmPipeline_::GetSmemSize()),
+                                     DsRowBroadcastMask_>
 {
 };
 
