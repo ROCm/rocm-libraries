@@ -148,7 +148,7 @@ BenchmarkProblems:
         - TransposeLDS: [0]
         - VectorWidthA: [1]
         - VectorWidthB: [1]
-        - WorkGroupMapping: [0, 1, 2, 4, 8, 16, 32, 64] # works
+        - WorkGroupMapping: [-16, -8, -4, -2, -1, 0, 1, 2, 4, 8, 16, 32, 64]
 
       BenchmarkForkParameters:
       JoinParameters:
@@ -367,7 +367,7 @@ BenchmarkProblems:
         - TransposeLDS: [0]
         - VectorWidthA: [1]
         - VectorWidthB: [1]
-        - WorkGroupMapping: [0, 1, 2, 4, 8, 16, 32, 64] # works
+        - WorkGroupMapping: [-16, -8, -4, -2, -1, 0, 1, 2, 4, 8, 16, 32, 64]
 
       BenchmarkForkParameters:
       JoinParameters:
