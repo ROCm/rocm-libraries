@@ -1519,6 +1519,93 @@ class TestBehaviorNotesVocabulary:
         assert config.engine.behavior_notes == ["supports_graph_capture"]
 
 
+class TestNumericalNotesVocabulary:
+    """``engine.numerical_notes`` is optional and tri-state: an absent key stays
+    ``None`` (no claim), ``[]`` is the claim "no note applies", and a list names
+    notes of DescriptorLoader.hpp's closed ten-name lowercase vocabulary."""
+
+    _SLOTTED = Path(__file__).parent / "fixtures" / "slotted_three_slot.yaml"
+
+    @staticmethod
+    def _unslotted(tmp_path, value):
+        raw = TestDeprecatedKeys()._base_raw()
+        raw["engine"]["numerical_notes"] = value
+        path = tmp_path / "c.yaml"
+        path.write_text(yaml.dump(raw))
+        return path
+
+    def _slotted(self, tmp_path, value):
+        raw = yaml.safe_load(self._SLOTTED.read_text())
+        raw["engine"]["numerical_notes"] = value
+        path = tmp_path / self._SLOTTED.name
+        path.write_text(yaml.safe_dump(raw, sort_keys=False))
+        return path
+
+    @pytest.fixture(params=["unslotted", "slotted"])
+    def author(self, request, tmp_path):
+        """Writes a config whose engine carries the given ``numerical_notes``."""
+        write = self._unslotted if request.param == "unslotted" else self._slotted
+        return lambda value: write(tmp_path, value)
+
+    def test_an_absent_key_stays_none(self, tmp_path):
+        raw = TestDeprecatedKeys()._base_raw()
+        path = tmp_path / "c.yaml"
+        path.write_text(yaml.dump(raw))
+        assert load_config(path).engine.numerical_notes is None
+
+    def test_an_absent_key_stays_none_on_a_slotted_config(self):
+        assert load_config(self._SLOTTED).engine.numerical_notes is None
+
+    def test_an_empty_list_is_kept_apart_from_an_absent_key(self, author):
+        assert load_config(author([])).engine.numerical_notes == []
+
+    def test_a_listed_note_round_trips(self, author):
+        config = load_config(author(["nondeterministic"]))
+        assert config.engine.numerical_notes == ["nondeterministic"]
+
+    def test_every_vocabulary_name_is_accepted(self, author):
+        from codegen.models import NUMERICAL_NOTES
+
+        config = load_config(author(list(NUMERICAL_NOTES)))
+        assert config.engine.numerical_notes == list(NUMERICAL_NOTES)
+
+    @pytest.mark.parametrize(
+        "value, message",
+        [
+            pytest.param(["not_a_real_note"], "closed vocabulary", id="unknown-name"),
+            pytest.param(
+                ["NONDETERMINISTIC"], "closed vocabulary", id="upper-case-name"
+            ),
+            pytest.param(
+                ["Nondeterministic"], "closed vocabulary", id="mixed-case-name"
+            ),
+            pytest.param(
+                ["nondeterministic", "fft", "nondeterministic"],
+                r"engine\.numerical_notes lists \['nondeterministic'\] more than once",
+                id="repeated-name",
+            ),
+            pytest.param(
+                "nondeterministic",
+                r"engine\.numerical_notes must be a list of numerical note names; got str",
+                id="bare-string",
+            ),
+            pytest.param(
+                5,
+                r"engine\.numerical_notes must be a list of numerical note names; got int \(5\)",
+                id="scalar",
+            ),
+            pytest.param(
+                None,
+                r"engine\.numerical_notes must be a list of numerical note names; got NoneType \(None\)",
+                id="explicit-null",
+            ),
+        ],
+    )
+    def test_a_bad_value_is_a_config_error(self, author, value, message):
+        with pytest.raises(ConfigError, match=message):
+            load_config(author(value))
+
+
 class TestDirectLoadAuthoredSubpath:
     """Each set under ``test_descriptors/`` is its own pack target, walked by directory
     and read by a different binary, so a bundle naming none has no shard to land in and

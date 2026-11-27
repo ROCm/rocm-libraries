@@ -931,6 +931,19 @@ engine:
                                   # rejected here though the scoped-name regex takes it.
   sdk_version: "1.0.0"            # optional, three components, default "1.0.0"
   behavior_notes: [runtime_compilation]   # optional, closed vocabulary
+  numerical_notes: [nondeterministic]     # optional, closed vocabulary of the ten lowercase
+                                  # cuDNN numerical-note names (tensor_core,
+                                  # down_convert_inputs, reduced_precision_reduction, fft,
+                                  # nondeterministic, winograd, winograd_tile_4x4,
+                                  # winograd_tile_6x6, winograd_tile_13x13,
+                                  # strict_nan_prop); an unknown, repeated or wrong-case
+                                  # name is a config error. Absent emits no key (the engine
+                                  # states nothing); an explicit [] is emitted as
+                                  # "numerical_notes": [] (a claim that no note applies);
+                                  # an explicit null is a config error. Any list without
+                                  # nondeterministic is also a determinism claim to
+                                  # hipDNN's consumers, so list nondeterministic with any
+                                  # other note unless a test proves bitwise reproducibility.
   slug: conv_fwd                  # optional; the descriptor directory, file stem and native
                                   # symbol namespace. Derived by default by splitting the
                                   # local name before every capital, which turns a name ending

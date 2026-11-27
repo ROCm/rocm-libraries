@@ -105,6 +105,23 @@ DIRECT_LOAD_SHIPPED_PREFIX = "descriptors/"
 #: RFC 0020 §4.2's closed vocabulary for UED ``behavior_notes``.
 BEHAVIOR_NOTES: tuple[str, ...] = ("runtime_compilation", "supports_graph_capture")
 
+#: ``DescriptorLoader.hpp``'s ``numericalNoteFromString`` vocabulary for UED
+#: ``numerical_notes``: the ten cuDNN numerical-note names, lowercase, in
+#: ``NumericalNote.h`` enum order. ``hkp_pack.descriptors._NUMERICAL_NOTES`` is the
+#: packer's copy; a test pins the two.
+NUMERICAL_NOTES: tuple[str, ...] = (
+    "tensor_core",
+    "down_convert_inputs",
+    "reduced_precision_reduction",
+    "fft",
+    "nondeterministic",
+    "winograd",
+    "winograd_tile_4x4",
+    "winograd_tile_6x6",
+    "winograd_tile_13x13",
+    "strict_nan_prop",
+)
+
 #: RFC 0021 §4: a slot name is a lowercase identifier, unique within the engine.
 #: ``global`` is reserved, since RFC 0004 owns ``global.`` knobs.
 SLOT_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -448,6 +465,9 @@ class EngineSpec:
     name: str
     sdk_version: str = "1.0.0"
     behavior_notes: list[str] = field(default_factory=list)
+    #: ``None`` is an absent key: the engine states nothing. ``[]`` is a claim ("no
+    #: note applies") and is emitted, so every reader tests ``is not None``.
+    numerical_notes: list[str] | None = None
     knobs: list[str] = field(default_factory=list)
     #: "native" emits a UHD scoring on a symbol; "none" omits the UHD, which is
     #: legal for an engine with no ranking model. A slotted engine's rankers
