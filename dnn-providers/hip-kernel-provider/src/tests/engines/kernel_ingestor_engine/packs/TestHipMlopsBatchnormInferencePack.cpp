@@ -7,6 +7,8 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <set>
+#include <string>
 #include <vector>
 
 #include <gmock/gmock.h>
@@ -28,6 +30,11 @@
  *        hipkernel:BatchnormInference accepts what the hand-written builder accepts --
  *        inference with an inverse variance or with a variance and epsilon, one pack each,
  *        alone or followed by a ReLU -- and computes each as a CPU reference does.
+ *
+ *        Each pack ships a kernel per vector width (ALMIOPEN-3066), addressed by the knob
+ *        `vector_size`: it offers the widths dividing the vectorized dimension, the inference
+ *        plans' choice ranks first, and every width, pinned through the knob, computes as the
+ *        reference does.
  */
 namespace
 {
@@ -62,6 +69,8 @@ struct BatchnormGraph
     bool withVariance = false;
     // N, C, then the spatial dimensions.
     std::vector<int64_t> dims = {2, 6, 5, 7};
+    // x and y channel-last (NLC, NHWC, NDHWC) rather than channel-first.
+    bool channelLast = false;
     float epsilon = 1e-2f;
     Activation activation = Activation::NONE;
     bool overrideShape = false;
@@ -91,7 +100,8 @@ std::vector<int64_t> channelDims(const BatchnormGraph& spec)
 flatbuffers::FlatBufferBuilder buildBatchnormGraph(const BatchnormGraph& spec)
 {
     flatbuffers::FlatBufferBuilder builder;
-    const auto ioStrides = packedStrides(spec.dims);
+    const auto ioStrides
+        = spec.channelLast ? channelLastStrides(spec.dims) : packedStrides(spec.dims);
     const auto perChannelDims = channelDims(spec);
     const auto perChannelStrides = packedStrides(perChannelDims);
     const bool isFused = fused(spec);
@@ -314,6 +324,116 @@ INSTANTIATE_TEST_SUITE_P(
     [](const ::testing::TestParamInfo<RefusalCase>& info) { return info.param.name; });
 
 // ---------------------------------------------------------------------------
+// Knob: one kernel per vector width
+// ---------------------------------------------------------------------------
+
+const std::vector<std::string> KNOBS = {"vector_size"};
+
+BatchnormGraph shape(bool withVariance, std::vector<int64_t> dims, bool channelLast = false)
+{
+    BatchnormGraph spec;
+    spec.withVariance = withVariance;
+    spec.dims = std::move(dims);
+    spec.channelLast = channelLast;
+    return spec;
+}
+
+auto ranked(const BatchnormGraph& spec)
+{
+    return rankedKernels(engineFor(spec), buildBatchnormGraph(spec));
+}
+
+TEST(TestHipMlopsBatchnormInferenceKnobs, EachPackShipsAKernelPerVectorWidth)
+{
+    EXPECT_EQ(engineKnobs(BATCHNORM_INFERENCE_ENGINE), KNOBS);
+
+    const auto kernels = loadedKernels(BATCHNORM_INFERENCE_ENGINE);
+    EXPECT_EQ(kernels.size(), 6U);
+    // The operation tells the packs' kernels apart, so no two share a KMD tuple.
+    std::set<std::pair<std::string, int64_t>> tuples;
+    for(const auto& kernel : kernels)
+    {
+        const auto& operation = kernel.getStringMetadata("operation");
+        EXPECT_TRUE(tuples.emplace(operation, kernel.getIntMetadata("vector_size")).second)
+            << kernel.name;
+        EXPECT_EQ(kernel.source.entryPoint,
+                  operation == "BATCHNORM_INFERENCE" ? "BatchNormFwdInferSpatialEstInvVar"
+                                                     : "BatchNormFwdInferSpatialEst");
+    }
+    const std::set<std::pair<std::string, int64_t>> expected = {
+        {"BATCHNORM_INFERENCE", 1},
+        {"BATCHNORM_INFERENCE", 2},
+        {"BATCHNORM_INFERENCE", 4},
+        {"BATCHNORM_INFERENCE_VARIANCE", 1},
+        {"BATCHNORM_INFERENCE_VARIANCE", 2},
+        {"BATCHNORM_INFERENCE_VARIANCE", 4},
+    };
+    EXPECT_EQ(tuples, expected);
+}
+
+struct WidthCase
+{
+    const char* name;
+    std::vector<int64_t> dims;
+    bool channelLast;
+    // The widths the knob offers, the inference plans' choice (the widest) first.
+    std::vector<int64_t> widths;
+};
+
+class TestHipMlopsBatchnormInferenceWidths : public ::testing::TestWithParam<WidthCase>
+{
+};
+
+// computeVectorSize()'s branches: C for a channel-last layout, the spatial size otherwise,
+// divisible by 4, by 2 only, or by neither.
+TEST_P(TestHipMlopsBatchnormInferenceWidths, TheKnobOffersTheWidthsDividingTheVectorizedDimension)
+{
+    for(const bool withVariance : {false, true})
+    {
+        SCOPED_TRACE(withVariance ? "variance and epsilon" : "inverse variance");
+        const auto kernels = ranked(shape(withVariance, GetParam().dims, GetParam().channelLast));
+        expectUniqueTuples(kernels, KNOBS);
+        // Ranked widest first: the inference plans' choice, then the narrower.
+        EXPECT_EQ(knobValues(kernels, "vector_size"), GetParam().widths);
+        for(const auto& kernel : kernels)
+        {
+            EXPECT_EQ(kernel.getStringMetadata("operation"),
+                      withVariance ? "BATCHNORM_INFERENCE_VARIANCE" : "BATCHNORM_INFERENCE");
+        }
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    ,
+    TestHipMlopsBatchnormInferenceWidths,
+    ::testing::Values(WidthCase{"NchwSpatialBy4", {2, 6, 2, 4}, false, {4, 2, 1}},
+                      WidthCase{"NchwSpatialBy2", {2, 6, 2, 3}, false, {2, 1}},
+                      WidthCase{"NchwSpatialOdd", {2, 6, 5, 7}, false, {1}},
+                      WidthCase{"NhwcChannelsBy4", {2, 8, 5, 7}, true, {4, 2, 1}},
+                      WidthCase{"NhwcChannelsBy2", {2, 6, 5, 7}, true, {2, 1}},
+                      WidthCase{"NhwcChannelsOdd", {2, 3, 4, 4}, true, {1}},
+                      WidthCase{"NclLengthBy4", {3, 8, 40}, false, {4, 2, 1}},
+                      WidthCase{"NcdhwSpatialBy2", {2, 4, 3, 5, 6}, false, {2, 1}}),
+    [](const ::testing::TestParamInfo<WidthCase>& info) { return info.param.name; });
+
+TEST(TestHipMlopsBatchnormInferenceKnobs, PinningAWidthBuildsItWhereItDivides)
+{
+    for(const bool withVariance : {false, true})
+    {
+        SCOPED_TRACE(withVariance ? "variance and epsilon" : "inverse variance");
+        const auto by4 = ranked(shape(withVariance, {2, 6, 2, 4}));
+        for(const int64_t width : {1, 2, 4})
+        {
+            EXPECT_EQ(pinnedTuple(by4, KNOBS, {{"vector_size", width}}),
+                      (KnobSettings{{"vector_size", width}}));
+        }
+        // A spatial size of 6 does not split into vectors of 4.
+        const auto by2 = ranked(shape(withVariance, {2, 6, 2, 3}));
+        EXPECT_FALSE(pinnedTuple(by2, KNOBS, {{"vector_size", 4}}).has_value());
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Numerics through the engine
 // ---------------------------------------------------------------------------
 
@@ -354,7 +474,8 @@ std::vector<float> reference(const BatchnormGraph& spec,
                                  : static_cast<double>(variance[c]);
             for(size_t i = 0; i < spatial; ++i)
             {
-                const size_t at = (n * channels + c) * spatial + i;
+                const size_t at = spec.channelLast ? (n * spatial + i) * channels + c
+                                                   : (n * channels + c) * spatial + i;
                 const double value
                     = static_cast<double>(scale[c])
                           * (static_cast<double>(x[at]) - static_cast<double>(mean[c])) * r
@@ -378,7 +499,8 @@ void expectNear(const std::vector<float>& actual, const std::vector<float>& expe
     }
 }
 
-void checkInference(const BatchnormGraph& spec)
+/// Runs @p spec through its engine, with @p knobs pinned, against the reference.
+void checkInference(const BatchnormGraph& spec, const KnobSettings& knobs = {})
 {
     const size_t count = elementCount(spec.dims);
     const auto channels = static_cast<size_t>(spec.dims[1]);
@@ -412,7 +534,7 @@ void checkInference(const BatchnormGraph& spec)
 
     EngineRun run;
     ASSERT_NO_FATAL_FAILURE(
-        executeThroughTheEngine(engineFor(spec), buildBatchnormGraph(spec), buffers, &run));
+        executeThroughTheEngine(engineFor(spec), buildBatchnormGraph(spec), buffers, &run, knobs));
     EXPECT_EQ(run.workspaceBytes, 0U);
     EXPECT_EQ(run.maxWorkspaceBytes, 0U);
     expectNear(yBuffer.read(), expected);
@@ -461,6 +583,51 @@ TEST(TestHipMlopsBatchnormInferenceDevice, ThreeAndFiveDimensionalInputsMatchThe
         spec.dims = dims;
         spec.withVariance = true;
         checkInference(spec);
+    }
+}
+
+TEST(TestHipMlopsBatchnormInferenceDevice, TheProviderAdvertisesTheRankedKnob)
+{
+    SKIP_IF_NO_DEVICES();
+
+    for(const bool withVariance : {false, true})
+    {
+        SCOPED_TRACE(withVariance ? "variance and epsilon" : "inverse variance");
+        const auto spec = shape(withVariance, {2, 6, 2, 3});
+        const auto knobs = advertisedKnobs(engineFor(spec), buildBatchnormGraph(spec));
+        ASSERT_EQ(knobs.size(), 1U);
+        EXPECT_EQ(knobs[0].name, "vector_size");
+        EXPECT_EQ(knobs[0].defaultValue, 2);
+        EXPECT_THAT(knobs[0].validValues, ::testing::UnorderedElementsAre(1, 2));
+    }
+}
+
+TEST(TestHipMlopsBatchnormInferenceDevice, EveryVectorWidthMatchesTheReference)
+{
+    SKIP_IF_NO_DEVICES();
+
+    // Vectorized along the spatial dimension (NCHW) and along C (NHWC).
+    for(const bool withVariance : {false, true})
+    {
+        for(const bool channelLast : {false, true})
+        {
+            SCOPED_TRACE(withVariance ? "variance and epsilon" : "inverse variance");
+            SCOPED_TRACE(channelLast ? "NHWC" : "NCHW");
+            const auto spec = shape(withVariance,
+                                    channelLast ? std::vector<int64_t>{2, 8, 5, 7}
+                                                : std::vector<int64_t>{2, 6, 2, 4},
+                                    channelLast);
+            std::set<int64_t> exercised;
+            for(const auto& kernel :
+                rankedKernelsOnThisDevice(engineFor(spec), buildBatchnormGraph(spec)))
+            {
+                SCOPED_TRACE(kernel.name);
+                const auto pins = knobTuple(kernel, KNOBS);
+                checkInference(spec, pins);
+                exercised.insert(pins.front().second);
+            }
+            EXPECT_EQ(exercised, (std::set<int64_t>{1, 2, 4}));
+        }
     }
 }
 

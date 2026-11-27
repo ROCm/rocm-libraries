@@ -7,6 +7,12 @@
     "native": "hipkernel.batchnorm_inference.graph_match"
   },
   "metadata": "1d746e44-101d-4061-97f1-0c29baacda45",
+  "sort_kernel_catalog": {
+    "default": "488677b7-0df3-4f40-ba5b-4d252df2042c"
+  },
+  "knobs": [
+    "vector_size"
+  ],
   "behavior_notes": [
     "runtime_compilation",
     "supports_graph_capture"

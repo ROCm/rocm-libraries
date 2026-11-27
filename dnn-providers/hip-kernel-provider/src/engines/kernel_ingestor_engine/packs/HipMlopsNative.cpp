@@ -89,7 +89,8 @@
  * first, here as there.
  *
  * Knobs: hipkernel:BatchnormTraining and hipkernel:BatchnormBackward ship a kernel per
- * performance configuration their build takes (`variant`, `block_size`, `vector_size`), so a
+ * performance configuration their build takes (`variant`, `block_size`, `vector_size`), and
+ * hipkernel:BatchnormInference a kernel per vector width of each form (`vector_size`), so a
  * caller can pin one. Unpinned, each engine's scorer ranks the configuration the hand-written
  * engine's heuristics choose first, and the plan is the hand-written engine's.
  *
@@ -123,7 +124,7 @@ constexpr std::string_view BATCHNORM_BACKWARD = "BATCHNORM_BACKWARD";
 
 // The knobs: the kernels' integer metadata naming the performance configuration each builds.
 // Batchnorm training and backward: BatchnormSpatialConfig's variant, groupSize and
-// vectorSize.
+// vectorSize. Batchnorm inference: BatchnormInferenceConfig's vectorSize.
 constexpr std::string_view VARIANT_FIELD = "variant";
 constexpr std::string_view BLOCK_SIZE_FIELD = "block_size";
 constexpr std::string_view VECTOR_SIZE_FIELD = "vector_size";
@@ -653,6 +654,94 @@ double batchnormBackwardScore(const MatchContext& context,
     return heuristicFirstScore(spatialConfigOf(kernel),
                                batchnorm::defaultBatchnormBwdConfig(params),
                                SPATIAL_CONFIG_ORDER);
+}
+
+/// The batchnorm inference params of the graph's inverse-variance form, alone or followed by
+/// an activation.
+batchnorm::BatchnormFwdInferenceParams inferenceParams(const MatchContext& context)
+{
+    const auto& graph = context.graph;
+    const auto& tensorMap = graph.getTensorMap();
+    const auto& attributes
+        = graph.getNodeWrapper(0).attributesAs<data_objects::BatchnormInferenceAttributes>();
+    // A fused graph's activation follows the batchnorm.
+    return graph.nodeCount() == 2
+               ? batchnorm::BatchnormFwdInferenceParams(
+                     attributes,
+                     graph.getNodeWrapper(1).attributesAs<data_objects::PointwiseAttributes>(),
+                     tensorMap)
+               : batchnorm::BatchnormFwdInferenceParams(attributes, tensorMap);
+}
+
+/// The batchnorm inference params of the graph's variance form, alone or followed by an
+/// activation.
+batchnorm::BatchnormFwdInferenceWithVarianceParams
+    inferenceVarianceParams(const MatchContext& context)
+{
+    const auto& graph = context.graph;
+    const auto& tensorMap = graph.getTensorMap();
+    const auto& attributes
+        = graph.getNodeWrapper(0)
+              .attributesAs<data_objects::BatchnormInferenceAttributesVarianceExt>();
+    // A fused graph's activation follows the batchnorm.
+    return graph.nodeCount() == 2
+               ? batchnorm::BatchnormFwdInferenceWithVarianceParams(
+                     attributes,
+                     graph.getNodeWrapper(1).attributesAs<data_objects::PointwiseAttributes>(),
+                     tensorMap)
+               : batchnorm::BatchnormFwdInferenceWithVarianceParams(attributes, tensorMap);
+}
+
+/// The batchnorm inference configuration @p kernel builds: its `vector_size`.
+batchnorm::BatchnormInferenceConfig inferenceConfigOf(const KernelDefinition& kernel)
+{
+    return {static_cast<size_t>(kernel.getIntMetadata(std::string(VECTOR_SIZE_FIELD)))};
+}
+
+/// The order the batchnorm inference scorer ranks the vector widths the inference plans did
+/// not choose: the widest first.
+constexpr std::array<batchnorm::BatchnormInferenceConfig, 3> INFERENCE_CONFIG_ORDER
+    = {{{4}, {2}, {1}}};
+
+/// Kernel-scoped, batchnorm inference: the operation, which selects the form, and a vector
+/// width dividing the vectorized dimension. The inference plans' own choice, the widest that
+/// divides it, always qualifies.
+bool batchnormInferenceKernelMatches(const MatchContext& context,
+                                     const BoundTokens& bound,
+                                     const KernelDefinition& kernel)
+{
+    if(!kernelMatches(context, bound, kernel))
+    {
+        return false;
+    }
+    try
+    {
+        const auto config = inferenceConfigOf(kernel);
+        return boundOperation(bound) == BATCHNORM_INFERENCE
+                   ? batchnorm::isBatchnormFwdInferenceConfigApplicable(inferenceParams(context),
+                                                                        config)
+                   : batchnorm::isBatchnormFwdInferenceWithVarianceConfigApplicable(
+                         inferenceVarianceParams(context), config);
+    }
+    catch(const std::exception& error)
+    {
+        HIPDNN_PLUGIN_LOG_INFO("hipkernel:BatchnormInference declines kernel "
+                               << kernel.name << ": " << error.what());
+        return false;
+    }
+}
+
+/// The inference plans' vector width first, then INFERENCE_CONFIG_ORDER.
+double batchnormInferenceScore(const MatchContext& context,
+                               const BoundTokens& bound,
+                               const KernelDefinition& kernel)
+{
+    const auto heuristic
+        = boundOperation(bound) == BATCHNORM_INFERENCE
+              ? batchnorm::defaultBatchnormFwdInferenceConfig(inferenceParams(context))
+              : batchnorm::defaultBatchnormFwdInferenceWithVarianceConfig(
+                    inferenceVarianceParams(context));
+    return heuristicFirstScore(inferenceConfigOf(kernel), heuristic, INFERENCE_CONFIG_ORDER);
 }
 
 // ---------------------------------------------------------------------------
@@ -1431,29 +1520,19 @@ class BatchnormInferenceDispatchHandler : public HipMlopsDispatchHandler
 public:
     using HipMlopsDispatchHandler::HipMlopsDispatchHandler;
 
+    /// Builds the vector width @p kernel names.
     std::unique_ptr<PreparedDispatch> prepare(const MatchContext& context,
                                               const BoundTokens& /*bound*/,
                                               const KernelDefinition& kernel) const override
     {
-        const auto& graph = context.graph;
-        const auto& tensorMap = graph.getTensorMap();
-        const auto& attributes
-            = graph.getNodeWrapper(0).attributesAs<data_objects::BatchnormInferenceAttributes>();
-        // A fused graph's activation follows the batchnorm.
-        const auto params
-            = graph.nodeCount() == 2
-                  ? batchnorm::BatchnormFwdInferenceParams(
-                        attributes,
-                        graph.getNodeWrapper(1).attributesAs<data_objects::PointwiseAttributes>(),
-                        tensorMap)
-                  : batchnorm::BatchnormFwdInferenceParams(attributes, tensorMap);
+        const auto params = inferenceParams(context);
         const auto& properties = context.deviceProperties;
-        const auto build = batchnorm::buildBatchnormFwdInferenceKernel(
-            params,
-            properties.gcnArchName,
-            properties.multiProcessorCount,
-            properties.warpSize,
-            batchnorm::defaultBatchnormFwdInferenceConfig(params));
+        const auto build
+            = batchnorm::buildBatchnormFwdInferenceKernel(params,
+                                                          properties.gcnArchName,
+                                                          properties.multiProcessorCount,
+                                                          properties.warpSize,
+                                                          inferenceConfigOf(kernel));
 
         return std::make_unique<PreparedBatchnormInference>(
             compileBatchnormInference(_compiler, _loader, context, kernel, build),
@@ -1469,6 +1548,7 @@ class BatchnormInferenceVarianceDispatchHandler : public HipMlopsDispatchHandler
 public:
     using HipMlopsDispatchHandler::HipMlopsDispatchHandler;
 
+    /// Builds the vector width @p kernel names.
     std::unique_ptr<PreparedDispatch> prepare(const MatchContext& context,
                                               const BoundTokens& /*bound*/,
                                               const KernelDefinition& kernel) const override
@@ -1478,21 +1558,14 @@ public:
         const auto& attributes
             = graph.getNodeWrapper(0)
                   .attributesAs<data_objects::BatchnormInferenceAttributesVarianceExt>();
-        // A fused graph's activation follows the batchnorm.
-        const auto params
-            = graph.nodeCount() == 2
-                  ? batchnorm::BatchnormFwdInferenceWithVarianceParams(
-                        attributes,
-                        graph.getNodeWrapper(1).attributesAs<data_objects::PointwiseAttributes>(),
-                        tensorMap)
-                  : batchnorm::BatchnormFwdInferenceWithVarianceParams(attributes, tensorMap);
+        const auto params = inferenceVarianceParams(context);
         const auto& properties = context.deviceProperties;
         const auto build = batchnorm::buildBatchnormFwdInferenceWithVarianceKernel(
             params,
             properties.gcnArchName,
             properties.multiProcessorCount,
             properties.warpSize,
-            batchnorm::defaultBatchnormFwdInferenceWithVarianceConfig(params));
+            inferenceConfigOf(kernel));
 
         return std::make_unique<PreparedBatchnormInference>(
             compileBatchnormInference(_compiler, _loader, context, kernel, build),
@@ -1946,7 +2019,8 @@ void registerHipMlopsRmsNormBwdSymbols(SymbolScope<Handle>& scope)
 void registerHipMlopsBatchnormInferenceSymbols(SymbolScope<Handle>& scope)
 {
     scope.add("hipkernel.batchnorm_inference.graph_match", &batchnormInferenceGraphMatches);
-    scope.add("hipkernel.batchnorm_inference.kernel_match", &kernelMatches);
+    scope.add("hipkernel.batchnorm_inference.kernel_match", &batchnormInferenceKernelMatches);
+    scope.add("hipkernel.batchnorm_inference.score", &batchnormInferenceScore);
 
     scope.add("hipkernel.batchnorm_inference.batchnorm_inference_match",
               &operationMatches<BATCHNORM_INFERENCE>);

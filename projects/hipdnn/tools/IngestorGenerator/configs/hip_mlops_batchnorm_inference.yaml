@@ -10,11 +10,18 @@ engine:
   name: hipkernel:BatchnormInference
   sdk_version: "1.4.0"
   behavior_notes: [runtime_compilation, supports_graph_capture]
-  heuristic: none
+  # Each vector width is a kernel of its own, addressed by this knob. The native scorer ranks
+  # the width the inference plans choose first.
+  knobs: [vector_size]
+  heuristic: native
 
+# vector_size defaults to BatchnormInferenceConfig's own default.
 kmd_fields:
   - name: operation
     type: string
+  - name: vector_size
+    type: int
+    default_value: 1
 
 graph_match:
   shape: disjoint_attributes
@@ -30,34 +37,74 @@ packs:
   # the graph supplies, or a variance and epsilon. Each also serves the hand-written builder's
   # two-node graph, an activation fused after the batchnorm.
   # The inverse-variance pack uses the engine's dispatch handler; the variance pack has its
-  # own.
+  # own. Each pack ships a kernel per vector width the build takes, 1, 2 or 4, along C for a
+  # channel-last layout and along the spatial dimension otherwise; `operation` tells the
+  # packs' kernels apart.
   - name: batchnorm_inference
     discriminator: batchnorm_inference
     kernels:
-      - name: hip_mlops.batchnorm_inference
+      - name: hip_mlops.batchnorm_inference.vector1
         kernel_source:
           kind: embedded_source
           source_file: kernels/BatchNormFwdInferSpatial.cpp
           entry_point: BatchNormFwdInferSpatialEstInvVar
         metadata:
           operation: BATCHNORM_INFERENCE
+          vector_size: 1
+        priority: 0
+      - name: hip_mlops.batchnorm_inference.vector2
+        kernel_source:
+          kind: embedded_source
+          source_file: kernels/BatchNormFwdInferSpatial.cpp
+          entry_point: BatchNormFwdInferSpatialEstInvVar
+        metadata:
+          operation: BATCHNORM_INFERENCE
+          vector_size: 2
+        priority: 0
+      - name: hip_mlops.batchnorm_inference.vector4
+        kernel_source:
+          kind: embedded_source
+          source_file: kernels/BatchNormFwdInferSpatial.cpp
+          entry_point: BatchNormFwdInferSpatialEstInvVar
+        metadata:
+          operation: BATCHNORM_INFERENCE
+          vector_size: 4
         priority: 0
   - name: batchnorm_inference_variance
     discriminator: batchnorm_inference_variance
     dispatch: batchnorm_inference_variance
     kernels:
-      - name: hip_mlops.batchnorm_inference_variance
+      - name: hip_mlops.batchnorm_inference_variance.vector1
         kernel_source:
           kind: embedded_source
           source_file: kernels/BatchNormFwdInferSpatial.cpp
           entry_point: BatchNormFwdInferSpatialEst
         metadata:
           operation: BATCHNORM_INFERENCE_VARIANCE
+          vector_size: 1
+        priority: 0
+      - name: hip_mlops.batchnorm_inference_variance.vector2
+        kernel_source:
+          kind: embedded_source
+          source_file: kernels/BatchNormFwdInferSpatial.cpp
+          entry_point: BatchNormFwdInferSpatialEst
+        metadata:
+          operation: BATCHNORM_INFERENCE_VARIANCE
+          vector_size: 2
+        priority: 0
+      - name: hip_mlops.batchnorm_inference_variance.vector4
+        kernel_source:
+          kind: embedded_source
+          source_file: kernels/BatchNormFwdInferSpatial.cpp
+          entry_point: BatchNormFwdInferSpatialEst
+        metadata:
+          operation: BATCHNORM_INFERENCE_VARIANCE
+          vector_size: 4
         priority: 0
 
 # Embedded source compiled at plan build: every field is matcher-only.
 specialization:
   metadata_fields: []
-  matcher_only_fields: [operation]
+  matcher_only_fields: [operation, vector_size]
   bindings: {}
   vocabulary: {}

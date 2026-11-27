@@ -17,7 +17,8 @@
           "kmd_id": "1d746e44-101d-4061-97f1-0c29baacda45",
           "metadata_fields": [],
           "matcher_only_fields": [
-            "operation"
+            "operation",
+            "vector_size"
           ],
           "bindings": {},
           "vocabulary": {}
@@ -29,14 +30,45 @@
     {
       "version": "1.0",
       "id": "c3a6551c-b461-4625-b9d9-f915f463c86a",
-      "name": "hip_mlops.batchnorm_inference_variance",
+      "name": "hip_mlops.batchnorm_inference_variance.vector1",
       "kernel_source": {
         "kind": "embedded_source",
         "source_file": "kernels/BatchNormFwdInferSpatial.cpp",
         "entry_point": "BatchNormFwdInferSpatialEst"
       },
       "metadata": {
-        "operation": "BATCHNORM_INFERENCE_VARIANCE"
+        "operation": "BATCHNORM_INFERENCE_VARIANCE",
+        "vector_size": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "de652ec4-62fa-47c7-ad77-f7b6c0543757",
+      "name": "hip_mlops.batchnorm_inference_variance.vector2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/BatchNormFwdInferSpatial.cpp",
+        "entry_point": "BatchNormFwdInferSpatialEst"
+      },
+      "metadata": {
+        "operation": "BATCHNORM_INFERENCE_VARIANCE",
+        "vector_size": 2
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "4fe8c4ea-86f5-4c32-8e7e-8af4658ce45e",
+      "name": "hip_mlops.batchnorm_inference_variance.vector4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/BatchNormFwdInferSpatial.cpp",
+        "entry_point": "BatchNormFwdInferSpatialEst"
+      },
+      "metadata": {
+        "operation": "BATCHNORM_INFERENCE_VARIANCE",
+        "vector_size": 4
       },
       "priority": 0
     }

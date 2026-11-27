@@ -17,7 +17,8 @@
           "kmd_id": "1d746e44-101d-4061-97f1-0c29baacda45",
           "metadata_fields": [],
           "matcher_only_fields": [
-            "operation"
+            "operation",
+            "vector_size"
           ],
           "bindings": {},
           "vocabulary": {}
@@ -29,14 +30,45 @@
     {
       "version": "1.0",
       "id": "766924f3-831d-49e7-a93b-aa1f70bfb7ab",
-      "name": "hip_mlops.batchnorm_inference",
+      "name": "hip_mlops.batchnorm_inference.vector1",
       "kernel_source": {
         "kind": "embedded_source",
         "source_file": "kernels/BatchNormFwdInferSpatial.cpp",
         "entry_point": "BatchNormFwdInferSpatialEstInvVar"
       },
       "metadata": {
-        "operation": "BATCHNORM_INFERENCE"
+        "operation": "BATCHNORM_INFERENCE",
+        "vector_size": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "8b220ac3-529a-4594-a4db-23d9ba25785f",
+      "name": "hip_mlops.batchnorm_inference.vector2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/BatchNormFwdInferSpatial.cpp",
+        "entry_point": "BatchNormFwdInferSpatialEstInvVar"
+      },
+      "metadata": {
+        "operation": "BATCHNORM_INFERENCE",
+        "vector_size": 2
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "171160c9-8d4f-4654-a523-c55e2a5b2fd4",
+      "name": "hip_mlops.batchnorm_inference.vector4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/BatchNormFwdInferSpatial.cpp",
+        "entry_point": "BatchNormFwdInferSpatialEstInvVar"
+      },
+      "metadata": {
+        "operation": "BATCHNORM_INFERENCE",
+        "vector_size": 4
       },
       "priority": 0
     }
