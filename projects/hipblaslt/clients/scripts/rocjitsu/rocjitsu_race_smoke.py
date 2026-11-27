@@ -157,8 +157,8 @@ def main():
     tensilelite_root = require(
         rocm_path / "share" / "hipblaslt" / "tensilelite", "TensileLite test tree"
     )
-    tensile = require(tensilelite_root / "tensilelite" / "bin" / "Tensile", "Tensile")
-    client = require(
+    # tensilelite finds this client under ROCM_PATH; check it is installed.
+    require(
         rocm_path / "libexec" / "hipblaslt" / "tensilelite" / "tensilelite-client",
         "tensilelite-client",
     )
@@ -207,8 +207,8 @@ def main():
         "tensilelite",
         rocjitsu,
         base_config,
-        [sys.executable, str(tensile), str(TENSILELITE_CONFIG), str(output_dir)]
-        + ["--prebuilt-client", str(client), "--gpu-targets", gpu_target]
+        [sys.executable, "-m", "tensilelite", "run", str(TENSILELITE_CONFIG), str(output_dir)]
+        + ["--gpu-targets", gpu_target]
         + ["--library-format", "msgpack", "--cxx-compiler", str(cxx)],
         env,
         TENSILELITE_TIMEOUT_SECONDS,

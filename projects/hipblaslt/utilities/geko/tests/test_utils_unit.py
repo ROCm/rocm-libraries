@@ -124,13 +124,31 @@ def test_build_tensilelite_client_raises_without_invoke(monkeypatch: pytest.Monk
         utils.build_tensilelite_client(hip, build_dir=tmp_path / "b")
 
 
-def test_build_tensilelite_client_build_and_cached_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+@pytest.fixture(params=["tensilelite-client", "tensilelite-client.exe"])
+def client_filename(request, monkeypatch: pytest.MonkeyPatch):
+    """Model the path returned by the checkout's Linux and Windows build tasks."""
+    name = request.param
+
+    def _client_path(cmd, *, cwd, env, text):
+        assert cmd[:3] == ["invoke", "client-path", "--build-dir"]
+        assert Path(cwd).name == "tensilelite"
+        assert env["ROCM_PATH"]
+        assert text is True
+        return str(Path(cmd[3]) / "tensilelite" / "client" / name) + "\n"
+
+    monkeypatch.setattr(utils.subprocess, "check_output", _client_path)
+    return name
+
+
+def test_build_tensilelite_client_build_and_cached_paths(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, client_filename: str
+) -> None:
     hip = tmp_path / "hip"
     tensile = hip / "tensilelite"
     tensile.mkdir(parents=True)
 
-    build_dir = tmp_path / "build"
-    client = build_dir / "tensilelite/client/tensilelite-client"
+    build_dir = tmp_path / "build with spaces"
+    client = build_dir / "tensilelite" / "client" / client_filename
     hash_file = build_dir / "hash.txt"
     client.parent.mkdir(parents=True, exist_ok=True)
 
@@ -138,8 +156,11 @@ def test_build_tensilelite_client_build_and_cached_paths(monkeypatch: pytest.Mon
 
     built = {"n": 0}
 
-    def _fake_run(_cmd, cwd=None):
+    calls = []
+
+    def _fake_run(_cmd, cwd=None, env=None):
         built["n"] += 1
+        calls.append((_cmd, cwd, env))
         client.parent.mkdir(parents=True, exist_ok=True)
         client.write_text("bin\n")
 
@@ -147,28 +168,59 @@ def test_build_tensilelite_client_build_and_cached_paths(monkeypatch: pytest.Mon
 
     out1 = utils.build_tensilelite_client(hip, build_dir=build_dir)
     assert out1 == client
-    assert built["n"] == 1
+    assert built["n"] == 3
     assert hash_file.is_file()
 
     out2 = utils.build_tensilelite_client(hip, build_dir=build_dir)
     assert out2 == client
-    assert built["n"] == 1
+    assert built["n"] == 5
+    assert calls[0] == (["invoke", "build-client", "--build-dir", str(build_dir)], tensile, None)
+    assert calls[1][0] == [
+        utils.sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "--no-build-isolation",
+        "--no-deps",
+        "--editable",
+        tensile,
+    ]
+    # The editable install is a development build (+g<commit>); it needs no
+    # ROCm identity, so it runs in the caller's environment.
+    assert calls[1][2] is None
+    assert calls[2] == (
+        [
+            utils.sys.executable,
+            "-m",
+            "tensilelite_configure_client",
+            "--ensure-client",
+            client,
+        ],
+        None,
+        None,
+    )
+    assert calls[3][0] == calls[1][0]
+    assert calls[3][2] is None
+    assert calls[4][0] == calls[2][0]
 
 
-def test_build_tensilelite_client_passes_gpu_targets(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_build_tensilelite_client_passes_gpu_targets(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, client_filename: str
+) -> None:
     hip = tmp_path / "hip"
     tensile = hip / "tensilelite"
     tensile.mkdir(parents=True)
 
     build_dir = tmp_path / "build"
-    client = build_dir / "tensilelite/client/tensilelite-client"
+    client = build_dir / "tensilelite" / "client" / client_filename
 
     monkeypatch.setattr(utils, "find_spec", lambda _n: object())
 
     captured = {}
 
-    def _fake_run(cmd, cwd=None):
-        captured["cmd"] = cmd
+    def _fake_run(cmd, cwd=None, env=None):
+        if cmd[0] == "invoke":
+            captured["cmd"] = cmd
         client.parent.mkdir(parents=True, exist_ok=True)
         client.write_text("bin\n")
 
@@ -181,21 +233,22 @@ def test_build_tensilelite_client_passes_gpu_targets(monkeypatch: pytest.MonkeyP
 
 
 def test_build_tensilelite_client_omits_gpu_targets_when_not_given(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, client_filename: str
 ) -> None:
     hip = tmp_path / "hip"
     tensile = hip / "tensilelite"
     tensile.mkdir(parents=True)
 
     build_dir = tmp_path / "build"
-    client = build_dir / "tensilelite/client/tensilelite-client"
+    client = build_dir / "tensilelite" / "client" / client_filename
 
     monkeypatch.setattr(utils, "find_spec", lambda _n: object())
 
     captured = {}
 
-    def _fake_run(cmd, cwd=None):
-        captured["cmd"] = cmd
+    def _fake_run(cmd, cwd=None, env=None):
+        if cmd[0] == "invoke":
+            captured["cmd"] = cmd
         client.parent.mkdir(parents=True, exist_ok=True)
         client.write_text("bin\n")
 

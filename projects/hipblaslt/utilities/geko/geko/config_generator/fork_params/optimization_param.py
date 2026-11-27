@@ -3,7 +3,7 @@
 
 from typing import Any, Dict, List, Optional, Tuple
 
-from geko.config_generator.fork_params.param_meta import load_tensile_metadata
+from geko.config_generator.fork_params.param_meta import load_tensilelite_metadata
 from geko.config_generator.shared_utils import (
     ForkParameter,
     GroupDimension,
@@ -22,7 +22,7 @@ class BaseParamBuilder:
     def __init__(self, config: Dict[str, Any]):
         self.config = config
         self._gt = config["GemmProblem"].gemm_type
-        self._meta = load_tensile_metadata()
+        self._meta = load_tensilelite_metadata()
 
     def _make_param(
         self,

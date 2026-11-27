@@ -73,7 +73,7 @@ def test_gfx950_i8_allowlist_has_native_mfmas() -> None:
     [("gfx950", True), ("gfx942", False)],
 )
 def test_generate_all_mfmas_i8_native_mfmas_by_arch(tmp_path: Path, arch: str, expected_native: bool) -> None:
-    gt = GemmType.from_tensile("N", "N", "I8", "I8", "I")
+    gt = GemmType.from_tensilelite("N", "N", "I8", "I8", "I")
     cfg = {
         "ARCH": arch,
         "CUs": HARDWARE_MAP[arch]["CUs"],

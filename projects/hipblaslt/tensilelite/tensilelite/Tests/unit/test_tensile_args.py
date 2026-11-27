@@ -36,7 +36,6 @@ def test_all_options():
     options = {
         "--tensile-options": "--cxx-compiler,/usr/bin/amdclang++",
         "--global-parameters": "CheckASMCodeSize=True",
-        "--prebuilt-client": "/path/to/client",
         "--gpu-targets": "gfx950",
     }
 
@@ -45,15 +44,8 @@ def test_all_options():
         "--global-parameters", "ClientLogLevel=0",
         "--cxx-compiler", "/usr/bin/amdclang++",
         "--global-parameters", "CheckASMCodeSize=True",
-        "--prebuilt-client", "/path/to/client",
         "--gpu-targets", "gfx950",
     ]
-
-
-def test_no_common_build_drops_prebuilt_client():
-    options = {"--no-common-build": True, "--prebuilt-client": "/path/to/client"}
-
-    assert "--prebuilt-client" not in tensileArgs(options.get, None)
 
 
 def test_world_marker_becomes_world_filter_after_user_parameters():

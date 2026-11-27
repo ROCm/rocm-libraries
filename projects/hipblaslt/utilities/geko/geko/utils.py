@@ -1,22 +1,19 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-
 from __future__ import annotations
 
-"""Common utility functions for the GEKO framework."""
-
-import subprocess
-import shutil
-import sys
-import logging
 import hashlib
+import logging
 import os
+import shutil
+import subprocess
+import sys
 
-from typing import List
-from pathlib import Path
 from datetime import date
-from importlib.util import find_spec
 from datetime import datetime, timezone
+from importlib.util import find_spec
+from pathlib import Path
+from typing import List
 
 logger = logging.getLogger("GEKO")
 
@@ -31,7 +28,6 @@ def compute_file_sha256(path: str | Path) -> str:
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-
 def _rocm_subprocess_env() -> dict[str, str]:
     """Return env with ROCm tools on PATH for invoke / Tensile subprocesses."""
     env = os.environ.copy()
@@ -43,7 +39,9 @@ def _rocm_subprocess_env() -> dict[str, str]:
     return env
 
 
-def run_silent_command(cmd: List[str], cwd: str | Path = None, env: dict[str, str] | None = None) -> None:
+def run_silent_command(
+    cmd: List[str], cwd: str | Path = None, env: dict[str, str] | None = None
+) -> None:
     """Execute a shell command with silent stdout and error handling.
 
     Args:
@@ -148,7 +146,20 @@ def build_tensilelite_client(
         build_dir = default_build_dir
 
     build_dir = Path(build_dir).resolve()
-    client_path = build_dir / "tensilelite/client/tensilelite-client"
+    if not find_spec("invoke"):
+        raise RuntimeError(
+            "'invoke' package not found. It is required by tensilelite's "
+            "build system. Install it via the tensilelite setup "
+            "(hipBLASLt/tensilelite/requirements.txt) or: pip install invoke"
+        )
+
+    # Query the source build's output before the editable package is installed.
+    client_path = Path(subprocess.check_output(
+        ["invoke", "client-path", "--build-dir", str(build_dir)],
+        cwd=tensilelite_path,
+        env=_rocm_subprocess_env(),
+        text=True,
+    ).strip())
     hash_file_path = build_dir / "hash.txt"
 
     build = True
@@ -163,13 +174,6 @@ def build_tensilelite_client(
         build = False
 
     if build:
-        if not find_spec("invoke"):
-            raise RuntimeError(
-                "'invoke' package not found. It is required by tensilelite's "
-                "build system. Install it via the tensilelite setup "
-                "(hipBLASLt/tensilelite/requirements.txt) or: pip install invoke"
-            )
-
         shutil.rmtree(build_dir, ignore_errors=True)
 
         logger.info(f"Building tensilelite client in '{build_dir}'")
@@ -182,10 +186,30 @@ def build_tensilelite_client(
         with open(hash_file_path, "w") as f:
             f.write(current_hash)
     else:
-        logger.debug(f"Skipping tensilelite client build, using cached client at '{client_path}'")
+        logger.debug(f"Skipping TensileLite client build, using cached binary at '{client_path}'")
 
-    return client_path if build_dir != default_build_dir else None
-
+    run_silent_command(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--no-build-isolation",
+            "--no-deps",
+            "--editable",
+            tensilelite_path,
+        ],
+    )
+    run_silent_command(
+        [
+            sys.executable,
+            "-m",
+            "tensilelite_configure_client",
+            "--ensure-client",
+            client_path,
+        ]
+    )
+    return client_path
 
 def parse_devices(devices: str | list[int]) -> List[int]:
     """Parse device specification into a list of device IDs.

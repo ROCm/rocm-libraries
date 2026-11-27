@@ -37,10 +37,6 @@ def tensileArgs(getOption, workerLockPath, world=None):
         rv += ["--global-parameters", getOption("--global-parameters")]
     if world is not None:
         rv += ["--global-parameters", f"WorldFilter={list(world)}"]
-    if not getOption("--no-common-build"):
-        if getOption("--prebuilt-client"):
-            rv += ["--prebuilt-client", getOption("--prebuilt-client")]
-
     # Forward --gpu-targets to tensilelite. Do NOT forward --build-only or
     # --use-cache here — those are hardcoded in each test function's args.
     if getOption("--gpu-targets"):
