@@ -10172,6 +10172,99 @@ TEST(TestGpuFlydslSdpaRdnaDispatch, PaddedCopiesReadAndWriteOnlyTheHeadDims)
     }
 }
 
+namespace
+{
+
+/// ALMIOPEN-3317's graph family: bf16 `[2, 1, 2, 7]`, one head and token stride 7, packed with
+/// per-batch lengths {2, 2} at @p origins in Q's and K's tables (empty: end to end), so with
+/// origins {16, 0} a sequence ends at token 18, past the B * S = 4 tokens the padded copies
+/// hold. Checked against hipDNN's CPU reference as well as the harness's, which also checks
+/// that no token outside a sequence of O and the LSE is written.
+SdpaGraphSpec gappedOriginsSpec(int64_t headDim, std::vector<int32_t> origins)
+{
+    SdpaGraphSpec spec;
+    spec.dataType = DataType::BFLOAT16;
+    spec.batch = 2;
+    spec.heads = 1;
+    spec.kvHeads = 1;
+    spec.seqLenQ = 2;
+    spec.seqLenKv = 2;
+    spec.headDim = headDim;
+    spec.stats = SdpaStats::LSE;
+    spec.crossCheckWithCpuReference = true;
+    setPacked(spec, {2, 2}, {2, 2});
+    setPadding(spec, {2, 2}, {2, 2});
+    spec.packedOriginsQ = origins;
+    spec.packedOriginsKv = std::move(origins);
+    return spec;
+}
+
+} // namespace
+
+// The 3317 graph over the head-dim padding copies: the workspace holds each sequence at
+// b * S, not at its origin, so origins past B * S neither write out of the workspace nor read
+// the wrong tokens. Controls: compact origins at the same head dim, and head dim 8, which runs
+// on the attention object without copies, at the same gapped origins.
+TEST(TestGpuFlydslSdpaRdnaDispatch, PacksGappedOriginsPastTheTokenCountAtAHeadDimOffEight)
+{
+    SKIP_IF_NO_DEVICES();
+    struct Case
+    {
+        const char* name;
+        int64_t headDim;
+        std::vector<int32_t> origins;
+    };
+    for(const auto& [name, headDim, origins] : {Case{"gapped origins, head dim 7", 7, {16, 0}},
+                                                Case{"compact origins, head dim 7", 7, {}},
+                                                Case{"gapped origins, head dim 8", 8, {16, 0}}})
+    {
+        SCOPED_TRACE(name);
+        auto spec = gappedOriginsSpec(headDim, origins);
+        for(const auto mask : {SdpaMask::NONE, SdpaMask::BOTTOM_RIGHT_CAUSAL})
+        {
+            SCOPED_TRACE(static_cast<int>(mask));
+            spec.mask = mask;
+            expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+                spec, BF16_TOLERANCE, RdnaFamily::PREFILL);
+        }
+    }
+}
+
+// seq_len_kv alone (seqused_k): only K and V are rebased, Q and O keep their own table, copied
+// as its differences say. K's sequences end at token 18 past B * S = 4.
+TEST(TestGpuFlydslSdpaRdnaDispatch, PacksGappedKeyOriginsPastTheTokenCountAtAHeadDimOffEight)
+{
+    SKIP_IF_NO_DEVICES();
+    auto spec = gappedOriginsSpec(7, {});
+    spec.omitSeqLenQ = true;
+    spec.packedOriginsKv = {16, 0};
+    for(const auto mask : {SdpaMask::NONE, SdpaMask::BOTTOM_RIGHT_CAUSAL})
+    {
+        SCOPED_TRACE(static_cast<int>(mask));
+        spec.mask = mask;
+        expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+            spec, BF16_TOLERANCE, RdnaFamily::PREFILL);
+    }
+}
+
+// Two heads: the rebased Q's LSE is held in a scratch tensor at token-major strides
+// {S*H, 1, H, 1} (H = 2 here, where one head cannot tell the layouts apart) and copied out
+// through Q's own gapped table, so a real kernel writes and the copy reads those strides.
+TEST(TestGpuFlydslSdpaRdnaDispatch, PacksGappedOriginsWithTwoHeadsAndTheLseAtAHeadDimOffEight)
+{
+    SKIP_IF_NO_DEVICES();
+    auto spec = gappedOriginsSpec(7, {16, 0});
+    spec.heads = 2;
+    spec.kvHeads = 2;
+    for(const auto mask : {SdpaMask::NONE, SdpaMask::BOTTOM_RIGHT_CAUSAL})
+    {
+        SCOPED_TRACE(static_cast<int>(mask));
+        spec.mask = mask;
+        expectSdpaMatchesReference<hipdnn_data_sdk::types::bfloat16>(
+            spec, BF16_TOLERANCE, RdnaFamily::PREFILL);
+    }
+}
+
 } // namespace hip_kernel_provider::kernel_ingestor_engine
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR && HIPDNN_ENGINE_FLYDSL

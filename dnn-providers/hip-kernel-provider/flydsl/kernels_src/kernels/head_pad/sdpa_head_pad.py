@@ -28,6 +28,20 @@ null. ``LEN`` is read only for a packed operand. Padding a row is ``copy_units``
 dim and ``dst_units`` = the padded width (the tail zeroed); unpadding is ``copy_units`` =
 ``dst_units`` = the head dim.
 
+A packed operand's side of the copy is addressed either through ``ROW_OFF`` as above or
+*compactly*: row ``(b, h, s)`` is then token ``b * seq_len + s`` of a dense ``[B, seq_len]``
+run, whatever ``ROW_OFF`` holds, at ``token * ss + h * sh`` with that side's own strides.
+``compact`` selects the compact sides (bit 0 the source, bit 1 the destination) and is read only
+for a packed operand; 0 addresses both sides through ``ROW_OFF``. Which rows exist is the
+``LEN``/``ROW_OFF`` rule above on both sides. Gathering a packed tensor with gapped origins into
+the workspace sets bit 1 and the copy back sets bit 0, so the workspace holds each sequence at
+``b * seq_len`` whatever the packed tensor's origins are.
+
+``TABLE_OUT`` (an int32 ``[B + 1]`` array, or null) receives the compact token table
+``[0, seq_len, 2 * seq_len, ..., B * seq_len]``: the workgroup at grid position (0, 0) writes it
+and no other workgroup does, and a null pointer writes nothing, so exactly one launch of those
+that share a table is given the pointer.
+
 One thread per 8 destination units (a chunk): a grid of ``cdiv(S * cdiv(dst_units, 8),
 BLOCK_THREADS)`` by ``B * H`` workgroups, each row of the grid one (batch, head) plane, so
 those two must each fit an int32 (the native checks). A chunk is read as one 16-byte vector
@@ -38,9 +52,10 @@ at any 2-byte alignment is read in place and nothing past a row's ``copy_units``
 written as one 16-byte vector when the destination's rows are 16-byte aligned (the padded copy,
 when padding) and unit by unit otherwise, each unit below ``dst_units`` once.
 
-Arguments, in order: ``SRC``, ``DST``, ``ROW_OFF``, ``LEN`` (pointers), ``batch``, ``heads``,
-``seq_len``, ``copy_units``, ``dst_units`` (Int32), the source's ``(batch, head, seq)`` strides
-and the destination's (Int64, in units), then the stream.
+Arguments, in order: ``SRC``, ``DST``, ``ROW_OFF``, ``LEN``, ``TABLE_OUT`` (pointers),
+``batch``, ``heads``, ``seq_len``, ``copy_units``, ``dst_units``, ``compact`` (Int32), the
+source's ``(batch, head, seq)`` strides and the destination's (Int64, in units), then the
+stream.
 """
 
 import flydsl.compiler as flyc
@@ -53,9 +68,9 @@ from flydsl.expr.typing import Vector as Vec
 KERNEL_NAME = "sdpa_head_pad_kernel"
 
 
-def _i32_at(ptr, index):
-    """``ptr[index]`` as an i64, read as an int32 (a token table in global memory)."""
-    i32_ptr = fx.recast_iter(
+def _i32_ptr(ptr):
+    """``ptr`` as a global int32 pointer (a token table in global memory)."""
+    return fx.recast_iter(
         fx.PointerType.get(
             elem_ty=fx.Int32.ir_type,
             address_space=fx.AddressSpace.Global,
@@ -63,7 +78,11 @@ def _i32_at(ptr, index):
         ),
         ptr,
     )
-    return fx.Int64(fx.Int32(fx.ptr_load(i32_ptr + fx.Int64(index), fx.Int32)))
+
+
+def _i32_at(ptr, index):
+    """``ptr[index]`` as an i64, read as an int32 (a token table in global memory)."""
+    return fx.Int64(fx.Int32(fx.ptr_load(_i32_ptr(ptr) + fx.Int64(index), fx.Int32)))
 
 
 def _sequence(row_off, lengths, batch, seq_len):
@@ -159,11 +178,13 @@ def build_sdpa_head_pad_module(block_threads=256):
         DST: fx.Pointer,
         ROW_OFF: fx.Pointer,
         LEN: fx.Pointer,
+        TABLE_OUT: fx.Pointer,
         batch: fx.Int32,
         heads: fx.Int32,
         seq_len: fx.Int32,
         copy_units: fx.Int32,
         dst_units: fx.Int32,
+        compact: fx.Int32,
         src_sb: fx.Int64,
         src_sh: fx.Int64,
         src_ss: fx.Int64,
@@ -171,6 +192,21 @@ def build_sdpa_head_pad_module(block_threads=256):
         dst_sh: fx.Int64,
         dst_ss: fx.Int64,
     ):
+        # The compact token table, when a pointer is given: written by the workgroup at grid
+        # position (0, 0), its threads striding over the B + 1 entries.
+        at_origin = (fx.Int32(gpu.block_idx.x) == fx.Int32(0)) & (
+            fx.Int32(gpu.block_idx.y) == fx.Int32(0)
+        )
+        writes_table = at_origin & (fx.Int64(fx.ptrtoint(TABLE_OUT)) != fx.Int64(0))
+        if writes_table:
+            table = _i32_ptr(TABLE_OUT)
+            for entry in range(
+                fx.Int32(gpu.thread_idx.x),
+                fx.Int32(batch) + fx.Int32(1),
+                fx.Int32(BLOCK_THREADS),
+            ):
+                position = fx.Int32(entry)
+                fx.ptr_store(position * fx.Int32(seq_len), table + fx.Int64(position))
         # One (batch, head) plane per workgroup row of the grid, so its indices are the
         # workgroup's own (scalar); within it, one thread per (sequence row, 8-unit chunk),
         # divided by the chunks per row in 32 bits.
@@ -182,15 +218,21 @@ def build_sdpa_head_pad_module(block_threads=256):
         t = fx.Int32(gpu.block_idx.x) * fx.Int32(BLOCK_THREADS) + fx.Int32(
             gpu.thread_idx.x
         )
+        src_compact = (fx.Int32(compact) & fx.Int32(1)) != fx.Int32(0)
+        dst_compact = (fx.Int32(compact) & fx.Int32(2)) != fx.Int32(0)
         if t < fx.Int32(seq_len) * chunks:
             s32 = t // chunks
             s = fx.Int64(s32)
             col = fx.Int64(t - s32 * chunks) * fx.Int64(CHUNK)
             first, rows, packed = _sequence(ROW_OFF, LEN, b, seq_len)
             if s < rows:
+                # A packed side is addressed through its table, or compactly at b * seq_len.
                 token = first + s
-                src_row = packed.select(token * src_ss, b * src_sb + s * src_ss)
-                dst_row = packed.select(token * dst_ss, b * dst_sb + s * dst_ss)
+                compact_token = b * fx.Int64(seq_len) + s
+                src_token = src_compact.select(compact_token, token)
+                dst_token = dst_compact.select(compact_token, token)
+                src_row = packed.select(src_token * src_ss, b * src_sb + s * src_ss)
+                dst_row = packed.select(dst_token * dst_ss, b * dst_sb + s * dst_ss)
                 src_idx = fx.Int64(src_row) + h * src_sh + col
                 dst_idx = fx.Int64(dst_row) + h * dst_sh + col
                 copy = fx.Int64(copy_units)
@@ -207,11 +249,13 @@ def build_sdpa_head_pad_module(block_threads=256):
         DST: fx.Pointer,
         ROW_OFF: fx.Pointer,
         LEN: fx.Pointer,
+        TABLE_OUT: fx.Pointer,
         batch: fx.Int32,
         heads: fx.Int32,
         seq_len: fx.Int32,
         copy_units: fx.Int32,
         dst_units: fx.Int32,
+        compact: fx.Int32,
         src_sb: fx.Int64,
         src_sh: fx.Int64,
         src_ss: fx.Int64,
@@ -230,11 +274,13 @@ def build_sdpa_head_pad_module(block_threads=256):
             DST,
             ROW_OFF,
             LEN,
+            TABLE_OUT,
             batch,
             heads,
             seq_len,
             copy_units,
             dst_units,
+            compact,
             src_sb,
             src_sh,
             src_ss,

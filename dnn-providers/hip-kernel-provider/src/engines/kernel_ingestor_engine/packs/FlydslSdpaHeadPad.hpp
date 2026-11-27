@@ -10,7 +10,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <iterator>
 #include <limits>
+#include <map>
 #include <memory>
 #include <optional>
 #include <set>
@@ -67,11 +69,26 @@
  *   A packed operand's copies go through its token table: each sequence at its table entry, for
  *   its per-batch length when the graph gives one (`seq_len_q` for Q and O, `seq_len_kv` for K
  *   and V: cuDNN's per-batch origins, in any order and with gaps), else for the table's
- *   difference: the binding the attention kernels read, servablePackedVarlenWithLengths(), so
- *   copies and kernels take the same lengths; no token outside a sequence is read or written
- *   (headPadLengths()).
+ *   difference: the binding the attention kernels read, servablePackedVarlenWithLengths(), taken
+ *   on the graph as given, so copies and kernels take the same lengths; no token outside a
+ *   sequence is read or written (headPadLengths()).
+ * - **Rebase.** The workspace holds a packed operand's sequences at `b * S`, not at the graph's
+ *   origins, which with gaps can pass `B * S` tokens: the workspace is sized for `B * S`
+ *   tokens, so a sequence at `origin + length > B * S` would be written past it. Only the sides
+ *   whose lengths the graph gives are rebased -- with `seq_len_kv` alone (`seqused_k`) K and V,
+ *   with `seq_len_q` as well Q and O too; a side without lengths keeps its table, copied as the
+ *   table's difference says. A rebased operand's copy in gathers each sequence from its table
+ *   entry to `b * S`, and its copy back reverses that. The padded graph packs each rebased
+ *   operand through a compact token table `[0, S, ..., B * S]`, a tensor it adds under a new
+ *   uid (one per distinct original table and sequence extent: Q and K sharing a table with
+ *   different extents get two) that the first copy through it writes into the workspace, and the
+ *   launch hands the engine that buffer. When Q is rebased the graph's LSE, packed through Q's
+ *   table, is held in the padded graph as a scratch tensor packed through Q's compact table
+ *   (token-major: batch `S*H`, head 1, sequence `H`, multiplier `H`, which
+ *   isPackedThrough() accepts for any `H`) and one more copy writes it out through Q's own
+ *   table.
  *   The copies are the `sdpa_head_pad` op's object (`flydsl/kernels_src/kernels/head_pad/`),
- *   found beside the attention kernel's directory as the RNG dump's writer is; all four launch on
+ *   found beside the attention kernel's directory as the RNG dump's writer is; each launches on
  *   the attention launch's stream.
  * - **Every other graph** -- both head dims multiples of 8 -- reaches the engine's own functions
  *   with its own context, bound tokens and kernel, and the engine's prepared dispatch, workspace
@@ -96,6 +113,12 @@ inline constexpr size_t HEAD_PAD_BUFFER_ALIGN = 256;
 /// The alignment the padded operands declare: rows of a multiple of 8 elements from a
 /// 256-byte-aligned base.
 inline constexpr int64_t HEAD_PAD_DECLARED_ALIGNMENT = 16;
+/// The alignment the LSE scratch declares: one float per element, from a 256-byte-aligned base.
+inline constexpr int64_t HEAD_PAD_STATS_DECLARED_ALIGNMENT = 4;
+/// The copy's `compact` argument: the side of a rebased operand's copy that is the workspace's
+/// dense run at `b * S + s` (the source when copying out, the destination when copying in).
+inline constexpr int32_t HEAD_PAD_COMPACT_SOURCE = 1;
+inline constexpr int32_t HEAD_PAD_COMPACT_DESTINATION = 2;
 
 /// Past this padded width and below 256, a copy is padded to 256 (headPadWidth()).
 inline constexpr int64_t HEAD_PAD_WIDE_FLOOR = 224;
@@ -174,7 +197,7 @@ inline HeadPadLayout headPadLayout(int64_t heads, int64_t sequence, int64_t widt
  *        is its table's difference.
  *
  * Read from the binding the attention kernels themselves read, servablePackedVarlenWithLengths()
- * (the RDNA, aiw and CDNA matchers' packed rule), over the padded graph the engine matches: that
+ * (the RDNA, aiw and CDNA matchers' packed rule), over the graph as given: that
  * binding is the one home of which lengths each packed operand takes. Q and O take its `seqLenQ`
  * unless that names Q's table (queryLengthsFromOffsets(): `seq_len_kv` alone, PyTorch's
  * seqused_k), K and V its `seqLenKv`.
@@ -186,8 +209,8 @@ struct HeadPadLengths
 };
 
 /**
- * @brief HeadPadLengths for the padded graph @p context: none for a graph with no packed operand,
- *        or nullopt for a packed graph the binding declines (as the engines then do).
+ * @brief HeadPadLengths for the graph @p context as given: none for a graph with no packed
+ *        operand, or nullopt for a packed graph the binding declines (as the engines then do).
  */
 inline std::optional<HeadPadLengths> headPadLengths(const MatchContext& context)
 {
@@ -279,6 +302,52 @@ inline bool headPadCopyable(const data_objects::TensorAttributes& tensor)
     return !packed || tensor.ragged_offset_multiplier() == strides->Get(SEQ_AXIS);
 }
 
+/// A compact token table the padded graph adds for rebased packed operands, `[0, S, ..., B * S]`
+/// in int32, and the one the copies write to the workspace.
+struct HeadPadTable
+{
+    /// The new tensor's uid in the padded graph.
+    int64_t uid = 0;
+    /// The graph's table the operands go through, and the operands' batch and sequence extents.
+    int64_t original = 0;
+    int64_t batch = 0;
+    int64_t sequence = 0;
+    /// Its place in the workspace (headPadPlan(); 0 in HeadPadGraph::tables).
+    size_t offset = 0;
+    size_t bytes = 0;
+};
+
+/**
+ * @brief Whether the LSE @p stats of a graph with query @p q can be held as a scratch tensor and
+ *        copied out through Q's own table: a FLOAT `[B, H, Sq, 1]` device tensor packed through
+ *        Q's table (isPackedThrough()), every axis of more than one element at a positive
+ *        stride, its elements distinct since the copy out writes each once.
+ */
+inline bool headPadStatsCopyable(const data_objects::TensorAttributes& stats,
+                                 const data_objects::TensorAttributes& q)
+{
+    const auto* dims = stats.dims();
+    const auto* strides = stats.strides();
+    if(dims == nullptr || strides == nullptr || dims->size() != SDPA_RANK
+       || strides->size() != SDPA_RANK || stats.data_type() != data_objects::DataType::FLOAT
+       || stats.virtual_() || hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&stats)
+       || !q.ragged_offset_tensor_uid().has_value() || q.dims() == nullptr
+       || q.dims()->size() != SDPA_RANK)
+    {
+        return false;
+    }
+    for(const uint32_t axis : {BATCH_AXIS, HEAD_AXIS, SEQ_AXIS})
+    {
+        if(dims->Get(axis) != q.dims()->Get(axis)
+           || (dims->Get(axis) > 1 && strides->Get(axis) <= 0))
+        {
+            return false;
+        }
+    }
+    return dims->Get(HEAD_DIM_AXIS) == 1 && isPackedThrough(stats, *q.ragged_offset_tensor_uid())
+           && elementsDoNotOverlap(stats);
+}
+
 /// The padded graph's serialized bytes and the graph over them. Built in place and never moved:
 /// the wrapper reads the bytes the vector holds.
 struct HeadPadGraph
@@ -299,6 +368,16 @@ struct HeadPadGraph
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph;
     /// The lengths the copies of packed operands read (headPadLengths()).
     HeadPadLengths lengths;
+    /// The packed operands (of Q, K, V and O) rebased onto compact origins: those the graph
+    /// gives lengths for. Their tensors in this graph go through a table of `tables`.
+    std::set<int64_t> rebased;
+    /// The compact token tables, each a tensor this graph adds, `[0, S, ..., B * S]`; none for a
+    /// graph with nothing rebased.
+    std::vector<HeadPadTable> tables;
+    /// The LSE tensor's uid when this graph holds it as a scratch tensor packed through Q's
+    /// compact table (Q is rebased and the graph's LSE is headPadStatsCopyable()), else
+    /// NO_SEQ_LEN.
+    int64_t scratchStats = NO_SEQ_LEN;
 
     /// A context over the padded graph for the same device and ranking as @p original.
     MatchContext contextFor(const MatchContext& original) const
@@ -312,9 +391,9 @@ struct HeadPadGraph
  * @brief The padded graph for @p context (the file comment), or nullptr when an operand cannot
  *        be copied: Q, K, V and O each headPadCopyable, and O's elements distinct, since the copy
  *        back writes each once. Also nullptr unless K has Q's head dim and O has V's, for a
- *        packed graph the kernels' binding declines (headPadLengths()), and when one packed
- *        tensor is both a query-side and a key-side operand whose lengths differ
- *        (headPadOperandLengths()).
+ *        packed graph the kernels' binding declines on the graph as given (headPadLengths()),
+ *        when one packed tensor is both a query-side and a key-side operand whose lengths differ
+ *        (headPadOperandLengths()), and when a rebased operand's token count passes an int32.
  */
 inline std::shared_ptr<const HeadPadGraph> buildHeadPadGraph(const MatchContext& context)
 {
@@ -351,6 +430,73 @@ inline std::shared_ptr<const HeadPadGraph> buildHeadPadGraph(const MatchContext&
     const int64_t widthQk = headPadWidth(headDim(qUid));
     const int64_t widthV = headPadWidth(headDim(vUid));
 
+    // The lengths the kernels read on the graph as given are the ones the copies read, and they
+    // decide which operands are rebased.
+    const auto lengths = headPadLengths(context);
+    if(!lengths.has_value())
+    {
+        return nullptr;
+    }
+    for(const int64_t uid : {qUid, kUid, vUid, oUid})
+    {
+        if(!headPadOperandLengths(*lengths, *attributes, uid).has_value())
+        {
+            return nullptr;
+        }
+    }
+
+    // A packed operand whose sequences the graph gives lengths for is rebased: its copy goes
+    // through a compact token table of its own, a new tensor, one per distinct (original table,
+    // sequence extent) -- Q and K sharing a table but not a sequence extent need two. Operands
+    // without lengths keep their table.
+    int64_t nextUid = 0;
+    for(const auto& entry : context.graph.getTensorMap())
+    {
+        nextUid = std::max(nextUid, entry.first + 1);
+    }
+    std::vector<HeadPadTable> tables;
+    std::set<int64_t> rebased;
+    std::map<int64_t, int64_t> compactTable;
+    for(const int64_t uid : {qUid, kUid, vUid, oUid})
+    {
+        const auto& tensor = *findTensor(context, uid);
+        if(!tensor.ragged_offset_tensor_uid().has_value()
+           || *headPadOperandLengths(*lengths, *attributes, uid) == NO_SEQ_LEN)
+        {
+            continue;
+        }
+        const int64_t batch = tensor.dims()->Get(BATCH_AXIS);
+        const int64_t sequence = tensor.dims()->Get(SEQ_AXIS);
+        // The table's entries are int32 token indices.
+        const auto tokens = checkedProduct({batch, sequence});
+        if(!tokens.has_value() || *tokens > INT32_LIMIT)
+        {
+            return nullptr;
+        }
+        const int64_t original = *tensor.ragged_offset_tensor_uid();
+        auto found = std::find_if(tables.begin(), tables.end(), [&](const HeadPadTable& table) {
+            return table.original == original && table.sequence == sequence;
+        });
+        if(found == tables.end())
+        {
+            tables.push_back(HeadPadTable{nextUid++, original, batch, sequence});
+            found = std::prev(tables.end());
+        }
+        rebased.insert(uid);
+        compactTable[uid] = found->uid;
+    }
+    // The LSE of a rebased Q is written to a scratch tensor packed through Q's compact table and
+    // copied out through Q's own (HeadPadGraph::scratchStats).
+    int64_t scratchStats = NO_SEQ_LEN;
+    if(attributes->stats_tensor_uid().has_value() && compactTable.count(qUid) != 0)
+    {
+        const auto* stats = findTensor(context, *attributes->stats_tensor_uid());
+        if(stats != nullptr && headPadStatsCopyable(*stats, *findTensor(context, qUid)))
+        {
+            scratchStats = *attributes->stats_tensor_uid();
+        }
+    }
+
     std::unique_ptr<data_objects::GraphT> graph(context.graph.getGraph().UnPack());
     for(auto& tensor : graph->tensors)
     {
@@ -359,6 +505,18 @@ inline std::shared_ptr<const HeadPadGraph> buildHeadPadGraph(const MatchContext&
             continue;
         }
         const int64_t uid = tensor->uid;
+        if(scratchStats != NO_SEQ_LEN && uid == scratchStats)
+        {
+            // Token-major, one float per (token, head): batch S*H, head 1, sequence H, and
+            // offsets counting tokens through Q's compact table.
+            const int64_t heads = tensor->dims.at(HEAD_AXIS);
+            const int64_t sequence = tensor->dims.at(SEQ_AXIS);
+            tensor->strides = {sequence * heads, 1, heads, 1};
+            tensor->alignment = HEAD_PAD_STATS_DECLARED_ALIGNMENT;
+            tensor->ragged_offset_tensor_uid = compactTable.at(qUid);
+            tensor->ragged_offset_multiplier = heads;
+            continue;
+        }
         if(uid != qUid && uid != kUid && uid != vUid && uid != oUid)
         {
             continue;
@@ -380,6 +538,21 @@ inline std::shared_ptr<const HeadPadGraph> buildHeadPadGraph(const MatchContext&
         {
             tensor->ragged_offset_multiplier = layout.sequence;
         }
+        if(const auto table = compactTable.find(uid); table != compactTable.end())
+        {
+            tensor->ragged_offset_tensor_uid = table->second;
+        }
+    }
+    for(const auto& table : tables)
+    {
+        auto tensor = std::make_unique<data_objects::TensorAttributesT>();
+        tensor->uid = table.uid;
+        tensor->name = "head_pad_compact_offsets_" + std::to_string(table.uid);
+        tensor->data_type = data_objects::DataType::INT32;
+        tensor->dims = {table.batch + 1, 1, 1, 1};
+        tensor->strides = {1, 1, 1, 1};
+        tensor->alignment = HEAD_PAD_DECLARED_ALIGNMENT;
+        graph->tensors.push_back(std::move(tensor));
     }
     flatbuffers::FlatBufferBuilder builder;
     builder.Finish(data_objects::Graph::Pack(builder, graph.get()));
@@ -389,20 +562,10 @@ inline std::shared_ptr<const HeadPadGraph> buildHeadPadGraph(const MatchContext&
     {
         return nullptr;
     }
-    // The lengths the kernels read on the padded graph are the ones the copies read.
-    const auto lengths = headPadLengths(padded->contextFor(context));
-    if(!lengths.has_value())
-    {
-        return nullptr;
-    }
-    for(const int64_t uid : {qUid, kUid, vUid, oUid})
-    {
-        if(!headPadOperandLengths(*lengths, *attributes, uid).has_value())
-        {
-            return nullptr;
-        }
-    }
     padded->lengths = *lengths;
+    padded->rebased = std::move(rebased);
+    padded->tables = std::move(tables);
+    padded->scratchStats = scratchStats;
     return padded;
 }
 
@@ -496,26 +659,28 @@ struct HeadPadMatchers
 };
 
 /// The copy's argument list, as `gen_sdpa_head_pad.py` asserts it: the source, destination,
-/// token-table and per-batch-length pointers; batch, heads, sequence, units copied, units per
-/// destination row (i32); the source's and the destination's (batch, head, sequence) strides in
-/// units (i64).
+/// token-table, per-batch-length and compact-token-table-output pointers; batch, heads, sequence,
+/// units copied, units per destination row, compact sides (i32); the source's and the
+/// destination's (batch, head, sequence) strides in units (i64).
 inline const std::vector<KernelArgument>& headPadSignature()
 {
     static const std::vector<KernelArgument> s_signature{{"global_buffer", 8, 0, ""},
                                                          {"global_buffer", 8, 8, ""},
                                                          {"global_buffer", 8, 16, ""},
                                                          {"global_buffer", 8, 24, ""},
-                                                         {"by_value", 4, 32, ""},
-                                                         {"by_value", 4, 36, ""},
+                                                         {"global_buffer", 8, 32, ""},
                                                          {"by_value", 4, 40, ""},
                                                          {"by_value", 4, 44, ""},
                                                          {"by_value", 4, 48, ""},
-                                                         {"by_value", 8, 56, ""},
+                                                         {"by_value", 4, 52, ""},
+                                                         {"by_value", 4, 56, ""},
+                                                         {"by_value", 4, 60, ""},
                                                          {"by_value", 8, 64, ""},
                                                          {"by_value", 8, 72, ""},
                                                          {"by_value", 8, 80, ""},
                                                          {"by_value", 8, 88, ""},
-                                                         {"by_value", 8, 96, ""}};
+                                                         {"by_value", 8, 96, ""},
+                                                         {"by_value", 8, 104, ""}};
     return s_signature;
 }
 
@@ -524,7 +689,8 @@ inline const std::vector<KernelArgument>& headPadSignature()
 struct HeadPadOperand
 {
     int64_t uid = 0;
-    /// The token table a packed operand goes through, or NO_SEQ_LEN.
+    /// The token table a packed operand goes through (the graph's own, even for a rebased
+    /// operand: the copy reads the graph tensor's sequences through it), or NO_SEQ_LEN.
     int64_t rowOffset = NO_SEQ_LEN;
     /// The per-batch lengths a packed operand's sequences take (headPadOperandLengths()), or
     /// NO_SEQ_LEN.
@@ -547,15 +713,25 @@ struct HeadPadOperand
     /// one grid row per plane.
     int64_t planeThreads = 0;
     int64_t planes = 0;
+    /// The copy's `compact` argument: HEAD_PAD_COMPACT_SOURCE or _DESTINATION for the
+    /// workspace side of a rebased operand, else 0.
+    int32_t compact = 0;
+    /// The index in HeadPadPlan::tables of the compact token table this copy writes, or -1: one
+    /// copy per table, the first operand through it.
+    int32_t tableIndex = -1;
 };
 
-/// Where everything the padded launch uses sits: each distinct operand's padded copy, then the
-/// engine's own workspace, last, where the engine would have it alone (its zero bias, for one,
-/// stays at the workspace's end).
+/// Where everything the padded launch uses sits: each distinct operand's padded copy, O's, the
+/// LSE scratch of a rebased Q, each compact token table, then the engine's own workspace, last,
+/// where the engine would have it alone (its zero bias, for one, stays at the workspace's end).
 struct HeadPadPlan
 {
     std::vector<HeadPadOperand> inputs;
     HeadPadOperand output;
+    /// The LSE's copy out of its scratch, when Q is rebased and the graph has an LSE
+    /// (HeadPadGraph::scratchStats).
+    std::optional<HeadPadOperand> stats;
+    std::vector<HeadPadTable> tables;
     size_t innerOffset = 0;
     size_t innerBytes = 0;
     size_t totalBytes = 0;
@@ -564,6 +740,26 @@ struct HeadPadPlan
 inline size_t headPadAlignUp(size_t bytes)
 {
     return (bytes + HEAD_PAD_BUFFER_ALIGN - 1) / HEAD_PAD_BUFFER_ALIGN * HEAD_PAD_BUFFER_ALIGN;
+}
+
+/// The index in @p padded's tables of the compact table @p tensor (a rebased operand's graph
+/// tensor) goes through.
+inline std::optional<size_t> headPadTableIndex(const HeadPadGraph& padded,
+                                               const data_objects::TensorAttributes& tensor)
+{
+    if(!tensor.ragged_offset_tensor_uid().has_value())
+    {
+        return std::nullopt;
+    }
+    for(size_t index = 0; index < padded.tables.size(); ++index)
+    {
+        if(padded.tables[index].original == *tensor.ragged_offset_tensor_uid()
+           && padded.tables[index].sequence == tensor.dims()->Get(SEQ_AXIS))
+        {
+            return index;
+        }
+    }
+    return std::nullopt;
 }
 
 /**
@@ -642,6 +838,7 @@ inline HeadPadPlan
         result.planes = *planes;
         return result;
     };
+    std::vector<bool> claimed(padded.tables.size(), false);
     for(const int64_t uid : {qUid, kUid, vUid})
     {
         bool seen = false;
@@ -656,14 +853,96 @@ inline HeadPadPlan
         auto input = operand(uid);
         input.offset = offset;
         offset = headPadAlignUp(offset + input.bytes);
+        if(padded.rebased.count(uid) != 0)
+        {
+            // The copy in gathers each sequence to b * S; the first copy through a table
+            // writes it.
+            input.compact = HEAD_PAD_COMPACT_DESTINATION;
+            const auto index = headPadTableIndex(padded, *findTensor(context, uid));
+            if(index.has_value() && !claimed[*index])
+            {
+                claimed[*index] = true;
+                input.tableIndex = static_cast<int32_t>(*index);
+            }
+        }
         plan.inputs.push_back(input);
     }
     plan.output = operand(oUid);
     plan.output.offset = offset;
+    if(padded.rebased.count(oUid) != 0)
+    {
+        plan.output.compact = HEAD_PAD_COMPACT_SOURCE;
+    }
     // Only O's own columns are copied back.
     plan.output.planeThreads
         = plan.output.planeThreads / plan.output.paddedUnits * plan.output.units;
-    plan.innerOffset = headPadAlignUp(offset + plan.output.bytes);
+    offset = headPadAlignUp(offset + plan.output.bytes);
+
+    // The LSE of a rebased Q: a scratch tensor of one float per (token, head), token-major at
+    // b * Sq + s, copied out through Q's own table.
+    if(padded.scratchStats != NO_SEQ_LEN)
+    {
+        const auto& tensor = *findTensor(context, padded.scratchStats);
+        const auto* dims = tensor.dims();
+        const auto* strides = tensor.strides();
+        constexpr int64_t units = 2;
+        const int64_t batch = dims->Get(BATCH_AXIS);
+        const int64_t heads = dims->Get(HEAD_AXIS);
+        const int64_t sequence = dims->Get(SEQ_AXIS);
+        const auto elements = checkedProduct({batch, sequence, heads});
+        const auto planeThreads = checkedProduct({sequence, units});
+        const auto planes = checkedProduct({batch, heads});
+        if(!elements.has_value() || !planeThreads.has_value() || !planes.has_value()
+           || *planeThreads > INT32_LIMIT || *planes > INT32_LIMIT
+           || *elements > std::numeric_limits<int64_t>::max() / (2 * units))
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "flydsl_sdpa head pad: the LSE is too large for the padding copy");
+        }
+        // The LSE is packed: its sequence stride is real, every other axis of one has none.
+        const auto stride = [&](uint32_t axis) {
+            return dims->Get(axis) == 1 && axis != SEQ_AXIS ? int64_t{0}
+                                                            : strides->Get(axis) * units;
+        };
+        HeadPadOperand stats;
+        stats.uid = padded.scratchStats;
+        stats.rowOffset = tensor.ragged_offset_tensor_uid().value_or(NO_SEQ_LEN);
+        stats.lengths = padded.lengths.query;
+        stats.batch = static_cast<int32_t>(batch);
+        stats.heads = static_cast<int32_t>(heads);
+        stats.sequence = static_cast<int32_t>(sequence);
+        stats.units = static_cast<int32_t>(units);
+        stats.paddedUnits = static_cast<int32_t>(units);
+        stats.strideBatch = stride(BATCH_AXIS);
+        stats.strideHead = stride(HEAD_AXIS);
+        stats.strideSequence = stride(SEQ_AXIS);
+        stats.padded = HeadPadLayout{sequence * heads * units, units, heads * units};
+        stats.offset = offset;
+        stats.bytes = static_cast<size_t>(*elements * 2 * units);
+        stats.planeThreads = *planeThreads;
+        stats.planes = *planes;
+        stats.compact = HEAD_PAD_COMPACT_SOURCE;
+        offset = headPadAlignUp(offset + stats.bytes);
+        plan.stats = stats;
+    }
+
+    // The compact token tables, B + 1 int32 entries each; every one has a copy that writes it.
+    for(size_t index = 0; index < padded.tables.size(); ++index)
+    {
+        if(!claimed[index])
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                "flydsl_sdpa head pad: a compact token table has no copy to write it");
+        }
+        auto table = padded.tables[index];
+        table.bytes = static_cast<size_t>(table.batch + 1) * sizeof(int32_t);
+        table.offset = offset;
+        offset = headPadAlignUp(offset + table.bytes);
+        plan.tables.push_back(table);
+    }
+    plan.innerOffset = offset;
     plan.totalBytes = plan.innerOffset + innerBytes;
     return plan;
 }
@@ -691,7 +970,8 @@ public:
         return _plan;
     }
 
-    /// The copy for each of the plan's inputs, in order, then O's.
+    /// The copy for each of the plan's inputs, in order, then O's, then the LSE's when the plan
+    /// has one.
     const IngestorKernelCode& copy(size_t index) const
     {
         return _copies.at(index);
@@ -786,6 +1066,10 @@ public:
             addCopy(input);
         }
         addCopy(plan.output);
+        if(plan.stats.has_value())
+        {
+            addCopy(*plan.stats);
+        }
         return std::make_unique<HeadPadPrepared>(
             std::move(inner), std::move(plan), std::move(copies));
     }
@@ -831,7 +1115,15 @@ public:
                 }
             }
         };
-        // Q, K and V into the workspace, the columns past their width zeroed.
+        // The compact token table a copy writes, in the workspace; every other copy gets null.
+        void* const noTable = nullptr;
+        const auto tableOut = [&](const HeadPadOperand& operand) -> void* {
+            return operand.tableIndex < 0
+                       ? noTable
+                       : base + plan.tables[static_cast<size_t>(operand.tableIndex)].offset;
+        };
+        // Q, K and V into the workspace, the columns past their width zeroed, the sequences of a
+        // rebased operand at b * S.
         for(size_t index = 0; index < plan.inputs.size(); ++index)
         {
             const auto& input = plan.inputs[index];
@@ -845,11 +1137,13 @@ public:
                                                                copy,
                                                                rowOffset(input),
                                                                lengths(input),
+                                                               tableOut(input),
                                                                input.batch,
                                                                input.heads,
                                                                input.sequence,
                                                                input.units,
                                                                input.paddedUnits,
+                                                               input.compact,
                                                                input.strideBatch,
                                                                input.strideHead,
                                                                input.strideSequence,
@@ -860,33 +1154,51 @@ public:
         }
         void* outputCopy = base + plan.output.offset;
         redirect(plan.output.uid, outputCopy);
+        void* statsCopy = nullptr;
+        if(plan.stats.has_value())
+        {
+            statsCopy = base + plan.stats->offset;
+            redirect(plan.stats->uid, statsCopy);
+        }
+        // The compact tables the rebased operands of the inner graph go through.
+        for(const auto& table : plan.tables)
+        {
+            buffers.push_back(hipdnnPluginDeviceBuffer_t{table.uid, base + table.offset});
+        }
         _inner.launch(handle,
                       padded->inner(),
                       buffers.data(),
                       static_cast<uint32_t>(buffers.size()),
                       base + plan.innerOffset);
-        // O's own columns back, from the padded copy.
-        const auto& output = plan.output;
-        void* destination
-            = hipdnn_plugin_sdk::findDeviceBuffer(output.uid, deviceBuffers, numDeviceBuffers).ptr;
-        padded->copy(plan.inputs.size())
-            .kernelForStream(stream)
-            .launch(stream,
-                    outputCopy,
-                    destination,
-                    rowOffset(output),
-                    lengths(output),
-                    output.batch,
-                    output.heads,
-                    output.sequence,
-                    output.units,
-                    output.units,
-                    output.padded.batch,
-                    output.padded.head,
-                    output.padded.sequence,
-                    output.strideBatch,
-                    output.strideHead,
-                    output.strideSequence);
+        // O's own columns back, and the LSE of a rebased Q, from the workspace.
+        const auto copyBack = [&](size_t index, const HeadPadOperand& operand, void* source) {
+            void* destination
+                = hipdnn_plugin_sdk::findDeviceBuffer(operand.uid, deviceBuffers, numDeviceBuffers)
+                      .ptr;
+            padded->copy(index).kernelForStream(stream).launch(stream,
+                                                               source,
+                                                               destination,
+                                                               rowOffset(operand),
+                                                               lengths(operand),
+                                                               noTable,
+                                                               operand.batch,
+                                                               operand.heads,
+                                                               operand.sequence,
+                                                               operand.units,
+                                                               operand.units,
+                                                               operand.compact,
+                                                               operand.padded.batch,
+                                                               operand.padded.head,
+                                                               operand.padded.sequence,
+                                                               operand.strideBatch,
+                                                               operand.strideHead,
+                                                               operand.strideSequence);
+        };
+        copyBack(plan.inputs.size(), plan.output, outputCopy);
+        if(plan.stats.has_value())
+        {
+            copyBack(plan.inputs.size() + 1, *plan.stats, statsCopy);
+        }
     }
 
 private:

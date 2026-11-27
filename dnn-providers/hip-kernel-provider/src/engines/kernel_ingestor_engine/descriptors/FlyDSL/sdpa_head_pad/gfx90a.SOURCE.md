@@ -24,8 +24,8 @@ instance list is untouched.
 | flydsl_kernels_commit | `89ad52fbbb9e252396829a8a44b12e18b7acd970` |
 | flydsl_kernels_describe | `v0.3.4.1-19-g89ad52f` |
 | aiter_kernels_commit | `8253efc4059516f492df597b80ce5311e9fda8bd` |
-| rocm_version | `7.13.0` |
-| inputs_sha256 | `43b9eb5193dac44e43118df305d7b796908dbc70aa0225092b373892c1a83e84` |
+| rocm_version | `10.2.0` |
+| inputs_sha256 | `f0542df62e02e56a236c28ed8ba65b4b0d41dc2e39e7739031c48f6fe805b756` |
 
 ## Instances
 
@@ -34,4 +34,4 @@ changes when the object does. The full record is `gfx90a/manifest.json`.
 
 | Instance | Priority | VGPRs | LDS | SHA256 |
 | --- | ---: | ---: | ---: | --- |
-| `sdpa_head_pad_f16_bt256` | 100 | 33 | 0 | `204b244c6237e319` |
+| `sdpa_head_pad_f16_bt256` | 100 | 35 | 0 | `b92c95166beaa7b0` |
