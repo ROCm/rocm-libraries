@@ -19,6 +19,7 @@ engine:
   sdk_version: 1.0.0
   behavior_notes:
   - supports_graph_capture
+  numerical_notes: []
   knobs:
   - block_m
   - block_n
