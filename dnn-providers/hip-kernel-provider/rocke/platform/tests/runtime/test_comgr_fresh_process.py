@@ -271,7 +271,9 @@ def test_the_child_caps_its_own_address_space() -> None:
 
     soft, hard = resource.getrlimit(resource.RLIMIT_AS)
     cap, lower = 1 << 30, 3 << 29
-    if _tightest(soft, hard) < lower:
+    inherited = _tightest(soft, hard)
+    # RLIM_INFINITY is -1 here: an unlimited address space is no reason to skip.
+    if inherited != resource.RLIM_INFINITY and inherited < lower:
         pytest.skip(f"inherited RLIMIT_AS {soft, hard} is below {lower} bytes")
     lines = _run_in_python(
         "import resource\n"
