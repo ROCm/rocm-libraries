@@ -927,6 +927,20 @@ def _usesFp8LdsConfig(dtype, state):
     return dtype.is8bitFloat() or (bool(state["ProblemType"]["Sparse"]) and dtype.isInt8())
 
 
+def _defaultVectorWidth(regPerElem):
+  """Starting auto VectorWidth: elements per dword, halved to a power of two.
+
+  F6/BF6 pack 21 elements per dword (4 // 0.1875), and halving from 21 gives
+  10 and 5, which are not powers of two. Skipping those keeps every
+  power-of-two width the old search could reach (F6 still lands on 2), so only
+  the other choices change.
+  """
+  vw = max(1, int(4 // regPerElem))
+  while vw & (vw - 1):
+    vw //= 2
+  return vw
+
+
 class Solution(collections.abc.Mapping):
   MAX_NUM_DS_LOAD_VGPRS: int = 4
   MAX_NUM_DS_LOAD_BYTES: int = 4 * MAX_NUM_DS_LOAD_VGPRS
@@ -3481,7 +3495,7 @@ class Solution(collections.abc.Mapping):
     if state["VectorWidthA"] == -1:
       if state["EnableMatrixInstruction"]:
         regPerElem = state["ProblemType"]["MacDataTypeA"].numRegisters()
-        optVW = int(4 // regPerElem)
+        optVW = _defaultVectorWidth(regPerElem)
         while 1:
           if state["MIWaveTile"][0] % optVW == 0:
             state["VectorWidthA"] = optVW
@@ -3496,7 +3510,7 @@ class Solution(collections.abc.Mapping):
     if state["VectorWidthB"] == -1:
       if state["EnableMatrixInstruction"]:
         regPerElem = state["ProblemType"]["MacDataTypeB"].numRegisters()
-        optVW = int(4 // regPerElem)
+        optVW = _defaultVectorWidth(regPerElem)
         while 1:
           if state["MIWaveTile"][1] % optVW == 0:
             state["VectorWidthB"] = optVW
@@ -3692,7 +3706,7 @@ class Solution(collections.abc.Mapping):
     if state["VectorWidthA"] == -1:
       if state["EnableMatrixInstruction"]:
         regPerElem = state["ProblemType"]["MacDataTypeA"].numRegisters()
-        optVW = int(4 // regPerElem)
+        optVW = _defaultVectorWidth(regPerElem)
         while 1:
           if state["MIWaveTile"][0] % optVW == 0:
             state["VectorWidthA"] = optVW
@@ -3720,7 +3734,7 @@ class Solution(collections.abc.Mapping):
     if state["VectorWidthB"] == -1:
       if state["EnableMatrixInstruction"]:
         regPerElem = state["ProblemType"]["MacDataTypeB"].numRegisters()
-        optVW = int(4 // regPerElem)
+        optVW = _defaultVectorWidth(regPerElem)
         while 1:
           if state["MIWaveTile"][1] % optVW == 0:
             state["VectorWidthB"] = optVW
@@ -6225,6 +6239,32 @@ class Solution(collections.abc.Mapping):
       # own its free0 elements in pairs. The divisibility check below turns an
       # incompatible VectorWidthA into a rejection.
       state["StoreVectorWidth"] = max(state["StoreVectorWidth"], 2)
+
+    # On matrix-instruction kernels, a VectorWidth that is not a power of two
+    # generates kernels that compute wrong results (seen on gfx1250 with 3, 5
+    # and 6), and the store coordinate code multiplies by VectorWidthA with a
+    # log2-based shift. The config validator still allows 3 and 6, and TDM
+    # kernels whose LdsBlockSizePerPad is forced to 0 (F6/BF6) skip the pad
+    # check that would otherwise reject them. WaveTileContiguousA lays out the
+    # A wave tile without VectorWidthA, so it is exempt.
+    if state["EnableMatrixInstruction"]:
+      for tc in ("A", "B"):
+        vw = state["VectorWidth%s" % tc]
+        if tc == "A" and state.get("WaveTileContiguousA"):
+          continue
+        if vw < 1 or (vw & (vw - 1)) != 0:
+          reject(state, printRejectionReason,
+                 "VectorWidth%s %u is not a power of two" % (tc, vw))
+          return
+
+    # The epilogue load/store encoders and the halved edge-store widths in
+    # NotLocalFullTileElements only handle power-of-two vector widths.
+    svw = state["StoreVectorWidth"]
+    if svw < 1 or (svw & (svw - 1)) != 0:
+      reject(state, printRejectionReason,
+             "StoreVectorWidth %u is not a power of two (VectorWidthA=%u)"
+             % (svw, state["VectorWidthA"]))
+      return
 
     if state.get("WaveTileContiguousA") and state["EnableMatrixInstruction"]:
       nativeStoreWidth = 1 if state["SourceSwap"] else state["MIOutputVectorWidth"]
