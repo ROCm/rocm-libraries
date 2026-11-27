@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: MIT
 """Element types that ``zero_vec`` and LDS loads and stores accept or refuse.
 
-``zero_vec`` of f64, i16 and u8, LDS loads and stores of i16 and i64, LDS loads
-of the 8-bit float types at their byte width, and the refusal of an LDS tile
-whose element has no whole-byte width.
+``zero_vec`` of f64, i16 and u8, LDS loads and stores of i16 and i64 (i64 also
+in HIP), LDS loads of the 8-bit float types at their byte width, and the refusal
+of an LDS tile whose element has no whole-byte width.
 
 ``zero_vec`` is what ``fill_fragment`` and ``load_fragment`` build on, so without f64 an f64
 fragment could not be zero-filled, and without u8 a u8 fragment could not be built. Lowering
@@ -30,7 +30,11 @@ from rocke.core.ir import (
 )
 from rocke.core.isa.backend import wired_arches
 from rocke.core.lower_llvm import lower_kernel_to_llvm
-from rocke.tests.engines import ENGINES, assert_engine_rejects
+from rocke.tests.engines import (
+    ENGINES,
+    assert_engine_rejects,
+    lower_hip_with_both_engines,
+)
 from rocke.tests.gpu import run_on_device
 from rocke.tests.ir_validity import assert_target_accepts
 
@@ -94,6 +98,16 @@ def test_lds_loads_and_stores_i64_at_natural_alignment(n):
     if n > 1:
         assert any("<2 x i64>" in line for line in loads + stores)
     assert_target_accepts(text, "gfx90a")
+
+
+@pytest.mark.parametrize("n", [1, 2])
+def test_lds_loads_and_stores_i64_lower_to_hip_as_i64_vectors(n):
+    hip = lower_hip_with_both_engines(_lds_round_trip(I64, n).kernel, "gfx90a")
+    vector = f"i64x{n}"
+    assert f"using {vector} = int64_t __attribute__((ext_vector_type({n})));" in hip
+    assert f"*reinterpret_cast<const {vector}*>(&" in hip  # the LDS load
+    if n > 1:  # one lane is stored as a scalar
+        assert f"*reinterpret_cast<{vector}*>(&" in hip  # the LDS store
 
 
 @pytest.mark.parametrize("dtype", [FP8E4M3, BF8E5M2], ids=lambda t: t.name)
