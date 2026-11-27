@@ -25,14 +25,23 @@
 //
 // Device unit tests of the block triangular solve rocsparse_Xbsrsv_*: every block
 // dimension class, both fill modes, unit and non-unit diagonals, no transpose and
-// transpose, both block storage directions, index bases and pointer modes. The
-// blocks of the matrices are strictly diagonally dominant (non-unit diagonal) or
-// small enough for the triangular recurrence to stay bounded (unit diagonal).
-// Entries stored in the other triangle of the matrix, including that of the
-// diagonal blocks, hold 37, which the solve must not read and the host reference
-// ignores.
+// transpose, both block storage directions, index bases and pointer modes, through
+// the public entry points and through the bsrsv templates at the 64-bit index
+// types. The blocks of the matrices are strictly diagonally dominant (non-unit
+// diagonal) or small enough for the triangular recurrence to stay bounded (unit
+// diagonal). Entries stored in the other triangle of the matrix, including that of
+// the diagonal blocks, hold 37, which the solve must not read and the host
+// reference ignores.
 //
 #include "unit_test_device_level2_common.hpp"
+#include "unit_test_grid_clamp.hpp"
+
+#include "rocsparse_bsrsv.hpp"
+#include "rocsparse_mat_info.hpp"
+
+#include <limits>
+#include <memory>
+#include <type_traits>
 
 using namespace level2;
 
@@ -187,15 +196,26 @@ namespace
         bool                device      = false;
         float               alpha       = 1.0f;
         bool                diag_blocks = true;
+        // When positive, maxGridSize[0] of the solve. 1 is smaller than every grid
+        // of these sizes, so each block of the solve walks a chunk of row groups.
+        int max_grid_x = 0;
     };
 
-    template <typename T>
+    // With rocsparse_int indices the solve goes through the public
+    // rocsparse_Xbsrsv_* entry points. Other index types call the bsrsv
+    // templates, which run only the wide kernels, and read the zero pivot, of
+    // type J, from the bsrsv container of the mat_info.
+    template <typename T, typename I = rocsparse_int, typename J = rocsparse_int>
     void run_bsrsv(rocsparse_handle handle, const solve_case& c)
     {
+        constexpr bool legacy
+            = std::is_same<I, rocsparse_int>::value && std::is_same<J, rocsparse_int>::value;
+
         SCOPED_TRACE(::testing::Message()
-                     << "bsrsv bd=" << c.bd << " mb=" << c.mb << " fill=" << c.fill
-                     << " diag=" << c.diag << " trans=" << c.trans << " dir=" << c.dir
-                     << " base=" << c.base << " device=" << c.device << " alpha=" << c.alpha);
+                     << "bsrsv I=" << sizeof(I) * 8 << " J=" << sizeof(J) * 8 << " bd=" << c.bd
+                     << " mb=" << c.mb << " fill=" << c.fill << " diag=" << c.diag << " trans="
+                     << c.trans << " dir=" << c.dir << " base=" << c.base << " device=" << c.device
+                     << " alpha=" << c.alpha << " max_grid_x=" << c.max_grid_x);
 
         const bsrsv_matrix<T> A = make_bsrsv<T>(c.mb, c.bd, c.fill, c.dir, c.base, c.diag_blocks);
         const int32_t         m = c.mb * c.bd;
@@ -203,9 +223,9 @@ namespace
         const T              alpha = scalar_of<T>(c.alpha, 0.25f);
         const std::vector<T> x     = make_vector<T>(m, 3);
 
-        device_vector<rocsparse_int> dptr(convert_vector<rocsparse_int>(A.ptr));
-        guarded_indices<>            dind(A.ind);
-        device_vector<T>             dval(A.val), dx(x), dy(std::vector<T>(m, T{})),
+        device_vector<I>   dptr(convert_vector<I>(A.ptr));
+        guarded_indices<J> dind(A.ind);
+        device_vector<T>   dval(A.val), dx(x), dy(std::vector<T>(m, T{})),
             dalpha(std::vector<T>(1, alpha));
         ASSERT_TRUE(dptr.ptr && dind.ptr && dval.ptr && dx.ptr && dy.ptr && dalpha.ptr);
 
@@ -220,65 +240,153 @@ namespace
         scoped_pointer_mode mode(handle, c.device);
 
         size_t bytes = 0;
-        ASSERT_EQ(bsrsv_buffer_size<T>(handle,
-                                       c.dir,
-                                       c.trans,
-                                       c.mb,
-                                       A.nnzb(),
-                                       descr.d,
-                                       dval.ptr,
-                                       dptr.ptr,
-                                       dind.ptr,
-                                       c.bd,
-                                       info.d,
-                                       &bytes),
-                  rocsparse_status_success);
+        if constexpr(legacy)
+        {
+            ASSERT_EQ(bsrsv_buffer_size<T>(handle,
+                                           c.dir,
+                                           c.trans,
+                                           c.mb,
+                                           A.nnzb(),
+                                           descr.d,
+                                           dval.ptr,
+                                           dptr.ptr,
+                                           dind.ptr,
+                                           c.bd,
+                                           info.d,
+                                           &bytes),
+                      rocsparse_status_success);
+        }
+        else
+        {
+            ASSERT_EQ((rocsparse::bsrsv_buffer_size_template<T, I, J>(handle,
+                                                                      c.dir,
+                                                                      c.trans,
+                                                                      static_cast<J>(c.mb),
+                                                                      static_cast<I>(A.nnzb()),
+                                                                      descr.d,
+                                                                      dval.ptr,
+                                                                      dptr.ptr,
+                                                                      dind.ptr,
+                                                                      c.bd,
+                                                                      info.d,
+                                                                      &bytes)),
+                      rocsparse_status_success);
+        }
         device_vector<char> dbuf(std::max<size_t>(bytes, 1));
         ASSERT_TRUE(dbuf.ptr);
-        ASSERT_EQ(bsrsv_analysis<T>(handle,
-                                    c.dir,
-                                    c.trans,
-                                    c.mb,
-                                    A.nnzb(),
-                                    descr.d,
-                                    dval.ptr,
-                                    dptr.ptr,
-                                    dind.ptr,
-                                    c.bd,
-                                    info.d,
-                                    rocsparse_analysis_policy_reuse,
-                                    rocsparse_solve_policy_auto,
-                                    dbuf.ptr),
-                  rocsparse_status_success);
-        ASSERT_EQ(bsrsv_solve<T>(handle,
-                                 c.dir,
-                                 c.trans,
-                                 c.mb,
-                                 A.nnzb(),
-                                 c.device ? dalpha.ptr : &alpha,
-                                 descr.d,
-                                 dval.ptr,
-                                 dptr.ptr,
-                                 dind.ptr,
-                                 c.bd,
-                                 info.d,
-                                 dx.ptr,
-                                 dy.ptr,
-                                 rocsparse_solve_policy_auto,
-                                 dbuf.ptr),
-                  rocsparse_status_success);
+        if constexpr(legacy)
+        {
+            ASSERT_EQ(bsrsv_analysis<T>(handle,
+                                        c.dir,
+                                        c.trans,
+                                        c.mb,
+                                        A.nnzb(),
+                                        descr.d,
+                                        dval.ptr,
+                                        dptr.ptr,
+                                        dind.ptr,
+                                        c.bd,
+                                        info.d,
+                                        rocsparse_analysis_policy_reuse,
+                                        rocsparse_solve_policy_auto,
+                                        dbuf.ptr),
+                      rocsparse_status_success);
+        }
+        else
+        {
+            ASSERT_EQ((rocsparse::bsrsv_analysis_template<T, I, J>(handle,
+                                                                   c.dir,
+                                                                   c.trans,
+                                                                   static_cast<J>(c.mb),
+                                                                   static_cast<I>(A.nnzb()),
+                                                                   descr.d,
+                                                                   dval.ptr,
+                                                                   dptr.ptr,
+                                                                   dind.ptr,
+                                                                   c.bd,
+                                                                   info.d,
+                                                                   info.d->get_bsrsv_info(),
+                                                                   rocsparse_analysis_policy_reuse,
+                                                                   rocsparse_solve_policy_auto,
+                                                                   dbuf.ptr)),
+                      rocsparse_status_success);
+        }
+        {
+            std::unique_ptr<rocsparse_ut::ScopedMaxGridSizeX> clamp;
+            if(c.max_grid_x > 0)
+            {
+                clamp = std::make_unique<rocsparse_ut::ScopedMaxGridSizeX>(handle, c.max_grid_x);
+            }
+            if constexpr(legacy)
+            {
+                ASSERT_EQ(bsrsv_solve<T>(handle,
+                                         c.dir,
+                                         c.trans,
+                                         c.mb,
+                                         A.nnzb(),
+                                         c.device ? dalpha.ptr : &alpha,
+                                         descr.d,
+                                         dval.ptr,
+                                         dptr.ptr,
+                                         dind.ptr,
+                                         c.bd,
+                                         info.d,
+                                         dx.ptr,
+                                         dy.ptr,
+                                         rocsparse_solve_policy_auto,
+                                         dbuf.ptr),
+                          rocsparse_status_success);
+            }
+            else
+            {
+                const rocsparse_bsrsv_info container = info.d->get_bsrsv_info();
+                ASSERT_EQ((rocsparse::bsrsv_solve_core<T, I, J>(
+                              handle,
+                              c.dir,
+                              c.trans,
+                              static_cast<J>(c.mb),
+                              static_cast<I>(A.nnzb()),
+                              c.device ? dalpha.ptr : &alpha,
+                              descr.d,
+                              dval.ptr,
+                              dptr.ptr,
+                              dind.ptr,
+                              c.bd,
+                              info.d->get_bsrsv_info(c.trans, c.fill),
+                              container->get_indextype(),
+                              static_cast<J*>(container->get_position()),
+                              dx.ptr,
+                              dy.ptr,
+                              rocsparse_solve_policy_auto,
+                              dbuf.ptr)),
+                          rocsparse_status_success);
+            }
+        }
 
-        // The position lives in host or device memory according to the pointer mode.
-        rocsparse_int                position = 0;
-        device_vector<rocsparse_int> dposition(std::vector<rocsparse_int>(1, 0));
-        ASSERT_TRUE(dposition.ptr);
         // A non-unit diagonal needs the diagonal blocks: without them the solve reports a
         // zero pivot (the matrix of a unit diagonal solve does not need them either).
         const bool singular = !c.diag_blocks && c.diag == rocsparse_diag_type_non_unit;
-        ASSERT_EQ(rocsparse_bsrsv_zero_pivot(handle, info.d, c.device ? dposition.ptr : &position),
-                  singular ? rocsparse_status_zero_pivot : rocsparse_status_success);
-        if(c.device)
-            position = to_host(dposition)[0];
+        int64_t    position = 0;
+        if constexpr(legacy)
+        {
+            // The position lives in host or device memory according to the pointer mode.
+            rocsparse_int                pos = 0;
+            device_vector<rocsparse_int> dposition(std::vector<rocsparse_int>(1, 0));
+            ASSERT_TRUE(dposition.ptr);
+            ASSERT_EQ(rocsparse_bsrsv_zero_pivot(handle, info.d, c.device ? dposition.ptr : &pos),
+                      singular ? rocsparse_status_zero_pivot : rocsparse_status_success);
+            position = c.device ? to_host(dposition)[0] : pos;
+        }
+        else
+        {
+            const rocsparse_bsrsv_info container = info.d->get_bsrsv_info();
+            ASSERT_EQ(container->get_indextype(), rocsparse::get_indextype<J>());
+            ASSERT_NE(container->get_position(), nullptr);
+            ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+            const J pivot
+                = rocsparse_ut::to_host(static_cast<const J*>(container->get_position()), 1)[0];
+            position = (pivot == std::numeric_limits<J>::max()) ? -1 : pivot;
+        }
         if(singular)
         {
             // Every diagonal block is missing, so the first zero pivot is block row 0.
@@ -300,8 +408,8 @@ namespace
     class L2DeviceBsrsv : public rocsparse_ut::HandleTest
     {
     protected:
-        template <typename T>
-        void sweep_dims(const std::vector<int32_t>& dims, int32_t mb)
+        template <typename T, typename I = rocsparse_int, typename J = rocsparse_int>
+        void sweep_dims(const std::vector<int32_t>& dims, int32_t mb, int max_grid_x = 0)
         {
             int n = 0;
             for(const int32_t bd : dims)
@@ -311,18 +419,19 @@ namespace
                             {rocsparse_operation_none, rocsparse_operation_transpose})
                         {
                             solve_case c;
-                            c.bd     = bd;
-                            c.mb     = mb;
-                            c.fill   = fill;
-                            c.diag   = diag;
-                            c.trans  = trans;
-                            c.dir    = ((n / 2) % 2) ? rocsparse_direction_column
-                                                     : rocsparse_direction_row;
-                            c.base   = (n / 3) % 2;
-                            c.device = (n % 3) == 1;
-                            c.alpha  = (n % 4 == 3) ? -2.0f : 1.0f;
+                            c.bd         = bd;
+                            c.mb         = mb;
+                            c.fill       = fill;
+                            c.diag       = diag;
+                            c.trans      = trans;
+                            c.dir        = ((n / 2) % 2) ? rocsparse_direction_column
+                                                         : rocsparse_direction_row;
+                            c.base       = (n / 3) % 2;
+                            c.device     = (n % 3) == 1;
+                            c.alpha      = (n % 4 == 3) ? -2.0f : 1.0f;
+                            c.max_grid_x = max_grid_x;
                             ++n;
-                            run_bsrsv<T>(handle, c);
+                            run_bsrsv<T, I, J>(handle, c);
                             if(HasFailure())
                                 return;
                         }
@@ -350,6 +459,54 @@ namespace
             c.mb          = 8;
             c.diag_blocks = false;
             run_bsrsv<float>(handle, c);
+        }
+    }
+
+    // A grid of one block is smaller than the launch of 8 block rows on either
+    // wavefront size. Every offset fits in rocsparse_int, so the host keeps the
+    // narrow kernels, and the one block walks all the row groups: the general
+    // kernels on wave32, and on wave64 the shared ones with BSRDIM 8, 16 and 32
+    // and the general one above 32.
+    TEST_F(L2DeviceBsrsv, clamped_grid_narrow_kernels)
+    {
+        sweep_dims<float>({2, 8, 9, 16, 17, 32, 33, 40}, 8, 1);
+        sweep_dims<double>({3, 20}, 8, 1);
+        sweep_dims<rocsparse_float_complex>({4, 17}, 8, 1);
+        sweep_dims<rocsparse_double_complex>({2, 33}, 8, 1);
+
+        for(const int32_t bd : {2, 9})
+        {
+            solve_case c;
+            c.bd          = bd;
+            c.mb          = 8;
+            c.diag_blocks = false;
+            c.max_grid_x  = 1;
+            run_bsrsv<float>(handle, c);
+        }
+    }
+
+    // The (int64, int32) and (int64, int64) templates run only the wide kernels:
+    // the general ones on wave32, and on wave64 the shared ones with BSRDIM 8, 16
+    // and 32 and the general one above 32. Block dimensions above the wavefront
+    // size take more than one pass of the lane-strided loops on wave32.
+    TEST_F(L2DeviceBsrsv, wide_index_types)
+    {
+        const std::vector<int32_t> dims{2, 3, 8, 9, 16, 17, 32, 33, 40};
+        sweep_dims<float, int64_t, int64_t>(dims, 8);
+        sweep_dims<float, int64_t, int32_t>(dims, 8);
+        sweep_dims<float, int64_t, int64_t>({2, 17, 33}, 8, 1);
+        sweep_dims<double, int64_t, int32_t>({3, 20}, 8);
+        sweep_dims<rocsparse_float_complex, int64_t, int64_t>({4, 17}, 8);
+        sweep_dims<rocsparse_double_complex, int64_t, int32_t>({2, 33}, 6);
+
+        for(const int32_t bd : {2, 9})
+        {
+            solve_case c;
+            c.bd          = bd;
+            c.mb          = 8;
+            c.diag_blocks = false;
+            run_bsrsv<float, int64_t, int64_t>(handle, c);
+            run_bsrsv<float, int64_t, int32_t>(handle, c);
         }
     }
 }

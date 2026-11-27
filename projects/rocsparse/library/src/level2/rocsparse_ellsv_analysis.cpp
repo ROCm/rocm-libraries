@@ -75,7 +75,7 @@ namespace rocsparse
         const size_t sizeof_I = sizeof(I);
 
         const uint32_t startbit = 0;
-        const uint32_t endbit   = rocsparse::clz(static_cast<int64_t>(m));
+        const uint32_t endbit   = rocsparse::radix_end_bit<int32_t>(m);
 
         size_t rocprim_size = 0;
         RETURN_IF_ROCSPARSE_ERROR((rocsparse::primitives::radix_sort_pairs_buffer_size<int32_t, I>(
@@ -411,7 +411,7 @@ rocsparse_status rocsparse::ellsv_analysis_buffer_size(rocsparse_handle         
     size += rocsparse::ellsv_align256(sizeof(int32_t) * static_cast<size_t>(m));
 
     const uint32_t startbit = 0;
-    const uint32_t endbit   = rocsparse::clz(m);
+    const uint32_t endbit   = rocsparse::radix_end_bit<int32_t>(m);
 
     size_t rocprim_size = 0;
     auto   calculate_rocprim_size

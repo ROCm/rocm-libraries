@@ -89,6 +89,19 @@ namespace rocsparse
                  rocsparse_fill_mode    fill_mode,
                  rocsparse::trm_info_t* trm_info);
 
+        // True when one of this container's analysis slots points at trm.
+        bool holds(const rocsparse::trm_info_t* trm) const
+        {
+            for(const rocsparse::trm_info_t* slot : this->m_data)
+            {
+                if(slot == trm)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         rocsparse_indextype get_indextype_J() const;
 
         rocsparse::trm_info_t* create(rocsparse_handle          handle,

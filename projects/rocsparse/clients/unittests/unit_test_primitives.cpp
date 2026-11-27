@@ -550,3 +550,51 @@ TEST_F(PrimitiveTest, segmented_radix_sort_pairs_i32_i32)
     EXPECT_EQ(got_keys, (std::vector<K>{2, 4, 6, 1, 5, 9}));
     EXPECT_EQ(got_vals, (std::vector<V>{20, 40, 60, 10, 50, 90}));
 }
+
+// ---------------------------------------------------------------------------
+// sort_csr_column_indices : the end bit comes from the column count n. With
+// 64-bit column indices and n = 2^32 + 100, a count narrowed to 32 bits gives
+// 100, so only the low 7 bits would be sorted and the keys below would come
+// out as {130, 2^32 + 5, 100}.
+// ---------------------------------------------------------------------------
+TEST_F(PrimitiveTest, sort_csr_column_indices_i64_past_uint32)
+{
+    using I = int64_t;
+    using J = int64_t;
+
+    const J              big = (static_cast<J>(1) << 32) + 5;
+    const J              n   = (static_cast<J>(1) << 32) + 100;
+    const J              m   = 1;
+    const std::vector<J> col_in{130, 100, big};
+    const std::vector<I> row_ptr{0, 3};
+    const I              nnz = static_cast<I>(col_in.size());
+
+    device_vector<I> d_row_ptr(row_ptr);
+    device_vector<J> d_col(col_in);
+    device_vector<J> d_col1(col_in.size());
+    device_vector<J> d_col2(col_in.size());
+    ASSERT_NE(d_row_ptr.ptr, nullptr);
+    ASSERT_NE(d_col.ptr, nullptr);
+    ASSERT_NE(d_col1.ptr, nullptr);
+    ASSERT_NE(d_col2.ptr, nullptr);
+
+    size_t buffer_size = 0;
+    expect_success(prim::sort_csr_column_indices_buffer_size<I, J>(
+        handle, m, n, nnz, d_row_ptr.ptr, &buffer_size));
+
+    device_vector<char> d_buffer(buffer_size ? buffer_size : 1);
+    ASSERT_NE(d_buffer.ptr, nullptr);
+
+    expect_success(prim::sort_csr_column_indices<I, J>(handle,
+                                                       m,
+                                                       n,
+                                                       nnz,
+                                                       d_row_ptr.ptr,
+                                                       static_cast<const J*>(d_col.ptr),
+                                                       d_col1.ptr,
+                                                       d_col2.ptr,
+                                                       d_buffer.ptr));
+    UT_CHECK_HIP(hipDeviceSynchronize());
+
+    EXPECT_EQ(to_host(d_col2.ptr, col_in.size()), (std::vector<J>{100, 130, big}));
+}

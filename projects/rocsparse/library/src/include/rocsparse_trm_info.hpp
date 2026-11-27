@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -100,6 +100,14 @@ namespace rocsparse
         rocsparse_indextype         get_index_indextype() const;
         void                        set_offset_indextype(rocsparse_indextype);
         void                        set_index_indextype(rocsparse_indextype);
+
+        // True when this analysis was built with the row-pointer and column-index
+        // types the caller is about to use.
+        bool has_indextypes(rocsparse_indextype offset_type, rocsparse_indextype index_type) const
+        {
+            return this->get_offset_indextype() == offset_type
+                   && this->get_index_indextype() == index_type;
+        }
 
         int64_t get_nnz() const;
         void    set_nnz(int64_t);

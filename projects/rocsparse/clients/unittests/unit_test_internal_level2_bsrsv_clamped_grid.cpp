@@ -43,6 +43,9 @@
 // than the device holds resident, so each block owns more than one row group.
 // A grid-stride loop hangs on it; a hang shows up as the test timing out.
 //
+// Pivot puts a numerically zero diagonal block past the first chunk of a
+// one-block grid, so only the chunk walk reports it.
+//
 #include "unit_test_utils.hpp"
 
 #include "rocsparse.h"
@@ -419,3 +422,115 @@ TEST_P(BsrsvClampedGridLarge, matches_reference)
 INSTANTIATE_TEST_SUITE_P(BsrsvClampedGridLarge,
                          BsrsvClampedGridLarge,
                          ::testing::Values(rocsparse_fill_mode_lower, rocsparse_fill_mode_upper));
+
+namespace
+{
+    class BsrsvClampedGridPivot : public HandleTest
+    {
+    };
+
+    // Block row singular_row of an 8 block-row matrix of 2-by-2 blocks has a
+    // numerically zero diagonal, which only the solve can find. Solves A with
+    // maxGridSize[0] = 1 and returns the zero pivot rocsparse_bsrsv_zero_pivot
+    // reports.
+    void clamped_zero_pivot(rocsparse_handle    handle,
+                            rocsparse_fill_mode fill,
+                            rocsparse_int       singular_row,
+                            rocsparse_int&      position)
+    {
+        BlockBidiagonal A(8, 2, rocsparse_direction_row, fill);
+        const size_t    blk  = static_cast<size_t>(A.bd) * A.bd;
+        const size_t    diag = (fill == rocsparse_fill_mode_lower)
+                                   ? static_cast<size_t>(A.row_ptr[singular_row + 1] - 1)
+                                   : static_cast<size_t>(A.row_ptr[singular_row]);
+        for(rocsparse_int bi = 0; bi < A.bd; ++bi)
+        {
+            A.val[diag * blk + static_cast<size_t>(bi) * A.bd + bi] = 0.0;
+        }
+
+        device_vector<rocsparse_int> d_row_ptr{A.row_ptr};
+        device_vector<rocsparse_int> d_col_ind{A.col_ind};
+        device_vector<double>        d_val{A.val};
+        const size_t                 n = static_cast<size_t>(A.mb) * A.bd;
+        device_vector<double>        d_x{std::vector<double>(n, 1.0)};
+        device_vector<double>        d_y{std::vector<double>(n, -99.0)};
+        ASSERT_TRUE(d_row_ptr.ptr && d_col_ind.ptr && d_val.ptr && d_x.ptr && d_y.ptr);
+
+        BsrsvDescriptors owner;
+        ASSERT_EQ(rocsparse_create_mat_descr(&owner.descr), rocsparse_status_success);
+        ASSERT_EQ(rocsparse_create_mat_info(&owner.info), rocsparse_status_success);
+        ASSERT_EQ(rocsparse_set_mat_fill_mode(owner.descr, fill), rocsparse_status_success);
+
+        size_t buffer_size = 0;
+        ASSERT_EQ(rocsparse_dbsrsv_buffer_size(handle,
+                                               A.dir,
+                                               rocsparse_operation_none,
+                                               A.mb,
+                                               A.nnzb(),
+                                               owner.descr,
+                                               d_val,
+                                               d_row_ptr,
+                                               d_col_ind,
+                                               A.bd,
+                                               owner.info,
+                                               &buffer_size),
+                  rocsparse_status_success);
+        device_vector<char> buffer(std::max<size_t>(buffer_size, 1));
+        ASSERT_TRUE(buffer.ptr);
+
+        const ScopedMaxGridSizeX clamp(handle, 1);
+        ASSERT_EQ(rocsparse_dbsrsv_analysis(handle,
+                                            A.dir,
+                                            rocsparse_operation_none,
+                                            A.mb,
+                                            A.nnzb(),
+                                            owner.descr,
+                                            d_val,
+                                            d_row_ptr,
+                                            d_col_ind,
+                                            A.bd,
+                                            owner.info,
+                                            rocsparse_analysis_policy_force,
+                                            rocsparse_solve_policy_auto,
+                                            buffer.ptr),
+                  rocsparse_status_success);
+
+        const double alpha = 1.0;
+        ASSERT_EQ(rocsparse_dbsrsv_solve(handle,
+                                         A.dir,
+                                         rocsparse_operation_none,
+                                         A.mb,
+                                         A.nnzb(),
+                                         &alpha,
+                                         owner.descr,
+                                         d_val,
+                                         d_row_ptr,
+                                         d_col_ind,
+                                         A.bd,
+                                         owner.info,
+                                         d_x,
+                                         d_y,
+                                         rocsparse_solve_policy_auto,
+                                         buffer.ptr),
+                  rocsparse_status_success);
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+        position = -2;
+        EXPECT_EQ(rocsparse_bsrsv_zero_pivot(handle, owner.info, &position),
+                  rocsparse_status_zero_pivot);
+    }
+}
+
+// With block_dim 2 a wave64 launch takes the shared kernel and a wave32 launch
+// the general one. A 128-thread block solves the first 4 map slots on wave32
+// and 2 on wave64, so the singular rows sit past them: lower row 6 is map slot
+// 6, and upper row 1 is map slot 6 as well. Only the walk over the later
+// chunks reaches them.
+TEST_F(BsrsvClampedGridPivot, zero_pivot_past_first_chunk)
+{
+    rocsparse_int position = -2;
+    ASSERT_NO_FATAL_FAILURE(clamped_zero_pivot(handle, rocsparse_fill_mode_lower, 6, position));
+    EXPECT_EQ(position, 6);
+    ASSERT_NO_FATAL_FAILURE(clamped_zero_pivot(handle, rocsparse_fill_mode_upper, 1, position));
+    EXPECT_EQ(position, 1);
+}
