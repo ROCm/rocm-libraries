@@ -34,7 +34,7 @@ from rocke.numeric import storage
 from rocke.numeric.compare import peak_relative_error
 from rocke.runtime.device_array import DeviceArray
 from rocke.tests.gpu import current_device_arch_in
-from rocke.tests.lanes import BINDING_LANE, import_or_skip_until
+from rocke.tests.lanes import BUILD_VARIANT, import_or_skip_until
 
 from builders.common.conv_reference import conv_dgrad_reference, conv_fwd_reference
 from kernels.common._conv_implicit_gemm_common import ConvDataSpec, ConvProblem
@@ -740,7 +740,7 @@ def _cpp_lower(eng, spec):
 def test_fwd_cpp_engine_emits_the_python_ir(row, dtype):
     """The C++ engine lowers each forward row to the Python engine's LLVM text
     (patch, chiplet, dtl, pgr, K pad); it refuses what Python refuses."""
-    eng = import_or_skip_until("rocke_library_engine", BINDING_LANE)
+    eng = import_or_skip_until("rocke_library_engine", BUILD_VARIANT)
     from rocke.core.lower_llvm import lower_kernel_to_llvm
 
     spec = _fwd_spec(row, dtype)
@@ -751,7 +751,7 @@ def test_fwd_cpp_engine_emits_the_python_ir(row, dtype):
 
 
 def test_fwd_cpp_engine_refuses_like_python():
-    eng = import_or_skip_until("rocke_library_engine", BINDING_LANE)
+    eng = import_or_skip_until("rocke_library_engine", BUILD_VARIANT)
     row = _FWD_ROWS[1]
     for why, kw in (
         ("dtl is built on the patch GEMM only", dict(patch=False, dtl=True)),
