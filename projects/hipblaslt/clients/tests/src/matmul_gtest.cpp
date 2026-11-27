@@ -637,9 +637,10 @@ namespace
     }
 
     // The whole uniform_check path on real kernels: with uniform summation order off, some
-    // gfx950 solution for bf16 1000 x 1000 x 7777 sums rows in different orders, so the check
-    // must fail at least one solution, and with the order off no failure counts as a failed check.
-    TEST(UniformCheckBench, pre_checkin_UsoOffFailsSomeSolution)
+    // gfx950 solution for bf16 1000 x 1000 x 7777 sums rows, or columns, in different orders, so
+    // the check in direction must fail at least one solution, and with the order off no failure
+    // counts as a failed check.
+    void expectUsoOffFailsSomeSolution(hipblaslt_uniform_check direction)
     {
         int             device = 0;
         hipDeviceProp_t props;
@@ -663,7 +664,7 @@ namespace
         arg.beta                                            = 0;
         arg.initialization                                  = hipblaslt_initialization::hpl;
         arg.uniform_summation_order                         = 0;
-        arg.uniform_check                                   = hipblaslt_uniform_check::row;
+        arg.uniform_check                                   = direction;
         arg.algo_method                                     = 1;
         arg.requested_solution_num                          = -1;
         arg.unit_check                                      = 0;
@@ -676,18 +677,31 @@ namespace
                 &results);
             testing_matmul(arg);
         }
+        const char* expected = direction == hipblaslt_uniform_check::column
+                                   ? "uniform_check column failed"
+                                   : "uniform_check row failed";
+
         int uniformFailures = 0;
         for(int i = 0; i < results.size(); i++)
         {
             const auto& r = results.GetTestPartResult(i);
-            if(r.failed()
-               && std::string(r.message()).find("uniform_check row failed") != std::string::npos)
+            if(r.failed() && std::string(r.message()).find(expected) != std::string::npos)
                 uniformFailures++;
             else
                 ADD_FAILURE() << r.message();
         }
         EXPECT_GT(uniformFailures, 0);
         EXPECT_EQ(hipblaslt_bench_options::verification_failures(), before);
+    }
+
+    TEST(UniformCheckBench, pre_checkin_UsoOffFailsSomeSolution)
+    {
+        expectUsoOffFailsSomeSolution(hipblaslt_uniform_check::row);
+    }
+
+    TEST(UniformCheckBench, pre_checkin_UsoOffFailsSomeSolutionColumn)
+    {
+        expectUsoOffFailsSomeSolution(hipblaslt_uniform_check::column);
     }
 
     // Runs an f32 m x n x 64 uniform_check case whose D has a single line in direction, so nothing
@@ -740,6 +754,70 @@ namespace
     TEST(UniformCheckBench, pre_checkin_OneColumnSkipsColumnCheck)
     {
         expectSingleLineSkips(hipblaslt_uniform_check::column, 64, 1, "N is 1");
+    }
+
+    // Runs a 64 x 64 x 64 f32 GEMM with uniform_check in the given direction and one bit of D
+    // flipped for the check, expects the check to report exactly that failure, and returns how
+    // many checks of D it counted toward --verify_strict.
+    int64_t uniform_check_inject_failures(hipblaslt_uniform_check direction, int32_t uso)
+    {
+        Arguments arg{};
+        arg.init();
+        snprintf(arg.function, sizeof(arg.function), "%s", "matmul");
+        arg.a_type = arg.b_type = arg.c_type = arg.d_type = arg.aux_type = HIP_R_32F;
+        arg.compute_type                                                 = HIPBLAS_COMPUTE_32F;
+        arg.transA = arg.transB = 'N';
+        arg.M[0] = arg.N[0] = arg.K[0] = 64;
+        arg.lda[0] = arg.ldb[0] = arg.ldc[0] = arg.ldd[0] = arg.lde[0] = 64;
+        arg.stride_a[0] = arg.stride_b[0] = arg.stride_c[0] = arg.stride_d[0] = arg.stride_e[0]
+            = 64 * 64;
+        arg.alpha                   = 1;
+        arg.beta                    = 0;
+        arg.unit_check              = 0;
+        arg.fast_check              = 0;
+        arg.uniform_summation_order = uso;
+        arg.uniform_check           = direction;
+        arg.uniform_check_inject    = 1;
+
+        const int64_t                  before = hipblaslt_bench_options::verification_failures();
+        ::testing::TestPartResultArray failures;
+        {
+            ::testing::ScopedFakeTestPartResultReporter reporter(
+                ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ONLY_CURRENT_THREAD,
+                &failures);
+            testing_matmul(arg);
+        }
+        const char* expected = direction == hipblaslt_uniform_check::column
+                                   ? "uniform_check column failed"
+                                   : "uniform_check row failed";
+        EXPECT_EQ(failures.size(), 1);
+        for(int i = 0; i < failures.size(); i++)
+            EXPECT_NE(std::string(failures.GetTestPartResult(i).message()).find(expected),
+                      std::string::npos)
+                << failures.GetTestPartResult(i).message();
+        return hipblaslt_bench_options::verification_failures() - before;
+    }
+
+    // A uniform_check failure counts toward --verify_strict only with uniform summation order
+    // on, which promises that every row, or column, of D is identical.
+    TEST(BenchVerify, smoke_UniformCheckColumnFailureCountsWithUniformOrder)
+    {
+        EXPECT_EQ(uniform_check_inject_failures(hipblaslt_uniform_check::column, 1), 1);
+    }
+
+    TEST(BenchVerify, smoke_UniformCheckColumnFailureDoesNotCountWithoutUniformOrder)
+    {
+        EXPECT_EQ(uniform_check_inject_failures(hipblaslt_uniform_check::column, 0), 0);
+    }
+
+    TEST(BenchVerify, smoke_UniformCheckRowFailureCountsWithUniformOrder)
+    {
+        EXPECT_EQ(uniform_check_inject_failures(hipblaslt_uniform_check::row, 1), 1);
+    }
+
+    TEST(BenchVerify, smoke_UniformCheckRowFailureDoesNotCountWithoutUniformOrder)
+    {
+        EXPECT_EQ(uniform_check_inject_failures(hipblaslt_uniform_check::row, 0), 0);
     }
 
     TEST(PreswizzledScaleLayout, smoke_rejects_nontransposed_A)

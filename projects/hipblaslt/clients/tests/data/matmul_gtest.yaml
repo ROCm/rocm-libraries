@@ -7101,4 +7101,46 @@ Tests:
   require_solution_chip_ids: [0x75a0, 0x75a3]
   gpu_arch: '950'
 
+# The same check along N: every column of D must equal column 0 when every column of op(B) and C
+# does. 256x256x65536 has witnesses only outside the heuristic top 256, so only the
+# all-solutions entry runs it.
+- name: matmul_uniform_columns_hpl
+  category: pre_checkin
+  function:
+    matmul:
+      - { a_type: bf16_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scale_type: f32_r, transA: N, transB: N, M: 1000, N: 1000, K: 7777, batch_count: 1 }
+      - { a_type: f16_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scale_type: f32_r, transA: N, transB: T, M: 1000, N: 1000, K: 7777, batch_count: 1 }
+      - { a_type: bf16_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scale_type: f32_r, transA: N, transB: N, M: 512, N: 512, K: 4096, batch_count: 4 }
+  alpha: 1
+  beta: 0
+  initialization: hpl
+  uniform_summation_order: 1
+  uniform_check: column
+  algo_method: 0
+  requested_solution_num: 256
+  unit_check: 0
+  allow_no_solution: 1
+  require_solution_chip_ids: [0x75a0, 0x75a3]
+  gpu_arch: '950'
+
+- name: matmul_uniform_columns_hpl_all_solutions
+  category: pre_checkin
+  function:
+    matmul:
+      - { a_type: bf16_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scale_type: f32_r, transA: N, transB: N, M: 1000, N: 1000, K: 7777, batch_count: 1 }
+      - { a_type: f16_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scale_type: f32_r, transA: N, transB: T, M: 1000, N: 1000, K: 7777, batch_count: 1 }
+      - { a_type: bf16_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scale_type: f32_r, transA: N, transB: N, M: 512, N: 512, K: 4096, batch_count: 4 }
+      - { a_type: bf16_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scale_type: f32_r, transA: N, transB: N, M: 256, N: 256, K: 65536, batch_count: 1 }
+  alpha: 1
+  beta: 0
+  initialization: hpl
+  uniform_summation_order: 1
+  uniform_check: column
+  algo_method: 1
+  requested_solution_num: -1
+  unit_check: 0
+  allow_no_solution: 1
+  require_solution_chip_ids: [0x75a0, 0x75a3]
+  gpu_arch: '950'
+
 ...
