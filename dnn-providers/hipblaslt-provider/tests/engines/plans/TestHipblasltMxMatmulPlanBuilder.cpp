@@ -741,8 +741,9 @@ TEST(TestMxGraphConstraints, DeclinesMisalignedShapes)
                    "K must be divisible by 128");
 }
 
-// rocRoller (gfx950) reads every operand-order combination; the plan transposes a
-// scale whose order differs from its operand's.
+// Every operand-order combination is accepted on gfx950: K-contiguous A and B on Tensile
+// (or rocRoller after the fallback), the rest on rocRoller, which transposes a scale in
+// the other order.
 TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableAcceptsEveryLayoutOnGfx950)
 {
     if(!onArch("gfx950"))
@@ -762,6 +763,14 @@ TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableAcceptsEveryLayoutOnGfx9
             EXPECT_TRUE(_builder.isApplicable(_handle, graph))
                 << toString(layout) << " mnContiguousScales=" << mnContiguousScales;
         }
+    }
+    for(const bool mnContiguousScales : {false, true})
+    {
+        auto fb = createMxGraphWithLayout(
+            MxOperandLayout::K_K, DT::FP4_E2M1, DT::HALF, DT::UNSET, mnContiguousScales);
+        GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
+        EXPECT_TRUE(_builder.isApplicable(_handle, graph))
+            << "FP4_E2M1 K_K mnContiguousScales=" << mnContiguousScales;
     }
 }
 

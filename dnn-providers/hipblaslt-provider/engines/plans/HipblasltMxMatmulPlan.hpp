@@ -35,6 +35,12 @@ std::optional<MxOrder> packedMxOrder(
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tensor,
     size_t kAxisFromEnd);
 
+// True when our A ([MN, K]) and our B ([K, MN]) are both packed K-contiguous
+// (hipBLAS TN), the only operands the swizzled scale formats serve.
+bool mxOperandsKContiguous(
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& xA,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& xB);
+
 #if WORKAROUND_ISSUE_14286
 // The MX scale layout a Tensile kernel reads, from its name: the abbreviated
 // MXScaleFormat value after "_MXSF" ("HPS" HostPreSwizzle = gfx950 32x8, "IMS"
@@ -51,12 +57,24 @@ std::optional<MxScaleFormat>
     kernelScaleFormat(bool isRocRoller, const std::string& layoutToken, MxScaleFormat prepared);
 #endif
 
-// Scale format for the device behind the handle's stream: SWIZZLED_GFX1250 on
-// gfx1250 (Tensile only, VEC32 + implicit swizzle), NATURAL elsewhere (rocRoller
-// on gfx950). SWIZZLED_GFX950 is never selected here; createMxMatmulPlan()
-// accepts it.
-MxScaleFormat selectMxScaleFormat(const HipdnnEnginePluginHandle& handle);
-MxScaleFormat mxScaleFormatForArch(std::string_view arch);
+// Scale format for device arch `arch` and the graph's MX inputs xA (our A, [M, K])
+// and xB (our B, [K, N]):
+//  - gfx1250: SWIZZLED_GFX1250 (Tensile only, VEC32 + implicit swizzle).
+//  - gfx950: SWIZZLED_GFX950 (Tensile, BLK32_UE8M0_32_8_EXT) when A and B are both
+//    FP4_E2M1 or both FP8_E4M3, the only pairs hipBLASLt runs on its gfx950 Tensile
+//    MX kernels, and both packed K-contiguous (hipBLAS TN), the only operands the
+//    relayout kernel swizzles scales for. createMxMatmulPlan() falls back to NATURAL
+//    when that plan cannot be built.
+//  - NATURAL (rocRoller) otherwise.
+MxScaleFormat mxScaleFormatFor(
+    std::string_view arch,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& xA,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& xB);
+// mxScaleFormatFor() for the device behind the handle's stream.
+MxScaleFormat selectMxScaleFormat(
+    const HipdnnEnginePluginHandle& handle,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& xA,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& xB);
 
 // One hipBLAS scale operand: which tensor feeds it and how it must be prepared.
 struct MxScaleOperand
