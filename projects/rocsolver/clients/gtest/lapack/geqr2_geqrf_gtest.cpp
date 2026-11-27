@@ -110,7 +110,8 @@ const vector<vector<int>> large_batch_size_range = {
 };
 
 const vector<int> large_batch_n_size_range = {
-    34,
+    15,
+    129,
 };
 
 const vector<vector<int64_t>> large_batch_size_range_64 = {
@@ -119,7 +120,8 @@ const vector<vector<int64_t>> large_batch_size_range_64 = {
 };
 
 const vector<int64_t> large_batch_n_size_range_64 = {
-    34,
+    15,
+    129,
 };
 
 template <typename I>
