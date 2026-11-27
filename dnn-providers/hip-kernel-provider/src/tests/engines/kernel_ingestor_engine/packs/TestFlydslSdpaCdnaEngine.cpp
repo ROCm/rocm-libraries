@@ -35,6 +35,7 @@
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "core/Handle.hpp"
@@ -1608,6 +1609,73 @@ TEST(TestFlydslSdpaCdnaKernelMatch, RunsABiasTheVectorizedObjectsCannotReadOnThe
     }
     // A strided object is a bias object: it serves no graph without a bias.
     EXPECT_FALSE(cdnaAdmits(cdnaSpec(), kstrided));
+}
+
+// ---------------------------------------------------------------------------
+// The decline log: a bias graph the matcher declines says why at INFO. The size message
+// appears only where the (batch, head) view's bytes are what failed.
+// ---------------------------------------------------------------------------
+
+/// An f32 bias [1, 1, seq, seq] laid out with queries contiguous and keys @p keyPitch
+/// elements apart (a transposed, padded view), over a one-head bf16 graph.
+SdpaGraphSpec permutedF32BiasSpec(int64_t seq, int64_t keyPitch)
+{
+    auto spec = cdnaSpec();
+    spec.heads = 1;
+    spec.kvHeads = 1;
+    spec.seqLenQ = seq;
+    spec.seqLenKv = seq;
+    spec.withBias = true;
+    spec.biasDataType = DataType::FLOAT;
+    spec.biasDims = {1, 1, seq, seq};
+    spec.biasStrides = {seq * keyPitch, seq * keyPitch, 1, keyPitch};
+    return spec;
+}
+
+TEST(TestFlydslSdpaCdnaBiasDeclineLog, NamesTheViewBytesWhereThe32BitSizeTestFailed)
+{
+    // 8999 * 65536 + 9000 f32 elements = 2.36e9 bytes, past 2^31 - 1. The same graph with a
+    // packed bias is served, so the bias view's size is the only cause.
+    auto packed = permutedF32BiasSpec(9000, 9000);
+    packed.biasStrides.clear();
+    ASSERT_TRUE(cdnaGraphMatch(packed).has_value());
+
+    const auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    EXPECT_FALSE(cdnaGraphMatch(permutedF32BiasSpec(9000, 65536)).has_value());
+    EXPECT_TRUE(
+        recorder.hasLogContaining(HIPDNN_SEV_INFO, "flydsl_sdpa declined the graph [bias]"));
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "one (batch, head) view spans"));
+    EXPECT_TRUE(
+        recorder.hasLogContaining(HIPDNN_SEV_INFO, "past the 32-bit limit of 2147483647 bytes"));
+}
+
+TEST(TestFlydslSdpaCdnaBiasDeclineLog, GivesAGenericReasonForABiasThatFailsAnotherTest)
+{
+    // A key extent that is neither 1 nor Skv: no object reads it, whatever its size.
+    auto spec = cdnaSpec();
+    spec.withBias = true;
+    spec.biasDataType = DataType::BFLOAT16;
+    spec.biasDims = {1, 1, 256, 255};
+    spec.biasStrides = {65280, 65280, 255, 1};
+
+    const auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    EXPECT_FALSE(cdnaGraphMatch(spec).has_value());
+    EXPECT_TRUE(
+        recorder.hasLogContaining(HIPDNN_SEV_INFO, "flydsl_sdpa declined the graph [bias]"));
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "bias (uid "));
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "is not one the kernels read"));
+    EXPECT_FALSE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "past the 32-bit limit"));
+}
+
+TEST(TestFlydslSdpaCdnaBiasDeclineLog, LogsNoBiasDeclineForAViewWithinThe32BitLimit)
+{
+    // 8191 * 57344 + 8192 f32 elements = 1.88e9 bytes: served, so nothing is logged.
+    const auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    EXPECT_TRUE(cdnaGraphMatch(permutedF32BiasSpec(8192, 57344)).has_value());
+    EXPECT_FALSE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "declined the graph [bias]"));
 }
 
 // ---------------------------------------------------------------------------

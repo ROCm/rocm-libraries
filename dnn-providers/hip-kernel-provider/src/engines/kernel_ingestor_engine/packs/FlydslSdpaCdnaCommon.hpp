@@ -29,6 +29,7 @@
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginDeviceBuffers.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_plugin_sdk/RuntimePassByValue.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
@@ -47,6 +48,7 @@
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaRngDump.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaShared.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaVarlen.hpp"
+#include "engines/kernel_ingestor_engine/packs/SdpaGraphMatch.hpp"
 
 /**
  * @file FlydslSdpaCdnaCommon.hpp
@@ -480,16 +482,26 @@ struct BiasStrides
 inline constexpr std::string_view BIAS_KSTRIDED_FIELD = "bias_kstrided";
 
 /**
+ * @brief A bias the strided objects read but for the size test: its strides as they take
+ *        them, and the bytes of one (batch, head) view (nullopt when they overflow int64).
+ */
+struct StridedBiasView
+{
+    BiasStrides strides;
+    std::optional<int64_t> viewBytes;
+};
+
+/**
  * @brief The bias's strides as the strided bias objects read it, or nullopt for one no
- *        object can add.
+ *        object can add, whatever its size.
  *
  * The strided objects (vendored-kernel modification 31) read each key on its own: in the
  * query's dtype or f32, right-aligned to [B, H, Sq, Skv] with any axis broadcast (extent 1,
  * absent or stride 0; the keys too), the tensor declaring 16-byte alignment. Its
  * (batch, head) slice is one buffer view of (Sq - 1) * stride_q + (Skv - 1) * stride_k + 1
- * elements, every byte offset within it 32-bit, as each stride is.
+ * elements.
  */
-inline std::optional<BiasStrides> servableStridedBias(const data_objects::TensorAttributes& bias,
+inline std::optional<StridedBiasView> stridedBiasView(const data_objects::TensorAttributes& bias,
                                                       const SdpaProblem& problem)
 {
     const auto* dims = bias.dims();
@@ -529,14 +541,31 @@ inline std::optional<BiasStrides> servableStridedBias(const data_objects::Tensor
         }
         stride[static_cast<size_t>(axis)] = value;
     }
+    StridedBiasView view{BiasStrides{stride[0], stride[1], stride[2], stride[3], f32, false},
+                         std::nullopt};
     const auto lastRow = checkedProduct({problem.seqLenQ - 1, stride[2]});
     const auto lastKey = checkedProduct({problem.seqLenKv - 1, stride[3]});
-    if(!lastRow.has_value() || !lastKey.has_value()
-       || (*lastRow + *lastKey + 1) * elementBytes > INT32_LIMIT)
+    if(lastRow.has_value() && lastKey.has_value())
+    {
+        view.viewBytes = (*lastRow + *lastKey + 1) * elementBytes;
+    }
+    return view;
+}
+
+/**
+ * @brief The bias's strides as the strided bias objects read it, or nullopt for one no
+ *        object can add: stridedBiasView()'s, its (batch, head) view's byte offsets within
+ *        32 bits, as each stride is.
+ */
+inline std::optional<BiasStrides> servableStridedBias(const data_objects::TensorAttributes& bias,
+                                                      const SdpaProblem& problem)
+{
+    const auto view = stridedBiasView(bias, problem);
+    if(!view.has_value() || !view->viewBytes.has_value() || *view->viewBytes > INT32_LIMIT)
     {
         return std::nullopt;
     }
-    return BiasStrides{stride[0], stride[1], stride[2], stride[3], f32, false};
+    return view->strides;
 }
 
 /**
@@ -636,6 +665,32 @@ inline std::optional<BiasStrides> servableBias(const data_objects::TensorAttribu
         strided->vectorized = true;
     }
     return strided;
+}
+
+/**
+ * @brief Why the bias graph is declined, for the decline log: the (batch, head) view's bytes
+ *        against the 32-bit limit when that size test (servableStridedBias()) is what failed,
+ *        else the bias as the graph declares it. @p bias is null when the graph names no
+ *        such tensor.
+ */
+inline std::string describeBiasDecline(const data_objects::TensorAttributes* bias,
+                                       int64_t biasUid,
+                                       const SdpaProblem& problem)
+{
+    if(bias == nullptr)
+    {
+        return "bias tensor (uid " + std::to_string(biasUid) + ") is not in the graph";
+    }
+    const auto operand = sdpa_graph::describeOperand("bias", *bias);
+    const auto view = stridedBiasView(*bias, problem);
+    if(view.has_value() && !(view->viewBytes.has_value() && *view->viewBytes <= INT32_LIMIT))
+    {
+        return operand + ": one (batch, head) view spans "
+               + (view->viewBytes.has_value() ? std::to_string(*view->viewBytes) + " bytes"
+                                              : std::string("more than 2^63 bytes"))
+               + ", past the 32-bit limit of " + std::to_string(INT32_LIMIT) + " bytes";
+    }
+    return operand + " is not one the kernels read (dtype, alignment, strides, or extents)";
 }
 
 /**
@@ -988,6 +1043,9 @@ inline std::optional<BoundTokens> flydslSdpaCdnaGraphMatches(const MatchContext&
         const auto biasStrides = bias == nullptr ? std::nullopt : servableBias(*bias, problem);
         if(!biasStrides.has_value())
         {
+            const sdpa_graph::DeclinedBy declined{"flydsl_sdpa", "bias"};
+            HIPDNN_PLUGIN_LOG_INFO(declined << describeBiasDecline(
+                                       bias, attributes.attn_mask_tensor_uid().value(), problem));
             return std::nullopt;
         }
         biasUid = attributes.attn_mask_tensor_uid().value();
