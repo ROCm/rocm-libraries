@@ -456,6 +456,8 @@ def test_tiled_transpose_refuses_channels_off_a_multiple_of_8():
         problem=_problem(C=200, K=70), runtime_channels=True, tiled=True
     )
     with pytest.raises(ValueError, match="multiples of 8"):
+        build_direct_transpose_weights_dgrad(spec, arch="gfx950")
+    with pytest.raises(ValueError, match="multiples of 8"):
         direct_launch_geometry(spec)
 
 

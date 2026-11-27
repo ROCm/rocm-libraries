@@ -586,7 +586,30 @@ rocke_kernel_def_t* rocke_build_direct_transpose_weights_dgrad_new(
         if(rocke_ir_builder_init(b, name) != ROCKE_OK)
             return NULL;
         if(spec->tiled)
+        {
+            if(!spec->runtime_channels
+               || (strcmp(spec->problem.dtype, "fp16") != 0
+                   && strcmp(spec->problem.dtype, "bf16") != 0))
+            {
+                rocke_i_set_err(
+                    b,
+                    ROCKE_ERR_VALUE,
+                    "tiled dgrad filter transpose needs runtime channels and fp16/bf16");
+                return NULL;
+            }
+            if(spec->problem.cpg % 8 != 0 || spec->problem.kpg % 8 != 0)
+            {
+                rocke_i_set_err(
+                    b,
+                    ROCKE_ERR_VALUE,
+                    "tiled dgrad filter transpose needs cpg and kpg to be multiples of 8 "
+                    "(got cpg=%d, kpg=%d)",
+                    spec->problem.cpg,
+                    spec->problem.kpg);
+                return NULL;
+            }
             return dconv_build_transpose_tiled(b, spec);
+        }
         return dconv_build_transpose(b, spec);
     });
 }

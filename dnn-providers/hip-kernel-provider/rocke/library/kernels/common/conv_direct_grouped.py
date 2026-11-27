@@ -8712,6 +8712,22 @@ def _xform_dtype_tag(dtype: str) -> str:
     return "_f32" if _is_f32_storage(dtype) else ""
 
 
+def _check_tiled_transpose(spec: "DirectTransposeWeightsDgradSpec") -> None:
+    """The tiled transpose's contract: runtime channels, 16-bit elements, and
+    cpg / kpg multiples of 8 (16-byte granules; an off count would store across
+    the next row and race with the neighbouring thread's writes)."""
+    p = spec.problem
+    if not spec.runtime_channels or p.dtype not in ("fp16", "bf16"):
+        raise ValueError(
+            "tiled dgrad filter transpose needs runtime channels and fp16/bf16"
+        )
+    if p.cpg % 8 or p.kpg % 8:
+        raise ValueError(
+            "tiled dgrad filter transpose needs cpg and kpg to be multiples "
+            f"of 8 (got cpg={p.cpg}, kpg={p.kpg})"
+        )
+
+
 def build_direct_transpose_weights_dgrad(
     spec: "DirectTransposeWeightsDgradSpec", arch: str = "gfx950"
 ) -> "KernelDef":
@@ -8729,6 +8745,7 @@ def build_direct_transpose_weights_dgrad(
     Block: (64, 1, 1)
     """
     if spec.tiled:
+        _check_tiled_transpose(spec)
         return _build_transpose_weights_dgrad_tiled(spec, arch)
     p = spec.problem
     io_type = _io_type(p.dtype)

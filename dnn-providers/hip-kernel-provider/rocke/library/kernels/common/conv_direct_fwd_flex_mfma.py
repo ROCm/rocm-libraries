@@ -153,7 +153,7 @@ def _dma_lds(b: IRBuilder, rsrc: Value, dst: Value, voff: Value, soff: Value) ->
     b.inline_asm(
         "s_mov_b32 m0, $3\n\tbuffer_load_dwordx4 $0, $1, $2 offen lds",
         "v,s,s,s,~{m0},~{memory}",
-        [voff, rsrc, soff, b.readfirstlane(b.trunc(dst, I32))],
+        [voff, rsrc, b.readfirstlane(soff), b.readfirstlane(b.trunc(dst, I32))],
     )
 
 
@@ -165,7 +165,7 @@ def _dma_lds_at(
     b.inline_asm(
         f"s_add_u32 m0, $3, {imm}\n\tbuffer_load_dwordx4 $0, $1, $2 offen lds",
         "v,s,s,s,~{m0},~{scc},~{memory}",
-        [voff, rsrc, soff, base],
+        [voff, rsrc, b.readfirstlane(soff), base],
     )
 
 

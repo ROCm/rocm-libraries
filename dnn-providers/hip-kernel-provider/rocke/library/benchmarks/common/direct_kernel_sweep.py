@@ -869,8 +869,8 @@ def _dgrad_flex_plan(cache, identity, hsaco_path, meta, spec, problem):
 def _reads_krsc_dgrad_filter(identity) -> bool:
     """A forward kernel that takes a dgrad's own filter (flex ``wt``):
     only a dgrad via forward may run it."""
-    return identity.algorithm == "direct_fwd_flex_mfma" and '"wt": true' in (
-        identity.knobs or ""
+    return identity.algorithm == "direct_fwd_flex_mfma" and bool(
+        json.loads(identity.knobs).get("wt") if identity.knobs else False
     )
 
 

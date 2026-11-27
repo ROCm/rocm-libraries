@@ -255,7 +255,7 @@ static void asm_void(rocke_ir_builder_t* b, const char* tmpl, const char* cons, 
 void dma_lds(rocke_ir_builder_t* b, V rsrc, V dst, V voff, V soff)
 {
     V t = rocke_b_trunc(b, dst, rocke_i32());
-    V ops[4] = {voff, rsrc, soff, rocke_b_readfirstlane(b, t)};
+    V ops[4] = {voff, rsrc, rocke_b_readfirstlane(b, soff), rocke_b_readfirstlane(b, t)};
     asm_void(b,
              "s_mov_b32 m0, $3\n\tbuffer_load_dwordx4 $0, $1, $2 offen lds",
              "v,s,s,s,~{m0},~{memory}",
@@ -268,7 +268,7 @@ void dma_lds_at(rocke_ir_builder_t* b, V rsrc, V base, int imm, V voff, V soff)
     char tmpl[128];
     snprintf(
         tmpl, sizeof tmpl, "s_add_u32 m0, $3, %d\n\tbuffer_load_dwordx4 $0, $1, $2 offen lds", imm);
-    V ops[4] = {voff, rsrc, soff, base};
+    V ops[4] = {voff, rsrc, rocke_b_readfirstlane(b, soff), base};
     asm_void(b, tmpl, "v,s,s,s,~{m0},~{scc},~{memory}", ops, 4);
 }
 
