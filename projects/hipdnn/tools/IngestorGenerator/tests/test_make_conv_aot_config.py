@@ -451,6 +451,19 @@ _DIRECT_REFUSED = {
         102,
         "direct algorithm 'direct_fwd_flex_mfma' has no packaged launch",
     ),
+    # rr: the count differs per dtype; the wfmt weight-format helper is a forward helper.
+    "direct_fwd_rr_mfma": (
+        {"fp16": 63, "bf16": 54},
+        "direct algorithm 'direct_fwd_rr_mfma' has no packaged launch",
+    ),
+    "direct_fwd_rr_wfmt": (
+        8,
+        "forward helper 'direct_fwd_rr_wfmt' is not packaged",
+    ),
+    "direct_fwd_tap1d_mfma": (
+        88,
+        "direct algorithm 'direct_fwd_tap1d_mfma' has no packaged launch",
+    ),
 }
 
 
@@ -492,7 +505,7 @@ def test_direct_identities_are_packaged_exactly_when_the_launch_runs_them(
         if algorithm in tool.PACKAGED_DIRECT_ALGORITHMS
     }
     assert refused == {
-        (dtype, algorithm): count
+        (dtype, algorithm): count[dtype] if isinstance(count, dict) else count
         for dtype in ("fp16", "bf16")
         for algorithm, (count, _) in _DIRECT_REFUSED.items()
     }
