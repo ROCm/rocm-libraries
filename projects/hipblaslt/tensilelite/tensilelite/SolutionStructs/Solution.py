@@ -58,9 +58,10 @@ from ..Components.DecouplePGR import pgrLevelsForTensors, ldsBlocksForPgrLevel, 
                                        resolvePrefetchGlobalReadSpecialValues
 from ..Components.TDMFuse import TDM_FUSE_GROUPING, TDM_SCALE_TENSORS, tdmBothTensors, \
                                        tdmGroupingName, tdmKDimStepsInElements, tdmKDimTrackable, tdmLiveScales, \
-                                       tdmPairOnEveryWave, \
+                                       tdmGroupingSeparatesAB, tdmPairOnEveryWave, \
                                        tdmPapRejectReason, tdmSeparateABDescriptors, tdmWavePartition, \
                                        tdmWaveSeparated
+from ..Components.NonTemporal import ntBitIgnored, tdmAbsentHints, tdmIgnoredHints
 from ..Common.TypeValidationErrors import ConfigTypeError
 from ..CustomKernels import isCustomKernelConfig, supportsUserSgprKernargPreload, validateCustomPersistentArgs
 from ..SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, get_mxs_mt_config, \
@@ -3261,17 +3262,19 @@ class Solution(collections.abc.Mapping):
       state["NonTemporalGate"] = state["NonTemporal"]
       state["NonTemporalMetadata"] = state["NonTemporal"]
 
-    if isaInfoMap[isa].asmCaps.get("HasTHModifier", False):
-      droppedNT = sorted(
-        "NonTemporal%s"%ch for ch in ("",) + _cacheHintTensors
-        if state["NonTemporal%s"%ch] >= 4
-      )
-      if droppedNT:
-        printWarning(
-          "gfx1250 ignores the NonTemporal nt bit (0x4) on %s; use TemporalHint*=1 (TH_NT) for non-temporal hints."
-          % ", ".join(droppedNT)
-        )
+    droppedNT = sorted(
+      "NonTemporal%s"%ch for ch in ("",) + _cacheHintTensors
+      if state.get("NonTemporal%s"%ch, 0) >= 4
+    )
+    if droppedNT and ntBitIgnored(isaInfoMap[isa].asmCaps):
+      reject(state, printRejectionReason,
+             "NonTemporal 4-7 set the nt bit (0x4), which TemporalHint replaces wherever th: modifiers "
+             "exist, so they emit what NonTemporal & 3 emits (%s): set each to NonTemporal & 3, and use "
+             "TemporalHint*=1 (TH_NT) for non-temporal hints"
+             % ", ".join("%s=%d emits %d" % (key, state[key], state[key] & 3) for key in droppedNT))
+      return
 
+    if isaInfoMap[isa].asmCaps.get("HasTHModifier", False):
       reservedLoadHints = [
         "TemporalHint%s"%ch for ch in _cacheHintLoadTensors
         if state["TemporalHint%s"%ch] == 7
@@ -4092,6 +4095,36 @@ class Solution(collections.abc.Mapping):
       if papGroupingReason:
         reject(state, printRejectionReason, papGroupingReason)
         return
+
+    if state.get("AdaptiveGemmNTAB", 0) and isaInfoMap[isa].asmCaps.get("HasTHModifier", False) \
+        and tdmWaveSeparated(state) and not state.get("UseSubtileImpl") \
+        and not tdmGroupingSeparatesAB(state):
+      reject(state, printRejectionReason,
+             "AdaptiveGemmNTAB is not implemented where A and B share one tensor_load_to_lds "
+             "(TDMFuse=%d on %d waves): the instruction keeps only the cache hints A and B agree "
+             "on, so the NTA and NTB loop bodies, which set TemporalHint on one tensor, issue the "
+             "same loads as the default body. Use TDMFuse=1, or AdaptiveGemmNTAB=0"
+             % (tdmFuse, state["NumWaves"]))
+      return
+
+    ignoredHints = tdmIgnoredHints(state, isaInfoMap[isa].asmCaps)
+    if ignoredHints:
+      reject(state, printRejectionReason,
+             "TDM cache hints that no tensor_load_to_lds carries (%s): wave-separated TDM loads a "
+             "descriptor set with one instruction, which keeps only the hints its data tensors "
+             "agree on, and a scale riding a data tensor's instruction takes that tensor's hints "
+             "(TDMFuse=%d). Use TDMFuse=1 for per-tensor A/B hints, with each scale's hints equal "
+             "to those of the data tensor it rides"
+             % (", ".join("%s=%d emits %d" % hint for hint in ignoredHints), tdmFuse))
+      return
+
+    absentHints = tdmAbsentHints(state) if isaInfoMap[isa].asmCaps.get("HasTHModifier", False) else []
+    if absentHints:
+      reject(state, printRejectionReason,
+             "Cache-hint keys on a tensor this problem does not carry (%s): an MX scale without "
+             "MXBlock, or the metadata of a dense problem, is never loaded. Set them to 0"
+             % ", ".join("%s=%d" % hint for hint in absentHints))
+      return
 
     # DepthU == -1?
     if state["DepthU"] == -1:

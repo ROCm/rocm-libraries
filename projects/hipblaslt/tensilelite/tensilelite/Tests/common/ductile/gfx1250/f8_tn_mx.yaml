@@ -51,6 +51,7 @@ BenchmarkProblems:
     ForkParameters:
     - WavefrontSize: [32] # Default Value: [-1] # Range: [-1, 32, 64]
     - TDMInst: [3] # Default Value: [0] # Range: [0, 1, 2, 3]
+    - TDMFuse: [1] # Default Value: [0] # Range: [0, 1, 2, 3]
     - PrefetchLocalRead: [1] # Default Value: [1] # Range: [0, 1, ..., 127, 128]
     - PrefetchGlobalRead: [2] # Default Value: [1] # Range: [0, 1, ..., 15, 16]
     - PrefetchGlobalReadA: [-1]
@@ -106,8 +107,6 @@ BenchmarkProblems:
     - InitCIterWmma: [-1] # Default Value: [-1] # Range: [-1, 0, 1]
     - SwInstructionPrefetch: [-1] # Default Value: [1] # Range: [-1, 0, ..., False, True]
     - NonVolatile: [-1] # Default Value: [-1] # Range: [-1, 0, 1]
-    - TemporalHintA: [0, 1] # Default Value: [0] # Range: [0, 1, ..., 6, 7]
-    - TemporalHintB: [0, 1] # Default Value: [0] # Range: [0, 1, ..., 6, 7]
     - TemporalHintD: [0, 1] # Default Value: [0] # Range: [0, 1, ..., 6, 7]
     - MbskPrefetchMethod: [-1] # Default Value: [-1] # Range: [-1, 0, 1]
     - Groups:
@@ -239,6 +238,14 @@ BenchmarkProblems:
         - TileProcessingStrategy: DataParallel # Default Value: ['None'] # Range: ['None', 'DataParallel', 'StreamK']
           PrefetchAcrossPersistent: 1 # Default Value: [0] # Range: [0, 1]
           PersistentXCCMapping: 0 # Default Value: [0] # Range: [0, 2, ..., 7, 8]
+      - - TemporalHintA: 0 # TDMFuse 1 loads MXSA with A, so MXSA takes A's hint
+          TemporalHintMXSA: 0
+        - TemporalHintA: 1
+          TemporalHintMXSA: 1
+      - - TemporalHintB: 0
+          TemporalHintMXSB: 0
+        - TemporalHintB: 1
+          TemporalHintMXSB: 1
     BenchmarkJoinParameters: 
     BenchmarkFinalParameters:
     - ProblemSizes:
