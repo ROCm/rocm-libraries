@@ -355,7 +355,11 @@ def dgrad_sub_gemms(identity: KernelIdentity, problem: object) -> list:
 
     if identity.patch:
         return patch_sub_gemms(
-            problem, identity.tile_m, identity.tile_n, tile_k=identity.tile_k
+            problem,
+            identity.tile_m,
+            identity.tile_n,
+            tile_k=identity.tile_k,
+            split_k=max(1, identity.split_k),
         )
     return enumerate_sub_gemms(
         problem,

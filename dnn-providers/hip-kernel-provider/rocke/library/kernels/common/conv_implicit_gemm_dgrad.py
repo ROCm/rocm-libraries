@@ -413,7 +413,7 @@ def is_patch_problem(p: ConvProblem) -> bool:
 
 
 def patch_sub_gemms(
-    p: ConvProblem, tile_m: int, tile_n: int, tile_k: int = 32
+    p: ConvProblem, tile_m: int, tile_n: int, tile_k: int = 32, split_k: int = 1
 ) -> List[SubGemmParams]:
     """The one sub-GEMM record a ``patch`` kernel runs ``p`` with.
 
@@ -424,11 +424,16 @@ def patch_sub_gemms(
     are the filter's, so the K tail past ``K`` (``ydot`` = 1 when ``K`` is
     not a multiple of the K tile) lands on ``y = Y``, outside the filter,
     and reads no W row -- with a tap stride of 1 it would read row ``y = 1``.
+    As for :func:`enumerate_sub_gemms`, ``gemm_k_padded`` is ``K`` rounded up
+    to ``tile_k * split_k``: the kernel splits it into ``split_k`` slices of
+    whole K tiles (a slice wholly past ``K`` reads only the tail).
     """
     if not is_patch_problem(p):
         raise ValueError(f"{p} is not a patch embedding")
     v = ConvProblem(N=p.N, Hi=p.Ho, Wi=p.Wo, C=p.Y * p.X * p.C, K=p.K, Y=1, X=1)
-    (sg,) = enumerate_sub_gemms(v, compute_tilde(v), tile_m, tile_n, tile_k=tile_k)
+    (sg,) = enumerate_sub_gemms(
+        v, compute_tilde(v), tile_m, tile_n, tile_k=tile_k, split_k=split_k
+    )
     return [
         dc_replace(sg, b_y_stride=p.Y, b_x_stride=p.X, d_h_stride=p.sH, d_w_stride=p.sW)
     ]
@@ -1051,7 +1056,11 @@ class DgradConvSpec:
         """Return the list of sub-GEMMs for the tilde decomposition."""
         if self.patch:
             return patch_sub_gemms(
-                self.problem, self.tile_m, self.tile_n, tile_k=self.tile_k
+                self.problem,
+                self.tile_m,
+                self.tile_n,
+                tile_k=self.tile_k,
+                split_k=max(1, self.split_k),
             )
         tilde = compute_tilde(self.problem)
         return enumerate_sub_gemms(

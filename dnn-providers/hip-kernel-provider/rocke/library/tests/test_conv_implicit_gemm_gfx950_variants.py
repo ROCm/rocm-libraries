@@ -225,9 +225,17 @@ _DGRAD_ROWS = [
         ),
         ("pgr", "ukd"),
     ),
+    # K == tile_k: the second K slice lies wholly past K.
     (
         "patch_split_k2",
         _DG_PATCH,
+        dict(split_k=2, uniform_k_decode=False),
+        ("patch", "spk2"),
+    ),
+    # Three K tiles over two slices: each slice is two whole tiles.
+    (
+        "patch_split_k2_k192",
+        dict(_DG_PATCH, K=192),
         dict(split_k=2, uniform_k_decode=False),
         ("patch", "spk2"),
     ),

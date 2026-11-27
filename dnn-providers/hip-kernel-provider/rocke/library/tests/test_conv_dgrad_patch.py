@@ -261,6 +261,32 @@ class TestPatchRecord(unittest.TestCase):
         # The K tail (ydot = 1) must land outside the filter.
         self.assertEqual((sg.b_y_stride, sg.b_y_offset), (p.Y, 0))
 
+    def test_split_k_slices_are_whole_k_tiles(self):
+        # The kernel splits gemm_k_padded into split_k slices; a record padded
+        # to tile_k only made a K == tile_k slice half a tile (both slices read
+        # the same K rows).
+        from kernels.conv.kernel_identity import KernelIdentity, dgrad_sub_gemms
+
+        for k, tile_k, split_k in ((64, 64, 2), (192, 64, 2), (72, 32, 4)):
+            spec = _spec(
+                problem=_problem(N=2, Hi=16, Wi=16, C=64, K=k, Y=2, X=2, sH=2, sW=2),
+                tile_k=tile_k,
+                split_k=split_k,
+                patch=True,
+            )
+            (sg,) = spec.compute_sub_gemms()
+            self.assertEqual(sg.gemm_k_padded % (tile_k * split_k), 0, (k, tile_k))
+            self.assertGreaterEqual(sg.gemm_k_padded, k)
+            ident = replace(
+                KernelIdentity.from_label(TestPatchIdentity.LABEL),
+                tile_m=spec.tile_m,
+                tile_n=spec.tile_n,
+                tile_k=tile_k,
+                split_k=split_k,
+            )
+            (ident_sg,) = dgrad_sub_gemms(ident, spec.problem)
+            self.assertEqual(ident_sg, sg)
+
     def test_refuses_a_problem_that_is_not_a_patch_embedding(self):
         from kernels.common.conv_implicit_gemm_dgrad import patch_sub_gemms
 
