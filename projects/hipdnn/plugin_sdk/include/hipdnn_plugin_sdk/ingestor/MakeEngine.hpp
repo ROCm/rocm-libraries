@@ -161,14 +161,28 @@ inline void describeRankers(
     }
 }
 
+/// The key one pack is described under: its id and its arch list.
+inline std::string packKey(const KernelDescriptorPack& pack)
+{
+    return toString(pack.id) + "/" + nlohmann::json(pack.arch).dump();
+}
+
+/// The code object @p source names, as a selector revision sees it: its compiler-independent
+/// identity when the packager compiled it, otherwise the digest of its bytes, which are then
+/// the kernel itself (RFC 0019 §8.1). The two keys differ, so the two forms never collide.
+inline nlohmann::json codeIdentity(const KernelSource& source)
+{
+    return source.identity.empty() ? nlohmann::json{{"sha256", source.sha256}}
+                                   : nlohmann::json{{"identity", source.identity}};
+}
+
 /// Writes @p packs under @p out["packs"], each with its dispatch and every kernel's identity,
 /// one entry per launch for a multi-launch kernel.
 inline void describePacks(nlohmann::json& out, const std::vector<KernelDescriptorPack>& packs)
 {
     for(const auto& pack : packs)
     {
-        auto& resolvedPack
-            = out["packs"][toString(pack.id) + "/" + nlohmann::json(pack.arch).dump()];
+        auto& resolvedPack = out["packs"][packKey(pack)];
         resolvedPack["dispatch"] = toString(pack.dispatchId);
         for(const auto& kernel : pack.kernels)
         {
@@ -179,19 +193,38 @@ inline void describePacks(nlohmann::json& out, const std::vector<KernelDescripto
                      {"entry_point", kernel.source.entryPoint},
                      {"source_file", kernel.source.sourceFile},
                      {"toc_key", kernel.source.tocKey},
-                     {"symbol", kernel.source.symbol},
-                     {"sha256", kernel.source.sha256}};
+                     {"symbol", kernel.source.symbol}};
+            value.update(codeIdentity(kernel.source));
             // A multi-launch kernel keeps no `source`: each launch's code object is part of
             // what the selector's ranking was trained against.
             for(const auto& [launch, source] : kernel.sources)
             {
-                value["sources"][launch] = {{"toc_key", source.tocKey},
-                                            {"symbol", source.symbol},
-                                            {"sha256", source.sha256}};
+                auto& described = value["sources"][launch];
+                described = {{"toc_key", source.tocKey}, {"symbol", source.symbol}};
+                described.update(codeIdentity(source));
             }
             for(const auto& [name, metadata] : kernel.metadata)
             {
                 value["metadata"][name] = metadataValueToJson(metadata);
+            }
+        }
+    }
+}
+
+/// Writes the code-object digest of every kernel in @p packs under @p out["packs"], one per
+/// launch for a multi-launch kernel.
+inline void describeCodeObjects(nlohmann::json& out, const std::vector<KernelDescriptorPack>& packs)
+{
+    for(const auto& pack : packs)
+    {
+        auto& kernels = out["packs"][packKey(pack)];
+        for(const auto& kernel : pack.kernels)
+        {
+            auto& value = kernels[toString(kernel.id)];
+            value["sha256"] = kernel.source.sha256;
+            for(const auto& [launch, source] : kernel.sources)
+            {
+                value["sources"][launch] = source.sha256;
             }
         }
     }
@@ -242,6 +275,38 @@ inline std::string engineSelectorRevision(const DescriptorSet& set)
         }
     }
     return "generic-untuned-v1/" + uhd::sha256(selector.dump());
+}
+
+/// @brief Digest of the bytes of every code object @p set loads (RFC 0019 §8.1
+/// `codegen_revision`).
+///
+/// Moves with any rebuilt code object, including one only a compiler change rebuilt, which the
+/// selector revision does not see for a kernel with an identity. A model that records another
+/// codegen revision still binds; the engine warns that it was measured on other code objects.
+inline std::string engineCodegenRevision(const DescriptorSet& set)
+{
+    auto codeObjects = nlohmann::json::object();
+    detail::describeCodeObjects(codeObjects, set.packs);
+    if(!set.slots.empty())
+    {
+        codeObjects["slots"] = nlohmann::json::array();
+        for(const auto& slot : set.slots)
+        {
+            auto described = nlohmann::json{{"name", slot.name}};
+            detail::describeCodeObjects(described, slot.packs);
+            codeObjects["slots"].push_back(std::move(described));
+        }
+    }
+    return "generic-codegen-v1/" + uhd::sha256(codeObjects.dump());
+}
+
+/// @brief What an engine's L1 binding compares a model's `trained_against` to: the descriptor
+/// dependencies of enginePredictionProvenance, plus the engine's codegen_revision.
+inline nlohmann::json engineBindingProvenance(const DescriptorSet& set)
+{
+    auto provenance = enginePredictionProvenance(set);
+    provenance["codegen_revision"] = engineCodegenRevision(set);
+    return provenance;
 }
 
 namespace detail
@@ -468,7 +533,7 @@ std::unique_ptr<IEngine<THandle, TSettings, TContext>>
     auto knobs = set.engine.knobs;
     auto predictions = std::move(set.enginePredictionsByMetric);
     auto unavailablePredictionArches = std::move(set.unavailableEnginePredictionArches);
-    auto provenance = enginePredictionProvenance(set);
+    auto provenance = engineBindingProvenance(set);
     auto selectorRevision = engineSelectorRevision(set);
     auto engine = set.engine;
     auto graphMatchSymbol = engine.graphMatchNativeSymbol;
@@ -510,7 +575,7 @@ std::unique_ptr<IEngine<THandle, TSettings, TContext>>
         set.enginePredictionsByMetric,
         set.unavailableEnginePredictionArches,
         engineSelectorRevision(set),
-        enginePredictionProvenance(set));
+        engineBindingProvenance(set));
 }
 
 /// The engine for @p set over @p state, which other engines may already share: a fresh

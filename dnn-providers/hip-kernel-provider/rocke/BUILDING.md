@@ -108,13 +108,15 @@ ROCm PyTorch must come from the ROCm wheel index for your system (see
 
 ## Running the full test sweep
 
-The sweep needs the test/heuristics extras plus a ROCm PyTorch:
+The sweep needs the test extras, the heuristics tests' packages and a ROCm
+PyTorch:
 
 ```sh
-# test runner + heuristics ML deps (pytest 9 or newer, pandas,
-# scikit-learn, lightgbm) come from the platform `dev` extra:
+# test runner (pytest 9 or newer) from the platform `dev` extra:
 pip install --config-settings editable_mode=compat -e "rocke/platform[dev]"
 pip install --config-settings editable_mode=compat --no-deps -e rocke/library
+# the heuristics scripts' and tests' packages; without them those tests skip:
+pip install -r rocke/platform/python/rocke/heuristics/tests/requirements.txt
 # torch: ROCm build for your system (see platform/requirements.txt). A CPU
 # torch lets the non-GPU suite import/run; GPU tests then skip without a device.
 

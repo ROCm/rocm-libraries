@@ -7,6 +7,8 @@ import pytest
 
 from rocke.tests.subprocess_launcher import rocke_python_command
 
+pytestmark = pytest.mark.gpu
+
 
 @pytest.mark.parametrize("route", ["comgr", "hip"])
 @pytest.mark.parametrize("dtype_c", ["bf16", "fp16"])

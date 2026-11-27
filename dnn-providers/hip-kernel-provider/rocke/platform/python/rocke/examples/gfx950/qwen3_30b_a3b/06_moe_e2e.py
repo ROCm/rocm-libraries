@@ -58,7 +58,7 @@ Key optimizations applied to reach 1.10×
    A3B has 128 experts; the default sort_block_size=64 would assert.
    Setting sort_block_size=128 fixes this.
 
-Results (MI355X / gfx950, T=2, E=128, K=8, H=2048, I=768, bf16)
+Results (gfx950, T=2, E=128, K=8, H=2048, I=768, bf16)
 -----------------------------------------------------------------
   Backend                      Latency   Speedup
   AITER fused_moe (2-stage CK) 101.3µs    1.00×

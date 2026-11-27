@@ -52,7 +52,7 @@ worked inside the story.
 
 | | |
 |---|---|
-| Host | AMD Instinct MI355X node, 4 visible GPUs |
+| Host | gfx950 node, 4 visible GPUs |
 | ROCm / comgr | 7.2.0, comgr reports `(7, 2)` |
 | LLVM flavor | `llvm22`, auto-resolved from the installed comgr and pinned on every path |
 | Target | `gfx950` (parity matrix additionally covers `gfx942`) |

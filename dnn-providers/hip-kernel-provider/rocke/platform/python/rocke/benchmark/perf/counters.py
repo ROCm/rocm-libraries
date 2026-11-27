@@ -57,7 +57,7 @@ _COMMON: dict[str, str] = {
 #    return 0 for real kernels even though the names exist in --list-avail - a
 #    rocprofv3/RDNA4 support gap, not a parse bug. Only clock/wave counters (above)
 #    populate. --list-avail offers 58 counters total.
-#  - gfx950/CDNA (2026-07, MI355X): the wave64 / TCC counters DO populate.
+#  - gfx950/CDNA (2026-07): the wave64 / TCC counters DO populate.
 #  - gfx90a/CDNA2 (2026-09): all of the below populate, including the LDS-conflict
 #    and VALU-activity counters. --list-avail offers 533 counters.
 # So the diagnostic panel is expected to fill on CDNA and be clock/wave-only on
@@ -79,7 +79,7 @@ _BY_FAMILY: dict[str, dict[str, str]] = {
         "lds_bank_conflict": "SQC_LDS_BANK_CONFLICT",
         "lds_idx_active": "SQC_LDS_IDX_ACTIVE",
     },
-    "cdna": {  # gfx9x - wave64 (verified on gfx950/MI355X and gfx90a)
+    "cdna": {  # gfx9x - wave64 (verified on gfx950 and gfx90a)
         "valu_insts": "SQ_INSTS_VALU",
         "lds_insts": "SQ_INSTS_LDS",
         "l2_hit": "TCC_HIT",

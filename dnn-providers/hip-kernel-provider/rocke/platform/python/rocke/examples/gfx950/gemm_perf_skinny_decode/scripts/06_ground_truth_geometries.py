@@ -4,7 +4,7 @@
 """Step 6: try the geometries hipBLASLt actually picks.
 
 Ground truth (from `rocprof --hsa-trace` on `torch.matmul(bf16)` for
-M=2 N=4096 K=4096 on gfx950 / MI355X, ROCm 7.0.2):
+M=2 N=4096 K=4096 on gfx950, ROCm 7.0.2):
 
     Cijk_Alik_Bljk_BBS_BH_Bias_HA_S_SAV_UserArgs_MT16x16x512_MI16x16x1
         ..._GRVWA8_GRVWB8_GSU0_SK3_SVW1_PGR2_PLR1_SIA3_DTLA1_DTLB1...

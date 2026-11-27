@@ -1,6 +1,6 @@
 # The RDNA4 WMMA fragment ABI, from the lane map up
 
-This directory is a small suite of **gfx1201 (RDNA4 / Navi 48) bring-up
+This directory is a small suite of **gfx1201 (RDNA4) bring-up
 examples**: a WMMA GEMM lane-map probe, a weight-only-quantized `MatMulNBits`
 matmul, and a deep-fused conv + maxpool prototype. All three are built on a
 single new primitive — the **gfx12 WMMA `16×16×16` f16 atom**

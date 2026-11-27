@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <cmath>
+
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/TensorView.hpp>
@@ -70,7 +72,6 @@ public:
         std::atomic<size_t> comparedCount(0);
 
         auto validateFunc = [&](const std::vector<int64_t>& indices) {
-            using hipdnn_data_sdk::types::fabs;
             using hipdnn_data_sdk::types::isnan;
             using hipdnn_data_sdk::types::isinf;
             using hipdnn_data_sdk::types::signbit;
@@ -112,9 +113,12 @@ public:
                 return result.load(std::memory_order_relaxed);
             }
 
-            auto absDiff = fabs(static_cast<float>(implValue) - static_cast<float>(refValue));
-            auto threshold
-                = _absoluteTolerance + _relativeTolerance * fabs(static_cast<float>(refValue));
+            const auto refDouble = static_cast<double>(refValue);
+            const auto implDouble = static_cast<double>(implValue);
+            const double absDiff = std::fabs(implDouble - refDouble);
+            const double threshold
+                = static_cast<double>(_absoluteTolerance)
+                  + static_cast<double>(_relativeTolerance) * std::fabs(refDouble);
 
             if(absDiff > threshold)
             {
@@ -282,6 +286,9 @@ inline std::unique_ptr<hipdnn_test_sdk::utilities::IReferenceValidation>
     case hipdnn_flatbuffers_sdk::data_objects::DataType::INT32:
         rejectMatchingInfinitiesRequest(matchingInfinities);
         return std::make_unique<CpuIntReferenceValidation<int32_t>>();
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN:
+        rejectMatchingInfinitiesRequest(matchingInfinities);
+        return std::make_unique<CpuIntReferenceValidation<bool>>();
     default:
         throw std::runtime_error("Unsupported data type for allClose validator");
     }

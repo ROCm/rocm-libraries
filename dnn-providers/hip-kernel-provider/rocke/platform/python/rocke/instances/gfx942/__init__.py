@@ -1,6 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""gfx942 (CDNA3 / MI300) arch-specific instance builders (hybrid layout).
+"""gfx942 (CDNA3) arch-specific instance builders (hybrid layout).
 
 Put a kernel here only when its *algorithm* genuinely differs on gfx942 from the
 shared ``instances/common/`` version (e.g. a K-loop or staging strategy that

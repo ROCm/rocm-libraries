@@ -207,6 +207,83 @@ def test_a_model_trained_against_every_slots_kmd_is_uhd_1_1(tmp_path, evaluator)
     assert _trained_version(output) == "1.1"
 
 
+def test_a_model_that_records_a_codegen_revision_is_uhd_1_2(tmp_path, evaluator):
+    """`trained_against.codegen_revision` is a UHD 1.2 key: a model whose measurements
+    agree on one records it and is written as 1.2."""
+    corpus = _l1_corpus(tmp_path / "corpus.json")
+    rows = json.loads(corpus.read_text("utf-8"))
+    for row in rows:
+        row["binding"]["trained_against"]["codegen_revision"] = "cg-A"
+    corpus.write_text(json.dumps(rows), encoding="utf-8")
+    output = tmp_path / "model"
+    assert _l1_train(corpus, output, "--feature-evaluator", evaluator) == 0
+    descriptor = json.loads((output / "heuristic.uhd.json").read_text("utf-8"))
+    assert descriptor["version"] == "1.2"
+    assert descriptor["trained_against"]["codegen_revision"] == "cg-A"
+
+
+def test_a_catalog_ranker_records_no_codegen_revision_from_its_snapshot(
+    tmp_path, evaluator
+):
+    """RFC 0019.13: an L2 ranker records no codegen revision, so a `--provenance`
+    snapshot copied from a runtime binding still trains a 1.0 UHD."""
+    provenance = tmp_path / "provenance.json"
+    provenance.write_text(
+        json.dumps(
+            {
+                "ued": {"id": UED, "revision": "1.0"},
+                "kmd": {"id": KMD, "revision": "1.0"},
+                "umd": [],
+                "codegen_revision": "cg-A",
+            }
+        ),
+        encoding="utf-8",
+    )
+    rows = [
+        {
+            "benchmark": f"p{problem}",
+            "device": "board",
+            "kernel": f"k{variant}",
+            "kernel.variant": variant,
+            "graph.size": problem + 1,
+            "tflops": 20.0 + problem + variant,
+        }
+        for problem in range(10)
+        for variant in range(2)
+    ]
+    corpus = tmp_path / "corpus.json"
+    corpus.write_text(json.dumps(rows), encoding="utf-8")
+    output = tmp_path / "model"
+    assert (
+        main(
+            [
+                "train",
+                "--input",
+                str(corpus),
+                "--output-dir",
+                str(output),
+                "--provenance",
+                str(provenance),
+                "--features",
+                "kernel.variant",
+                "graph.size",
+                "--metric",
+                "tflops",
+                "--num-boost-round",
+                "2",
+                "--early-stopping",
+                "1",
+                "--feature-evaluator",
+                evaluator,
+            ]
+        )
+        == 0
+    )
+    descriptor = json.loads((output / "heuristic.uhd.json").read_text(encoding="utf-8"))
+    assert descriptor["version"] == "1.0"
+    assert "codegen_revision" not in descriptor["trained_against"]
+
+
 def test_rows_collected_under_another_metric_cannot_train_a_model(
     tmp_path, evaluator, caplog
 ):

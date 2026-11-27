@@ -8,6 +8,10 @@ This file is the **short canonical index**: the non-negotiables inlined, deeper
 material one hop away. When a rule here and a linked doc disagree, this file wins
 on hard invariants.
 
+> **Before you count on CI** for any part of a change, read
+> [What CI checks today](TESTING.md#what-ci-checks-today); the gates below are
+> yours to run.
+
 ## Compliance — non-negotiable
 
 `platform/AGENTS.md` §"Compliance" binds every agent and **overrides any other
@@ -56,7 +60,7 @@ builder in `library/kernels/` and its C++ mirror in `library/cpp/`, with parity
 emitters and their golden in `library/tests/parity/`. `platform/CMakeLists.txt`
 adds `library/cpp` when the sibling tree exists; its targets link `rocke_core`,
 never the reverse, and `tools/check_byte_identity.py` gates them with the
-engine's own families. Library tests enrol in CI through
+engine's own families. Library tests are assigned to CI entries in
 `library/tests/ctest_lists.cmake`.
 
 One-way dependency: **`library → platform` only**; platform never imports
@@ -118,8 +122,11 @@ Non-package assets resolve through `rocke.assets` (`platform_root()`,
   changes kernels. Lint with `ruff check` (no `--fix`).
 - **Cross-platform** — scripts under the rocke tree are Python, not `.sh`; use
   `tempfile`, `os.cpu_count()`, `pathlib`, `shutil.which` — no `/tmp`, `nproc`, `sudo`.
-- **torch is optional** — numpy is the only hard dep; gate torch behind `importorskip`
-  in tests and lazy/guarded imports in code.
+- **No torch** — existing uses are being removed, and their allowlist
+  (`platform/tests/tools/no_torch_allowlist.txt`) only shrinks. Until a test's
+  use is removed, it declares torch under a pending record that names the torch
+  follow-up ticket (AICK-3408 / AICK-3409).
+  Rule: [`TESTING.md` §6](TESTING.md#6-invariants--contracts).
 - **No build artifacts in git** — never commit `build*/`, `_deps/`, `*.a`/`*.o`/`*.so`,
   `*.egg-info/`, `__pycache__/`. Always build out-of-tree on a local filesystem.
 

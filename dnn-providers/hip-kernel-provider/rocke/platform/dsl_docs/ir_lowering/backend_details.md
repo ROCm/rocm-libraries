@@ -33,7 +33,7 @@ target datalayout = (clang-emitted gfx950 string; see _DATALAYOUT in core/lower_
 
 `_DATALAYOUT` was copied verbatim from `clang -target amdgcn-amd-amdhsa -mcpu=gfx950 -emit-llvm -S`. The datalayout/triple are now served per target by an ISA backend (`core/isa/backend.py::backend_for(arch)`), keyed off the chosen gfx; the supported CDNA and RDNA targets share this clang-verified layout/triple on the ROCm releases targeted, but other ISA details (buffer-resource word3, `s_waitcnt` encoding, MFMA vs WMMA matrix ops) diverge per backend. If you bump the ROCm version or move to a different target, regenerate the datalayout. Mismatched datalayouts produce subtle codegen drift; the comgr stage rarely flags them.
 
-The default `compile_kernel` ISA is `amdgcn-amd-amdhsa--gfx950`, and gfx950 (MI355X) is the default-target / byte-identical baseline. The lowerer also supports gfx942 (CDNA, wave64) and the RDNA targets gfx1151 (RDNA3/3.5) and gfx1201 (RDNA4) — wave32 WMMA, including attention. The CDNA targets use MFMA atoms where the chosen shape exists (16x16x16, 32x32x8, 4x4x4); the K-packed atoms (16x16x32, 32x32x16) are gfx950-only. RDNA targets use WMMA atoms (`core/isa/backend.py`) instead of MFMA.
+The default `compile_kernel` ISA is `amdgcn-amd-amdhsa--gfx950`, and gfx950 is the default-target / byte-identical baseline. The lowerer also supports gfx942 (CDNA, wave64) and the RDNA targets gfx1151 (RDNA3/3.5) and gfx1201 (RDNA4) — wave32 WMMA, including attention. The CDNA targets use MFMA atoms where the chosen shape exists (16x16x16, 32x32x8, 4x4x4); the K-packed atoms (16x16x32, 32x32x16) are gfx950-only. RDNA targets use WMMA atoms (`core/isa/backend.py`) instead of MFMA.
 
 ## LLVM Intrinsic Flavor
 

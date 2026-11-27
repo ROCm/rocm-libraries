@@ -1,6 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Build + numeric-verify the gfx1151 int8-storage WMMA GEMM on a Strix Halo node.
+"""Build + numeric-verify the gfx1151 int8-storage WMMA GEMM on a gfx1151 node.
 
 Builds the RDNA3.5 int8-storage / f16-compute WMMA GEMM
 (``instances/gfx1151/wmma_gemm_int8.py``), launches it via the HIP runtime, and

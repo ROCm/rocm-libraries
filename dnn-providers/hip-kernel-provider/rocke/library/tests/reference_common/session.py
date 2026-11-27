@@ -52,6 +52,10 @@ for line in sys.stdin:
 )
 _ACTIVE = ContextVar("gpu_reference_worker_session", default=None)
 
+# How long one reference worker request may take when its caller names no
+# limit, as the offline snapshot, qualify and verify commands (cli.py) do.
+REQUEST_TIMEOUT_SECONDS = 300
+
 
 def _remove_worker_directory(directory: tempfile.TemporaryDirectory) -> None:
     """Delete a reaped worker's directory, tolerating Windows' delayed handle release.
@@ -137,7 +141,9 @@ class _Worker:
 class WorkerSession:
     """Keep baseline and candidate processes separate and close them on exit."""
 
-    def __init__(self, *, module: str, timeout: float = 300) -> None:
+    def __init__(
+        self, *, module: str, timeout: float = REQUEST_TIMEOUT_SECONDS
+    ) -> None:
         self.timeout = timeout
         self.module = module
         self.workers: dict[tuple[str, str, str], _Worker] = {}
@@ -172,9 +178,12 @@ class WorkerSession:
 
 
 @contextmanager
-def reuse_workers(module: str) -> Iterator[WorkerSession]:
-    """Reuse workers only within an explicit verification scope."""
-    session = WorkerSession(module=module)
+def reuse_workers(
+    module: str, *, timeout: float = REQUEST_TIMEOUT_SECONDS
+) -> Iterator[WorkerSession]:
+    """Reuse workers only within an explicit verification scope; each request
+    may take ``timeout`` seconds."""
+    session = WorkerSession(module=module, timeout=timeout)
     token = _ACTIVE.set(session)
     try:
         yield session

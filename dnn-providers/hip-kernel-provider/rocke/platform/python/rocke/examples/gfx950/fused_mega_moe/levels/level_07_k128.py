@@ -93,7 +93,7 @@ GROUP_K = 128
 FP8_MAX = quant_max_abs("fp8e4m3", arch="gfx950")  # 448.0
 # hand-tuned asm dynamic-quant amax floor.
 AMAX_FLOOR = 1e-6
-# L5: MI355X has 8 XCDs; the persistent-grid XCD remap groups consecutive
+# L5: gfx950 has 8 XCDs; the persistent-grid XCD remap groups consecutive
 # logical tiles onto the same XCD slice for L2 reuse. 256 CUs total.
 XCD_COUNT = 8
 PERSISTENT_CTA_DEFAULT = 256

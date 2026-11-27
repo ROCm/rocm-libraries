@@ -26,7 +26,7 @@ aiter.moe_fused_gate involves:
 Steps 1–3 alone cost 10–12µs for a tiny kernel.  CUDA graph capture
 eliminates all of them on replay.
 
-Results (MI355X / gfx950, T=2, E=128, K=8, bf16)
+Results (gfx950, T=2, E=128, K=8, bf16)
 --------------------------------------------------
   Backend                   Latency   Speedup
   AITER moe_fused_gate       13.3µs    1.00×

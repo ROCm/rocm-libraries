@@ -24,7 +24,9 @@ after the file (``[Class::]test[params]``). Its ``event`` is one of:
 - ``deselected``: a filter removed it; ``reason`` is the reason the plugin that
   removed it gave (:func:`note_deselection`), else the ``-m`` or ``-k``
   expression that rejects it (declaring the lanes, ``rocke.tests.lanes``,
-  whose markers are what it rejects);
+  whose markers are what it rejects). The expressions are evaluated with
+  pytest's private matchers; a pytest without them gets every expression given,
+  as plain text;
 - ``ran``: it ran, or erred in setup or teardown; ``reason`` is how it ended,
   one of :data:`RAN_OUTCOMES` (a test whose teardown raises after its body
   ran has two ``ran`` records), so runs of one test can be compared;
@@ -60,13 +62,15 @@ import uuid
 from collections.abc import Iterator, Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
-from _pytest.mark import KeywordMatcher, MarkMatcher
-from _pytest.mark.expression import Expression
 
 from .ci_shard import current_worker
 from .lanes import LANES, skip_until_reason
+
+if TYPE_CHECKING:
+    from _pytest.mark.expression import Expression
 
 __all__ = [
     "EVENTS",
@@ -286,30 +290,65 @@ def _deselection(item: pytest.Item) -> str:
     if noted is not None:
         return noted
     option = item.config.option
+    matchers = _pytest_matchers()
+    if matchers is None:
+        return _expression_deselection(option.markexpr, option.keyword)
+    expression_type, keyword_matcher, mark_matcher = matchers
     if option.markexpr:
-        expression = Expression.compile(option.markexpr)
+        expression = expression_type.compile(option.markexpr)
         markers = list(item.iter_markers())
-        if not expression.evaluate(MarkMatcher.from_markers(markers)):
-            return _marker_deselection(expression, option.markexpr, markers)
-    if option.keyword and not Expression.compile(option.keyword).evaluate(
-        KeywordMatcher.from_item(item)
+        if not expression.evaluate(mark_matcher.from_markers(markers)):
+            return _marker_deselection(
+                expression, option.markexpr, markers, mark_matcher
+            )
+    if option.keyword and not expression_type.compile(option.keyword).evaluate(
+        keyword_matcher.from_item(item)
     ):
-        return f"deselected by -k {option.keyword!r}"
-    return "deselected by a plugin that gave no reason"
+        return _expression_deselection("", option.keyword)
+    return _expression_deselection("", "")
+
+
+def _pytest_matchers() -> tuple[type, type, type] | None:
+    """pytest's ``Expression``, ``KeywordMatcher`` and ``MarkMatcher``, so -m
+    and -k are evaluated exactly as pytest did; ``None`` where they cannot be
+    imported, for they are private and a pytest may move them."""
+    try:
+        from _pytest.mark import KeywordMatcher, MarkMatcher
+        from _pytest.mark.expression import Expression
+    except ImportError:
+        return None
+    return Expression, KeywordMatcher, MarkMatcher
+
+
+def _expression_deselection(markexpr: str, keyword: str) -> str:
+    """The deselection reason naming the ``-m`` and ``-k`` expressions given
+    (an empty one is not given), or an unnamed plugin when neither is."""
+    filters = []
+    if markexpr:
+        filters.append(f"-m {markexpr!r}")
+    if keyword:
+        filters.append(f"-k {keyword!r}")
+    if not filters:
+        return "deselected by a plugin that gave no reason"
+    return "deselected by " + " or ".join(filters)
 
 
 def _marker_deselection(
-    expression: Expression, markexpr: str, markers: list[pytest.Mark]
+    expression: Expression,
+    markexpr: str,
+    markers: list[pytest.Mark],
+    mark_matcher: type,
 ) -> str:
     """Why ``-m markexpr`` rejects a test carrying ``markers``: the expression,
     declaring the lanes whose markers it rejects when the test without them
-    would be selected."""
-    reason = f"deselected by -m {markexpr!r}"
+    would be selected. ``mark_matcher`` is pytest's ``MarkMatcher``
+    (:func:`_pytest_matchers`)."""
+    reason = _expression_deselection(markexpr, "")
     names = {marker.name for marker in markers}
     lanes = [lane for lane in LANES if lane.marker and lane.marker in names]
     lane_markers = {lane.marker for lane in lanes}
     if lanes and expression.evaluate(
-        MarkMatcher.from_markers(
+        mark_matcher.from_markers(
             [marker for marker in markers if marker.name not in lane_markers]
         )
     ):

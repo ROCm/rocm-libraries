@@ -675,6 +675,7 @@ def _bound_and_step(qdtype: str, arch: str) -> tuple[float, float]:
     return bound, float(magnitudes[-1] - magnitudes[-2])
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("qdtype", ["fp8e4m3", "bf8e5m2"])
 def test_fp8_conversion_does_not_saturate_on_gpu(qdtype):
     """The bare f32 -> fp8 / bf8 conversion gives NaN for a value past the
@@ -696,6 +697,7 @@ def test_fp8_conversion_does_not_saturate_on_gpu(qdtype):
         assert np.isnan(_host_codec(qdtype, arch).decode_table()[codes]).all(), codes
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("qdtype", ["fp8e4m3", "bf8e5m2", "i8"])
 def test_quantize_scalar_f32_saturates_and_keeps_nan_on_gpu(qdtype):
     """quantize_scalar_f32 on the GPU's encoding: values within the bound are
@@ -740,6 +742,7 @@ def test_quantize_scalar_f32_saturates_and_keeps_nan_on_gpu(qdtype):
     np.testing.assert_array_equal(got, expected, err_msg=f"{qdtype} on {arch}")
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("vec", [2, 4])
 def test_smoothquant_fp8_output_is_exact_and_reaches_the_bound_on_gpu(vec):
     """SmoothQuant scales each row to the bound of the GPU's e4m3 encoding:

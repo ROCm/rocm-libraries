@@ -22,7 +22,7 @@ unrolled loop of zero trips, directly in its body or in an scf.if there; a
 loop in a branch keeps its own yield; and, when a GPU is present, a kernel
 whose lanes take both branches on the LLVM and the hipcc route. The refusals
 run the verifier and the Python lowerings everywhere, and the C++ lowerings
-where the ``rocke_engine`` binding is built.
+where the shared ``librocke`` loads (``rocke.tests.engines``).
 """
 
 from __future__ import annotations
@@ -869,6 +869,7 @@ def _run(blob, kernel_name, x):
     return outputs
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("route", ["llvm", "hipcc"])
 def test_gpu_lanes_take_both_branches(route):
     arch = _gpu_arch()

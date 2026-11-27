@@ -42,7 +42,7 @@ Reported metrics
   Throughput   Total output tokens / total wall-clock time (tok/s)
 
 Measured results (Qwen3-30B-A3B config, random weights, bs=2, input=512,
-output=200 tok, MI355X, level=3 CUDAGraph, kv_cache_dtype=bf16):
+output=200 tok, gfx950, level=3 CUDAGraph, kv_cache_dtype=bf16):
 
 Methodology: bench_atom_sweep.py runs configs in interleaved round-robin order
 (baseline -> dsl_gemm -> dsl_all, repeat) so each round experiences the same

@@ -16,6 +16,10 @@ Usage::
 
 The harness exits non-zero if any kernel's max abs diff exceeds the
 per-kernel tolerance, so it doubles as a smoke gate for CI.
+
+Inputs are numpy draws from a fixed per-case seed, stored in the kernel's
+element type and launched from :class:`~rocke.runtime.device_array.DeviceArray`
+buffers; each reference is computed from the stored values.
 """
 
 # ruff: noqa: E741
@@ -23,9 +27,11 @@ per-kernel tolerance, so it doubles as a smoke gate for CI.
 from __future__ import annotations
 
 import argparse
-from typing import Callable, Dict
+from collections.abc import Callable
+from types import ModuleType
+from typing import TYPE_CHECKING
 
-import torch  # noqa: E402
+import numpy as np
 
 from rocke.instances import (  # noqa: E402
     BlockScaleGemmSpec,
@@ -54,24 +60,30 @@ from rocke.instances import (  # noqa: E402
     streamk_gemm_grid,
     streamk_gemm_signature,
 )
-from rocke.runtime.launcher import KernelLauncher, LaunchConfig  # noqa: F401,E402
-
-from dataclasses import dataclass  # noqa: E402
+from rocke.examples.common.parity_support import (
+    CaseUnavailable,
+    Result,
+    default_arch,
+    device_available,
+    device_values,
+    draw,
+    launch,
+    require_ocp_fp8_arch,
+    round_to_f16,
+    run_cases,
+    summarise,
+    values,
+)
 from rocke.helpers import compile_kernel  # noqa: E402
+from rocke.runtime.device_array import DeviceArray, zero_elements
+from rocke.runtime.launcher import KernelLauncher, synchronize_and_release
 
-
-def _default_arch() -> str:
-    """Return the running device's gfx arch, falling back to ``gfx950``."""
-    try:
-        from rocke.runtime.hip_module import get_device_arch
-
-        return get_device_arch() or "gfx950"
-    except Exception:  # noqa: BLE001 - no device / import issue: fall back
-        return "gfx950"
+if TYPE_CHECKING:
+    import torch
 
 
 # Target gfx arch for all compiles in this harness.  Set by main() from
-# --arch / _default_arch() before any case runs.
+# --arch / default_arch() before any case runs.
 _ARCH = "gfx950"
 
 
@@ -80,77 +92,14 @@ def _compile(kernel):
     return compile_kernel(kernel, arch=_ARCH)
 
 
-def _require_ocp_fp8_arch(case: str) -> None:
-    """Raise a gfx950-only SKIP for OCP-fp8 (e4m3fn) parity cases on gfx942.
-
-    On CDNA4 (gfx950) ``cvt_f32_fp8`` decodes the byte as OCP e4m3fn, matching
-    torch bit-for-bit; on CDNA3 (gfx942) the same intrinsic decodes it as legacy
-    ``e4m3fnuz`` (bias 8, 0x80 == NaN), so hardware and the OCP torch reference
-    disagree.  The kernel builds + runs on gfx942 -- this is purely an fp8
-    byte-format mismatch, hence the OCP-reference parity check is gfx950-only.
-    """
-    if _ARCH != "gfx950":
-        raise NotImplementedError(
-            f"{case}: OCP fp8e4m3fn dequant parity is gfx950-only; gfx942 "
-            "cvt_f32_fp8 decodes bytes as legacy e4m3fnuz (bias 8, 0x80=NaN), "
-            "which does not match the torch float8_e4m3fn (OCP) reference"
-        )
-
-
-@dataclass
-class Result:
-    name: str
-    passed: bool
-    max_abs_diff: float
-    rel_max: float
-    range_min: float
-    range_max: float
-    note: str = ""
-
-
-def _summarise(O, O_ref, *, tol: float, note: str = "") -> Result:
-    diff = (O.float() - O_ref.float()).abs()
-    max_d = float(diff.max().item())
-    ref_max = float(O_ref.abs().max().item())
-    rel = max_d / (ref_max + 1e-9)
-    O_min = float(O.min().item())
-    O_max = float(O.max().item())
-    # Sanity: O must be non-trivial when ref is non-trivial.
-    if max(abs(O_min), abs(O_max)) < 0.001 and ref_max > 0.01:
-        return Result(
-            name="",
-            passed=False,
-            max_abs_diff=max_d,
-            rel_max=rel,
-            range_min=O_min,
-            range_max=O_max,
-            note=f"output is trivially zero (ref range ~{ref_max:.3f})",
-        )
-    return Result(
-        name="",
-        passed=(max_d <= tol),
-        max_abs_diff=max_d,
-        rel_max=rel,
-        range_min=O_min,
-        range_max=O_max,
-        note=note,
-    )
-
-
-def _launch(launcher, args, *, grid, block=(64, 1, 1)):
-    """Launch with wave64 block-size by default; per-kernel overrides pass an
-    explicit ``block`` when the kernel distributes work at another granularity."""
-    launcher(args, config=LaunchConfig(grid=grid, block=block))
-    torch.cuda.synchronize()
-
-
 # ---------------------------------------------------------------------
 # Fused MoE
 # ---------------------------------------------------------------------
 
 
-def case_moe_gather() -> Result:
-    spec = FusedMoeSpec(
+def _moe_streaming_spec() -> FusedMoeSpec:
+    """The MoE shape every streaming-kernel case runs."""
+    return FusedMoeSpec(
         tokens=32,
         experts=4,
         topk=2,
@@ -160,6 +109,35 @@ def case_moe_gather() -> Result:
         block_size=64,
         vec=4,
     )
+
+
+def _gather_reference(x: np.ndarray, sids: list[int]) -> np.ndarray:
+    """Row ``b`` is ``x[sids[b]]``; a bucket with ``sids[b] < 0`` stays 0."""
+    ref = np.zeros((len(sids), x.shape[1]))
+    for b, tid in enumerate(sids):
+        if tid >= 0:
+            ref[b] = x[tid]
+    return ref
+
+
+def _silu_mul_reference(gate: np.ndarray, up: np.ndarray) -> np.ndarray:
+    """``silu(gate) * up``, rounded to fp16 as the kernel stores it."""
+    return round_to_f16(gate / (1.0 + np.exp(-gate)) * up)
+
+
+def _topk_reduce_reference(
+    down: np.ndarray, sids: list[int], weights: np.ndarray, tokens: int
+) -> np.ndarray:
+    """``Y[tid] = sum over buckets b of token tid of weights[b] * down[b]``."""
+    ref = np.zeros((tokens, down.shape[1]))
+    for b, tid in enumerate(sids):
+        if tid >= 0:
+            ref[tid] += weights[b] * down[b]
+    return ref
+
+
+def case_moe_gather() -> Result:
+    spec = _moe_streaming_spec()
     kernel = build_moe_gather(spec)
     art = _compile(kernel)
     launcher = KernelLauncher(
@@ -167,22 +145,16 @@ def case_moe_gather() -> Result:
         kernel_name=kernel.name,
         signature=moe_gather_signature(spec),
     )
-    torch.manual_seed(0)
-    X = torch.randn(spec.tokens, spec.hidden, dtype=torch.float16, device="cuda")
+    rng = np.random.default_rng(0)
+    X_host = draw(rng, spec.tokens, spec.hidden)
     sids = [(b % spec.tokens) for b in range(spec.total_pairs)]
     sids[3] = -1  # mask out one bucket
-    SortedTokenIds = torch.tensor(sids, dtype=torch.int32, device="cuda")
-    GroupedInput = torch.zeros(
-        spec.total_pairs,
-        spec.hidden,
-        dtype=torch.float16,
-        device="cuda",
-    )
-    _launch(
+    GroupedInput = DeviceArray.zeros((spec.total_pairs, spec.hidden), "fp16")
+    launch(
         launcher,
         {
-            "X": X,
-            "SortedTokenIds": SortedTokenIds,
+            "X": DeviceArray(X_host),
+            "SortedTokenIds": DeviceArray(np.array(sids, dtype=np.int32)),
             "GroupedInput": GroupedInput,
             "tokens": spec.tokens,
             "hidden": spec.hidden,
@@ -190,27 +162,14 @@ def case_moe_gather() -> Result:
         grid=moe_gather_grid(spec),
         block=(spec.block_size, 1, 1),
     )
-    Ref = torch.zeros_like(GroupedInput)
-    for b in range(spec.total_pairs):
-        tid = sids[b]
-        if tid >= 0:
-            Ref[b, :] = X[tid, :]
-    r = _summarise(GroupedInput, Ref, tol=0.0)
+    ref = _gather_reference(values(X_host, "fp16"), sids)
+    r = summarise(device_values(GroupedInput), ref, tol=0.0)
     r.name = "moe_gather"
     return r
 
 
 def case_moe_silu_mul() -> Result:
-    spec = FusedMoeSpec(
-        tokens=32,
-        experts=4,
-        topk=2,
-        hidden=256,
-        intermediate=512,
-        dtype="f16",
-        block_size=64,
-        vec=4,
-    )
+    spec = _moe_streaming_spec()
     kernel = build_moe_silu_mul(spec)
     art = _compile(kernel)
     launcher = KernelLauncher(
@@ -218,25 +177,15 @@ def case_moe_silu_mul() -> Result:
         kernel_name=kernel.name,
         signature=moe_silu_mul_signature(spec),
     )
-    torch.manual_seed(1)
-    GateOut = torch.randn(
-        spec.total_pairs,
-        spec.intermediate,
-        dtype=torch.float16,
-        device="cuda",
-    )
-    UpOut = torch.randn(
-        spec.total_pairs,
-        spec.intermediate,
-        dtype=torch.float16,
-        device="cuda",
-    )
-    Hidden = torch.zeros_like(GateOut)
-    _launch(
+    rng = np.random.default_rng(1)
+    GateOut_host = draw(rng, spec.total_pairs, spec.intermediate)
+    UpOut_host = draw(rng, spec.total_pairs, spec.intermediate)
+    Hidden = DeviceArray.zeros((spec.total_pairs, spec.intermediate), "fp16")
+    launch(
         launcher,
         {
-            "GateOut": GateOut,
-            "UpOut": UpOut,
+            "GateOut": DeviceArray(GateOut_host),
+            "UpOut": DeviceArray(UpOut_host),
             "Hidden": Hidden,
             "total_pairs": spec.total_pairs,
             "intermediate": spec.intermediate,
@@ -244,25 +193,14 @@ def case_moe_silu_mul() -> Result:
         grid=moe_silu_mul_grid(spec),
         block=(spec.block_size, 1, 1),
     )
-    g32 = GateOut.float()
-    silu = g32 * torch.sigmoid(g32)
-    Ref = (silu * UpOut.float()).to(torch.float16)
-    r = _summarise(Hidden, Ref, tol=5e-3, note="f16 silu via exp2 ULP")
+    ref = _silu_mul_reference(values(GateOut_host, "fp16"), values(UpOut_host, "fp16"))
+    r = summarise(device_values(Hidden), ref, tol=5e-3, note="f16 silu via exp2 ULP")
     r.name = "moe_silu_mul"
     return r
 
 
 def case_moe_topk_weighted_reduce() -> Result:
-    spec = FusedMoeSpec(
-        tokens=32,
-        experts=4,
-        topk=2,
-        hidden=256,
-        intermediate=512,
-        dtype="f16",
-        block_size=64,
-        vec=4,
-    )
+    spec = _moe_streaming_spec()
     kernel = build_moe_topk_weighted_reduce(spec)
     art = _compile(kernel)
     launcher = KernelLauncher(
@@ -270,32 +208,17 @@ def case_moe_topk_weighted_reduce() -> Result:
         kernel_name=kernel.name,
         signature=moe_topk_weighted_reduce_signature(spec),
     )
-    torch.manual_seed(2)
-    DownOut = torch.randn(
-        spec.total_pairs,
-        spec.hidden,
-        dtype=torch.float16,
-        device="cuda",
-    )
+    rng = np.random.default_rng(2)
+    DownOut_host = draw(rng, spec.total_pairs, spec.hidden)
     sids = [b // spec.topk for b in range(spec.total_pairs)]
-    SortedTokenIds = torch.tensor(sids, dtype=torch.int32, device="cuda")
-    SortedWeights = torch.rand(
-        spec.total_pairs,
-        dtype=torch.float32,
-        device="cuda",
-    )
-    Y = torch.zeros(
-        spec.tokens,
-        spec.hidden,
-        dtype=torch.float32,
-        device="cuda",
-    )
-    _launch(
+    weights = rng.random(spec.total_pairs, dtype=np.float32)
+    Y = DeviceArray.zeros((spec.tokens, spec.hidden), "fp32")
+    launch(
         launcher,
         {
-            "DownOut": DownOut,
-            "SortedTokenIds": SortedTokenIds,
-            "SortedWeights": SortedWeights,
+            "DownOut": DeviceArray(DownOut_host),
+            "SortedTokenIds": DeviceArray(np.array(sids, dtype=np.int32)),
+            "SortedWeights": DeviceArray(weights),
             "Y": Y,
             "total_pairs": spec.total_pairs,
             "hidden": spec.hidden,
@@ -304,12 +227,10 @@ def case_moe_topk_weighted_reduce() -> Result:
         grid=moe_topk_weighted_reduce_grid(spec),
         block=(spec.block_size, 1, 1),
     )
-    Ref = torch.zeros_like(Y)
-    for b in range(spec.total_pairs):
-        tid = sids[b]
-        if tid >= 0:
-            Ref[tid, :] += SortedWeights[b].item() * DownOut[b, :].float()
-    r = _summarise(Y, Ref, tol=5e-2)
+    ref = _topk_reduce_reference(
+        values(DownOut_host, "fp16"), sids, weights, spec.tokens
+    )
+    r = summarise(device_values(Y), ref, tol=5e-2)
     r.name = "moe_topk_weighted_reduce"
     return r
 
@@ -326,7 +247,7 @@ def case_moe_fused_chain() -> Result:
     full MoE forward goes through per-expert GEMMs that are not
     iterated here -- see :class:`FusedMoeLauncher` docstring), so
     correctness is checked by independently comparing each kernel's
-    output to a torch reference. The chain test specifically
+    output to its numpy reference. The chain test specifically
     validates:
 
     1. The new :func:`launch_kernel` primitive correctly submits 3
@@ -339,91 +260,56 @@ def case_moe_fused_chain() -> Result:
     3. The :class:`StreamConfig` ``time_kernel=True`` path returns a
        positive ms when the chain runs in benchmark mode.
     """
-    spec = FusedMoeSpec(
-        tokens=32,
-        experts=4,
-        topk=2,
-        hidden=256,
-        intermediate=512,
-        dtype="f16",
-        block_size=64,
-        vec=4,
-    )
+    spec = _moe_streaming_spec()
     launcher = FusedMoeLauncher(spec, arch=_ARCH)
 
     # Phase 1: gather inputs. Same shape and seed as case_moe_gather
     # so this test exercises the same numerics as the per-kernel
     # case, just routed through the chained primitive.
-    torch.manual_seed(0)
-    X = torch.randn(spec.tokens, spec.hidden, dtype=torch.float16, device="cuda")
+    rng = np.random.default_rng(0)
+    X_host = draw(rng, spec.tokens, spec.hidden)
     sids_list = [(b % spec.tokens) for b in range(spec.total_pairs)]
     sids_list[3] = -1  # mask out one bucket so the masked-store path runs
-    SortedTokenIds = torch.tensor(sids_list, dtype=torch.int32, device="cuda")
-    GroupedInput = torch.zeros(
-        spec.total_pairs,
-        spec.hidden,
-        dtype=torch.float16,
-        device="cuda",
-    )
+    GroupedInput = DeviceArray.zeros((spec.total_pairs, spec.hidden), "fp16")
 
     # Phase 2: silu_mul inputs. Independent of phase 1 (the real
     # pipeline routes GroupedInput through per-expert gate / up GEMMs
     # before this kernel runs); the chain test feeds synthetic
     # GateOut / UpOut to keep the 3 kernels' validation independent.
-    torch.manual_seed(1)
-    GateOut = torch.randn(
-        spec.total_pairs,
-        spec.intermediate,
-        dtype=torch.float16,
-        device="cuda",
-    )
-    UpOut = torch.randn(
-        spec.total_pairs,
-        spec.intermediate,
-        dtype=torch.float16,
-        device="cuda",
-    )
-    Hidden = torch.zeros_like(GateOut)
+    rng = np.random.default_rng(1)
+    GateOut_host = draw(rng, spec.total_pairs, spec.intermediate)
+    UpOut_host = draw(rng, spec.total_pairs, spec.intermediate)
+    Hidden = DeviceArray.zeros((spec.total_pairs, spec.intermediate), "fp16")
 
-    # Phase 3: topk_reduce inputs. ``SortedTokenIds`` reuses the
-    # gather phase's tensor so the torch reference can be computed
-    # against the same per-bucket assignment.
-    torch.manual_seed(2)
-    DownOut = torch.randn(
-        spec.total_pairs,
-        spec.hidden,
-        dtype=torch.float16,
-        device="cuda",
-    )
+    # Phase 3: topk_reduce inputs.
+    rng = np.random.default_rng(2)
+    DownOut_host = draw(rng, spec.total_pairs, spec.hidden)
     # Match the per-kernel reduce test's id pattern (no -1 mask, so
     # every bucket contributes -- the gather phase's -1 mask is its
     # own concern).
     reduce_sids_list = [b // spec.topk for b in range(spec.total_pairs)]
-    ReduceSortedTokenIds = torch.tensor(
-        reduce_sids_list, dtype=torch.int32, device="cuda"
-    )
-    SortedWeights = torch.rand(spec.total_pairs, dtype=torch.float32, device="cuda")
-    Y = torch.zeros(spec.tokens, spec.hidden, dtype=torch.float32, device="cuda")
+    weights = rng.random(spec.total_pairs, dtype=np.float32)
+    Y = DeviceArray.zeros((spec.tokens, spec.hidden), "fp32")
 
-    values = {
+    launch_values = {
         "gather": {
-            "X": X,
-            "SortedTokenIds": SortedTokenIds,
+            "X": DeviceArray(X_host),
+            "SortedTokenIds": DeviceArray(np.array(sids_list, dtype=np.int32)),
             "GroupedInput": GroupedInput,
             "tokens": spec.tokens,
             "hidden": spec.hidden,
         },
         "silu_mul": {
-            "GateOut": GateOut,
-            "UpOut": UpOut,
+            "GateOut": DeviceArray(GateOut_host),
+            "UpOut": DeviceArray(UpOut_host),
             "Hidden": Hidden,
             "total_pairs": spec.total_pairs,
             "intermediate": spec.intermediate,
         },
         "topk_reduce": {
-            "DownOut": DownOut,
-            "SortedTokenIds": ReduceSortedTokenIds,
-            "SortedWeights": SortedWeights,
+            "DownOut": DeviceArray(DownOut_host),
+            "SortedTokenIds": DeviceArray(np.array(reduce_sids_list, dtype=np.int32)),
+            "SortedWeights": DeviceArray(weights),
             "Y": Y,
             "total_pairs": spec.total_pairs,
             "hidden": spec.hidden,
@@ -432,12 +318,11 @@ def case_moe_fused_chain() -> Result:
     }
 
     # Production dispatch: time_kernel=False -> launch_kernel returns
-    # 0.0 and the chain runs once. Drain via torch.cuda.synchronize()
-    # before reading outputs (run() does not implicitly fence on the
-    # non-timing path; the FusedMoeLauncher docstring documents
-    # this).
-    ms_run = launcher.run(values, stream=0, time_kernel=False)
-    torch.cuda.synchronize()
+    # 0.0 and the chain runs once. Drain the device before reading
+    # outputs (run() does not implicitly fence on the non-timing path;
+    # the FusedMoeLauncher docstring documents this).
+    ms_run = launcher.run(launch_values, stream=0, time_kernel=False)
+    synchronize_and_release()
     if ms_run != 0.0:
         return Result(
             name="moe_fused_chain",
@@ -452,12 +337,11 @@ def case_moe_fused_chain() -> Result:
     # Validate phase 1 (gather): GroupedInput[b, :] == X[sids[b], :]
     # for non-negative sids; the masked-out bucket stays 0 (matches
     # case_moe_gather expectations).
-    Ref_gather = torch.zeros_like(GroupedInput)
-    for b in range(spec.total_pairs):
-        tid = sids_list[b]
-        if tid >= 0:
-            Ref_gather[b, :] = X[tid, :]
-    r_gather = _summarise(GroupedInput, Ref_gather, tol=0.0)
+    r_gather = summarise(
+        device_values(GroupedInput),
+        _gather_reference(values(X_host, "fp16"), sids_list),
+        tol=0.0,
+    )
     if not r_gather.passed:
         return Result(
             name="moe_fused_chain.gather",
@@ -472,10 +356,12 @@ def case_moe_fused_chain() -> Result:
     # Validate phase 2 (silu_mul): Hidden[b, i] = silu(GateOut[b, i])
     # * UpOut[b, i] within the f16 / exp2 tolerance documented in
     # case_moe_silu_mul (5e-3).
-    g32 = GateOut.float()
-    silu = g32 * torch.sigmoid(g32)
-    Ref_hidden = (silu * UpOut.float()).to(torch.float16)
-    r_silu = _summarise(Hidden, Ref_hidden, tol=5e-3, note="f16 silu via exp2 ULP")
+    r_silu = summarise(
+        device_values(Hidden),
+        _silu_mul_reference(values(GateOut_host, "fp16"), values(UpOut_host, "fp16")),
+        tol=5e-3,
+        note="f16 silu via exp2 ULP",
+    )
     if not r_silu.passed:
         return Result(
             name="moe_fused_chain.silu_mul",
@@ -490,12 +376,13 @@ def case_moe_fused_chain() -> Result:
     # Validate phase 3 (topk_reduce): atomic-add scatter into Y. Use
     # the same 5e-2 tol as case_moe_topk_weighted_reduce -- the
     # f16 -> f32 atomic add accumulates rounding error per-bucket.
-    Ref_Y = torch.zeros_like(Y)
-    for b in range(spec.total_pairs):
-        tid = reduce_sids_list[b]
-        if tid >= 0:
-            Ref_Y[tid, :] += SortedWeights[b].item() * DownOut[b, :].float()
-    r_reduce = _summarise(Y, Ref_Y, tol=5e-2)
+    r_reduce = summarise(
+        device_values(Y),
+        _topk_reduce_reference(
+            values(DownOut_host, "fp16"), reduce_sids_list, weights, spec.tokens
+        ),
+        tol=5e-2,
+    )
     if not r_reduce.passed:
         return Result(
             name="moe_fused_chain.topk_reduce",
@@ -511,17 +398,16 @@ def case_moe_fused_chain() -> Result:
     # cold + timed loop wrapping the 3-callable group and returns
     # the per-iteration average ms. Re-zero the output accumulator
     # between iterations to avoid the timed loop accumulating into Y.
-    Y.zero_()
-    Hidden.zero_()
-    GroupedInput.zero_()
+    for output in (Y, Hidden, GroupedInput):
+        zero_elements(output.info())
     ms_timed = launcher.run(
-        values,
+        launch_values,
         stream=0,
         time_kernel=True,
         cold_niters=1,
         nrepeat=2,
     )
-    torch.cuda.synchronize()
+    synchronize_and_release()
     if not (ms_timed > 0.0):
         return Result(
             name="moe_fused_chain.timing",
@@ -556,6 +442,20 @@ def case_moe_fused_chain() -> Result:
     )
 
 
+def _torch_for_e2e() -> ModuleType | None:
+    """torch for :func:`case_moe_e2e_forward`, or None when it is not installed.
+
+    :func:`main` calls this before its first HIP call when that case is
+    selected: torch must create its HIP context first so the rocKE runtime
+    binds the same HIP runtime (a torch imported after it sees no GPU).
+    """
+    try:
+        import torch
+    except ModuleNotFoundError:
+        return None
+    return torch
+
+
 def _torch_fused_moe_reference(
     routing_logits: torch.Tensor,  # (T, E) f32
     X: torch.Tensor,  # (T, H) act dtype
@@ -566,6 +466,9 @@ def _torch_fused_moe_reference(
 ) -> torch.Tensor:
     """Plain torch fused-MoE forward, for parity comparison.
 
+    Only :func:`case_moe_e2e_forward` uses it: :class:`FusedMoeForward` still
+    takes torch tensors.
+
     Mirrors :class:`FusedMoeForward` semantics:
     * router : top-k of routing_logits, then softmax over the K picked
       values (matches CK Tile / topk_softmax kernel semantics, *not*
@@ -573,6 +476,8 @@ def _torch_fused_moe_reference(
     * per-token-expert pair: gate / up GEMMs in f32, SwiGLU, down GEMM.
     * weighted sum over the K experts per token.
     """
+    import torch
+
     T, H = X.shape
     E, I, _ = W_gate.shape
     top_vals, top_ids = torch.topk(routing_logits, k=topk, dim=-1)  # (T, K)
@@ -601,7 +506,18 @@ def case_moe_e2e_forward() -> Result:
     pipeline issues 5 streaming kernels via :func:`launch_kernel`
     chains plus 3*E grouped-GEMM launches via
     :class:`GroupedGemmLauncher` -- all on a single HIP stream.
+
+    :class:`FusedMoeForward` takes torch tensors until it moves to
+    :class:`DeviceArray`, so this is the one case that uses torch
+    (:func:`_torch_for_e2e`); without torch it raises :class:`CaseUnavailable`
+    (reported as SKIP).
     """
+    torch = _torch_for_e2e()
+    if torch is None:
+        raise CaseUnavailable(
+            "FusedMoeForward takes torch tensors until it moves to DeviceArray"
+        )
+
     spec = FusedMoeForwardSpec(
         tokens=32,
         experts=4,
@@ -672,7 +588,7 @@ def case_moe_e2e_forward() -> Result:
         Y=Y,
         stream=0,
     )
-    torch.cuda.synchronize()
+    synchronize_and_release()
 
     Y_ref = _torch_fused_moe_reference(
         routing_logits=routing_logits,
@@ -688,9 +604,9 @@ def case_moe_e2e_forward() -> Result:
     # catch genuine drift (not just fp16 ULP wobble on a large
     # accumulator).
     return _annotate_result(
-        _summarise(
-            Y,
-            Y_ref,
+        summarise(
+            Y.cpu().double().numpy(),
+            Y_ref.cpu().double().numpy(),
             tol=0.05,
             note="end-to-end fused MoE forward via FusedMoeForward",
         ),
@@ -698,7 +614,7 @@ def case_moe_e2e_forward() -> Result:
     )
 
 
-def _annotate_result(r: "Result", name: str) -> "Result":
+def _annotate_result(r: Result, name: str) -> Result:
     """Helper: stamp a ``name`` onto a :class:`Result` (it's a regular
     dataclass so we can't use ``_replace``)."""
     r.name = name
@@ -731,22 +647,20 @@ def case_streamk_gemm() -> Result:
         kernel_name=kernel.name,
         signature=streamk_gemm_signature(spec),
     )
-    import math
-
-    torch.manual_seed(200)
+    rng = np.random.default_rng(200)
     # Integer-valued so f16 multiplies are exact (no rounding).
-    A = torch.randint(-3, 4, (M, K), dtype=torch.int32, device="cuda").to(torch.float16)
-    B = torch.randint(-3, 4, (K, N), dtype=torch.int32, device="cuda").to(torch.float16)
-    Cf32 = torch.zeros(M, N, dtype=torch.float32, device="cuda")
-    Counter = torch.zeros(1, dtype=torch.int32, device="cuda")
-    _launch(
+    A = rng.integers(-3, 4, (M, K)).astype(np.float16)
+    B = rng.integers(-3, 4, (K, N)).astype(np.float16)
+    Cf32 = DeviceArray.zeros((M, N), "fp32")
+    Counter = DeviceArray.zeros((1,), "i32")
+    launch(
         launcher,
-        {"A": A, "B": B, "Cf32": Cf32, "Counter": Counter},
+        {"A": DeviceArray(A), "B": DeviceArray(B), "Cf32": Cf32, "Counter": Counter},
         grid=streamk_gemm_grid(spec),
         block=(spec.block_size, 1, 1),
     )
-    C_ref = A.float() @ B.float()
-    r = _summarise(Cf32, C_ref, tol=0.0)
+    C_ref = values(A, "fp16") @ values(B, "fp16")
+    r = summarise(device_values(Cf32), C_ref, tol=0.0)
     r.name = "streamk_gemm (atomic strategy)"
     return r
 
@@ -769,20 +683,20 @@ def case_mfma_gemm() -> Result:
         kernel_name=kernel.name,
         signature=mfma_gemm_signature(spec),
     )
-    torch.manual_seed(230)
+    rng = np.random.default_rng(230)
     # Integer-valued so f16 multiplies are exact (no rounding).
-    A = torch.randint(-3, 4, (M, K), dtype=torch.int32, device="cuda").to(torch.float16)
-    B = torch.randint(-3, 4, (K, N), dtype=torch.int32, device="cuda").to(torch.float16)
-    C = torch.zeros(M, N, dtype=torch.float16, device="cuda")
-    _launch(
+    A = rng.integers(-3, 4, (M, K)).astype(np.float16)
+    B = rng.integers(-3, 4, (K, N)).astype(np.float16)
+    C = DeviceArray.zeros((M, N), "fp16")
+    launch(
         launcher,
-        {"A": A, "B": B, "C": C, "M": M, "N": N, "K": K},
+        {"A": DeviceArray(A), "B": DeviceArray(B), "C": C, "M": M, "N": N, "K": K},
         grid=mfma_gemm_grid(spec),
         block=(spec.block_size, 1, 1),
     )
-    C_ref = (A.float() @ B.float()).to(torch.float16)
-    r = _summarise(
-        C,
+    C_ref = round_to_f16(values(A, "fp16") @ values(B, "fp16"))
+    r = summarise(
+        device_values(C),
         C_ref,
         tol=0.0,
         note="mfma_f32_16x16x16_f16 atom; one MFMA per K-tile",
@@ -793,7 +707,7 @@ def case_mfma_gemm() -> Result:
 
 def case_block_scale_gemm() -> Result:
     """Block-scaled FP8 GEMM with a/b/abquant per-group scales."""
-    _require_ocp_fp8_arch("block_scale_gemm")
+    require_ocp_fp8_arch("block_scale_gemm", _ARCH)
     M = N = K = 64
     spec = BlockScaleGemmSpec(
         M=M,
@@ -812,23 +726,21 @@ def case_block_scale_gemm() -> Result:
         kernel_name=kernel.name,
         signature=block_scale_gemm_signature(spec),
     )
-    torch.manual_seed(210)
-    A_f32 = torch.randn(M, K, dtype=torch.float32, device="cuda") * 0.3
-    B_f32 = torch.randn(K, N, dtype=torch.float32, device="cuda") * 0.3
-    A_fp8 = A_f32.to(torch.float8_e4m3fn)
-    B_fp8 = B_f32.to(torch.float8_e4m3fn)
+    rng = np.random.default_rng(210)
+    A_fp8 = draw(rng, M, K, dtype="fp8e4m3", scale=0.3)
+    B_fp8 = draw(rng, K, N, dtype="fp8e4m3", scale=0.3)
     # A scale per row and B scale per column, each different, so an output
     # scaled with another row's or column's scale misses the reference.
-    a_scale = 1.0 + torch.rand(M, 1, dtype=torch.float32, device="cuda")
-    b_scale = 0.5 + 0.5 * torch.rand(1, N, dtype=torch.float32, device="cuda")
-    C = torch.zeros(M, N, dtype=torch.float32, device="cuda")
-    _launch(
+    a_scale = (1.0 + rng.random((M, 1))).astype(np.float32)
+    b_scale = (0.5 + 0.5 * rng.random((1, N))).astype(np.float32)
+    C = DeviceArray.zeros((M, N), "fp32")
+    launch(
         launcher,
         {
-            "A": A_fp8,
-            "AScale": a_scale,
-            "B": B_fp8,
-            "BScale": b_scale,
+            "A": DeviceArray(A_fp8, "fp8e4m3"),
+            "AScale": DeviceArray(a_scale),
+            "B": DeviceArray(B_fp8, "fp8e4m3"),
+            "BScale": DeviceArray(b_scale),
             "C": C,
             "M": M,
             "N": N,
@@ -837,18 +749,18 @@ def case_block_scale_gemm() -> Result:
         grid=block_scale_gemm_grid(spec),
         block=(spec.block_size, 1, 1),
     )
-    # Reference: f32 GEMM on the dequantised + scaled values.
-    A_dq = A_fp8.float() * a_scale
-    B_dq = B_fp8.float() * b_scale
+    # Reference: GEMM on the dequantised + scaled values.
+    A_dq = values(A_fp8, "fp8e4m3") * a_scale
+    B_dq = values(B_fp8, "fp8e4m3") * b_scale
     C_ref = A_dq @ B_dq
-    r = _summarise(C, C_ref, tol=1e-2, note="fp8 abquant 1x1xK")
+    r = summarise(device_values(C), C_ref, tol=1e-2, note="fp8 abquant 1x1xK")
     r.name = "block_scale_gemm (fp8 abquant)"
     return r
 
 
 def case_mx_gemm() -> Result:
     """OCP MX shared-exponent GEMM, fp8e4m3 mantissa, group_k=32."""
-    _require_ocp_fp8_arch("mx_gemm")
+    require_ocp_fp8_arch("mx_gemm", _ARCH)
     M = N = 32
     K = 64  # 2 MX blocks
     spec = MxGemmSpec(
@@ -861,27 +773,21 @@ def case_mx_gemm() -> Result:
         kernel_name=kernel.name,
         signature=mx_gemm_signature(spec),
     )
-    torch.manual_seed(220)
-    A_f32 = torch.randn(M, K, dtype=torch.float32, device="cuda") * 0.3
-    B_f32 = torch.randn(K, N, dtype=torch.float32, device="cuda") * 0.3
-    A_fp8 = A_f32.to(torch.float8_e4m3fn)
-    B_fp8 = B_f32.to(torch.float8_e4m3fn)
+    rng = np.random.default_rng(220)
+    A_fp8 = draw(rng, M, K, dtype="fp8e4m3", scale=0.3)
+    B_fp8 = draw(rng, K, N, dtype="fp8e4m3", scale=0.3)
     # MX shared-exponent E8M0 byte: bias=127. e=127 => scale 1.0. Both scale
     # tensors are K-major: (K / 32, M) and (K / 32, N).
-    a_scale = torch.full((K // 32, M), 127, dtype=torch.uint8, device="cuda").to(
-        torch.int8
-    )
-    b_scale = torch.full((K // 32, N), 127, dtype=torch.uint8, device="cuda").to(
-        torch.int8
-    )
-    C = torch.zeros(M, N, dtype=torch.float32, device="cuda")
-    _launch(
+    a_scale = np.full((K // 32, M), 127, dtype=np.int8)
+    b_scale = np.full((K // 32, N), 127, dtype=np.int8)
+    C = DeviceArray.zeros((M, N), "fp32")
+    launch(
         launcher,
         {
-            "A": A_fp8,
-            "AScale": a_scale,
-            "B": B_fp8,
-            "BScale": b_scale,
+            "A": DeviceArray(A_fp8, "fp8e4m3"),
+            "AScale": DeviceArray(a_scale),
+            "B": DeviceArray(B_fp8, "fp8e4m3"),
+            "BScale": DeviceArray(b_scale),
             "C": C,
             "M": M,
             "N": N,
@@ -891,8 +797,8 @@ def case_mx_gemm() -> Result:
         block=(spec.block_size, 1, 1),
     )
     # With scale=1 the dequant is the fp8 round-trip.
-    C_ref = A_fp8.float() @ B_fp8.float()
-    r = _summarise(C, C_ref, tol=1e-2, note="MX e8m0=127 (scale=1)")
+    C_ref = values(A_fp8, "fp8e4m3") @ values(B_fp8, "fp8e4m3")
+    r = summarise(device_values(C), C_ref, tol=1e-2, note="MX e8m0=127 (scale=1)")
     r.name = "mx_gemm (fp8 e8m0=127)"
     return r
 
@@ -901,7 +807,7 @@ def case_mx_gemm() -> Result:
 # Runner
 # ---------------------------------------------------------------------
 
-ALL_CASES: Dict[str, Callable[[], Result]] = {
+ALL_CASES: dict[str, Callable[[], Result]] = {
     "moe_gather": case_moe_gather,
     "moe_silu_mul": case_moe_silu_mul,
     "moe_topk_weighted_reduce": case_moe_topk_weighted_reduce,
@@ -928,14 +834,6 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    global _ARCH
-    _ARCH = args.arch or _default_arch()
-    print(f"codegen arch: {_ARCH}")
-
-    if not torch.cuda.is_available():
-        print("CUDA / ROCm not available; skipping.")
-        return 0
-
     if args.op == "all":
         cases = list(ALL_CASES.items())
     else:
@@ -944,78 +842,17 @@ def main() -> int:
         if not cases:
             print(f"no cases match {args.op!r}; valid: {list(ALL_CASES)}")
             return 2
+    if any(name == "moe_e2e_forward" for name, _ in cases):
+        _torch_for_e2e()  # before the first HIP call (see its docstring)
 
-    results = []
-    skipped: list[str] = []
-    for name, fn in cases:
-        print(f"\n=== {name} ===")
-        try:
-            r = fn()
-            results.append(r)
-            print(f"  {r.name}")
-            print(
-                f"    max_abs={r.max_abs_diff:.4g}  rel={r.rel_max:.4g}  "
-                f"range=({r.range_min:.4f}, {r.range_max:.4f})  "
-                f"{'PASS' if r.passed else 'FAIL'}"
-                f"{('  ' + r.note) if r.note else ''}"
-            )
-        except (ValueError, NotImplementedError) as exc:
-            # Arch-aware builders raise a clean ValueError / NotImplementedError
-            # when the requested kernel needs an MFMA atom (or other feature)
-            # that only exists on gfx950. On gfx942 that is a legitimate SKIP,
-            # not a failure -- the harness must keep running. (On gfx950 the
-            # builders never raise these, so a raise there would be a genuine
-            # regression and is re-raised below.)
-            if _ARCH == "gfx950":
-                import traceback
+    global _ARCH
+    _ARCH = args.arch or default_arch()
+    print(f"codegen arch: {_ARCH}")
 
-                traceback.print_exc()
-                results.append(
-                    Result(
-                        name=name,
-                        passed=False,
-                        max_abs_diff=float("inf"),
-                        rel_max=float("inf"),
-                        range_min=0.0,
-                        range_max=0.0,
-                        note=f"EXCEPTION (unexpected on gfx950): {exc}",
-                    )
-                )
-            else:
-                print(f"  SKIP {name} (gfx950-only on {_ARCH}): {exc}")
-                skipped.append(name)
-        except Exception as exc:
-            import traceback
-
-            traceback.print_exc()
-            results.append(
-                Result(
-                    name=name,
-                    passed=False,
-                    max_abs_diff=float("inf"),
-                    rel_max=float("inf"),
-                    range_min=0.0,
-                    range_max=0.0,
-                    note=f"EXCEPTION: {exc}",
-                )
-            )
-
-    print("\n" + "=" * 60 + "\nSUMMARY\n" + "=" * 60)
-    for r in results:
-        tag = "PASS" if r.passed else "FAIL"
-        print(f"  {tag}  {r.name:50s} max_abs={r.max_abs_diff:.4g}")
-    for name in skipped:
-        print(f"  SKIP  {name:50s} (gfx950-only on {_ARCH})")
-    n_pass = sum(1 for r in results if r.passed)
-    n_run = len(results)
-    n_skip = len(skipped)
-    print(
-        f"\narch={_ARCH}: {n_pass}/{n_run} pass"
-        + (f", {n_skip} skipped (gfx950-only)" if n_skip else "")
-    )
-    # Exit non-zero only on a genuine FAIL. Skipped (gfx950-only) cases on
-    # gfx942 do not fail the gate; verified cases must all pass.
-    return 0 if n_pass == n_run else 1
+    if not device_available():
+        print("HIP device not available; skipping.")
+        return 0
+    return run_cases(cases, arch=_ARCH)
 
 
 if __name__ == "__main__":

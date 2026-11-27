@@ -35,16 +35,16 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 
+from .grid import NUM_XCDS_GFX950
 from .spec import ceil_div
 
-# gfx950 (MI350X) compute-unit count: 8 XCDs * 32 CUs. This is the number of
+# gfx950 compute-unit count: 8 XCDs * 32 CUs. This is the number of
 # CTAs needed to give every CU one resident block; the heuristic targets it as
 # the grid "fill" point. Other CDNA arches differ but the decode regime (grid in
 # the single/low-double digits) is well below all of them, so this constant is a
 # conservative fill target across the family.
-GFX950_NUM_XCDS = 8
 GFX950_CU_PER_XCD = 32
-GFX950_TARGET_CTAS = GFX950_NUM_XCDS * GFX950_CU_PER_XCD  # 256
+GFX950_TARGET_CTAS = NUM_XCDS_GFX950 * GFX950_CU_PER_XCD  # 256
 
 # Per-arch CU counts. Mirrors CK's ``get_num_cus()`` but as a static table so
 # it works without a live device. Keys match the ``gfx`` strings returned by
@@ -58,13 +58,13 @@ GFX950_TARGET_CTAS = GFX950_NUM_XCDS * GFX950_CU_PER_XCD  # 256
 # gfx11-generic). The C++ mirror is wgrad_arch_num_cus.
 ARCH_NUM_CUS: Mapping[str, int] = MappingProxyType(
     {
-        "gfx942": 304,  # MI300X: 8 XCDs * 38 CUs
-        "gfx950": 256,  # MI350X: 8 XCDs * 32 CUs
+        "gfx942": 304,  # the 304-CU part: 8 XCDs * 38 CUs
+        "gfx950": 256,  # 8 XCDs * 32 CUs
         "gfx1151": 64,  # RDNA gfx1151 (WMMA)
-        "gfx1201": 64,  # RDNA4 Navi48
-        "gfx1200": 32,  # RDNA4 Navi44
+        "gfx1201": 64,  # RDNA4
+        "gfx1200": 32,  # RDNA4
         "gfx12-generic": 64,  # one binary for gfx1200/gfx1201: the larger part
-        "gfx1100": 96,  # RDNA3 Navi31
+        "gfx1100": 96,  # RDNA3
         "gfx11-generic": 96,  # one binary for gfx1100-gfx1153: the largest part
     }
 )

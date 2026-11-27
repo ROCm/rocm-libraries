@@ -1,5 +1,5 @@
 {
-  "gpu": "AMD Instinct MI355X",
+  "arch": "gfx950",
   "model": "Qwen3-30B-A3B",
   "batch": 2,
   "methodology": "pure_dsl_vs_aiter_production_pipeline",

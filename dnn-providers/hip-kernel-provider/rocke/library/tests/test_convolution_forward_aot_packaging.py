@@ -658,7 +658,7 @@ def _rockes_selection(
     return compatible, [ident for ident, *_ in _widest_vector_sizes(compatible)]
 
 
-@pytest.mark.rocke_shard_cost(4)
+@pytest.mark.rocke_shard_cost(13)
 @pytest.mark.parametrize("chunk", range(_SELECTION_CHUNKS))
 @pytest.mark.parametrize("dtype", _SWEEP_DTYPE_PARAMS)
 def test_runtime_candidates_are_rockes_runtime_selection(forward_sweep, dtype, chunk):
@@ -696,7 +696,7 @@ def test_rockes_runtime_selection_narrows_most_of_the_grid(forward_sweep, dtype)
     assert narrowed > len(_SELECTION_GRID) // 2 and kept_default > 0
 
 
-@pytest.mark.rocke_shard_cost(4)
+@pytest.mark.rocke_shard_cost(9)
 @pytest.mark.parametrize("dtype", ["fp16"])
 def test_runtime_candidates_fall_back_to_every_serving_instance(forward_sweep, dtype):
     """A catalog that does not build the problem's widest combination runs every

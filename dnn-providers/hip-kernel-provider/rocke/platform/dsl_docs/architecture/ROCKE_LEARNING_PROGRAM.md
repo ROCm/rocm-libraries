@@ -7,7 +7,7 @@
 **AI Integration**: Each week includes AI-assisted learning checkpoints and exercises
 
 > **Validation note**: Every code example, exercise, and command in this guide
-> has been run and verified on an AMD Instinct MI355X (gfx950, ROCm 7.0). All
+> has been run and verified on a gfx950 GPU (ROCm 7.0). All
 > custom kernels are bit-exact against their torch reference. Run commands from
 > the `rocke/platform/` directory with `export PYTHONPATH=python`.
 
@@ -312,7 +312,7 @@ for atom, tflops, status in sorted(results, key=lambda r: -r[1]):
     print(f"{atom:<16}{tflops:<12.1f}{status}")
 ```
 
-Sample run on MI355X (gfx950) — note the >3x spread from atom choice alone:
+Sample run on gfx950 — note the >3x spread from atom choice alone:
 ```
 Atom (MxNxK)    TFLOPS      Status
 ----------------------------------------
@@ -954,7 +954,7 @@ Profile your GEMM from Week 1 and identify:
 **AI-Assisted Analysis:**
 ```
 Prompt: "Here's my profiling output [paste rocprof stats].
-My GPU is MI300X with peak 1.3 PFLOPS FP16.
+My GPU is a 304-CU gfx942 with peak 1.3 PFLOPS FP16.
 
 Analyze:
 1. What % of peak am I achieving?
@@ -1060,7 +1060,7 @@ cat utilities/skills/prefetch-data-load-rocke.md # prefetch / async load levers
 **AI-Assisted Optimization Setup** — feed the AI your *real* probe output, not
 guesses:
 ```
-Prompt: "I'm optimizing a GEMM on gfx950 (MI355X). Here is the occupancy probe:
+Prompt: "I'm optimizing a GEMM on gfx950. Here is the occupancy probe:
 [paste probe_occupancy.py table]
 and the ISA mix:
 [paste probe_isa_inspect.py histogram + waitcnt patterns]
@@ -1142,7 +1142,7 @@ for label, tflops, status in sorted(results, key=lambda r: -r[1]):
     print(f"{label:<20} {tflops:7.1f} TFLOPS  {status}")
 ```
 
-Sample run on MI355X (gfx950) — all variants stay bit-exact (`PASS`):
+Sample run on gfx950 — all variants stay bit-exact (`PASS`):
 ```
 RANKED:
 pipeline=compv3        359.8 TFLOPS  PASS

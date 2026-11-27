@@ -9,52 +9,44 @@ the structure of :class:`TestNumericVerification.test_extended_parity` in
 attention harness which is now the correct home for FMHA / Sage / Sparse
 kernel parity checks (those kernels import from ``kernels`` — library layer).
 
-PYTHONPATH is derived from this file's location so the test is portable:
-- ``library/`` (exposes ``builders.*``, ``kernels.*``, ``dispatch.*``)
-- ``platform/python`` (exposes ``rocke.*``)
+The harness imports the ``rocke`` package this test imports, with ``library/``
+(``builders.*``, ``kernels.*``, ``dispatch.*``) on its path
+(``rocke.tests.subprocess_launcher``), in a source checkout and in the installed
+test tree alike.
 """
 
 from __future__ import annotations
 
-import importlib.util
-import os
 import pathlib
 import subprocess
-import sys
 import unittest
 
 from rocke.runtime.hip_module import get_device_arch
-from rocke.tests.lanes import TORCH_IN_CI, skip_until_reason
+from rocke.tests.subprocess_launcher import (
+    rocke_python_command,
+    rocke_subprocess_env,
+)
 
-_LIBDIR = pathlib.Path(__file__).resolve().parents[1]  # rocke/library
-_PYDIR = pathlib.Path(__file__).resolve().parents[2] / "platform" / "python"
-_SUBPROC_PYTHONPATH = os.pathsep.join([str(_PYDIR), str(_LIBDIR)])
+_LIBDIR = pathlib.Path(__file__).resolve().parents[1]  # the library root
 
 
-# Detect arch via the rocke HIP runtime (no torch). The parity harness subprocess
-# imports torch for its numeric reference, so also gate on torch being importable (a
-# dependency check, not a device probe) — a torch-free env then skips cleanly instead of
-# hitting an ImportError in the body.
+# Detect arch via the rocke HIP runtime. The parity harness subprocess computes
+# numpy references.
 ARCH = get_device_arch(0)
 _CDNA = ARCH in ("gfx942", "gfx950")
-_HAS_TORCH = importlib.util.find_spec("torch") is not None
 
 
 @unittest.skipUnless(ARCH, "needs a ROCm GPU")
-@unittest.skipUnless(
-    _HAS_TORCH,
-    skip_until_reason(TORCH_IN_CI, reason="needs torch for the parity reference"),
-)
 class TestAttentionParityLibrary(unittest.TestCase):
     """Launch the library attention parity harness and check all cases pass."""
 
     def _run(self, *cmd, timeout=420):
-        env = dict(os.environ)
-        env["PYTHONPATH"] = _SUBPROC_PYTHONPATH
+        env = rocke_subprocess_env(python_paths=[_LIBDIR])
         env["PYTHONDONTWRITEBYTECODE"] = "1"
 
         r = subprocess.run(
-            [sys.executable, *cmd],
+            rocke_python_command(*cmd),
+            check=False,
             cwd=str(_LIBDIR),
             env=env,
             capture_output=True,
@@ -65,7 +57,7 @@ class TestAttentionParityLibrary(unittest.TestCase):
         return r.returncode, (r.stdout + r.stderr)
 
     def test_extended_parity_attention(self):
-        """FMHA/sage/sparse/mfma-fwd/bwd attention cases vs torch reference.
+        """FMHA/sage/sparse/mfma-fwd/bwd attention cases vs the numpy reference.
 
         Runs on BOTH arches: on gfx950 every case runs and verifies
         numerically.  On gfx942 the builders raise a clean

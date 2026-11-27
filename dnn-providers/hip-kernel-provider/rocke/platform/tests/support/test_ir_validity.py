@@ -196,7 +196,7 @@ def test_without_the_platform_tools_a_case_waits_for_the_source_tree_run(tmp_pat
     ):
         skip_without_verdict("rocke platform tools not found")
     assert without_tools.value.msg == (
-        "waits for source-tree-cases: rocke platform tools not found"
+        "waits for source-tree: rocke platform tools not found"
     )
     if _validity_tool() is None:
         pytest.skip("this layout has no platform tools to compare with")

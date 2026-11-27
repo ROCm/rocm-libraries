@@ -5,24 +5,83 @@
 The serialized-IR binding checks lowerer parity, not the C emitter's builder-call
 ordering. This runner consumes a prebuilt C binary; it never compiles during a
 test or infers artifacts from a source checkout. CMake supplies relocatable paths.
+
+With ``--rocke-shard-from-gtest-env`` it compares only its CI shard's share
+(``rocke.tests.ci_shard``, imported from the package on ``PYTHONPATH``): each configuration and the range-boundary check fall
+in exactly one shard, so the shards of a run compare everything once, and a run
+without the shard variables compares everything. With ``--rocke-list-shard-keys``
+as well, it writes those keys to a path instead of comparing, for the
+entry-time check (``tools/check_entry_times.py``).
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import difflib
-from pathlib import Path
+import io
+import os
 import subprocess
 import sys
+import tempfile
 import unittest
+from collections.abc import Callable
+from pathlib import Path
+from unittest import mock
+
+from rocke.tests.ci_shard import (
+    Shard,
+    ShardKeyListing,
+    add_shard_argument,
+    header_line,
+    list_keys_path,
+    shard_from_arguments,
+)
+
+# The shard key of the check that both emitters refuse the first index past the
+# advertised range.
+RANGE_BOUNDARY_KEY = "range boundary"
 
 
 def _invoke(command: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(command, capture_output=True, text=True, timeout=30)
+    return subprocess.run(
+        command, capture_output=True, text=True, timeout=30, check=False
+    )
 
 
-def compare_emitters(native: Path, launcher: Path, emitter: Path, count: int) -> None:
-    """Compare every advertised HIP configuration and verify the range boundary."""
+def config_key(index: int) -> str:
+    """The shard key of HIP configuration ``index``."""
+    return f"hip config {index}"
+
+
+def comparison_keys(count: int) -> list[str]:
+    """Every shard key of a comparison of ``count`` configurations."""
+    return [*(config_key(index) for index in range(count)), RANGE_BOUNDARY_KEY]
+
+
+def owned_checks(
+    count: int, owns: Callable[[str], bool] | None
+) -> tuple[list[int], bool]:
+    """The configuration indices and whether the range-boundary check that a run
+    owning the keys ``owns`` accepts performs; ``None`` owns every key."""
+    indices = [
+        index for index in range(count) if owns is None or owns(config_key(index))
+    ]
+    return indices, owns is None or owns(RANGE_BOUNDARY_KEY)
+
+
+def compare_emitters(
+    native: Path,
+    launcher: Path,
+    emitter: Path,
+    count: int,
+    owns: Callable[[str], bool] | None = None,
+) -> None:
+    """Compare the advertised HIP configurations and verify the range boundary.
+
+    ``owns`` selects the shard keys (:func:`comparison_keys`) this run checks;
+    ``None`` checks them all.
+    """
     if count <= 0:
         raise ValueError("emitter comparison count must be positive")
     for path in (native, launcher, emitter):
@@ -31,7 +90,12 @@ def compare_emitters(native: Path, launcher: Path, emitter: Path, count: int) ->
                 f"required emitter comparison artifact is missing: {path}"
             )
     python_prefix = [sys.executable, "-S", str(launcher), str(emitter)]
-    for index in range(count):
+
+    indices, boundary = owned_checks(count, owns)
+    if not indices and not boundary:
+        print("PASS: no HIP emitter check falls in this shard")
+        return
+    for index in indices:
         python = _invoke([*python_prefix, str(index), "hip"])
         cpp = _invoke([str(native), str(index), "hip"])
         if python.returncode or cpp.returncode:
@@ -49,16 +113,24 @@ def compare_emitters(native: Path, launcher: Path, emitter: Path, count: int) ->
                 )
             )
             raise AssertionError(f"HIP emitter config {index} differs:\n{diff}")
-    # An omitted/new configuration must not silently leave this gate green.
-    expected = f"unknown config index {count}"
-    for command in (
-        [*python_prefix, str(count), "hip"],
-        [str(native), str(count), "hip"],
-    ):
-        result = _invoke(command)
-        if result.returncode <= 0 or result.stdout or result.stderr.strip() != expected:
-            raise AssertionError(f"HIP emitter range boundary differs: {result}")
-    print(f"PASS: {count} C/Python HIP emitter configurations and range boundary")
+    if boundary:
+        # An omitted/new configuration must not silently leave this gate green.
+        expected = f"unknown config index {count}"
+        for command in (
+            [*python_prefix, str(count), "hip"],
+            [str(native), str(count), "hip"],
+        ):
+            result = _invoke(command)
+            if (
+                result.returncode <= 0
+                or result.stdout
+                or result.stderr.strip() != expected
+            ):
+                raise AssertionError(f"HIP emitter range boundary differs: {result}")
+    print(
+        f"PASS: {len(indices)} of {count} C/Python HIP emitter configurations"
+        + (" and the range boundary" if boundary else "")
+    )
 
 
 class TestEmitterComparisonAdmission(unittest.TestCase):
@@ -73,14 +145,108 @@ class TestEmitterComparisonAdmission(unittest.TestCase):
             )
 
 
+class TestEmitterComparisonSharding(unittest.TestCase):
+    def test_shards_of_a_run_check_every_key_exactly_once(self):
+        count = 17
+        checked = []
+        for index in range(4):
+            indices, boundary = owned_checks(count, Shard(f"{index}/4").owns)
+            checked += [config_key(config) for config in indices]
+            checked += [RANGE_BOUNDARY_KEY] if boundary else []
+        self.assertEqual(sorted(checked), sorted(comparison_keys(count)))
+
+    def test_a_run_without_a_shard_checks_everything(self):
+        self.assertEqual(owned_checks(17, None), (list(range(17)), True))
+
+    def test_the_flag_takes_the_shard_and_reports_its_split(self):
+        output = io.StringIO()
+        missing = Path(__file__).with_name("missing")
+        argv = ["--native", str(missing), "--launcher", str(missing)]
+        argv += ["--emitter", str(missing), "--count", "17"]
+        argv += ["--rocke-shard-from-gtest-env"]
+        with (
+            mock.patch.dict(os.environ, {"ROCKE_TEST_SHARD": "0/1"}),
+            contextlib.redirect_stdout(output),
+            self.assertRaisesRegex(FileNotFoundError, "artifact is missing"),
+        ):
+            main(argv)
+        lines = output.getvalue().splitlines()
+        self.assertEqual(lines[0], "rocke-ctest-shard: 0/1 (ROCKE_TEST_SHARD=0/1)")
+        self.assertEqual(lines[1], "rocke-ctest-shard 0/1: split 18 of 18; kept 18")
+
+    def test_a_malformed_shard_is_a_usage_error(self):
+        missing = Path(__file__).with_name("missing")
+        argv = ["--native", str(missing), "--launcher", str(missing)]
+        argv += ["--emitter", str(missing), "--count", "17"]
+        argv += ["--rocke-shard-from-gtest-env"]
+        with (
+            mock.patch.dict(os.environ, {"ROCKE_TEST_SHARD": "4/4"}),
+            contextlib.redirect_stderr(io.StringIO()),
+            self.assertRaises(SystemExit) as exit_info,
+        ):
+            main(argv)
+        self.assertEqual(exit_info.exception.code, 2)
+
+    def test_the_listing_flag_writes_every_key_instead_of_comparing(self):
+        missing = Path(__file__).with_name("missing")
+        argv = ["--native", str(missing), "--launcher", str(missing)]
+        argv += ["--emitter", str(missing), "--count", "3"]
+        with tempfile.TemporaryDirectory() as scratch:
+            listing = Path(scratch) / "keys.json"
+            argv += ["--rocke-shard-from-gtest-env"]
+            argv += ["--rocke-list-shard-keys", str(listing)]
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(main(argv), 0)
+            written = ShardKeyListing.read(listing)
+        keys = comparison_keys(3)
+        self.assertEqual(dict(written.key_of_case), {key: key for key in keys})
+
+    def test_the_listing_flag_without_the_shard_flag_is_a_usage_error(self):
+        missing = Path(__file__).with_name("missing")
+        argv = ["--native", str(missing), "--launcher", str(missing)]
+        argv += ["--emitter", str(missing), "--count", "3"]
+        argv += ["--rocke-list-shard-keys", str(missing)]
+        error = io.StringIO()
+        with (
+            contextlib.redirect_stderr(error),
+            self.assertRaises(SystemExit) as exit_info,
+        ):
+            main(argv)
+        self.assertEqual(exit_info.exception.code, 2)
+        self.assertIn(
+            "--rocke-list-shard-keys needs --rocke-shard-from-gtest-env",
+            error.getvalue(),
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--native", type=Path, required=True)
     parser.add_argument("--launcher", type=Path, required=True)
     parser.add_argument("--emitter", type=Path, required=True)
     parser.add_argument("--count", type=int, required=True)
+    add_shard_argument(
+        parser,
+        help="compare only this CI shard's configurations",
+        list_help="write the configurations and the range-boundary check the CI "
+        "shards split, each its own shard key, to this path instead of comparing "
+        "them",
+    )
     args = parser.parse_args(argv)
-    compare_emitters(args.native, args.launcher, args.emitter, args.count)
+    shard = shard_from_arguments(parser, args)
+    listing = list_keys_path(args)
+    if listing is not None:
+        ShardKeyListing({key: key for key in comparison_keys(args.count)}).write(
+            listing
+        )
+        return 0
+    if args.shard_from_gtest_env:
+        print(header_line(shard))
+    owns = None
+    if shard is not None:
+        print(shard.split_line(comparison_keys(args.count)))
+        owns = shard.owns
+    compare_emitters(args.native, args.launcher, args.emitter, args.count, owns)
     return 0
 
 

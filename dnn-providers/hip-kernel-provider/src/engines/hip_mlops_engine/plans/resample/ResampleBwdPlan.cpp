@@ -11,7 +11,6 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
 #include <cstdint>
-#include <limits>
 #include <numeric>
 
 namespace hip_kernel_provider::resample
@@ -201,6 +200,13 @@ ResampleBwdPlan::ResampleBwdPlan(ResampleBwdParams&& params)
 {
 }
 
+std::vector<KernelLaunchShape> ResampleBwdPlan::launchShapes(int64_t numElements)
+{
+    return {{"ResampleBwd",
+             numElements / BLOCK_SIZE + (numElements % BLOCK_SIZE != 0 ? 1 : 0),
+             BLOCK_SIZE}};
+}
+
 size_t ResampleBwdPlan::getWorkspaceSize([[maybe_unused]] const Handle& handle) const
 {
     // No workspace needed for resample backward
@@ -225,15 +231,12 @@ void ResampleBwdPlan::compile([[maybe_unused]] const IKernelCompiler& kernelComp
         validateResampleIndexShape(*_params.index(), dyDims, "ResampleBwd");
     }
 
-    constexpr uint64_t BLOCK_SIZE = 256;
     const auto numDxElements
         = std::accumulate(dxDims.begin(), dxDims.end(), 1ULL, std::multiplies<>());
-    const auto gridSize = (numDxElements + BLOCK_SIZE - 1) / BLOCK_SIZE;
-    if(gridSize > std::numeric_limits<unsigned int>::max())
+    const auto shapes = launchShapes(static_cast<int64_t>(numDxElements));
+    for(const auto& shape : shapes)
     {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "ResampleBwd output is too large for one kernel launch.");
+        checkLaunchFitsThreadLimit(shape);
     }
 
     const std::string dyTypeString = getKernelParamTypeString(_params.dy()->data_type());
@@ -256,8 +259,8 @@ void ResampleBwdPlan::compile([[maybe_unused]] const IKernelCompiler& kernelComp
 
     _compiledProgram = kernelCompiler.compile("ResampleBwd.cpp", options);
     _runnableKernel = _compiledProgram->getKernel("ResampleBwd");
-    _runnableKernel->setBlockSize(static_cast<unsigned int>(BLOCK_SIZE), 1, 1);
-    _runnableKernel->setGridSize(static_cast<unsigned int>(gridSize), 1, 1);
+    _runnableKernel->setBlockSize(static_cast<unsigned int>(shapes[0].threadsPerBlock), 1, 1);
+    _runnableKernel->setGridSize(static_cast<unsigned int>(shapes[0].blocks), 1, 1);
 }
 
 void ResampleBwdPlan::execute([[maybe_unused]] const Handle& handle,

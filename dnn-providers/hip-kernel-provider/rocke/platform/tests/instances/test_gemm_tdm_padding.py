@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from test_gemm_split_barrier import _spec  # noqa: E402
 
 from rocke.instances.common.gemm_universal import _tdm_padding_for_tile  # noqa: E402
-from rocke.tests.lanes import BINDING_LANE, skip_until
+from rocke.tests.lanes import BUILD_VARIANT, skip_until
 
 ARCH = "gfx1250"
 
@@ -49,7 +49,7 @@ class TestTdmPaddingCppEngine(unittest.TestCase):
             import rocke_engine  # noqa: F401
         except ModuleNotFoundError as e:
             skip_until(
-                BINDING_LANE, reason=f"rocke_engine C++ binding not importable: {e}"
+                BUILD_VARIANT, reason=f"rocke_engine C++ binding not importable: {e}"
             )
 
     def test_both_engines_judge_lds_k_pad_alike(self):

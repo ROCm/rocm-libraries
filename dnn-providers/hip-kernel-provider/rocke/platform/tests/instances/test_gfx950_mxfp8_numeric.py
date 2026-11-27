@@ -5,6 +5,8 @@
 import pytest
 from rocke.tests.arch_marks import arch_specific
 
+pytestmark = pytest.mark.gpu
+
 
 @arch_specific(
     ("gfx950",),

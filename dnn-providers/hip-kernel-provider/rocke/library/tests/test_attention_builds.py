@@ -32,7 +32,7 @@ import pytest
 from rocke import lower_kernel_to_llvm
 from rocke.tests.comgr import loaded_compiler_build
 from rocke.tests.compiler_tools import require_hsaco_tools, require_tools_or_skip
-from rocke.tests.lanes import TORCH_IN_CI, import_or_skip_until
+from rocke.tests.lanes import TICKET, import_or_skip_until, skip_until
 from rocke.tests.pending_lanes import (
     measured_budget_kernels,
     measured_scratch_allowance,
@@ -6395,7 +6395,7 @@ class TestAttentionHarnessTimers(unittest.TestCase):
         # so it cannot be loaded without torch; skip torch-free instead of
         # erroring. Import torch BEFORE patching sys.modules so it stays in the
         # parent process's module table after ``mock.patch.dict`` exits.
-        import_or_skip_until("torch", TORCH_IN_CI)
+        import_or_skip_until("torch", TICKET)
 
         # The harness moved into the library tree (builders/); resolve it via the
         # package system (editable-installed) rather than a hardcoded path, then
@@ -6484,7 +6484,7 @@ def test_every_declared_budget_was_exercised():
     budgeted kernels, so the check is meaningful on a full-file / CI run without
     false-failing an unrelated targeted run."""
     if not _SEEN_KERNEL_NAMES:
-        pytest.skip("no budgeted kernels built in this selection")
+        skip_until(TICKET, reason="no budgeted kernels built in this selection")
     measured = measured_budget_kernels(_MEASURED_BUDGETS_PATH)
     orphaned = (set(_MIN_WAVES_PER_SIMD) | measured) - _SEEN_KERNEL_NAMES
     assert (

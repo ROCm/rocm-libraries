@@ -26,7 +26,7 @@ from rocke.runtime.device_array import DeviceArray, host_values
 from rocke.runtime.hip_module import get_device_arch
 from rocke.tests.gpu import current_device_arch_in
 from rocke.tests.host_arrays import HostArray
-from rocke.tests.lanes import TORCH_IN_CI, import_or_skip_until
+from rocke.tests.lanes import TICKET, import_or_skip_until
 
 from ._attention_paged_reference import paged_attention_reference_with_lse
 from ._attention_unified_support import random_half
@@ -554,7 +554,7 @@ def test_cached_lse_off_2d_graph_never_serves_an_lse_request(cdna3_or_4):
     hit). Then the LSE-on call must write O and LSE, match the reference, and
     add no graph. gfx950 has no 2D graph path, so there only the
     served-and-correct half runs."""
-    torch = import_or_skip_until("torch", TORCH_IN_CI)
+    torch = import_or_skip_until("torch", TICKET)
     problem, data = _case2d([256], [256])
     off_problem = dataclasses.replace(problem, emit_lse=False)
 

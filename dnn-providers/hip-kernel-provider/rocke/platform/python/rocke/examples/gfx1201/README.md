@@ -1,6 +1,6 @@
 # gfx1201 (RDNA4) WMMA examples
 
-Bring-up and verification examples for the **gfx1201** GPU (RDNA4, Navi 48,
+Bring-up and verification examples for the **gfx1201** GPU (RDNA4,
 wave32), authored in `rocke` (Python → LLVM IR → HSACO). Three kernels, all
 built on the single new **gfx12 WMMA `16×16×16` f16 atom**
 (`wmma_gfx12_f32_16x16x16_f16`):
@@ -28,10 +28,10 @@ built on the single new **gfx12 WMMA `16×16×16` f16 atom**
 
 ## Prerequisites
 
-- A **gfx1201 device** for the `--verify` / `--bench` step (e.g. a Navi 48
-  board). The probe and the verify drivers run a real kernel and compare against
-  a numpy reference, so they need the hardware. Use `--no-verify` (probe and
-  `matmul_nbits`) to **build + write the artifact only**, with no device.
+- A **gfx1201 device** for the `--verify` / `--bench` step. The probe and the
+  verify drivers run a real kernel and compare against a numpy reference, so
+  they need the hardware. Use `--no-verify` (probe and `matmul_nbits`) to
+  **build + write the artifact only**, with no device.
 - The repo's `rocke` Python package on `PYTHONPATH` (run from
   `dnn-providers/hip-kernel-provider/rocke/platform/python`, i.e. `PYTHONPATH=python`).
 - A working `rocke` build toolchain (LLVM/comgr) to compile the HSACO.
