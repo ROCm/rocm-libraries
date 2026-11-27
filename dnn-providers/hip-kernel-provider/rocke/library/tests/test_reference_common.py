@@ -1908,6 +1908,62 @@ def test_reference_fixture_keeps_one_slot_open_at_a_time(
     assert workers == ["closed", "closed"]
 
 
+@pytest.mark.parametrize("operation", OPERATIONS[:1])
+def test_a_pinned_reference_slot_stops_a_stalled_request_at_its_timeout(
+    second_variant, tmp_path, monkeypatch
+):
+    """A request made while a pinned slot is open runs in that slot's workers,
+    which stop it at ``PINNED_REQUEST_TIMEOUT_SECONDS`` with the worker's own
+    error, below the GPU entries' per-test limit.
+
+    The real worker session runs a worker that never finishes; the limit is
+    shortened so the stop takes half a second rather than the real one.
+    """
+    from contextlib import closing
+    from types import SimpleNamespace
+
+    from reference_common import pinned_tests
+    from reference_common.runner import run_worker
+    from rocke.runtime import hip_module
+
+    registry = second_variant.architectures
+    architecture = registry.ARCHITECTURES[0]
+    for variant in registry.variants(architecture):
+        registry.baseline_lock(architecture, variant).write_text("{}")
+    monkeypatch.setattr(
+        hip_module, "get_device_target_id", lambda device=0: architecture
+    )
+    monkeypatch.setattr(pinned_tests, "PINNED_REQUEST_TIMEOUT_SECONDS", 0.5)
+    stalled = tmp_path / "stalled_worker"
+    (stalled / "stalled_reference").mkdir(parents=True)
+    (stalled / "stalled_reference" / "__init__.py").touch()
+    (stalled / "stalled_reference" / "worker.py").write_text(
+        "import time\ndef run(request, work):\n    time.sleep(30)\n"
+    )
+    fixture = pinned_tests.select_bundle(
+        SimpleNamespace(getoption=lambda option: None),
+        second_variant,
+        lambda *args, **kwargs: tmp_path,
+        lambda bundle, lock, *, architecture, variant: {},
+    )
+    with closing(fixture):
+        open_slot = next(fixture)
+        open_slot(architecture, "narrow")
+        started = time.monotonic()
+        with pytest.raises(
+            TimeoutError, match="replay worker exceeded its 0.5 s request timeout"
+        ):
+            run_worker(
+                {"mode": "replay", "repetitions": 1},
+                runner=stalled,
+                platform=stalled,
+                library=None,
+                work=tmp_path / "request",
+                module="stalled_reference.worker",
+            )
+        assert time.monotonic() - started < 10
+
+
 @pytest.mark.parametrize("operation", OPERATIONS)
 def test_reference_worker_requires_explicit_architecture(operation, tmp_path):
     from importlib import import_module
