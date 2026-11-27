@@ -425,4 +425,83 @@ TEST(TestOperationMetadata, AConditionalDimsElementIsOmittedWhenItsConditionIsFa
               (std::vector<int64_t>{4, 512, 1024}));
 }
 
+TEST(TestOperationMetadata, AWeightMustNameADeclaredValueAndBePositive)
+{
+    // A weight that names nothing, or that cannot be a frequency, would otherwise be ignored and
+    // leave the corpus at equal shares while the declaration says otherwise.
+    const auto errorFor = [](const std::string& parameter) {
+        auto declaration = layernormMetadata();
+        declaration["parameters"]["dtype"] = nlohmann::json::parse(parameter);
+        const auto load = parseOperationMetadata(declaration);
+        return load.errors.empty() ? std::string() : load.errors.front();
+    };
+
+    EXPECT_TRUE(errorFor(R"({"type": "enum", "values": ["fp32", "fp16"],
+                             "weights": {"fp32": 2, "fp16": 1}})")
+                    .empty());
+    EXPECT_NE(errorFor(R"({"type": "enum", "values": ["fp32", "fp16"],
+                           "weights": {"bf16": 2}})")
+                  .find("undeclared value 'bf16'"),
+              std::string::npos);
+    EXPECT_NE(errorFor(R"({"type": "enum", "values": ["fp32", "fp16"],
+                           "weights": {"fp32": 0}})")
+                  .find("above 0"),
+              std::string::npos);
+    EXPECT_NE(errorFor(R"({"type": "enum", "values": ["fp32", "fp16"],
+                           "weights": {"fp32": -1}})")
+                  .find("above 0"),
+              std::string::npos);
+    EXPECT_NE(errorFor(R"({"type": "int64", "weights": {"1": 2}})").find("not an enum"),
+              std::string::npos);
+}
+
+TEST(TestOperationMetadata, WeightErrorsNameTheParameterAndValue)
+{
+    const auto firstError = [](const std::string& weights) {
+        auto declaration = layernormMetadata();
+        declaration["parameters"]["dtype"] = nlohmann::json::parse(
+            R"({"type": "enum", "values": ["fp32", "fp16"], "weights": )" + weights + "}");
+        const auto load = parseOperationMetadata(declaration);
+        return load.errors.empty() ? std::string() : load.errors.front();
+    };
+
+    EXPECT_EQ(firstError(R"({"bogus": 1})"), "parameter 'dtype' weights undeclared value 'bogus'");
+    EXPECT_EQ(firstError(R"({"fp32": 0})"),
+              "parameter 'dtype' weight for 'fp32' must be a number above 0");
+}
+
+TEST(TestOperationMetadata, AValueWithoutAWeightWeighsOneAndWeightsAreRelativeToTheirMean)
+{
+    auto declaration = layernormMetadata();
+    declaration["parameters"]["dtype"] = nlohmann::json::parse(
+        R"({"type": "enum", "values": ["fp32", "fp16", "bf16"], "weights": {"fp32": 4}})");
+    const auto load = parseOperationMetadata(declaration);
+    ASSERT_TRUE(load.ok()) << (load.errors.empty() ? "" : load.errors.front());
+
+    const auto* dtype = load.metadata->find("dtype");
+    ASSERT_NE(dtype, nullptr);
+    // 4, 1, 1: the mean is 2, so fp32 is twice as common as average and the others half.
+    EXPECT_DOUBLE_EQ(dtype->relativeWeight("fp32"), 2.0);
+    EXPECT_DOUBLE_EQ(dtype->relativeWeight("fp16"), 0.5);
+    EXPECT_DOUBLE_EQ(load.metadata->find("forward_phase")->relativeWeight("TRAINING"), 1.0);
+}
+
+TEST(TestOperationMetadata, AModelShapeDefaultMustBeADeclaredValueOfAnEnumParameter)
+{
+    const auto errorFor = [](const std::string& defaults) {
+        auto declaration = layernormMetadata();
+        declaration["model_shape_defaults"] = nlohmann::json::parse(defaults);
+        const auto load = parseOperationMetadata(declaration);
+        return load.errors.empty() ? std::string() : load.errors.front();
+    };
+
+    EXPECT_TRUE(errorFor(R"({"dtype": "fp32"})").empty());
+    EXPECT_NE(errorFor(R"({"dtype": "fp8"})").find("a value it does not declare"),
+              std::string::npos);
+    EXPECT_NE(errorFor(R"({"nothing": "fp32"})").find("not a declared enum parameter"),
+              std::string::npos);
+    EXPECT_NE(errorFor(R"({"batch": "1"})").find("not a declared enum parameter"),
+              std::string::npos);
+}
+
 } // namespace hipdnn_corpus_gen

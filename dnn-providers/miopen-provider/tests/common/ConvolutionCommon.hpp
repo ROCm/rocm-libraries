@@ -5,9 +5,14 @@
 
 #include <cstdint>
 #include <ostream>
+#include <string>
 #include <vector>
 
+#include <flatbuffers/flatbuffers.h>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 
 namespace test_conv_common
@@ -214,6 +219,77 @@ inline std::vector<ConvTestCase> getDeterministicConvTestCases5D()
         // Filter 3x3x3 with padding - common 5D case
         {{1, 8, 8, 8, 8}, {1, 8, 3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, seed},
     };
+}
+
+// Packed strides of `dims` in channels-last or channels-first order.
+inline std::vector<int64_t> packedStrides(const std::vector<int64_t>& dims, bool channelsLastLayout)
+{
+    return channelsLastLayout ? hipdnn_data_sdk::utilities::generateStrides(
+                                    dims, hipdnn_data_sdk::utilities::strideOrderNhwc(dims.size()))
+                              : hipdnn_data_sdk::utilities::generateStrides(dims);
+}
+
+// One 2D convolution (unit stride, no padding, no dilation) shared by the tests of the plan
+// builders and of the applicability checks: x [2, 4, 8, 8] with w [4, 4, 3, 3] gives
+// y [2, 4, 6, 6].
+inline const std::vector<int64_t> CONV_2D_X_DIMS = {2, 4, 8, 8};
+inline const std::vector<int64_t> CONV_2D_W_DIMS = {4, 4, 3, 3};
+inline const std::vector<int64_t> CONV_2D_Y_DIMS = {2, 4, 6, 6};
+
+// The 2D bf16 convolution of the mixed-layout bundle that MIOpen fails on, in backward-data roles
+// (forward poses the same problem with x the shape of dx and y the shape of dy): dy and dx are
+// channels-first and w is channels-last, with the exact strides of the bundle.
+inline const std::vector<int64_t> MIXED_LAYOUT_2D_DY_DIMS = {2, 32, 14, 14};
+inline const std::vector<int64_t> MIXED_LAYOUT_2D_DY_STRIDES = {6272, 196, 14, 1};
+inline const std::vector<int64_t> MIXED_LAYOUT_2D_W_DIMS = {32, 16, 3, 3};
+inline const std::vector<int64_t> MIXED_LAYOUT_2D_W_STRIDES = {144, 1, 48, 16};
+inline const std::vector<int64_t> MIXED_LAYOUT_2D_DX_DIMS = {2, 16, 16, 16};
+inline const std::vector<int64_t> MIXED_LAYOUT_2D_DX_STRIDES = {4096, 256, 16, 1};
+inline constexpr hipdnn_flatbuffers_sdk::data_objects::DataType MIXED_LAYOUT_2D_DATA_TYPE
+    = hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16;
+
+// The 1D bf16 convolution of the same mixed-layout bundle, in the same roles: dy and dx are
+// channels-first and w is channels-last.
+inline const std::vector<int64_t> MIXED_LAYOUT_1D_DY_DIMS = {8, 32, 16};
+inline const std::vector<int64_t> MIXED_LAYOUT_1D_DY_STRIDES = {512, 16, 1};
+inline const std::vector<int64_t> MIXED_LAYOUT_1D_W_DIMS = {32, 16, 1};
+inline const std::vector<int64_t> MIXED_LAYOUT_1D_W_STRIDES = {16, 1, 16};
+inline const std::vector<int64_t> MIXED_LAYOUT_1D_DX_DIMS = {8, 16, 16};
+inline const std::vector<int64_t> MIXED_LAYOUT_1D_DX_STRIDES = {256, 16, 1};
+
+// The reason the fused applicability check gives when the bias data type differs from the data
+// type of the convolution input.
+inline std::string biasDataTypeReason(hipdnn_flatbuffers_sdk::data_objects::DataType bias,
+                                      hipdnn_flatbuffers_sdk::data_objects::DataType input)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType;
+    return std::string("Bias tensor data type ") + EnumNameDataType(bias)
+           + " must equal the convolution input data type " + EnumNameDataType(input);
+}
+
+// The reason for the graph of cbaGraphWithFloatBiasOnHalfGraph, which is biasDataTypeReason(FLOAT,
+// HALF), as the literal (a const char*) that the table of declined graphs of the fused builder
+// test holds.
+inline constexpr const char* FLOAT_BIAS_ON_HALF_GRAPH_REASON
+    = "Bias tensor data type FLOAT must equal the convolution input data type HALF";
+
+// A conv -> bias -> activation graph whose convolution and bias intermediates and bias are float
+// while the input, weights and final output are half: the graph the node checks of the fused
+// builder let through up to the bias data type rule.
+inline flatbuffers::FlatBufferBuilder cbaGraphWithFloatBiasOnHalfGraph()
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    using hipdnn_flatbuffers_sdk::data_objects::GraphT;
+
+    return hipdnn_test_sdk::utilities::mutateGraph(
+        hipdnn_test_sdk::utilities::createValidConvFwdBiasActivGraph(), [](GraphT& graph) {
+            for(auto& tensor : graph.tensors)
+            {
+                const bool isFloat = tensor->name == "bias" || tensor->name == "y_conv"
+                                     || tensor->name == "y_bias";
+                tensor->data_type = isFloat ? DataType::FLOAT : DataType::HALF;
+            }
+        });
 }
 
 } // namespace test_conv_common

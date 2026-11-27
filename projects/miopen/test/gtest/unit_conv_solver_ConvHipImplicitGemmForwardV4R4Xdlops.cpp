@@ -130,20 +130,20 @@ TEST_P(CPU_UnitTestConvSolverHipImplicitGemmForwardV4R4XdlopsDevApplicabilityFwd
     this->RunTest(miopen::solver::conv::ConvHipImplicitGemmForwardV4R4Xdlops{});
 };
 
-// Smoke tests
-INSTANTIATE_TEST_SUITE_P(Smoke,
+// Quick tests
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverHipImplicitGemmForwardV4R4XdlopsFwd_FP16,
                          testing::Combine(testing::Values(GetTestParamsFP16()),
                                           testing::Values(miopenConvolutionAlgoImplicitGEMM),
                                           testing::ValuesIn(GetConvTestCases(miopenHalf))));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverHipImplicitGemmForwardV4R4XdlopsFwd_BFP16,
                          testing::Combine(testing::Values(GetTestParamsBFP16()),
                                           testing::Values(miopenConvolutionAlgoImplicitGEMM),
                                           testing::ValuesIn(GetConvTestCases(miopenBFloat16))));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverHipImplicitGemmForwardV4R4XdlopsFwd_FP32,
                          testing::Combine(testing::Values(GetTestParamsFP32()),
                                           testing::Values(miopenConvolutionAlgoImplicitGEMM),
@@ -151,19 +151,19 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 
 // Device applicability test
 INSTANTIATE_TEST_SUITE_P(
-    Smoke,
+    Quick,
     CPU_UnitTestConvSolverHipImplicitGemmForwardV4R4XdlopsDevApplicabilityFwd_BFP16,
     testing::Combine(testing::Values(GetTestParamsBFP16()),
                      testing::Values(GetConvTestCases(miopenBFloat16)[0])));
 
 INSTANTIATE_TEST_SUITE_P(
-    Smoke,
+    Quick,
     CPU_UnitTestConvSolverHipImplicitGemmForwardV4R4XdlopsDevApplicabilityFwd_FP32,
     testing::Combine(testing::Values(GetTestParamsFP32()),
                      testing::Values(GetConvTestCases(miopenFloat)[0])));
 
-// Full tests
-INSTANTIATE_TEST_SUITE_P(Full,
+// Standard tests
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_UnitTestConvSolverHipImplicitGemmForwardV4R4XdlopsFwd_FP16,
                          testing::Combine(testing::Values(GetTestParamsFull()),
                                           testing::Values(miopenConvolutionAlgoImplicitGEMM),

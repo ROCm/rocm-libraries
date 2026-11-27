@@ -107,10 +107,10 @@ Statistics are computed per-channel over the batch and spatial dimensions.
 | Tensor | Shape | Description |
 |--------|-------|-------------|
 | Input (x) | `(N, ...)` | Batch first, then feature dims |
-| Scale, Bias | `(1, ...)` | Batch dim = 1, remaining dims match input feature dims |
+| Scale, Bias | `(1, ...)` or lower rank | Full rank: batch dim = 1, feature dims match x. Lower rank: see normalization rule below |
 | Mean, Inv Variance | Stats dims | Batch dims from input, normalized dims = 1 |
 
-Normalization is performed over the feature dimensions (all dims where scale > 1).
+A full-rank scale (or bias) — same rank as x — derives the normalized dimension count k as `rank(x) - i`, for the first dimension i (0-indexed, up to but excluding x's last dimension) whose value is not 1; if every such dimension is 1, k = 1. A scale with a 1 after its first non-1 dimension where x's dimension there is not 1, such as `(1, C, 1, 1)` on x `(N, C, H, W)`, derives a k that would span non-trailing feature dims and is rejected: no hipDNN provider normalizes non-trailing axes (see [Graph validation](./KNOWN_DIVERGENCES.md#graph-validation)). A scale of lower rank than x that equals x's own trailing dims normalizes all of them: k equals the scale's rank. For example, scale `(1, 14, 14)` on x `(2, 1, 14, 14)` gives k = 3. Any other lower-rank scale is right-aligned to x's rank by prepending 1s and then follows the full-rank rule above. For example, scale `(1, 5)` on x `(2, 3, 4, 5)` right-aligns to `(1, 1, 1, 5)`, so k = 1.
 
 #### Matrix Multiplication
 
@@ -118,7 +118,7 @@ Normalization is performed over the feature dimensions (all dims where scale > 1
 |--------|-------|-------------|
 | A | `(...batch, M, K)` | Leading batch dims, last two are matrix dims |
 | B | `(...batch, K, N)` | K must match A's last dim |
-| C (output) | `(...batch, M, N)` | Batch dims are broadcast |
+| C (output) | `(...batch, M, N)` | Same rank as A; each batch dim is the larger of A's and B's; M from A, N from B |
 
 Batch dimensions support broadcasting (dims must be equal or divisible).
 
