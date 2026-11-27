@@ -1055,6 +1055,8 @@ int main(int argc, const char* argv[])
     {
         ScopedTimer timer("hip_initialization");
         hardware     = GetHardware(args);
+        const bool fusedA2ADirect = fusedMode == FusedA2A::GemmA2A
+                                    && hardware->archName().find("gfx1250") != std::string::npos;
         size_t world = 1;
         for(int i : problemIdxs)
             world = std::max<size_t>(world, problems[i]->world());
@@ -1120,7 +1122,8 @@ int main(int argc, const char* argv[])
                                                 args["use-default-stream"].as<bool>(),
                                                 fusedA2A ? kCommFlagsBytes : 0,
                                                 fusedA2A ? deviceIds : std::vector<int>{},
-                                                sdmaRotate));
+                                                sdmaRotate,
+                                                fusedA2ADirect));
     }
     std::shared_ptr<DeviceContext>              device0 = devices[0];
     std::vector<std::shared_ptr<DeviceContext>> active;

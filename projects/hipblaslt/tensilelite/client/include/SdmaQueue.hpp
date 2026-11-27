@@ -236,15 +236,7 @@ namespace TensileLite
         {
             if(mask & ~1u)
                 mask &= ~1u;
-            if(mask == 0)
-                return 0;
-            size_t engines = 0;
-            for(uint32_t b = 0; b < 32; ++b)
-                engines += (mask >> b) & 1u;
-            k %= engines;
-            for(uint32_t b = 0;; ++b)
-                if((mask & (1u << b)) && k-- == 0)
-                    return b;
+            return sdmaMaskEngine(mask, k);
         }
 
         // Engine of the `remote`-th remote peer queue of a node with target `gfx`, given

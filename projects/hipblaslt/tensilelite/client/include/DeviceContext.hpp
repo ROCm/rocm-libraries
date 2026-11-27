@@ -46,14 +46,16 @@ namespace TensileLite
 
         struct DeviceContext
         {
-            // sdmaPeers: device ids to enable P2P to and open one SDMA queue each for,
-            // indexed by rank; the entry equal to deviceId is a loopback queue.
+            // sdmaPeers: device ids to enable P2P to and open one SDMA queue each for outside
+            // directMask, indexed by rank; the entry equal to deviceId is a loopback queue.
             // sdmaRotate: the `rotate` of sdmaQueueEngine.
+            // fusedA2ADirect: directMask = fusedA2ADirectMask.
             DeviceContext(int                     deviceId,
                           bool                    useDefaultStream,
                           size_t                  commFlagsBytes = 0,
                           std::vector<int> const& sdmaPeers      = {},
-                          int                     sdmaRotate     = 0);
+                          int                     sdmaRotate     = 0,
+                          bool                    fusedA2ADirect = false);
             ~DeviceContext();
 
             DeviceContext(DeviceContext const&)            = delete;
@@ -68,6 +70,8 @@ namespace TensileLite
             size_t                                      commFlagsBytes;
             void*                                       commFlags = nullptr;
             std::vector<std::shared_ptr<SdmaQueue>>     sdmaQueues;
+            // Bit j: sdmaPeers[j] is direct (fusedA2ADirectMask); its sdmaQueues entry is null.
+            uint32_t directMask = 0;
 
         private:
             void release();

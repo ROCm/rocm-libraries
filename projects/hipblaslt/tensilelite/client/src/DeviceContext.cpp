@@ -9,6 +9,7 @@
 #include <Tensile/Utils.hpp>
 
 #ifdef TENSILELITE_ENABLE_SDMA
+#include "FusedA2ATopology.hpp"
 #include "SdmaQueue.hpp"
 #endif
 
@@ -73,13 +74,29 @@ namespace TensileLite
             }
 
             constexpr int kA2AGemmPoisonByte = 0xC7;
+
+#ifdef TENSILELITE_ENABLE_SDMA
+            PciBusId pciBusIdOfDevice(int device)
+            {
+                char busId[64] = {};
+                HIP_CHECK_EXC(hipDeviceGetPCIBusId(busId, sizeof(busId), device));
+                PciBusId id;
+                if(!parsePciBusId(busId, id))
+                    throw std::runtime_error(concatenate("[fused-a2a] cannot parse PCI bus id '",
+                                                         busId,
+                                                         "' of HIP device ",
+                                                         device));
+                return id;
+            }
+#endif
         }
 
         DeviceContext::DeviceContext(int                     deviceId,
                                      bool                    useDefaultStream,
                                      size_t                  commFlagsBytes,
                                      std::vector<int> const& sdmaPeers,
-                                     int                     sdmaRotate)
+                                     int                     sdmaRotate,
+                                     bool                    fusedA2ADirect)
             : deviceId(deviceId)
             , adapter(std::make_shared<hip::SolutionAdapter>())
             , commFlagsBytes(commFlagsBytes)
@@ -111,15 +128,26 @@ namespace TensileLite
                         if(pe != hipSuccess && pe != hipErrorPeerAccessAlreadyEnabled)
                             HIP_CHECK_EXC(pe);
                     }
-                    const uint32_t node   = sdmaNodeIdForDevice(deviceId);
-                    size_t         remote = 0;
-                    for(int peer : sdmaPeers)
-                        sdmaQueues.push_back(std::make_shared<SdmaQueue>(
-                            node,
-                            sdmaQueueEngine(node,
-                                            sdmaNodeIdForDevice(peer),
-                                            peer == deviceId ? 0 : remote++,
-                                            sdmaRotate)));
+                    if(fusedA2ADirect)
+                    {
+                        std::vector<PciBusId> peerIds;
+                        for(int peer : sdmaPeers)
+                            peerIds.push_back(pciBusIdOfDevice(peer));
+                        directMask = fusedA2ADirectMask(pciBusIdOfDevice(deviceId), peerIds);
+                    }
+
+                    const uint32_t node = sdmaNodeIdForDevice(deviceId);
+                    const auto     plan = sdmaQueuePlan(sdmaPeers, deviceId, directMask);
+                    sdmaQueues.resize(sdmaPeers.size());
+                    for(SdmaQueuePlan const& q : plan)
+                    {
+                        const uint32_t peerNode = sdmaNodeIdForDevice(sdmaPeers[q.peer]);
+                        const uint32_t engine
+                            = q.spread
+                                  ? sdmaMaskEngine(sdmaRecommendedEngineMask(node, peerNode), q.k)
+                                  : sdmaQueueEngine(node, peerNode, q.k, sdmaRotate);
+                        sdmaQueues[q.peer] = std::make_shared<SdmaQueue>(node, engine);
+                    }
 #else
                     throw std::runtime_error(
                         "DeviceContext: SDMA queues requested, but this client was built without "
@@ -229,16 +257,16 @@ namespace TensileLite
                                                          " was requested."));
                 auto const& peer
                     = dynamic_cast<ContractionInputs const&>(*devices[j]->inputArr[slot]);
-                auto const&             queue = *devices[rank]->sdmaQueues[j];
-                const HsaQueueResource& q     = queue.queueResource();
+                auto const&             queue = devices[rank]->sdmaQueues[j];
+                const HsaQueueResource* q     = queue ? &queue->queueResource() : nullptr;
                 scratch.fusedA2APeers[j]
                     = {(char*)devices[j]->commFlags + channel * FUSED_A2A_FLAG_BLOCK_BYTES,
                        mode == FusedA2A::GemmA2A || j == rank ? peer.a2aBuf
                                                               : const_cast<void*>(peer.b),
-                       queue.ringBase(),
-                       (void*)q.Queue_read_ptr_aql,
-                       (void*)q.Queue_write_ptr_aql,
-                       (void*)q.Queue_DoorBell_aql};
+                       queue ? queue->ringBase() : nullptr,
+                       q ? (void*)q->Queue_read_ptr_aql : nullptr,
+                       q ? (void*)q->Queue_write_ptr_aql : nullptr,
+                       q ? (void*)q->Queue_DoorBell_aql : nullptr};
             }
 #endif
             scratch.fusedA2ACounter = scratch.Synchronizer;
