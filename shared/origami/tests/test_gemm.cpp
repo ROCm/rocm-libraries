@@ -3434,6 +3434,10 @@ TEST_CASE("GEMM: a gfx115x kernel is modeled with the workgroup mapping it launc
   REQUIRE(mapping(gfx1151, -4, 1, 0).wgm == -4);
   REQUIRE(mapping(gfx1151, 0, 1, 0).wgm == gfx1151_default_wgm);
   REQUIRE(mapping(gfx1151, 8, 1, 0).wgmxcc == 1);
+  // WGMXCC -1 on a non-persistent kernel launches with NUM_XCD groups.
+  REQUIRE(mapping(gfx1151, 0, -1, 0).wgm == gfx1151_default_wgm);
+  REQUIRE(mapping(gfx1151, 0, -1, 0).wgmxcc == 1);
+  REQUIRE(mapping(gfx1151, 8, -1, 0).wgm == 8);
 
   // StreamK with a fixed WGM or WGMXCC launches with it, like a non-persistent kernel.
   for (int sk : {3, 4, 5}) {
@@ -3464,6 +3468,11 @@ TEST_CASE("GEMM: a gfx115x kernel is modeled with the workgroup mapping it launc
   const auto rates = origami::gemm::estimate_cache_hit_rates(problem, gfx1151, c, ctx);
   REQUIRE(std::get<0>(rates) > 0.8);  // H_mem_l2_A
   REQUIRE(std::get<2>(rates) > 0.8);  // H_mem_mall_A
+  const auto c1 = fixed_wgm_config(1, 1, 0);
+  origami::gemm::context_t ctx1(problem, gfx1151, c1);
+  const auto rates1 = origami::gemm::estimate_cache_hit_rates(problem, gfx1151, c1, ctx1);
+  REQUIRE(std::get<0>(rates1) < 0.1);
+  REQUIRE(std::get<2>(rates1) < 0.1);
 
   // The four gfx115x parts are opted in.
   for (auto arch : {arch_t::gfx1150, arch_t::gfx1152, arch_t::gfx1153}) {
