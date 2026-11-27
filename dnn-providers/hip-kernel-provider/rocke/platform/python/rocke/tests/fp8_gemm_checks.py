@@ -5,11 +5,23 @@
 the fp8 / bf8 host codec every test uses.
 
 A GPU check of a scaled fp8 / bf8 GEMM fills its operands with numbers the
-arch's MFMA reads exactly, so the reference is computed on the values the
-device sees, and accepts the kernel's output within the runbook's GEMM
-tolerance. :data:`GEMM_TOLERANCE`, :data:`EXACT_OPERAND_VALUES` and
-:func:`mfma_operand_bytes` are those three facts, kept here so the checks
-cannot drift apart.
+arch's MFMA reads exactly (:data:`EXACT_OPERAND_VALUES`, encoded by
+:func:`mfma_operand_bytes`), so the reference is computed on the values the
+device sees. It then holds the output to one of two bounds, by what the
+output depends on:
+
+* :func:`exact_operand_tolerance`: an output computed from those operands and
+  f32 scales only (the block-scaled GEMM). Every group's dot product is exact
+  in f32, so the output is exact up to the f32 rounding of its scaling and
+  sums, and the bound is that rounding, element by element.
+* :data:`GEMM_TOLERANCE`: an output that also passes through a rounding to an
+  fp8 type the reference cannot reproduce bit for bit (the fused MoE, which
+  requantizes its hidden activation: an f32 value one ulp from a rounding
+  boundary takes a different code in the kernel than in the reference). That
+  is the runbook's bound for random fp8 data, relative to the largest
+  reference output.
+
+These facts are kept here so the checks cannot drift apart.
 
 :func:`fp8_host_codec` is the home of the fp8 / bf8 host codec for all tests,
 GEMM or not: the one map from an element format (as
@@ -25,6 +37,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
+import numpy.typing as npt
 
 from ..helpers.fp8_encoding import (
     BF8_E5M2_FNUZ,
@@ -34,6 +47,7 @@ from ..helpers.fp8_encoding import (
     Fp8ElementFormat,
 )
 from ..instances.common.mx_gemm import mx_gemm_element_format
+from ..numeric.compare import Tolerance
 from ..numeric.fp8 import (
     bf8e5m2_decode_table,
     bf8e5m2_encode,
@@ -49,12 +63,15 @@ __all__ = [
     "EXACT_OPERAND_VALUES",
     "GEMM_TOLERANCE",
     "Fp8HostCodec",
+    "exact_operand_tolerance",
     "fp8_host_codec",
     "mfma_operand_bytes",
 ]
 
 # The runbook's GEMM tolerance (optimization_runbook.md section 1.4), as an
-# error relative to the largest reference output.
+# error relative to the largest reference output: for outputs that pass
+# through an fp8 requantization (see the module docstring), not for outputs
+# of exact operands.
 GEMM_TOLERANCE = 7e-2
 
 # Operand values every fp8 / bf8 encoding an MFMA reads (OCP and FNUZ, E4M3
@@ -62,6 +79,31 @@ GEMM_TOLERANCE = 7e-2
 EXACT_OPERAND_VALUES = np.array([0.0, 0.5, -0.5, 1.0, -1.0, 1.5, -1.5, 2.0, -2.0])
 
 _OCP_ENCODERS = {"fp8e4m3": fp8e4m3_encode, "bf8e5m2": bf8e5m2_encode}
+
+# The unit roundoff of f32.
+_F32_UNIT_ROUNDOFF = 2.0**-24
+
+
+def exact_operand_tolerance(term_magnitude: npt.ArrayLike, groups: int) -> Tolerance:
+    """The element-wise bound of a scaled fp8 / bf8 GEMM output whose operands
+    are :data:`EXACT_OPERAND_VALUES` and whose ``groups`` K groups are each
+    scaled by an f32 factor and summed in f32.
+
+    ``term_magnitude`` holds, per output, the sum over its K groups of
+    ``|dot_g * scale_g|``. A group's products are multiples of 1/4 of at most
+    4 in magnitude, so a group of fewer than 2**20 of them sums exactly in f32;
+    what is left is the f32 rounding of the scale product, of the scaled group
+    term and of the running sum, each at most one unit roundoff of a value no
+    larger than ``term_magnitude``: ``groups + 2`` of them in the kernel and as
+    many in an f32 reference, whatever order either takes.
+    """
+    if isinstance(groups, bool) or not (isinstance(groups, int) and groups >= 1):
+        raise ValueError(
+            f"exact_operand_tolerance failed - groups={groups!r}, expected an "
+            "int >= 1"
+        )
+    rounding = 2 * (groups + 2) * _F32_UNIT_ROUNDOFF
+    return Tolerance(atol=rounding * np.asarray(term_magnitude, dtype=np.float64))
 
 
 @dataclass(frozen=True)

@@ -26,10 +26,12 @@ Checks:
   stores that output to.
 * On a gfx942 or gfx950 GPU, running that same LLVM IR, with A scales that
   differ per row and per K group and B scales that differ per column and per
-  K group, the output matches an f32 reference within the runbook GEMM
-  tolerance; with infinite and NaN scales in some rows and columns, the
-  infinities and NaNs land in exactly the outputs of those rows and columns,
-  as in the reference.
+  K group, every output matches an f32 reference within the f32 rounding of
+  its scaling and sums (``exact_operand_tolerance``: the operands are exact,
+  so nothing else is left); with infinite and NaN scales in some rows and
+  columns, the infinities and NaNs land in exactly the outputs of those rows
+  and columns, as in the reference. On the host, that bound rejects an output
+  with one row's scale taken from the next row in a single K group.
 """
 
 from __future__ import annotations
@@ -46,10 +48,11 @@ from rocke.instances.common.block_scale_gemm import (
     block_scale_gemm_signature,
     build_block_scale_gemm,
 )
+from rocke.numeric.compare import assert_within_tolerance, within_tolerance
 from rocke.tests.engines import ENGINES, Engine, lower_spec_with_engine
 from rocke.tests.fp8_gemm_checks import (
     EXACT_OPERAND_VALUES,
-    GEMM_TOLERANCE,
+    exact_operand_tolerance,
     mfma_operand_bytes,
 )
 from rocke.tests.gpu import current_device_arch_in, launch_with_buffers
@@ -234,7 +237,8 @@ def _run_block_scale_gemm(arch, spec, *, a, a_scale, b, b_scale) -> np.ndarray:
         "B": np.ascontiguousarray(b, dtype=np.uint8),
         "AScale": np.ascontiguousarray(a_scale, dtype=np.float32),
         "BScale": np.ascontiguousarray(b_scale, dtype=np.float32),
-        "C": np.zeros((spec.M, spec.N), dtype=np.float32),
+        # NaN: an output the kernel does not write fails the NaN-position check.
+        "C": np.full((spec.M, spec.N), np.nan, dtype=np.float32),
     }
     launch_with_buffers(
         artifact,
@@ -247,32 +251,86 @@ def _run_block_scale_gemm(arch, spec, *, a, a_scale, b, b_scale) -> np.ndarray:
     return host["C"]
 
 
-def _reference(spec, a_values, a_scale, b_values, b_scale) -> np.ndarray:
-    """The f32 reference: ``acc += dot_g * (a_scale * b_scale)`` per K group,
-    each operation rounded to f32. The element values are small multiples of
-    1/2, so every group's dot product is exact in f32."""
+def _reference(spec, a_values, a_scale, b_values, b_scale):
+    """``(C, magnitude)``: the f32 reference ``acc += dot_g * (a_scale *
+    b_scale)`` per K group, each operation rounded to f32, and per output the
+    sum over K groups of ``|dot_g * scale_g|``, the size its rounding is
+    measured against. The element values are small multiples of 1/2, so every
+    group's dot product is exact in f32."""
     gm, gn, gk = spec.group_size_mnk
     acc = np.zeros((spec.M, spec.N), dtype=np.float32)
+    magnitude = np.zeros((spec.M, spec.N))
     rows, cols = np.arange(spec.M) // gm, np.arange(spec.N) // gn
     with np.errstate(over="ignore", invalid="ignore"):
         for group in range(spec.K // gk):
             k = slice(group * gk, (group + 1) * gk)
             dot = (a_values[:, k] @ b_values[k, :]).astype(np.float32)
             scale = a_scale[rows, group, None] * b_scale[None, group, cols]
-            acc = acc + dot * scale.astype(np.float32)
-    return acc
+            term = dot * scale.astype(np.float32)
+            acc = acc + term
+            magnitude += np.abs(term)
+    return acc, magnitude
 
 
-def _check_against_reference(got, want):
+def _check_against_reference(got, want, magnitude, groups):
     """Infinities (with their sign) and NaNs in exactly the reference's
-    places; the finite outputs within the runbook GEMM tolerance."""
+    places; every finite output within ``exact_operand_tolerance``."""
     np.testing.assert_array_equal(np.isnan(got), np.isnan(want))
     np.testing.assert_array_equal(np.isinf(got), np.isinf(want))
     infinite = np.isinf(want)
     np.testing.assert_array_equal(got[infinite], want[infinite])
     finite = np.isfinite(want)
-    error = np.abs(got[finite] - want[finite]).max()
-    assert error <= GEMM_TOLERANCE * np.abs(want[finite]).max(), error
+    assert_within_tolerance(
+        got[finite],
+        want[finite],
+        exact_operand_tolerance(magnitude[finite], groups),
+        context="finite outputs",
+    )
+
+
+def _scales_case(mantissa):
+    """``(spec, a_values, b_values, a_scale, b_scale)`` of the GPU check:
+    seven 128-wide K groups, one A scale per row and one B scale per column in
+    every group, operands from ``EXACT_OPERAND_VALUES``."""
+    spec = BlockScaleGemmSpec(
+        M=48,
+        N=32,
+        K=7 * 128,
+        quant_mode="abquant",
+        mantissa_dtype=mantissa,
+        group_size_mnk=(1, 1, 128),
+    )
+    groups = spec.K // spec.group_size_mnk[2]
+    rng = np.random.default_rng(2888)
+    a_values = rng.choice(EXACT_OPERAND_VALUES, size=(spec.M, spec.K))
+    b_values = rng.choice(EXACT_OPERAND_VALUES, size=(spec.K, spec.N))
+    a_scale = rng.uniform(0.25, 4.0, size=(spec.M, groups)).astype(np.float32)
+    b_scale = rng.uniform(0.25, 4.0, size=(groups, spec.N)).astype(np.float32)
+    return spec, a_values, b_values, a_scale, b_scale
+
+
+def test_the_exact_bound_rejects_one_misread_scale_or_dropped_output():
+    """Host only. The bound the GPU check applies accepts the reference and
+    rejects the bug class this file targets on its smallest footprint: one
+    output whose K group 3 term takes the next row's A scale (a lane that reads
+    the wrong row's scale for one of its outputs), and, separately, the
+    smallest nonzero output left at zero. Both move their output by well under
+    7% of the largest one."""
+    spec, a_values, b_values, a_scale, b_scale = _scales_case("fp8e4m3")
+    groups = spec.K // spec.group_size_mnk[2]
+    want, magnitude = _reference(spec, a_values, a_scale, b_values, b_scale)
+    tolerance = exact_operand_tolerance(magnitude, groups)
+    assert within_tolerance(want, want, tolerance)
+    k = slice(3 * 128, 4 * 128)
+    term = float(a_values[0, k] @ b_values[k, 0]) * a_scale[0, 3] * b_scale[3, 0]
+    assert term != 0.0, "the case must give output (0, 0) a group-3 term"
+    misread = want.copy()
+    misread[0, 0] += term * (a_scale[1, 3] / a_scale[0, 3] - 1.0)
+    assert not within_tolerance(misread, want, tolerance), "misread row scale"
+    dropped = want.copy()
+    nonzero = np.flatnonzero(want)
+    dropped.flat[nonzero[np.argmin(np.abs(want.flat[nonzero]))]] = 0.0
+    assert not within_tolerance(dropped, want, tolerance), "smallest output zeroed"
 
 
 @pytest.mark.gpu
@@ -288,20 +346,8 @@ def test_row_and_column_scales_on_gpu(gpu_arch, mantissa, special_values):
     turn into infinities and NaNs. Seven K groups: the kernel runs the first
     six several per loop iteration and the last on its own, and the special
     values sit in groups of both."""
-    spec = BlockScaleGemmSpec(
-        M=48,
-        N=32,
-        K=7 * 128,
-        quant_mode="abquant",
-        mantissa_dtype=mantissa,
-        group_size_mnk=(1, 1, 128),
-    )
+    spec, a_values, b_values, a_scale, b_scale = _scales_case(mantissa)
     groups = spec.K // spec.group_size_mnk[2]
-    rng = np.random.default_rng(2888)
-    a_values = rng.choice(EXACT_OPERAND_VALUES, size=(spec.M, spec.K))
-    b_values = rng.choice(EXACT_OPERAND_VALUES, size=(spec.K, spec.N))
-    a_scale = rng.uniform(0.25, 4.0, size=(spec.M, groups)).astype(np.float32)
-    b_scale = rng.uniform(0.25, 4.0, size=(groups, spec.N)).astype(np.float32)
     if special_values:
         a_scale[5, 1] = np.inf
         a_scale[22, 6] = -np.inf
@@ -317,7 +363,7 @@ def test_row_and_column_scales_on_gpu(gpu_arch, mantissa, special_values):
         b=mfma_operand_bytes(gpu_arch, mantissa, b_values),
         b_scale=b_scale,
     )
-    want = _reference(spec, a_values, a_scale, b_values, b_scale)
+    want, magnitude = _reference(spec, a_values, a_scale, b_values, b_scale)
     if special_values:
         assert np.isnan(want).any() and np.isinf(want).any()
-    _check_against_reference(got, want)
+    _check_against_reference(got, want, magnitude, groups)

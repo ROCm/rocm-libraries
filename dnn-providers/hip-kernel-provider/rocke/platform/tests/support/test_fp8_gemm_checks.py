@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 """The fp8 / bf8 operand bytes the GPU checks of the scaled GEMMs feed an MFMA,
-and the host codec of each element format.
+the host codec of each element format, and the exact-operand output bound.
 
 Each arch's code for every exact operand value is checked against the code
 written out from the format: sign, biased exponent, mantissa. The OCP formats
@@ -23,6 +23,7 @@ from rocke.helpers.fp8_encoding import (
 )
 from rocke.tests.fp8_gemm_checks import (
     EXACT_OPERAND_VALUES,
+    exact_operand_tolerance,
     fp8_host_codec,
     mfma_operand_bytes,
 )
@@ -108,3 +109,21 @@ def test_host_codec_of_e5m2_has_no_rounding(encoding):
 def test_host_codec_of_an_unknown_format_is_refused():
     with pytest.raises(KeyError, match="fp8_host_codec failed - element_format="):
         fp8_host_codec(Fp8ElementFormat("E3M4", 15.5))
+
+
+def test_the_exact_operand_bound_is_the_f32_rounding_of_each_output():
+    """``groups + 2`` f32 roundings in the kernel and as many in the reference,
+    each at most a unit roundoff (2**-24) of the output's term magnitude."""
+    magnitude = np.array([[0.0, 1.0], [512.0, 3.5]])
+    tolerance = exact_operand_tolerance(magnitude, 7)
+    np.testing.assert_array_equal(tolerance.atol, 18 * 2.0**-24 * magnitude)
+    assert tolerance.rtol == 0.0
+
+
+@pytest.mark.parametrize("groups", [0, -1, 2.0, True])
+def test_the_exact_operand_bound_refuses_a_group_count_that_is_not_positive(groups):
+    with pytest.raises(
+        ValueError,
+        match=rf"exact_operand_tolerance failed - groups={groups!r}, expected an int",
+    ):
+        exact_operand_tolerance(np.ones(2), groups)

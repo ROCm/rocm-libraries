@@ -34,6 +34,10 @@ Checks:
   tile, matches a float reference within the runbook GEMM tolerance. The
   reference requantizes the hidden activation to the e4m3 encoding the target
   converts to (FNUZ on gfx942, OCP on gfx950), scaled to its largest value.
+  That requantization is why the bound is the random-data one and not the
+  exact-operand bound of the block-scaled GEMM: an f32 hidden value at or one
+  ulp from a rounding boundary takes a different code in the kernel than in
+  the reference.
 """
 
 from __future__ import annotations
