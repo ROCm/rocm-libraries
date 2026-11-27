@@ -349,6 +349,53 @@ Optimization levers:
 - reducing redundant loads where N is small enough to cache;
 - writeback of mean/invstd only when requested.
 
+### LayerNorm2D backward
+
+File:
+
+```text
+instances/layernorm2d_bwd.py
+```
+
+Main symbols:
+
+- `LayerNorm2DBwdSpec` (`part` = `"dx"` | `"dwdb"` | `"dwdb_reduce"`)
+- `build_layernorm2d_bwd`
+- `layernorm2d_bwd_grid`, `layernorm2d_bwd_signature`
+- `layernorm2d_bwd_workspace_bytes`, `default_row_splits` (host-side launch planning)
+
+Contract (mean / rstd are the forward's saved `Mean` / `InvStd`):
+
+```text
+dY, X: [M, N]   gamma: [N]   mean, rstd: [M]
+dX: [M, N]      dgamma, dbeta: [N]
+WS: f32 [P][2][N]   (only when P > 1)
+```
+
+Every part is AOT-generic: `M`, `N` and the row-split `P` are runtime
+kernargs, so one binary per tuning config serves every shape. The split
+and the algebra follow MIOpen's `LayernormBackward` solver:
+
+```text
+dx           one CTA per row:
+             pass 1: s1 = sum(dY*gamma), s2 = sum(dY*gamma*X)   (twin block reduction)
+             a = rstd^3 / N * (s2 - mean*s1);  b = rstd / N * s1 - a*mean
+             pass 2: dX = rstd*dY*gamma - a*X - b               (masked tail: any N)
+dwdb         grid (ceil(N / (block_size*vec)), P): each thread owns vec columns and
+             walks a contiguous ceil(M / P)-row slice, `unroll` rows per trip;
+             P == 1 writes dgamma / dbeta, else f32 partials to WS
+dwdb_reduce  folds the P partials into dgamma / dbeta (launched only when P > 1)
+```
+
+`dwdb` / `dwdb_reduce` vector-access `vec` columns, so dispatch admits them
+only for `N % vec == 0`. Levers: `block_size`, `vec` per part;
+`fast_reduce` (dx: wave-shuffle twin reduction); `unroll` (dwdb /
+dwdb_reduce: rows or partials in flight per loop trip); the runtime `P`.
+Candidates: `dispatch/families/norm.py::dynamic_norm_bwd_candidates`
+(opt-in, outside `NORM_REGISTRY`). Sweep: `benchmark_layernorm2d_aot.py
+--backward`; case study:
+`examples/gfx950/layernorm2d_bwd/layernorm2d_bwd_case_study.md`.
+
 ## RMSNorm2D
 
 File:

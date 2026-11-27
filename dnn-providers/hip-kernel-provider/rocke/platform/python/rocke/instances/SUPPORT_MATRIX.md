@@ -25,6 +25,7 @@ atom (CDNA: `pipeline=mem`/`compv*`; gfx1151: `pipeline=mem`, `epilogue=default`
 | `reduce2d` | ✅ | ✅ | ✅ |
 | `rmsnorm2d` | ✅ | ✅ | ✅ |
 | `layernorm2d` | ✅ | ✅ | ✅ |
+| `layernorm2d_bwd` | ✅ | ✅ | ✅ |
 | `batchnorm2d` | ✅ | ✅ | ✅ |
 | `add_rmsnorm2d_bf16` | ✅ | ✅ | ✅ |
 | `add_rmsnorm2d_rdquant` | ✅ | ✅ | ✅ |

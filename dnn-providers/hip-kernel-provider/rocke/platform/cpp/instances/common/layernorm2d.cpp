@@ -206,12 +206,6 @@ bool rocke_layernorm2d_is_valid_spec(const rocke_layernorm2d_spec_t* spec,
         return false;
     }
 
-    if(spec->cheap_reduce && spec->fast_reduce)
-    {
-        ln_set_reason(reason, reason_cap, "cheap_reduce and fast_reduce cannot both be set");
-        return false;
-    }
-
     /* Three f32 Welford reduction buffers: 3 * block_size * 4 bytes. */
     bytes_lds = (long)3 * (long)spec->block_size * 4L;
     if(!rocke_archtarget_fits_lds(target, bytes_lds))
@@ -579,9 +573,19 @@ static rocke_kernel_def_t* rocke_build_layernorm2d_dynamic(rocke_ir_builder_t* b
          * below. */
         rocke_value_t* total_sum = NULL;
         rocke_value_t* total_sumsq = NULL;
-        rocke_block_lds_reduce_pair(b, sum_p, sumsq_p, lds_mean, lds_m2, tid, BS,
-                                     ROCKE_REDUCE_SUM, ROCKE_REDUCE_SUM,
-                                     &total_sum, &total_sumsq);
+        if(spec->fast_reduce)
+        {
+            rocke_block_lds_reduce_pair_with_wave_prologue(b, sum_p, sumsq_p, lds_mean, lds_m2,
+                                                           tid, BS, ROCKE_REDUCE_SUM,
+                                                           ROCKE_REDUCE_SUM, spec->wave_size,
+                                                           &total_sum, &total_sumsq);
+        }
+        else
+        {
+            rocke_block_lds_reduce_pair(b, sum_p, sumsq_p, lds_mean, lds_m2, tid, BS,
+                                         ROCKE_REDUCE_SUM, ROCKE_REDUCE_SUM,
+                                         &total_sum, &total_sumsq);
+        }
         rocke_value_t* one_f32 = rocke_b_const_f32(b, 1.0);
         rocke_value_t* cols_f32 = rocke_b_sitofp_f32(b, cols);
         rocke_value_t* inv_cols = rocke_b_fdiv(b, one_f32, cols_f32);
@@ -866,8 +870,17 @@ rocke_kernel_def_t* rocke_build_layernorm2d(rocke_ir_builder_t* b,
     {
         /* MIOpen-style cheap reduction: mean, var = welford_block_reduce(b,
          *     sum_p, sumsq_p, elems, lds_mean, lds_m2, tid, block_size=BS) */
-        rocke_welford_block_reduce(
-            b, p1.sum_p, p1.sumsq_p, elems, lds_mean, lds_m2, tid, BS, &mean, &var);
+        if(spec->fast_reduce)
+        {
+            rocke_welford_block_reduce_wave_prologue(b, p1.sum_p, p1.sumsq_p, elems, lds_mean,
+                                                     lds_m2, tid, BS, spec->wave_size, &mean,
+                                                     &var);
+        }
+        else
+        {
+            rocke_welford_block_reduce(
+                b, p1.sum_p, p1.sumsq_p, elems, lds_mean, lds_m2, tid, BS, &mean, &var);
+        }
     }
     else
     {

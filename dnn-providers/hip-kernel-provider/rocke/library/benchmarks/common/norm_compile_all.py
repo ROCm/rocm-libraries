@@ -55,6 +55,7 @@ def case_argv(case, *, arch: str) -> list:
     return [
         "--rows", str(dims["rows"]), "--cols", str(dims["cols"]),
         "--kind", "layernorm", "--dtype", case.dtype, "--arch", arch,
+        *(["--backward"] if case.mode == "backward" else []),
     ]
 
 
@@ -98,12 +99,12 @@ _DYNAMIC_PLACEHOLDER_ARGV = {
 
 
 def dynamic_dtype_modes(cases) -> list:
-    """Distinct ``(dtype, mode)`` pairs across *cases* (``mode`` is ``None``
-    for ``lnorm``, which has no training/inference axis)."""
+    """Distinct ``(dtype, mode)`` pairs across *cases* (``mode`` is
+    training/inference for ``bnorm``, forward/backward for ``lnorm`` -- the
+    lnorm backward is a different candidate set, not a different shape)."""
     seen = set()
     for case in cases:
-        mode = case.mode if case.family == "bnorm" else None
-        seen.add((case.dtype, mode))
+        seen.add((case.dtype, case.mode))
     return sorted(seen, key=lambda dm: (dm[0], dm[1] or ""))
 
 
@@ -114,6 +115,8 @@ def compile_dynamic_one(dtype: str, mode, *, family: str, script: Path, arch: st
             "--cache-dir", cache_dir]
     if family == "bnorm":
         argv += ["--training" if mode == "training" else "--inference"]
+    elif mode == "backward":
+        argv += ["--backward"]
     try:
         proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:

@@ -272,6 +272,32 @@ def test_real_ext_times_every_call():
 
 
 @_GPU
+def test_real_ext_spans_a_multi_kernel_sequence():
+    """Start on the first launch's packet, stop on the last's: the sample
+    spans the whole sequence, and is never shorter than one launch."""
+    _rt, prep = _busy_launch()
+
+    def bind(start, stop):
+        first = prep(events=(start, None))
+        middle = prep()
+        last = prep(events=(None, stop))
+
+        def run():
+            first()
+            middle()
+            last()
+
+        return run
+
+    seq = time_launches_ext(bind, warmup=2, iters=9)
+    one = time_launches_ext(
+        lambda start, stop: prep(events=(start, stop)), warmup=2, iters=9
+    )
+    assert len(seq) == 9
+    assert sorted(seq)[4] > sorted(one)[4]
+
+
+@_GPU
 def test_real_ext_refuses_a_cluster_launch():
     rt, prep = _busy_launch()
     start, stop = rt.event(), rt.event()

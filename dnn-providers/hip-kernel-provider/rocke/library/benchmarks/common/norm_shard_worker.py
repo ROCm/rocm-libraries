@@ -52,6 +52,11 @@ _MIOPEN_BN_RE = re.compile(
 _MIOPEN_LN_RE = re.compile(
     r"GPU Kernel Time Forward LayerNorm Elapsed:\s*([0-9.]+)\s*ms"
 )
+# ``-F 0`` prints both lines (MIOpenDriver runs forward, then backward); a
+# backward case must read this one, not the forward line above.
+_MIOPEN_LN_BWD_RE = re.compile(
+    r"GPU Kernel Time Backward LayerNorm Elapsed:\s*([0-9.]+)\s*ms"
+)
 _MIOPEN_BIN: Optional[str] = None
 _MIOPEN_WARNED = False
 
@@ -77,7 +82,8 @@ def rocke_case_key(case: dict) -> str:
     if case["family"] == "bnorm":
         return case_key(dims, dtype=case["dtype"], family="batchnorm2d",
                          extra=f"training={case['mode'] == 'training'}")
-    return case_key(dims, dtype=case["dtype"], family="norm2d", extra="kind=layernorm")
+    kind = "layernorm_bwd" if case["mode"] == "backward" else "layernorm"
+    return case_key(dims, dtype=case["dtype"], family="norm2d", extra=f"kind={kind}")
 
 
 def run_miopen_case(case: dict, *, timeout: int = 120) -> Optional[float]:
@@ -99,12 +105,15 @@ def run_miopen_case(case: dict, *, timeout: int = 120) -> Optional[float]:
         ]
         pattern = _MIOPEN_BN_RE
     else:
+        # The NW-layout form the case files use (layernorm_driver.hpp has no
+        # -X flag); weight+bias mode, normalized over the last dim.
+        backward = case["mode"] == "backward"
         argv = [
-            binary, f"layernorm{dtype_token}", "-F", "1",
-            "-X", f"{dims['rows']}x{dims['cols']}",
-            "-o", "1", "-t", "1", "-w", "1", "-V", "0", "-i", "20",
+            binary, f"layernorm{dtype_token}", "-F", "0" if backward else "1",
+            "-N", str(dims["rows"]), "-C", "0", "-H", "0", "-W", str(dims["cols"]),
+            "-L", "NW", "-o", "1", "-m", "1", "-t", "1", "-V", "0", "-i", "20",
         ]
-        pattern = _MIOPEN_LN_RE
+        pattern = _MIOPEN_LN_BWD_RE if backward else _MIOPEN_LN_RE
 
     import os
 
@@ -141,6 +150,7 @@ def case_argv(case: dict, *, arch: str, dtype: str) -> list:
     return [
         "--rows", str(dims["rows"]), "--cols", str(dims["cols"]),
         "--kind", "layernorm", "--dtype", dtype, "--arch", arch,
+        *(["--backward"] if case["mode"] == "backward" else []),
     ]
 
 

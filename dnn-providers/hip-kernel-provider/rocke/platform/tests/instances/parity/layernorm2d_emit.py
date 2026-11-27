@@ -76,6 +76,9 @@ CONFIGS = [
     # --- cheap_reduce (MIOpen-style naive E[X^2]-E[X]^2): one static, one dynamic ---
     (4096, 256, 4, "f16", False, False, False, True),  # 39
     (4096, 256, 4, "f16", False, True, False, True),  # 40
+    # --- fast_reduce + cheap_reduce (wave-prologue (sum, sum_sq) fold) ---
+    (4096, 256, 4, "f16", False, False, True, True),  # 41
+    (4096, 256, 4, "bf16", True, True, True, True),  # 42
 ]
 
 

@@ -19,8 +19,10 @@ for the exact scope:
 * ``bnormfp16``/``bnormbfp16`` + ``--layout NCHW`` + ``--forw 1`` (training)
   or ``--forw 2`` (inference). Bare ``bnorm`` (fp32), ``--layout NHWC``/
   ``NCDHW``, and ``--forw 0`` (backward) are out of scope.
-* ``layernormbfp16`` + ``-L NW`` + ``-F 1`` (forward). ``-F 0`` (backward) is
-  out of scope.
+* ``layernormfp16``/``layernormbfp16`` + ``-L NW`` + ``-F 1`` (forward) or
+  ``-F 0`` (MIOpenDriver runs forward *and* backward; the case this parses
+  to is the backward, ``mode="backward"`` -- the forward half is the
+  ``-F 1`` line of the same shape).
 
 A skipped line is reported, not silently dropped: :func:`parse_file` returns a
 ``Counter`` of skip reasons alongside the cases it could parse.
@@ -54,7 +56,7 @@ class ParsedCase:
     family: str  # "bnorm" | "lnorm"
     dims: Tuple[Tuple[str, int], ...]  # sorted dims.items(), e.g. (("c", 64), ("h", 28), ...)
     dtype: str  # "fp16" | "bf16"
-    mode: str  # "training" | "inference" (bnorm) | "forward" (lnorm)
+    mode: str  # "training" | "inference" (bnorm) | "forward" | "backward" (lnorm)
 
     @property
     def dims_dict(self) -> Dict[str, int]:
@@ -116,17 +118,20 @@ def parse_lnorm_line(line: str):
     if layout != "NW":
         return None, f"unsupported-layout({layout})"
 
+    # MIOpenDriver's -F default is 0 (forward + backward).
     forw = _int_flag(line, "F")
-    if forw == 0:
-        return None, "backward-only(F=0)"
-    if forw != 1:
+    if forw is None or forw == 0:
+        mode = "backward"
+    elif forw == 1:
+        mode = "forward"
+    else:
         return None, f"unknown-forw({forw})"
 
     rows, cols = _int_flag(line, "N"), _int_flag(line, "W")
     if None in (rows, cols):
         return None, "missing-dims"
     dims = tuple(sorted({"rows": rows, "cols": cols}.items()))
-    return ParsedCase(family="lnorm", dims=dims, dtype=dtype, mode="forward"), None
+    return ParsedCase(family="lnorm", dims=dims, dtype=dtype, mode=mode), None
 
 
 _PARSERS = {"bnorm": parse_bnorm_line, "lnorm": parse_lnorm_line}
