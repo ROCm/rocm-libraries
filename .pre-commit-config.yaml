@@ -610,8 +610,9 @@ repos:
 
       # The checks of the rocKE hooks themselves: the tools that read this
       # config (rocke/tools/precommit_hooks.py and run_hook_on_deletion.py),
-      # the emitter pair pattern check and the modules it alone imports, and
-      # this config, whose hooks they read. In CI an edit to this config alone
+      # the checks' tests and every module they import beyond what import rocke
+      # loads (test_precommit_hooks.py holds the pattern to that), and this
+      # config, whose hooks they read. In CI an edit to this config alone
       # checks out no rocKE, so this hook runs nothing for it there.
       - id: rocke-hook-checks
         name: rocKE hook tools and hook config checks pass
@@ -635,7 +636,8 @@ repos:
             \.pre-commit-config\.yaml|
             dnn-providers/hip-kernel-provider/rocke/(
               tools/(precommit_hooks|run_hook_on_deletion)\.py|
-              platform/python/rocke/tests/(cmake_file_api|import_closure|lanes|
+              platform/python/rocke/tests/(__init__|cmake_file_api|cmake_generator|
+                ctest_listing|host_cpus|import_closure|lanes|platform_build|
                 source_modules)\.py|
               platform/tests/support/test_(cmake_file_api|import_closure)\.py|
               platform/tests/tools/test_(emitter_pair_hook_files|precommit_hooks|
