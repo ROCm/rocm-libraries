@@ -603,7 +603,6 @@ gfx11_common_patterns: &gfx11_common_patterns
   - "*GPU_Dropout_FP16*"
   - "*GPU_GroupConv3D_BackwardData_FP16.GroupConv3D_BackwardData_half_Test*"
   - "*GPU_GroupConv3D_BackwardData_BFP16.GroupConv3D_BackwardData_bfloat16_Test*"
-  - "*GPU_UnitTestConvSolverImplicitGemmGroup*" # issue: ALMIOPEN-1841
   - "Smoke/GPU_MultiMarginLoss*"
   - "*CPU_UnitTestConvSolverImplicitGemmGroupWrwXdlopsDevApplicability_FP16.ConvHipImplicitGemmGroupWrwXdlops*"
   # Slow tests to exclude (from #3362)
@@ -622,8 +621,8 @@ exclude_gpu:
       - "GPU_ConvAIModelLoad_FP32*"
       # Fails on gfx1201 hosts whose CU count has no shipped system db (#13416): "Db file does not exist ...
       # gfx120138.HIP.fdb.txt" on CS-RORDMZ-DT84 (TheRock PR #9651 run 41113572856 attempt 1); only gfx120140 ships, which
-      # passes on the other gfx1201 hosts. Same cause as StaticFDBSync/9 on gfx115X. Remove with the gfx115X entry (#13416).
-      - "Smoke/CPU_DBSync_NONE.StaticFDBSync/11"
+      # passes on the other gfx1201 hosts. Same cause as the gfx1151 entry on gfx115X. Remove with the gfx115X entry (#13416).
+      - "Smoke/CPU_DBSync_NONE.StaticFDBSync/gfx1201_32"
     labels:
       - "quick"
       - "standard"
@@ -676,12 +675,15 @@ exclude_gpu:
   #Add exclude_gpu_gfx1150/gfx1151 separately only if they have unique patterns.
     test_patterns:
       - *gfx11_common_patterns
+      # The gfx1151 system db check, named by arch and CU count so adding a param can't move it to another arch (#16420).
       # Fails on every gfx1151 host whose CU count has no shipped system db (#13416): "Db file does not exist ...
       # gfx115128.HIP.fdb.txt" / "gfx115120.HIP.fdb.txt". Windows: 5 of 5 executions on 5 hosts (PR #13107 runs 39358709264,
-      # 39480689944, develop nightly 38527180317). Linux: 12 of 12 on the 20-CU strixhalo hosts in run 39740910967 (passes on
-      # CS-RORDMZ hosts). Only gfx115128 dbs ship; #13680 fixed the Windows install of those, but 20-CU hosts still have no
-      # gfx115120 db. Remove once the test skips missing dbs or a gfx115120 db ships (#13416).
-      - "Smoke/CPU_DBSync_NONE.StaticFDBSync/9"
+      # 39480689944, develop nightly 38527180317). Linux: 12 of 12 on the 32-CU strixhalo hosts in run 39740910967. Only
+      # gfx115128 dbs ship, and #13680 fixed the Windows install of those, but 32-CU hosts still have no gfx115120 db.
+      # Also fails on the 40-CU hosts that load gfx115128: 658 of its find-db entries hold a workspace size the solver no
+      # longer reports (524 GemmWrwUniversal, 134 ConvWinoFuryRxS<2-3>), TheRock PR #10132 run 44595703412 (#16420).
+      # Remove once gfx115128 passes this check and the test skips missing dbs or a gfx115120 db ships (#13416).
+      - "Smoke/CPU_DBSync_NONE.StaticFDBSync/gfx1151_0"
       # Fails on every arch without bundled AI models (ALMIOPEN-2966): "no fdeep .tn.model files found" in the system db.
       # Models ship only for gfx908/gfx90a/gfx942/gfx950, and since #13680 Windows installs per-target db files like Linux.
       # Linux gfx1151: PR #13107 run 39358709264. Remove when ALMIOPEN-2966 makes the test skip archs without models.
@@ -734,6 +736,32 @@ exclude_gpu:
       - "comprehensive"
       - "full"
       - "ex_gpu_gfx115X"
+
+  exclude_gpu_gfx117X:
+    test_patterns:
+      # gfx1170 reproduces the FP16 backward dw tolerance failures tracked in
+      # ROCm/rocm-libraries#15056. Remove when that issue is fixed.
+      - "Full/GPU_LayerNormBwdTest_FP16.LayerNormTestBw/124"
+      - "Full/GPU_LayerNormBwdTest_FP16.LayerNormTestBw/127"
+    labels:
+      - "quick"
+      - "standard"
+      - "comprehensive"
+      - "full"
+      - "ex_gpu_gfx117X"
+
+  exclude_gpu_gfx117X_windows:
+    test_patterns:
+      # gfx1170: the large untiled GPU reference can hit the Windows watchdog.
+      # Quarantine only the reproduced FP32 and FP16 large-memory cases.
+      - "Standard/GPU_GemmWrwUniversal_LargeMemory_FP32.GemmWrwUniversal/0"
+      - "Standard/GPU_GemmWrwUniversal_LargeMemory_FP16.GemmWrwUniversal/0"
+    labels:
+      - "quick"
+      - "standard"
+      - "comprehensive"
+      - "full"
+      - "ex_gpu_gfx117X"
 
   exclude_gpu_gfx950:
     test_patterns:

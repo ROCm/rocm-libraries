@@ -18,6 +18,9 @@ public:
     virtual void setGridSize(unsigned int x, unsigned int y, unsigned int z) = 0;
     virtual void setSharedMemBytes(unsigned int bytes) = 0;
 
+    /// Launch with the grid and block sizes set. A launch with more than
+    /// LAUNCH_AXIS_ITEM_LIMIT work-items (grid x block) or an empty block on any axis throws
+    /// HipdnnPluginException with status BAD_PARAM before any HIP call (see LaunchLimits.hpp).
     template <typename... Args>
     void launch(hipStream_t stream, Args&&... args) const
     {
@@ -28,7 +31,7 @@ public:
 
     /// Launch with an already-built argument array: one pointer per kernel argument, in
     /// ABI order, as hipModuleLaunchKernel takes it. For a caller whose argument list is
-    /// data rather than a fixed signature.
+    /// data rather than a fixed signature. The limits are those of `launch`.
     void launchWithParams(hipStream_t stream, void** kernelParams) const
     {
         launchImpl(stream, kernelParams);

@@ -45,6 +45,7 @@
 #include <miopen/filesystem.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <regex>
 #include <iterator>
@@ -1264,6 +1265,18 @@ TEST_P(CPU_DBSync_NONE, StaticFDBSync)
 #endif
 }
 
+// Names each param <arch>_<num_cu> (for example gfx1151_0) instead of its position in the list, so
+// a filter that names one param, such as an arch exclusion in test_categories.yaml, keeps naming
+// the same arch when a param is added. Characters gtest rejects in a name become '_'.
+static std::string
+StaticFDBSyncParamName(const testing::TestParamInfo<CPU_DBSync_NONE::ParamType>& info)
+{
+    auto name = info.param.first + "_" + std::to_string(info.param.second);
+    std::replace_if(
+        name.begin(), name.end(), [](unsigned char c) { return std::isalnum(c) == 0; }, '_');
+    return name;
+}
+
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          CPU_DBSync_NONE,
                          testing::Values(std::make_pair("gfx908", 120),
@@ -1285,4 +1298,5 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                          // (gfx120140). 32 makes StaticFDBSync skip other CU
                                          // counts, such as the 56-CU part (28 WGP), instead of
                                          // failing on a missing file.
-                                         std::make_pair("gfx1201", 32)));
+                                         std::make_pair("gfx1201", 32)),
+                         StaticFDBSyncParamName);
