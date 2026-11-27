@@ -1,0 +1,47 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --NumWaves=2 --GirFencePlacementPass --print-output
+#
+# Same seam, but the source block holds TWO branches. The hoist must target the FIRST: everything
+# after it already runs on one arm, so hoisting to `s_branch seam` would leave the barrier exactly
+# where the hoist exists to remove it from.
+#
+# CHECK-LABEL: @gir_fence_rendezvous_first_branch
+# CHECK: ^loop:
+# CHECK-NEXT: "st.s_barrier_signal"(-1)
+# CHECK-NEXT: "st.s_barrier_wait"(-1)
+# CHECK-NEXT: "st.ds_load_b64"(v10)
+# CHECK-NEXT: "st.ds_load_b64"(v12)
+# CHECK-NEXT: "st.s_barrier_signal"(-1)
+# CHECK-NEXT: "st.s_barrier_wait"(-1)
+#
+# THE POINT. Both branches follow the fence; neither arm can miss it.
+# CHECK-NEXT: "st.s_cbranch_scc1"(join, SCC0)
+# CHECK-NEXT: "st.s_branch"(seam)
+
+st.metadata "gir.frame_contract" {
+gir-frame-contract
+
+gen 0  ring=2 entry=0
+incoming  dst=4 src=0 gen=0 value=0
+incoming  dst=4 src=4 gen=0 value=1 relative=1
+}
+
+st.func @gir_fence_rendezvous_first_branch() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { mod.gir_action = { action = 0, anchor = 0, kind = tensor, access0_write = 1, access0_operand = 0, access0_ring = 2, access0_abs = 0, access0_cross = 1 } }
+  "st.tensor_load_to_lds"(s[8:11], s[10:17]) { mod.gir_action = { action = 2, anchor = 0, kind = tensor, access0_write = 1, access0_operand = 0, access0_ring = 2, access0_abs = 1, access0_cross = 1 } }
+  "st.s_branch"("loop")
+  Successors: ^loop
+^loop:
+  v[0:1] = "st.ds_load_b64"(v10) { mod.ds = { na = 1, offset = 0, gds = false }, mod.gir_action = { action = 4, anchor = 4, kind = ds, access0_write = 0, access0_operand = 0, access0_ring = 2, access0_gen = 0, access0_gdelta = 1, access0_cross = 1 } }
+  v[4:5] = "st.ds_load_b64"(v12) { mod.ds = { na = 1, offset = 0, gds = false }, mod.gir_action = { action = 5, anchor = 4, kind = ds, access0_write = 0, access0_operand = 0, access0_ring = 2, access0_gen = 0, access0_gdelta = 0, access0_cross = 1 } }
+  "st.s_cbranch_scc1"("join", SCC0)
+  "st.s_branch"("seam")
+  Successors: ^seam, ^join
+^seam:
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { mod.gir_action = { action = 6, anchor = 4, kind = tensor, access0_write = 1, access0_operand = 0, access0_ring = 2, access0_gen = 0, access0_gdelta = 1, access0_cross = 1 } }
+  Successors: ^join
+^join:
+  "st.s_cbranch_scc1"("loop", SCC0)
+  Successors: ^loop, ^exit
+^exit:
+}

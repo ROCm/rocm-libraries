@@ -60,7 +60,7 @@ protected:
     std::array<char, 16> _engineDescs{};
     size_t _nextEngineDesc = 0;
     size_t _nextEngineIdLookup = 0;
-    // When set, heuristics given a policy order (modes A/B) rank the engines in reverse.
+    // When set, heuristics in backend mode A or B rank the engines in reverse.
     bool _policyOrderReversesRanking = false;
     std::unordered_set<hipdnnBackendDescriptor_t> _policyOrderedHeuristics;
     std::unordered_map<hipdnnBackendDescriptor_t, int64_t> _engineIdsByConfig;
@@ -68,6 +68,8 @@ protected:
     // entry reports 0.
     std::unordered_map<int64_t, int64_t> _engineConfigWorkspaceByEngineId;
     int64_t _lastStampedEngineId = -1;
+    // Every HIPDNN_ATTR_ENGINEHEUR_MODE the shim sends, in order.
+    std::vector<hipdnnBackendHeurMode_t> _sentModes;
 
     void installRankedEnginePlanMocks()
     {
@@ -98,9 +100,14 @@ protected:
                     _lastStampedEngineId = *static_cast<const int64_t*>(arrayOfElements);
                     _engineIdsByDesc[descriptor] = _lastStampedEngineId;
                 }
-                if(attribute == HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT)
+                if(attribute == HIPDNN_ATTR_ENGINEHEUR_MODE && arrayOfElements != nullptr)
                 {
-                    _policyOrderedHeuristics.insert(descriptor);
+                    const auto mode = *static_cast<const hipdnnBackendHeurMode_t*>(arrayOfElements);
+                    _sentModes.push_back(mode);
+                    if(mode != HIPDNN_HEUR_MODE_FALLBACK)
+                    {
+                        _policyOrderedHeuristics.insert(descriptor);
+                    }
                 }
                 return HIPDNN_STATUS_SUCCESS;
             });
@@ -287,6 +294,38 @@ protected:
         return notesEntry == _behaviorNotesByEngineId.end() ? nullptr : &notesEntry->second;
     }
 };
+
+// Each compatibility-layer Graph entry point called without a mode list queries hipDNN mode A:
+// hipDNN's default (upstream requires the list). The shim's engine-index map is built from a
+// FALLBACK query, so FALLBACK may also appear; a default left at FALLBACK sends no A and fails.
+TEST_F(TestCudnnShimNoteTriageBackend, EntryPointsWithoutModesSendModeA)
+{
+    installRankedEnginePlanMocks();
+    const std::vector<std::pair<const char*, std::function<fe::error_t(fe::graph::Graph&)>>>
+        entryPoints{
+            {"create_execution_plans",
+             [this](fe::graph::Graph& graph) {
+                 EXPECT_TRUE(graph.validate().is_good());
+                 EXPECT_TRUE(graph.build_operation_graph(_handle).is_good());
+                 return graph.create_execution_plans();
+             }},
+            {"is_supported_ext",
+             [this](fe::graph::Graph& graph) { return graph.is_supported_ext(_handle); }},
+            {"build", [this](fe::graph::Graph& graph) { return graph.build(_handle); }},
+        };
+    for(const auto& [name, call] : entryPoints)
+    {
+        SCOPED_TRACE(name);
+        fe::graph::Graph graph;
+        addPointwiseGraph(graph);
+        _sentModes.clear();
+        const auto error = call(graph);
+        ASSERT_TRUE(error.is_good()) << error.get_message();
+        EXPECT_NE(std::find(_sentModes.begin(), _sentModes.end(), HIPDNN_HEUR_MODE_A),
+                  _sentModes.end());
+        EXPECT_EQ(std::count(_sentModes.begin(), _sentModes.end(), HIPDNN_HEUR_MODE_B), 0);
+    }
+}
 
 TEST(TestCudnnShimNoteTriage, DeselectNondeterministicDoesNotPoisonValidate)
 {
@@ -1314,6 +1353,36 @@ TEST_F(TestCudnnShimEngineFilterReplacement, FilterRetryAfterFailedPlanCreationU
     auto built = graph.build_plans(fe::BuildPlanPolicy_t::ALL);
     ASSERT_TRUE(built.is_good()) << built.get_message();
     expectBarred(graph, PLAN_A);
+    expectExecutes(graph, PLAN_B);
+}
+
+// As in cuDNN FE, a copy owns its plan list and filters: filtering, recreating plans and
+// building through the copy leave the original's built plan and filters alone.
+TEST_F(TestCudnnShimEngineFilterReplacement, ACopyOwnsItsPlansAndFilters)
+{
+    installRegisteredEnginePlanMocks();
+    fe::graph::Graph graph;
+    ASSERT_NO_FATAL_FAILURE(createPlans(graph));
+    ASSERT_TRUE(graph.build_plans(fe::BuildPlanPolicy_t::HEURISTICS_CHOICE).is_good());
+
+    fe::graph::Graph copy = graph;
+    copy.deselect_engines(std::vector<std::string>{nameA()});
+    ASSERT_TRUE(copy.create_execution_plans({fe::HeurMode_t::A}).is_good());
+    auto copyBuilt = copy.build_plans(fe::BuildPlanPolicy_t::HEURISTICS_CHOICE);
+    ASSERT_TRUE(copyBuilt.is_good()) << copyBuilt.get_message();
+    std::string copyPlan;
+    ASSERT_TRUE(copy.get_plan_name(copyPlan).is_good());
+    EXPECT_EQ(copyPlan, nameB());
+
+    std::string plan;
+    ASSERT_TRUE(graph.get_plan_name(plan).is_good());
+    EXPECT_EQ(plan, nameA());
+    expectExecutes(graph, PLAN_A);
+
+    // The copy's filter never reached the original, so building every plan bars none.
+    auto built = graph.build_plans(fe::BuildPlanPolicy_t::ALL);
+    ASSERT_TRUE(built.is_good()) << built.get_message();
+    expectExecutes(graph, PLAN_A);
     expectExecutes(graph, PLAN_B);
 }
 

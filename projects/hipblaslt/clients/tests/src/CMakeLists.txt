@@ -24,6 +24,7 @@ target_sources(hipblaslt-test
         ${CMAKE_CURRENT_SOURCE_DIR}/math_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/scale_buffer_size_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/auxiliary_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/check_numerics_flag_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/heuristic_workspace_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/grouped_matmul_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/data_type_names_gtest.cpp
@@ -35,6 +36,9 @@ target_sources(hipblaslt-test
         ${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_gtest_ext_op.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/error_paths_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/utility_helpers_test.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/experimental_api_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/experimental_api_off_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/experimental/contract_partitioned_gemm_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/streamk5_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/streamk_multistream_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/streamk_null_stream_test.cpp
@@ -50,10 +54,13 @@ target_sources(hipblaslt-test
         ${CMAKE_CURRENT_SOURCE_DIR}/arguments_a2a_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/unit_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/algo_errors_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/null_algo_matmul_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/row_order_matmul_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/fast_check_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/relaunch_compare_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/host_memory_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/maf_init_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/uniform_check_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/w4a16_layout_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/fp6_tile128x4_args_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/handwritten_algo_reuse_gtest.cpp
@@ -63,6 +70,16 @@ if(NOT WIN32)
     target_sources(hipblaslt-test PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/multi_gpu_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/cotenant_gtest.cpp
+    )
+endif()
+
+# The online tuner's unit tests, against a private copy of the tuner; a shared
+# libhipblaslt exports neither. Coverage and static builds link the library's
+# own objects, where the copies would clash, so they leave these cases out.
+if(HIPBLASLT_BUILD_SHARED_LIBS AND NOT HIPBLASLT_ENABLE_COVERAGE)
+    target_sources(hipblaslt-test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/online_tuner_test.cpp
+        ${PROJECT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/src/OnlineTuner.cpp
     )
 endif()
 

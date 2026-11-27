@@ -1803,6 +1803,17 @@ TEST_F(TestFlydslSdpaBwdSplitPacks, RefusesPlanSerialization)
     expectEngineRefusesPlanSerialization(loadedSet(ENGINE_NAME));
 }
 
+// The engine's UED authors `numerical_notes: []`, the claim that no note applies: the engine is
+// run-to-run deterministic over all three slots. An absent key states nothing, so a lost key
+// fails here.
+TEST_F(TestFlydslSdpaBwdSplitPacks, DeclaresItsNumericalNotes)
+{
+    const auto& set = loadedSet(ENGINE_NAME);
+
+    ASSERT_TRUE(set.engine.numericalNotes.has_value());
+    EXPECT_TRUE(set.engine.numericalNotes->empty());
+}
+
 } // namespace
 } // namespace hip_kernel_provider::kernel_ingestor_engine
 

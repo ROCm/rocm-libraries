@@ -173,3 +173,117 @@ TEST(TestHipblasltMatrixLayout, setStridedBatchOffset)
         matLayout.setStridedBatchOffset(2);
     });
 }
+
+namespace
+{
+// Builds a FLOAT tensor with the given dims and strides and keeps the builder alive.
+struct FloatTensorHolder
+{
+    flatbuffers::FlatBufferBuilder builder;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* attrs = nullptr;
+
+    FloatTensorHolder(const std::vector<int64_t>& dims, const std::vector<int64_t>& strides)
+    {
+        builder.Finish(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+            builder,
+            1,
+            "t",
+            hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+            &strides,
+            &dims));
+        attrs = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>(
+            builder.GetBufferPointer());
+    }
+};
+} // namespace
+
+TEST(TestHipblasltMatrixLayout, NegativeLeadingDimensionThrows)
+{
+    struct Row
+    {
+        std::vector<int64_t> dims;
+        std::vector<int64_t> strides;
+    };
+
+    const std::vector<Row> rows = {
+        // Row-major: the leading dimension is the row stride.
+        {{6, 8}, {-1, 1}},
+        {{2, 6, 8}, {48, -1, 1}},
+        // Column-major: the leading dimension is the column stride.
+        {{6, 8}, {1, -1}},
+        {{2, 6, 8}, {48, 1, -1}},
+    };
+
+    for(const auto& row : rows)
+    {
+        const FloatTensorHolder holder(row.dims, row.strides);
+        hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper const tensorWrapper(
+            holder.attrs);
+        EXPECT_THROW(HipblasltMatrixLayout const matLayout(tensorWrapper),
+                     hipdnn_plugin_sdk::HipdnnPluginException)
+            << "strides " << row.strides[row.strides.size() - 2] << ","
+            << row.strides[row.strides.size() - 1];
+    }
+}
+
+// Fails if a zero leading dimension, which hipBLASLt computes correctly for a broadcast
+// operand, is rejected by the layout.
+TEST(TestHipblasltMatrixLayout, ZeroLeadingDimensionIsAccepted)
+{
+    struct Row
+    {
+        std::vector<int64_t> dims;
+        std::vector<int64_t> strides;
+    };
+
+    const std::vector<Row> rows = {
+        {{6, 8}, {0, 1}},
+        {{2, 6, 8}, {48, 0, 1}},
+        {{6, 8}, {1, 0}},
+        {{2, 6, 8}, {48, 1, 0}},
+    };
+
+    for(const auto& row : rows)
+    {
+        const FloatTensorHolder holder(row.dims, row.strides);
+        hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper const tensorWrapper(
+            holder.attrs);
+        EXPECT_NO_THROW({
+            HipblasltMatrixLayout const matLayout(tensorWrapper);
+            EXPECT_NE(matLayout.matrixLayout(), nullptr);
+        }) << "strides "
+           << row.strides[row.strides.size() - 2] << "," << row.strides[row.strides.size() - 1];
+    }
+}
+
+TEST(TestHipblasltMatrixLayout, NonPositiveStrideOfSizeOneDimIsNotALeadingDimension)
+{
+    struct Row
+    {
+        std::vector<int64_t> dims;
+        std::vector<int64_t> strides;
+    };
+
+    const std::vector<Row> rows = {
+        // A size-1 row count takes ld from the column count; its stride is ignored.
+        {{1, 8}, {-1, 1}},
+        {{1, 8}, {0, 1}},
+        // A size-1 column count is row-major; the stride of that dim is ignored.
+        {{6, 1}, {1, -5}},
+        {{6, 1}, {1, 0}},
+        {{1, 1}, {-3, -4}},
+    };
+
+    for(const auto& row : rows)
+    {
+        const FloatTensorHolder holder(row.dims, row.strides);
+        hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper const tensorWrapper(
+            holder.attrs);
+        EXPECT_NO_THROW({
+            HipblasltMatrixLayout const matLayout(tensorWrapper);
+            EXPECT_NE(matLayout.matrixLayout(), nullptr);
+        }) << "dims "
+           << row.dims[0] << "x" << row.dims[1] << " strides " << row.strides[0] << ","
+           << row.strides[1];
+    }
+}

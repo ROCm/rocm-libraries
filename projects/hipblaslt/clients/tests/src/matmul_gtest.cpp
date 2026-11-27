@@ -23,6 +23,7 @@
  * SOFTWARE.
  *
  *******************************************************************************/
+#include "hipBuffer.hpp"
 #include "hipblaslt/hipblaslt-ext.hpp"
 #include "hipblaslt_arguments.hpp"
 #include "hipblaslt_data.hpp"
@@ -635,6 +636,190 @@ namespace
         EXPECT_EQ(bench_relaunch_failures(0), 0);
     }
 
+    // The whole uniform_check path on real kernels: with uniform summation order off, some
+    // gfx950 solution for bf16 1000 x 1000 x 7777 sums rows, or columns, in different orders, so
+    // the check in direction must fail at least one solution, and with the order off no failure
+    // counts as a failed check.
+    void expectUsoOffFailsSomeSolution(hipblaslt_uniform_check direction)
+    {
+        int             device = 0;
+        hipDeviceProp_t props;
+        ASSERT_EQ(hipGetDevice(&device), hipSuccess);
+        ASSERT_EQ(hipGetDeviceProperties(&props, device), hipSuccess);
+        if(strncmp(props.gcnArchName, "gfx950", 6))
+            GTEST_SKIP() << "which solutions fail depends on the gfx950 library";
+
+        Arguments arg{};
+        arg.init();
+        snprintf(arg.function, sizeof(arg.function), "%s", "matmul");
+        arg.a_type = arg.b_type = arg.c_type = arg.d_type = HIP_R_16BF;
+        arg.compute_type                                  = HIPBLAS_COMPUTE_32F;
+        arg.transA = arg.transB = 'N';
+        arg.M[0] = arg.N[0] = arg.lda[0] = arg.ldc[0] = arg.ldd[0] = arg.lde[0] = 1000;
+        arg.K[0] = arg.ldb[0] = 7777;
+        arg.stride_a[0]       = 1000 * 7777;
+        arg.stride_b[0]       = 7777 * 1000;
+        arg.stride_c[0] = arg.stride_d[0] = arg.stride_e[0] = 1000 * 1000;
+        arg.alpha                                           = 1;
+        arg.beta                                            = 0;
+        arg.initialization                                  = hipblaslt_initialization::hpl;
+        arg.uniform_summation_order                         = 0;
+        arg.uniform_check                                   = direction;
+        arg.algo_method                                     = 1;
+        arg.requested_solution_num                          = -1;
+        arg.unit_check                                      = 0;
+
+        const int64_t                  before = hipblaslt_bench_options::verification_failures();
+        ::testing::TestPartResultArray results;
+        {
+            ::testing::ScopedFakeTestPartResultReporter reporter(
+                ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ONLY_CURRENT_THREAD,
+                &results);
+            testing_matmul(arg);
+        }
+        const char* expected = direction == hipblaslt_uniform_check::column
+                                   ? "uniform_check column failed"
+                                   : "uniform_check row failed";
+
+        int uniformFailures = 0;
+        for(int i = 0; i < results.size(); i++)
+        {
+            const auto& r = results.GetTestPartResult(i);
+            if(r.failed() && std::string(r.message()).find(expected) != std::string::npos)
+                uniformFailures++;
+            else
+                ADD_FAILURE() << r.message();
+        }
+        EXPECT_GT(uniformFailures, 0);
+        EXPECT_EQ(hipblaslt_bench_options::verification_failures(), before);
+    }
+
+    TEST(UniformCheckBench, pre_checkin_UsoOffFailsSomeSolution)
+    {
+        expectUsoOffFailsSomeSolution(hipblaslt_uniform_check::row);
+    }
+
+    TEST(UniformCheckBench, pre_checkin_UsoOffFailsSomeSolutionColumn)
+    {
+        expectUsoOffFailsSomeSolution(hipblaslt_uniform_check::column);
+    }
+
+    // Runs an f32 m x n x 64 uniform_check case whose D has a single line in direction, so nothing
+    // is compared, and expects the case to skip with reason rather than pass.
+    void expectSingleLineSkips(hipblaslt_uniform_check direction,
+                               int64_t                 m,
+                               int64_t                 n,
+                               const char*             reason)
+    {
+        Arguments arg{};
+        arg.init();
+        snprintf(arg.function, sizeof(arg.function), "%s", "matmul");
+        arg.a_type = arg.b_type = arg.c_type = arg.d_type = HIP_R_32F;
+        arg.compute_type                                  = HIPBLAS_COMPUTE_32F;
+        arg.transA = arg.transB = 'N';
+        arg.M[0] = arg.lda[0] = arg.ldc[0] = arg.ldd[0] = arg.lde[0] = m;
+        arg.N[0]                                                     = n;
+        arg.K[0] = arg.ldb[0] = 64;
+        arg.stride_a[0]       = m * 64;
+        arg.stride_b[0]       = 64 * n;
+        arg.stride_c[0] = arg.stride_d[0] = arg.stride_e[0] = m * n;
+        arg.alpha                                           = 1;
+        arg.beta                                            = 0;
+        arg.initialization                                  = hipblaslt_initialization::hpl;
+        arg.uniform_summation_order                         = 0;
+        arg.uniform_check                                   = direction;
+        arg.unit_check                                      = 0;
+
+        const int64_t                  before = hipblaslt_bench_options::verification_failures();
+        ::testing::TestPartResultArray results;
+        {
+            ::testing::ScopedFakeTestPartResultReporter reporter(
+                ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ONLY_CURRENT_THREAD,
+                &results);
+            testing_matmul(arg);
+        }
+        ASSERT_EQ(results.size(), 1);
+        const auto&       r        = results.GetTestPartResult(0);
+        const std::string expected = std::string("uniform_check checked no solution: ") + reason;
+        EXPECT_TRUE(r.skipped()) << r.message();
+        EXPECT_NE(std::string(r.message()).find(expected), std::string::npos) << r.message();
+        EXPECT_EQ(hipblaslt_bench_options::verification_failures(), before);
+    }
+
+    TEST(UniformCheckBench, pre_checkin_OneRowSkipsRowCheck)
+    {
+        expectSingleLineSkips(hipblaslt_uniform_check::row, 1, 64, "M is 1");
+    }
+
+    TEST(UniformCheckBench, pre_checkin_OneColumnSkipsColumnCheck)
+    {
+        expectSingleLineSkips(hipblaslt_uniform_check::column, 64, 1, "N is 1");
+    }
+
+    // Runs a 64 x 64 x 64 f32 GEMM with uniform_check in the given direction and one bit of D
+    // flipped for the check, expects the check to report exactly that failure, and returns how
+    // many checks of D it counted toward --verify_strict.
+    int64_t uniform_check_inject_failures(hipblaslt_uniform_check direction, int32_t uso)
+    {
+        Arguments arg{};
+        arg.init();
+        snprintf(arg.function, sizeof(arg.function), "%s", "matmul");
+        arg.a_type = arg.b_type = arg.c_type = arg.d_type = arg.aux_type = HIP_R_32F;
+        arg.compute_type                                                 = HIPBLAS_COMPUTE_32F;
+        arg.transA = arg.transB = 'N';
+        arg.M[0] = arg.N[0] = arg.K[0] = 64;
+        arg.lda[0] = arg.ldb[0] = arg.ldc[0] = arg.ldd[0] = arg.lde[0] = 64;
+        arg.stride_a[0] = arg.stride_b[0] = arg.stride_c[0] = arg.stride_d[0] = arg.stride_e[0]
+            = 64 * 64;
+        arg.alpha                   = 1;
+        arg.beta                    = 0;
+        arg.unit_check              = 0;
+        arg.fast_check              = 0;
+        arg.uniform_summation_order = uso;
+        arg.uniform_check           = direction;
+        arg.uniform_check_inject    = 1;
+
+        const int64_t                  before = hipblaslt_bench_options::verification_failures();
+        ::testing::TestPartResultArray failures;
+        {
+            ::testing::ScopedFakeTestPartResultReporter reporter(
+                ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ONLY_CURRENT_THREAD,
+                &failures);
+            testing_matmul(arg);
+        }
+        const char* expected = direction == hipblaslt_uniform_check::column
+                                   ? "uniform_check column failed"
+                                   : "uniform_check row failed";
+        EXPECT_EQ(failures.size(), 1);
+        for(int i = 0; i < failures.size(); i++)
+            EXPECT_NE(std::string(failures.GetTestPartResult(i).message()).find(expected),
+                      std::string::npos)
+                << failures.GetTestPartResult(i).message();
+        return hipblaslt_bench_options::verification_failures() - before;
+    }
+
+    // A uniform_check failure counts toward --verify_strict only with uniform summation order
+    // on, which promises that every row, or column, of D is identical.
+    TEST(BenchVerify, smoke_UniformCheckColumnFailureCountsWithUniformOrder)
+    {
+        EXPECT_EQ(uniform_check_inject_failures(hipblaslt_uniform_check::column, 1), 1);
+    }
+
+    TEST(BenchVerify, smoke_UniformCheckColumnFailureDoesNotCountWithoutUniformOrder)
+    {
+        EXPECT_EQ(uniform_check_inject_failures(hipblaslt_uniform_check::column, 0), 0);
+    }
+
+    TEST(BenchVerify, smoke_UniformCheckRowFailureCountsWithUniformOrder)
+    {
+        EXPECT_EQ(uniform_check_inject_failures(hipblaslt_uniform_check::row, 1), 1);
+    }
+
+    TEST(BenchVerify, smoke_UniformCheckRowFailureDoesNotCountWithoutUniformOrder)
+    {
+        EXPECT_EQ(uniform_check_inject_failures(hipblaslt_uniform_check::row, 0), 0);
+    }
+
     TEST(PreswizzledScaleLayout, smoke_rejects_nontransposed_A)
     {
         Arguments arg{};
@@ -866,6 +1051,21 @@ namespace
         EXPECT_FATAL_FAILURE(run_short_unit_check_case(), MEMORY_SHORTAGE_STRING "this case needs");
     }
 
+    // A pinned host allocation far beyond any host, checked as a test checks its buffers after the
+    // memory preflight let its case run.
+    void check_impossible_host_allocation()
+    {
+        HipHostBuffer impossible(HIP_R_8I, size_t(1) << 60);
+        CHECK_HOST_ALLOCATION(host_allocation_failure(impossible));
+    }
+
+    TEST(MatmulMemory_pre_checkin, failed_allocation_fails_a_pre_checkin_test_by_default)
+    {
+        ScopedVariable unset("HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP", nullptr);
+        EXPECT_FATAL_FAILURE(check_impossible_host_allocation(),
+                             MEMORY_SHORTAGE_STRING "could not allocate");
+    }
+
     // A pointer-array f16 GEMM whose batches start at the given element offsets, as in the
     // matmul_batch_offset cases.
     Arguments batch_offset_case(int64_t offset_a, int64_t offset_b, int64_t offset_c)
@@ -930,6 +1130,28 @@ namespace
         EXPECT_FALSE(IsSkipped());
     }
 
+    TEST(MatmulMemory_pre_checkin, grouped_unit_check_case_runs_without_a_memory_stop)
+    {
+        // A grouped case allocates and checks its host buffers once per gemm, so a check that
+        // misreads an earlier gemm's buffer stops the case for memory. The case needs well under
+        // 1 MiB, so any memory stop is a bug, and HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP fails it.
+        const int arch = hipblaslt_get_arch();
+        if(arch / 100 == 11 || (arch / 100 == 12 && arch / 10 % 10 != 5))
+            GTEST_SKIP() << "no grouped GEMM kernels for gfx" << arch;
+        Arguments arg    = unit_check_case(127, 129, 127, HIP_R_16F);
+        arg.grouped_gemm = 2;
+        arg.M[1]         = 129;
+        arg.N[1]         = 127;
+        arg.K[1]         = 129;
+        arg.lda[1]       = arg.M[1];
+        arg.ldb[1]       = arg.K[1];
+        arg.ldc[1] = arg.ldd[1] = arg.M[1];
+        arg.beta                = 2;
+        ScopedVariable fail("HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP", "1");
+        testing_matmul(arg);
+        EXPECT_FALSE(IsSkipped());
+    }
+
     // Runs one case with the estimate check on and returns what it measured.
     MemoryEstimateMeasurement measure_estimate(const Arguments& arg)
     {
@@ -954,10 +1176,15 @@ namespace
             int64_t     m, n, k;
             hipDataType type;
         };
-        // A small case first, since the check leaves out the first case in the process.
-        testing_matmul(unit_check_case(64, 64, 16, HIP_R_32F));
-        for(const Shape& s : {Shape{"f32, 8192 x 8192 x 16", 8192, 8192, 16, HIP_R_32F},
-                              Shape{"f16, 16384 x 16 x 16384", 16384, 16, 16384, HIP_R_16F}})
+        const Shape shapes[] = {{"f32, 8192 x 8192 x 16", 8192, 8192, 16, HIP_R_32F},
+                                {"f16, 16384 x 16 x 16384", 16384, 16, 16384, HIP_R_16F}};
+        // TensileLite loads a problem type's kernel library on the first case of that type, and
+        // the f16 one raised the peak by about 2 GiB on 96-CU gfx1250. A small case of each type
+        // runs first so the measured cases leave that out. It also covers the check skipping
+        // the first case in the process.
+        for(const Shape& s : shapes)
+            testing_matmul(unit_check_case(64, 64, 16, s.type));
+        for(const Shape& s : shapes)
         {
             SCOPED_TRACE(s.name);
             auto m = measure_estimate(unit_check_case(s.m, s.n, s.k, s.type));

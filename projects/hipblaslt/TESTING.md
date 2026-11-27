@@ -248,7 +248,7 @@ sits at the opposite, much weaker end.
 #### C++ library and clients (weak, and structurally blocked)
 
 Most of the host-only tests that exist are compiled into `hipblaslt-test` alongside the GPU tests,
-in [`clients/tests/src/`](clients/tests/src/). The last three rows are in
+in [`clients/tests/src/`](clients/tests/src/). The last four rows are in
 [`clients/tests/unit/`](clients/tests/unit/), described after the table:
 
 | File | Suites | What it covers |
@@ -265,6 +265,7 @@ in [`clients/tests/src/`](clients/tests/src/). The last three rows are in
 | `unit/parser_gtest.cpp` | `HostUnitInitParser`, `HostUnitActivationParser`, `HostUnitBiasSourceParser`, `HostUnitComputeInputType`, `HostUnitBiasType` | The client's string parsers for initialization, activation and bias source, with round-trips through their `*_to_string` helpers; independent validation and defaulting of A and B compute-input types; bias-type validation only when bias is enabled |
 | `unit/scaling_format_gtest.cpp` | `HostUnitScalingFormat` | Scaling-format helpers, including the two independent paddings in scale-buffer sizing |
 | `unit/yaml_conversion_gtest.cpp` | `HostUnitYamlConversionDeathTest` | `--yaml` conversion through `hipblaslt_gentest.py`: the client exits with failure on malformed input and accepts a valid empty test list. Needs Python with PyYAML |
+| `unit/exception_logging_gtest.cpp` | `HostUnitExceptionLoggingDeathTest` | A public call that fails with a C++ exception (an unparsable `HIPBLASLT_OVERRIDE_COMPUTE_TYPE_XF32` makes `hipblasLtMatmulDescCreate` throw) returns `HIPBLAS_STATUS_INTERNAL_ERROR` and writes the API name and exception text to the error log at `HIPBLASLT_LOG_LEVEL=1`. Runs in a child process because the logger reads its environment once |
 
 The sources in `clients/tests/unit/` also build a second, CPU-only client, `hipblaslt-test-hostunit`
 ([PR #9733](https://github.com/ROCm/rocm-libraries/pull/9733)), so they can run on a machine with no
@@ -342,7 +343,11 @@ kernels on CPU and hands an artifact to a GPU stage for the run phase.
 | `standard` | smoke + quick + pre_checkin | ~30 min | 3600 s |
 | `comprehensive` | standard + nightly | ~2 h | 7200 s |
 | `full` | comprehensive + HMM (needs a managed-memory capable host) | up to 24 h | 86400 s |
-| `stress` | stress only: size-threshold and address-overflow cases needing up to about 33 GiB of device memory (the 2^32 C and D batch-stride case) and, for the unit_check cases, up to about 48 GiB of host memory on gfx90a; for large-memory runners or a weekly run. A case that does not fit skips with the amounts (see below). The fast_check cases among them skip in a run with no gtest filter, such as TheRock's | ~10 min on gfx90a for the fast_check cases, longer with more solutions; the older stress cases add their host-reference time | 14400 s |
+| `stress` | stress only: size-threshold and address-overflow cases needing up to about 33 GiB of device memory (the 2^32 C and D batch-stride case) and, for the unit_check cases, up to about 48 GiB of host memory on gfx90a; for large-memory runners or a weekly run. A case that does not fit skips with the amounts (see below). The fast_check cases among them skip in a run whose gtest filter selects nothing in particular (no filter, `*`, or exclusions only), such as Math CI's unfiltered `precheckin`. No CI lane runs the ctest `stress` tier today. Math CI's `precheckin` and the gfx1250 workflow run the older unit_check stress cases but skip the fast_check ones; outside CI, a weekly QA suite that runs `--gtest_filter=*matmul*` runs the fast_check cases | ~10 min on gfx90a for the fast_check cases, longer with more solutions; the older stress cases add their host-reference time | 14400 s |
+
+The `sdc_hunt` cases are in no tier. Their fast_check cases run only when a positive pattern of the
+gtest filter contains `sdc_hunt`, so a broad filter such as `*matmul*` skips them; see
+[`clients/scripts/sdc_hunt/README.md`](clients/scripts/sdc_hunt/README.md).
 
 The clients check host memory before pinning a host buffer, against the smaller of `MemAvailable`
 and the headroom under the container's memory limit. On a machine with no container limit, set
@@ -353,13 +358,20 @@ total, and it reserves nothing against other test processes on the same host.
 Before allocating, every `hipblaslt-test` matmul case estimates the device and host memory it
 needs, including the CPU reference's float or double copies of A and B, and skips with both amounts
 when either does not fit. A case that runs out anyway, at a pinned host allocation or a device
-allocation, also skips. Every such skip begins "Not enough memory:", and the end of the run lists
+allocation, also stops. Every such stop begins "Not enough memory:", and the end of the run lists
 them under `[ MEMORY   ]`. On Linux the run's last lines also give the process's peak resident
-memory, pinned host buffers included, under `[ PEAK RSS ]`. Two environment variables help a
-large-memory lane:
+memory, pinned host buffers included, under `[ PEAK RSS ]`.
 
-- `HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP=1` turns those skips into failures, so a run can require
-  that every case ran.
+A stop by the preflight is a skip, because the preflight measured the host and the case does not
+fit. A stop at an allocation, after the preflight let the case run, fails a smoke, quick or
+pre_checkin test and skips any other. The quick and standard tiers run those three categories on
+every CI host, so a failed allocation there points at a client bug, a low estimate, or another
+process taking the memory, rather than a shortage the preflight could see. Two environment
+variables control these checks:
+
+- `HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP` uses the defaults above when unset or empty. `0` makes
+  every memory stop a skip. Any other nonempty value makes every one a failure, so a large-memory
+  run can require that every case ran.
 - `HIPBLASLT_TEST_CHECK_MEMORY_ESTIMATE=1` (Linux) compares each estimate of 256 MiB or more with
   the rise in the process's peak resident memory, and fails a case that used more than its
   estimate plus 10% and 256 MiB. The first case in a process is left out, because it also loads
@@ -373,15 +385,19 @@ default), and they run on a two-GPU gfx950 node in Math CI's `precheckin` on pul
 **How the tiers are applied in CI.** TheRock's test lane runs hipBLASLt through the CTest presets
 built from this file ([TheRock#5230](https://github.com/ROCm/TheRock/pull/5230)), so the tiers above
 are what CI actually runs. A pull request to this repository gets the `standard` tier in Multi-Arch
-CI, because TheRock treats any rocm-libraries change as a submodule change, except on gfx950, where
-a pull request that touches hipBLASLt gets the `quick` tier; scheduled nightly runs get
-`comprehensive`. The hipBLASLt ASAN lane drives `hipblaslt-test` directly through
-[`test/therock/test_hipblaslt.py`](../../test/therock/test_hipblaslt.py) with these filters:
+CI, because TheRock treats any rocm-libraries change as a submodule change. On gfx950, hipBLASLt
+tests run only for a pull request that touches `projects/hipblaslt/`, and they get the same tier as
+gfx94X. Scheduled nightly runs get `comprehensive`. The hipBLASLt ASAN lane drives
+`hipblaslt-test` directly through [`test/therock/test_hipblaslt.py`](../../test/therock/test_hipblaslt.py)
+with these filters:
 
 | ASAN tier | GTest filter |
 | --- | --- |
 | `quick` (pull requests) | `*smoke*-*HipBufferTransferMemoryMode.*/Managed` |
 | `standard` (nightly) | `*smoke*:*quick*:*pre_checkin*-*known_bug*:*HipBufferTransferMemoryMode.*/Managed` |
+
+The dedicated HOST_ASAN jobs run with `DEBUG_CLR_DEV_SIGNALS=0` to work around
+[ROCM-34728](https://amd-hub.atlassian.net/browse/ROCM-34728).
 
 Both tiers temporarily exclude the two managed-memory buffer cases for the ASAN allocator
 failure tracked in ROCM-34263 and [rocm-systems #15163](https://github.com/ROCm/rocm-systems/issues/15163).
@@ -915,7 +931,7 @@ the set of architectures the library supports or builds for.
 | Windows, gfx1151 | Partial | Nightly | Forced to the quick tier regardless of requested tier, for memory reasons |
 | Linux, gfx950 (MI350) | Benchmarks only | Nightly, in the rocPTS lane outside this repository | Non-gating, and not surfaced on a pull request. See [Performance and Benchmarking Testing](#performance-and-benchmarking-testing) |
 | Linux, gfx103X / gfx120X | Partial | Nightly, in TheRock's own nightly | |
-| Linux, gfx1250-strict | Client test suite and TensileLite common tests | Eligible PRs, nightly on develop, and manual dispatch | The [gfx1250 workflow](../../.github/workflows/gfx1250_hipblaslt_tensilelite_test.yml) (`gfx1250 HW hipBLASLt + TensileLite Tests`) checks non-draft PRs with an accepted organization label and relevant file changes. It verifies strict mode before testing. The client suite runs as 4 shards, then the large-memory cases one group per process; a large case that skips for lack of memory fails the job (`HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP=1`). The job summary lists each process's peak memory and every test that stopped for memory. See [Scoping test cases to architectures](#scoping-test-cases-to-architectures) |
+| Linux, gfx1250-strict | Client test suite and TensileLite common tests | Eligible PRs, nightly on develop, and manual dispatch | The [gfx1250 workflow](../../.github/workflows/gfx1250_hipblaslt_tensilelite_test.yml) (`gfx1250 HW hipBLASLt + TensileLite Tests`) checks non-draft PRs with an accepted organization label and relevant file changes. It skips PRs that change only docs, and skips the TensileLite tests when only `projects/hipblaslt/library/` or `projects/hipblaslt/clients/` change. It verifies strict mode before testing. The client suite runs as 4 shards, then the large-memory cases one group per process; a large case that skips for lack of memory fails the job (`HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP=1`). The job summary lists each process's peak memory and every test that stopped for memory. See [Scoping test cases to architectures](#scoping-test-cases-to-architectures) |
 
 ### Scoping test cases to architectures
 
@@ -1889,6 +1905,7 @@ collected under the umbrella epic AIHPBLAS-5028.
 | What Math CI runs, and which of its jobs gate, is not visible from this repository | Medium | Medium | This document, which is a snapshot and will drift. The gap closes as hipBLASLt's testing moves to TheRock CI | ROCM-31467 |
 | The list of checks required to merge is maintained by hand in `docs/gardening.md`, and it has drifted from the repository ruleset | Medium | Medium | Anyone can read the ruleset with `gh api` (see [Validation Gates and Ownership](#validation-gates-and-ownership)) | [#12996](https://github.com/ROCm/rocm-libraries/issues/12996) |
 | No sanitizer lane is a required check, so an ASAN failure does not block a merge | Medium | High if hit | The ASAN lanes run on every hipBLASLt pull request, and reviewers can see their results | AIHPBLAS-1079 |
+| A memory stop is a skip, and the job stays green, when the preflight finds that a case does not fit, and when an allocation fails in a nightly, stress or HMM test, except in gfx1250-strict's large-memory groups. An estimate that is too high, or a client bug that fakes a shortage in one of those tests, shows up only as a longer `[ MEMORY   ]` list. In [#15973](https://github.com/ROCm/rocm-libraries/pull/15973)'s CI, such a bug skipped 161 grouped GEMM cases on gfx94X. On TheRock's Linux gfx1151 runners, which have under 5 GiB of host memory free, the preflight skips three pre_checkin cases on every run | Low | High if hit: the CPU check of those cases is lost without a failure | An allocation that fails after the preflight fails every smoke, quick and pre_checkin test, which the pull request tiers run. A host buffer counts as short of memory only when its allocation failed. `MatmulMemory_pre_checkin.host_estimate_matches_what_a_unit_check_case_uses` checks the estimate on two shapes | AIHPBLAS-5352, [#16017](https://github.com/ROCm/rocm-libraries/issues/16017) |
 
 ### Known bugs and flaky tests
 

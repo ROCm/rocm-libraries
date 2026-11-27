@@ -42,6 +42,12 @@ test_categories:
       - "comprehensive_*"
       - "Full*"
       - "full_*"
+      # Pointwise modes added with the CPU-parity work: device runs that compile new kernels
+      - "TestGpuPointwise*Plan*.ExecutePlan*"
+      - "TestGpuReferenceGraphExecutor.PointwiseBinaryMixedOperandTypesExecutes"
+      - "TestGpuReferenceGraphExecutorFp32.PointwiseMaxMinExecutes"
+      - "TestGpuReferenceGraphExecutorFp32.PointwiseCmpGtExecutes"
+      - "TestGpuReferenceGraphExecutorFp32.PointwiseBinarySelectExecutes"
     labels:
       - "quick"
       - "standard"
@@ -53,6 +59,12 @@ test_categories:
     test_patterns:
       - "Standard*"
       - "standard_*"
+      # Pointwise modes added with the CPU-parity work: device runs that compile new kernels
+      - "TestGpuPointwise*Plan*.ExecutePlan*"
+      - "TestGpuReferenceGraphExecutor.PointwiseBinaryMixedOperandTypesExecutes"
+      - "TestGpuReferenceGraphExecutorFp32.PointwiseMaxMinExecutes"
+      - "TestGpuReferenceGraphExecutorFp32.PointwiseCmpGtExecutes"
+      - "TestGpuReferenceGraphExecutorFp32.PointwiseBinarySelectExecutes"
     exclude:
       - "*DISABLED*"
     labels:

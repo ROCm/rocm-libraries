@@ -48,7 +48,9 @@ CK_TILE_DEVICE auto tdm_row_major_lds_view(void* p)
 
 } // namespace impl
 
-// the Problem will be reused from CShuffleEpilogueProblem
+// the Problem will be reused from CShuffleEpilogueProblem. AccElementwise maps each accumulator
+// in place before the conversion to ODataType (element_wise::SaturateFp8E4M3 saturates FP8);
+// PassThrough leaves them as they are.
 //
 // Writes the C tile to LDS, then to global memory with TDM stores. Two modes:
 //
@@ -62,10 +64,14 @@ CK_TILE_DEVICE auto tdm_row_major_lds_view(void* p)
 //
 // Compared with CShuffleEpilogue: slabs are full width so that each TDM store is one wide box, and
 // a buffer is reused only after s_wait_tensorcnt, because the TDM engine reads LDS asynchronously.
-template <typename Problem_, index_t MIterPerStage_ = 0, index_t NumStageBuffers_ = 2>
+template <typename Problem_,
+          index_t MIterPerStage_   = 0,
+          index_t NumStageBuffers_ = 2,
+          typename AccElementwise_ = element_wise::PassThrough>
 struct TdmEpilogueStaged
 {
     using Problem                          = remove_cvref_t<Problem_>;
+    using AccElementwise                   = remove_cvref_t<AccElementwise_>;
     using AsDataType                       = remove_cvref_t<typename Problem::AsDataType>;
     using BsDataType                       = remove_cvref_t<typename Problem::BsDataType>;
     using AccDataType                      = remove_cvref_t<typename Problem::AccDataType>;
@@ -225,9 +231,16 @@ struct TdmEpilogueStaged
     template <typename LdsTile, typename InLdsWindow>
     CK_TILE_DEVICE void cast_lds_tile(LdsTile& lds_tile, InLdsWindow& in_lds_window)
     {
-        const auto c_warptile_in_tensor_casted = cast_tile_pk<ODataType>(lds_tile);
-
-        store_tile(in_lds_window, c_warptile_in_tensor_casted);
+        if constexpr(std::is_same_v<AccElementwise, element_wise::PassThrough>)
+        {
+            store_tile(in_lds_window, cast_tile_pk<ODataType>(lds_tile));
+        }
+        else
+        {
+            auto mapped = lds_tile;
+            tile_elementwise_inout([](auto& v) { AccElementwise{}(v, v); }, mapped);
+            store_tile(in_lds_window, cast_tile_pk<ODataType>(mapped));
+        }
     }
 
     struct EmptyScale
@@ -313,7 +326,7 @@ struct TdmEpilogueStaged
         }
     }
 
-    private:
+    protected:
     // Tile distribution of one slab: the accumulator's, with kMIterPerStage M iterations per wave.
     template <typename AccEncode>
     CK_TILE_HOST_DEVICE static constexpr auto MakeStageDistribution()

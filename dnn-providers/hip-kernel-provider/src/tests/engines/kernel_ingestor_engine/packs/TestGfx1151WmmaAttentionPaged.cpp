@@ -131,6 +131,8 @@ struct PagedSpec
     std::optional<int64_t> vNumBlocks; // numBlocks when absent
     // V's container strides (K's layout at V's page size when absent).
     std::optional<std::vector<int64_t>> vStrides;
+    // O's strides for a dense (non-ragged) Q (Q's strides when absent).
+    std::optional<std::vector<int64_t>> oStrides;
     // Declared device-pointer alignment in bytes, by tensor uid (16 when absent).
     std::map<int64_t, int64_t> alignment;
     // Further SDPA attributes (FP8, dropout and other features the kernels lack).
@@ -211,7 +213,12 @@ flatbuffers::FlatBufferBuilder buildPagedGraph(const PagedSpec& spec)
         tensor(Q_UID, spec.dtype, qStrides, qDims, qRagged, multiplier),
         tensor(K_UID, spec.dtype, cacheStrides, cacheDims),
         tensor(V_UID, spec.dtype, vCacheStrides, vCacheDims),
-        tensor(O_UID, spec.dtype, qStrides, qDims, oRagged, spec.raggedQ ? token : 1),
+        tensor(O_UID,
+               spec.dtype,
+               spec.oStrides.value_or(qStrides),
+               qDims,
+               oRagged,
+               spec.raggedQ ? token : 1),
         tensor(PAGE_TABLE_UID,
                spec.tableDtype,
                tableStrides,
@@ -432,6 +439,28 @@ TEST(TestGfx1151WmmaAttentionPaged, BindsUniformDecodeOverTheInterleavedCache)
     EXPECT_FALSE(tryGetBoundInt(*bound, Q_OFFSET_UID_TOKEN).has_value());
 }
 
+// The overlap check (DeclinesMalformedPagedGraphs's "an overlapping O" case) sorts
+// (stride, extent) pairs over axes of extent above one, so Sq=1 never puts the sequence
+// axis in that sort: an O sequence stride narrower than D then passes unnoticed. The
+// prefill kernel masks a wave tile's tail rows only by sizing the O buffer resource to
+// the live row span, and with one row that span collapses to D itself, so a narrower
+// stride keeps a tail-row store in range instead of dropping it; hasRowRoomForTailStores
+// (Gfx1151WmmaAttentionNative.cpp) guards this dense-Q layout's O the same way the dense
+// layout's does. The decode engine never reaches this layout (TheDecodeEngineDeclines
+// EveryPagedGraph), so it needs no case here.
+TEST(TestGfx1151WmmaAttentionPaged, PrefillEngineDeclinesOneRowOutputWithoutRowRoom)
+{
+    // B=4, Hq=8, Sq=1, D=128: the default Q/O strides are {1024, 128, 1024, 1}.
+    PagedSpec declined;
+    declined.oStrides = std::vector<int64_t>{1024, 128, 8, 1};
+    EXPECT_FALSE(matches(declined));
+
+    // A control: an O sequence stride at least D still matches.
+    PagedSpec control;
+    control.oStrides = std::vector<int64_t>{1024, 128, 128, 1};
+    EXPECT_TRUE(matches(control));
+}
+
 TEST(TestGfx1151WmmaAttentionPaged, BindsSpeculativeDecodeWithStats)
 {
     PagedSpec spec;
@@ -602,6 +631,10 @@ TEST(TestGfx1151WmmaAttentionPaged, DeclinesMalformedPagedGraphs)
     add("an additive bias", [](PagedSpec& s) { s.bias = true; });
     add("ALiBi", [](PagedSpec& s) { s.alibi = true; });
     add("a head dim off the 8-element grid", [](PagedSpec& s) { s.headSize = 76; });
+    // isWellFormedOperand declines a dense O whose batch stride (128) undercuts the
+    // packed value (Hq*D = 1024), aliasing distinct O elements onto one address.
+    add("an overlapping O",
+        [](PagedSpec& s) { s.oStrides = std::vector<int64_t>{128, 128, 1024, 1}; });
     add("stats of a ragged Q", [](PagedSpec& s) { s.returnLse = true; }, raggedGraph());
     // One page count bounds both caches' page ids.
     add("V with more pages than K", [](PagedSpec& s) { s.vNumBlocks = s.numBlocks * 2; });

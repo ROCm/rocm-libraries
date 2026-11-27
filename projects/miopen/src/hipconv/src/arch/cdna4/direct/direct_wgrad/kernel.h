@@ -386,6 +386,18 @@ inline size_t get_workspace_size(const ConvParams& par, const Config& cfg)
            partial_count(grid);
 }
 
+// Whether FlatGrid's int counts fit.
+//
+// divup(N, unfold_n) adds up to unfold_n - 1 to N, and live_splits' divup by items_per_split adds
+// up to items - 1 to the item count.
+inline bool items_fit(const ConvParams& par, const Config& cfg)
+{
+    const int64_t image_groups = (static_cast<int64_t>(par.n) + cfg.unfold_n - 1) / cfg.unfold_n;
+    const int64_t col_blocks   = divup(par.q, cfg.w_unfold());
+    return par.n + int64_t{cfg.unfold_n} - 1 <= INT32_MAX &&
+           image_groups * col_blocks <= INT32_MAX / 2;
+}
+
 // Whether this entry may run this layer, which several entries of a layer may.
 //
 // Which of them the dispatcher prefers is the ranking's answer, not this one. A launch reaches
@@ -399,6 +411,8 @@ inline bool is_valid_config(const ConvParams& par, const Config& cfg)
         return false;
     const int unfold_n = preferred_unfold_n(view, cfg.exchange_hw);
     if(cfg.unfold_n != unfold_n)
+        return false;
+    if(!items_fit(view, cfg))
         return false;
     if(!writes_fit_the_split(view, cfg))
         return false;
@@ -934,6 +948,9 @@ public:
         if(par.stride_h != 1 || par.stride_w != 1)
             return false;
         if(par.dilation_h != 1 || par.dilation_w != 1)
+            return false;
+        // The epilogue forms dW's filter stride, kh × kw × C/g, in an int.
+        if(int64_t{par.kh} * par.kw * par.channels_per_group() > INT32_MAX)
             return false;
         // Whether the layer can be addressed is per-entry, like the filter shape: a baseline
         // entry spans the image from one base and a tiled one spans a tile. See

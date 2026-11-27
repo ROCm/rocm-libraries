@@ -54,7 +54,7 @@
  * - RunAIHeuristics: Main template function that orchestrates AI model execution
  *
  * Architecture support:
- * - gfx942/gfx950: Candidate Selection models (newer architecture)
+ * - gfx942/gfx950/gfx1250: Candidate Selection models (newer architecture)
  * - gfx90a: KTN models (legacy compatibility)
  *
  * @see RunAIHeuristics for usage examples
@@ -94,7 +94,7 @@ static constexpr int CkSplitkAutoDeduce = -1;
  */
 struct SolverHeuristicConfig
 {
-    // Solver name for Candidate Selection models (gfx942/gfx950)
+    // Solver name for Candidate Selection models (gfx942/gfx950/gfx1250)
     const char* solver_name = "Unknown";
 
     // Solver name for KTN models (gfx90a) - often abbreviated
@@ -281,7 +281,7 @@ bool RunKTNGeneric(ConfigType& config,
 /**
  * @brief Run AI-based heuristics to select optimal kernel configuration
  *
- * This centralized function handles both Candidate Selection (gfx942/gfx950)
+ * This centralized function handles both Candidate Selection (gfx942/gfx950/gfx1250)
  * and KTN (gfx90a) heuristics, reducing code duplication across solvers.
  *
  * @tparam FillKernelsFunc Callable that returns valid kernel IDs for a given problem
@@ -328,21 +328,23 @@ bool RunAIHeuristics(const SolverHeuristicConfig& solver_cfg,
                      CKValidatorCreatorFunc&& ck_val_creator = nullptr,
                      bool use_tf32                           = false)
 {
-    const std::string& arch = ctx.GetStream().GetDeviceName();
+    // Normalize so a runtime sub-target (e.g. "gfx1250-strict") matches the gates and the
+    // per-arch candidate-selection model files (keyed on "gfx1250").
+    const std::string arch = ai::common::NormalizeArch(ctx.GetStream().GetDeviceName());
 
     MIOPEN_LOG_I2(solver_cfg.solver_name << ": RunAIHeuristics on " << arch
                                          << " (use_tf32=" << std::boolalpha << use_tf32 << ")");
 
     // Only applicable for supported architectures
-    if(arch != "gfx90a" && arch != "gfx942" && arch != "gfx950")
+    if(arch != "gfx90a" && arch != "gfx942" && arch != "gfx950" && arch != "gfx1250")
     {
         MIOPEN_LOG_I2(solver_cfg.solver_name
                       << ": Unsupported architecture, skipping AI heuristics");
         return false;
     }
 
-    // Candidate Selection heuristics for gfx942/gfx950
-    if(arch == "gfx942" || arch == "gfx950")
+    // Candidate Selection heuristics for gfx942/gfx950/gfx1250
+    if(arch == "gfx942" || arch == "gfx950" || arch == "gfx1250")
     {
         MIOPEN_LOG_I2(solver_cfg.solver_name << ": Candidate Selection heuristics for " << arch);
         std::string solver_name = solver_cfg.GetSolverNameForArch(arch);

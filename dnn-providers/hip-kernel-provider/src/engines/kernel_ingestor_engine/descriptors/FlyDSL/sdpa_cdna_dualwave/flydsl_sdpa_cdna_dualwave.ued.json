@@ -12,7 +12,7 @@
   "predict_engine": {
     "default": "5d156390-4d28-54bd-af50-8ac27bd21890",
     "gfx950": [
-      "0f5ccdb4-f513-4fe6-a61f-8b80e7050750"
+      "262eca2c-d6e6-4809-8957-4f6e222d2d14"
     ]
   },
   "metadata": "798ed3e1-93e3-5c95-8bab-c8c767225601",
@@ -23,5 +23,6 @@
   ],
   "behavior_notes": [
     "supports_graph_capture"
-  ]
+  ],
+  "numerical_notes": []
 }
