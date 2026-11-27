@@ -242,6 +242,10 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   # in librocsparse (already coverage-instrumented) is counted. They link
   # roc::rocsparse directly, so they need no compile-in library TUs.
   unit_test_internal_util_checkmatrix.cpp
+  # Also runs the unsorted ELL duplicate pass on its own, which needs
+  # rocsparse_segmented_radix_sort_keys.cpp compiled in (see
+  # ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES).
+  unit_test_internal_util_checkmatrix_duplicates.cpp
   # --- AISPARSE-698: CSR validator launch-grid overflow regression -----------
   # Distinct anchor at the very end of the device source list so this leaf does
   # not conflict with the sibling unit-test branches that append above.
@@ -444,7 +448,8 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_coo2csr.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_exclusive_scan.cpp
   # Added at this (extras) leaf for unit_test_internal_primitives_host_extras.cpp:
-  # sort_csr_column_indices / radix_sort_pairs primitive host wrappers.
+  # sort_csr_column_indices / radix_sort_pairs primitive host wrappers. The
+  # segmented sort is also needed by unit_test_internal_util_checkmatrix_duplicates.cpp.
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_segmented_radix_sort_keys.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_radix_sort_pairs.cpp
   # Bitmap path of csrgemm, for unit_test_internal_extra_csrgemm_bitmap.cpp.

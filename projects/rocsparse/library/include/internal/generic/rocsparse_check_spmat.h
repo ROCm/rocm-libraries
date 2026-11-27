@@ -69,6 +69,13 @@ extern "C" {
 *  In the final stage \ref rocsparse_check_spmat_stage_compute, the actual computation is performed.
 *
 *  \note
+*  The size of the temporary storage buffer depends on the \ref rocsparse_spmat_storage_mode attribute
+*  of \p mat: unsorted storage can need a larger buffer than sorted storage, for example for COO and ELL
+*  matrices. Set the storage mode before the buffer size stage. After changing it, repeat the buffer
+*  size stage and allocate a buffer of the new size before the compute stage. The compute stage cannot
+*  check the size of the buffer it is given.
+*
+*  \note
 *  This routine does not support execution in a hipGraph context.
 *
 *  \note
@@ -95,6 +102,9 @@ extern "C" {
 *  \retval     rocsparse_status_invalid_pointer \p mat, \p buffer_size, \p temp_buffer, or \p data_status pointer
 *              is invalid.
 *  \retval     rocsparse_status_invalid_value the value of \p stage is incorrect.
+*  \retval     rocsparse_status_not_implemented the format, index types, or data type of \p mat are not
+*              supported, \p mat is batched, or \p mat is an ELL matrix with
+*              \ref rocsparse_storage_mode_unsorted and an ELL width above 2^32 - 1. Both stages return it.
 *
 *  \par Example
 *  This example checks whether a matrix is upper triangular. The matrix passed to

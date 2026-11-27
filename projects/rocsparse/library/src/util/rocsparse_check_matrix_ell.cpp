@@ -27,6 +27,7 @@
 #include "rocsparse_utility.hpp"
 
 #include "check_matrix_ell_device.h"
+#include "check_matrix_ell_unsorted.hpp"
 
 template <typename T, typename I>
 rocsparse_status rocsparse::check_matrix_ell_core(rocsparse_handle       handle,
@@ -44,13 +45,16 @@ rocsparse_status rocsparse::check_matrix_ell_core(rocsparse_handle       handle,
 {
     ROCSPARSE_ROUTINE_TRACE;
 
+    if(!rocsparse::check_matrix_ell_sort_supported(
+           storage, ell_width, rocsparse::check_matrix_ell_sort_limits{}))
+    {
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+    }
+
     *data_status = rocsparse_data_status_success;
 
-    // Temporary buffer entry points
-    char* ptr = reinterpret_cast<char*>(temp_buffer);
-
-    rocsparse_data_status* d_data_status = reinterpret_cast<rocsparse_data_status*>(ptr);
-    ptr += ((sizeof(rocsparse_data_status) - 1) / 256 + 1) * 256;
+    // The status slot is at the start of the temporary buffer.
+    rocsparse_data_status* d_data_status = reinterpret_cast<rocsparse_data_status*>(temp_buffer);
 
     RETURN_IF_HIP_ERROR(
         rocsparse_hipMemsetAsync(d_data_status, 0, sizeof(rocsparse_data_status), handle->stream));
@@ -77,6 +81,13 @@ rocsparse_status rocsparse::check_matrix_ell_core(rocsparse_handle       handle,
                                                  hipMemcpyDeviceToHost,
                                                  handle->stream));
     RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
+
+    if(*data_status == rocsparse_data_status_success && storage == rocsparse_storage_mode_unsorted
+       && ell_width > 1)
+    {
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::check_matrix_ell_unsorted_duplicates<I>(
+            handle, m, n, ell_width, ell_col_ind, idx_base, data_status, temp_buffer));
+    }
 
     if(*data_status != rocsparse_data_status_success)
     {

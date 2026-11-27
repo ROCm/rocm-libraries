@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the Software), to deal
@@ -64,10 +64,13 @@ extern "C" {
 *  @param[in]
 *  uplo        \ref rocsparse_fill_mode_lower or \ref rocsparse_fill_mode_upper.
 *  @param[in]
-*  storage     \ref rocsparse_storage_mode_sorted or \ref rocsparse_storage_mode_sorted.
+*  storage     \ref rocsparse_storage_mode_sorted or \ref rocsparse_storage_mode_unsorted.
 *  @param[out]
 *  buffer_size number of bytes of the temporary storage buffer required by
 *              \ref rocsparse_scheck_matrix_coo "rocsparse_Xcheck_matrix_coo()".
+*              The size depends on \p storage and can be larger for
+*              \ref rocsparse_storage_mode_unsorted, so query it with the storage mode
+*              that is passed to the check.
 *
 *  \retval rocsparse_status_success the operation completed successfully.
 *  \retval rocsparse_status_invalid_handle the library context was not initialized.
@@ -180,7 +183,7 @@ rocsparse_status rocsparse_zcheck_matrix_coo_buffer_size(rocsparse_handle       
 *  @param[in]
 *  uplo        \ref rocsparse_fill_mode_lower or \ref rocsparse_fill_mode_upper.
 *  @param[in]
-*  storage     \ref rocsparse_storage_mode_sorted or \ref rocsparse_storage_mode_sorted.
+*  storage     \ref rocsparse_storage_mode_sorted or \ref rocsparse_storage_mode_unsorted.
 *  @param[out]
 *  data_status modified to indicate the status of the data.
 *  @param[in]

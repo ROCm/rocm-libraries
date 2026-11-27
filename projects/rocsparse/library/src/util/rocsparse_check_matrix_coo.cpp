@@ -24,9 +24,99 @@
 #include "internal/util/rocsparse_check_matrix_coo.h"
 #include "rocsparse_check_matrix_coo.hpp"
 #include "rocsparse_enum_utils.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 #include "check_matrix_coo_device.h"
+#include "check_matrix_workspace.hpp"
+
+namespace rocsparse
+{
+    template <typename I>
+    static rocsparse_status check_matrix_coo_unsorted_duplicates(rocsparse_handle       handle,
+                                                                 I                      m,
+                                                                 I                      n,
+                                                                 int64_t                nnz,
+                                                                 const I*               coo_row_ind,
+                                                                 const I*               coo_col_ind,
+                                                                 rocsparse_index_base   idx_base,
+                                                                 rocsparse_data_status* data_status,
+                                                                 void*                  temp_buffer)
+    {
+        check_matrix_coo_workspace ws;
+        RETURN_IF_ROCSPARSE_ERROR(check_matrix_coo_workspace_query<I>(
+            handle, m, n, nnz, idx_base, rocsparse_storage_mode_unsorted, ws));
+
+        void* rocprim_buffer = check_matrix_workspace_at<char>(temp_buffer, ws.rocprim_offset);
+        I*    col0           = check_matrix_workspace_at<I>(temp_buffer, ws.cols_offset);
+        I*    col1           = check_matrix_workspace_at<I>(temp_buffer, ws.cols_alt_offset);
+        I*    row0           = check_matrix_workspace_at<I>(temp_buffer, ws.rows_offset);
+        I*    row1           = check_matrix_workspace_at<I>(temp_buffer, ws.rows_alt_offset);
+
+        const size_t bytes = sizeof(I) * static_cast<size_t>(nnz);
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+            col0, coo_col_ind, bytes, hipMemcpyDeviceToDevice, handle->stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+            row0, coo_row_ind, bytes, hipMemcpyDeviceToDevice, handle->stream));
+
+        rocsparse::primitives::double_buffer<I> col_keys(col0, col1);
+        rocsparse::primitives::double_buffer<I> row_vals(row0, row1);
+        RETURN_IF_ROCSPARSE_ERROR(
+            (rocsparse::primitives::radix_sort_pairs<I, I>(handle,
+                                                           col_keys,
+                                                           row_vals,
+                                                           static_cast<size_t>(nnz),
+                                                           0,
+                                                           ws.end_bit,
+                                                           ws.rocprim_bytes,
+                                                           rocprim_buffer)));
+
+        // The second sort is stable, so equal rows keep the column order from the first sort.
+        rocsparse::primitives::double_buffer<I> row_keys(row_vals.current(), row_vals.alternate());
+        rocsparse::primitives::double_buffer<I> col_vals(col_keys.current(), col_keys.alternate());
+        RETURN_IF_ROCSPARSE_ERROR(
+            (rocsparse::primitives::radix_sort_pairs<I, I>(handle,
+                                                           row_keys,
+                                                           col_vals,
+                                                           static_cast<size_t>(nnz),
+                                                           0,
+                                                           ws.end_bit,
+                                                           ws.rocprim_bytes,
+                                                           rocprim_buffer)));
+
+        rocsparse_data_status* d_data_status
+            = reinterpret_cast<rocsparse_data_status*>(temp_buffer);
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(
+            handle,
+            rocsparse::ceil_div(nnz - 1, 256),
+            256,
+            [&](auto grid_stride, uint32_t grid) -> rocsparse_status {
+                RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                    (rocsparse::
+                         check_matrix_coo_duplicate_device<256, decltype(grid_stride)::value, I>),
+                    dim3(grid),
+                    dim3(256),
+                    0,
+                    handle->stream,
+                    m,
+                    n,
+                    nnz,
+                    row_keys.current(),
+                    col_vals.current(),
+                    idx_base,
+                    d_data_status);
+                return rocsparse_status_success;
+            }));
+
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(data_status,
+                                                     d_data_status,
+                                                     sizeof(rocsparse_data_status),
+                                                     hipMemcpyDeviceToHost,
+                                                     handle->stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
+        return rocsparse_status_success;
+    }
+}
 
 template <typename T, typename I>
 rocsparse_status rocsparse::check_matrix_coo_core(rocsparse_handle       handle,
@@ -47,11 +137,8 @@ rocsparse_status rocsparse::check_matrix_coo_core(rocsparse_handle       handle,
 
     *data_status = rocsparse_data_status_success;
 
-    // Temporary buffer entry points
-    char* ptr = reinterpret_cast<char*>(temp_buffer);
-
-    rocsparse_data_status* d_data_status = reinterpret_cast<rocsparse_data_status*>(ptr);
-    ptr += ((sizeof(rocsparse_data_status) - 1) / 256 + 1) * 256;
+    // The status slot is at the start of the temporary buffer.
+    rocsparse_data_status* d_data_status = reinterpret_cast<rocsparse_data_status*>(temp_buffer);
 
     RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(d_data_status, 0, sizeof(int), handle->stream));
 
@@ -78,6 +165,13 @@ rocsparse_status rocsparse::check_matrix_coo_core(rocsparse_handle       handle,
                                                  hipMemcpyDeviceToHost,
                                                  handle->stream));
     RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
+
+    if(*data_status == rocsparse_data_status_success && storage == rocsparse_storage_mode_unsorted
+       && nnz >= 2)
+    {
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::check_matrix_coo_unsorted_duplicates<I>(
+            handle, m, n, nnz, coo_row_ind, coo_col_ind, idx_base, data_status, temp_buffer));
+    }
 
     if(*data_status != rocsparse_data_status_success)
     {

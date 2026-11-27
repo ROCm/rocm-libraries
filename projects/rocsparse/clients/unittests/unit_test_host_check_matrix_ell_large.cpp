@@ -44,6 +44,21 @@ class CheckMatrixEllLarge : public HandleTest
 
 namespace
 {
+    // Slot j of every row stores column j, which is unique and inside [0, n).
+    __global__ void fill_columns(rocsparse_int* col, int64_t m, int64_t width)
+    {
+        const int64_t row = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+        if(row >= m)
+        {
+            return;
+        }
+
+        for(int64_t j = 0; j < width; ++j)
+        {
+            col[m * j + row] = static_cast<rocsparse_int>(j);
+        }
+    }
+
     // m * ell_width = 2^32: the 32-bit product is exactly 0.
     constexpr rocsparse_int m_wrap_zero = 65536;
     constexpr rocsparse_int w_wrap_zero = 65536;
@@ -122,8 +137,10 @@ TEST_F(CheckMatrixEllLarge, kernel_indexes_beyond_int32_max)
     device_vector<float>         val(static_cast<size_t>(total));
     ASSERT_NE(col.ptr, nullptr);
     ASSERT_NE(val.ptr, nullptr);
-    // Every column index 0 and every value 0 is valid.
-    UT_CHECK_HIP(hipMemset(col.ptr, 0, static_cast<size_t>(total) * sizeof(rocsparse_int)));
+    // Sorted storage rejects repeated columns, so every row holds 0, 1, ..., w - 1.
+    hipLaunchKernelGGL((fill_columns), dim3((m - 1) / 256 + 1), dim3(256), 0, 0, col.ptr, m, w);
+    UT_CHECK_HIP(hipGetLastError());
+    UT_CHECK_HIP(hipDeviceSynchronize());
     UT_CHECK_HIP(hipMemset(val.ptr, 0, static_cast<size_t>(total) * sizeof(float)));
 
     size_t buffer_size = 0;
@@ -136,7 +153,7 @@ TEST_F(CheckMatrixEllLarge, kernel_indexes_beyond_int32_max)
                                                       rocsparse_index_base_zero,
                                                       rocsparse_matrix_type_general,
                                                       rocsparse_fill_mode_lower,
-                                                      rocsparse_storage_mode_unsorted,
+                                                      rocsparse_storage_mode_sorted,
                                                       &buffer_size),
               rocsparse_status_success);
     device_vector<char> buffer(buffer_size > 0 ? buffer_size : size_t{256});
@@ -153,7 +170,7 @@ TEST_F(CheckMatrixEllLarge, kernel_indexes_beyond_int32_max)
                                               rocsparse_index_base_zero,
                                               rocsparse_matrix_type_general,
                                               rocsparse_fill_mode_lower,
-                                              rocsparse_storage_mode_unsorted,
+                                              rocsparse_storage_mode_sorted,
                                               &data_status,
                                               buffer.ptr),
                   rocsparse_status_success);
@@ -168,4 +185,82 @@ TEST_F(CheckMatrixEllLarge, kernel_indexes_beyond_int32_max)
     UT_CHECK_HIP(hipMemcpy(
         col.ptr + (int64_t(1) << 31) + 5, &bad, sizeof(rocsparse_int), hipMemcpyHostToDevice));
     EXPECT_EQ(check(), rocsparse_data_status_invalid_index);
+}
+
+// Unsorted storage with 2^29 rows of width 2. The segmented sort of the duplicate pass
+// gives each row of this width 8 threads, so one sort of all rows would launch 2^32
+// work-items, which the runtime rejects. The rows are sorted in batches below that, and a
+// duplicate in the last row, which is in the last batch, must be found. Needs two
+// 2^30-element arrays (about 8.5 GB with the workspace): skipped when the device is
+// smaller.
+TEST_F(CheckMatrixEllLarge, unsorted_rows_beyond_sort_launch_limit)
+{
+    const rocsparse_int m     = rocsparse_int(1) << 29;
+    const rocsparse_int w     = 2;
+    const rocsparse_int n     = 4;
+    const int64_t       total = static_cast<int64_t>(m) * w;
+
+    size_t free_bytes = 0, total_bytes = 0;
+    ASSERT_EQ(hipMemGetInfo(&free_bytes, &total_bytes), hipSuccess);
+    const size_t needed = static_cast<size_t>(total) * (sizeof(rocsparse_int) + sizeof(float));
+    if(free_bytes < needed + (size_t{2} << 30))
+    {
+        GTEST_SKIP() << "needs " << needed / (1 << 20) << " MiB of device memory, have "
+                     << free_bytes / (1 << 20) << " MiB free";
+    }
+
+    device_vector<rocsparse_int> col(static_cast<size_t>(total));
+    device_vector<float>         val(static_cast<size_t>(total));
+    hipLaunchKernelGGL((fill_columns), dim3((m - 1) / 256 + 1), dim3(256), 0, 0, col.ptr, m, w);
+    UT_CHECK_HIP(hipGetLastError());
+    UT_CHECK_HIP(hipDeviceSynchronize());
+    UT_CHECK_HIP(hipMemset(val.ptr, 0, static_cast<size_t>(total) * sizeof(float)));
+
+    size_t buffer_size = 0;
+    ASSERT_EQ(rocsparse_scheck_matrix_ell_buffer_size(handle,
+                                                      m,
+                                                      n,
+                                                      w,
+                                                      val.ptr,
+                                                      col.ptr,
+                                                      rocsparse_index_base_zero,
+                                                      rocsparse_matrix_type_general,
+                                                      rocsparse_fill_mode_lower,
+                                                      rocsparse_storage_mode_unsorted,
+                                                      &buffer_size),
+              rocsparse_status_success);
+    ASSERT_EQ(hipMemGetInfo(&free_bytes, &total_bytes), hipSuccess);
+    if(free_bytes < buffer_size + (size_t{1} << 30))
+    {
+        GTEST_SKIP() << "needs " << buffer_size / (1 << 20) << " MiB of workspace, have "
+                     << free_bytes / (1 << 20) << " MiB free";
+    }
+    device_vector<char> buffer(buffer_size);
+
+    auto check = [&]() {
+        rocsparse_data_status data_status = rocsparse_data_status_success;
+        EXPECT_EQ(rocsparse_scheck_matrix_ell(handle,
+                                              m,
+                                              n,
+                                              w,
+                                              val.ptr,
+                                              col.ptr,
+                                              rocsparse_index_base_zero,
+                                              rocsparse_matrix_type_general,
+                                              rocsparse_fill_mode_lower,
+                                              rocsparse_storage_mode_unsorted,
+                                              &data_status,
+                                              buffer.ptr),
+                  rocsparse_status_success);
+        EXPECT_EQ(hipGetLastError(), hipSuccess);
+        return data_status;
+    };
+
+    EXPECT_EQ(check(), rocsparse_data_status_success);
+
+    // Row m - 1 holds column 0 twice.
+    const rocsparse_int zero = 0;
+    UT_CHECK_HIP(
+        hipMemcpy(col.ptr + total - 1, &zero, sizeof(rocsparse_int), hipMemcpyHostToDevice));
+    EXPECT_EQ(check(), rocsparse_data_status_duplicate_entry);
 }

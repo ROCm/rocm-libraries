@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -51,7 +51,7 @@ namespace rocsparse
                                  rocsparse_storage_mode storage,
                                  rocsparse_data_status* data_status)
     {
-        const int64_t gid = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
+        const int64_t gid = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
 
         if(gid >= nnz)
         {
@@ -115,18 +115,90 @@ namespace rocsparse
         {
             if(gid < nnz - 1)
             {
-                const I next_row = coo_row_ind[gid + 1] - idx_base;
+                const I    next_row    = coo_row_ind[gid + 1] - idx_base;
+                const I    next_col    = coo_col_ind[gid + 1] - idx_base;
+                const bool next_row_ok = (next_row >= 0 && next_row < m);
+                const bool next_col_ok = (next_col >= 0 && next_col < n);
 
-                if(row == next_row)
+                if(next_row_ok && row > next_row)
                 {
-                    const I next_col = coo_col_ind[gid + 1] - idx_base;
+                    record_data_status(data_status, rocsparse_data_status_invalid_sorting);
+                    return;
+                }
 
-                    if(col > next_col && (next_col >= 0 && next_col < n))
+                if(next_row_ok && row == next_row && next_col_ok)
+                {
+                    if(col == next_col)
+                    {
+                        record_data_status(data_status, rocsparse_data_status_duplicate_entry);
+                        return;
+                    }
+
+                    if(col > next_col)
                     {
                         record_data_status(data_status, rocsparse_data_status_invalid_sorting);
                         return;
                     }
                 }
+            }
+        }
+    }
+
+    // Entries gid and gid + 1 of a copy sorted by row, then by column.
+    template <typename I>
+    ROCSPARSE_DEVICE_ILF void check_matrix_coo_duplicate_pair(int64_t gid,
+                                                              I       m,
+                                                              I       n,
+                                                              const I* __restrict__ rows,
+                                                              const I* __restrict__ cols,
+                                                              rocsparse_index_base   idx_base,
+                                                              rocsparse_data_status* data_status)
+    {
+        const I row = rows[gid] - idx_base;
+        const I col = cols[gid] - idx_base;
+
+        if(row < 0 || row >= m || col < 0 || col >= n)
+        {
+            return;
+        }
+
+        const I next_row = rows[gid + 1] - idx_base;
+        const I next_col = cols[gid + 1] - idx_base;
+
+        if(row == next_row && col == next_col)
+        {
+            record_data_status(data_status, rocsparse_data_status_duplicate_entry);
+        }
+    }
+
+    // Launched with GRID_STRIDE = true only when get_grid_size_x clamps grid.x below the
+    // natural block count.
+    template <uint32_t BLOCKSIZE, bool GRID_STRIDE, typename I>
+    ROCSPARSE_KERNEL(BLOCKSIZE)
+    void check_matrix_coo_duplicate_device(I       m,
+                                           I       n,
+                                           int64_t nnz,
+                                           const I* __restrict__ rows,
+                                           const I* __restrict__ cols,
+                                           rocsparse_index_base   idx_base,
+                                           rocsparse_data_status* data_status)
+    {
+        if constexpr(GRID_STRIDE)
+        {
+            for(int64_t gid = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
+                gid < nnz - 1;
+                gid += static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE)
+            {
+                check_matrix_coo_duplicate_pair(gid, m, n, rows, cols, idx_base, data_status);
+            }
+        }
+        else
+        {
+            const int64_t gid = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
+
+            if(gid < nnz - 1)
+            {
+                check_matrix_coo_duplicate_pair(gid, m, n, rows, cols, idx_base, data_status);
             }
         }
     }
