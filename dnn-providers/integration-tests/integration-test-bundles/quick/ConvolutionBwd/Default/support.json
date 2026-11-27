@@ -9,10 +9,26 @@
           "s3_3d_i8x8x4_n2c16k32_f3x3x3_fp32_cl"
         ],
         "support": {
+          "gfx1101": [
+            "linux",
+            "windows"
+          ],
+          "gfx1151": [
+            "linux"
+          ],
+          "gfx1200": [
+            "linux"
+          ],
+          "gfx1201": [
+            "windows"
+          ],
           "gfx90a": [
             "linux"
           ],
           "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
             "linux"
           ]
         }
