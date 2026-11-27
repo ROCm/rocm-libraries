@@ -8936,6 +8936,160 @@ TEST(TestGpuFlydslSdpaCdnaDispatch, ServesHeadDimsOffEightPaddedAndPacked)
     }
 }
 
+// ---------------------------------------------------------------------------
+// Gapped packed origins over the head-dim padding copies (FlydslSdpaHeadPad.hpp): the copies
+// hold each sequence at b * S, so a sequence whose origin lies past the B * S tokens of the
+// padded operands is rebased onto compact origins on the way in, and O and the LSE are copied
+// back through the graph's own origins.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+/// ALMIOPEN-3317's graph family: bf16 `[2, 1, 2, 7]`, one head and token stride 7, packed with
+/// per-batch lengths {2, 2} at @p origins in Q's and K's tables (empty: end to end), so with
+/// origins {16, 0} a sequence ends at token 18, past the B * S = 4 tokens the padded copies
+/// hold. Checked against hipDNN's CPU reference as well as the harness's, which also checks
+/// that no token outside a sequence of O and the LSE is written.
+SdpaGraphSpec cdnaGappedOriginsSpec(int64_t headDim, std::vector<int32_t> origins)
+{
+    SdpaGraphSpec spec;
+    spec.dataType = DataType::BFLOAT16;
+    spec.batch = 2;
+    spec.heads = 1;
+    spec.kvHeads = 1;
+    spec.seqLenQ = 2;
+    spec.seqLenKv = 2;
+    spec.headDim = headDim;
+    spec.stats = SdpaStats::LSE;
+    spec.crossCheckWithCpuReference = true;
+    setPacked(spec, {2, 2}, {2, 2});
+    setPadding(spec, {2, 2}, {2, 2});
+    spec.packedOriginsQ = origins;
+    spec.packedOriginsKv = std::move(origins);
+    return spec;
+}
+
+/// Three packed sequences of 40, 17 and 25 query and 40, 30 and 12 key tokens at head dim
+/// @p headDim, with the LSE. Q's origins {200, 0, 100} and K's {300, 40, 150} put two query and
+/// two key sequences past the B * S = 120 tokens the padded copies hold, out of order, with
+/// gaps between the regions.
+SdpaGraphSpec
+    cdnaGappedForm2Spec(int64_t headDim, DataType dataType, int64_t heads, int64_t kvHeads)
+{
+    auto spec = cdnaSpec();
+    spec.dataType = dataType;
+    spec.batch = 3;
+    spec.heads = heads;
+    spec.kvHeads = kvHeads;
+    spec.headDim = headDim;
+    spec.seqLenQ = 40;
+    spec.seqLenKv = 40;
+    spec.stats = SdpaStats::LSE;
+    spec.crossCheckWithCpuReference = true;
+    setPacked(spec, {40, 17, 25}, {40, 40, 40});
+    setPadding(spec, {40, 17, 25}, {40, 30, 12});
+    spec.packedOriginsQ = {200, 0, 100};
+    spec.packedOriginsKv = {300, 40, 150};
+    return spec;
+}
+
+constexpr std::array<SdpaMask, 2> CDNA_GAPPED_MASKS{SdpaMask::NONE, SdpaMask::BOTTOM_RIGHT_CAUSAL};
+
+} // namespace
+
+// The 3317 graph: the padded copies hold each sequence at b * S, not at its origin, so origins
+// past B * S neither write outside the workspace nor read the wrong tokens. Controls: compact
+// origins at the same head dim, and head dim 8, which runs on the attention object without
+// copies, at the same gapped origins.
+TEST(TestGpuFlydslSdpaCdnaDispatch, PacksGappedOriginsPastTheTokenCountAtAHeadDimOffEight)
+{
+    struct Case
+    {
+        const char* name;
+        int64_t headDim;
+        std::vector<int32_t> origins;
+    };
+    for(const auto& [name, headDim, origins] : {Case{"gapped origins, head dim 7", 7, {16, 0}},
+                                                Case{"compact origins, head dim 7", 7, {}},
+                                                Case{"gapped origins, head dim 8", 8, {16, 0}}})
+    {
+        SCOPED_TRACE(name);
+        auto spec = cdnaGappedOriginsSpec(headDim, origins);
+        for(const auto mask : CDNA_GAPPED_MASKS)
+        {
+            SCOPED_TRACE(static_cast<int>(mask));
+            spec.mask = mask;
+            expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+        }
+    }
+}
+
+// Q, K, V, O and the LSE (head dim 53, four heads over two key heads) at origins past B * S:
+// every sequence's copies and its O and LSE land at its own origin.
+TEST(TestGpuFlydslSdpaCdnaDispatch, PacksGappedOriginsPastTheTokenCountWithLengthsOnBothSides)
+{
+    auto spec = cdnaGappedForm2Spec(53, DataType::BFLOAT16, 4, 2);
+    for(const auto mask : CDNA_GAPPED_MASKS)
+    {
+        SCOPED_TRACE(static_cast<int>(mask));
+        spec.mask = mask;
+        expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    }
+}
+
+// seq_len_kv alone (seqused_k): only K and V are rebased; Q, O and the LSE keep their own table.
+// K's sequences end at tokens 340, 70 and 162, past B * S = 120, with NaN in the slot tails.
+TEST(TestGpuFlydslSdpaCdnaDispatch, PacksGappedKeyOriginsPastTheTokenCountAtAHeadDimOffEight)
+{
+    auto spec = cdnaGappedForm2Spec(53, DataType::BFLOAT16, 4, 2);
+    spec.omitSeqLenQ = true;
+    spec.packedOriginsQ.clear();
+    spec.slotTailNan = true;
+    for(const auto mask : CDNA_GAPPED_MASKS)
+    {
+        SCOPED_TRACE(static_cast<int>(mask));
+        spec.mask = mask;
+        expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+    }
+}
+
+// Exact f32 at head dims 4 mod 8, PyTorch's nested mem-efficient varlen path: packed with
+// lengths on both sides at gapped origins.
+TEST(TestGpuFlydslSdpaCdnaDispatch, PacksGappedOriginsInF32AtAHeadDimFourModEight)
+{
+    for(const int64_t headDim : {int64_t{60}, int64_t{68}})
+    {
+        SCOPED_TRACE("head_dim " + std::to_string(headDim));
+        auto spec = cdnaGappedForm2Spec(headDim, DataType::FLOAT, 4, 2);
+        for(const auto mask : CDNA_GAPPED_MASKS)
+        {
+            SCOPED_TRACE(static_cast<int>(mask));
+            spec.mask = mask;
+            expectCdnaMatchesReference(spec, F32_TOLERANCE);
+        }
+    }
+}
+
+// The rebased Q's LSE is held in a scratch tensor at token-major strides {S*H, 1, H, 1} and
+// copied out through Q's own gapped table: at two and four heads (one head cannot tell the
+// layouts apart), with and without grouped keys, a real kernel writes and the copy reads those
+// strides.
+TEST(TestGpuFlydslSdpaCdnaDispatch, PacksGappedOriginsWithTwoAndFourHeadsAndTheLse)
+{
+    for(const auto& [heads, kvHeads] : {std::pair<int64_t, int64_t>{2, 2}, {4, 4}, {4, 2}})
+    {
+        SCOPED_TRACE("heads " + std::to_string(heads) + ", key heads " + std::to_string(kvHeads));
+        auto spec = cdnaGappedForm2Spec(53, DataType::BFLOAT16, heads, kvHeads);
+        for(const auto mask : CDNA_GAPPED_MASKS)
+        {
+            SCOPED_TRACE(static_cast<int>(mask));
+            spec.mask = mask;
+            expectCdnaMatchesReference(spec, BF16_TOLERANCE);
+        }
+    }
+}
+
 } // namespace hip_kernel_provider::kernel_ingestor_engine
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR && HIPDNN_ENGINE_FLYDSL
