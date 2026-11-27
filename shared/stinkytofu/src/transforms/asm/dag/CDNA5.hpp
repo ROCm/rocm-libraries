@@ -466,7 +466,8 @@ class CDNA5ReadyQueue : public ReadyQueue {
     }
 
     bool dsSpreadOn() const {
-        return getPassContext().getPassFeatureConfig().dagFeatures.dsSpread;
+        const auto& f = getPassContext().getPassFeatureConfig().dagFeatures;
+        return f.dsSpread && (!f.dsSpreadLoopOnly || getLoop() != nullptr);
     }
     int dsReadQueueDepth() const {
         const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.dsReadQueueDepth;
@@ -4059,7 +4060,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     auto planDsSpread = [&]() {
         dsSpread_.reset();
         dsOverflow_ = false;
-        if (!dagFeatures.dsSpread) return;
+        if (!dsSpreadOn()) return;
         const int windowCycles = std::max(1, wmmaIssueConfig.latency);
         // The ds_loads in the order they issue: the scheduler chains them by dsReadPriority (the
         // hard constraints are merged into the DAG only after this runs), not by node id.

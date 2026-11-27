@@ -124,6 +124,10 @@ struct PassFeatureConfig {
         /// (see DsSpreadPacer), and a load issues only while the ds queue has a free credit. Off =
         /// ds_loads issue as soon as they are ready and a credit is free.
         bool dsSpread = true;
+        /// Apply dsSpread only to loop body blocks. A block outside a loop (a no-load loop, a
+        /// peeled first iteration) runs once, with no next trip whose WMMAs could cover a
+        /// spread-out load, so its ds_loads issue as soon as they are ready.
+        bool dsSpreadLoopOnly = false;
         /// Cycles the LDS needs to return one ds_load (its return rate, the old throttle latency /
         /// queue depth). The windows the ds_loads in front of a barrier need are at least
         /// loads * cycles / WMMA window. 0 = off (the even-spread density only).
