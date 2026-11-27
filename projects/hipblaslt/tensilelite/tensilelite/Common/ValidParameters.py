@@ -617,6 +617,8 @@ validParameters = { # we need to make sure this matches develop
     "StoreCachelineAlign": [False, True],
     # FusedA2A=A2AGemm: K sub-rounds per peer shard, each with its own flag.
     "A2ASubRounds": [1, 2, 4],
+    # FusedA2A=A2AGemm: cap on the peer groups of a batch; 0 = ceil(count / ceil(count / (W-1))).
+    "A2APeerGroups": list(range(8)),
     # Load options:
     # (GRO = Global Read Offset)
     # BufferLoad=0:

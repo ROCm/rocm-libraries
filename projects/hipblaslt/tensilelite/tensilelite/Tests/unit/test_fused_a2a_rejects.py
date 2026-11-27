@@ -319,3 +319,11 @@ def test_a2a_sub_rounds_rejected_without_a2a_gemm(_gp_gfx942, request, assembler
     )
     assert sol.get("Valid") is False
     assert "A2ASubRounds > 1 requires FusedA2A=A2AGemm" in out
+
+
+def test_a2a_peer_groups_rejected_without_a2a_gemm(_gp_gfx942, request, assembler, capsys):
+    sol, out = _derive_a2a_gemm(
+        request, assembler, capsys, ProblemType={"FusedA2A": "Disabled"}, A2APeerGroups=1
+    )
+    assert sol.get("Valid") is False
+    assert "A2APeerGroups > 0 requires FusedA2A=A2AGemm" in out

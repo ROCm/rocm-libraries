@@ -2791,6 +2791,10 @@ class Solution(collections.abc.Mapping):
       reject(state, printRejectionReason, "A2ASubRounds > 1 requires FusedA2A=A2AGemm")
       return
 
+    if state["A2APeerGroups"] != 0 and fusedA2A != "A2AGemm":
+      reject(state, printRejectionReason, "A2APeerGroups > 0 requires FusedA2A=A2AGemm")
+      return
+
     if fusedA2A == "A2AGemm":
       _disableRuntimeStaggerU(state)
       if not state["ProblemType"]["DataTypeB"].isBFloat16():
