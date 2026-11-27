@@ -408,8 +408,10 @@ repos:
       # push rather than at each commit, install them with
       #   pre-commit install --hook-type pre-push
       # instead of plain pre-commit install; this moves every hook of this
-      # file, not only rocKE's, to push time. CI runs every hook on each pull
-      # request either way.
+      # file, not only rocKE's, to push time. CI runs them on each pull
+      # request either way, but checks out only the directories the pull
+      # request touches: a hook runs there only when its files are checked
+      # out, so a change to this file alone runs no rocKE check in CI.
       # rocKE layering ratchet: platform's imports of the library packages
       # (kernels, builders, dispatch, benchmarks) may only shrink. It audits
       # the source tree, so the installed rocke_pytest CTest skips it; this

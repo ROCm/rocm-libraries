@@ -12,6 +12,7 @@ rules.
 
 from __future__ import annotations
 
+import shlex
 from pathlib import Path
 
 import pytest
@@ -33,6 +34,27 @@ PLATFORM = platform_root().resolve()
 # rocke/platform -> rocke -> hip-kernel-provider -> dnn-providers -> monorepo.
 MONOREPO = PLATFORM.parents[3]
 MONOREPO_CONFIG = MONOREPO / ".pre-commit-config.yaml"
+ROCKE_DIR = "dnn-providers/hip-kernel-provider/rocke/"
+# The rocKE hooks of the monorepo's config. The config is outside rocke/, so a
+# change there that drops or renames a rocKE gate gets no rocKE review; this
+# list is under rocke/, so changing it does.
+ROCKE_HOOK_IDS = frozenset(
+    {
+        "rocke-arch-table-engine-parity",
+        "rocke-compliance",
+        "rocke-compliance-rules",
+        "rocke-emitter-pair-files",
+        "rocke-emitter-pair-parity",
+        "rocke-gemm-spec-dict-binding-parity",
+        "rocke-hook-checks",
+        "rocke-library-reach",
+        "rocke-native-unit-tests",
+        "rocke-no-torch",
+        "rocke-on-deletion",
+        "rocke-pending-lanes",
+        "rocke-toolchain-pins",
+    }
+)
 
 CONFIG = """\
 exclude: ^vendored/
@@ -186,4 +208,47 @@ def test_the_hook_checks_take_every_module_their_tests_import_beyond_rocke(
     assert not missing, (
         "rocke-hook-checks in .pre-commit-config.yaml does not take these files "
         "its tests import; add them to its files: pattern:\n  " + "\n  ".join(missing)
+    )
+
+
+@pytest.fixture(scope="module")
+def rocke_hooks(monorepo_config):
+    return [
+        hook
+        for hook in precommit_hooks.load_local_hooks(monorepo_config)
+        if hook.hook_id.startswith("rocke-")
+    ]
+
+
+def test_the_monorepo_config_holds_exactly_the_rocke_hooks(rocke_hooks):
+    ids = [hook.hook_id for hook in rocke_hooks]
+    assert len(ids) == len(set(ids)), "a rocKE hook id is listed twice"
+    assert set(ids) == ROCKE_HOOK_IDS, (
+        "the rocKE hooks of .pre-commit-config.yaml changed: missing "
+        f"{sorted(ROCKE_HOOK_IDS - set(ids))}, new {sorted(set(ids) - ROCKE_HOOK_IDS)}; "
+        "update ROCKE_HOOK_IDS here when the change is meant"
+    )
+
+
+def test_the_config_wide_files_and_exclude_leave_rocke_visible(rocke_hooks):
+    for hook in rocke_hooks:
+        assert hook.config_files.search(ROCKE_DIR), hook.hook_id
+        assert not hook.config_exclude.search(ROCKE_DIR), hook.hook_id
+
+
+def test_every_file_a_rocke_hook_runs_exists(rocke_hooks):
+    named = {
+        (hook.hook_id, token)
+        for hook in rocke_hooks
+        for token in (*shlex.split(hook.entry), *hook.args)
+        if token.startswith(ROCKE_DIR) and token.endswith(".py")
+    }
+    assert {hook_id for hook_id, _ in named} == ROCKE_HOOK_IDS
+    missing = sorted(
+        f"{hook_id}: {path}"
+        for hook_id, path in named
+        if not (MONOREPO / path).is_file()
+    )
+    assert not missing, "rocKE hooks run files that do not exist:\n  " + "\n  ".join(
+        missing
     )
