@@ -1,0 +1,17 @@
+{
+  "description": "Two nodes each read a result the other produces. Every node waits on another, so the pattern has no root and could never match a graph.",
+  "valid": false,
+  "error": "pattern nodes 'node_b' -> 'node_a' -> 'node_b'",
+  "ued": {
+    "version": "1.0",
+    "id": "f885f112-e771-59e4-b83b-0677c686f3e0",
+    "name": "ued_fixture:cyclic_pattern",
+    "metadata": "7282c997-0ddb-583c-806e-8ffd6cee8370",
+    "graph_match": {
+      "nodes": [
+        {"kind": "op", "id": "node_a", "op": "pointwise", "operands": {"in_0": "$b"}, "results": {"out_0": "$a"}},
+        {"kind": "op", "id": "node_b", "op": "pointwise", "operands": {"in_0": "$a"}, "results": {"out_0": "$b"}}
+      ]
+    }
+  }
+}

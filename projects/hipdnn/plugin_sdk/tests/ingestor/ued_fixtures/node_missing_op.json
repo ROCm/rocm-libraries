@@ -1,0 +1,16 @@
+{
+  "description": "A node without the required key 'op'.",
+  "valid": false,
+  "error": "missing required key 'op' in graph_match.nodes[0]",
+  "ued": {
+    "version": "1.0",
+    "id": "8892f3cb-e3ee-57b7-9b2a-6c7f322a25ab",
+    "name": "ued_fixture:node_missing_op",
+    "metadata": "48ecf75b-88bc-5b1e-80bc-f58b02c6fc98",
+    "graph_match": {
+      "nodes": [
+        {"kind": "op", "id": "pw", "operands": {"in_0": "$input_a", "in_1": "$input_b"}, "results": {"out_0": "$output"}}
+      ]
+    }
+  }
+}

@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include "TestGoodPluginApiVersion.hpp"
 #include "TestPluginCommon.hpp"
 #include "TestPluginEngineIdMap.hpp"
 
@@ -21,9 +22,12 @@ public:
         return "1.0.0";
     }
 
+    /// Reports K_TEST_GOOD_PLUGIN_API_VERSION, which supports override-execute but sits
+    /// below K_PASS_BY_VALUE_MIN_API_VERSION, so this fake stays the pre-pass-by-value
+    /// plugin regardless of the plugin SDK package version.
     const char* getPluginApiVersion() const override
     {
-        return apiVersionWithoutTweak();
+        return hipdnn_tests::plugin_constants::K_TEST_GOOD_PLUGIN_API_VERSION.data();
     }
 
     int64_t getEngineId() const override

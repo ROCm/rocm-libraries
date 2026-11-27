@@ -1476,7 +1476,7 @@ def test_packaging_admits_every_sdk_version_the_loader_parses(
         ),
         pytest.param(
             _set("graph_match", {"nodes": []}),
-            "unknown fields",
+            "must not be empty",
             id="graph_match_declarative_arm",
         ),
         pytest.param(

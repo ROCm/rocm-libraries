@@ -2,6 +2,7 @@ operation:
   name: "LayernormBackward"
   class_name: "LayernormBackwardOperationDescriptor"
   fbs_table: "LayernormBackwardAttributes"
+  matcher_opcode: "layernorm_bwd"
   fbs_generated_header: "layernorm_backward_attributes_generated.h"
 
   descriptor_type:
@@ -85,54 +86,63 @@ operation:
   tensor_fields:
     - name: "dy"
       fbs_field: "dy_tensor_uid"
+      direction: "input"
       attr_suffix: "DY"
       required: true
       frontend_getter: "get_dy()"
 
     - name: "x"
       fbs_field: "x_tensor_uid"
+      direction: "input"
       attr_suffix: "X"
       required: true
       frontend_getter: "get_x()"
 
     - name: "scale"
       fbs_field: "scale_tensor_uid"
+      direction: "input"
       attr_suffix: "SCALE"
       required: true
       frontend_getter: "get_scale()"
 
     - name: "mean"
       fbs_field: "mean_tensor_uid"
+      direction: "input"
       attr_suffix: "MEAN"
       required: false
       frontend_getter: "get_mean()"
 
     - name: "inv_variance"
       fbs_field: "inv_variance_tensor_uid"
+      direction: "input"
       attr_suffix: "INV_VARIANCE"
       required: false
       frontend_getter: "get_inv_variance()"
 
     - name: "epsilon"
       fbs_field: "epsilon_tensor_uid"
+      direction: "input"
       attr_suffix: "EPSILON"
       required: false
       frontend_getter: "get_epsilon()"
 
     - name: "dx"
       fbs_field: "dx_tensor_uid"
+      direction: "output"
       attr_suffix: "DX"
       required: true
       frontend_getter: "get_dx()"
 
     - name: "dscale"
       fbs_field: "dscale_tensor_uid"
+      direction: "output"
       attr_suffix: "DSCALE"
       required: true
       frontend_getter: "get_dscale()"
 
     - name: "dbias"
       fbs_field: "dbias_tensor_uid"
+      direction: "output"
       attr_suffix: "DBIAS"
       required: true
       frontend_getter: "get_dbias()"

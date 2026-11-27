@@ -54,7 +54,7 @@ showing *accept*, so this document walks through one accept and three distinct d
 This family's real dispatch is one function: it checks the request's arch, dtype, and feature
 flags, then calls `supports_attention_dense`, which validates the full spec. There is no separate
 catalog-matching stage. The descriptors split that function along the seam the graph already has.
-The engine's pattern (§6) runs first and once per graph: it matches the single `sdpa_fwd` node,
+The engine's pattern (§6) runs first and once per graph: it matches the single `sdpa` node,
 binds Q/K/V/O and the node's attributes, and a graph whose shape it does not match declines the
 engine outright, before either pack's criteria are touched. The criteria (§2) run second, over the
 symbols that binding published.
@@ -74,10 +74,10 @@ inputs are real, separately gated modes of the same kernel file, called out as a
 in §7.
 
 Every `$`-token below reaches a symbol §6's engine pattern bound: the four tensors `$q`, `$k`,
-`$v`, `$o`, the twenty-four optional operands the pattern declares with a `?`, and the `sdpa_fwd`
+`$v`, `$o`, the twenty-four optional operands the pattern declares with a `?`, and the `sdpa`
 node's scalar attributes; this descriptor carries the constraints over them. That last group spans
 two schema tables — the op's `SdpaAttributes` and the `Node` table's own scalars, which is where
-`compute_data_type` lives — and a criterion reads both under the same `$sdpa_fwd.` root
+`compute_data_type` lives — and a criterion reads both under the same `$sdpa.` root
 ([RFC 0020 App. B.3](../0020_UniversalEngineDescriptor.md#b3-field-classification-normative)).
 
 ```jsonc
@@ -95,17 +95,16 @@ two schema tables — the op's `SdpaAttributes` and the `Node` table's own scala
     //     declined before any criterion runs
     //     ([RFC 0018 A.1](../0018_UniversalMatchDescriptor.md#a1-the-umd-descriptor-object)).
     //     No conjunct restates that: with the default in force, one could never change the
-    //     verdict. `node_count` below is the opposite case — it is not a restatement of the
-    //     pattern but the only thing bounding the rest of the graph, since the pattern matches
-    //     the ops it names and does not by itself exclude others (RFC 0020 § 4.3.1). ---
-    {"==": ["$graph.node_count", 1]},
-    // --- 23 of the 24 optional tensors the engine's pattern binds are refused outright. The
-    //     24th, the scale tensor, is served, and its gate is further down. ---
+    //     verdict. Nor is there a `node_count` conjunct: the engine's one-node pattern already
+    //     declines a graph with any other node, because a match covers the whole graph
+    //     (RFC 0020 § 4.3.1). ---
+    // --- 19 of the 20 optional operands the engine's pattern binds are refused outright. The
+    //     20th, the scale tensor, is served, and its gate is further down. The six optional
+    //     results are left unnamed, so a graph carrying any of them already declines. ---
     {"not_present": ["$attn_mask", "$seq_len_q", "$seq_len_kv", "$seed", "$offset",
                      "$dropout_mask", "$dropout_scale", "$page_table_k", "$page_table_v",
                      "$block_mask", "$sink_token", "$descale_q", "$descale_k", "$descale_v",
-                     "$descale_s", "$scale_s", "$scale_o", "$stats", "$max", "$sum_exp",
-                     "$rng_dump", "$amax_s", "$amax_o"]},
+                     "$descale_s", "$scale_s", "$scale_o", "$cu_seq_len_q", "$cu_seq_len_kv"]},
 
     // --- rank, plus the cross-tensor dim agreements written out one position at a time. Q's
     //     query-side extents reappear in O; K and V agree with each other on the KV-side ones;
@@ -193,21 +192,21 @@ two schema tables — the op's `SdpaAttributes` and the `Node` table's own scala
     //     ALLOW-LIST, not `== "UNSET"`: an f32 accumulator is what the builder emits
     //     unconditionally, so UNSET and an explicit FLOAT are equally inert, and gating on UNSET
     //     alone declines every graph that spells out the value it was going to get anyway. ---
-    {"==": ["$sdpa_fwd.compute_data_type", "FLOAT"]},
-    {"in": ["$sdpa_fwd.mma_core_mode", ["UNSET", "FLOAT"]]},
-    {"in": ["$sdpa_fwd.implementation", ["AUTO", "UNIFIED"]]},
+    {"==": ["$sdpa.compute_data_type", "FLOAT"]},
+    {"in": ["$sdpa.mma_core_mode", ["UNSET", "FLOAT"]]},
+    {"in": ["$sdpa.implementation", ["AUTO", "UNIFIED"]]},
 
     // --- no ALiBi, no padding mask, no dropout. alibi_mask and padding_mask are plain bools
     //     defaulting false, so a bare negation suffices. dropout_probability is an optional
     //     float where unset and an explicit 0.0 both accept. ---
-    {"!": ["$sdpa_fwd.alibi_mask"]}, {"!": ["$sdpa_fwd.padding_mask"]},
-    {"or": [{"not_present": ["$sdpa_fwd.dropout_probability"]},
-            {"==": ["$sdpa_fwd.dropout_probability", 0.0]}]},
+    {"!": ["$sdpa.alibi_mask"]}, {"!": ["$sdpa.padding_mask"]},
+    {"or": [{"not_present": ["$sdpa.dropout_probability"]},
+            {"==": ["$sdpa.dropout_probability", 0.0]}]},
 
     // --- stats and paged-KV attributes this family does not implement. generate_stats is
     //     tri-state: unset and false both accept, so it is defaulted then negated. ---
-    {"!": [{"value_or_default": ["$sdpa_fwd.generate_stats", false]}]},
-    {"not_present": ["$sdpa_fwd.max_seq_len_kv"]},
+    {"!": [{"value_or_default": ["$sdpa.generate_stats", false]}]},
+    {"not_present": ["$sdpa.max_seq_len_kv"]},
 
     // --- scale. hipDNN carries this three ways and this pack takes all three: the
     //     `attn_scale_value` attribute, a scale tensor holding a compile-time value, or a scale
@@ -216,9 +215,9 @@ two schema tables — the op's `SdpaAttributes` and the `Node` table's own scala
     //     constrains how many were supplied, not which: exactly one of the attribute and the
     //     tensor, since a graph carrying both has said two different things. ---
     {"or": [
-      {"and": [{"present":     ["$sdpa_fwd.attn_scale_value"]},
+      {"and": [{"present":     ["$sdpa.attn_scale_value"]},
                {"not_present": ["$scale"]}]},
-      {"and": [{"not_present": ["$sdpa_fwd.attn_scale_value"]},
+      {"and": [{"not_present": ["$sdpa.attn_scale_value"]},
                {"present":     ["$scale"]}]}
     ]},
 
@@ -229,42 +228,42 @@ two schema tables — the op's `SdpaAttributes` and the `Node` table's own scala
     //     carries the resolution of the deprecated booleans into the band rather than testing a
     //     raw boolean; §3 derives why, and what goes wrong without it. ---
     {"and": [
-      {"!": [{"and": ["$sdpa_fwd.causal_mask", "$sdpa_fwd.causal_mask_bottom_right"]}]},
-      {">=": [{"value_or_default": ["$sdpa_fwd.left_bound",  -1]}, -1]},
-      {">=": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]}, -1]},
+      {"!": [{"and": ["$sdpa.causal_mask", "$sdpa.causal_mask_bottom_right"]}]},
+      {">=": [{"value_or_default": ["$sdpa.left_bound",  -1]}, -1]},
+      {">=": [{"value_or_default": ["$sdpa.right_bound", -1]}, -1]},
 
       {"or": [
         // A REAL LEFT BOUND OUTRANKS THE DEPRECATED BOOLEANS. They can only pick top-left from
         // bottom-right; they cannot express a window, so a graph that sets one AND carries a
         // left bound is asking for a band and resolves to sliding_window.
         {"and": [{"==": ["$kernel.mask_mode", "sliding_window"]},
-                 {"!=": [{"value_or_default": ["$sdpa_fwd.left_bound",  -1]}, -1]}]},
+                 {"!=": [{"value_or_default": ["$sdpa.left_bound",  -1]}, -1]}]},
 
         {"and": [{"==": ["$kernel.mask_mode", "none"]},
-                 {"!": ["$sdpa_fwd.causal_mask"]}, {"!": ["$sdpa_fwd.causal_mask_bottom_right"]},
-                 {"==": [{"value_or_default": ["$sdpa_fwd.left_bound",  -1]}, -1]},
-                 {"==": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]}, -1]}]},
+                 {"!": ["$sdpa.causal_mask"]}, {"!": ["$sdpa.causal_mask_bottom_right"]},
+                 {"==": [{"value_or_default": ["$sdpa.left_bound",  -1]}, -1]},
+                 {"==": [{"value_or_default": ["$sdpa.right_bound", -1]}, -1]}]},
 
         // R0: the resolved right bound is 0, either stored or supplied by a deprecated boolean.
         {"and": [{"==": ["$kernel.mask_mode", "causal_bottom_right"]},
-                 {"==": [{"value_or_default": ["$sdpa_fwd.left_bound",  -1]}, -1]},
-                 {"or": [{"==": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]},  0]},
-                         {"and": [{"==": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]}, -1]},
-                                  {"or": ["$sdpa_fwd.causal_mask", "$sdpa_fwd.causal_mask_bottom_right"]}]}]},
-                 {"or": ["$sdpa_fwd.causal_mask_bottom_right",
-                         {"==": ["$sdpa_fwd.diagonal_alignment", "BOTTOM_RIGHT"]}]}]},
+                 {"==": [{"value_or_default": ["$sdpa.left_bound",  -1]}, -1]},
+                 {"or": [{"==": [{"value_or_default": ["$sdpa.right_bound", -1]},  0]},
+                         {"and": [{"==": [{"value_or_default": ["$sdpa.right_bound", -1]}, -1]},
+                                  {"or": ["$sdpa.causal_mask", "$sdpa.causal_mask_bottom_right"]}]}]},
+                 {"or": ["$sdpa.causal_mask_bottom_right",
+                         {"==": ["$sdpa.diagonal_alignment", "BOTTOM_RIGHT"]}]}]},
         {"and": [{"==": ["$kernel.mask_mode", "causal_top_left"]},
-                 {"==": [{"value_or_default": ["$sdpa_fwd.left_bound",  -1]}, -1]},
-                 {"or": [{"==": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]},  0]},
-                         {"and": [{"==": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]}, -1]},
-                                  {"or": ["$sdpa_fwd.causal_mask", "$sdpa_fwd.causal_mask_bottom_right"]}]}]},
-                 {"!": ["$sdpa_fwd.causal_mask_bottom_right"]},
-                 {"!": [{"==": ["$sdpa_fwd.diagonal_alignment", "BOTTOM_RIGHT"]}]}]},
+                 {"==": [{"value_or_default": ["$sdpa.left_bound",  -1]}, -1]},
+                 {"or": [{"==": [{"value_or_default": ["$sdpa.right_bound", -1]},  0]},
+                         {"and": [{"==": [{"value_or_default": ["$sdpa.right_bound", -1]}, -1]},
+                                  {"or": ["$sdpa.causal_mask", "$sdpa.causal_mask_bottom_right"]}]}]},
+                 {"!": ["$sdpa.causal_mask_bottom_right"]},
+                 {"!": [{"==": ["$sdpa.diagonal_alignment", "BOTTOM_RIGHT"]}]}]},
 
         {"and": [{"==": ["$kernel.mask_mode", "sliding_window"]},
-                 {"==": [{"value_or_default": ["$sdpa_fwd.left_bound",  -1]}, -1]},
-                 {"!=": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]}, -1]},
-                 {"!=": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]},  0]}]}
+                 {"==": [{"value_or_default": ["$sdpa.left_bound",  -1]}, -1]},
+                 {"!=": [{"value_or_default": ["$sdpa.right_bound", -1]}, -1]},
+                 {"!=": [{"value_or_default": ["$sdpa.right_bound", -1]},  0]}]}
       ]}
     ]}
   ]}
@@ -316,12 +315,12 @@ boolean.** Guarding an arm by a boolean alone does not encode the same function:
 whatever precedence the reader assumed. An earlier revision of this document did exactly that —
 its first arm was `mask_mode == causal_top_left AND causal_mask`, with no bound consulted — and
 reproduced the fixed defect verbatim, because the `sliding_window` arm that would have caught the
-graph was guarded by `{"!": ["$sdpa_fwd.causal_mask"]}` and unreachable for precisely those
+graph was guarded by `{"!": ["$sdpa.causal_mask"]}` and unreachable for precisely those
 graphs. The arms below consult the booleans only through the resolved right bound and alignment,
 so each arm states exactly the resolved band it covers.
 
-With `L = value_or_default($sdpa_fwd.left_bound, -1)`,
-`R = value_or_default($sdpa_fwd.right_bound, -1)`, `CM`/`CBR` the two deprecated booleans and
+With `L = value_or_default($sdpa.left_bound, -1)`,
+`R = value_or_default($sdpa.right_bound, -1)`, `CM`/`CBR` the two deprecated booleans and
 `R0 := R == 0 ∨ (R == -1 ∧ (CM ∨ CBR))`, the three outcomes become five arms, all under the guard
 `¬(CM ∧ CBR) ∧ L >= -1 ∧ R >= -1`:
 
@@ -346,7 +345,7 @@ and Case D what happens to one that resolves to `sliding_window`.
 
 `left_bound` and `right_bound` are optional (`long = null`), and the C++ they mirror treats an
 absent bound as unbounded, i.e. `-1`. Written out, each arm below would need
-`{"or": [{"not_present": ["$sdpa_fwd.left_bound"]}, {"==": ["$sdpa_fwd.left_bound", -1]}]}`
+`{"or": [{"not_present": ["$sdpa.left_bound"]}, {"==": ["$sdpa.left_bound", -1]}]}`
 wherever it means "left unbounded", correct but unreadable in every arm. The arms below instead
 use `value_or_default` to normalize an absent bound to `-1` first and then compare. The two
 spellings are equivalent; this one is legible.
@@ -356,42 +355,42 @@ spellings are equivalent; this one is legible.
 // Pasting only the inner `or` would make the guard a disjunct instead, so a graph with both
 // deprecated causal booleans set, or a bound below -1, could pass by satisfying another arm.
 {"and": [
-  {"!": [{"and": ["$sdpa_fwd.causal_mask", "$sdpa_fwd.causal_mask_bottom_right"]}]},
-  {">=": [{"value_or_default": ["$sdpa_fwd.left_bound",  -1]}, -1]},
-  {">=": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]}, -1]},
+  {"!": [{"and": ["$sdpa.causal_mask", "$sdpa.causal_mask_bottom_right"]}]},
+  {">=": [{"value_or_default": ["$sdpa.left_bound",  -1]}, -1]},
+  {">=": [{"value_or_default": ["$sdpa.right_bound", -1]}, -1]},
 
   {"or": [
     // A REAL LEFT BOUND OUTRANKS THE DEPRECATED BOOLEANS. They can only pick top-left from
     // bottom-right; they cannot express a window, so a graph that sets one AND carries a
     // left bound is asking for a band and resolves to sliding_window.
     {"and": [{"==": ["$kernel.mask_mode", "sliding_window"]},
-             {"!=": [{"value_or_default": ["$sdpa_fwd.left_bound",  -1]}, -1]}]},
+             {"!=": [{"value_or_default": ["$sdpa.left_bound",  -1]}, -1]}]},
 
     {"and": [{"==": ["$kernel.mask_mode", "none"]},
-             {"!": ["$sdpa_fwd.causal_mask"]}, {"!": ["$sdpa_fwd.causal_mask_bottom_right"]},
-             {"==": [{"value_or_default": ["$sdpa_fwd.left_bound",  -1]}, -1]},
-             {"==": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]}, -1]}]},
+             {"!": ["$sdpa.causal_mask"]}, {"!": ["$sdpa.causal_mask_bottom_right"]},
+             {"==": [{"value_or_default": ["$sdpa.left_bound",  -1]}, -1]},
+             {"==": [{"value_or_default": ["$sdpa.right_bound", -1]}, -1]}]},
 
     // R0: the resolved right bound is 0, either stored or supplied by a deprecated boolean.
     {"and": [{"==": ["$kernel.mask_mode", "causal_bottom_right"]},
-             {"==": [{"value_or_default": ["$sdpa_fwd.left_bound",  -1]}, -1]},
-             {"or": [{"==": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]},  0]},
-                     {"and": [{"==": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]}, -1]},
-                              {"or": ["$sdpa_fwd.causal_mask", "$sdpa_fwd.causal_mask_bottom_right"]}]}]},
-             {"or": ["$sdpa_fwd.causal_mask_bottom_right",
-                     {"==": ["$sdpa_fwd.diagonal_alignment", "BOTTOM_RIGHT"]}]}]},
+             {"==": [{"value_or_default": ["$sdpa.left_bound",  -1]}, -1]},
+             {"or": [{"==": [{"value_or_default": ["$sdpa.right_bound", -1]},  0]},
+                     {"and": [{"==": [{"value_or_default": ["$sdpa.right_bound", -1]}, -1]},
+                              {"or": ["$sdpa.causal_mask", "$sdpa.causal_mask_bottom_right"]}]}]},
+             {"or": ["$sdpa.causal_mask_bottom_right",
+                     {"==": ["$sdpa.diagonal_alignment", "BOTTOM_RIGHT"]}]}]},
     {"and": [{"==": ["$kernel.mask_mode", "causal_top_left"]},
-             {"==": [{"value_or_default": ["$sdpa_fwd.left_bound",  -1]}, -1]},
-             {"or": [{"==": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]},  0]},
-                     {"and": [{"==": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]}, -1]},
-                              {"or": ["$sdpa_fwd.causal_mask", "$sdpa_fwd.causal_mask_bottom_right"]}]}]},
-             {"!": ["$sdpa_fwd.causal_mask_bottom_right"]},
-             {"!": [{"==": ["$sdpa_fwd.diagonal_alignment", "BOTTOM_RIGHT"]}]}]},
+             {"==": [{"value_or_default": ["$sdpa.left_bound",  -1]}, -1]},
+             {"or": [{"==": [{"value_or_default": ["$sdpa.right_bound", -1]},  0]},
+                     {"and": [{"==": [{"value_or_default": ["$sdpa.right_bound", -1]}, -1]},
+                              {"or": ["$sdpa.causal_mask", "$sdpa.causal_mask_bottom_right"]}]}]},
+             {"!": ["$sdpa.causal_mask_bottom_right"]},
+             {"!": [{"==": ["$sdpa.diagonal_alignment", "BOTTOM_RIGHT"]}]}]},
 
     {"and": [{"==": ["$kernel.mask_mode", "sliding_window"]},
-             {"==": [{"value_or_default": ["$sdpa_fwd.left_bound",  -1]}, -1]},
-             {"!=": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]}, -1]},
-             {"!=": [{"value_or_default": ["$sdpa_fwd.right_bound", -1]},  0]}]}
+             {"==": [{"value_or_default": ["$sdpa.left_bound",  -1]}, -1]},
+             {"!=": [{"value_or_default": ["$sdpa.right_bound", -1]}, -1]},
+             {"!=": [{"value_or_default": ["$sdpa.right_bound", -1]},  0]}]}
   ]}
 ]}
 ```
@@ -403,7 +402,7 @@ collapses into the predicate. That inversion is the general recipe for porting a
 
 ## 4. One Accept, Three Declines
 
-All four cases share one graph: a single `sdpa_fwd` node, Q/K/V/O rank-4, bf16, packed BSHD. Q
+All four cases share one graph: a single `sdpa` node, Q/K/V/O rank-4, bf16, packed BSHD. Q
 and O carry dims `[1, 16, 2048, 128]`; K and V carry `[1, 2, 2048, 128]`. Read against the
 positions §2 pins, that is batch 1, 16 query heads over 2 KV heads (GQA ratio 8), query and key
 sequence length 2048 apiece, and head size 128. The node also has `compute_data_type=FLOAT`,
@@ -485,7 +484,7 @@ The persistent UDD, the measured ~940-970 TFLOPS path (PR #9480):
     {"name": "v_ptr", "kind": "pointer", "source": {"from": "tensor", "ref": "$v"}},
     {"name": "o_ptr", "kind": "pointer", "source": {"from": "tensor", "ref": "$o"}},
     {"name": "scale", "kind": "scalar", "type": "f32",
-      "source": {"from": "expr", "expr": {"value_or_default": ["$sdpa_fwd.attn_scale_value",
+      "source": {"from": "expr", "expr": {"value_or_default": ["$sdpa.attn_scale_value",
                                                                "$scale.value_f32"]}}}
   ]
 }
@@ -520,7 +519,7 @@ over graph dims instead of a `$kernel.*` constant) and shares the identical `arg
     {"name": "v_ptr", "kind": "pointer", "source": {"from": "tensor", "ref": "$v"}},
     {"name": "o_ptr", "kind": "pointer", "source": {"from": "tensor", "ref": "$o"}},
     {"name": "scale", "kind": "scalar", "type": "f32",
-      "source": {"from": "expr", "expr": {"value_or_default": ["$sdpa_fwd.attn_scale_value",
+      "source": {"from": "expr", "expr": {"value_or_default": ["$sdpa.attn_scale_value",
                                                                "$scale.value_f32"]}}}
   ]
 }
@@ -623,17 +622,17 @@ adapter invocation: the builder, plus the exact build values for that instance.
   "sort_kernel_catalog": {"gfx950": "2b7a4e1c-6f3d-4a8e-9c2b-5d1f0a7e8b93"},  // arch -> the UHD above (RFC 0020 § 4.6)
   "metadata":    "9c53b6b0-9a1e-4b1d-8b5c-7e2d9a6f3c40",
 
-  // Stage one (RFC 0020 § 4.2). The declarative arm: this engine's shape is expressible as a
-  // pattern, so it needs no `native` escape hatch (RFC 0020 § 4.5).
+  // Stage one (RFC 0020 § 4.2), written with the `nodes` arm (RFC 0020 § 4.3). The `native` arm
+  // (RFC 0020 § 4.5) would put a registered C++ function's symbol in this slot instead.
   "graph_match": {
     "nodes": [
-      {"kind": "op", "id": "sdpa_fwd", "op": "sdpa_fwd",
+      {"kind": "op", "id": "sdpa", "op": "sdpa",
        "operands": {
          // Required operands, named as `sdpa_attributes.fbs` names them, minus the `_tensor_uid`
          // suffix: a pattern binds the tensor, not its uid.
          "q": "$q", "k": "$k", "v": "$v",
 
-         // Every optional tensor the schema declares, bound here and declined by §2's criteria.
+         // Every optional operand the schema declares, bound here and declined by §2's criteria.
          // The set is generic hipDNN SDPA vocabulary; none of it appears in AttentionDenseSpec.
          "attn_mask":     "$attn_mask?",
          "scale":         "$scale?",           // the scale-tensor form; §2's scale gate accepts it
@@ -653,22 +652,19 @@ adapter invocation: the builder, plus the exact build values for that instance.
          "descale_s":     "$descale_s?",
          "scale_s":       "$scale_s?",
          "scale_o":       "$scale_o?",
-         "stats":         "$stats?",
-         "max":           "$max?",
-         "sum_exp":       "$sum_exp?",
-         "rng_dump":      "$rng_dump?",
-         "amax_s":        "$amax_s?",
-         "amax_o":        "$amax_o?"
+         "cu_seq_len_q":  "$cu_seq_len_q?",
+         "cu_seq_len_kv": "$cu_seq_len_kv?"
        },
+       // Only the required result is named. A result takes no `?`, and a named result must be
+       // present, so the six optional results (stats, max, sum_exp, rng_dump, amax_s, amax_o)
+       // stay unnamed: a graph that carries any of them declines (RFC 0020 § 4.3.1).
        "results": {"o": "$o"}}
     ]
     // A prebuilt kernel serves one fixed compile-time shape, so this pack needs the whole graph
-    // to be this node. The pattern does not state that: match semantics are exact over the ops
-    // named, not subgraph-containment, so the pattern binds this node and says nothing about the
-    // rest of the graph (RFC 0020 § 4.3.1). Bounding the graph is §2's `node_count` conjunct,
-    // which ADDS that constraint rather than restating one. It lives on the criteria side
-    // because it is a per-pack constraint: another pack on this same engine could serve this
-    // node fused into a larger graph without touching the pattern both share.
+    // to be this node. The pattern states that: a match covers the whole graph, so this
+    // one-node pattern declines a graph with any other node (RFC 0020 § 4.3.1), and §2 needs no
+    // `node_count` conjunct. Serving this node fused into a larger graph takes a different
+    // engine whose pattern names the larger graph.
   }
 }
 

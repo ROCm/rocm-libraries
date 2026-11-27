@@ -18,6 +18,7 @@
   - [Reporting Numerical Notes](#reporting-numerical-notes)
   - [Saving Execution Plans from Ingestor Engines](#saving-execution-plans-from-ingestor-engines)
   - [Execution contract for engines](#execution-contract-for-engines)
+  - [Upgrading Kernel Ingestor Integrations](#upgrading-kernel-ingestor-integrations)
 - [Plugin Architecture](#plugin-architecture)
 - [Plugin Loading](#plugin-loading)
 - [How to Test Plugins](#how-to-test-plugins)
@@ -477,6 +478,94 @@ Engines are expected to be graph-capture capable by default: `execute` can be ca
 - **Time only in benchmarking paths.** The only exceptions are benchmarking and autotune timing paths (`global.benchmarking`, `Graph::autotune()`, the timed-execute and profiling APIs), which can synchronize and allocate timing memory, and the integrations described in the last bullet.
 - **Report the note.** An engine that meets this contract reports `HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE` (see [Saving Execution Plans from Ingestor Engines](#saving-execution-plans-from-ingestor-engines)).
 - **Document library behavior you cannot control.** Where a provider integrates a library whose behavior hipDNN cannot control (for example MIOpen), the allocation, synchronization or capture behavior that library imposes is documented in that provider's section, and its engines do not report `SUPPORTS_GRAPH_CAPTURE` unless they capture. Behavior not documented there is a violation.
+
+### Upgrading Kernel Ingestor Integrations
+
+A Universal Engine Descriptor (UED) fills `graph_match` with one of two arms: `native`, a C++ function the provider registers, or `nodes`, a declarative graph pattern ([RFC 0020 §4.3](./rfcs/0020_UniversalEngineDescriptor.md#43-the-nodes-pattern-normative)). Both arms are supported. This section lists what a provider that uses the generic kernel ingestor changes when it upgrades to the hipDNN that adds the `nodes` arm.
+
+#### 1. `graph_match`: nothing to change for a native engine
+
+A provider whose engines use the `native` arm, or no `graph_match`, needs no code change. The declarations such a provider uses already exist in hipdnn_plugin_sdk 1.1.0, and a native engine keeps its engine selector revision, so trained heuristic models keep matching it:
+
+- `EngineDescriptor::graphMatchNativeSymbol` (`std::string`, in `hipdnn_plugin_sdk/ingestor/Descriptors.hpp`): the symbol of the `native` arm. It is empty when the UED declares no `native` arm.
+- The overloads that take the symbol as a string: the `KernelIngestorSharedState` and `KernelIngestorStateManager` constructors, and `makeStateManager<THandle>(set, symbol)`. An empty string or a braced `{}` means no `graph_match`.
+- `KernelIngestorSharedState::graphMatchFn()`: the function the native symbol resolved to.
+- `makeEngine()`, which serves whichever arm the UED declares.
+
+The string overloads and `graphMatchFn()` carry only the `native` arm. For an engine whose UED declares a `nodes` pattern:
+
+- `graphMatchFn()` returns `nullptr`.
+- `makeStateManager(set, symbol)` throws `std::invalid_argument`, so the pattern is never silently dropped. This includes `makeStateManager(set, {})`, because a braced `{}` selects the string overload.
+
+##### Serving a `nodes` pattern
+
+Code that builds a state manager itself, rather than through `makeEngine()`, uses the declarations below to serve a `nodes` pattern. They are introduced in hipdnn_plugin_sdk 1.2.0:
+
+- `EngineDescriptor::graphMatchPattern` (`std::shared_ptr<const CompiledGraphPattern>`): the `nodes` arm, compiled when the UED is read. It is null when the UED declares no `nodes` arm. The loader sets at most one of `graphMatchNativeSymbol` and `graphMatchPattern`.
+- `CompiledGraphPattern` and `compileGraphPattern()` (`hipdnn_plugin_sdk/ingestor/CompiledGraphPattern.hpp`).
+- `NativeGraphMatch`, `GraphMatch` and `engineGraphMatch()` (`Descriptors.hpp`).
+- The `KernelIngestorSharedState` and `KernelIngestorStateManager` constructors and the `makeStateManager<THandle>(set, graphMatch)` overload that take a `GraphMatch`.
+- `KernelIngestorSharedState::graphMatch()`, which returns the engine's graph match as a `ResolvedGraphMatch`: `std::monostate`, the resolved `GraphMatchFn`, or the compiled pattern.
+
+To serve whichever arm the UED declares, follow these steps:
+
+1. Call `engineGraphMatch(set.engine)` before you move `set`. It returns a `GraphMatch`: `std::monostate` for no `graph_match`, `NativeGraphMatch{symbol}` for the `native` arm, or the compiled pattern for the `nodes` arm.
+2. Pass the result to the overload that takes a `GraphMatch`.
+
+```cpp
+using namespace hipdnn_plugin_sdk::ingestor;
+
+auto graphMatch = engineGraphMatch(set.engine);
+auto manager = makeStateManager<MyHandle>(std::move(set), std::move(graphMatch));
+```
+
+To opt out of graph matching for an engine with a pattern, pass `GraphMatch{}` or `std::monostate{}` instead.
+
+#### 2. Remove duplicate JSON keys
+
+The descriptor loader rejects a JSON object that repeats a key, at any depth, in every descriptor file type except the kernel descriptor pack (KDP, `.kdp.json`). The whole file fails to load, and the loader logs an ERROR naming the key and the file (`parseDescriptorDocument()` in `DescriptorLoader.hpp`; the Universal Heuristic Descriptor (UHD) reader, `readUhdDocument()`, refuses repeated keys too). A KDP is read in a single pass that keeps the last occurrence of a repeated key. `hkp_pack` rejects a repeated key in every descriptor it reads, the KDP included.
+
+#### 3. Expect the reference native packs to decline malformed graphs
+
+The hip-kernel-provider's pointwise and convolution native graph matches publish their bindings through `publishTensor()` and `publishGraph()` (`hipdnn_plugin_sdk/ingestor/BindingPublication.hpp`). They decline a graph, so the engine reports no support, when any of these holds:
+
+- A pointwise float attribute (`relu_lower_clip`, `relu_upper_clip`, `relu_lower_clip_slope`, `swish_beta`, `elu_alpha` or `softplus_beta`) is NaN or infinite.
+- A stored scalar tensor value is not finite once rounded to a 32-bit float.
+- An enum value has no name: an operand data type, the node's compute data type, the pointwise mode or the convolution mode.
+- An operand has an extent of zero or less, or its element count overflows `int64_t`.
+- A convolution operand has an extent greater than `INT_MAX`.
+
+#### 4. Check callers of `isTensorPacked()` and of INT8 scalar reads
+
+`isTensorPacked()` (`hipdnn_data_sdk/utilities/ShapeUtilities.hpp`) returns true only when the tensor fills a dense, non-overlapping block in some axis order. It returns false when:
+
+- Any extent is zero or negative.
+- An axis with more than one element has a zero or negative stride.
+- Two elements share an offset, even when the span equals the element count (for example dims `{2, 2, 2}` with strides `{1, 1, 5}`).
+- The element count overflows `int64_t`.
+
+Strides on size-one axes are ignored, and a rank-0 tensor is packed.
+
+An INT8 scalar's stored byte is read as a signed `int8_t`, so the stored byte `0xFF` reads as `-1`, not `255`. This applies to `extractValueFromTensorValue()` and `extractFiniteFloatFromTensorValue()` in `hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp`.
+
+#### 5. Check your descriptors before you upgrade
+
+Run `hkp_pack` over each authored descriptor root. It applies the duplicate-key rule above, and it resolves any `nodes` pattern against the op-schema registry. See [Op-schema registry for `graph_match.nodes`](../../../dnn-providers/hip-kernel-provider/descriptor-packaging/README.md#op-schema-registry-for-graph_matchnodes) for the registry options.
+
+```bash
+cd dnn-providers/hip-kernel-provider/descriptor-packaging
+python3 tools/hkp_pack.py \
+    --source-root <authored root> \
+    --out-root /tmp/hkp-check/out \
+    --inter-root /tmp/hkp-check/inter \
+    --arches gfx942 \
+    --hip-compiler /opt/rocm/lib/llvm/bin/clang++ \
+    --generic-targets-json ../../../projects/hipdnn/plugin_sdk/data/gpu_generic_targets.json \
+    --kpack-python-dir <directory containing rocm_kpack> \
+    --source-label upgrade-check
+```
+
+For a runtime descriptor tree that is already packed, run `hipdnn_validate_descriptors <root>` from a build with `HIPDNN_ENABLE_KERNEL_INGESTOR=ON`. It loads the tree with the new loader rules.
 
 ## Plugin Architecture
 

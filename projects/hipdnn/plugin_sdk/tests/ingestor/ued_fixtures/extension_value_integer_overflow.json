@@ -1,0 +1,6 @@
+{
+  "description": "An integer under an extension key fits no 64-bit integer and overflows a double; the document parse refuses it although the value is otherwise ignored.",
+  "valid": false,
+  "error": "number overflow parsing '1000000000",
+  "ued_text": "{\"version\": \"1.0\", \"id\": \"b2ddee6a-3b03-590e-bcae-65d5801f9d45\", \"name\": \"ued_fixture:extension_value_integer_overflow\", \"metadata\": \"dae4b7a7-0519-5ade-b6d7-89f699906c84\", \"x-value\": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000, \"graph_match\": {\"nodes\": [{\"kind\": \"op\", \"id\": \"pointwise\", \"op\": \"pointwise\", \"operands\": {\"in_0\": \"$input_a\", \"in_1\": \"$input_b\"}, \"results\": {\"out_0\": \"$output\"}}]}}"
+}

@@ -5,8 +5,11 @@
 
 #include <cstdint>
 #include <functional>
+#include <memory>
+#include <stdexcept>
 #include <string>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -14,6 +17,7 @@
 #include <hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 
+#include "GraphPatternTestSupport.hpp"
 #include "KernelIngestorTestFixtures.hpp"
 
 /**
@@ -268,7 +272,8 @@ TEST(TestIngestorDescriptors, HeuristicDescriptorDefaultsToStaticOrder)
                                       f11,
                                       f12,
                                       f13,
-                                      f14]
+                                      f14,
+                                      f15]
             = EngineDescriptor{};
     }
     {
@@ -660,6 +665,13 @@ std::vector<EqualityCase> allEqualityCases()
                      true,
                      baseline,
                      [](auto& v) { v.graphMatchNativeSymbol += "!"; }),
+            fieldRow(type,
+                     "GraphMatchPattern",
+                     true,
+                     baseline,
+                     [](auto& v) {
+                         v.graphMatchPattern = compilePatternText(BINARY_POINTWISE_PATTERN);
+                     }),
             fieldRow(type, "Revision", true, baseline, [](auto& v) { v.revision = OTHER_VERSION; }),
             fieldRow(type, "Slots", true, baseline, [](auto& v) { v.slots.front().name += "!"; }),
             fieldRow(type,
@@ -805,6 +817,74 @@ INSTANTIATE_TEST_SUITE_P(EveryField,
                          [](const ::testing::TestParamInfo<EqualityCase>& info) {
                              return info.param.name;
                          });
+
+/// populatedEngine() with its native symbol replaced by @p pattern, as the loader sets at most
+/// one of the two.
+EngineDescriptor patternEngine(std::shared_ptr<const CompiledGraphPattern> pattern)
+{
+    auto engine = populatedEngine();
+    engine.graphMatchNativeSymbol.clear();
+    engine.graphMatchPattern = std::move(pattern);
+    return engine;
+}
+
+// The packer copies a UED into every arch shard, and each parse compiles its own pattern.
+// The copies must compare equal so the loader collapses them rather than dropping the id.
+TEST(TestIngestorDescriptors, SeparatelyCompiledCopiesOfOnePatternAreEqual)
+{
+    const auto lhs = patternEngine(compileGraphPattern(
+        nlohmann::json::parse(BINARY_POINTWISE_PATTERN), "gfx942/engine.ued.json"));
+    const auto rhs = patternEngine(compileGraphPattern(
+        nlohmann::json::parse(BINARY_POINTWISE_PATTERN), "gfx950/engine.ued.json"));
+
+    EXPECT_TRUE(lhs == rhs);
+    EXPECT_FALSE(lhs != rhs);
+}
+
+TEST(TestIngestorDescriptors, PatternsThatBindDifferentEdgesAreNotEqual)
+{
+    const auto base = patternEngine(compilePatternText(R"([{"kind": "op", "id": "pointwise",
+        "op": "pointwise", "operands": {"in_0": "$a", "in_1": "$b"},
+        "results": {"out_0": "$y"}}])"));
+    // The same variables, swapped between the two operand edges.
+    const auto swapped = patternEngine(compilePatternText(R"([{"kind": "op", "id": "pointwise",
+        "op": "pointwise", "operands": {"in_0": "$b", "in_1": "$a"},
+        "results": {"out_0": "$y"}}])"));
+    // The same variables in the same order, with $b bound to a different edge.
+    const auto retargeted = patternEngine(compilePatternText(R"([{"kind": "op", "id": "pointwise",
+        "op": "pointwise", "operands": {"in_0": "$a", "in_2": "$b"},
+        "results": {"out_0": "$y"}}])"));
+
+    EXPECT_FALSE(base == swapped);
+    EXPECT_TRUE(base != swapped);
+    EXPECT_FALSE(base == retargeted);
+    EXPECT_TRUE(base != retargeted);
+}
+
+TEST(TestIngestorDescriptors, EngineGraphMatchReflectsTheDeclaredArm)
+{
+    auto engine = populatedEngine();
+
+    engine.graphMatchNativeSymbol.clear();
+    EXPECT_TRUE(std::holds_alternative<std::monostate>(engineGraphMatch(engine)));
+
+    engine.graphMatchNativeSymbol = "graph.match";
+    const auto native = engineGraphMatch(engine);
+    const auto* nativeArm = std::get_if<NativeGraphMatch>(&native);
+    ASSERT_NE(nativeArm, nullptr);
+    EXPECT_EQ(nativeArm->symbol, "graph.match");
+
+    const auto pattern = compilePatternText(BINARY_POINTWISE_PATTERN);
+    engine.graphMatchNativeSymbol.clear();
+    engine.graphMatchPattern = pattern;
+    const auto compiled = engineGraphMatch(engine);
+    const auto* patternArm = std::get_if<std::shared_ptr<const CompiledGraphPattern>>(&compiled);
+    ASSERT_NE(patternArm, nullptr);
+    EXPECT_EQ(patternArm->get(), pattern.get());
+
+    engine.graphMatchNativeSymbol = "graph.match";
+    EXPECT_THROW(engineGraphMatch(engine), std::invalid_argument);
+}
 
 // Kernel metadata: values are typed by the KMD only at resolve, so an integer and a
 // floating-point spelling of one number are the same authored value.

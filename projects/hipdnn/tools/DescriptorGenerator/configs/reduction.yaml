@@ -2,6 +2,7 @@ operation:
   name: "Reduction"
   class_name: "ReductionOperationDescriptor"
   fbs_table: "ReductionAttributes"
+  matcher_opcode: "reduction"
   fbs_generated_header: "reduction_attributes_generated.h"
 
   descriptor_type:
@@ -43,11 +44,13 @@ operation:
   tensor_fields:
     - name: "x"
       fbs_field: "in_tensor_uid"
+      direction: "input"
       attr_suffix: "XDESC"
       required: true
 
     - name: "y"
       fbs_field: "out_tensor_uid"
+      direction: "output"
       attr_suffix: "YDESC"
       required: true
 

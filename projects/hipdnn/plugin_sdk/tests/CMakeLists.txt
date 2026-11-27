@@ -84,6 +84,7 @@ add_executable(hipdnn_plugin_sdk_tests
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/uhd/TestUhdGeneratedModel.cpp>
     $<$<BOOL:${HIPDNN_UHD_GEN_RUNNABLE}>:ingestor/uhd/TestUhdGenArtifact.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestMatchContext.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestBindingPublication.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestDescriptors.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestArchGate.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestGenericTargets.cpp>
@@ -101,6 +102,9 @@ add_executable(hipdnn_plugin_sdk_tests
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestDescriptorLoader.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestDeviceKey.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestWinnerCache.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestCompiledGraphPattern.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestGraphPatternMatcher.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestUedFixtureParity.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestWinnerLineGolden.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:TestKernelIngestorConcurrency.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:DigitGroupingLocale.cpp>
@@ -236,6 +240,48 @@ endif()
 
 clang_tidy_check(hipdnn_plugin_sdk_tests)
 add_hipdnn_test(hipdnn_plugin_sdk_tests ${CMAKE_CURRENT_BINARY_DIR})
+
+# TestUedFixtureParity loads the UED fixtures and a copy of the UED schema from
+# share/hipdnn_plugin_sdk/test_fixtures next to the binary's bin/ directory. Stage the build tree
+# with the same layout an install produces. The test reads its own copy of the schema, not the
+# one plugin_sdk installs for authors, so an install of only the test files can run it.
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    set(_ued_test_fixtures_dir "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_DATADIR}/hipdnn_plugin_sdk/test_fixtures")
+    set(_ued_schema "${CMAKE_CURRENT_SOURCE_DIR}/../schemas/universal_engine_descriptor.schema.json")
+    file(GLOB _ued_fixtures CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/ingestor/ued_fixtures/*.json")
+    # Removing a fixture makes no input newer than the stamp, so the fixture list itself is an
+    # input: file(CONFIGURE) rewrites this manifest only when the list changes, and the newer
+    # manifest forces a restage that drops the removed file.
+    list(SORT _ued_fixtures)
+    string(REPLACE ";" "\n" _ued_fixture_manifest_body "${_ued_fixtures}")
+    set(_ued_fixture_manifest "${CMAKE_CURRENT_BINARY_DIR}/ued-fixture-inputs.txt")
+    # cmake-lint: disable=E1126
+    #   cmake-lint carries no form spec for file(CONFIGURE) and reports it as an
+    #   invalid discriminator. It is valid CMake from 3.18.
+    file(CONFIGURE OUTPUT "${_ued_fixture_manifest}" CONTENT "${_ued_fixture_manifest_body}\n" @ONLY)
+    # Copy the directory, not each file, so the command line does not grow with the corpus
+    # (cmd.exe limits it to 8191 characters on Windows).
+    add_custom_command(
+        OUTPUT "${_ued_test_fixtures_dir}/ued.stamp"
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${_ued_test_fixtures_dir}/ued"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${_ued_test_fixtures_dir}/schemas"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/ingestor/ued_fixtures"
+                "${_ued_test_fixtures_dir}/ued"
+        COMMAND ${CMAKE_COMMAND} -E copy "${_ued_schema}" "${_ued_test_fixtures_dir}/schemas"
+        COMMAND ${CMAKE_COMMAND} -E touch "${_ued_test_fixtures_dir}/ued.stamp"
+        DEPENDS ${_ued_fixtures} "${_ued_schema}" "${_ued_fixture_manifest}"
+        COMMENT "Staging the UED fixture corpus and schema for hipdnn_plugin_sdk_tests"
+        VERBATIM
+    )
+    add_custom_target(stage_hipdnn_plugin_sdk_ued_fixtures
+        DEPENDS "${_ued_test_fixtures_dir}/ued.stamp"
+        COMMENT "UED fixture corpus and schema for hipdnn_plugin_sdk_tests")
+    add_dependencies(hipdnn_plugin_sdk_tests stage_hipdnn_plugin_sdk_ued_fixtures)
+    install(FILES ${_ued_fixtures}
+            DESTINATION ${CMAKE_INSTALL_DATADIR}/hipdnn_plugin_sdk/test_fixtures/ued)
+    install(FILES "${_ued_schema}"
+            DESTINATION ${CMAKE_INSTALL_DATADIR}/hipdnn_plugin_sdk/test_fixtures/schemas)
+endif()
 
 # The installed CTestTestfile.cmake does not carry this, so an installed test on a runner
 # without the source tree still skips TestUhdGenArtifact rather than failing it.

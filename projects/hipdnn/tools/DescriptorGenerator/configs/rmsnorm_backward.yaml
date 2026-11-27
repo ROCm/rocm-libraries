@@ -2,6 +2,7 @@ operation:
   name: "RMSNormBackward"
   class_name: "RMSNormBackwardOperationDescriptor"
   fbs_table: "RMSNormBackwardAttributes"
+  matcher_opcode: "rmsnorm_bwd"
   fbs_generated_header: "rmsnorm_backward_attributes_generated.h"
 
   descriptor_type:
@@ -73,42 +74,49 @@ operation:
   tensor_fields:
     - name: "dy"
       fbs_field: "dy_tensor_uid"
+      direction: "input"
       attr_suffix: "DY_EXT"
       required: true
       frontend_getter: "get_dy()"
 
     - name: "x"
       fbs_field: "x_tensor_uid"
+      direction: "input"
       attr_suffix: "X_EXT"
       required: true
       frontend_getter: "get_x()"
 
     - name: "scale"
       fbs_field: "scale_tensor_uid"
+      direction: "input"
       attr_suffix: "SCALE_EXT"
       required: true
       frontend_getter: "get_scale()"
 
     - name: "inv_rms"
       fbs_field: "inv_rms_tensor_uid"
+      direction: "input"
       attr_suffix: "INV_RMS_EXT"
       required: true
       frontend_getter: "get_inv_rms()"
 
     - name: "dx"
       fbs_field: "dx_tensor_uid"
+      direction: "output"
       attr_suffix: "DX_EXT"
       required: true
       frontend_getter: "get_dx()"
 
     - name: "dscale"
       fbs_field: "dscale_tensor_uid"
+      direction: "output"
       attr_suffix: "DSCALE_EXT"
       required: true
       frontend_getter: "get_dscale()"
 
     - name: "dbias"
       fbs_field: "dbias_tensor_uid"
+      direction: "output"
       attr_suffix: "DBIAS_EXT"
       required: false
       frontend_getter: "get_dbias()"

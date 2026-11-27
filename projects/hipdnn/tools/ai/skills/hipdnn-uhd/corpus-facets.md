@@ -19,15 +19,19 @@ One `*.opmeta.json` per operation under `projects/hipdnn/tools/corpus_gen/operat
 | elementwise / other | `pointwise`, `pointwise_unary`, `reduction`, `resample_fwd`, `resample_bwd` |
 
 Pick the operation whose graph the engine accepts: for a descriptor engine, its UED's graph
-matcher (`graph_match.native`, plus any `scope: graph` UMD); for an opaque engine, its plan
-builders. The engine name is not evidence: the example `hkp_example:tiled_attention` UED
+matcher (`graph_match`, either a `native` symbol or a `nodes` pattern, plus any `scope: graph`
+UMD); for an opaque engine, its plan builders. A `nodes` pattern names op-schema registry
+opcodes (`convolution`, `sdpa`, `rmsnorm`), not the operation names above: pick the operation
+whose graph has those nodes. The engine name is not evidence: the example
+`hkp_example:tiled_attention` UED
 (`dnn-providers/hip-kernel-provider/descriptor-packaging/examples/descriptors/rocKE/gfx942_tiled_attention/`)
 has `graph_match` `hipkernel.pointwise.graph_match` and its UMD matches
 `hipkernel.pointwise.add_match`, so it serves `pointwise` graphs (two operands, identical
 rank-4 extent, `mode` ADD). `--operation` restricts generation to that one operation.
 
-When the graph-match symbol names no operation (a pack that is not an operation, e.g.
-`attention_dense`), run corpus_gen without `--operation` and a small `--count`: its first
+When the graph matcher names no operation (a `native` symbol for a pack that is not an
+operation, e.g. `attention_dense`, or a `nodes` pattern whose opcodes fit several corpus
+operations), run corpus_gen without `--operation` and a small `--count`: its first
 pass offers a few problems of every operation, and the operations the engine admits are the
 ones it serves.
 

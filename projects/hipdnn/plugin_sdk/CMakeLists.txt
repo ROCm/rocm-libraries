@@ -9,8 +9,9 @@ hipdnn_setup_version(hipdnn_plugin_sdk)
 # Set project with version
 project(hipdnn_plugin_sdk VERSION ${HIPDNN_PLUGIN_SDK_VERSION} LANGUAGES CXX)
 
-# Read data_sdk version for minimum requirement
+# Read data_sdk and flatbuffers_sdk versions for minimum requirements
 hipdnn_get_component_version(hipdnn_data_sdk HIPDNN_PLUGIN_SDK_DATA_SDK_MIN_VERSION)
+hipdnn_get_component_version(hipdnn_flatbuffers_sdk HIPDNN_PLUGIN_SDK_FLATBUFFERS_SDK_MIN_VERSION)
 
 set(HIP_DNN_PLUGIN_SDK_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
@@ -148,6 +149,16 @@ install(
     DESTINATION ${HIP_DNN_PLUGIN_SDK_INSTALL_INCLUDE_DIR}/hipdnn_plugin_sdk
     COMPONENT Development
 )
+
+# The UED JSON Schema describes descriptors only the kernel ingestor reads, so it ships
+# with the ingestor headers.
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    install(
+        FILES "${CMAKE_CURRENT_SOURCE_DIR}/schemas/universal_engine_descriptor.schema.json"
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/hipdnn_plugin_sdk/schemas
+        COMPONENT Development
+    )
+endif()
 
 install(EXPORT hipdnn_plugin_sdk_targets DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_plugin_sdk
         FILE hipdnn_plugin_sdkTargets.cmake COMPONENT Development

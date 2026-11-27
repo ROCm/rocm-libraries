@@ -15,6 +15,7 @@ unless pointed at one:
 
 import json
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -186,6 +187,50 @@ def test_malformed_fixture_is_rejected(validator, name, marker):
         f"be failing for a reason other than its one deliberate defect. Diagnostics: "
         f"{diagnostics}"
     )
+
+
+def _nodes_bundle(tmp_path, op):
+    """valid/ with its UED's `graph_match` replaced by a one-node `nodes` pattern."""
+    root = tmp_path / "nodes"
+    shutil.copytree(FIXTURE_ROOT / "valid", root)
+    ued_path = root / "fixture.ued.json"
+    ued = json.loads(ued_path.read_text(encoding="utf-8"))
+    ued["graph_match"] = {
+        "nodes": [
+            {
+                "kind": "op",
+                "id": "pw",
+                "op": op,
+                "operands": {"in_0": "$input_a", "in_1": "$input_b"},
+                "results": {"out_0": "$output"},
+            }
+        ]
+    }
+    ued_path.write_text(json.dumps(ued, indent=2), encoding="utf-8")
+    return root
+
+
+def test_a_nodes_pattern_validates_clean(validator, tmp_path):
+    """A `nodes` engine needs no graph-match stub: the loader compiles the pattern."""
+    result, payload = _run_validator(validator, _nodes_bundle(tmp_path, "pointwise"))
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert payload["success"] is True
+    assert FIXTURE_ENGINE in payload["engines"]
+
+
+def test_a_nodes_pattern_naming_an_unknown_opcode_fails_its_ued(validator, tmp_path):
+    result, payload = _run_validator(
+        validator, _nodes_bundle(tmp_path, "pointwise_add")
+    )
+
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert payload["success"] is False
+    assert FIXTURE_ENGINE in payload["expected_engines_missing"]
+    diagnostics = " ".join(d["message"] for d in payload["diagnostics"])
+    assert (
+        "'pointwise_add' is not in the op-schema registry" in diagnostics
+    ), diagnostics
 
 
 @pytest.mark.parametrize(

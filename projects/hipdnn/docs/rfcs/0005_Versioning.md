@@ -143,7 +143,7 @@ The following table lists the versioned components of hipDNN (omitting the `hipd
 | -- | -- | -- |
 | flatbuffers_sdk [^1] | - data_sdk | No |
 | data_sdk | | No |
-| plugin_sdk | - data_sdk | No [^2] |
+| plugin_sdk | - data_sdk<br>- flatbuffers_sdk | No [^2] |
 | backend | | Yes, `hipdnnVersionString_ext()` |
 | frontend | - data_sdk<br>- backend | No |
 | test_sdk | - data_sdk<br>- plugin_sdk | No |

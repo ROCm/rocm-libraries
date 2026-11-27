@@ -17,10 +17,16 @@ two kinds. In short:
   its provider is the `dnn-providers/<provider>` it lives under. Its role maps are its
   bindings (`sort_kernel_catalog` is L2, `predict_engine` is L1; L2 is trained first), keyed
   by gfx arch or `default`; its archs are the role-map gfx keys, else the `arch` lists of its
-  KDPs. Its corpus operation is what its graph matcher (`graph_match.native`) accepts; by the
-  hip-kernel-provider's naming convention the symbol's middle segment names it, arch prefix
-  dropped (`hipkernel.gfx950_conv_fwd.graph_match` serves `conv_fwd`), and where the name
-  says nothing, a census run does ([corpus-facets.md](corpus-facets.md)).
+  KDPs. Its corpus operation is the `corpus_gen` operation whose graphs its `graph_match`
+  accepts: a `native` symbol or a `nodes` pattern (RFC 0020 §4.3,
+  `projects/hipdnn/docs/rfcs/0020_UniversalEngineDescriptor.md`). For a `native` symbol, by
+  the hip-kernel-provider's naming convention the symbol's middle segment names it, arch
+  prefix dropped (`hipkernel.gfx950_conv_fwd.graph_match` serves `conv_fwd`). A `nodes`
+  pattern's node `op` fields are op-schema registry opcodes
+  (`projects/hipdnn/flatbuffers_sdk/op_schema_registry.json`), not corpus operation names:
+  `convolution` is not `conv_fwd` and `sdpa` is not `sdpa_fwd`. Pick the corpus operation
+  whose graph has those nodes ([corpus-facets.md](corpus-facets.md)). Where neither says,
+  a census run does ([corpus-facets.md](corpus-facets.md)).
 - **Opaque engine**: a `HIPDNN_REGISTER_ENGINE` name with no UED, implemented in its
   provider's code (`grep -rn <NAME> dnn-providers`). It is L1 only. It can be trained when it
   overrides `getPrediction` and binds UHD ids through the plugin SDK (`EngineModelBinding` /
@@ -45,7 +51,8 @@ two kinds. In short:
    model by a scalar `"heuristic": X` key is refused by the loader (the engine does not
    register): rewrite it as `"sort_kernel_catalog": {"default": X}`, and X's UHD `kind` /
    `payload` as `"adapter": "native"`, `"objective"`, `"native": {"symbol": ...}`.
-2. **A graph matcher** (the UED's `graph_match.native` symbol, registered by the provider),
+2. **A graph matcher**: the UED's `graph_match`, either a `native` symbol the provider
+   registers or a `nodes` pattern (RFC 0020 §4.3), which needs no registration. Also
    any **UMDs** its kernels need, and a **KMD** whose fields cover every knob. Knob
    parity is two subset checks at load
    (`projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/ingestor/UhdKernelHeuristic.hpp`):

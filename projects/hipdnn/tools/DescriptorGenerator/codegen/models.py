@@ -103,6 +103,9 @@ class TensorField:
     # The tensor's contents, not its shape, decide how much work the node does
     # (ragged offsets, valid lengths, page tables, block masks, routing offsets).
     work_data_dependent: bool = False
+    # TENSOR_DIRECTIONS member: whether the node reads ("input") or writes ("output")
+    # the tensor. Selects the field's matcher_input_tensor or matcher_output_tensor flag.
+    direction: str = "input"
 
     @property
     def camel_name(self) -> str:
@@ -146,14 +149,26 @@ class TensorField:
     def fbs_declaration(self) -> str:
         """The FBS table field declaration with its annotations."""
         default = "" if self.required else " = null"
-        return f"{self.fbs_field}: long{default} ({_fbs_uid_attributes(self)})"
+        attributes = _fbs_uid_attributes(self)
+        return f'{self.fbs_field}: long{default} ({attributes}, matcher_name: "{self.matcher_name}")'
+
+    @property
+    def matcher_name(self) -> str:
+        """The edge name a UED pattern binds the field by: the FBS field without its
+        ``_tensor_uid`` suffix (graph.fbs, ``matcher_name``)."""
+        return self.fbs_field.removesuffix("_tensor_uid")
+
+
+TENSOR_DIRECTIONS = ("input", "output")
 
 
 def _fbs_uid_attributes(tensor_field) -> str:
-    """FBS attribute list of a tensor-reference field."""
+    """FBS attribute list of a tensor-reference field, without its matcher_name."""
+    attributes = ["cache_uid"]
     if tensor_field.work_data_dependent:
-        return "cache_uid, work_data_dependent"
-    return "cache_uid"
+        attributes.append("work_data_dependent")
+    attributes.append(f"matcher_{tensor_field.direction}_tensor")
+    return ", ".join(attributes)
 
 
 def _to_camel_case(snake: str) -> str:
@@ -516,6 +531,9 @@ class TensorArrayField:
     test_label: str = ""
     # See TensorField.work_data_dependent.
     work_data_dependent: bool = False
+    # See TensorField.direction. An array field carries no matcher_name: a UED pattern
+    # never binds it.
+    direction: str = "input"
 
     @property
     def member_name(self) -> str:
@@ -892,6 +910,9 @@ class OperationConfig:
     class_name: str
     fbs_table: str
     fbs_generated_header: str
+    # The table's matcher_opcode, the name a UED pattern uses for the op. The naming
+    # convention is in graph.fbs.
+    matcher_opcode: str = ""
 
     descriptor_type: DescriptorTypeConfig = field(default_factory=DescriptorTypeConfig)
     operation_attr_prefix: str = ""

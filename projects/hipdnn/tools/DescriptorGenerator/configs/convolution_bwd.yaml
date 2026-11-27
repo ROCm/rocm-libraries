@@ -2,6 +2,7 @@ operation:
   name: "ConvolutionBwd"
   class_name: "ConvolutionBwdOperationDescriptor"
   fbs_table: "ConvolutionBwdAttributes"
+  matcher_opcode: "convolution_bwd_data"
   fbs_generated_header: "convolution_bwd_attributes_generated.h"
 
   descriptor_type:
@@ -47,16 +48,19 @@ operation:
   tensor_fields:
     - name: "dy"
       fbs_field: "dy_tensor_uid"
+      direction: "input"
       attr_suffix: "DY"
       required: true
 
     - name: "w"
       fbs_field: "w_tensor_uid"
+      direction: "input"
       attr_suffix: "W"
       required: true
 
     - name: "dx"
       fbs_field: "dx_tensor_uid"
+      direction: "output"
       attr_suffix: "DX"
       required: true
 

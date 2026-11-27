@@ -12,11 +12,14 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <gtest/gtest.h>
 
+#include <hipdnn_plugin_sdk/ingestor/BindingPublication.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelHeuristic.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
@@ -25,6 +28,7 @@
 #include <hipdnn_plugin_sdk/ingestor/NativeHooks.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 
+#include "GraphPatternTestSupport.hpp"
 #include "KernelIngestorTestFixtures.hpp"
 
 /**
@@ -37,6 +41,7 @@ namespace
 
 using namespace hipdnn_plugin_sdk::ingestor;
 using namespace hipdnn_plugin_sdk::ingestor::testing;
+using hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
 using hipdnn_flatbuffers_sdk::flatbuffer_utilities::testing::ContentCarryingTestGraph;
 
 inline bool rejectSecondCriterion(const MatchContext& /*context*/, const BoundTokens& /*bound*/)
@@ -915,6 +920,317 @@ TEST(TestKernelIngestorStateManager, AnEngineWithNoGraphMatchStillMatchesOnItsCr
     EXPECT_EQ(counters().graphCalls, 1);
 }
 
+TEST(TestKernelIngestorStateManager, ACompiledPatternBindsTheCatalogOrDeclinesIt)
+{
+    // The declarative graph_match: a matching graph's tokens reach the catalog, and a
+    // graph the pattern declines empties it before any kernel matcher runs.
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+
+    const StateManager manager(
+        makeSchema(),
+        std::vector<MatchDescriptor>{
+            {KERNEL_MATCHER_ID, "kernel scoped", MatchScope::KERNEL, "test.kernel"}},
+        makeTestDispatches(),
+        {makePack({KERNEL_MATCHER_ID})},
+        std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+        GraphMatch{compilePatternText(BINARY_POINTWISE_PATTERN)});
+    const auto properties = testDeviceProperties();
+
+    PatternGraphBuilder add;
+    add.tensor(1).tensor(2).tensor(3).node(pointwiseNode(PointwiseMode::ADD, 1, 2, 3));
+    const auto addGraph = add.build();
+    const auto matched
+        = manager.unsortedCatalog(MatchContext{addGraph.context().graph, 0, properties});
+
+    EXPECT_EQ(matched.entries.size(), 2U);
+    EXPECT_EQ(std::get<std::string>(matched.bound.at("pointwise.operation")), "ADD");
+    EXPECT_EQ(tryGetBoundInt(matched.bound, "input_b"), 2);
+
+    // A unary node leaves the pattern's required in_1 slot empty.
+    PatternGraphBuilder abs;
+    abs.tensor(1).tensor(3).node(pointwiseNode(PointwiseMode::ABS, 1, std::nullopt, 3));
+    const auto absGraph = abs.build();
+    const auto kernelCallsBefore = counters().kernelCalls;
+    const auto declined
+        = manager.unsortedCatalog(MatchContext{absGraph.context().graph, 0, properties});
+
+    EXPECT_TRUE(declined.entries.empty());
+    EXPECT_TRUE(declined.bound.empty());
+    EXPECT_EQ(counters().kernelCalls, kernelCallsBefore);
+}
+
+// A graph_match symbol is a string; only a GraphMatch carries a compiled pattern.
+static_assert(!std::is_constructible_v<GraphMatch, const char*>);
+static_assert(!std::is_constructible_v<GraphMatch, std::string>);
+static_assert(std::is_constructible_v<GraphMatch, NativeGraphMatch>);
+
+// The resolved graph match is public API, named in the ingestor namespace.
+static_assert(std::is_same_v<
+              decltype(std::declval<const KernelIngestorSharedState<TestHandle>&>().graphMatch()),
+              const hipdnn_plugin_sdk::ingestor::ResolvedGraphMatch&>);
+
+using SharedState = KernelIngestorSharedState<TestHandle>;
+
+std::vector<MatchDescriptor> kernelScopedMatchers()
+{
+    return {{KERNEL_MATCHER_ID, "kernel scoped", MatchScope::KERNEL, "test.kernel"}};
+}
+
+std::vector<KernelDescriptorPack> kernelScopedPacks()
+{
+    return {makePack({KERNEL_MATCHER_ID})};
+}
+
+/// One slot with no packs: enough for a slotted engine to construct and evaluate its
+/// graph_match.
+std::vector<KernelSlotInput> singleSlot()
+{
+    std::vector<KernelSlotInput> slots;
+    slots.push_back(
+        {"only", makeSchema(), {}, std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL)});
+    return slots;
+}
+
+constexpr const char* SHARED_WORKSPACE_TOKEN = "test.ws_bytes";
+
+/// A manager over @p state, which the caller keeps alive for the manager's lifetime. The
+/// shared state cannot be moved, so a test that spells a constructor argument at the call
+/// site builds it in place and lends it here without ownership.
+std::unique_ptr<StateManager> managerOver(const SharedState& state)
+{
+    return std::make_unique<StateManager>(
+        std::shared_ptr<const SharedState>(std::shared_ptr<void>(), &state));
+}
+
+/// One way of spelling a shared-state constructor call. Returns the state by value, built in
+/// place through guaranteed copy elision.
+struct SharedStateSpelling
+{
+    std::string name;
+    SharedState (*build)();
+};
+
+class TestKernelIngestorSharedStateSpelling : public ::testing::TestWithParam<SharedStateSpelling>
+{
+};
+
+TEST_P(TestKernelIngestorSharedStateSpelling, AnEmptyOrBracedSymbolMeansNoGraphMatch)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const SharedState state = GetParam().build();
+
+    EXPECT_EQ(state.graphMatchFn(), nullptr);
+    EXPECT_TRUE(std::holds_alternative<std::monostate>(state.graphMatch()));
+
+    const TestGraph graph(makeGraphId(0x90));
+    const auto properties = testDeviceProperties();
+    const auto bound = managerOver(state)->graphBindings(MatchContext{graph, 0, properties});
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_TRUE(bound->empty());
+    EXPECT_EQ(counters().graphMatchCalls, 0);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    NoGraphMatch,
+    TestKernelIngestorSharedStateSpelling,
+    ::testing::Values(
+        SharedStateSpelling{"UnslottedEmptyLiteral",
+                            []() -> SharedState {
+                                return SharedState(
+                                    makeSchema(),
+                                    kernelScopedMatchers(),
+                                    makeTestDispatches(),
+                                    kernelScopedPacks(),
+                                    std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                                    "");
+                            }},
+        SharedStateSpelling{"UnslottedEmptyString",
+                            []() -> SharedState {
+                                return SharedState(
+                                    makeSchema(),
+                                    kernelScopedMatchers(),
+                                    makeTestDispatches(),
+                                    kernelScopedPacks(),
+                                    std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                                    std::string{});
+                            }},
+        SharedStateSpelling{"UnslottedBraced",
+                            []() -> SharedState {
+                                return SharedState(
+                                    makeSchema(),
+                                    kernelScopedMatchers(),
+                                    makeTestDispatches(),
+                                    kernelScopedPacks(),
+                                    std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                                    {});
+                            }},
+        SharedStateSpelling{"SlottedEmptyLiteral",
+                            []() -> SharedState {
+                                return SharedState(singleSlot(),
+                                                   std::vector<MatchDescriptor>{},
+                                                   makeTestDispatches(),
+                                                   "",
+                                                   SHARED_WORKSPACE_TOKEN);
+                            }},
+        SharedStateSpelling{"SlottedEmptyString",
+                            []() -> SharedState {
+                                return SharedState(singleSlot(),
+                                                   std::vector<MatchDescriptor>{},
+                                                   makeTestDispatches(),
+                                                   std::string{},
+                                                   SHARED_WORKSPACE_TOKEN);
+                            }},
+        SharedStateSpelling{"SlottedBraced",
+                            []() -> SharedState {
+                                return SharedState(singleSlot(),
+                                                   std::vector<MatchDescriptor>{},
+                                                   makeTestDispatches(),
+                                                   {},
+                                                   SHARED_WORKSPACE_TOKEN);
+                            }}),
+    [](const ::testing::TestParamInfo<SharedStateSpelling>& info) { return info.param.name; });
+
+TEST(TestKernelIngestorSharedState, AStringSymbolResolvesTheNativeFunction)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto expected = GraphMatchRegistry::resolve("test.graph");
+
+    const SharedState unslotted(makeSchema(),
+                                kernelScopedMatchers(),
+                                makeTestDispatches(),
+                                kernelScopedPacks(),
+                                std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                                "test.graph");
+    EXPECT_EQ(unslotted.graphMatchFn(), expected);
+    EXPECT_TRUE(std::holds_alternative<GraphMatchFn>(unslotted.graphMatch()));
+
+    const SharedState slotted(singleSlot(),
+                              std::vector<MatchDescriptor>{},
+                              makeTestDispatches(),
+                              "test.graph",
+                              SHARED_WORKSPACE_TOKEN);
+    EXPECT_EQ(slotted.graphMatchFn(), expected);
+    EXPECT_TRUE(std::holds_alternative<GraphMatchFn>(slotted.graphMatch()));
+}
+
+TEST(TestKernelIngestorSharedState, ACompiledPatternLeavesGraphMatchFnNull)
+{
+    // graphMatchFn() reports only the native arm, so an engine serving a pattern reads as
+    // having no native function.
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto pattern = compilePatternText(BINARY_POINTWISE_PATTERN);
+
+    const SharedState unslotted(makeSchema(),
+                                kernelScopedMatchers(),
+                                makeTestDispatches(),
+                                kernelScopedPacks(),
+                                std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                                GraphMatch{pattern});
+    EXPECT_EQ(unslotted.graphMatchFn(), nullptr);
+    const auto* unslottedPattern
+        = std::get_if<std::shared_ptr<const CompiledGraphPattern>>(&unslotted.graphMatch());
+    ASSERT_NE(unslottedPattern, nullptr);
+    EXPECT_EQ(unslottedPattern->get(), pattern.get());
+
+    const SharedState slotted(singleSlot(),
+                              std::vector<MatchDescriptor>{},
+                              makeTestDispatches(),
+                              GraphMatch{pattern},
+                              SHARED_WORKSPACE_TOKEN);
+    EXPECT_EQ(slotted.graphMatchFn(), nullptr);
+    const auto* slottedPattern
+        = std::get_if<std::shared_ptr<const CompiledGraphPattern>>(&slotted.graphMatch());
+    ASSERT_NE(slottedPattern, nullptr);
+    EXPECT_EQ(slottedPattern->get(), pattern.get());
+}
+
+TEST(TestKernelIngestorStateManager, StringConstructorsMatchTheirGraphMatchCounterparts)
+{
+    // Each string spelling binds exactly what its GraphMatch counterpart binds: a symbol
+    // reaches the native function, and an empty or braced one declares no graph_match.
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const TestGraph graph(makeGraphId(0x91));
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+    const std::string symbol = "test.graph";
+
+    const auto unslotted = [](auto graphMatch) {
+        return std::make_unique<StateManager>(makeSchema(),
+                                              kernelScopedMatchers(),
+                                              makeTestDispatches(),
+                                              kernelScopedPacks(),
+                                              std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                                              std::move(graphMatch));
+    };
+    const auto slotted = [](auto graphMatch) {
+        return std::make_unique<StateManager>(singleSlot(),
+                                              std::vector<MatchDescriptor>{},
+                                              makeTestDispatches(),
+                                              std::move(graphMatch),
+                                              SHARED_WORKSPACE_TOKEN);
+    };
+    const auto bindings = [&context](const std::unique_ptr<StateManager>& manager) {
+        return manager->graphBindings(context);
+    };
+
+    const auto nativeUnslotted = bindings(unslotted(NativeGraphMatch{symbol}));
+    ASSERT_TRUE(nativeUnslotted.has_value());
+    EXPECT_EQ(tryGetBoundInt(*nativeUnslotted, "test.bound_token"), BOUND_TOKEN_VALUE);
+    const auto noneUnslotted = bindings(unslotted(GraphMatch{}));
+    ASSERT_TRUE(noneUnslotted.has_value());
+    EXPECT_TRUE(noneUnslotted->empty());
+
+    // The string spellings go straight to the constructor, so overload resolution sees them
+    // exactly as an integrator writes them.
+    const StateManager literalUnslotted(makeSchema(),
+                                        kernelScopedMatchers(),
+                                        makeTestDispatches(),
+                                        kernelScopedPacks(),
+                                        std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                                        "test.graph");
+    EXPECT_EQ(literalUnslotted.graphBindings(context), nativeUnslotted);
+    const StateManager stringUnslotted(makeSchema(),
+                                       kernelScopedMatchers(),
+                                       makeTestDispatches(),
+                                       kernelScopedPacks(),
+                                       std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                                       symbol);
+    EXPECT_EQ(stringUnslotted.graphBindings(context), nativeUnslotted);
+    const StateManager bracedUnslotted(makeSchema(),
+                                       kernelScopedMatchers(),
+                                       makeTestDispatches(),
+                                       kernelScopedPacks(),
+                                       std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                                       {});
+    EXPECT_EQ(bracedUnslotted.graphBindings(context), noneUnslotted);
+
+    const auto nativeSlotted = bindings(slotted(NativeGraphMatch{symbol}));
+    ASSERT_TRUE(nativeSlotted.has_value());
+    EXPECT_EQ(tryGetBoundInt(*nativeSlotted, "test.bound_token"), BOUND_TOKEN_VALUE);
+    const auto noneSlotted = bindings(slotted(GraphMatch{}));
+    ASSERT_TRUE(noneSlotted.has_value());
+    EXPECT_TRUE(noneSlotted->empty());
+
+    const StateManager literalSlotted(singleSlot(),
+                                      std::vector<MatchDescriptor>{},
+                                      makeTestDispatches(),
+                                      "test.graph",
+                                      SHARED_WORKSPACE_TOKEN);
+    EXPECT_EQ(literalSlotted.graphBindings(context), nativeSlotted);
+    const StateManager stringSlotted(singleSlot(),
+                                     std::vector<MatchDescriptor>{},
+                                     makeTestDispatches(),
+                                     symbol,
+                                     SHARED_WORKSPACE_TOKEN);
+    EXPECT_EQ(stringSlotted.graphBindings(context), nativeSlotted);
+    const StateManager bracedSlotted(singleSlot(),
+                                     std::vector<MatchDescriptor>{},
+                                     makeTestDispatches(),
+                                     {},
+                                     SHARED_WORKSPACE_TOKEN);
+    EXPECT_EQ(bracedSlotted.graphBindings(context), noneSlotted);
+}
+
 TEST(TestKernelIngestorStateManager, RefusesToConstructAgainstAnUnregisteredGraphMatchSymbol)
 {
     // Same eager-resolution contract the matcher and dispatch symbols get: a misspelled
@@ -1103,6 +1419,53 @@ TEST(TestKernelIngestorStateManager, ReadingBoundStateAfterMatchingDoesNotRematc
     EXPECT_EQ(counters().graphMatchCalls, afterMatching);
     EXPECT_EQ(tryGetBoundInt(secondRead, "test.bound_token"), BOUND_TOKEN_VALUE);
     EXPECT_EQ(tryGetBoundInt(thirdRead, "test.bound_token"), BOUND_TOKEN_VALUE);
+}
+
+TEST(TestKernelIngestorStateManager, ResidentCanonicalPublicationOutlivesItsSourceGraph)
+{
+    const auto publish = [](const MatchContext& context) -> std::optional<BoundTokens> {
+        ++counters().graphMatchCalls;
+        BoundTokens bound;
+        publishGraph(bound, context.graph);
+        if(!publishTensor(bound, "input", context.graph.getTensorMap().at(1)))
+        {
+            return std::nullopt;
+        }
+        return bound;
+    };
+    const auto dtypeMatches
+        = [](const MatchContext&, const BoundTokens& bound, const KernelDefinition& kernel) {
+              const auto* dtype = tryGetBoundValue<std::string>(bound, "input.dtype");
+              return dtype != nullptr && *dtype == kernel.getStringMetadata(DTYPE);
+          };
+    const ScopedSymbols symbols("test.graph", publish, "test.kernel", dtypeMatches);
+    const auto manager = makeStateManager();
+    using ContentGraph
+        = hipdnn_flatbuffers_sdk::flatbuffer_utilities::testing::ContentCarryingTestGraph;
+    ContentGraph::Spec spec;
+    spec.graphId = makeGraphId(0x71);
+    const auto properties = testDeviceProperties();
+    {
+        const ContentGraph graph(spec);
+        const auto catalog = manager->unsortedCatalog(MatchContext{graph, 0, properties});
+        ASSERT_EQ(catalog.entries.size(), 2U);
+        EXPECT_EQ(tryGetBoundInt(catalog.bound, "input"), 1);
+    }
+
+    // The same finalized graph may arrive through a new serialized wrapper.
+    const ContentGraph restored(spec);
+    const MatchContext context{restored, 0, properties};
+    auto snapshot = manager->sortedCatalog(context);
+    ASSERT_EQ(snapshot.entries.size(), 2U);
+    EXPECT_EQ(std::get<std::string>(snapshot.bound.at("input.dtype")), "FLOAT");
+    EXPECT_EQ(std::get<std::vector<int64_t>>(snapshot.bound.at("input.stride_order")),
+              (std::vector<int64_t>{1, 0}));
+    EXPECT_EQ(tryGetBoundInt(snapshot.bound, "input.dims[1]"), 8);
+    EXPECT_EQ(snapshot.bound.count("input.value_f32"), 0U);
+    snapshot.bound.at("input.dtype") = std::string("HALF");
+    const auto resident = manager->unsortedCatalog(context);
+    EXPECT_EQ(std::get<std::string>(resident.bound.at("input.dtype")), "FLOAT");
+    EXPECT_EQ(counters().graphMatchCalls, 1);
 }
 
 TEST(TestKernelIngestorStateManager, RematchesAfterCacheEviction)
@@ -2124,6 +2487,18 @@ INSTANTIATE_TEST_SUITE_P(
                     std::vector<KernelDescriptorPack>{makePack({GRAPH_MATCHER_ID})},
                     std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
                     std::string{});
+            }},
+        StateManagerConstructionThrowCase{
+            "RejectsANullCompiledPattern",
+            "null compiled graph pattern",
+            [] {
+                return std::make_unique<StateManager>(
+                    makeSchema(),
+                    makeTestMatchers(),
+                    makeTestDispatches(),
+                    std::vector<KernelDescriptorPack>{makePack({GRAPH_MATCHER_ID})},
+                    std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                    GraphMatch{std::shared_ptr<const CompiledGraphPattern>{}});
             }},
         StateManagerConstructionThrowCase{"RejectsAMissingHeuristic",
                                           "requires a heuristic",

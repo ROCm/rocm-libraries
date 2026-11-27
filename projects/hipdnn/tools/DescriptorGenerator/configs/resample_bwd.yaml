@@ -2,6 +2,7 @@ operation:
   name: "ResampleBwd"
   class_name: "ResampleBwdOperationDescriptor"
   fbs_table: "ResampleBwdAttributes"
+  matcher_opcode: "resample_bwd"
   fbs_generated_header: "resample_bwd_attributes_generated.h"
 
   descriptor_type:
@@ -69,18 +70,21 @@ operation:
   tensor_fields:
     - name: "dy"
       fbs_field: "dy_tensor_uid"
+      direction: "input"
       attr_suffix: "DYDESC"
       required: true
       frontend_getter: "get_dy()"
 
     - name: "dx"
       fbs_field: "dx_tensor_uid"
+      direction: "output"
       attr_suffix: "DXDESC"
       required: true
       frontend_getter: "get_dx()"
 
     - name: "index"
       fbs_field: "index_tensor_uid"
+      direction: "input"
       attr_suffix: "IDXDESC"
       required: false
       frontend_getter: "get_index()"

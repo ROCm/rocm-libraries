@@ -9,8 +9,10 @@
 #include <cstdint>
 #include <filesystem>
 #include <map>
+#include <memory>
 #include <optional>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -25,6 +27,7 @@
 #include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
+#include <hipdnn_plugin_sdk/ingestor/CompiledGraphPattern.hpp>
 
 /// @file Descriptors.hpp
 /// @brief The universal descriptor set, as parsed in-memory data: KMD (kernel
@@ -391,6 +394,7 @@ struct HeuristicDescriptor
     /// alone for a code object that carries a packer `identity` (rocKE). A prebuilt (FlyDSL) or HIP-compiled code
     /// object enters the selector revision by its `sha256`: regenerating a prebuilt one moves
     /// both, and a HIP-compiled one moves both on every compiler change.
+    /// Introduced in hipdnn_plugin_sdk 1.2.0.
     std::string trainedAgainstCodegenRevision;
     /// The role-map entry that resolved this model: backfilled by
     /// DescriptorLoader::resolveRole from the owning UED, never authored in the UHD
@@ -443,6 +447,56 @@ inline bool operator!=(const HeuristicDescriptor& lhs, const HeuristicDescriptor
 {
     return !(lhs == rhs);
 }
+
+/// The `native` arm of a UED's `graph_match`: a GraphMatchRegistry symbol. The function it
+/// names decides the graph topology and publishes the binding.
+/// Introduced in hipdnn_plugin_sdk 1.2.0.
+struct NativeGraphMatch
+{
+    std::string symbol;
+};
+
+/// Introduced in hipdnn_plugin_sdk 1.2.0.
+inline bool operator==(const NativeGraphMatch& lhs, const NativeGraphMatch& rhs)
+{
+    return lhs.symbol == rhs.symbol;
+}
+
+/// Introduced in hipdnn_plugin_sdk 1.2.0.
+inline bool operator!=(const NativeGraphMatch& lhs, const NativeGraphMatch& rhs)
+{
+    return !(lhs == rhs);
+}
+
+/// How an engine binds a graph, as declared by its UED's `graph_match`.
+///  - std::monostate: no `graph_match`. The engine binds nothing, and every graph reaches
+///    the UMDs with an empty binding.
+///  - NativeGraphMatch: the `native` arm, resolved through GraphMatchRegistry.
+///  - CompiledGraphPattern: the declarative `nodes` arm, compiled against the op-schema
+///    registry when the UED is read (see CompiledGraphPattern.hpp). Must not be null.
+///    Immutable and shared by every copy of the descriptor.
+/// engineGraphMatch() builds one from an EngineDescriptor.
+/// Introduced in hipdnn_plugin_sdk 1.2.0.
+using GraphMatch
+    = std::variant<std::monostate, NativeGraphMatch, std::shared_ptr<const CompiledGraphPattern>>;
+
+namespace detail
+{
+
+/// True when both are null, or both are set and compile the same pattern. A compiled pattern
+/// compares by structure, not by pointer, because every parse of a UED compiles its own
+/// instance.
+inline bool samePattern(const std::shared_ptr<const CompiledGraphPattern>& lhs,
+                        const std::shared_ptr<const CompiledGraphPattern>& rhs)
+{
+    if(lhs == nullptr || rhs == nullptr)
+    {
+        return lhs == rhs;
+    }
+    return *lhs == *rhs;
+}
+
+} // namespace detail
 
 /// RFC 0021 §4: one position of a slotted engine's kernel program. A slot carries the selection
 /// members an unslotted engine carries itself.
@@ -502,7 +556,7 @@ struct EngineDescriptor
     /// vector, even an empty one, is the provider's explicit claim.
     std::optional<std::vector<int32_t>> numericalNotes;
     /// Resolved through GraphMatchRegistry; empty means this engine declares no
-    /// graph-topology match.
+    /// `native` graph_match (none, or a `nodes` pattern in graphMatchPattern).
     std::string graphMatchNativeSymbol;
     /// Authored knob and binding semantics, not the JSON file-format version.
     hipdnn_data_sdk::utilities::Version revision{1, 0, 0};
@@ -512,6 +566,10 @@ struct EngineDescriptor
     std::vector<SlotDescriptor> slots;
     /// RFC 0021 §6 bound token holding the shared workspace region's size; empty when none.
     std::string sharedWorkspaceToken;
+    /// The UED's `graph_match.nodes` pattern, compiled when the UED is read; null when the
+    /// UED declares none or declares the `native` arm. The loader sets at most one of this
+    /// and graphMatchNativeSymbol. Introduced in hipdnn_plugin_sdk 1.2.0.
+    std::shared_ptr<const CompiledGraphPattern> graphMatchPattern;
 };
 
 inline bool operator==(const EngineDescriptor& lhs, const EngineDescriptor& rhs)
@@ -530,25 +588,64 @@ inline bool operator==(const EngineDescriptor& lhs, const EngineDescriptor& rhs)
                     lhs.revision,
                     lhs.slots,
                     lhs.sharedWorkspaceToken)
-           == std::tie(rhs.id,
-                       rhs.name,
-                       rhs.sortKernelCatalog,
-                       rhs.predictEngine,
-                       rhs.predictApplicableKernels,
-                       rhs.metadataSchemaId,
-                       rhs.knobs,
-                       rhs.behaviorNotes,
-                       rhs.sdkVersion,
-                       rhs.numericalNotes,
-                       rhs.graphMatchNativeSymbol,
-                       rhs.revision,
-                       rhs.slots,
-                       rhs.sharedWorkspaceToken);
+               == std::tie(rhs.id,
+                           rhs.name,
+                           rhs.sortKernelCatalog,
+                           rhs.predictEngine,
+                           rhs.predictApplicableKernels,
+                           rhs.metadataSchemaId,
+                           rhs.knobs,
+                           rhs.behaviorNotes,
+                           rhs.sdkVersion,
+                           rhs.numericalNotes,
+                           rhs.graphMatchNativeSymbol,
+                           rhs.revision,
+                           rhs.slots,
+                           rhs.sharedWorkspaceToken)
+           && detail::samePattern(lhs.graphMatchPattern, rhs.graphMatchPattern);
 }
 
 inline bool operator!=(const EngineDescriptor& lhs, const EngineDescriptor& rhs)
 {
     return !(lhs == rhs);
+}
+
+namespace detail
+{
+
+/// The GraphMatch a native symbol spells: std::monostate for an empty symbol, otherwise the
+/// `native` arm. Backs the overloads that take the symbol as a string.
+inline GraphMatch graphMatchFromNativeSymbol(std::string symbol)
+{
+    if(symbol.empty())
+    {
+        return std::monostate{};
+    }
+    return NativeGraphMatch{std::move(symbol)};
+}
+
+} // namespace detail
+
+/// The engine's graph_match as a GraphMatch: the compiled pattern when graphMatchPattern
+/// is set, otherwise detail::graphMatchFromNativeSymbol(graphMatchNativeSymbol), which is
+/// std::monostate for an empty symbol and NativeGraphMatch{symbol} otherwise. Pass it to a
+/// GraphMatch overload to serve whichever arm the UED declares.
+/// @throws std::invalid_argument when both graphMatchNativeSymbol and graphMatchPattern are set.
+/// Introduced in hipdnn_plugin_sdk 1.2.0.
+inline GraphMatch engineGraphMatch(const EngineDescriptor& engine)
+{
+    if(engine.graphMatchPattern != nullptr)
+    {
+        if(!engine.graphMatchNativeSymbol.empty())
+        {
+            throw std::invalid_argument(
+                "engine '" + engine.name
+                + "' sets both graphMatchNativeSymbol and graphMatchPattern; a graph_match "
+                  "declares one arm");
+        }
+        return engine.graphMatchPattern;
+    }
+    return detail::graphMatchFromNativeSymbol(engine.graphMatchNativeSymbol);
 }
 
 /// Which inputs a matcher reads, and so what its failure prunes.
@@ -721,6 +818,7 @@ struct KernelSource
     /// compiler, for a code object it compiled from rocKE IR. It moves when the kernel's code
     /// changes but not on a compiler bump within one LLVM flavor, so the selector revision
     /// hashes it in place of @ref sha256 (RFC 0019 §8.1). Empty for a prebuilt or HIP-compiled code object.
+    /// Introduced in hipdnn_plugin_sdk 1.2.0.
     std::string identity;
 };
 

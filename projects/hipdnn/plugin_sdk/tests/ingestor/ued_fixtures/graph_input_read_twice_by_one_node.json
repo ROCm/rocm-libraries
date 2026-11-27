@@ -1,0 +1,16 @@
+{
+  "description": "One node binds the same graph input variable on two operands; no node produces it, so exactly one operand may bind it.",
+  "valid": false,
+  "error": "node 'pointwise' operand 'in_0' and node 'pointwise' operand 'in_1'",
+  "ued": {
+    "version": "1.0",
+    "id": "7d5774ae-8203-5338-ab37-97b8a01be033",
+    "name": "ued_fixture:graph_input_read_twice_by_one_node",
+    "metadata": "6fa91ae0-2d7b-5e9f-9cbc-9c22510f31ff",
+    "graph_match": {
+      "nodes": [
+        {"kind": "op", "id": "pointwise", "op": "pointwise", "operands": {"in_0": "$x", "in_1": "$x"}, "results": {"out_0": "$output"}}
+      ]
+    }
+  }
+}

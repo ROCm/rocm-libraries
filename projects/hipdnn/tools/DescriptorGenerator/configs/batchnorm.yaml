@@ -2,6 +2,7 @@ operation:
   name: "Batchnorm"
   class_name: "BatchnormOperationDescriptor"
   fbs_table: "BatchnormAttributes"
+  matcher_opcode: "batchnorm"
   fbs_generated_header: "batchnorm_attributes_generated.h"
 
   descriptor_type:
@@ -53,72 +54,84 @@ operation:
   tensor_fields:
     - name: "x"
       fbs_field: "x_tensor_uid"
+      direction: "input"
       attr_suffix: "X_EXT"
       required: true
       frontend_getter: "get_x()"
 
     - name: "scale"
       fbs_field: "scale_tensor_uid"
+      direction: "input"
       attr_suffix: "SCALE_EXT"
       required: true
       frontend_getter: "get_scale()"
 
     - name: "bias"
       fbs_field: "bias_tensor_uid"
+      direction: "input"
       attr_suffix: "BIAS_EXT"
       required: true
       frontend_getter: "get_bias()"
 
     - name: "epsilon"
       fbs_field: "epsilon_tensor_uid"
+      direction: "input"
       attr_suffix: "EPSILON_EXT"
       required: true
       frontend_getter: "get_epsilon()"
 
     - name: "y"
       fbs_field: "y_tensor_uid"
+      direction: "output"
       attr_suffix: "Y_EXT"
       required: true
       frontend_getter: "get_y()"
 
     - name: "prev_running_mean"
       fbs_field: "prev_running_mean_tensor_uid"
+      direction: "input"
       attr_suffix: "PREV_RUNNING_MEAN_EXT"
       required: false
       frontend_getter: "get_prev_running_mean()"
 
     - name: "prev_running_variance"
       fbs_field: "prev_running_variance_tensor_uid"
+      direction: "input"
       attr_suffix: "PREV_RUNNING_VARIANCE_EXT"
       required: false
       frontend_getter: "get_prev_running_variance()"
 
     - name: "momentum"
       fbs_field: "momentum_tensor_uid"
+      direction: "input"
       attr_suffix: "MOMENTUM_EXT"
       required: false
       frontend_getter: "get_momentum()"
 
     - name: "mean"
       fbs_field: "mean_tensor_uid"
+      direction: "output"
       attr_suffix: "MEAN_EXT"
       required: false
       frontend_getter: "get_mean()"
 
     - name: "inv_variance"
       fbs_field: "inv_variance_tensor_uid"
+      direction: "output"
       attr_suffix: "INV_VARIANCE_EXT"
       required: false
       frontend_getter: "get_inv_variance()"
 
     - name: "next_running_mean"
       fbs_field: "next_running_mean_tensor_uid"
+      direction: "output"
       attr_suffix: "NEXT_RUNNING_MEAN_EXT"
       required: false
       frontend_getter: "get_next_running_mean()"
 
     - name: "next_running_variance"
       fbs_field: "next_running_variance_tensor_uid"
+      direction: "output"
       attr_suffix: "NEXT_RUNNING_VARIANCE_EXT"
       required: false
       frontend_getter: "get_next_running_variance()"
@@ -128,6 +141,7 @@ operation:
   tensor_array_fields:
     - name: "peer_stats"
       fbs_field: "peer_stats_tensor_uid"
+      direction: "input"
       attr_name: "HIPDNN_ATTR_OPERATION_BATCHNORM_PEER_STATS_EXT"
       frontend_getter: "get_peer_stats()"
       required: false

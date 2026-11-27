@@ -3,6 +3,7 @@
 
 """YAML config loading and validation."""
 
+import re
 import sys
 from pathlib import Path
 
@@ -24,6 +25,7 @@ from .models import (
     ModeRule,
     ModeScalarConstraint,
     OperationConfig,
+    TENSOR_DIRECTIONS,
     TensorArrayField,
     TensorConfig,
     TensorField,
@@ -48,7 +50,13 @@ def load_config(path: Path) -> OperationConfig:
         raise ConfigError("YAML config must have a top-level 'operation' key")
 
     # Required fields
-    for required in ("name", "class_name", "fbs_table", "fbs_generated_header"):
+    for required in (
+        "name",
+        "class_name",
+        "fbs_table",
+        "fbs_generated_header",
+        "matcher_opcode",
+    ):
         if required not in op:
             raise ConfigError(f"Missing required field 'operation.{required}'")
 
@@ -90,6 +98,7 @@ def load_config(path: Path) -> OperationConfig:
                 frontend_getter=stripped_fg,
                 expected_data_type=tf.get("expected_data_type", ""),
                 work_data_dependent=_work_data_dependent(op["name"], tf),
+                direction=_direction(op["name"], tf),
             )
         )
 
@@ -154,6 +163,7 @@ def load_config(path: Path) -> OperationConfig:
                 test_uids=taf.get("test_uids", []),
                 test_label=taf.get("test_label", ""),
                 work_data_dependent=_work_data_dependent(op["name"], taf),
+                direction=_direction(op["name"], taf),
             )
         )
 
@@ -221,6 +231,7 @@ def load_config(path: Path) -> OperationConfig:
         class_name=op["class_name"],
         fbs_table=op["fbs_table"],
         fbs_generated_header=op["fbs_generated_header"],
+        matcher_opcode=_matcher_opcode(op),
         descriptor_type=descriptor_type,
         operation_attr_prefix=op.get("operation_attr_prefix", ""),
         frontend=frontend,
@@ -263,6 +274,30 @@ def _work_data_dependent(operation_name: str, tensor_raw: dict) -> bool:
         raise ConfigError(
             f"Operation '{operation_name}', tensor field '{tensor_raw['name']}': "
             f"work_data_dependent must be true or false, got {value!r}."
+        )
+    return value
+
+
+def _direction(operation_name: str, tensor_raw: dict) -> str:
+    """Read a tensor field's required ``direction``: ``input`` or ``output``."""
+    value = tensor_raw.get("direction")
+    if value not in TENSOR_DIRECTIONS:
+        raise ConfigError(
+            f"Operation '{operation_name}', tensor field '{tensor_raw['name']}': "
+            f"direction must be one of {', '.join(TENSOR_DIRECTIONS)}, got {value!r}."
+        )
+    return value
+
+
+def _matcher_opcode(op: dict) -> str:
+    """Read ``operation.matcher_opcode``: lowercase snake_case, per graph.fbs."""
+    value = op["matcher_opcode"]
+    if not isinstance(value, str) or not re.fullmatch(
+        r"[a-z][a-z0-9]*(_[a-z0-9]+)*", value
+    ):
+        raise ConfigError(
+            f"Operation '{op['name']}': matcher_opcode must be lowercase snake_case "
+            f"(see the opcode naming rules in graph.fbs), got {value!r}."
         )
     return value
 

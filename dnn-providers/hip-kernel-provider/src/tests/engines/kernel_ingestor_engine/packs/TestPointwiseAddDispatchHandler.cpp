@@ -250,12 +250,13 @@ TEST(TestPointwiseAddDispatch, PreparedLaunchIsReusableAcrossExecutions)
 {
     SKIP_IF_NO_DEVICES();
 
-    const GraphFixture fixture(buildPointwiseGraph(), currentDeviceProperties());
     const auto& handler = dispatchHandler(POINTWISE_ADD);
-
-    // A plan built once and executed many times must hold nothing tied to one execution.
-    const auto prepared = handler.prepare(
-        fixture.context(), bindingsFor(fixture.context()), makeKernel(64, "FLOAT"));
+    const auto prepared = [&handler] {
+        const GraphFixture fixture(buildPointwiseGraph(), currentDeviceProperties());
+        return handler.prepare(
+            fixture.context(), bindingsFor(fixture.context()), makeKernel(64, "FLOAT"));
+    }();
+    // The graph and binding are destroyed before any launch.
     const Handle handle;
 
     for(const auto& [a, b, expected] : std::vector<std::array<float, 3>>{

@@ -94,6 +94,36 @@ TREE, not by that directory. Writing the value arch-root-relative instead is
 correct only for a descriptor sitting flat at the arch root, and silently wrong
 for every nested one.
 
+**A Universal Engine Descriptor (UED) `graph_match` holds exactly one arm.** The
+optional `graph_match` object carries either `native`, a nonempty symbol the
+provider registers, or `nodes`, a declarative graph pattern (RFC 0020 §4.3).
+A pattern resolves against the op-schema registry generated from the hipDNN
+graph schemas (`projects/hipdnn/flatbuffers_sdk/op_schema_registry.json`): every
+opcode, operand name, and result name must exist there, and `?` may mark only an
+operand the registry declares optional. `hkp_pack` applies the same checks as the
+runtime, so a pattern the runtime would refuse fails the pack. Unknown fields are
+rejected. Extensions use `x-` or `_` prefixes or the key `provenance`; they do not
+declare bindings. The JSON Schema is
+`projects/hipdnn/plugin_sdk/schemas/universal_engine_descriptor.schema.json`.
+
+**Preserve producer identity and generic descriptor bytes.** Generic descriptors
+must be byte-identical across architecture shards. A native UED names a symbol,
+not binding keys, and native code defines the tensor binding names, so renaming
+those bindings does not require UED edits. A `nodes` pattern binds the variables
+it names.
+
+**Use a matching provider and descriptor package.** The runtime skips malformed or
+unsupported files individually, not whole packages. Identical accepted JSON
+definitions count as one. Conflicting accepted definitions within one root
+invalidate that UUID; across roots, the first accepted definition wins. If the
+winner fails native-symbol checks, the loader does not try a later root. A pack
+can still resolve a UUID in another root if an earlier malformed file was skipped.
+
+`HIPDNN_DESCRIPTOR_RUNTIME_DIR` adds a tree without overriding installed
+definitions. For a replacement tree, set `HIPDNN_DESCRIPTOR_DIR` and use a
+matching provider. Start a fresh process to load descriptor or environment changes;
+discovery does not reload them.
+
 ## Why this rocKE builder
 
 `build_unified_attention_2d_tiled` rather than `build_attention_dense`. Both

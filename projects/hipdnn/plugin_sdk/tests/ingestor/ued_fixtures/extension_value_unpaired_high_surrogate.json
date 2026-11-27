@@ -1,0 +1,6 @@
+{
+  "description": "A string under an extension key holds a high surrogate escape with no low surrogate after it; the document parse refuses it.",
+  "valid": false,
+  "error": "surrogate U+D800..U+DBFF must be followed by U+DC00..U+DFFF",
+  "ued_text": "{\"version\": \"1.0\", \"id\": \"ebb60902-8ffc-5e89-83b7-a2b6e8c2c15a\", \"name\": \"ued_fixture:extension_value_unpaired_high_surrogate\", \"metadata\": \"e9b40640-73f0-5451-8c0d-19413cf75a0c\", \"x-value\": \"\\ud800\", \"graph_match\": {\"nodes\": [{\"kind\": \"op\", \"id\": \"pointwise\", \"op\": \"pointwise\", \"operands\": {\"in_0\": \"$input_a\", \"in_1\": \"$input_b\"}, \"results\": {\"out_0\": \"$output\"}}]}}"
+}

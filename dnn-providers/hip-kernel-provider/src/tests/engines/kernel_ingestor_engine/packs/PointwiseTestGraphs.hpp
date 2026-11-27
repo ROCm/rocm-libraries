@@ -27,9 +27,9 @@ inline constexpr PackSymbols POINTWISE_ADD{"hipkernel:Pointwise",
                                            "hipkernel.pointwise.kernel_match",
                                            "hipkernel.pointwise.score",
                                            "hipkernel.pointwise.dispatch",
-                                           "pointwise.input_a.uid",
-                                           "pointwise.input_b.uid",
-                                           "pointwise.output.uid"};
+                                           "input_a",
+                                           "input_b",
+                                           "output"};
 
 inline constexpr PackSymbols POINTWISE_MUL{"hipkernel:Pointwise",
                                            "hipkernel.pointwise.graph_match",
@@ -37,9 +37,9 @@ inline constexpr PackSymbols POINTWISE_MUL{"hipkernel:Pointwise",
                                            "hipkernel.pointwise.kernel_match",
                                            "hipkernel.pointwise.score",
                                            "hipkernel.pointwise.dispatch",
-                                           "pointwise.input_a.uid",
-                                           "pointwise.input_b.uid",
-                                           "pointwise.output.uid"};
+                                           "input_a",
+                                           "input_b",
+                                           "output"};
 
 inline constexpr PackSymbols POINTWISE_SUB{"hipkernel:Pointwise",
                                            "hipkernel.pointwise.graph_match",
@@ -47,9 +47,9 @@ inline constexpr PackSymbols POINTWISE_SUB{"hipkernel:Pointwise",
                                            "hipkernel.pointwise.kernel_match",
                                            "hipkernel.pointwise.score",
                                            "hipkernel.pointwise.dispatch",
-                                           "pointwise.input_a.uid",
-                                           "pointwise.input_b.uid",
-                                           "pointwise.output.uid"};
+                                           "input_a",
+                                           "input_b",
+                                           "output"};
 
 /// Tensor uids the builders below use, in argument order.
 constexpr int64_t INPUT_A_UID = 1;
