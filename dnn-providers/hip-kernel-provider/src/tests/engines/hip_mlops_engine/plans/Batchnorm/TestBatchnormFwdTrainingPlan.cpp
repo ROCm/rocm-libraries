@@ -15,6 +15,7 @@
 #include "mocks/MockKernelCompiler.hpp"
 #include "mocks/MockRunnableKernel.hpp"
 
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
@@ -623,11 +624,31 @@ struct TrainingGraph
     BatchnormFwdTrainingParams params;
 };
 
+// Every tensor of the graph is fp32 unless xDataType makes x another type, which upcasts it to
+// the fp32 y.
 TrainingGraph createTrainingGraph(const std::vector<int64_t>& strides,
-                                  const std::vector<int64_t>& dims)
+                                  const std::vector<int64_t>& dims,
+                                  hipdnn_flatbuffers_sdk::data_objects::DataType xDataType
+                                  = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
 {
     auto builder
         = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(strides, dims, true);
+    if(xDataType != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
+    {
+        auto* mutableGraph
+            = hipdnn_flatbuffers_sdk::data_objects::GetMutableGraph(builder.GetBufferPointer());
+        const auto xUid
+            = mutableGraph->nodes()->Get(0)->attributes_as_BatchnormAttributes()->x_tensor_uid();
+        auto* tensors = mutableGraph->mutable_tensors();
+        for(flatbuffers::uoffset_t i = 0; i < tensors->size(); ++i)
+        {
+            auto* tensor = tensors->GetMutableObject(i);
+            if(tensor->uid() == xUid)
+            {
+                EXPECT_TRUE(tensor->mutate_data_type(xDataType));
+            }
+        }
+    }
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     BatchnormFwdTrainingParams params(*graph.getNode(0).attributes_as_BatchnormAttributes(),
@@ -659,6 +680,26 @@ TEST(TestBatchnormFwdTrainingKernelConfig, DefaultConfigIsTheHeuristicChoice)
     const auto multiple = createTrainingGraph({147456, 4608, 576, 1}, {32, 8, 24, 24});
     EXPECT_EQ(defaultBatchnormFwdTrainingConfig(multiple.params, 60),
               (BatchnormSpatialConfig{2, 0, 1}));
+}
+
+// A channel of 2^25 values or more (N * H * W) keeps the forward heuristics off variant 1 for
+// a spatial size above 1024, and they do not prefer spatial multiple for an fp16 x upcast to
+// an fp32 y with N <= 768, nor for fp32 with N <= 2: the spatial single fallback picks
+// variant 0, whose 1024 threads cover only 1024 of the spatial positions.
+// IntegrationGpuBatchnormTrainingSpatialBeyondWorkgroup runs these graphs on a device.
+TEST(TestBatchnormFwdTrainingKernelConfig, DefaultConfigForASpatialSizeBeyondTheWorkgroup)
+{
+    const auto upcast = createTrainingGraph({2097152, 1048576, 1024, 1},
+                                            {32, 2, 1024, 1024},
+                                            hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
+    const auto upcastConfig = defaultBatchnormFwdTrainingConfig(upcast.params, 60);
+    EXPECT_EQ(upcastConfig, (BatchnormSpatialConfig{0, 1024, 1}));
+    EXPECT_FALSE(isBatchnormFwdTrainingConfigApplicable(upcast.params, 60, upcastConfig));
+
+    const auto fp32 = createTrainingGraph({33554432, 16777216, 4096, 1}, {2, 2, 4096, 4096});
+    const auto fp32Config = defaultBatchnormFwdTrainingConfig(fp32.params, 60);
+    EXPECT_EQ(fp32Config, (BatchnormSpatialConfig{0, 1024, 1}));
+    EXPECT_FALSE(isBatchnormFwdTrainingConfigApplicable(fp32.params, 60, fp32Config));
 }
 
 TEST(TestBatchnormFwdTrainingKernelConfig, BuildTakesTheWorkgroupSizeOfTheConfig)
