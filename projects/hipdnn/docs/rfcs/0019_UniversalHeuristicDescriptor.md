@@ -2,8 +2,8 @@
 
 - Contributors: Jason Campbell, Chris Erb
 - **Status**: In progress
-- **Status notes**: The UHD runtime ships (#13028): the UHD parser, the UED role maps, feature extraction, the `static_order`, `native`, `tree_data`, `table`, and `custom_library` adapters, ranking metrics, engine estimates, and the winner cache (`plugin_sdk/include/hipdnn_plugin_sdk/heuristics/`, `ingestor/DescriptorLoader.hpp`, `ingestor/UhdKernelHeuristic.hpp`). The `onnx` adapter, a consumer for `predict_applicable_kernels`, a persistent cache of model rankings, and the generation tool are not built. Every in-tree engine ships a `native` UHD; none ships a trained model.
-- **Last verified**: 2026-10-15 against `develop` (2501d0b28cc)
+- **Status notes**: The UHD runtime ships (#13028): the UHD parser, the UED role maps, feature extraction, the `static_order`, `native`, `tree_data`, `table`, `linear_data`, `mlp_data`, and `custom_library` adapters, ranking metrics, engine estimates, and the winner cache (`plugin_sdk/include/hipdnn_plugin_sdk/heuristics/`, `ingestor/DescriptorLoader.hpp`, `ingestor/UhdKernelHeuristic.hpp`). The `onnx` adapter, a consumer for `predict_applicable_kernels`, and a persistent cache of model rankings are not built. The generation tool (`tools/uhd_gen`) trains and installs models: 42 trained `predict_engine` models ship (38 across ten FlyDSL engines, two for the ASM SDPA engine on gfx942 and gfx950, and two for the gfx950 rocKE forward and backward-data convolution engines), and trained `sort_kernel_catalog` models for the gfx942 and gfx950 rocKE attention engines, the gfx950 and gfx1250 rocKE convolution engines and three FlyDSL SDPA engines.
+- **Last verified**: 2026-11-24 against `develop` (131d91a1428)
 - Parent: [RFC 0017 Universal Kernel Descriptor](0017_UniversalKernelDescriptor.md) — the "UHD + kernel selection" follow-up named in [RFC 0017 §14.2](0017_UniversalKernelDescriptor.md#142-follow-up-rfcs).
 - Siblings:
   - [RFC 0020 Universal Engine Descriptor](0020_UniversalEngineDescriptor.md) — owns engine identity, the UED's `nodes` pattern, and the **symbol table matching it publishes**. That table is the binding this RFC's `features_signature` reads, and the set every UHD is validated against ([Section 6.1](#61-feature-sources), [Section 6.3](#63-contract-enforcement)).
@@ -129,7 +129,7 @@ consumer for `predict_applicable_kernels`.
 UED (engine)
  ├── sort_kernel_catalog:       {arch → [UHD id]} ← kernel-selection heuristics (the main UHD), one per metric
  ├── predict_engine:            {arch → [UHD id]} ← optional: cheap engine-level estimates, one per metric
- ├── predict_applicable_kernels:{arch → UHD id}   ← optional, future: candidate generator
+ ├── predict_applicable_kernels:{arch → [UHD id]} ← optional, future: candidate generators (JIT)
  ├── metadata:  KMD id          ← one metadata schema per engine
  └── knobs: [...]               ← user-facing runtime parameters (= sort_kernel_catalog's $kernel.* axes)
 
@@ -231,8 +231,10 @@ each UHD declares in its own `score.metric`:
   request names a metric. Every `predict_engine` UHD must declare a metric
   ([Section 11.1](#111-the-engine-estimate-and-the-kernel-catalog-ranker)).
 
-`predict_applicable_kernels` stays single-valued: it generates the candidate set rather than scoring
-it, so it has no metric to key on.
+`predict_applicable_kernels` is a list per architecture too, for the JIT spaces that will consume it.
+It generates the candidate set rather than scoring it, and its UHDs are usually metric-less; the
+same rule applies, so at most one metric-less UHD per architecture key. A single id is still a
+one-element list.
 
 ### 3.2 KMD Fields, and Knobs as the Heuristic's Feature Axes
 
@@ -425,7 +427,7 @@ engine rather than folded into one model. **OPEN:** See [Open Question 2](#schem
 
 The UHD parser (`heuristics/uhd/UhdParser.hpp`) admits the schema in this section, and
 `parseHeuristicDescriptor()` in `DescriptorLoader.hpp` reads it. `heuristics/uhd/AdapterFactory.hpp`
-builds the `native`, `tree_data`, `table`, and `custom_library` adapters; `static_order` needs no
+builds the `native`, `tree_data`, `table`, `linear_data`, `mlp_data`, and `custom_library` adapters; `static_order` needs no
 adapter. Not yet built: the `onnx` adapter. The parser admits an `onnx` UHD, and the engine then ranks
 its catalog by `priority`, then `id`.
 
@@ -522,7 +524,7 @@ The normative header. A loader can validate every row here without instantiating
 | `features_signature` | if the adapter features | ordered list | Model inputs, in training order ([Section 6.2](#62-the-features_signature)). |
 | `categorical_encoding` | if a feature reads a string field | field → (value → code) | Generated during training; makes string→number conversion explicit ([Section 6.5](#65-categorical-encoding)). |
 | `features_hash` | if `features_signature` | `sha256:` + 16 hex | Fingerprint of the **resolved feature contract** — the canonicalized signature *and* `categorical_encoding`, truncated to 64 bits ([Section 6.3](#63-contract-enforcement)). |
-| `trained_against` | if the adapter features | descriptor refs, `selector_revision`, or both; optionally `feature_semantics_revision` | What this heuristic was generated against: the `{id, revision}` **content revisions** of the `ued`, `kmd`, and every `umd`, and/or the selector revision whose behaviour was measured — the provider's, for an engine that has no descriptor set, or the generic engine's own, which an engine estimate (`predict_engine`) of a descriptor engine must record beside its descriptor refs ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)). Either form may also record the integer revision of the feature semantics the model was trained on; absent means 1 ([Section 6.9](#69-feature-semantics-revision)). |
+| `trained_against` | if the adapter features | descriptor refs, `selector_revision`, or both; optionally `codegen_revision` and `feature_semantics_revision` | What this heuristic was generated against: the `{id, revision}` **content revisions** of the `ued`, `kmd`, and every `umd`, and/or the selector revision whose behaviour was measured — the provider's, for an engine that has no descriptor set, or the generic engine's own, which an engine estimate (`predict_engine`) of a descriptor engine must record beside its descriptor refs ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)). Either form may also record the integer revision of the feature semantics the model was trained on; absent means 1 ([Section 6.9](#69-feature-semantics-revision)). An engine estimate of a descriptor engine also records the `codegen_revision` of the code objects it was measured on, which the engine only warns about and which needs UHD 1.2 ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)). |
 | `objective` | if the adapter scores | `max` \| `min` | Direction of the winning score, applied when the ranking is ordered. An adapter returns its model's raw value; the sign is the consumer's to apply, so a `min` model needs no trainer-side negation ([Section 5](#5-selection-flow)). |
 | `score` | no | object | `metric`, `calibrated`, and a `transform` drawn from the closed invertible set — lets a consumer recover the metric's value in its registered units ([Section 4.4](#44-ranking-metrics), [Section 11.3](#113-cross-engine-comparison)). `metric` names a registered ranking metric and fixes the units and the winning direction, so `objective` must agree with it. A `calibrated` score requires a `metric`. |
 | `<adapter>` | yes | object | Adapter-scoped body; its key **must** equal `adapter`. A body naming a model file names it by a relative path that stays inside the descriptor's directory, and may also carry that file's `hash`: its SHA-256 as 64 lowercase hexadecimal digits. A `custom_library` body must ([Section 7.2](#72-default-tree_data)). |
@@ -565,6 +567,23 @@ hold the schema and the packer together (below).
         "revision": {"$ref": "#/definitions/revision"}
       }
     },
+    "slot_name": {
+      "description": "RFC 0021 slot name: a lowercase identifier, never the reserved `global`.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*(?![\\s\\S])",
+      "not": {"const": "global"}
+    },
+    "slot_dependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {"^(x-|_)": {}},
+      "required": ["slot", "id", "revision"],
+      "properties": {
+        "slot": {"$ref": "#/definitions/slot_name"},
+        "id": {"$ref": "#/definitions/uuid"},
+        "revision": {"$ref": "#/definitions/revision"}
+      }
+    },
     "sha256": {
       "description": "SHA-256 of the named file: 64 lowercase hexadecimal digits, no prefix.",
       "type": "string",
@@ -588,10 +607,10 @@ hold the schema and the packer together (below).
     }
   },
   "properties": {
-    "version": {"const": "1.0"},
+    "version": {"enum": ["1.0", "1.1", "1.2"]},
     "id": {"$ref": "#/definitions/uuid"},
     "name": {"type": "string", "minLength": 1},
-    "adapter": {"enum": ["static_order", "native", "table", "tree_data", "onnx", "custom_library"]},
+    "adapter": {"enum": ["static_order", "native", "table", "tree_data", "linear_data", "mlp_data", "onnx", "custom_library"]},
     "provenance": {"description": "Free-form authoring notes; never read by the loader."},
     "features_signature": {
       "type": "array",
@@ -619,18 +638,25 @@ hold the schema and the packer together (below).
       "patternProperties": {"^(x-|_)": {}},
       "anyOf": [
         {"required": ["ued", "kmd", "umd"]},
+        {"required": ["ued", "kmds", "umd"]},
         {"required": ["selector_revision"]}
       ],
+      "not": {"required": ["kmd", "kmds"]},
       "dependencies": {
-        "ued": ["kmd", "umd"],
+        "ued": {"required": ["umd"], "anyOf": [{"required": ["kmd"]}, {"required": ["kmds"]}]},
         "kmd": ["ued", "umd"],
-        "umd": ["ued", "kmd"]
+        "kmds": ["ued", "umd"],
+        "umd": {"required": ["ued"], "anyOf": [{"required": ["kmd"]}, {"required": ["kmds"]}]},
+        "slot": ["kmd"]
       },
       "properties": {
         "ued": {"$ref": "#/definitions/dependency"},
         "kmd": {"$ref": "#/definitions/dependency"},
+        "kmds": {"type": "array", "minItems": 1, "items": {"$ref": "#/definitions/slot_dependency"}},
+        "slot": {"$ref": "#/definitions/slot_name"},
         "umd": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/definitions/dependency"}},
         "selector_revision": {"type": "string", "minLength": 1},
+        "codegen_revision": {"type": "string", "minLength": 1},
         "feature_semantics_revision": {"type": "integer", "minimum": 1, "maximum": 9223372036854775807}
       }
     },
@@ -660,6 +686,8 @@ hold the schema and the packer together (below).
     },
     "table": {"$ref": "#/definitions/artifact"},
     "tree_data": {"$ref": "#/definitions/artifact"},
+    "linear_data": {"$ref": "#/definitions/artifact"},
+    "mlp_data": {"$ref": "#/definitions/artifact"},
     "onnx": {"$ref": "#/definitions/artifact"},
     "custom_library": {
       "type": "object",
@@ -679,23 +707,40 @@ hold the schema and the packer together (below).
     {"required": ["native"], "properties": {"adapter": {"const": "native"}}},
     {"required": ["table"], "properties": {"adapter": {"const": "table"}}},
     {"required": ["tree_data"], "properties": {"adapter": {"const": "tree_data"}}},
+    {"required": ["linear_data"], "properties": {"adapter": {"const": "linear_data"}}},
+    {"required": ["mlp_data"], "properties": {"adapter": {"const": "mlp_data"}}},
     {"required": ["onnx"], "properties": {"adapter": {"const": "onnx"}}},
     {"required": ["custom_library"], "properties": {"adapter": {"const": "custom_library"}}}
   ],
   "allOf": [
+    {"if": {"properties": {"version": {"const": "1.0"}}},
+     "then": {"properties": {"trained_against": {"not": {"anyOf": [{"required": ["slot"]}, {"required": ["kmds"]}]}}}}},
+    {"if": {"properties": {"version": {"enum": ["1.0", "1.1"]}}},
+     "then": {"properties": {"trained_against": {"not": {"required": ["codegen_revision"]}}}}},
     {"oneOf": [
       {"required": ["static_order"]}, {"required": ["native"]},
       {"required": ["table"]}, {"required": ["tree_data"]},
+      {"required": ["linear_data"]},
+      {"required": ["mlp_data"]},
       {"required": ["onnx"]}, {"required": ["custom_library"]}
     ]},
-    {"if": {"properties": {"adapter": {"enum": ["table", "tree_data", "onnx"]}}},
+    {"if": {"properties": {"adapter": {"enum": ["table", "tree_data", "linear_data", "mlp_data", "onnx"]}}},
      "then": {"required": ["features_signature", "features_hash", "trained_against"]}},
     {"if": {"required": ["features_signature"]},
      "then": {"required": ["features_hash", "trained_against"]}},
     {"if": {"required": ["categorical_encoding"]},
      "then": {"required": ["features_signature"]}},
-    {"if": {"properties": {"adapter": {"enum": ["native", "table", "tree_data", "onnx", "custom_library"]}}},
+    {"if": {"properties": {"adapter": {"enum": ["native", "table", "tree_data", "linear_data", "mlp_data", "onnx", "custom_library"]}}},
      "then": {"required": ["objective"]}},
+    {"if": {"properties": {"adapter": {"const": "linear_data"}}},
+     "then": {"properties": {"objective": {"const": "min"},
+                             "score": {"not": {"required": ["metric"]},
+                                       "properties": {"calibrated": {"const": false},
+                                                      "transform": {"const": "identity"}}}}}},
+    {"if": {"properties": {"adapter": {"const": "mlp_data"}}},
+     "then": {"required": ["score"],
+              "properties": {"score": {"required": ["metric", "transform"],
+                                       "properties": {"transform": {"const": "log"}}}}}},
     {"if": {"required": ["score"],
             "properties": {"score": {"required": ["calibrated"],
                                      "properties": {"calibrated": {"const": true}}}}},
@@ -728,7 +773,7 @@ naming, because each needs an explicit construct rather than falling out of the 
   rest rather than being left as the one adapter whose absent body validates. Its body is closed: a
   declared ordering criterion (`order`) is refused.
 - **The scoring and training fields are conditioned, and their subfields are reachable.** Every adapter
-  except `static_order` requires `objective`. The model adapters (`table`, `tree_data`, `onnx`) also
+  except `static_order` requires `objective`. The model adapters (`table`, `tree_data`, `linear_data`, `mlp_data`, `onnx`) also
   require the feature contract and `trained_against`, and any document declaring a
   `features_signature` requires `features_hash` and `trained_against` with it, whatever its adapter.
   `trained_against` in turn
@@ -743,7 +788,9 @@ naming, because each needs an explicit construct rather than falling out of the 
   ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)).
   An optional `feature_semantics_revision` may accompany either shape but satisfies neither, so a
   document recording only it still lacks provenance; it is an integer, so `"1"` and `true` are refused
-  ([Section 6.9](#69-feature-semantics-revision)).
+  ([Section 6.9](#69-feature-semantics-revision)). An optional `codegen_revision`, a non-empty string,
+  needs UHD 1.2 and likewise satisfies neither form
+  ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)).
 - **Direction is the metric's, not the author's.** A `score` naming a `metric` requires the
   `objective` that metric's registry entry fixes ([Section 4.4](#44-ranking-metrics)) — `max` for
   `tflops`, `min` for `time` — and a `calibrated` score must name its metric. The pairing is checked
@@ -776,8 +823,8 @@ spelled any way but 64 lowercase hexadecimal digits, a `custom_library` with no 
 that is not a portable descriptor-relative file name. The path pattern refuses a leading `/`, any
 backslash, colon or NUL, every `..` segment, and an empty or `.` final segment; the runtime parser
 applies the same spelling rules and then resolves symlinks, refusing a path whose target leaves the
-descriptor's directory, which no schema can express. Any `version` other than `1.0` is rejected by the
-`const`, which is the accept rule working as intended rather than a gap.
+descriptor's directory, which no schema can express. A `version` outside `1.0`-`1.2` is rejected by the
+`enum`, which is the accept rule working as intended rather than a gap.
 
 **Schema and packer parity.** The hip-kernel-provider packaging tests
 (`descriptor-packaging/tests/test_hkp_pack_sidecars.py`) validate every in-tree UHD against
@@ -801,6 +848,8 @@ new model family) is one more `adapter` value — the single discriminant is wha
 | `native` | A scorer compiled into the engine, resolved by symbol name — **first to land** | Whatever the function returns | none (code, not data) |
 | `table` | A bucketed lookup over quantized feature ranges, carried as a FlatBuffer | Quantize the row, look up the bucket, then tie-break | with engine |
 | `tree_data` | A GBDT tree table (LightGBM/XGBoost), in-tree walker — **default shipping path** | Score each candidate, argmax | with engine |
+| `linear_data` | A per-config linear ranker (RelLin): predicted log slowdown against the catalog's best, carried as a FlatBuffer | Score each candidate, lowest first | with engine |
+| `mlp_data` | An ensemble of small MLPs predicting log(metric) for one engine, carried as a FlatBuffer | Score each row (the graph's, or each candidate's), in the metric's direction | with engine |
 | `onnx` | An ONNX graph via a gated runtime | Score each candidate, argmax | with engine |
 | `custom_library` | An author-shipped `.so` behind a small C ABI (drop-in escape hatch) | Whatever the library returns | with engine |
 
@@ -871,7 +920,7 @@ lives beside the policy names in the data SDK, and each entry fixes three things
 
 | Metric | Units | Better | Status |
 |---|---|---|---|
-| `tflops` | TFLOPS (10^12 FLOP/s over the graph's logical FLOPs, `$graph.flops`, [Section 6.8](#68-the-work-model)) | higher | Defined. The default metric. A graph whose work is unknown has no `tflops` label. |
+| `tflops` | TFLOPS (10^12 FLOP/s over the graph's logical FLOPs, `$graph.flops`, [Section 6.8](#68-the-work-model)) | higher | Defined. The default metric. A graph whose work is unknown (an opaque custom op, inconsistent operands) has no `tflops` label. |
 | `time` | milliseconds of device time for one execution | lower | Defined. Trained on `avgTimeMs` directly, not derived from throughput, so it never depends on a FLOP count. |
 | `accuracy.*` | per definition | per definition | **Reserved.** Each accuracy metric names its definition, e.g. `accuracy.max_rel_error`; none is registered until its reference and tolerance are settled ([Open Question 20](#ranking-metrics)). |
 
@@ -1591,7 +1640,7 @@ the set.
 | string, nested table or struct, union, byte vector | nothing |
 
 Beside those, each node publishes `type` (its `NodeAttributes` member), `compute_data_type`,
-`data_dependent` (below), and `flops` when its work is known ([Section 6.8](#68-the-work-model)); SDPA
+`data_dependent` (below), and `flops` when its work can be counted ([Section 6.8](#68-the-work-model)); SDPA
 adds two derived flags no schema field carries, `has_attention_mask` and `has_variable_lengths`. Graph
 tensors are also reachable by position, as `$graph.tensors[j].{data_type, rank, dims[d], strides[d]}`.
 
@@ -1611,8 +1660,9 @@ tensors are also reachable by position, as `$graph.tensors[j].{data_type, rank, 
   `TensorAttributes.ragged_offset_tensor_uid`, which marks every node reading or writing a ragged tensor.
   An operand read densely whatever its values — an additive attention bias, a dropout seed, MoE's
   `token_index` — is not annotated. A node with an annotated operand present publishes
-  `data_dependent = true`. The generator rejects the annotation anywhere its visitor would not report
-  it, so a misplaced one cannot compile and silently mark nothing.
+  `data_dependent = true`: its work count is the declared extent, which the contents may cut short
+  ([Section 6.8](#68-the-work-model)). The generator rejects the annotation anywhere its visitor would
+  not report it, so a misplaced one cannot compile and silently mark nothing.
 
 ### 6.8 The Work Model
 
@@ -1634,13 +1684,31 @@ the trainer, and the runtime compute the same number.
    intermediates included, so a fused convolution + bias + ReLU is the convolution plus two pointwise
    nodes. If any node's work is unknown, `$graph.flops` is **absent**, never a partial sum: divided by
    the whole graph's time, a partial count reports a throughput the engine did not achieve. Each known
-   node still publishes its `$graph.nodes[i].flops`. A graph with override shapes publishes no
-   graph-level work features, because the shapes it declares are not the ones it executes.
-4. **Content-dependent work is unknown.** A node whose `data_dependent` is true
-   ([Section 6.7](#67-per-node-operand-features)) has no count, whatever its type: its shapes bound its
-   work without determining it. Any present `work_data_dependent` operand or ragged operand tensor
-   makes it so, for Matmul, ConvolutionFwd, and SDPA as for every other type. A bound, where one is
-   worth publishing, takes its own name (`…flops_upper_bound`) and never `flops`.
+   node still publishes its `$graph.nodes[i].flops`. A graph with override shapes counts the shapes it
+   declares, like any other: an execute-time override changes what runs, not the problem the graph was
+   built and selected for.
+4. **Content-dependent work is the declared extent.** A node whose `data_dependent` is true
+   ([Section 6.7](#67-per-node-operand-features)) counts the problem its shapes declare: padded
+   sequence lengths, a ragged tensor's padded dims, a paged cache's declared keys, every score a block
+   mask could keep, every routed row. Its operands' contents decide how much of that runs, and a
+   problem feature never reads device memory; `data_dependent` tells a model the count bounds the work
+   rather than measuring it. The convention holds the rule-1 property that matters: every engine of a
+   graph has the same numerator, so their `tflops` order is their `time` order. Refusing a count
+   instead would cost every variable-length, paged, ragged and routed graph its `tflops` label and its
+   work features. Collection runs exactly that problem: `hipdnn_bench` writes each such operand's
+   declared contents (`InputDomain.hpp`, `declaredContents`): full valid lengths, cumulative lengths
+   of full sequences (GDN and KDA split their tokens evenly over the sequences), ragged offsets of the
+   dense layout (values at their stride positions when the tensor is gapped), a page of its own for
+   every table entry, a mask keeping every block (every byte of the bit-packed `UINT8` mask 0xFF), and
+   every routed row spread over the groups. Without that, a timing buffer's zeros would run lengths of
+   0 and time a near-empty problem against the declared work, so an operand whose declared contents
+   cannot be derived — a ragged stride its multiplier does not divide, two rules disagreeing on a
+   shared tensor, a page cache with fewer blocks than table entries, an unknown extent, a block mask
+   that is not `UINT8` or covers fewer tiles than the declared problem — fails the run with an
+   error naming it rather than timing its zeros.
+   A measured `tflops` (a benchmark record's) of such a graph divides the declared count by the time
+   of the caller's actual contents, so it can exceed a dense-equivalent rate and is not comparable
+   with a model estimate.
 5. **One formula per node type**, over the operand roles of
    [Section 6.7](#67-per-node-operand-features):
 
@@ -1660,24 +1728,26 @@ the trainer, and the runtime compute the same number.
    | `ResampleFwdAttributes` | `y.numel · Π window[i]` | One positive `window` entry per spatial dim. |
    | `ResampleBwdAttributes` | `dy.numel · Π window[i]` | |
    | `BlockScaleQuantizeAttributes`, `BlockScaleDequantizeAttributes` | `2·x.numel` | |
-   | `SdpaAttributes` | `2·B·H·pairs·(Dq + Dv)` | `pairs` is `Sq·Sk`, or the attended pairs under a causal mask. |
+   | `SdpaAttributes` | `2·B·H·pairs·(Dq + Dv)` | `pairs` sums, per query row, the keys inside its band: causal mask, `left_bound`, `right_bound` and diagonal alignment (cuDNN's band, SEM-001), `Sq·Sk` when unbounded. The deprecated `causal_mask` and `causal_mask_bottom_right` compose as cuDNN's setters do: a flag gives `right_bound` when it is ≥ 0, else 0; `causal_mask_bottom_right` forces bottom-right alignment, `causal_mask` keeps `diagonal_alignment`. `left_bound` of 0, a bound below -1, or both deprecated flags leave the work unknown: the frontend rejects the first two and the references the third. A `left_bound` below -1 and both flags were counted before this rule; they are dropped without a revision bump because no engine serves them and their training rows are re-collected. A paged cache's `Sk` is inferred as cuDNN does: `max_seq_len_kv` when stated, else a non-paged K's (then V's) sequence length, else the `attn_mask` last dim, else the `rng_dump` last dim, else the smaller of the two sides' page-table pages × page size. K or V may be paged alone, each with its own block size; the extent must fit every paged side's capacity and match a dense side's sequence extent, else the work is unknown. Bias, ALiBi, softmax, dropout, sinks and FP8 scaling are elementwise on the scores and not counted. |
    | `SdpaBackwardAttributes` | `2.5 ×` the forward count on its `q`/`k`/`v`/`o` | The FlashAttention convention. |
-   | `MoeGroupedMatmulAttributes`, `MoeGroupedMatmulBwdAttributes` | unknown | `first_token_offset` decides how many rows are computed. |
+   | `MoeGroupedMatmulAttributes` | `2·rows·K·N` | `rows` is the output's when gathering, else the token's: every declared routed row. |
+   | `MoeGroupedMatmulBwdAttributes` | `2·rows·K·N` | The weight gradient over the token's declared rows. |
+   | `GdnAttributes`, `KdaAttributes` | `6·T·HO·V·K` | Three `V × K` products per token and output head: `S k`, the rank-one update `β (v − S k) kᵀ` (`S (I − β k kᵀ) + β v kᵀ` is `S` plus that one product), and `S q`; decay and gating are elementwise. Token-packed, so the split into sequences does not change it. |
    | `CustomOpAttributes` | unknown | Opaque to hipDNN. |
 
    The per-element constants for the normalizations, resampling, and SDPA backward are conventions,
    chosen once and held; what matters is that every engine counts the same. A formula refuses — the
    node's work is unknown — when its operands are inconsistent: a missing tensor, a non-positive dim, or
-   shapes that do not compose. The convolutions, Matmul, and SDPA forward and backward also require
-   floating-point operands. So 20 of the 23 node types have a static count; whether a given graph has one
-   is still rule 3's to decide.
+   shapes that do not compose. The convolutions, Matmul, SDPA forward and backward, the MoE grouped
+   matmuls, GDN and KDA also require floating-point operands. So 24 of the 25 node types have a static
+   count; whether a given graph has one is still rule 3's to decide.
 6. **Bytes are a declared convention, and three different quantities are kept apart.**
    - **Logical footprint** — `$graph.logical_bytes`, a feature. The sum over the graph's non-virtual
      tensors, each counted once however many nodes read it, of element count × element size. Sub-byte
      types count fractionally (fp4 and int4 as 0.5 byte, fp6 as 0.75); virtual intermediates are
-     excluded, since keeping them out of memory is what fusion is for. Absent when any non-virtual
-     tensor's footprint is unknown — missing or negative dims, an unset data type, or a ragged tensor,
-     whose dims are only its padded bound. A zero-extent tensor contributes 0.
+     excluded, since keeping them out of memory is what fusion is for. A ragged tensor counts its
+     declared (padded) dims, as its work does. Absent when any non-virtual tensor's footprint is
+     unknown — missing or negative dims, or an unset data type. A zero-extent tensor contributes 0.
    - **Allocation size** — strides, alignment, rounding, and workspace, in whole bytes. What corpus
      generation's memory-safety accounting budgets; not a feature, and not derived from the footprint.
    - **Measured traffic** — what the device actually moved, re-reads and cache effects included. Never
@@ -1710,7 +1780,7 @@ feature-semantics revision they were computed under ([Section 6.9](#69-feature-s
 
 **A new node type declares its work.** Each `NodeAttributes` member either has a formula (a
 `nodeFlops` overload and a `logicalFlops` case) or is listed in `NO_COUNTING_CONVENTION` with its
-reason, as `NONE`, `CustomOpAttributes`, and the MoE grouped matmuls are. A test over every member
+reason, as `NONE` and `CustomOpAttributes` are. A test over every member
 fails for one with neither, so a new op cannot silently leave its graphs without `$graph.flops`.
 [Adding a New Operation: Work Model (FLOPs)](../AddingNewOperations.md#work-model-flops) gives the
 contributor steps.
@@ -1792,6 +1862,8 @@ loadable artifact rather than baked into `libhipdnn_provider.so`.
 | `native` | none | **No — compiled into the engine** | Scorer function resolved by symbol name; the bootstrap path |
 | `table` | none | Yes | Bucketed lookup over quantized feature ranges, carried as a FlatBuffer beside the descriptor |
 | `tree_data` | none | **Yes — default shipping path** | GBDT tree table + in-tree walker |
+| `linear_data` | none | Yes | Per-config linear ranker: one hash lookup and one dot product per candidate; a within-catalog ranker only ([Section 7.5](#75-linear_data)) |
+| `mlp_data` | none | Yes | Per-engine MLP ensemble: a few small matrix products per row; engine estimates or catalog ranking ([Section 7.6](#76-mlp_data)) |
 | `onnx` | ONNX runtime | Yes, if dep present | Opt-in, dependency-gated |
 | `custom_library` | none on provider | Yes | Engine ships its own `.so`, `dlopen`'d through a tiny C ABI |
 
@@ -1902,7 +1974,81 @@ The initial adapters are **`static_order`, then `native`, then `tree_data`**. `s
 and always available; `native` proves the seam with a compiled function and needs no new format;
 `tree_data` is the data-driven shipping path. `table` is a low-cost addition for coarse bucketed
 heuristics. `onnx` is added when a concrete need appears. `custom_library` is implemented with no trust
-gate; [Open Question 11](#operational) records what the code does.
+gate; [Open Question 11](#operational) records what the code does. `linear_data` ([Section 7.5](#75-linear_data))
+is a cheaper alternative to `tree_data` for small catalogs, and `mlp_data`
+([Section 7.6](#76-mlp_data)) a cheaper one where a ranking costs one estimate per engine.
+
+### 7.5 `linear_data`
+
+The UHD names this adapter as `"adapter": "linear_data"` and points `linear_data.artifact` at a
+FlatBuffer (`flatbuffers_sdk/schemas/linear_model.fbs`, file identifier `HLIN`), with the artifact's
+`hash` as for `tree_data`. It is a within-catalog ranker: the score of a candidate is its predicted
+**log slowdown** against the best candidate of the same problem, so lower is better. The UHD therefore
+declares `objective: "min"`, no `score.metric`, no calibration and no transform; the parser refuses any
+other declaration. A `linear_data` UHD cannot serve `predict_engine` or any calibrated role, because its
+score is in no physical unit.
+
+The model is one linear function per kernel configuration over a shared, standardized basis:
+
+```
+z[j]  = clamp((t_j(x[feature_j]) - mean_j) / scale_j, lo_j, hi_j)      t_j: identity | log1p(max(x, 0))
+entry = the config whose key equals x at `key_features`,
+        else the family whose key equals x at `family_features`,
+        else the global entry
+score = max(entry.coefficients . [1, z], entry.floor)
+```
+
+A missing (`NaN`) input gives `z = 0`. Keys compare as doubles with every `NaN` equal. The clamp holds a
+term to the range it took in training. A configuration's `floor` is the smallest slowdown it showed in
+training, so a measured configuration that was never the best in training cannot be extrapolated into a
+winner. The guarantee covers measured configurations only: a family entry and the global entry describe
+configurations the corpus never measured, and their floor is 0, so an unmeasured configuration can tie or
+beat a measured winner. Per candidate the adapter does one hash lookup and one dot product; a batch
+transforms a basis value only when it differs from the row before. Training
+(`uhd_gen train --adapter linear_data`) fits one ridge regression per configuration, shrunk toward its
+family and, through it, toward a fit on every row; a configuration with few rows is shrunk harder. It
+needs a corpus in which every problem is measured on several configurations, because its target is the
+slowdown relative to the best of the problem. The adapter loads under the same checks as `table`: digest,
+file identifier, FlatBuffers verifier, `features_hash`, then the model's own bounds (indices, lengths,
+finiteness, unique keys).
+
+### 7.6 `mlp_data`
+
+The UHD names this adapter as `"adapter": "mlp_data"` and points `mlp_data.artifact` at a FlatBuffer
+(`flatbuffers_sdk/schemas/mlp_model.fbs`, file identifier `HMLP`), with the artifact's `hash` as for
+`tree_data`. It scores a feature row to the **log of a registered ranking metric**: for an engine
+estimate (`predict_engine`) one model per engine and architecture scores the graph's row, and as a
+catalog ranker (`sort_kernel_catalog`) it scores each candidate's row like an ungrouped `tree_data`
+model. The artifact names that metric, and the UHD declares the same one with `transform: "log"`
+(`score: {metric, transform: "log"}` and the metric's `objective`; `calibrated` follows the role, as
+for any adapter). The parser refuses an `mlp_data` UHD without `score.metric` or with another
+transform, and the adapter refuses an artifact whose metric is not the UHD's.
+
+The model is an ensemble of small fully connected networks over one standardized input:
+
+```text
+t     = sign(x) * log1p(|x|)        a missing (NaN) value gives t = 0
+z     = (t - mean) / scale          per network input; a non-finite z declines the row
+input = [z..., isnan(x[slot])...]   the standardized inputs, then one 0/1 missing flag per slot
+score = target_mean + target_scale * (mean over networks of network(input))
+```
+
+The inputs are log1p-compressed and standardized but not clamped, so a row outside the training range
+gets an extrapolated score. `uhd_gen evaluate` on graphs larger than the training corpus is how to
+check that.
+
+Every layer of a network but the last is followed by SiLU, `x / (1 + exp(-x))`; the last has one output.
+The networks run in float32 with the ensemble mean in double. An estimate costs a few small matrix
+products: about 2 us in the portable build for three networks of two 64-wide layers, against 6-15 us
+for a 500-tree `tree_data` model, whose cost rises as more engines' models compete for the CPU cache
+(one Ryzen AI MAX+ 395 core, clang -O3, SSE2 build, one convolution graph with 77 inputs; the 15 us end
+is per engine when 32 engines' models are scored in turn). One estimate is made per applicable engine
+and graph, so that cost grows with the number of engines.
+Training (`uhd_gen train --adapter mlp_data`) fits each network on the engine's own rows with an L1
+loss on the standardized log metric, so engines stay independent; whether a catalog ranker should be
+`mlp_data` or `tree_data` is the evaluation's to decide. The adapter loads under the checks of
+`linear_data`: digest, file identifier and FlatBuffers verifier, then the model's own bounds (slots,
+layer shapes, widths of at most 512, finiteness), its metric and `features_hash`.
 
 ---
 
@@ -2031,14 +2177,38 @@ on is what those revisions describe. An engine estimate predicts something large
 the engine achieves on a graph, which is the outcome of its whole selector: which ranker answers each
 metric and architecture, which kernels and code objects its packs carry, which matcher and dispatch
 symbols they resolve, which knobs it exposes, and how its pattern binds the graph. Several of those move
-with no descriptor's content revision moving — a retrained ranker restamps no UED, and a rebuilt code
-object changes no KMD. So the generic engine computes a selector revision of its own over exactly those
+with no descriptor's content revision moving — a retrained ranker restamps no UED, and a recompiled
+kernel changes no KMD. So the generic engine computes a selector revision of its own over exactly those
 inputs (`generic-untuned-v1/<sha256>`), and a `predict_engine` model bound to a descriptor engine must
-record a `selector_revision` equal to it, beside the descriptor entries. The check is the opaque
+record a `selector_revision` equal to it, beside the descriptor entries. A code object enters it by its
+`identity` when the packager compiled it from rocKE IR: a digest of what the packager handed the
+compiler (the LLVM IR, the target ISA and the compiler options), stamped beside the code object's
+`sha256` in the packed descriptor (UKD 1.2). That identity moves when the kernel's code moves and not when only the compiler
+does. A code object with no identity enters by its `sha256`: a prebuilt one, whose bytes are the kernel,
+and one compiled from HIP source, whose identity would miss the headers it includes. The check is the opaque
 engine's, unchanged: a different recorded revision makes the estimate *unavailable*, naming both; no
 recorded revision makes it *invalid*. The generation tool always records the engine's current revision
 when it trains an estimate. A `sort_kernel_catalog` model is not subject to the check: it is one of the
 selector's inputs, so a revision over itself would expire every ranker at every retrain.
+
+**A compiler change is recorded apart.** Compilers move far more often than kernels, and a rebuilt code
+object of an unchanged kernel usually performs as before, so the selector revision does not see it. The
+generic engine also computes a `codegen_revision` (`generic-codegen-v1/<sha256>`) over the `sha256` of
+every code object it loads, and a `predict_engine` model records the one it was measured on beside its
+`selector_revision`. The key needs UHD 1.2, so a provider that predates it skips such a model at the
+version gate rather than refusing an unknown key, and a 1.0 or 1.1 document recording it is refused:
+
+```jsonc
+"trained_against": {"ued": {...}, "kmd": {...}, "umd": [...],
+                    "selector_revision": "generic-untuned-v1/…",
+                    "codegen_revision": "generic-codegen-v1/…"}
+```
+
+A different recorded `codegen_revision` does not refuse the model: the estimate stays *available*, and
+the engine logs one warning per engine, metric, architecture and pair of revisions per process, naming both revisions, so the owners of
+the model decide when a compiler change warrants a retrain. A model that records none is not checked.
+Two compiler changes do move the selector revision: a new LLVM major version that changes the IR a
+generator emits, and a compiler that accepts another target ISA.
 
 **Either form may also record what the features meant.** Descriptor revisions and a
 `selector_revision` say which selector was measured; neither says how the plugin SDK computed the
@@ -2484,7 +2654,8 @@ engine's whole selector, so it records the selector revision it was trained agai
 while that revision is the engine's current one — the provider's for an opaque engine, the generic
 engine's own for a descriptor engine ([Section 8.1](#81-descriptor-versions-and-uhd-coupling)). A
 different recorded revision resolves the estimate *unavailable*, with a reason naming both; a missing
-one resolves it *invalid*.
+one resolves it *invalid*. A different recorded `codegen_revision` leaves it *available* and is logged
+as a warning.
 
 ### 11.2 Two Engine-Selection Policies (RFC 0007)
 
@@ -2609,10 +2780,19 @@ the best score without selecting for launch).
 
 Items 1 and 2 are built. `IEngine::getPrediction()` answers A and B for one named metric
 (`heuristics/uhd/EnginePredictor.hpp`), and the backend implements the quick and thorough policies as
-`SelectionHeuristic::ModeA` and `SelectionHeuristic::ModeB`. A caller names the metric through
+`SelectionHeuristic::ModeA` and `SelectionHeuristic::ModeB`. The quick policy is selected by heuristic
+mode A (`HIPDNN_HEUR_MODE_A`, alias `HIPDNN_HEUR_MODE_INSTANT`; list `Config`, `ModeA`, `StaticOrdering`;
+RFC 0007 §5.3.2), which is the frontend's default mode, so default engine selection ranks by L1
+estimates wherever an engine ships one; the thorough policy is selected by mode B, and mode `FALLBACK`
+is model-free. A caller names the metric through
 `HIPDNN_ATTR_ENGINEHEUR_RANKING_METRIC_EXT`, `Graph::set_ranking_metric()`, or
-`HIPDNN_HEUR_RANKING_METRIC` ([Environment variables](../Environment.md)). Item 3 is the models' to meet:
-no in-tree engine ships a calibrated model.
+`HIPDNN_HEUR_RANKING_METRIC` ([Environment variables](../Environment.md)). Item 3 is the models' to meet.
+Which in-tree engines bind trained L1 models changes as models land: an engine has one for an
+architecture and metric when its descriptor set holds
+`heuristics/<uhd id>/predict_engine/<arch>/<metric>/heuristic.uhd.json` (today several FlyDSL engines in
+hip-kernel-provider, on architectures that differ per engine). An engine with none for the device ranks
+after those that have one, in static order. Calibration across engines stays the models' obligation: an engine's
+estimate may only outrank another's if both are in the metric's real units.
 
 ### 11.4 Selecting a UHD by Metric
 
@@ -2668,8 +2848,8 @@ Because selection is data-driven, it must be inspectable — consistent with
 - **Selection trace:** Candidates, scores, the ranked order, winner, and whether the model or a fallback
   decided
 - **Model provenance:** UHD id, adapter, model artifact version, `features_hash`,
-  `trained_against` (UED/UMD/KMD content revisions, each named by id, or the selector revision; and the
-  feature-semantics revision), training provenance
+  `trained_against` (UED/UMD/KMD content revisions, each named by id, or the selector revision; the
+  codegen revision; and the feature-semantics revision), training provenance
 - **Contract diagnostics:** A clear **error** (not a warning) naming which of the three checks failed and
   why, plus the fact that ranking degraded to `static_order` and the estimate was reported as 0
 - **Coverage warnings:** When a scored candidate or device falls outside what the model was trained on
@@ -3091,10 +3271,9 @@ Caveats:
   tensor's own size, fractional for sub-byte types — a single-dtype shortcut is wrong for quantized
   kernels.
 - **Not every op has a clean closed form.** Ragged or data-dependent work (variable-length sequences,
-  page tables, MoE routing) cannot be counted from shapes; the count is then absent rather than
-  silently wrong ([Section 6.8](#68-the-work-model)). A bound, where one is useful, is published under its
-  own name and never as the count, and a UHD that needs better can compute its own inline in the
-  signature.
+  page tables, MoE routing) is counted at its declared extent, and `data_dependent` says the count is a
+  bound ([Section 6.8](#68-the-work-model)); contents are device data, so a UHD ranks on the bound and
+  `data_dependent`, not on the work actually done.
 - **Auto-derivation yields a *superset*.** Deriving every raw field and generic transform produces a
   bloated, noisy vector that can hurt a small-data model; the sweep's feature-importance (or a curated
   per-op template) prunes it. Auto-derivation proposes; data or a template trims.
@@ -3665,8 +3844,9 @@ dependency-gated and land only when a concrete need appears.
   refused ([Section 6.9](#69-feature-semantics-revision)).
 
 - **Work model:** The conventions by which the plugin SDK counts a graph's logical FLOPs and bytes —
-  multiply-add = 2, graph = Σ nodes all or nothing, content-dependent work unknown — published as
-  `$graph.flops`, `$graph.logical_bytes`, and the features built from them
+  multiply-add = 2, graph = Σ nodes all or nothing, content-dependent work counted at its declared
+  extent and marked `data_dependent` — published as `$graph.flops`, `$graph.logical_bytes`, and the
+  features built from them
   ([Section 6.8](#68-the-work-model)).
 
 - **Dispatch-only field:** A KMD field that is *not* a knob, and therefore not in the UHD's feature set —

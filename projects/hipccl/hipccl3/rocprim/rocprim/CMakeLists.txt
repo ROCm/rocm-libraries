@@ -22,6 +22,9 @@
 
 # rocPRIM header-only library
 
+# Expose the HIPCCL_USE_LEGACY_API option to the configured version header
+set(ROCPRIM_USE_LEGACY_API ${HIPCCL_USE_LEGACY_API})
+
 # Configure a header file to pass the rocPRIM version
 configure_file(
   "${CMAKE_CURRENT_SOURCE_DIR}/include/rocprim/rocprim_version.hpp.in"
@@ -42,6 +45,17 @@ target_include_directories(rocprim
 # This target links against HIP library
 add_library(rocprim_hip INTERFACE)
 target_link_libraries(rocprim_hip INTERFACE rocprim hip::device)
+
+# Without these the roc:: names exist only on the installed export set, leaving
+# sibling components in a superbuild with no namespaced target to link against.
+# Skipped under USE_SYSTEM_LIB, where the tests want the installed rocPRIM: the
+# lookup that provides it runs after this directory is added, and its export set
+# returns early if these names are already taken. Siblings then fall back to
+# their own find_package(rocprim).
+if(NOT USE_SYSTEM_LIB)
+  add_library(roc::rocprim ALIAS rocprim)
+  add_library(roc::rocprim_hip ALIAS rocprim_hip)
+endif()
 
 
 # Installation

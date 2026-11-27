@@ -16,7 +16,12 @@ from __future__ import annotations
 
 import unittest
 
-from rocke.core.arch import ArchTarget, known_arches
+from rocke.core.arch import (
+    ArchTarget,
+    arches_with_own_facts,
+    known_arches,
+    listed_arch_for,
+)
 
 from dispatch.attention import (
     ATTENTION_REGISTRY,
@@ -66,14 +71,22 @@ class TestDeclaredCoverage(unittest.TestCase):
 
     def test_no_candidate_admits_an_architecture_it_did_not_declare(self):
         for candidate in attention_candidates():
-            undeclared = set(known_arches()) - set(candidate.capability.arches)
+            # A declared generic target covers each member whose row points at it.
+            undeclared = {
+                arch
+                for arch in known_arches()
+                if listed_arch_for(arch, candidate.capability.arches) is None
+            }
             for arch in sorted(undeclared):
                 with self.subTest(candidate=candidate.name, arch=arch):
-                    for req in _requests(arch):
-                        self.assertFalse(
-                            candidate.admits(req)[0],
-                            f"{candidate.name} wrongly admits {arch}",
-                        )
+                    # Capability.check rejects the architecture before reading
+                    # any other request axis. Check that public verdict directly
+                    # instead of walking the same 1,152-request product for every
+                    # candidate/arch pair.
+                    req = next(_requests(arch))
+                    ok, why = candidate.admits(req)
+                    self.assertFalse(ok, f"{candidate.name} wrongly admits {arch}")
+                    self.assertTrue(why.startswith("capability: arch "), why)
 
     def test_specialized_candidates_span_a_single_wave_size(self):
         for candidate in attention_candidates():
@@ -104,7 +117,7 @@ class TestDeclaredCoverage(unittest.TestCase):
                     {
                         c.name
                         for c in attention_candidates()
-                        if arch in c.capability.arches
+                        if listed_arch_for(arch, c.capability.arches) is not None
                     },
                 )
 
@@ -112,7 +125,7 @@ class TestDeclaredCoverage(unittest.TestCase):
         by_name = {c["name"]: c for c in ATTENTION_REGISTRY.coverage()["candidates"]}
         self.assertEqual(
             by_name["attention_unified_2d"]["capability"]["arches"],
-            list(known_arches()),
+            list(arches_with_own_facts()),
         )
         self.assertEqual(
             by_name["attention_gfx942_dense_pipe"]["capability"]["arches"], ["gfx942"]

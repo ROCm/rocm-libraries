@@ -441,6 +441,30 @@ def test_grouped_training_is_lightgbm_only(tmp_path, caplog):
     assert not (tmp_path / "model").exists()
 
 
+def test_a_family_with_another_adapter_is_refused(tmp_path, caplog):
+    corpus = _catalog_corpus(tmp_path / "corpus.csv")
+    arguments = _train_arguments(corpus, tmp_path / "model", "unused", "sklearn-hgb")
+    assert main([*arguments, "--adapter", "linear_data"]) == 1
+    assert "fits a tree_data ensemble" in caplog.text
+    assert not (tmp_path / "model").exists()
+
+
+def test_a_family_writes_no_early_exit_schedule_and_refuses_an_explicit_one(
+    tmp_path, evaluator, caplog
+):
+    corpus = _catalog_corpus(tmp_path / "corpus.csv")
+    arguments = _train_arguments(corpus, tmp_path / "model", evaluator, "sklearn-hgb")
+    assert main([*arguments, "--early-exit", "3:2"]) == 1
+    assert "--early-exit" in caplog.text
+    assert not (tmp_path / "model").exists()
+    # `auto` (the default) resolves to no schedule for a family.
+    assert main(arguments) == 0
+    manifest = json.loads(
+        (tmp_path / "model" / "train_manifest.json").read_text("utf-8")
+    )
+    assert manifest["early_exit"] == {"schedule": [], "chosen": False}
+
+
 @pytest.mark.parametrize("patience", [0, -1])
 def test_a_non_positive_patience_keeps_every_xgboost_round(patience):
     """XGBoost turns early stopping on for any truthy value, so -1 must reach it as None."""

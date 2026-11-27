@@ -62,6 +62,23 @@ void buildAboveP0WmmaKernel(BasicBlock* bb, GfxArchID arch) {
     createVAddInBlock(bb, arch, 3, 4, 5);
 }
 
+StinkyInstruction* createSLoadB32InBlock(BasicBlock* bb, GfxArchID arch, int dstReg, int addrReg) {
+    AsmIRBuilder builder(*bb, arch);
+    StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::s_load_b32, arch));
+    inst->addDestReg(StinkyRegister("s", dstReg, 1));
+    inst->addSrcReg(StinkyRegister("s", addrReg, 2));
+    return inst;
+}
+
+/// Same layout as buildAboveP0WmmaKernel, but with s_load_b32 as the first instruction, so an SMEM
+/// replay group is still open at the insertion site, and as the 8 B P(0) anchor.
+void buildAboveP0OpenSmemGroupKernel(BasicBlock* bb, GfxArchID arch) {
+    createSLoadB32InBlock(bb, arch, 4, 0);
+    appendAlignDirective(bb, 32632);
+    createSLoadB32InBlock(bb, arch, 5, 2);
+    createVAddInBlock(bb, arch, 3, 4, 5);
+}
+
 int parsePlanInsertCount(const std::string& text) {
     const std::string key = "PLAN_INSERT=";
     const auto pos = text.find(key);
@@ -228,11 +245,10 @@ TEST_F(SwInstructionPrefetchRelDynamicPassTest, AboveP0Wmma_InsertsOnePrefetch) 
 
 // The drain follows AsmCapsConfig::enableXnackReplay. These two go through the
 // PassManager rather than calling the insert helper directly, so the capability
-// is read the way a real run reads it. Relative prefetches are scattered, so
-// the count is one wait per prefetch -- unlike the absolute passes, where it is
-// one per contiguous burst.
-TEST_F(SwInstructionPrefetchRelDynamicPassTest, XnackReplayOn_EmitsOneDrainPerPrefetch) {
-    buildAboveP0WmmaKernel(bb, arch);
+// is read the way a real run reads it. The kernel leaves an SMEM replay group
+// open at the insertion site, so the relative prefetch there needs the drain.
+TEST_F(SwInstructionPrefetchRelDynamicPassTest, XnackReplayOn_OpenSmemGroup_EmitsTheDrain) {
+    buildAboveP0OpenSmemGroupKernel(bb, arch);
 
     PassManager pm;
     registerAllAnalyses(pm.getAnalysisManager());
@@ -247,8 +263,9 @@ TEST_F(SwInstructionPrefetchRelDynamicPassTest, XnackReplayOn_EmitsOneDrainPerPr
     EXPECT_EQ(countSWaitXcnt(*bb), 1);
 }
 
-TEST_F(SwInstructionPrefetchRelDynamicPassTest, XnackReplayOff_KeepsThePrefetchAndDropsTheDrain) {
-    buildAboveP0WmmaKernel(bb, arch);
+TEST_F(SwInstructionPrefetchRelDynamicPassTest,
+       XnackReplayOff_OpenSmemGroup_KeepsThePrefetchAndDropsTheDrain) {
+    buildAboveP0OpenSmemGroupKernel(bb, arch);
 
     PassManager pm;
     registerAllAnalyses(pm.getAnalysisManager());

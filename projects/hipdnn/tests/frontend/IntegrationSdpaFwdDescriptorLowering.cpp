@@ -486,9 +486,10 @@ TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdWithStatsRoundTrip)
     EXPECT_EQ(statsT->data_type, DataTypeSdk::FLOAT);
 }
 
-// Exercises packer code paths for optional input tensors (attn_mask, seed,
-// offset, dropout_mask), stats output, non-default booleans, optional float
-// and int64 scalars, and non-default enum values.
+// Exercises packer code paths for optional input tensors (attn_mask, seed, offset), stats
+// output, non-default booleans, optional float and int64 scalars, and non-default enum
+// values. Dropout takes its Philox form; the custom-mask form, which excludes a probability,
+// is SdpaFwdWithCustomDropoutRoundTrip.
 TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdWithOptionalTensorsAndScalars)
 {
     auto attnMask = std::make_shared<TensorAttributes>();
@@ -507,17 +508,10 @@ TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdWithOptionalTensorsAndScalar
     offset->set_dim(toVec(K_SDPA_TENSOR_SCALAR_DIMS));
     offset->set_stride(toVec(K_SDPA_TENSOR_SCALAR_STRIDES));
 
-    auto dropoutMask = std::make_shared<TensorAttributes>();
-    dropoutMask->set_uid(K_SDPA_TENSOR_DROPOUT_MASK_UID).set_name("DROPOUT_MASK");
-    dropoutMask->set_data_type(DataType::FLOAT);
-    dropoutMask->set_dim(toVec(K_SDPA_TENSOR_ATTN_MASK_DIMS));
-    dropoutMask->set_stride(toVec(K_SDPA_TENSOR_ATTN_MASK_STRIDES));
-
     SdpaAttributes sdpaAttrs;
     sdpaAttrs.set_name("sdpa_with_optionals");
     sdpaAttrs.set_bias(attnMask);
     sdpaAttrs.set_dropout(0.1f, seed, offset);
-    sdpaAttrs.set_dropout_mask(dropoutMask);
     sdpaAttrs.set_generate_stats(true);
     sdpaAttrs.causal_mask = true;
     sdpaAttrs.set_attn_scale(0.125f);
@@ -532,8 +526,8 @@ TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdWithOptionalTensorsAndScalar
         return;
     }
 
-    // Q + K + V + O + STATS + attn_mask + seed + offset + dropout_mask = 9
-    EXPECT_EQ(graphT.tensors.size(), 9u);
+    // Q + K + V + O + STATS + attn_mask + seed + offset = 8
+    EXPECT_EQ(graphT.tensors.size(), 8u);
 
     std::unordered_set<int64_t> uids;
     for(const auto& t : graphT.tensors)
@@ -548,7 +542,6 @@ TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdWithOptionalTensorsAndScalar
     EXPECT_NE(uids.count(K_SDPA_TENSOR_ATTN_MASK_UID), 0u);
     EXPECT_NE(uids.count(K_SDPA_TENSOR_SEED_UID), 0u);
     EXPECT_NE(uids.count(K_SDPA_TENSOR_OFFSET_UID), 0u);
-    EXPECT_NE(uids.count(K_SDPA_TENSOR_DROPOUT_MASK_UID), 0u);
 
     // -- Verify SDPA node attributes --
     ASSERT_EQ(graphT.nodes.size(), 1u);
@@ -570,9 +563,6 @@ TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdWithOptionalTensorsAndScalar
 
     ASSERT_TRUE(sdpa->offset_tensor_uid.has_value());
     EXPECT_EQ(sdpa->offset_tensor_uid.value(), K_SDPA_TENSOR_OFFSET_UID);
-
-    ASSERT_TRUE(sdpa->dropout_mask_tensor_uid.has_value());
-    EXPECT_EQ(sdpa->dropout_mask_tensor_uid.value(), K_SDPA_TENSOR_DROPOUT_MASK_UID);
 
     ASSERT_TRUE(sdpa->stats_tensor_uid.has_value());
     EXPECT_EQ(sdpa->stats_tensor_uid.value(), K_SDPA_TENSOR_STATS_UID);
@@ -599,6 +589,92 @@ TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdWithOptionalTensorsAndScalar
     // Enum values
     EXPECT_EQ(sdpa->diagonal_alignment, DiagonalAlignmentSdk::BOTTOM_RIGHT);
     EXPECT_EQ(sdpa->implementation, AttentionImplementationSdk::UNIFIED);
+}
+
+// Exercises the packer path for the custom dropout form: a dropout mask with its scale and
+// no dropout_probability.
+TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdWithCustomDropoutRoundTrip)
+{
+    auto dropoutMask = std::make_shared<TensorAttributes>();
+    dropoutMask->set_uid(K_SDPA_TENSOR_DROPOUT_MASK_UID).set_name("DROPOUT_MASK");
+    dropoutMask->set_data_type(DataType::FLOAT);
+    dropoutMask->set_dim(toVec(K_SDPA_TENSOR_ATTN_MASK_DIMS));
+    dropoutMask->set_stride(toVec(K_SDPA_TENSOR_ATTN_MASK_STRIDES));
+
+    auto dropoutScale = std::make_shared<TensorAttributes>();
+    dropoutScale->set_uid(K_SDPA_TENSOR_DROPOUT_SCALE_UID).set_name("DROPOUT_SCALE");
+    dropoutScale->set_data_type(DataType::FLOAT);
+    dropoutScale->set_dim(toVec(K_SDPA_TENSOR_SCALAR_DIMS));
+    dropoutScale->set_stride(toVec(K_SDPA_TENSOR_SCALAR_STRIDES));
+
+    SdpaAttributes sdpaAttrs;
+    sdpaAttrs.set_name("sdpa_with_custom_dropout");
+    sdpaAttrs.set_dropout(dropoutMask, dropoutScale);
+
+    auto graphT = buildAndDeserializeSdpaGraph(_handle, std::move(sdpaAttrs));
+    if(HasFailure())
+    {
+        return;
+    }
+
+    // Q + K + V + O + dropout_mask + dropout_scale = 6
+    EXPECT_EQ(graphT.tensors.size(), 6u);
+
+    ASSERT_EQ(graphT.nodes.size(), 1u);
+    auto* sdpa = graphT.nodes[0]->attributes.AsSdpaAttributes();
+    ASSERT_NE(sdpa, nullptr);
+
+    ASSERT_TRUE(sdpa->dropout_mask_tensor_uid.has_value());
+    EXPECT_EQ(sdpa->dropout_mask_tensor_uid.value(), K_SDPA_TENSOR_DROPOUT_MASK_UID);
+
+    ASSERT_TRUE(sdpa->dropout_scale_tensor_uid.has_value());
+    EXPECT_EQ(sdpa->dropout_scale_tensor_uid.value(), K_SDPA_TENSOR_DROPOUT_SCALE_UID);
+
+    EXPECT_FALSE(sdpa->dropout_probability.has_value());
+    EXPECT_FALSE(sdpa->seed_tensor_uid.has_value());
+    EXPECT_FALSE(sdpa->offset_tensor_uid.has_value());
+}
+
+// Exercises the packer path for the attention-sink input: a FLOAT [1, H, 1, 1] sink in a
+// HALF graph lowers with its own dtype, not the graph's IO type.
+TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdWithSinkTokenRoundTrip)
+{
+    const auto numHeads = K_SDPA_TENSOR_Q_DIMS[1];
+    auto sinkToken = std::make_shared<TensorAttributes>();
+    sinkToken->set_uid(K_SDPA_TENSOR_SINK_TOKEN_UID).set_name("SINK_TOKEN");
+    sinkToken->set_data_type(DataType::FLOAT);
+    sinkToken->set_dim({1, numHeads, 1, 1}).set_stride({numHeads, 1, 1, 1});
+
+    SdpaAttributes sdpaAttrs;
+    sdpaAttrs.set_name("sdpa_with_sink");
+    sdpaAttrs.set_sink_token(sinkToken);
+
+    auto graphT = buildAndDeserializeSdpaGraph(_handle, std::move(sdpaAttrs), DataType::HALF);
+    if(HasFailure())
+    {
+        return;
+    }
+
+    // Q + K + V + O + SINK_TOKEN = 5
+    EXPECT_EQ(graphT.tensors.size(), 5u);
+
+    ASSERT_EQ(graphT.nodes.size(), 1u);
+    auto* sdpa = graphT.nodes[0]->attributes.AsSdpaAttributes();
+    ASSERT_NE(sdpa, nullptr);
+    ASSERT_TRUE(sdpa->sink_token_tensor_uid.has_value());
+    EXPECT_EQ(sdpa->sink_token_tensor_uid.value(), K_SDPA_TENSOR_SINK_TOKEN_UID);
+
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT* sinkT = nullptr;
+    for(const auto& t : graphT.tensors)
+    {
+        if(t->uid == K_SDPA_TENSOR_SINK_TOKEN_UID)
+        {
+            sinkT = t.get();
+        }
+    }
+    ASSERT_NE(sinkT, nullptr);
+    EXPECT_EQ(sinkT->dims, (std::vector<int64_t>{1, numHeads, 1, 1}));
+    EXPECT_EQ(sinkT->data_type, DataTypeSdk::FLOAT);
 }
 
 // Exercises packer code paths for FP8 descale/scale tensors, amax output

@@ -41,12 +41,14 @@ namespace TensileLite
         class ResultFileReporter : public ResultReporter
         {
         public:
+            // nullptr (no reporter) when no-results-file is set.
             static std::shared_ptr<ResultFileReporter> Default(po::variables_map const& args);
 
             ResultFileReporter(std::string const& filename,
                                bool               exportExtraCols,
                                bool               mergeSameProblems,
-                               PerformanceMetric  performanceMetric);
+                               PerformanceMetric  performanceMetric,
+                               bool               fusedA2ACols);
 
             virtual void reportValue_string(std::string const& key,
                                             std::string const& value) override;
@@ -75,6 +77,7 @@ namespace TensileLite
             bool              m_extraCol;
             bool              m_mergeSameProblems;
             PerformanceMetric m_performanceMetric;
+            bool              m_fusedA2ACols;
             // for extra columns
             std::string m_winnerSolution;
             int64_t     m_currSolutionIdx         = -1;

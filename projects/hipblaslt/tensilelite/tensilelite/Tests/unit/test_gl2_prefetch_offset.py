@@ -84,7 +84,9 @@
 #
 # test_gl2_prefetch_codegen runs without a device: it only generates and
 # assembles each config's kernel, so CPU-only runners (including the coverage
-# lane) still exercise GL2Prefetch's codegen paths.
+# lane) still exercise GL2Prefetch's codegen paths. The same test also runs the
+# KernelWriterAssembly hooks (defineVariableSgprs, allocGL2PrefetchAddrVgprs,
+# gl2PrefetchClearIncrement) that this harness does not emit itself.
 #
 # Usage:
 #   pytest test_gl2_prefetch_offset.py -v -s
@@ -99,7 +101,7 @@ import struct
 import tempfile
 import types
 from bisect import bisect_right
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from math import ceil
 from types import SimpleNamespace
 
@@ -129,6 +131,7 @@ from gpu_test_helpers import (  # noqa: E402
 TARGET = "gfx1250"
 HAS_GFX1250 = GFX_TARGET == TARGET
 WAVESIZE = 32
+HOST_PAD_K_BYTES = 64   # host K padding of a swizzled-TDM operand (SwizzledTdmGeometry.PAD_K_BYTES)
 GLOBAL_PREFETCH_SIZE = 256
 
 
@@ -145,6 +148,7 @@ class TensorSpec:
     sparse_side: str = None  # for is_m: "A" or "B" -- which sparse data tensor this
                              # metadata mirrors (Sparse==1 -> A, Sparse==2 -> B); tc
                              # itself is always literally "Metadata"
+    swizzled_tdm: bool = False  # gfx1250 global pre-swizzle consumed through TDM
 
     @property
     def subtc(self):
@@ -174,8 +178,11 @@ class GL2Config:
                               # (WorkGroup0); B-type is the mirror image. So a 2D
                               # cluster exercises A and B cooperatively at once.
     matrix_inst_k: int = 128
+    matrix_inst_m: int = 16
+    matrix_inst_n: int = 16
     mx_block: int = 32
     mx_block_free: int = 1
+    size_l: int = 2048       # runtime K used to derive swizzled-TDM paddedK row stride
     size_i: int = None        # free-dim size (M) override for A-type; None => clean M*MT
     size_j: int = None        # free-dim size (N) override for B-type; None => clean N*MT
     pgr: int = 2              # PrefetchGlobalRead: skipPGR advances the start
@@ -217,6 +224,11 @@ class GL2Config:
     user_args: bool = False   # SupportUserArgs: a batched kernel that may run with ArgType == 3
     arg_type: int = 0         # runtime ArgType; low 8 bits = named domain, bits 8+ = TDM wave id
     sizes_sum_zero: bool = False  # K == 0 (SizesSum = 0): the pointer-array dereference is skipped
+    inc64: bool = False       # PrefetchGL2Inc64Bit: 64-bit (sgpr pair) addr increment.
+    saddr: bool = False       # PrefetchGL2SAddr: sgpr pair base + 32-bit vgpr offset.
+    k_start: int = None       # StreamKLocalStart: a StreamK work item's first unroll
+                              # iteration within its tile; None leaves the K-start
+                              # path off, as for non-StreamK kernels.
 
     @property
     def lc(self):
@@ -287,6 +299,11 @@ def tensor_dims(spec, cfg):
         mx_unit = cfg.matrix_inst_k // cfg.mx_block
         coal = ((spec.mt * M + cfg.mx_block_free - 1) // cfg.mx_block_free) * mx_unit
         perp = cfg.depth_u // cfg.matrix_inst_k
+    elif spec.swizzled_tdm:
+        mi = cfg.matrix_inst_m if spec.subtc == "A" else cfg.matrix_inst_n
+        assert spec.mt % mi == 0
+        coal = mi * data_depth_u(spec, cfg)
+        perp = spec.mt * M // mi
     else:
         du = data_depth_u(spec, cfg)
         coal, perp = (spec.mt * M, du) if spec.tlu else (du, spec.mt * M)
@@ -343,8 +360,14 @@ def mt_tiles(spec, cfg):
     return cfg.cluster[0] if spec.subtc == "A" else cfg.cluster[1]
 
 
-def _A(tlu, mt, bpe=1):   return TensorSpec("A", tlu, mt, bpe)
-def _B(tlu, mt, bpe=1):   return TensorSpec("B", tlu, mt, bpe)
+def _A(tlu, mt, bpe=1, swizzled_tdm=False):
+    return TensorSpec("A", tlu, mt, bpe, swizzled_tdm=swizzled_tdm)
+
+
+def _B(tlu, mt, bpe=1, swizzled_tdm=False):
+    return TensorSpec("B", tlu, mt, bpe, swizzled_tdm=swizzled_tdm)
+
+
 def _MXSA(mt):            return TensorSpec("MXSA", True, mt, 1)
 def _MXSB(mt):            return TensorSpec("MXSB", True, mt, 1)
 def _M(side, tlu, mt):    return TensorSpec("Metadata", tlu, mt, 1, is_m=True, sparse_side=side)
@@ -366,6 +389,35 @@ CONFIGS = [
     # footprint is covered by this single WG's threads. Guards the degenerate
     # single-workgroup path. ----
     GL2Config("ab_fp8_tlu_nocluster", [_A(True, 256), _B(True, 256)], cluster=(1, 1)),
+    # ---- gfx1250 global pre-swizzle through TDM. Exercise the per-tensor gate
+    # independently first, then A+B together with whole-cluster cooperation. ----
+    GL2Config("a_swizzled_tdm", [_A(True, 64, swizzled_tdm=True), _B(False, 64)],
+              depth_u=128, cluster=(2, 1)),
+    GL2Config("b_swizzled_tdm", [_A(True, 64), _B(False, 64, swizzled_tdm=True)],
+              depth_u=128, cluster=(1, 2)),
+    GL2Config("ab_swizzled_tdm", [_A(True, 64, swizzled_tdm=True),
+                                   _B(False, 64, swizzled_tdm=True)],
+              depth_u=256, cluster=(2, 2)),
+    # Degenerate non-cooperative path: a single workgroup must cover the complete
+    # swizzled A/B footprint without cluster-local tile/share indices.
+    GL2Config("ab_swizzled_tdm_nocluster", [_A(True, 64, swizzled_tdm=True),
+                                             _B(False, 64, swizzled_tdm=True)],
+              depth_u=128, cluster=(1, 1)),
+    # More cache-line addresses than cooperative threads forces two address VGPRs
+    # per thread and exercises the swizzled per-instruction stride-add path.
+    GL2Config("ab_swizzled_tdm_nl2", [_A(True, 64, swizzled_tdm=True),
+                                       _B(False, 64, swizzled_tdm=True)],
+              depth_u=256, num_threads=32, cluster=(1, 1)),
+    # Runtime K is not padK-aligned. The physical row stride must use the
+    # host-padded K extent (alignUp(2033, 64) == 2048), not raw SizeL.
+    GL2Config("ab_swizzled_tdm_padded_k", [_A(True, 64, swizzled_tdm=True),
+                                            _B(False, 64, swizzled_tdm=True)],
+              depth_u=128, cluster=(2, 2), size_l=2033),
+    # Last cluster is partial in both free dimensions. The host-padded final MI row
+    # remains addressable; excess cooperative rows clamp to that row.
+    GL2Config("ab_swizzled_tdm_edge", [_A(True, 64, swizzled_tdm=True),
+                                        _B(False, 64, swizzled_tdm=True)],
+              depth_u=128, cluster=(2, 2), size_i=91, size_j=77),
     # ---- 384-byte coalesced range with two 256-byte prefetch chunks. ----
     GL2Config("ab_fp8_ncc_partial",    [_A(True, 384), _B(True, 384)],
               depth_u=128, cluster=(1, 1)),
@@ -553,6 +605,14 @@ CONFIGS = [
     GL2Config("pgr2_guard_taken", [_A(True, 256), _B(False, 256)], cluster=(2, 2),
               loop_counter=2),
 
+    # ---- StreamK. A work item starts StreamKLocalStart unroll iterations into its
+    # tile, so the start address gains kStart*inc before skipPGR, the same shift
+    # its TDM loads take. Mixed layouts so the shift is checked on both K axes,
+    # and MX scales so each tensor scales kStart by its own increment. ----
+    GL2Config("streamk_kstart", [_A(True, 256), _B(False, 256)], cluster=(2, 2), k_start=3),
+    GL2Config("streamk_kstart_mx", [_A(True, 192), _B(True, 192), _MXSA(192), _MXSB(192)],
+              depth_u=256, mx_block=32, cluster=(2, 2), k_start=5),
+
     # ---- SupportUserArgs (see the coverage note at the top). ----
     # Strided launch of a UserArgs kernel (ArgType 0 + TDM wave id in bits 8+):
     # the batch stride still applies.
@@ -602,6 +662,35 @@ CONFIGS = [
               depth_u=512, mx_block=128, mx_block_free=128, cluster=(4, 2),
               gsu=2, gsuc=True, k_iters=14),
 ]
+
+# ---- PrefetchGL2Inc64Bit: the same footprints with a 64-bit increment, covering
+# every consumer of it -- setIncrement on each layout (TLU, non-TLU, MX, sparse
+# metadata), the GSU chunk offset and stride widening (both chunk layouts),
+# skipPGR on PGR 1 / >1 and the guard, and incrementAddr. ----
+_INC64_CONFIGS = {
+    "ab_fp8_mixed_layout", "abmx_fp8", "a_sparse_tlu_mlayout1",
+    "gsu4_interleaved", "gsu4_contiguous_rem", "gsu2_mx_cluster",
+    "pgr1_nl2", "pgr3_ntlu", "pgr2_guard_taken", "streamk_kstart", "streamk_kstart_mx",
+    "ab_swizzled_tdm",  # the swizzled-TDM increment is MI*DepthU*bpe, widened to a pair
+}
+CONFIGS += [replace(c, name=f"{c.name}_inc64", inc64=True)
+            for c in CONFIGS if c.name in _INC64_CONFIGS]
+
+# ---- PrefetchGL2SAddr: the scalar-base + 32-bit offset address form, covering
+# the 32-bit per-lane offset on each layout (TLU, non-TLU, MX, FP4 bpe, sparse
+# metadata, gl2nl > 1), the base folding the batch and GSU chunk offsets, and
+# skipPGR / incrementAddr on the sgpr base with both increment widths. ----
+_SADDR_CONFIGS = {
+    "ab_fp8_mixed_layout", "abmx_fp8", "ab_fp4_tlu", "ab_ntlu_edge",
+    "a_sparse_nl2", "ab_tlu_nl_ceil", "gsu4_interleaved", "gsu3_contiguous_rem",
+    "pgr1_nl2", "pgr3_ntlu", "pgr2_guard_taken",
+    "abmx_fp8_inc64", "gsu4_contiguous_rem_inc64", "pgr1_nl2_inc64", "pgr3_ntlu_inc64",
+    "userargs_strided", "userargs_ptr_array", "userargs_ptr_k0",
+    "userargs_ptr_array_gsu4_interleaved", "userargs_ptr_array_gsu2_mx",
+    "streamk_kstart", "streamk_kstart_inc64",
+}
+CONFIGS += [replace(c, name=f"{c.name}_saddr", saddr=True)
+            for c in CONFIGS if c.name in _SADDR_CONFIGS]
 
 
 def batch_stride_elems(spec, cfg):
@@ -658,6 +747,7 @@ def _make_kernel(cfg):
     m_spec = next((t for t in cfg.tensors if t.is_m), None)
     kernel = {
         "ProblemType": {
+            "UseScaleAlphaVec": 0,
             "Batched": cfg.batched,
             "StridedBatched": cfg.batched,
             "IndicesBatch": [2] if cfg.batched else [],
@@ -684,12 +774,16 @@ def _make_kernel(cfg):
         "_DepthUA": depth_u_side("A", cfg),
         "_DepthUB": depth_u_side("B", cfg),
         "MatrixInstK": cfg.matrix_inst_k,
+        "MatrixInstM": cfg.matrix_inst_m,
+        "MatrixInstN": cfg.matrix_inst_n,
         "ClusterDim": list(cfg.cluster),
         "NumThreads": cfg.num_threads,
         "DepthU": cfg.depth_u,
         "PrefetchGlobalRead": cfg.pgr,
         "WavefrontSize": WAVESIZE,
         "PrefetchGL2": cfg.pgl,
+        "PrefetchGL2Inc64Bit": cfg.inc64,
+        "PrefetchGL2SAddr": cfg.saddr,
         "GlobalSplitU": cfg.gsu,
     }
     if m_spec is not None:
@@ -737,8 +831,11 @@ def _make_writer(kernel):
 # Kernel assembly generation
 # ---------------------------------------------------------------------------
 
-def build_kernel(cfg):
+def build_kernel(cfg, with_prefetch=False):
     """Build a kernel computing GL2 addresses for all of cfg.tensors at once.
+
+    with_prefetch also emits each stage's issueLoad and a final clearIncrement,
+    for assembling only: the dummy base buffer does not back the whole footprint.
 
     The kernel emits cfg.n_inc+1 "stages": stage 0 is the start address after
     the loop-counter-guarded skipPGR, and each later stage calls incrementAddr
@@ -780,10 +877,14 @@ def build_kernel(cfg):
     shared = ["WorkGroup0", "WorkGroup1", "WorkGroup2", "LoopCounterL"]
     if cfg.n_regions > 1:
         shared += ["WGOUT"]   # per-region output shift = linear_wg_id * n_out
+    if cfg.saddr:
+        shared += ["BaseDelta"]   # GL2PrefetchBase{tc} - Address{tc} (low 32 bits)
     if "A" in subtcs:
         shared += ["StrideAI", "StrideAL", "SizeI"]
     if "B" in subtcs:
         shared += ["StrideBJ", "StrideBL", "SizeJ"]
+    if any(t.swizzled_tdm for t in cfg.tensors):
+        shared += ["SizeL"]
     for t in cfg.tensors:
         if t.is_m:                        # StrideMetadata{I,J} + StrideMetadataL
             idxChar = "I" if t.idx == 0 else "J"
@@ -792,6 +893,9 @@ def build_kernel(cfg):
         # GSU packs the group count and the GSUC bit; SizesSum feeds numIter in the
         # contiguous branch.
         shared += ["GSU", "SizesSum"]
+    if cfg.k_start is not None:
+        assert not cfg.gsu_on, f"{cfg.name}: StreamK forces GlobalSplitU=0"
+        shared += ["StreamKLocalStart"]
     if cfg.user_args:
         assert cfg.batched, f"{cfg.name}: SupportUserArgs needs a batched config"
         assert not (cfg.gsu_on and cfg.sizes_sum_zero), \
@@ -809,7 +913,12 @@ def build_kernel(cfg):
         w.sgprs["GSUSumIdx"] = w.sgprPool.checkOut(2, "GSUSumIdx", preventOverflow=False)
     for t in cfg.tensors:
         w.sgprs[f"Address{t.tc}"] = w.sgprPool.checkOutAligned(2, 2, f"Address{t.tc}", preventOverflow=False)
-        w.sgprs[f"GL2PrefetchInc{t.tc}"] = w.sgprPool.checkOut(1, f"GL2PrefetchInc{t.tc}", preventOverflow=False)
+        n_inc = 2 if cfg.inc64 else 1
+        w.sgprs[f"GL2PrefetchInc{t.tc}"] = w.sgprPool.checkOutAligned(
+            n_inc, n_inc, f"GL2PrefetchInc{t.tc}", preventOverflow=False)
+        if cfg.saddr:
+            w.sgprs[f"GL2PrefetchBase{t.tc}"] = w.sgprPool.checkOutAligned(
+                2, 2, f"GL2PrefetchBase{t.tc}", preventOverflow=False)
         if cfg.batched:    # batch stride Stride{tc}K (index 2 -> 'K')
             w.sgprs[f"Stride{t.tc}K"] = w.sgprPool.checkOut(1, f"Stride{t.tc}K", preventOverflow=False)
 
@@ -830,15 +939,22 @@ def build_kernel(cfg):
     vgpr_sets = {}
     for t in cfg.tensors:
         ia = t.ia + [2] if cfg.batched else t.ia   # batch index 2 must be in ia
-        tp = {"tensorChar": t.tc, "idx": t.idx, "tlu": t.tlu, "bpeGR": t.bpe, "ia": ia, "isM": t.is_m}
+        tp = {"tensorChar": t.tc, "idx": t.idx, "tlu": t.tlu, "bpeGR": t.bpe,
+              "ia": ia, "isM": t.is_m, "isSwizzledTDM": t.swizzled_tdm}
+        if t.swizzled_tdm:
+            mi = cfg.matrix_inst_m if t.subtc == "A" else cfg.matrix_inst_n
+            inner_k = round(16 / t.bpe)
+            tp["swizzleK"] = inner_k * (WAVESIZE // mi)
+            tp["swizzlePadK"] = round(HOST_PAD_K_BYTES / t.bpe)
         comp.init(w, kernel, tp)
         assert tp["gl2nc"] == tensor_dims(t, cfg)[3], \
             f"{t.tc}: gl2nc {tp['gl2nc']} != expected {tensor_dims(t, cfg)[3]}"
         assert tp["gl2nl"] == tensor_gl2nl(t, cfg), \
             f"{t.tc}: gl2nl {tp['gl2nl']} != expected {tensor_gl2nl(t, cfg)}"
+        n_addr = comp.numAddrVgpr(kernel)
         for i in range(tp["gl2nl"]):
             name = f"GL2PrefetchAddr{t.tc}_{i}"
-            vgpr_sets[name] = w.vgprPool.checkOutAligned(2, 2, name, preventOverflow=False)
+            vgpr_sets[name] = w.vgprPool.checkOutAligned(n_addr, n_addr, name, preventOverflow=False)
         tps.append((t, tp))
 
     # output elements written by one workgroup (used to shift per-wg regions);
@@ -863,9 +979,10 @@ def build_kernel(cfg):
                 body.add(comp.setIncrement(w, kernel, tp))
                 body.add(comp.calculateStartAddr(w, kernel, tp, gsu_iter_sgpr))
     else:
+        k_start_sgpr = None if cfg.k_start is None else "StreamKLocalStart"
         for t, tp in tps:
             body.add(comp.setIncrement(w, kernel, tp))
-            body.add(comp.calculateStartAddr(w, kernel, tp))
+            body.add(comp.calculateStartAddr(w, kernel, tp, kStartSgprName=k_start_sgpr))
 
     # Same guard as the pre-loop GL2 issue in KernelWriter: with LoopCounterL <=
     # PGR there is nothing left to prefetch, so the skip is branched over. It runs
@@ -898,6 +1015,8 @@ def build_kernel(cfg):
         coal_b = _data_coal(cfg, "B")
         consts += [("StrideBJ", coal_b), ("StrideBL", coal_b),
                    ("SizeJ", free_dim_size(cfg, "B"))]
+    if any(t.swizzled_tdm for t in cfg.tensors):
+        consts += [("SizeL", cfg.size_l)]
     for t in cfg.tensors:
         if t.is_m:
             # StrideMetadata{I,J}/StrideMetadataL are both programmed to the
@@ -907,6 +1026,8 @@ def build_kernel(cfg):
             idxChar = "I" if t.idx == 0 else "J"
             consts += [(f"StrideMetadata{idxChar}", coal_m), ("StrideMetadataL", coal_m)]
     consts += [("WorkGroup0", 0), ("WorkGroup1", 0), ("WorkGroup2", 0), ("LoopCounterL", cfg.lc)]
+    if cfg.k_start is not None:
+        consts += [("StreamKLocalStart", cfg.k_start)]
     if cfg.batched:                              # programmed batch stride Stride{tc}K
         consts += [(f"Stride{t.tc}K", batch_stride_elems(t, cfg)) for t in cfg.tensors]
     if cfg.gsu_on:
@@ -971,13 +1092,30 @@ def build_kernel(cfg):
     def export_tensor(t, tp, region):
         num_loads = tp["gl2nl"]
         base = w.sgprs[f"Address{t.tc}"]
+        if cfg.saddr:
+            # exported offset = (GL2PrefetchBase - Address) + per-lane 32-bit offset
+            delta = w.sgprs["BaseDelta"]
+            epi.add(TextBlock("  s_sub_u32 s%d, s%d, s%d\n"
+                              % (delta, w.sgprs[f"GL2PrefetchBase{t.tc}"], base)))
         k = 0
         for i in range(tp["gl2nl"]):
             addr = vgpr_sets[f"GL2PrefetchAddr{t.tc}_{i}"]
             if derefs_ptr_array(t, cfg):
                 # export the low word (the host subtracts the batch base), or -1 on a wrong high word
-                epi.add(TextBlock("  v_cmp_ne_u32 vcc_lo, 0x%x, v%d\n" % (ptr_array_base(t.tc, 0) >> 32, addr + 1)))
-                epi.add(TextBlock("  v_cndmask_b32 v%d, v%d, -1, vcc_lo\n" % (val, addr)))
+                if cfg.saddr:
+                    # rebuild the 64-bit address; a_hi is free until the store below
+                    sbase = w.sgprs[f"GL2PrefetchBase{t.tc}"]
+                    epi.add(TextBlock("  v_add_co_u32 v%d, vcc_lo, s%d, v%d\n" % (val, sbase, addr)))
+                    epi.add(TextBlock("  v_mov_b32 v%d, s%d\n" % (a_hi, sbase + 1)))
+                    epi.add(TextBlock("  v_add_co_ci_u32 v%d, vcc_lo, v%d, 0, vcc_lo\n" % (a_hi, a_hi)))
+                    hi_vgpr = a_hi
+                else:
+                    epi.add(TextBlock("  v_mov_b32 v%d, v%d\n" % (val, addr)))
+                    hi_vgpr = addr + 1
+                epi.add(TextBlock("  v_cmp_ne_u32 vcc_lo, 0x%x, v%d\n" % (ptr_array_base(t.tc, 0) >> 32, hi_vgpr)))
+                epi.add(TextBlock("  v_cndmask_b32 v%d, v%d, -1, vcc_lo\n" % (val, val)))
+            elif cfg.saddr:
+                epi.add(TextBlock("  v_add_nc_u32 v%d, s%d, v%d\n" % (val, delta, addr)))
             else:
                 epi.add(TextBlock("  v_sub_co_u32 v%d, vcc_lo, v%d, s%d\n" % (val, addr, base)))
             # output element index = region + Serial*num_loads + k
@@ -1005,9 +1143,14 @@ def build_kernel(cfg):
                 epi.add(comp.incrementAddr(w, kernel, tp))
         for t, tp in tps:
             num_loads = tp["gl2nl"]
+            if with_prefetch:
+                epi.add(comp.issueLoad(w, kernel, tp))
             export_tensor(t, tp, region)
             layout.append((t, num_loads, stage, region))
             region += cfg.num_threads * num_loads
+    if with_prefetch:
+        for t, tp in tps:
+            epi.add(comp.clearIncrement(w, kernel, tp))
     epi.add(TextBlock("  s_wait_storecnt 0x0\n"))
     n_out = region
 
@@ -1119,6 +1262,9 @@ def inc_bytes(spec, cfg):
     if spec.is_m:
         coal, _, _, _ = tensor_dims(spec, cfg)
         return round(coal * cfg.depth_u_metadata) if spec.tlu else round(cfg.depth_u_metadata)
+    if spec.swizzled_tdm:
+        mi = cfg.matrix_inst_m if spec.subtc == "A" else cfg.matrix_inst_n
+        return round(mi * data_depth_u(spec, cfg) * bpe)
     if spec.tlu:
         return _data_coal(cfg, spec.subtc) * round(data_depth_u(spec, cfg) * bpe)
     return round(data_depth_u(spec, cfg) * bpe)
@@ -1154,6 +1300,12 @@ def expected_offsets(spec, cfg, stage=0, batch=0, group=0):
     implementation detail. Any allocation that yields the same footprint passes;
     only a coverage bug (a missing/extra/out-of-bounds address) fails."""
     g = _footprint_geometry(spec, cfg, stage, batch, group)
+    if g.swizzled:
+        return {
+            min(row, g.last_valid_row) * g.row_stride_bytes + line * GLOBAL_PREFETCH_SIZE + g.shift
+            for row in range(g.perp)
+            for line in range(tensor_dims(spec, cfg)[2])
+        }
     bpe, edge, perp_stride, shift = g.bpe, g.edge, g.perp_stride, g.shift
     ncc = tensor_dims(spec, cfg)[2]
     gps_elems = round(GLOBAL_PREFETCH_SIZE / bpe)
@@ -1189,15 +1341,25 @@ def _footprint_geometry(spec, cfg, stage, batch, group):
         perp_stride = coal
         edge = size_free - 1
     k_iter = gsu_start_iter(cfg, group) + (cfg.skip_iters + stage) * gsu_iter_stride(cfg)
+    k_iter += cfg.k_start or 0
     shift = k_iter * inc_bytes(spec, cfg)
     # a pointer-array base already selects the batch (run_config strips it)
     if cfg.batched and not derefs_ptr_array(spec, cfg):
         shift += batch * round(batch_stride_elems(spec, cfg) * spec.bpe)
-    return SimpleNamespace(
+    g = SimpleNamespace(
         bpe=spec.bpe, coal=coal, perp=perp, size_free=size_free, unit=unit,
         perp_stride=perp_stride, edge=edge,
         coal_to_mt=spec.is_mx or spec.tlu,   # MT offset & clamp land in coal (else perp)
-        shift=shift)
+        shift=shift, swizzled=spec.swizzled_tdm)
+    if spec.swizzled_tdm:
+        # Swizzled-TDM rows are outer MI rows `MI * alignUp(SizeL, padK)`
+        # elements apart; each row's DepthU slice (coal elements) is contiguous.
+        mi = cfg.matrix_inst_m if spec.subtc == "A" else cfg.matrix_inst_n
+        pad_k = round(HOST_PAD_K_BYTES / spec.bpe)
+        padded_k = (cfg.size_l + pad_k - 1) // pad_k * pad_k
+        g.row_stride_bytes = round(mi * padded_k * spec.bpe)
+        g.last_valid_row = (size_free - 1) // mi
+    return g
 
 
 def uncovered_bytes(offsets, spec, cfg, stage=0, batch=0, group=0):
@@ -1211,11 +1373,17 @@ def uncovered_bytes(offsets, spec, cfg, stage=0, batch=0, group=0):
     is perpendicular (non-TLU). Rows are measured from their own start, so this
     does not model cache-line alignment of a row that starts mid-line."""
     g = _footprint_geometry(spec, cfg, stage, batch, group)
-    if g.coal_to_mt:
+    if g.swizzled:
+        row_bytes = round(g.coal * g.bpe)
+        row_starts = [r * g.row_stride_bytes + g.shift
+                      for r in range(min(g.perp, g.last_valid_row + 1))]
+    elif g.coal_to_mt:
         rows, row_elems = g.perp, min(g.coal, g.edge + g.unit)
     else:
         rows, row_elems = min(g.perp, g.size_free), g.coal
-    row_bytes = round(row_elems * g.bpe)
+    if not g.swizzled:
+        row_bytes = round(row_elems * g.bpe)
+        row_starts = [round(p * g.perp_stride * g.bpe) + g.shift for p in range(rows)]
 
     merged = []
     for o in sorted(set(offsets)):
@@ -1226,8 +1394,7 @@ def uncovered_bytes(offsets, spec, cfg, stage=0, batch=0, group=0):
     starts = [m[0] for m in merged]
 
     gaps = []
-    for p in range(rows):
-        lo = round(p * g.perp_stride * g.bpe) + g.shift
+    for lo in row_starts:
         hi = lo + row_bytes
         i = bisect_right(starts, lo) - 1
         if i < 0 or merged[i][1] < hi:
@@ -1351,6 +1518,95 @@ def _assemble_for_target(asm, obj_path):
     assert proc.returncode == 0, proc.stderr
 
 
+class _NoPackDataType:
+    """DataType stand-in so defineVariableSgprs skips the pack-sgpr block."""
+    def isHalf(self): return False
+    def isBFloat16(self): return False
+    def isInt8(self): return False
+    def is8bitFloat(self): return False
+
+
+def _cover_kwa_gl2_hooks(cfg):
+    """Run the KernelWriterAssembly GL2 hooks this harness does not emit.
+
+    build_kernel calls GL2PrefetchLoad directly. defineVariableSgprs (the
+    GL2PrefetchInc / GL2PrefetchBase sgprs), allocGL2PrefetchAddrVgprs (the
+    64-bit-vaddr alignment), and gl2PrefetchClearIncrement live on the writer.
+    """
+    from tensilelite.KernelWriter import KernelWriter
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly as KWA
+
+    # The base hooks are the fallback an override replaces. Call them once per
+    # config; they do not depend on cfg.
+    assert KernelWriter.allocGL2PrefetchAddrVgprs(None, {}, {}, {}, 7) == 7
+    assert KernelWriter.gl2PrefetchClearIncrement(None, {}, {}, {}) == ""
+
+    kernel = _make_kernel(cfg)
+    kernel["enableTDMMetadata"] = any(t.is_m for t in cfg.tensors)
+    tPA = {"tensorChar": "A", "gl2nl": 2, "is_sparse": cfg.sparse == 1}
+    tPB = {"tensorChar": "B", "gl2nl": 1}
+    if kernel["ProblemType"]["MXBlockA"]:
+        tPA["MX"] = {"tensorChar": "MXSA", "gl2nl": 1}
+    if kernel["ProblemType"]["MXBlockB"]:
+        tPB["MX"] = {"tensorChar": "MXSB", "gl2nl": 1}
+    if kernel["enableTDMMetadata"]:
+        meta = {"tensorChar": "Metadata", "gl2nl": 1}
+        (tPA if cfg.sparse == 1 else tPB)["tpsMetadata"] = meta
+
+    w = _make_writer(kernel)
+    w.states.mxsa = SimpleNamespace()
+    w.states.mxsb = SimpleNamespace()
+    w.states.m = SimpleNamespace()
+    w.states.rapDropAResidentLoads = False
+    for name in ("allocGL2PrefetchAddrVgprs", "gl2PrefetchClearIncrement", "gl2PrefetchTpList"):
+        setattr(w, name, types.MethodType(getattr(KWA, name), w))
+
+    # Odd start: a 64-bit vaddr rounds up to an even VGPR, a 32-bit saddr offset does not.
+    a_start = w.allocGL2PrefetchAddrVgprs(kernel, tPA, tPB, 5)
+    assert w.states.a.startVgprGL2PrefetchAddr == (5 if cfg.saddr else 6)
+    assert a_start > w.states.a.startVgprGL2PrefetchAddr
+    cleared = str(w.gl2PrefetchClearIncrement(kernel, tPA, tPB))
+    inc = "GL2PrefetchIncA"
+    if cfg.inc64:
+        assert "s[sgpr%s:sgpr%s+1], 0" % (inc, inc) in cleared
+    else:
+        assert "s[sgpr%s], 0" % inc in cleared and "+1" not in cleared
+
+    # defineVariableSgprs walks the whole sgpr prologue. Turn off every block
+    # except PrefetchGL2 so only the inc/base allocation runs.
+    sgpr_kernel = _make_kernel(cfg)
+    sgpr_kernel.update(UseSubtileImpl=True, BufferLoad=False, enableTDMA=False,
+                       enableTDMB=False, _UseSgprForGRO=False, NumWaves=1,
+                       DirectToVgprA=False, DirectToVgprB=False,
+                       DirectToVgprSparseMetadata=False,
+                       _GlobalAccumulation="Off", AdaptiveGemmGSUA=0,
+                       enableTDMMetadata=kernel["enableTDMMetadata"])
+    sgpr_kernel["ProblemType"]["DataType"] = _NoPackDataType()
+    sw = _make_writer(sgpr_kernel)
+    sw.states.freeSgprVarPool = set()
+    sw.states.use64bShadowLimit = False
+    sw.states.use64bShadowLimitMX = False
+    sw.states.staggerUCode = False
+    sw.states.IncLdsBufSwitch = False
+    sw.states.lrvwTileA = sw.states.lrvwTileB = sw.states.lrvwTileMetadata = 1
+    sw.states.nonPostLoopSgpr = []
+    for obj in (sw.states.a, sw.states.b):
+        obj.numSgprGlobalReadIncs = 0
+    sw.states.mxsa = SimpleNamespace(numSgprGlobalReadIncs=0)
+    sw.states.mxsb = SimpleNamespace(numSgprGlobalReadIncs=0)
+    sw.states.m = SimpleNamespace(numSgprGlobalReadIncs=0)
+    for name in ("defineSgpr", "defineSgprIdx", "defineVariableSgprs",
+                 "setSgprToInUseState", "setSgprToFreeState"):
+        setattr(sw, name, types.MethodType(getattr(KWA, name), sw))
+    defined = str(sw.defineVariableSgprs(sgpr_kernel))
+    for tc in ("A", "B"):
+        assert "sgprGL2PrefetchInc%s" % tc in defined
+        assert ("sgprGL2PrefetchBase%s" % tc in defined) == cfg.saddr
+    if cfg.inc64:
+        # numIncSgpr == 2, so the inc register is allocated as a pair.
+        assert "GL2PrefetchIncA" in sw.sgprs
+
+
 @pytest.mark.parametrize("cfg", CONFIGS, ids=lambda c: c.name)
 def test_gl2_prefetch_codegen(cfg, tmp_path):
     """Generate and assemble every config's kernel, on CPU.
@@ -1358,9 +1614,11 @@ def test_gl2_prefetch_codegen(cfg, tmp_path):
     The address check above needs a gfx1250 device, so CPU-only runners (the
     coverage lane among them) skip it. This half keeps every codegen path in
     GL2Prefetch exercised there, and still catches register-model mismatches
-    (build_kernel asserts gl2nc/gl2nl) and assembly the target rejects."""
-    asm, _, _ = build_kernel(cfg)
+    (build_kernel asserts gl2nc/gl2nl) and assembly the target rejects.
+    It also runs the KernelWriterAssembly GL2 hooks for this config's inc64/saddr."""
+    asm, _, _ = build_kernel(cfg, with_prefetch=True)
     _assemble_for_target(asm, str(tmp_path / f"gl2_{cfg.name}.o"))
+    _cover_kwa_gl2_hooks(cfg)
 
 
 # ---------------------------------------------------------------------------

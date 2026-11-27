@@ -29,6 +29,33 @@ HARDWARE = {
     "gfx1201": origami.get_hardware_for_arch(
         origami.architecture_t.gfx1201, 60, 128 * 1024, 512 * 1024, 6 * 1024 * 1024, 2500000
     ),
+    "gfx1250": origami.get_hardware_for_arch(
+        origami.architecture_t.gfx1250, 256, 320 * 1024, 512 * 1024, 4 * 1024 * 1024, 2400000
+    ),
+}
+
+
+def _w4a16_device(arch, cus: int, rf_capacity: int, memory_clock_ghz: float) -> origami.hardware_t:
+    """A gfx115x device as hipBLASLt reads it from the board.
+
+    get_hardware_for_arch derives the MALL and DRAM rates from the compute clock (2.9 GHz) and
+    the architecture's clock ratio (1.5). hipBLASLt uses the memory clock HIP reports for the
+    device instead, which changes both rates.
+    """
+    compute_clock_ghz = 2.9
+    hardware = origami.get_hardware_for_arch(
+        arch, cus, 64 * 1024, rf_capacity, 2 * 1024 * 1024, int(compute_clock_ghz * 1e6)
+    )
+    scale = (compute_clock_ghz / 1.5) / memory_clock_ghz
+    hardware.mem2_perf_ratio *= scale
+    hardware.mem3_perf_ratio *= scale
+    return hardware
+
+
+# Hardware objects of the W4A16 ranking regression (test_w4a16_ranking_regression.py).
+W4A16_HARDWARE = {
+    "gfx1150": _w4a16_device(origami.architecture_t.gfx1150, 16, 512 * 1024, 2.8),
+    "gfx1151": _w4a16_device(origami.architecture_t.gfx1151, 40, 768 * 1024, 1.0),
 }
 
 

@@ -274,11 +274,16 @@ public:
     }
 };
 
-// The number of entries in the kpack module caches of all packs.
+// The number of entries in the kpack module caches of the packs every test build compiles:
+// Pointwise, ConvFwd, gfx950 dense and unified 2D/3D, and gfx942 dense. The FlyDSL caches
+// (optional) and the gfx1151 caches (file-local) are not counted.
 inline size_t packModuleCacheEntries()
 {
     return pointwiseKpackModuleCache().size() + convFwdKpackModuleCache().size()
-           + gfx950AttentionDenseKpackModuleCache().size();
+           + gfx950AttentionDenseKpackModuleCache().size()
+           + gfx950AttentionUnified2DKpackModuleCache().size()
+           + gfx950AttentionUnified3DKpackModuleCache().size()
+           + gfx942AttentionDenseKpackModuleCache().size();
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing

@@ -12,7 +12,7 @@ minimal authored source root.
 and archive (`arch: [<G>]`) into each selected member's folder; no generic-named folder is
 installed. Disk use grows with the number of members.
 
-Copies depend only on the source tree, the generic's spelling, hipcc and the table, so they are
+Copies depend only on the source tree, the generic's spelling, the HIP compiler and the table, so they are
 identical across member folders and separate per-arch builds, and the loader collapses them to
 one entry. Copies from different compilers differ in `provenance`, and the loader drops both.
 
@@ -49,7 +49,7 @@ selection is per-UKD on `kernel_source.kind`, never per-folder, so one root feed
 producer into one kpack per arch. Nothing is registered in CMake: adding a descriptor is
 dropping files in a folder.
 
-Two filters decide what a build packs, and both prune exactly as arch pruning does:
+Three filters decide what a build packs, and all prune exactly as arch pruning does:
 
 - **Family folders.** A descriptor family lives in a top-level child folder of a root
   (`rocKE/` and `FlyDSL/` today; `hip/` has no switch). `HKP_DESCRIPTOR_FAMILIES` in
@@ -60,24 +60,50 @@ Two filters decide what a build packs, and both prune exactly as arch pruning do
   name deeper in the tree is not a family. A root that is itself placed inside a family
   folder (for example `descriptors/rocKE/...`) is not filtered by that family's switch:
   pointing a root there is the user's responsibility.
+- **Incomplete bundles.** `--exclude-folder` also takes a `/`-separated path under the
+  root, which excludes that one folder (case-insensitively, like a family). The provider
+  passes `rocKE/<bundle>` to the production root, and to the probes that read it, for
+  every rocKE bundle whose DVC outputs were not pulled (`HKP_PRODUCT_EXCLUDED_BUNDLES`,
+  set by the provider's DVC check): its git-tracked descriptors may name one that lives
+  in the missing output, which the packer would refuse as a dangling reference.
 - **Producer kinds.** A `kernel_source.kind` this build has no producer for is passed
   as `--disable-kind <kind>`. Its UKDs are dropped from their KDPs, and a KDP left with
   none does not ship. The rocKE producer, and the private rocKE wheels and comgr it
   lowers through, exist only under `HIPKERNELPROVIDER_ENABLE_ROCKE=ON`, so with it OFF
   `rocke` is disabled. A kind outside the vocabulary is still a validation error.
+- **DVC models.** A UHD whose model file is absent while `<model>.dvc` sits beside it (a
+  `dvc pull` that was not run) is validated, then left out with a warning naming the
+  pointer: neither the UHD nor its model ships, and a UED that names it keeps a dangling
+  UHD id, which the loader reads as that role being off. A model with no pointer is still
+  an error. `HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON` is passed as `--require-dvc`,
+  which makes the un-pulled model an error too. Each shard that ships beside such a skip
+  holds `hkp-unpulled-models.record` at its root (JSON: `uhd_id`, source-relative `uhd`
+  and `pointer` per skipped UHD), written only when something was skipped. Its extension
+  is not `.json` on purpose, so the loader does not warn about it. A census accepts a
+  bound model's absence only when this record names it.
 
 A root, or an arch, left with nothing to pack is skipped, not failed. Only producers
 gated by a build option (rocKE today) are disabled by kind; a kind outside that set is
 not pruned.
 
-The provider wires eight roots: production, plus seven over the five authored test sets.
+The provider wires eleven roots: production, plus seven over the five authored test sets and
+three slotted fixture roots packed from `tests/fixtures/` (`slotted`, `slotted_hsaco`, and
+`slotted_multi_launch`, which exists only with `HIPKERNELPROVIDER_ENABLE_ROCKE=ON`).
 `shared` packs twice, once into each test binary's discovery root. `archive_fixture` packs
-twice, once for each test binary, so each binary reads its own archive.
+twice, once for each test binary, so each binary reads its own archive. `slotted_hsaco` and
+`slotted_multi_launch` are fixed-arch roots, authored for gfx950 and gfx1151: each packs for
+its arch only when the build selects it (`GPU_TARGETS`) and is dormant otherwise, so a
+build ships a device-specific fixture shard only for its own arch. The packed-load test
+decides from the staged shards: with the unit tree's `<arch>` shard present the fixture's
+`<arch>` shard is required, else the case skips naming the arch. The packaging probes
+`slotted-hsaco-gfx950` and `slotted-multi-launch-gfx1151` (see Packaging probes) pack these
+roots in a build that does not select the arch.
 
 | Root | Source | Ships |
 |---|---|---|
 | Production | `HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT`, a `CACHE PATH` defaulting to the in-tree `src/engines/kernel_ingestor_engine/descriptors/` | yes |
 | Test | `src/engines/kernel_ingestor_engine/test_descriptors/{shared,unit,integration,archive_fixture,multi_launch}/` | only under `HIPKERNELPROVIDER_ENABLE_TESTS` |
+| Slotted fixtures | `descriptor-packaging/tests/fixtures/{slotted,slotted_hsaco,slotted_multi_launch}/`; `slotted_hsaco` for gfx950 and `slotted_multi_launch` for gfx1151, each only when the build selects that arch | only under `HIPKERNELPROVIDER_ENABLE_TESTS` |
 
 Before wiring any root, configure asks the packer (`pipeline.shipped_engines` and
 `pipeline.offered_engines`, under the base interpreter, with the same filters) which
@@ -90,11 +116,12 @@ too. Two answers decide which engine-pinned tests are registered:
 
 - **Per-arch registrations** (the census, and the external and gpu_ref integration
   checks) install into a gfx-specific shard and are gated on
-  `hkp_gfx950_attention_dense_available()`, which reads what the shard for that arch
-  ships.
-- **Host-side sources that pin an engine**, such as the gfx950 knobs suite, are gated on
-  `hkp_product_offers_engine()`, which reads what the product root carries for any arch
-  under this build's filters. It never reads `GPU_TARGETS`: the host libraries and
+  `hkp_product_ships_engine_for_arch()`, which reads what the shard for that arch
+  ships. The single-arch rocKE attention engines pinned against the SdpaFwd bundles
+  are registered from one table, `HKP_PINNED_ATTENTION_ENGINES` in `src/CMakeLists.txt`.
+- **Host-side sources that pin an engine**, such as the attention knob suites, are gated
+  on `hkp_product_offers_engine()`, which reads what the product root carries for any
+  arch under this build's filters. It never reads `GPU_TARGETS`: the host libraries and
   tests must work with another build's arch content.
 
 A probe that cannot answer leaves the root wired, so the packer reports what is wrong
@@ -104,6 +131,15 @@ not a directory is fatal.
 Test roots hold no family folder today. The first family folder added under
 `test_descriptors/` must also gate the test binary's cases: a fixture root that goes
 dormant still leaves cases in that binary that expect its descriptors.
+
+A pack wipes its `OUT_ROOT` before refilling it, so nothing else may write there with a
+rule of its own: the next repack deletes it and no edge restores it. Files that must ship
+in a packed tree without being packed — the ASM SDPA engine's loose L1 models
+(`asm_sdpa/predict_engine/<arch>/`), declared as `HIPKERNELPROVIDER_PRODUCT_STAGE_FILES`
+in the provider's `CMakeLists.txt` — are passed as `STAGE_FILES <src> <dest>` pairs to
+`hkp_wire_pack_target()`, which copies them inside the pack command, after the packer
+and before the stamp, with each `<src>` an input. With production packaging dormant the
+provider stages and installs them itself.
 
 Two rules govern the walk:
 
@@ -176,7 +212,8 @@ The toc key derives from the file's resolved root-relative path, so one file ser
 several symbols is one archive entry, and one key claimed by two different files is a
 hard error. The packer does not check the object's format or target processor;
 `arch` follows [hsaco kernels and `arch`](#hsaco-kernels-and-arch). The author's own load
-test on the target arch is the only check; no in-tree load test covers `hsaco`. The shipped provenance records
+test on the target arch is the only check that the object runs on a device; the slotted `hsaco`
+packed-load test checks descriptors and archive entries of authored `hsaco`, not execution. The shipped provenance records
 `origin_kind: "hsaco"`, the root-relative `file`, its `sha256` and the `symbol`, and makes no
 toolchain claim. As for `hip`, the specialization contract must declare
 `metadata_fields: []`: no compiler ran whose specialization a binding could observe.
@@ -306,19 +343,31 @@ argument list back out of the compiled object — sniffing a clang offload bundl
 ELF, and dropping compiler-appended `hidden_` arguments — catching a kernel whose
 parameters changed while its bytes stayed internally consistent.
 
+A rocKE kernel also carries an optional sixth key, `identity`: 64 lowercase hex digesting
+what COMGR compiled (the LLVM IR of every kernel in the object, the COMGR ISA name and the
+COMGR options), but not the COMGR library itself. A compiler bump within one LLVM flavor
+only rebuilds the bytes: it moves `sha256` and keeps `identity`, which the selector revision
+of a trained model hashes in its place. An LLVM-major bump that changes the IR flavor rocKE
+emits moves `identity` too (RFC 0019 §8.1). With `ROCKE_DEBUG_LOC` set the IR embeds absolute
+source paths, so `identity`, and an L1 trained on such a build, depends on the checkout path;
+CI never sets it. HIP and hsaco kernels carry none. A UKD whose kernel source (or any
+`sources` entry) carries `identity` reads at version 1.2: the packer raises an earlier
+version to 1.2, the packer and the loader refuse `identity` under an earlier one, and a
+runtime that predates the key skips a 1.2 file at its version gate.
+
 ### Multi-launch kernels: `sources`
 
 A UKD carries **exactly one** of `kernel_source` (one launch) or `sources` (several), as
 [RFC 0017 §15.1](../../../projects/hipdnn/docs/rfcs/0017_UniversalKernelDescriptor.md) describes. A
 packed `sources` is a JSON object keyed by launch name with at least two entries, each a
-complete `kpack` source with the five keys above, and its UKD declares `"version": "1.1"`.
+complete `kpack` source with the five keys above, and its UKD declares `"version": "1.1"` or later.
 Launch names are lowercase identifiers (`^[a-z][a-z0-9_]*$`). Neither key, both keys, a
 single entry, a bad name, a packed `sources` under version 1.0 and an entry that is not `kpack`
 are all refused, by the packer and by the loader. Two launch names may name one kernel (a
 stage that runs one kernel twice with different arguments): such entries carry equal
-`library`, `toc_key` and `symbol`. Key order carries no meaning. The packer stamps 1.1 on a UKD with
-`sources` only; every other UKD packs byte for byte as before, and a runtime that predates
-the key skips a 1.1 file at its version gate.
+`library`, `toc_key` and `symbol`. Key order carries no meaning. The packer raises a UKD
+with `sources` to at least 1.1 (1.2 when its entries carry `identity`), and a runtime that
+predates the key skips a 1.1 file at its version gate.
 
 ```json
 "sources": {
@@ -387,7 +436,7 @@ still validates a packed `sources`, so a shipped tree can be checked.
 - **Provenance (`hip`, `hsaco`).** `origin_kind` is the shared kind and
   `provenance.sources` is keyed by launch name with each launch's authored identity:
   `{source, entry, build}` for `hip` and `{file, sha256, symbol}` for `hsaco`. The toolchain
-  field is top level as for a single launch (`hipcc_version` for `hip`, none for `hsaco`).
+  field is top level as for a single launch (`hip_version` for `hip`, none for `hsaco`).
   No compiler observed these kernels, so there is **no `effective_spec`** and no consumer
   agreement evidence. A declaration with `metadata_fields` over a `hip` or `hsaco`
   `sources` UKD is refused, exactly as for a single launch; one without them leaves the
@@ -515,9 +564,26 @@ export AMD_COMGR_CACHE_DIR=/tmp/comgr-cache   # RAM disk or local disk
 
 `HKP_PACK_JOBS` is read by a **direct child run** of `hkp_pack`. Inside the build it comes
 from the `PACK_JOBS <n>` argument of each `hkp_wire_pack_target()` call: the test roots
-pass `1`, or `2` for `integration`, and the production root and the packaging probes pass
-none, so the packer uses its default. The reason is in the `hkp_wire_pack_target()` header
-in `cmake/HkpPackaging.cmake`.
+pass `1`, or `2` for `integration`, and the production root passes
+`HIPKERNELPROVIDER_PRODUCT_PACK_JOBS`. That cache variable is empty by default, which
+passes none, so the packer uses its default; set it to size the production pool for a
+large catalog on a wide host. The packaging probes pass none. The reason is in the
+`hkp_wire_pack_target()` header in `cmake/HkpPackaging.cmake`.
+
+## rocKE toolchain pins
+
+Two `CACHE` variables, resolved once in `_hkp_resolve_rocke_args()` under
+`HIPKERNELPROVIDER_ENABLE_ROCKE=ON`:
+
+| Variable | Forwarded as | Reaches | Effect |
+|---|---|---|---|
+| `HIPKERNELPROVIDER_ROCKE_COMGR_LIB` | `ROCKE_COMGR_LIB` | the pack step and the ctest entries | Explicit `libamd_comgr` for the rocKE producer to load. Empty by default (derived from the `amd_comgr` package); set it to override, e.g. on Windows where a System32 `amd_comgr.dll` can shadow the ROCm one. |
+| `HIPKERNELPROVIDER_ROCKE_LLVM_FLAVOR` | `ROCKE_LLVM_FLAVOR` | the pack step only | LLVM IR flavor rocKE lowers to (`llvm20`, `llvm22`, `llvm23`, `llvm24`). Empty by default (derived from the loaded COMGR's LLVM); set it to lower exactly as a catalog was swept -- the gfx950 conv AOT catalogs were measured as `llvm22`, the gfx1250 dgrad catalog as `llvm24`. The value applies to every catalog the pack step builds, and a catalog refuses an older flavor than its own, so a build that packs both architectures pins `llvm24` (or leaves it derived from an LLVM 24 COMGR). An unrecognized value is only rejected when the pack step runs, not at configure. |
+
+Changing either repacks every rocKE-sourced catalog with a different lowering, so a silent
+loss of the forwarding would repack with whatever rocke derives instead, unnoticed.
+`tests/test_hkp_pack_wiring.py` and `tests/rocke/test_hkp_python_environment.py` pin the
+forwarding.
 
 ## Packaging probes
 
@@ -590,8 +656,9 @@ A new architecture, or a new pack under one, is therefore probed with no edit an
 lane whose `GPU_TARGETS` cover every named architecture declares no probe; that is valid,
 and only `hkp-probe-tools` is registered. A lane that must always have a probe configures
 with `-DHIPKERNELPROVIDER_MIN_PACKAGING_PROBES=N`, which fails configure when fewer than N
-probes are declared, so broken probe discovery cannot pass as a lane with nothing to probe;
-the default, 0, accepts no probe.
+automatic probes are found, so broken probe discovery cannot pass as a lane with nothing to
+probe; the named probes in `probes/probes.cmake` do not count. The default, 0, accepts no
+probe.
 
 **Wildcards are excluded.** A descriptor with no `arch` (absent or empty) names no
 architecture and gets no automatic probe. That is safe: a wildcard ships for whatever the
@@ -629,17 +696,27 @@ too. Concrete names with a distinct-target word (`gfx1250-strict`) are
 probed like any other arch. The rule is `hkp_is_concrete_arch()` in
 `cmake/HkpPackaging.cmake`, the same one `GPU_TARGETS` goes through.
 
+### Fixed-arch fixture probes
+
+`probes/probes.cmake` declares two probes over the fixed-arch slotted fixture roots, each
+only when its arch is not in `hkp_selected_arches()`: `slotted-hsaco-gfx950` over
+`tests/fixtures/slotted_hsaco`, and, with `HIPKERNELPROVIDER_ENABLE_ROCKE=ON`,
+`slotted-multi-launch-gfx1151` over `tests/fixtures/slotted_multi_launch`. A lane that
+selects the arch packs the real root and runs the packed-load gtest instead. A probe checks
+packaging, not engine load. Output stays under `<build>/hkp-probes/` and is not installed.
+
 ### How to use
 
-`probes/probes.cmake` is for **named `UKDS` probes** only. Add a line when an integration
-needs specific UKDs packed on every PR, beyond the default sample: a combination of spec
-values the sweep does not guarantee, or a variant with its own known risk.
+`probes/probes.cmake` is for **named probes**: a `UKDS` subset, or another `ROOT` (the
+fixed-arch slotted fixtures above). Add a `UKDS` line when an integration needs specific
+UKDs packed on every PR, beyond the default sample: a combination of spec values the sweep
+does not guarantee, or a variant with its own known risk.
 
 ```cmake
 # One integration, a chosen representative set.
 hkp_add_packaging_probe(ARCH gfx950 NAME attention_dense
-    UKDS attention_dense.fp16_d64_hq8_kv1_c1_bm128_bn64.gfx950
-         attention_dense.bf16_d64_hq8_kv1_c1_bm256_bn32.gfx950)
+    UKDS attention_dense.fp16_d64_c1_bm128_bn64.gfx950
+         attention_dense.bf16_d64_c1_bm256_bn32.gfx950)
 ```
 
 - **With `UKDS`**, the probe packs exactly the listed UKDs, selected by UKD `name`. Pick a
@@ -712,7 +789,7 @@ Greedily, the UKD covering the most uncovered pairs is kept, ties broken by sort
 until every pair is covered; the result is deterministic. A group in which no field varies,
 and every group of a kind without a sweep field (`hip`, `hsaco`, `embedded_source`), keeps
 one UKD, the first by sorted `name`. Kept UKDs keep their authored order. The gfx950 dense
-attention KDP (840 UKDs in one group, 7 varying spec fields) keeps 17.
+attention KDP (52 UKDs in one group, 5 varying spec fields) keeps 4.
 
 - **Each value is packed; combinations are not.** The sweep guarantees, say, that some fp16
   UKD and some causal UKD are packed, not that an fp16 causal one is. Breakage specific to
@@ -894,10 +971,10 @@ PYTHONPATH=descriptor-packaging/python:/opt/rocm-kpack/python \
 `HIPKERNELPROVIDER_ROCM_KPACK_DIR`) is the kpack archive reader/writer most of the suite
 round-trips through. Its absence is diagnosed once by the `rocm_kpack_dir` fixture in
 `tests/conftest.py`: every test needing it skips with one message naming the dependency.
-Set `HIPKERNELPROVIDER_KPACK_REQUIRE_ROCM_KPACK=1` (mirroring `_REQUIRE_HIPCC` /
+Set `HIPKERNELPROVIDER_KPACK_REQUIRE_ROCM_KPACK=1` (mirroring `_REQUIRE_HIP_COMPILER` /
 `_REQUIRE_COMGR`) to turn that skip into a hard failure, e.g. in CI.
 
-`-m quick` selects the load-time/pure-unit subset needing neither `hipcc` nor
+`-m quick` selects the load-time/pure-unit subset needing neither the HIP compiler nor
 `rocm_kpack`/comgr.
 
 Every rocKE test lives in `tests/rocke/`, whose own `conftest.py` owns the rocKE
@@ -937,8 +1014,9 @@ tools/hkp_desk_check.py --mode {full,structural} --generic-targets-json J
 
 The desk check resolves KDP engine → UED metadata → KMD UUID within the selected
 descriptor tree/shards, completing defaults and canonicalizing metadata through that
-schema. Tuple identity is engine-wide, including cross-pack overlap in effective
-architectures: equal metadata on disjoint architectures is legal, conflicting overlapping
+schema. Tuple identity is engine-wide (per slot for a slotted engine, whose packs each name a
+slot through `KDP.slot` and resolve to that slot's KMD), including cross-pack overlap in
+effective architectures: equal metadata on disjoint architectures is legal, conflicting overlapping
 candidates are not. A KDP filename is not a KMD reference. An authored tree without
 compiler evidence can receive only a structural result.
 

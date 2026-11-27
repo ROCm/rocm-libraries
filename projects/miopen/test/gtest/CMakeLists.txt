@@ -30,6 +30,7 @@ endif()
 if(THEROCK_SANITIZER STREQUAL "ASAN")
     # Disable tests that currently hang or crash under ASAN with CK kernels.
     list(APPEND SKIP_TESTS
+        group_conv_tf32_reuse_test.cpp
         group_conv3d_bwd.cpp
         group_conv3d_fwd.cpp
         group_conv3d_wrw.cpp
@@ -65,12 +66,6 @@ if(THEROCK_SANITIZER STREQUAL "ASAN")
     # temporarily disable: LeakSanitizer reports a memory leak at exit
     # (assertions pass but the process leaks).
     list(APPEND SKIP_TESTS find_2_conv.cpp)
-    # temporarily disable (ALMIOPEN-3097): LeakSanitizer reports leaks at exit because these tests never call
-    # miopenDestroySolution on the solutions returned by miopenFindSolutions (assertions pass).
-    list(APPEND SKIP_TESTS
-        na_inference_find2.cpp
-        na_train_find2.cpp
-    )
     # temporarily disable: these fail under ASan even when run individually
     # on gfx942.
     list(APPEND SKIP_TESTS
@@ -84,7 +79,9 @@ endif()
 # registers exactly the tests it did before that work.
 if(NOT MIOPEN_ENABLE_HIPDNN_WRAPPER)
     list(APPEND SKIP_TESTS
+        hipdnn_erase_outside_lock.cpp
         hipdnn_lru_cache.cpp
+        hipdnn_reentry.cpp
         hipdnn_shim_conv.cpp
         hipdnn_shim_conv_gaps.cpp
         hipdnn_shim_conv_translation.cpp
@@ -121,11 +118,10 @@ function(add_gtest TEST_NAME TEST_CPP)
     # _impl suffix and MIOPEN_LOG_FUNCTION runs inside the renamed definition,
     # so the logged name carries that suffix.
     target_compile_definitions(${TEST_NAME} PRIVATE MIOPEN_ENABLE_HIPDNN_WRAPPER)
-    # src/private is deliberately not on the include path: wrapper_routing.cpp is
-    # the only test that needs the routing header and reaches it by relative
-    # path. Adding it would also expose miopen_private_rename.h, which rewrites
-    # the public miopenFoo names to their _impl form -- a name collision waiting
-    # to happen in tests that have no business seeing it.
+    # src/private is deliberately not on the include path: the wrapper tests that need its
+    # headers reach them by relative path. Adding it would also expose miopen_private_rename.h,
+    # which rewrites the public miopenFoo names to their _impl form -- a name collision
+    # waiting to happen in tests that have no business seeing it.
   endif()
 
   add_dependencies(miopen-tests ${TEST_NAME})
@@ -194,7 +190,7 @@ function(add_gtest TEST_NAME TEST_CPP)
     if (MIOPEN_TEST_ALL)
       set(MIOPEN_GTEST_PREFIX "")
     else()
-      set(MIOPEN_GTEST_PREFIX "Smoke")
+      set(MIOPEN_GTEST_PREFIX "Quick")
     endif()
 
     if (NOT MIOPEN_TEST_DBSYNC)
@@ -241,7 +237,7 @@ function(add_gtest TEST_NAME TEST_CPP)
     if (MIOPEN_TEST_ALL)
       set(MIOPEN_GTEST_PREFIX "")
     else()
-      set(MIOPEN_GTEST_PREFIX "Smoke")
+      set(MIOPEN_GTEST_PREFIX "Quick")
     endif()
 
     if (NOT MIOPEN_TEST_DBSYNC)
@@ -261,15 +257,9 @@ function(add_gtest TEST_NAME TEST_CPP)
     endif()
 
     if(MIOPEN_TEST_GFX115X)
-        add_gtest_negative_filter("Full/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_32") # Temporarily disabled until gfx1151 CI nodes have fw 31 or higher installed
-        add_gtest_negative_filter("Full/GPU_BNFWDTrainLarge2D_FP32.BnV2LargeFWD_TrainCKfp32/NCHW_BNSpatial_testBNAPIV2_Dim_2_test_id_64") # Temporarily disabled until gfx1151 CI nodes have fw 31 or higher installed
+        add_gtest_negative_filter("Comprehensive/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_32") # Temporarily disabled until gfx1151 CI nodes have fw 31 or higher installed
+        add_gtest_negative_filter("Comprehensive/GPU_BNFWDTrainLarge2D_FP32.BnV2LargeFWD_TrainCKfp32/NCHW_BNSpatial_testBNAPIV2_Dim_2_test_id_64") # Temporarily disabled until gfx1151 CI nodes have fw 31 or higher installed
         add_gtest_negative_filter("*SerialRun3D*") # These FP32 SerialRun3D tests use so much memory that they have a risk of timing out the machine during tests
-    endif()
-
-    if(MIOPEN_TEST_GFX94X)
-        # Disable flaky test ALMIOPEN-1926: bias-only CPU/GPU mismatch, a different index each run (39 failures at 36 indices in
-        # 60 days of Jenkins gfx942 builds, 2026-08-24..10-23, incl. 11 of 37 develop builds after /1026 and /1095 were filtered).
-        add_gtest_negative_filter("Full/GPU_LstmMSRnn_FP32*")
     endif()
 
     # Excluded from MIOpen CI: the FP32 case OOMs when shards run concurrently on a single GPU.
@@ -404,10 +394,10 @@ function(miopen_forwarding_parity_entry MODE TEST_NAME ENTRY_NAME LABELS)
     )
   elseif(MODE STREQUAL "INSTALL")
     # No --output-dir, --lib-dir or --known-divergences: the script's defaults fit the
-    # installed layout. python3 because the configure machine's interpreter path need not
-    # exist where the package is tested.
+    # installed layout. A bare interpreter name: the configure machine's path may not exist
+    # where the package is tested.
     file(APPEND "${INSTALL_TEST_FILE}"
-"add_test(${ENTRY_NAME} python3 \"../${MIOPEN_WRAPPER_TESTS_SUBDIR}/run_forwarding_parity.py\" \"--gtest\" \"../${TEST_NAME}\" \"--filter\" \"${MIOPEN_FORWARDING_PARITY_FILTER}\")
+"add_test(${ENTRY_NAME} ${MIOPEN_INSTALLED_TEST_PYTHON} \"../${MIOPEN_WRAPPER_TESTS_SUBDIR}/run_forwarding_parity.py\" \"--gtest\" \"../${TEST_NAME}${CMAKE_EXECUTABLE_SUFFIX}\" \"--filter\" \"${MIOPEN_FORWARDING_PARITY_FILTER}\")
 set_tests_properties(${ENTRY_NAME} PROPERTIES RUN_SERIAL TRUE TIMEOUT ${MIOPEN_FORWARDING_PARITY_TIMEOUT} LABELS \"${LABELS}\" ENVIRONMENT \"${PARITY_ENVIRONMENT}\")
 
 ")
@@ -429,10 +419,69 @@ function(miopen_forwarding_parity_entries MODE TEST_NAME)
   endforeach()
 endfunction()
 
+# Same split as the parity entries, for checks that need no GPU. On an architecture that
+# test_categories.yaml declares, the runner selects `-L ^<tier>$ -L ^ex_gpu_<arch>$`, which a
+# tier-only entry does not match; elsewhere it selects `-LE ex_gpu`, which only the bare entry
+# matches. The bare entry also keeps the name other tooling selects by.
+function(miopen_add_wrapper_check NAME)
+  cmake_parse_arguments(CHECK "" "" "COMMAND;ENVIRONMENT;ENVIRONMENT_MODIFICATION;PROPERTIES" ${ARGN})
+  foreach(CHECK_GPU_LABEL "" ${MIOPEN_FORWARDING_PARITY_GPU_LABELS})
+    set(CHECK_ENTRY_NAME ${NAME})
+    set(CHECK_LABELS ${MIOPEN_FORWARDING_PARITY_TIER_LABELS})
+    if(CHECK_GPU_LABEL)
+      string(APPEND CHECK_ENTRY_NAME "_${CHECK_GPU_LABEL}")
+      list(APPEND CHECK_LABELS ${CHECK_GPU_LABEL})
+    endif()
+    add_test(NAME ${CHECK_ENTRY_NAME} COMMAND ${CHECK_COMMAND})
+    set_tests_properties(${CHECK_ENTRY_NAME} PROPERTIES LABELS "${CHECK_LABELS}" TIMEOUT 300)
+    if(CHECK_ENVIRONMENT)
+      set_tests_properties(${CHECK_ENTRY_NAME} PROPERTIES ENVIRONMENT "${CHECK_ENVIRONMENT}")
+    endif()
+    if(CHECK_ENVIRONMENT_MODIFICATION)
+      set_tests_properties(${CHECK_ENTRY_NAME} PROPERTIES
+        ENVIRONMENT_MODIFICATION "${CHECK_ENVIRONMENT_MODIFICATION}")
+    endif()
+    if(CHECK_PROPERTIES)
+      set_tests_properties(${CHECK_ENTRY_NAME} PROPERTIES ${CHECK_PROPERTIES})
+    endif()
+  endforeach()
+endfunction()
+
+# The packaged counterpart of miopen_add_wrapper_check. COMMAND_TEXT and EXTRA_PROPERTIES are
+# written into the test list as given, so they carry their own quoting. The program is the
+# Python interpreter unless a fourth argument names another one.
+function(miopen_append_installed_wrapper_check NAME COMMAND_TEXT EXTRA_PROPERTIES)
+  set(CHECK_PROGRAM ${MIOPEN_INSTALLED_TEST_PYTHON})
+  if(ARGC GREATER 3)
+    set(CHECK_PROGRAM "${ARGV3}")
+  endif()
+  foreach(CHECK_GPU_LABEL "" ${MIOPEN_FORWARDING_PARITY_GPU_LABELS})
+    set(CHECK_ENTRY_NAME ${NAME})
+    set(CHECK_LABELS ${MIOPEN_FORWARDING_PARITY_TIER_LABELS})
+    if(CHECK_GPU_LABEL)
+      string(APPEND CHECK_ENTRY_NAME "_${CHECK_GPU_LABEL}")
+      list(APPEND CHECK_LABELS ${CHECK_GPU_LABEL})
+    endif()
+    file(APPEND "${INSTALL_TEST_FILE}"
+"add_test(${CHECK_ENTRY_NAME} ${CHECK_PROGRAM} ${COMMAND_TEXT})
+set_tests_properties(${CHECK_ENTRY_NAME} PROPERTIES TIMEOUT 300 LABELS \"${CHECK_LABELS}\"${EXTRA_PROPERTIES})
+
+")
+  endforeach()
+endfunction()
+
 # Set before the test executables are registered, because add_gtest() uses all of it.
 # test/gtest/README.md describes the harness and why it is set up this way.
 if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
+
+  # The name the installed test list runs scripts with. A standard Windows Python install
+  # provides python and py but not python3.
+  if(WIN32)
+    set(MIOPEN_INSTALLED_TEST_PYTHON python)
+  else()
+    set(MIOPEN_INSTALLED_TEST_PYTHON python3)
+  endif()
 
   # Every packaged flag-ON test file except miopen_gtest installs in this folder, so
   # packagers can keep the fake hipDNN backend out of runtime packages with one path
@@ -460,8 +509,10 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
             test_compare_forwarding_runs
             test_run_forwarding_parity
             test_forwarding_parity_gpu_labels
+            test_check_wrapper_registration
             test_check_wrapper_abi
             test_miopen_wrapper_libs
+            test_check_bare_link
     WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
   set_tests_properties(test_forwarding_parity_scripts PROPERTIES
     LABELS "${MIOPEN_FORWARDING_PARITY_TIER_LABELS}"
@@ -470,26 +521,50 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
     ENVIRONMENT_MODIFICATION
       "PYTHONPATH=path_list_prepend:${CMAKE_CURRENT_SOURCE_DIR};PYTHONPATH=path_list_prepend:${PROJECT_SOURCE_DIR}/script")
 
-  add_test(NAME wrapper_abi_check
+  # The plugins sit beside libMIOpen in the build tree, so a build that makes plugin targets
+  # must also contain them here; --require-plugins turns a missing one into a failure rather
+  # than a skipped check. The packaged entry below leaves it off: an installed test layout
+  # may carry no plugin. ck_impl makes no targets when no GPU target has CK support.
+  set(MIOPEN_WRAPPER_ABI_CHECK_PLUGIN_ARGS)
+  if(MIOPEN_USE_COMPOSABLEKERNEL)
+    get_property(MIOPEN_CK_PLUGIN_TARGETS DIRECTORY ${PROJECT_SOURCE_DIR}/src/ck_impl
+      PROPERTY BUILDSYSTEM_TARGETS)
+    if(MIOPEN_CK_PLUGIN_TARGETS)
+      set(MIOPEN_WRAPPER_ABI_CHECK_PLUGIN_ARGS --require-plugins)
+    endif()
+  endif()
+
+  miopen_add_wrapper_check(wrapper_abi_check
     COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/script/check_wrapper_abi.py
       --lib-dir $<TARGET_FILE_DIR:MIOpen>
+      ${MIOPEN_WRAPPER_ABI_CHECK_PLUGIN_ARGS}
       --baseline ${PROJECT_SOURCE_DIR}/test/public_abi/public_symbols.baseline
-      --excluded ${PROJECT_SOURCE_DIR}/test/public_abi/wrapper_excluded_symbols.txt
       --wrapper-only ${PROJECT_SOURCE_DIR}/test/public_abi/wrapper_only_symbols.txt
       --public-header ${PROJECT_SOURCE_DIR}/include/miopen/miopen.h
   )
-  set_tests_properties(wrapper_abi_check PROPERTIES
-    LABELS "${MIOPEN_FORWARDING_PARITY_TIER_LABELS}"
-    TIMEOUT 300)
+
+  # Links against a bare -lMIOpen, like a pkg-config user or a configure-time probe,
+  # and fails if the wrapper lacks a baseline symbol. SKIP_RETURN_CODE: the script
+  # exits 77 where it cannot apply (Windows).
+  miopen_add_wrapper_check(wrapper_bare_link_check
+    COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/script/check_bare_link.py
+      --lib-dir $<TARGET_FILE_DIR:MIOpen>
+      --baseline ${PROJECT_SOURCE_DIR}/test/public_abi/public_symbols.baseline
+      --compiler ${CMAKE_CXX_COMPILER}
+    PROPERTIES SKIP_RETURN_CODE 77
+  )
 
   # A backend that hipDNN loads and then refuses. It has the real backend's file name, so it
   # gets its own directory. MODULE, not SHARED: on Windows a SHARED library's DLL ignores the
   # LIBRARY output and install directories and lands next to MIOpen.dll. hipDNN looks there
   # before anywhere but HIPDNN_BACKEND_LIBRARY_PATH, so every other test would load the fake.
+  # On Windows a MODULE also gets an import library (and .exp) named hipdnn_backend. In a tree
+  # shared with hipDNN it would replace the real backend's, so it goes in the DLL's directory.
   add_library(fake_hipdnn_backend MODULE forwarding_failure/fake_hipdnn_backend.cpp)
   set_target_properties(fake_hipdnn_backend PROPERTIES
     OUTPUT_NAME hipdnn_backend
-    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/fake_hipdnn_backend")
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/fake_hipdnn_backend"
+    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/fake_hipdnn_backend")
   add_dependencies(miopen-tests fake_hipdnn_backend)
   add_dependencies(miopen-check fake_hipdnn_backend)
 
@@ -502,16 +577,27 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
   add_dependencies(miopen-tests forwarding_failure_probe)
   add_dependencies(miopen-check forwarding_failure_probe)
 
-  add_test(NAME forwarding_failure_modes
+  miopen_add_wrapper_check(forwarding_failure_modes
     COMMAND ${Python3_EXECUTABLE} -m unittest -v test_forwarding_failure_modes
-    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
-  set_tests_properties(forwarding_failure_modes PROPERTIES
-    LABELS "${MIOPEN_FORWARDING_PARITY_TIER_LABELS}"
-    TIMEOUT 300
     ENVIRONMENT
       "PYTHONDONTWRITEBYTECODE=1;MIOPEN_FAILURE_PROBE=$<TARGET_FILE:forwarding_failure_probe>;MIOPEN_FAKE_HIPDNN_BACKEND=${CMAKE_CURRENT_BINARY_DIR}/fake_hipdnn_backend"
     ENVIRONMENT_MODIFICATION
       "PYTHONPATH=path_list_prepend:${PROJECT_SOURCE_DIR}/script")
+
+  # Tests of the dispatch macro's re-entry check. They need forwarding on from the first
+  # call and skip otherwise. gtest exits 0 when every test skips, or when the filter matches
+  # no test (a renamed fixture), so both fail the entry: a stray MIOPEN_DISABLE_HIPDNN_FOR
+  # or a rename would otherwise leave an entry that checks nothing.
+  if(MIOPEN_TEST_DISCRETE)
+    set(MIOPEN_WRAPPER_ROUTING_TEST test_wrapper_routing)
+  else()
+    set(MIOPEN_WRAPPER_ROUTING_TEST miopen_gtest)
+  endif()
+  miopen_add_wrapper_check(wrapper_reentry_macro
+    COMMAND $<TARGET_FILE:${MIOPEN_WRAPPER_ROUTING_TEST}> --gtest_filter=Quick/CPU_WrapperRoutingReentryMacro_NONE.*
+    ENVIRONMENT "MIOPEN_HIPDNN_FORWARDING=1"
+    ENVIRONMENT_MODIFICATION "MIOPEN_DISABLE_HIPDNN_FOR=unset:"
+    PROPERTIES FAIL_REGULAR_EXPRESSION "\\[  SKIPPED \\]|Running 0 tests")
 endif()
 
 if( MIOPEN_TEST_DISCRETE )
@@ -557,6 +643,16 @@ else()
         PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
         DESTINATION ${DATA_INSTALL_DIR}/bin
         COMPONENT clients)
+    # Golden-vector fixtures read by CPU_LgbmForest_NONE and CPU_LgbmPcfgForest_NONE through
+    # GetSystemDbPath(). The installed tests look in <prefix>/share/miopen/db, next to the model
+    # assets, and fail when a fixture is missing, so they ship with miopen_gtest.
+    if(MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
+      install(FILES
+          ${PROJECT_SOURCE_DIR}/src/kernels/lgbm_rank_golden.json
+          ${PROJECT_SOURCE_DIR}/src/kernels/lgbm_pcfg_golden.json
+          DESTINATION ${DATABASE_INSTALL_DIR}
+          COMPONENT clients)
+    endif()
   endif()
 endif()
 
@@ -592,19 +688,30 @@ endif()
 # EXCLUDE_FROM_ALL and installs nothing from it. No --public-header: it checks two source
 # files, which the build-tree entry already covers.
 if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
-  file(APPEND "${INSTALL_TEST_FILE}"
-"add_test(wrapper_abi_check python3 \"../${MIOPEN_WRAPPER_TESTS_SUBDIR}/check_wrapper_abi.py\" \"--baseline\" \"../${MIOPEN_WRAPPER_TESTS_SUBDIR}/public_symbols.baseline\" \"--excluded\" \"../${MIOPEN_WRAPPER_TESTS_SUBDIR}/wrapper_excluded_symbols.txt\" \"--wrapper-only\" \"../${MIOPEN_WRAPPER_TESTS_SUBDIR}/wrapper_only_symbols.txt\")
-set_tests_properties(wrapper_abi_check PROPERTIES TIMEOUT 300 LABELS \"${MIOPEN_FORWARDING_PARITY_TIER_LABELS}\")
-
-")
+  miopen_append_installed_wrapper_check(wrapper_abi_check
+    "\"../${MIOPEN_WRAPPER_TESTS_SUBDIR}/check_wrapper_abi.py\" \"--baseline\" \"../${MIOPEN_WRAPPER_TESTS_SUBDIR}/public_symbols.baseline\" \"--wrapper-only\" \"../${MIOPEN_WRAPPER_TESTS_SUBDIR}/wrapper_only_symbols.txt\""
+    "")
+  # No --compiler: the package has none to name, so the script looks for one and skips
+  # (exit 77) where there is none.
+  miopen_append_installed_wrapper_check(wrapper_bare_link_check
+    "\"../${MIOPEN_WRAPPER_TESTS_SUBDIR}/check_bare_link.py\" \"--baseline\" \"../${MIOPEN_WRAPPER_TESTS_SUBDIR}/public_symbols.baseline\""
+    " SKIP_RETURN_CODE 77")
 endif()
 
 if(MIOPEN_ENABLE_HIPDNN_WRAPPER AND NOT MIOPEN_TEST_DISCRETE)
-  file(APPEND "${INSTALL_TEST_FILE}"
-"add_test(forwarding_failure_modes python3 \"../${MIOPEN_WRAPPER_TESTS_SUBDIR}/test_forwarding_failure_modes.py\" \"-v\")
-set_tests_properties(forwarding_failure_modes PROPERTIES TIMEOUT 300 LABELS \"${MIOPEN_FORWARDING_PARITY_TIER_LABELS}\" ENVIRONMENT \"PYTHONDONTWRITEBYTECODE=1;MIOPEN_FAILURE_PROBE=../${MIOPEN_WRAPPER_TESTS_SUBDIR}/forwarding_failure_probe${CMAKE_EXECUTABLE_SUFFIX};MIOPEN_FAKE_HIPDNN_BACKEND=../${MIOPEN_WRAPPER_TESTS_SUBDIR}/fake_hipdnn_backend\")
+  miopen_append_installed_wrapper_check(forwarding_failure_modes
+    "\"../${MIOPEN_WRAPPER_TESTS_SUBDIR}/test_forwarding_failure_modes.py\" \"-v\""
+    " ENVIRONMENT \"PYTHONDONTWRITEBYTECODE=1;MIOPEN_FAILURE_PROBE=../${MIOPEN_WRAPPER_TESTS_SUBDIR}/forwarding_failure_probe${CMAKE_EXECUTABLE_SUFFIX};MIOPEN_FAKE_HIPDNN_BACKEND=../${MIOPEN_WRAPPER_TESTS_SUBDIR}/fake_hipdnn_backend\"")
+endif()
 
-")
+# The dispatch macro's re-entry tests, with the settings wrapper_reentry_macro gives them in the
+# build tree. They need a visible device: miopen_gtest's startup fails every test without one.
+# A missing hipDNN does not skip them.
+if(MIOPEN_ENABLE_HIPDNN_WRAPPER AND NOT MIOPEN_TEST_DISCRETE)
+  miopen_append_installed_wrapper_check(wrapper_reentry_macro
+    "\"--gtest_filter=Quick/CPU_WrapperRoutingReentryMacro_NONE.*\""
+    " ENVIRONMENT \"MIOPEN_HIPDNN_FORWARDING=1\" ENVIRONMENT_MODIFICATION \"MIOPEN_DISABLE_HIPDNN_FOR=unset:\" FAIL_REGULAR_EXPRESSION \"\\\\[  SKIPPED \\\\]|Running 0 tests\""
+    "../miopen_gtest${CMAKE_EXECUTABLE_SUFFIX}")
 endif()
 
 # Install CTestTestfile.cmake to bin/MIOpen/ subdirectory for TheRock distribution
@@ -623,6 +730,7 @@ if( NOT ENABLE_ASAN_PACKAGING )
     install(
         PROGRAMS
           "${PROJECT_SOURCE_DIR}/script/check_wrapper_abi.py"
+          "${PROJECT_SOURCE_DIR}/script/check_bare_link.py"
           "${PROJECT_SOURCE_DIR}/script/check_public_abi.py"
           "${PROJECT_SOURCE_DIR}/script/miopen_wrapper_libs.py"
           "${PROJECT_SOURCE_DIR}/script/run_forwarding_parity.py"
@@ -634,7 +742,6 @@ if( NOT ENABLE_ASAN_PACKAGING )
     install(
         FILES
           "${PROJECT_SOURCE_DIR}/test/public_abi/public_symbols.baseline"
-          "${PROJECT_SOURCE_DIR}/test/public_abi/wrapper_excluded_symbols.txt"
           "${PROJECT_SOURCE_DIR}/test/public_abi/wrapper_only_symbols.txt"
           "${CMAKE_CURRENT_SOURCE_DIR}/known_forwarding_divergences.txt"
         DESTINATION ${MIOPEN_WRAPPER_TESTS_INSTALL_DIR}

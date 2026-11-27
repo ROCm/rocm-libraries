@@ -10,9 +10,10 @@ counts, resources) and the device tests; this file checks the pieces.
 from __future__ import annotations
 
 import dataclasses
+from types import SimpleNamespace
 
 import pytest
-from rocke.core.ir import F16, F32, I32, I64, IRBuilder, PtrType
+from rocke.core.ir import F16, F32, I32, I64, IRBuilder, PtrType, VectorType
 
 from kernels.common._attention_bwd_addr import WorkspaceAddr
 from kernels.common._attention_bwd_body import (
@@ -54,6 +55,38 @@ def test_geometry_gemm_shapes(arch, d):
     assert st.mfma.g4 == g.g4.mma_per_wave
     # the frozen geometry is hashable and equal for equal specs
     assert hash(g) == hash(BwdTileGeometry.from_spec(r, arch))
+
+
+@pytest.mark.parametrize("arch", ARCHS)
+def test_fragment_dq_initializes_from_source_and_extracts_result(arch):
+    from kernels.common._attention_bwd_body import BwdTileStep
+    from kernels.common._attention_bwd_frag import LdsView
+    from kernels.common._attention_bwd_gemm import BlockGemm
+
+    g = BlockGemm(arch, "fp16", 16, 16, 16, (1, 1))
+    atom = g.op
+    source_width = atom.srcs[2].frag_len + 1
+    g.__dict__["op"] = dataclasses.replace(
+        atom,
+        srcs=(*atom.srcs[:2], dataclasses.replace(atom.srcs[2], frag_len=source_width)),
+    )
+    b = IRBuilder("fragment_source_accumulator")
+    zero = b.const_i32(0)
+    # Exercise this emission phase with real geometry, IR and LDS operands.
+    step = object.__new__(BwdTileStep)
+    step.geom = SimpleNamespace(
+        g4=g, acc_in_lds=False, dq_issue="fragment", interior_clamp=False
+    )
+    step.lane = zero
+    step.o4 = (zero, zero)
+    step.v_ds = LdsView(b.smem_alloc(F16, (256,), "ds"), 0, 16, 16)
+    kt = b.param("kt", VectorType(F16, atom.srcs[1].frag_len))
+    record = []
+    step._g4_dq(b, zero, zero, None, kt_b=[[kt]], record=record, edge=False)
+    mma = next(op for op in b.kernel.body.ops if op.name == "tile.mma")
+    assert mma.operands[2].type == VectorType(F32, source_width)
+    assert mma.result.type == VectorType(F32, atom.dst.frag_len)
+    assert len(record) == atom.dst.frag_len
 
 
 def test_geometry_needs_a_resolved_spec():

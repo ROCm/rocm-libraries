@@ -201,8 +201,9 @@ rocke_value_t* rocke_tensor_view_load_scalar(rocke_ir_builder_t* b,
                                              rocke_value_t* const* indices,
                                              int num_indices);
 
-/* TensorView.store_scalar(b, indices, value, align). Pass align<=0 for the
- * Python default (align=None). */
+/* TensorView.store_scalar(b, indices, value, align). Pass align 0 for the
+ * Python default (align=None); a global view passes any other `align` to
+ * rocke_b_global_store as given. */
 void rocke_tensor_view_store_scalar(rocke_ir_builder_t* b,
                                     const rocke_tensor_view_t* v,
                                     rocke_value_t* const* indices,
@@ -304,8 +305,8 @@ rocke_value_t* rocke_tile_window_load_scalar(rocke_ir_builder_t* b,
                                              rocke_value_t* const* local_indices,
                                              int num_indices);
 
-/* TileWindow.store_scalar(b, *local_indices, value, align). Pass align<=0 for
- * the Python default (align=None). */
+/* TileWindow.store_scalar(b, *local_indices, value, align). Pass align 0 for
+ * the Python default (align=None), as rocke_tensor_view_store_scalar. */
 void rocke_tile_window_store_scalar(rocke_ir_builder_t* b,
                                     const rocke_tile_window_t* w,
                                     rocke_value_t* const* local_indices,

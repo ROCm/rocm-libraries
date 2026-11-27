@@ -51,6 +51,11 @@ two kinds. In short:
    (`projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/ingestor/UhdKernelHeuristic.hpp`):
    every `$kernel.*` axis a model reads must be in the UED `knobs` **and** in the KMD fields;
    otherwise the loader drops the model and ranks by priority, then id.
+   A slotted engine's UED declares `slots` (each with its `metadata` KMD, optional
+   `sort_kernel_catalog` and `knobs`) and optionally `shared_workspace`, in place of the
+   engine-level `metadata`, `knobs` and `sort_kernel_catalog`; its parity checks run per slot, against that
+   slot's KMD and knobs, and its `predict_engine` stays at the engine
+   ([generate.md](generate.md), "Slotted engines").
 3. **Registration.** After a full build, `hipdnn_list_engines --plugin-dir <abs plugin dir>`
    prints the engine name. Descriptors reach the plugin directory through the `ALL` descriptor
    staging and packaging targets; a build restricted to a target list can register fewer

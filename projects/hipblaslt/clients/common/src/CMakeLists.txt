@@ -15,6 +15,8 @@ target_sources(hipblaslt-clients-common
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_init_device.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/fast_check.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/relaunch_compare.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/host_memory.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/uniform_check.cpp"
 )
 
 if(HIPBLASLT_ENABLE_BLIS)

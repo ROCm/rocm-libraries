@@ -31,6 +31,7 @@
 #include "hipsparse_arguments.hpp"
 #include "hipsparse_local_dnvec.hpp"
 #include "hipsparse_local_handle.hpp"
+#include "hipsparse_local_spmat.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -48,7 +49,7 @@ void testing_spmv_csr_reuse_descr_bad_arg(const Arguments& argus)
 
 // Exercises the per-call bufferSize / per-call buffer-allocation pattern
 // for a single (operation, algorithm) configuration: query
-// hipsparseSpMV_bufferSize, hipMalloc a fresh externalBuffer of that size,
+// hipsparseSpMV_bufferSize, allocate a fresh externalBuffer of that size,
 // optionally run hipsparseSpMV_preprocess, then run hipsparseSpMV. When
 // called repeatedly with the same (op, alg) on the same matA, the wrapper must
 // continue to return correct results despite the bufferSize / buffer
@@ -120,8 +121,8 @@ static void call_spmv(hipsparseHandle_t&     handle,
     CHECK_HIPSPARSE_ERROR(hipsparseSpMV_bufferSize(
         handle, transA, &alpha, matA, x, &beta, y1, computeType, alg, &bufferSize));
 
-    void* buffer;
-    CHECK_HIP_ERROR(hipMalloc(&buffer, bufferSize));
+    auto  buffer_managed = hipsparse_unique_ptr{device_malloc(bufferSize), device_free};
+    void* buffer         = buffer_managed.get();
 
     // HIPSPARSE pointer mode host
     CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
@@ -163,8 +164,6 @@ static void call_spmv(hipsparseHandle_t&     handle,
 
     unit_check_near(1, y_size, 1, hy_gold.data(), hy_1.data());
     unit_check_near(1, y_size, 1, hy_gold.data(), hy_2.data());
-
-    CHECK_HIP_ERROR(hipFree(buffer));
 }
 
 // Exercises the multi-configuration cache path: query bufferSize once per
@@ -231,8 +230,8 @@ static void call_spmv_shared_buffer(hipsparseHandle_t&                       han
         }
     }
 
-    void* buffer = nullptr;
-    CHECK_HIP_ERROR(hipMalloc(&buffer, buffer_size_max));
+    auto  buffer_managed = hipsparse_unique_ptr{device_malloc(buffer_size_max), device_free};
+    void* buffer         = buffer_managed.get();
 
     // Step 2: repeatedly loop over every (operation, algorithm) configuration
     // and call hipsparseSpMV with the shared buffer, never calling
@@ -290,8 +289,6 @@ static void call_spmv_shared_buffer(hipsparseHandle_t&                       han
             }
         }
     }
-
-    CHECK_HIP_ERROR(hipFree(buffer));
 }
 
 static std::vector<hipsparseOperation_t> get_supported_operations(hipDataType datatype)
@@ -374,9 +371,7 @@ void testing_spmv_csr_reuse_descr(Arguments argus)
     CHECK_HIP_ERROR(hipMemcpy(d_beta, &h_beta, sizeof(T), hipMemcpyHostToDevice));
 
     // Create matrix
-    hipsparseSpMatDescr_t matA;
-    CHECK_HIPSPARSE_ERROR(
-        hipsparseCreateCsr(&matA, m, n, nnz, dptr, dcol, dval, typeI, typeJ, idx_base, aType));
+    hipsparseLocalCsr matA(m, n, nnz, dptr, dcol, dval, typeI, typeJ, idx_base, aType);
 
     const std::vector<hipsparseOperation_t> ops = get_supported_operations(aType);
     std::vector<hipsparseSpMVAlg_t>         algs
@@ -440,9 +435,6 @@ void testing_spmv_csr_reuse_descr(Arguments argus)
                                                   number_of_passes,
                                                   use_preprocess);
     }
-
-    // Destroy matrix
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(matA));
 #endif
 }
 

@@ -3,6 +3,19 @@
 Full documentation for rocSOLVER is available at the [rocSOLVER documentation](https://rocm.docs.amd.com/projects/rocSOLVER/en/latest/index.html).
 
 
+## rocSOLVER 3.39.0 for ROCm 10.3.0
+
+### Optimized
+
+* Improved performance of STEDC's secular equation solver
+
+### Resolved issues
+
+* Fixed failure of large batch count > 64 * 1024 for POTRF, POTF2, POTRS, POSV, POTRI.
+* Fixed a race condition in SYEVJ GPU kernel.
+
+
+
 ## rocSOLVER 3.38.0 for ROCm 10.2.0
 
 ### Added
@@ -22,9 +35,10 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 ### Resolved issues
 
+* Improved kernel launches to detect invalid launch configuration.
+
 * Fixed failure of GETRS for batch_count > 64 * 1024
 * Fixed failure of GETRF for batch_count > 64 * 1024 for certain sizes such as m = 3, n = 4
-* Fixed a race condition in SYEVJ GPU kernel.
 * Improved kernel launches to detect invalid launch configuration.
 * Fixed sparse functions potentially not using the stream set in the handle.
 

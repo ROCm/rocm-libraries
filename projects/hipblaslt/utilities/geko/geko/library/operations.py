@@ -6,9 +6,9 @@ from __future__ import annotations
 """
 Library operations module.
 
-This module provides tools to manage and manipulate Tensile solution libraries including
+This module provides tools to manage and manipulate TensileLite solution libraries including
 loading, merging, and creating optimized GEMM solution libraries. It handles YAML
-manipulation, solution library operations, and integration with the Tensile framework.
+manipulation, solution library operations, and integration with the TensileLite framework.
 
 The operations module enables the final step of the optimization workflow by merging
 individual optimized solutions into hipBLASLt libraries.
@@ -20,14 +20,14 @@ Functions:
         Load all YAML libraries in a folder into a collection.
     merge_solutions(input_dir) -> LibraryCollection
         Merge optimized solutions from multiple build directories into single libraries.
-    extract_solutions(df, match_table_path, hipblaslt_path=None, fill_perf=False) -> LibraryCollection
+    extract_solutions(df, match_table_path, hipblaslt_path=None) -> LibraryCollection
         Build library from DataFrame with GEMMs and solution indices.
         Same-name libraries with different default solutions are merged with
         TensileMergeLibrary when hipblaslt_path is given.
     merge(hipblaslt_path, orig_dir, inc_dir, output_dir) -> None
         Merge incremental library into original using TensileMergeLibrary.
     create(hipblaslt_path, input_dir, output_dir) -> None
-        Create a Tensile library from YAML library logic files using TensileCreateLibrary.
+        Create a TensileLite library from YAML library logic files using TensileCreateLibrary.
     from_dataframe(df, lib_dir) -> LibraryCollection
         Create filtered libraries from a DataFrame of selected solutions.
     prune_library(hipblaslt_path, base_lib) -> Library
@@ -152,7 +152,8 @@ def merge_solutions(
         LibraryCollection: LibraryCollection with all merged solutions.
 
     Raises:
-        ValueError: If no valid YAML library logic files found.
+        ValueError: If no valid YAML library logic files found or if there is a library type mismatch.
+        NotImplementedError: If there is a default solution mismatch for a library.
 
     Note:
         For duplicate problem sizes, keeps the solution with highest performance.
@@ -179,11 +180,15 @@ def merge_solutions(
     libs: dict[str, Library] = {}
     for lib in sorted(parallel_for(load_library, lib_paths), key=lambda k: k.name):
         if lib.name not in libs:
-            for size in lib.sizes:
+            for size in lib.sizes or []:
                 if trim_size:
                     size[0] = size[0][:4]
             libs[lib.name] = lib
             continue
+
+        if libs[lib.name].type != lib.type:
+            raise ValueError(f"Library type mismatch for library '{lib.name}': "
+                             f"'{libs[lib.name].type}' != '{lib.type}'.")
 
         if libs[lib.name].default_solution != lib.default_solution:
             raise NotImplementedError(f"Default solution mismatch for library '{lib.name}'. "
@@ -192,7 +197,7 @@ def merge_solutions(
         base_sols = libs[lib.name].solutions
         base_sizes = libs[lib.name].sizes
         for i, sol in enumerate(lib.solutions):
-            sizes = [sz for sz in lib.sizes if sz[1][0] == i]
+            sizes = [sz for sz in lib.sizes or [] if sz[1][0] == i]
             sol = copy.deepcopy(sol)
             _sanitize_solution(sol)
             sol["SolutionIndex"] = len(base_sols)
@@ -213,7 +218,7 @@ def merge_solutions(
         if epilogues and _library_supports_epilogues(lib):
             lib.add_epilogues()
         merged.append(lib)
-        logger.info(f"Processed {len(lib.solutions)} solutions and {len(lib.sizes)} sizes for '{lib.name}'")
+        logger.info(f"Processed {len(lib.solutions)} solutions and {len(lib.sizes or [])} sizes for '{lib.name}'")
 
     return merged
 
@@ -295,7 +300,6 @@ def extract_solutions(
     df: pd.DataFrame,
     match_table_path: str | Path,
     hipblaslt_path: str | Path | None = None,
-    fill_perf: bool = False,
 ) -> LibraryCollection:
     """Extract solutions by solution index from a DataFrame.
 
@@ -309,8 +313,6 @@ def extract_solutions(
             checkout. When provided, libraries with the same filename but
             different default solutions are merged with TensileMergeLibrary.
             Defaults to None.
-        fill_perf (bool, optional): Whether to fill performance data for the extracted solutions.
-            Defaults to False.
 
     Returns:
         LibraryCollection: LibraryCollection with all extracted solutions.
@@ -350,7 +352,7 @@ def extract_solutions(
             if kidx not in mapping:
                 mapping[kidx] = []
             mapping[kidx].append(
-                [int(row["m"]), int(row["n"]), int(row["batch_count"]), int(row["k"]), row.get("hipblaslt-Gflops", 0.0)]
+                [int(row["m"]), int(row["n"]), int(row["batch_count"]), int(row["k"])]
             )
 
         lib.order = [2, 3, 0, 1]
@@ -362,7 +364,7 @@ def extract_solutions(
         for kidx, sizes in mapping.items():
             sol = copy.deepcopy(lib.solutions[kidx])
             sol["SolutionIndex"] = len(new_sols)
-            sizes = [[size[:4], [sol["SolutionIndex"], size[4] if fill_perf else 0.0]] for size in sizes]
+            sizes = [[size, [sol["SolutionIndex"], 0.0]] for size in sizes]
             new_sols.append(sol)
             new_sizes.extend(sizes)
         logger.debug(
@@ -406,7 +408,7 @@ def merge(
 
     Args:
         hipblaslt_path (str | Path): Path to hipBLASLt installation.
-        orig_dir (str | Path): Directory containing original Tensile library.
+        orig_dir (str | Path): Directory containing original TensileLite library.
         inc_dir (str | Path): Directory containing incremental/tuned library.
         output_dir (str | Path): Output directory for merged library.
         eff (bool, optional): Whether to set efficiency calculations.
@@ -430,7 +432,7 @@ def merge(
 
 
 def create(hipblaslt_path: str | Path, library_dir: str | Path, output_dir: str | Path, version: str = "5") -> None:
-    """Create a Tensile library from YAML library logic files using TensileCreateLibrary.
+    """Create a TensileLite library from YAML library logic files using TensileCreateLibrary.
 
     Args:
         hipblaslt_path (str | Path): Path to hipBLASLt installation.
@@ -470,13 +472,13 @@ def create(hipblaslt_path: str | Path, library_dir: str | Path, output_dir: str 
     )
 
 def normalize(library_path: str | Path, output_path: str | Path, hipblaslt_path: ( str | Path) | None = None) -> None:
-    """Normalize a Tensile library using TensileNormalizeLibrary.
+    """Normalize a TensileLite library using TensileNormalizeLibrary.
 
     Args:
         library_path (str | Path): Path to the input library.
         output_path (str | Path): Path to the output normalized library.
         hipblaslt_path (str | Path, optional): Path to hipBLASLt installation. 
-            If set, will append the path to sys.path to find Tensile.
+            If set, will append the path to sys.path to find tensilelite.
 
     Raises:
         FileNotFoundError: If library path does not exist.
@@ -495,7 +497,7 @@ def normalize(library_path: str | Path, output_path: str | Path, hipblaslt_path:
     try:
         from tensilelite import LibraryIO
         from tensilelite.CustomYamlLoader import load_yaml_stream
-        from tensilelite.TensileMergeLibrary import convertToDict, normalizeDictLibraryLayout
+        from tensilelite.merge_library import convertToDict, normalizeDictLibraryLayout
     except ImportError as e:
         raise ImportError(f"Failed to import tensilelite. Install it or pass the correct path to hipBLASLt. Error: {e}. ")
     
@@ -756,6 +758,7 @@ def prune_library(
     Note:
         - If clustering is not enabled, only one GPU will be used.
         - Will re-use benchmark results if they exist.
+        - Benchmarks use the adaptive "fast" timing profile with cache flushing.
     """
     hipblaslt_path = Path(hipblaslt_path)
     if not hipblaslt_path.is_dir():

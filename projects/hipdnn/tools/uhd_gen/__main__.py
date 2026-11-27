@@ -10,6 +10,7 @@ Subcommands for collection, training, evaluation and descriptor installation:
     evaluate            corpus + trained UHD -> §11.2 regret report
     promote             install that pair into a descriptor tree and point a UED at it
     generate            graph corpus -> public collection -> train/evaluate/promote
+    feature-search      training rows -> a searched feature recipe (recipe.json)
 
 Collect, train and install:
 
@@ -95,6 +96,7 @@ from .model_families import (
     model_summary,
     train_family,
 )
+from .optional import feature_name, safe_signature
 from .promote import add_promote_arguments, run_promote
 from .ranking_metrics import DEFAULT_RANKING_METRIC, RANKING_METRICS, ranking_metric
 from . import score_transform
@@ -227,6 +229,24 @@ def main(argv: list[str] | None = None) -> int:
     )
     add_size_arguments(size)
 
+    from .feature_search import add_feature_search_arguments, run_feature_search
+
+    feature_search = subparsers.add_parser(
+        "feature-search",
+        help="search a feature recipe over the published columns and derived expressions",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    add_feature_search_arguments(feature_search)
+
+    from .rewrite import add_rewrite_arguments, run_rewrite
+
+    rewrite = subparsers.add_parser(
+        "rewrite-signature",
+        help="read an installed UHD's optional features through value_or_default, "
+        "without retraining (RFC 0019 §6.7, §6.8 item 9)",
+    )
+    add_rewrite_arguments(rewrite)
+
     # Split off before the main parser sees flags it does not declare.
     if argv is None:
         argv = sys.argv[1:]
@@ -268,6 +288,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_generate(args)
     if args.command == "size":
         return run_size(args)
+    if args.command == "feature-search":
+        return run_feature_search(args)
     if args.command == "promote":
         return run_promote(args)
     if args.command == "evaluate":
@@ -276,6 +298,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_knobs(args)
     if args.command == "merge":
         return run_merge(args)
+    if args.command == "rewrite-signature":
+        return run_rewrite(args)
     code = _run_train(args)
     if code == 0:
         print(install_hint(args.output_dir, args.role, args.arch, args.uhd_id))
@@ -421,6 +445,40 @@ def _add_train_arguments(parser: argparse.ArgumentParser) -> None:
         help="Keep intermediate .lgbm file",
     )
     add_model_encoding_arguments(parser)
+    add_adapter_arguments(parser)
+    parser.add_argument(
+        "--key-features",
+        nargs="+",
+        default=None,
+        dest="key_features",
+        metavar="FEATURE",
+        help="linear_data only: the features whose values together identify a kernel "
+        "configuration (full published names, among --features). Default: every "
+        "`$kernel.*` reference in the signature.",
+    )
+    parser.add_argument(
+        "--family-features",
+        nargs="+",
+        default=None,
+        dest="family_features",
+        metavar="FEATURE",
+        help="linear_data only: a coarser key for configurations never seen in training; "
+        "they are scored by their family's fit. Default: none (the global fit).",
+    )
+    parser.add_argument(
+        "--ridge",
+        type=float,
+        default=None,
+        help="linear_data only: ridge strength of every fit (default: rellin.DEFAULT_RIDGE)",
+    )
+    parser.add_argument(
+        "--min-rows",
+        type=int,
+        default=None,
+        dest="min_rows",
+        help="linear_data only: a configuration with fewer rows is shrunk harder toward its "
+        "family (default: rellin.DEFAULT_MIN_ROWS)",
+    )
     parser.add_argument(
         "--model-family",
         choices=FAMILIES,
@@ -428,10 +486,11 @@ def _add_train_arguments(parser: argparse.ArgumentParser) -> None:
         dest="model_family",
         help=(
             "Library that fits the ensemble (default: lightgbm). Every family is written "
-            "as the same tree_data artifact; xgboost needs the optional xgboost package. "
-            "--group-by-feature and --keep-lgbm are LightGBM only. A non-LightGBM model is "
-            "always written as node_arrays with exact float64 leaves, so --model-encoding "
-            "and --leaf-precision apply to LightGBM only."
+            "as the same tree_data artifact (--adapter tree_data only); xgboost needs the "
+            "optional xgboost package. --group-by-feature, --keep-lgbm and an explicit "
+            "--early-exit schedule are LightGBM only. A non-LightGBM model is always "
+            "written as node_arrays with exact float64 leaves and no early-exit schedule, "
+            "so --model-encoding and --leaf-precision apply to LightGBM only."
         ),
     )
     parser.add_argument(
@@ -485,6 +544,103 @@ def add_model_encoding_arguments(parser: argparse.ArgumentParser) -> None:
         help="Storage of split_leaf leaf values: float32 (default; each within 2**-24 of "
         "itself) or float64 (exact)",
     )
+    parser.add_argument(
+        "--early-exit",
+        default="auto",
+        help="Early-exit schedule of a tree_data catalog ranker (README, 'Early exit'): "
+        "'auto' (default) chooses one from out-of-fold predictions for an uncalibrated, "
+        "single-layer sort_kernel_catalog model with problem identity, and writes none "
+        "otherwise; 'none' writes none; TREES:KEEP[,TREES:KEEP...] writes that schedule "
+        "(refused for a calibrated, grouped or predict_engine model). A schedule changes "
+        "model.bin, and with it the engine's selector revision",
+    )
+
+
+#: The model families `train` fits, one per UHD adapter that ships a trained artifact.
+TRAINED_ADAPTERS = ("tree_data", "linear_data", "mlp_data")
+
+#: `train`'s mlp_data options, by flag and argparse destination. They default to None so an
+#: unset one is told from a set one: a flag of another adapter is refused, and `generate`
+#: forwards only what its caller gave.
+_MLP_OPTIONS = (
+    ("--mlp-hidden", "mlp_hidden"),
+    ("--mlp-members", "mlp_members"),
+    ("--mlp-epochs", "mlp_epochs"),
+    ("--mlp-seed", "mlp_seed"),
+    ("--mlp-max-rows", "mlp_max_rows"),
+)
+
+
+def add_adapter_arguments(parser: argparse.ArgumentParser) -> None:
+    """Which model family `train` fits, and its options: `train` and `generate` take the
+    same flags."""
+    from .mlp import DEFAULT_EPOCHS, DEFAULT_HIDDEN, DEFAULT_MEMBERS, DEFAULT_SEED
+
+    parser.add_argument(
+        "--adapter",
+        choices=TRAINED_ADAPTERS,
+        default="tree_data",
+        help="UHD adapter, and so model, to train. tree_data (default): a LightGBM ensemble. "
+        "linear_data: a per-configuration linear ranker (RelLin) of the log slowdown against "
+        "the best candidate of each problem, for a small catalog; it needs problem identity "
+        "(--group-by or a benchmark column), serves no --metric or --calibrated score and no "
+        "predict_engine role, and ignores the tree-only options (--num-boost-round, "
+        "--early-stopping, --model-encoding, --leaf-precision, --group-by-feature). "
+        "mlp_data: an ensemble of small neural networks fitted to the log of one metric; "
+        "an estimate of one engine's metric for --role predict_engine, a catalog ranker "
+        "(like an ungrouped tree_data model) for --role sort_kernel_catalog, where "
+        "evaluation decides whether it is picked (README, 'The mlp_data adapter'). It "
+        "refuses --group-by-feature, ignores the other tree-only options and takes the "
+        "--mlp-* ones.",
+    )
+    parser.add_argument(
+        "--mlp-hidden",
+        default=None,
+        dest="mlp_hidden",
+        metavar="WIDTHS",
+        help="mlp_data only: comma-separated hidden layer widths of each network, e.g. "
+        f"64,64 (default: {','.join(str(w) for w in DEFAULT_HIDDEN)})",
+    )
+    parser.add_argument(
+        "--mlp-members",
+        type=int,
+        default=None,
+        dest="mlp_members",
+        help=f"mlp_data only: networks in the ensemble (default: {DEFAULT_MEMBERS})",
+    )
+    parser.add_argument(
+        "--mlp-epochs",
+        type=int,
+        default=None,
+        dest="mlp_epochs",
+        help="mlp_data only: epochs of the cosine schedule; a member stops earlier when "
+        f"its validation loss stops improving (default: {DEFAULT_EPOCHS})",
+    )
+    parser.add_argument(
+        "--mlp-seed",
+        type=int,
+        default=None,
+        dest="mlp_seed",
+        help="mlp_data only: seed of the first member; member k uses seed + k, for its "
+        f"initial weights, validation split and shuffles (default: {DEFAULT_SEED})",
+    )
+    parser.add_argument(
+        "--mlp-max-rows",
+        type=int,
+        default=None,
+        dest="mlp_max_rows",
+        help="mlp_data only: subsample a corpus of more rows than this, seeded; 0 uses "
+        "every row (default: 0)",
+    )
+
+
+def adapter_args(args: argparse.Namespace) -> list[str]:
+    """The `train` flags that pick the adapter `args` asked for, and its options."""
+    flags = ["--adapter", args.adapter]
+    for flag, dest in _MLP_OPTIONS:
+        if getattr(args, dest) is not None:
+            flags += [flag, str(getattr(args, dest))]
+    return flags
 
 
 def model_encoding_args(args: argparse.Namespace) -> list[str]:
@@ -494,6 +650,8 @@ def model_encoding_args(args: argparse.Namespace) -> list[str]:
         args.model_encoding,
         "--leaf-precision",
         args.leaf_precision,
+        "--early-exit",
+        args.early_exit,
     ]
 
 
@@ -517,6 +675,23 @@ def _resolve_uhd_id(requested: str | None) -> str:
     return canonical
 
 
+def check_adapter_options(args: argparse.Namespace) -> None:
+    """Refuse an adapter option that does not apply: `train` and `generate` share this, so
+    `generate` refuses before it measures anything."""
+    if args.adapter != "mlp_data":
+        given = [flag for flag, dest in _MLP_OPTIONS if getattr(args, dest) is not None]
+        if given:
+            raise ValueError(
+                f"{', '.join(given)} apply only to --adapter mlp_data, not {args.adapter}"
+            )
+        return
+    if args.group_by_feature:
+        raise ValueError(
+            "--group-by-feature is a tree_data option: an mlp_data model is one "
+            "ensemble per engine"
+        )
+
+
 def _resolve_score(args: argparse.Namespace, immediate: bool) -> None:
     """Settle the metric, label column and objective before any data is read.
 
@@ -525,6 +700,10 @@ def _resolve_score(args: argparse.Namespace, immediate: bool) -> None:
     """
     from .immediate import LABEL_STATISTIC
 
+    check_adapter_options(args)
+    if args.adapter == "linear_data":
+        _resolve_linear_score(args, immediate)
+        return
     if args.metric is None and args.target in (None, "tflops"):
         args.metric = DEFAULT_RANKING_METRIC
     if args.metric is None:
@@ -532,6 +711,11 @@ def _resolve_score(args: argparse.Namespace, immediate: bool) -> None:
             raise ValueError(
                 f"{args.role} requires --metric: engine selection compares its "
                 "score across engines, so it must name a registered metric"
+            )
+        if args.adapter == "mlp_data":
+            raise ValueError(
+                "mlp_data predicts the log of one registered metric, and its artifact "
+                "names it: pass --metric (--target alone names a column, not a metric)"
             )
         if args.calibrated:
             raise ValueError(
@@ -562,6 +746,49 @@ def _resolve_score(args: argparse.Namespace, immediate: bool) -> None:
         args.timing_statistic = LABEL_STATISTIC
 
 
+def _resolve_linear_score(args: argparse.Namespace, immediate: bool) -> None:
+    """The label and its direction for a linear_data model.
+
+    Its score is a log slowdown, lower is better, in no registered unit (RFC 0019 §7.5), so
+    the UHD declares `objective: min` whatever the corpus holds. `--objective` here names
+    the direction of the corpus's own target column, which the slowdown is measured in.
+    """
+    if immediate:
+        raise ValueError(
+            f"linear_data cannot train {args.role}: its score is a within-catalog slowdown, "
+            "not a calibrated estimate engine selection can compare across engines"
+        )
+    if args.metric is not None or args.calibrated:
+        raise ValueError(
+            "linear_data scores a log slowdown against the catalog's best candidate, which "
+            "is no registered metric and is not comparable across engines: drop --metric "
+            "and --calibrated"
+        )
+    if args.group_by_feature:
+        raise ValueError("--group-by-feature is a tree_data option")
+    args.target = args.target or "tflops"
+    args.objective = args.objective or "max"
+
+
+def _require_rows_provenance(recorded: dict, measured: dict, what: str) -> None:
+    """`recorded`, a provenance snapshot, must name the contract the rows were measured
+    under (`hard_provenance`). Their `codegen_revision` is the rows' own: a snapshot that
+    records another one is warned about."""
+    from .provenance import CODEGEN_REVISION, hard_provenance
+
+    if hard_provenance(recorded) != hard_provenance(measured):
+        raise ValueError(f"{what} differs from immediate engine binding")
+    codegen = recorded.get(CODEGEN_REVISION)
+    if codegen is not None and codegen != measured.get(CODEGEN_REVISION):
+        logger.warning(
+            "%s records %s %r, the rows were measured with %r; the model records the rows'",
+            what,
+            CODEGEN_REVISION,
+            codegen,
+            measured.get(CODEGEN_REVISION),
+        )
+
+
 def _immediate_training_rows(
     args: argparse.Namespace, input_path: Path
 ) -> tuple[pd.DataFrame, dict, dict]:
@@ -584,7 +811,9 @@ def _immediate_training_rows(
             f"--group-by-feature is not supported for {ROLE}: a grouped "
             "artifact has no engine-level (per-row) scoring contract"
         )
-    df, binding = training_binding(read_corpus(input_path), args.engine)
+    df, binding, warning = training_binding(read_corpus(input_path), args.engine)
+    if warning:
+        logger.warning("%s", warning)
     # RFC 0019 §13.2: a pick checked wrong is never a label; null is unknown.
     wrong = known_wrong(df)
     if wrong.any():
@@ -600,21 +829,19 @@ def _immediate_training_rows(
         )
     trained_against = binding["trained_against"]
     if args.provenance:
-        recorded = validate_provenance(
-            json.loads(Path(args.provenance).read_text(encoding="utf-8"))
+        _require_rows_provenance(
+            validate_provenance(
+                json.loads(Path(args.provenance).read_text(encoding="utf-8"))
+            ),
+            trained_against,
+            "recorded provenance",
         )
-        if recorded != trained_against:
-            raise ValueError(
-                "recorded provenance differs from immediate engine binding"
-            )
     elif args.descriptor_tree:
-        recorded = snapshot_provenance(
-            Path(args.descriptor_tree), args.engine, args.arch
+        _require_rows_provenance(
+            snapshot_provenance(Path(args.descriptor_tree), args.engine, args.arch),
+            trained_against,
+            "descriptor provenance",
         )
-        if recorded != trained_against:
-            raise ValueError(
-                "descriptor provenance differs from immediate engine binding"
-            )
     if args.group_by is not None and args.group_by != ["benchmark", "device"]:
         raise ValueError(
             "L1 training groups must be benchmark device, never engine/candidate rows"
@@ -652,11 +879,15 @@ def _catalog_training_rows(
     Rows with no measurement, a collection error or a pick checked wrong are dropped, as
     `evaluate` and `knobs` drop them, so the tools agree on which rows exist."""
     from .immediate import LABEL_STATISTIC
-    from .provenance import snapshot_provenance, validate_provenance
+    from .provenance import hard_provenance, snapshot_provenance, validate_provenance
 
     if args.provenance:
-        trained_against = validate_provenance(
-            json.loads(Path(args.provenance).read_text(encoding="utf-8"))
+        # An L2 ranker records no codegen revision (RFC 0019.13): a snapshot copied from a
+        # runtime binding carries one, which would make the UHD 1.2.
+        trained_against = hard_provenance(
+            validate_provenance(
+                json.loads(Path(args.provenance).read_text(encoding="utf-8"))
+            )
         )
     elif args.descriptor_tree:
         arch = (
@@ -827,8 +1058,320 @@ def _group_models(
     return group_index, group_models
 
 
+def _fit_trees(
+    args: argparse.Namespace,
+    df: pd.DataFrame,
+    names: list,
+    matrix: np.ndarray,
+    groups: list | None,
+    categorical_encoding: dict,
+):
+    """The tree_data fit: layer 1, and layer 2 when the model is a grouped LightGBM one.
+    Returns the layer-1 model, the group feature's slot (-1 if none), the group models, and
+    the early-exit schedule with what the manifest records about it."""
+    # Layer 1 ranks groups, so fit it on one row per (problem, group) with that
+    # group's best target, not on every candidate.
+    layer_one_df, layer_one_matrix = df, matrix
+    if args.group_by_feature:
+        if not groups:
+            raise ValueError(
+                "--group-by-feature needs --group-by: layer 1 is fitted on one row per "
+                "(problem, group), so it has to know which columns identify a problem. "
+                "Without them every group would collapse to a single row."
+            )
+        keys = list(groups) + [args.group_by_feature]
+        positions = (
+            df.assign(_uhd_row=np.arange(len(df)))
+            .sort_values(args.target, ascending=(args.objective == "min"))
+            .drop_duplicates(subset=keys, keep="first")["_uhd_row"]
+            .to_numpy()
+        )
+        positions = np.sort(positions)
+        layer_one_df = df.iloc[positions].reset_index(drop=True)
+        layer_one_matrix = None if matrix is None else matrix[positions]
+        logger.info(
+            "Layer 1 fitted on %d group rows (from %d candidates)",
+            len(layer_one_df),
+            len(df),
+        )
+
+    early_exit = _early_exit_request(args, groups)
+    if args.model_family != LIGHTGBM:
+        # A single ensemble over every row (--group-by-feature is refused for these
+        # families), written without an early-exit schedule.
+        model = train_family(
+            args.model_family,
+            layer_one_df,
+            names,
+            args.target,
+            groups,
+            num_boost_round=args.num_boost_round,
+            early_stopping_rounds=args.early_stopping,
+            categorical_encoding=categorical_encoding,
+            feature_matrix=layer_one_matrix,
+        )
+        return model, -1, [], ([], {"schedule": [], "chosen": False})
+    cross_validation: list | None = [] if early_exit == "auto" else None
+    model = train_model(
+        layer_one_df,
+        names,
+        args.target,
+        groups,
+        num_boost_round=args.num_boost_round,
+        early_stopping_rounds=args.early_stopping,
+        categorical_encoding=categorical_encoding,
+        feature_matrix=layer_one_matrix,
+        cross_validation=cross_validation,
+    )
+
+    group_index, group_models = _group_models(
+        args, df, names, groups, matrix, categorical_encoding
+    )
+    return (
+        model,
+        group_index,
+        group_models,
+        _early_exit_schedule(
+            args, early_exit, layer_one_df, groups, cross_validation, model.num_trees()
+        ),
+    )
+
+
+def _early_exit_request(args: argparse.Namespace, groups: list | None):
+    """`--early-exit` resolved: 'auto' (choose), [] (none) or the stages asked for.
+
+    `auto` chooses only where the runtime ranks catalogs with the whole ensemble and the
+    choice can be measured: a single-layer sort_kernel_catalog model with problem identity.
+    A calibrated score keeps every candidate fully scored until pruned candidates' missing
+    estimates are reviewed against every consumer (README, 'Early exit')."""
+    from .early_exit import parse_schedule
+    from .immediate import ROLE
+
+    text = (args.early_exit or "auto").strip()
+    if args.model_family != LIGHTGBM:
+        # The schedule is chosen and checked against LightGBM boosters and written by
+        # lgbm_to_flatbuffer; the other families' export carries none.
+        if text not in ("auto", "none"):
+            raise ValueError(
+                f"--early-exit {text!r} needs --model-family {LIGHTGBM}: "
+                f"--model-family {args.model_family} writes no early-exit schedule"
+            )
+        return []
+    if text == "none":
+        return []
+    if text != "auto":
+        if args.role == ROLE or args.group_by_feature:
+            raise ValueError(
+                "--early-exit applies to a single-layer sort_kernel_catalog model: "
+                "predict_engine scores one row with every tree, and a grouped model's "
+                "runtime ignores the schedule"
+            )
+        if args.calibrated:
+            raise ValueError(
+                "--early-exit does not apply to a --calibrated model: a pruned candidate "
+                "carries no estimate, and a calibrated ranking needs every candidate's"
+            )
+        return parse_schedule(text)
+    if args.role == ROLE or args.group_by_feature or args.calibrated or not groups:
+        return []
+    return "auto"
+
+
+def _early_exit_schedule(
+    args: argparse.Namespace,
+    request,
+    df: pd.DataFrame,
+    groups: list | None,
+    cross_validation: list | None,
+    tree_count: int,
+) -> tuple[list, dict]:
+    """The schedule to write and what the manifest records about it."""
+    from .early_exit import check_schedule, choose_schedule, out_of_fold_catalogs
+
+    if request != "auto":
+        check_schedule(request, tree_count)
+        return request, {
+            "schedule": [list(stage) for stage in request],
+            "chosen": False,
+        }
+    problem_ids = df[list(groups)].astype(str).agg("\x1f".join, axis=1).to_numpy()
+    catalogs = out_of_fold_catalogs(
+        cross_validation[0], problem_ids, df[args.target].to_numpy(dtype=np.float64)
+    )
+    choice = choose_schedule(catalogs, tree_count, args.objective)
+    logger.info(
+        "Early exit: %s (out-of-fold mean regret %.4f with every tree)",
+        choice.schedule or "none",
+        choice.full["mean_regret"],
+    )
+    return choice.schedule, {**choice.to_manifest(), "chosen": True}
+
+
+def _fit_linear(
+    args: argparse.Namespace,
+    df: pd.DataFrame,
+    signature: list,
+    names: list,
+    matrix: np.ndarray,
+    groups: list | None,
+):
+    """The RelLin fit of linear_data. Returns the ranker and what the manifest records."""
+    from .rellin import (
+        DEFAULT_MIN_ROWS,
+        DEFAULT_RIDGE,
+        fit_rellin,
+        relative_log_slowdown,
+        select_basis,
+    )
+
+    if not groups or any(column not in df.columns for column in groups):
+        raise ValueError(
+            "linear_data trains on each candidate's slowdown against the best candidate of "
+            "its problem, so it needs problem identity: pass --group-by (columns present in "
+            "the corpus) or use a corpus with a 'benchmark' column"
+        )
+    problems = df.groupby(list(groups), sort=False, dropna=False).ngroup().to_numpy()
+    slowdown = relative_log_slowdown(
+        df[args.target].to_numpy(dtype=np.float64), problems, args.objective
+    )
+
+    def slots(requested: list[str], flag: str) -> list[int]:
+        missing = [name for name in requested if name not in names]
+        if missing:
+            raise ValueError(
+                f"{flag} {missing} is not among the model's features {names}; a feature "
+                "that never varies in this corpus is dropped, so it cannot key a config"
+            )
+        return [names.index(name) for name in requested]
+
+    if args.key_features:
+        key = slots(args.key_features, "--key-features")
+    else:
+        key = [
+            index
+            for index, entry in enumerate(signature)
+            if isinstance(entry, str) and entry.startswith("$kernel.")
+        ]
+        if not key:
+            raise ValueError(
+                "linear_data keys its per-config models on the signature's `$kernel.*` "
+                "references, and this one has none that vary: name the features with "
+                "--key-features"
+            )
+    family = (
+        slots(args.family_features, "--family-features") if args.family_features else []
+    )
+    basis, transforms = select_basis(matrix, key)
+    if not basis:
+        logger.warning(
+            "no feature besides the config key varies, so the model is one constant per config"
+        )
+    ranker = fit_rellin(
+        matrix,
+        slowdown,
+        key_features=key,
+        family_features=family,
+        basis_features=basis,
+        transforms=transforms,
+        ridge=DEFAULT_RIDGE if args.ridge is None else args.ridge,
+        min_rows=DEFAULT_MIN_ROWS if args.min_rows is None else args.min_rows,
+    )
+    logger.info(
+        "Fitted %d config(s), %d family(ies), %d basis term(s) on %d rows (%d problems)",
+        len(ranker.config_floors),
+        len(ranker.family_floors),
+        len(basis),
+        len(df),
+        int(problems.max()) + 1,
+    )
+    return ranker, {
+        "adapter": "linear_data",
+        "key_features": [names[index] for index in key],
+        "family_features": [names[index] for index in family],
+        "basis": [
+            {"feature": names[slot], "transform": "log1p" if transform else "identity"}
+            for slot, transform in zip(basis, transforms)
+        ],
+        "num_configs": int(len(ranker.config_floors)),
+        "num_families": int(len(ranker.family_floors)),
+        "ridge": DEFAULT_RIDGE if args.ridge is None else args.ridge,
+        "min_rows": DEFAULT_MIN_ROWS if args.min_rows is None else args.min_rows,
+    }
+
+
+def _parse_mlp_hidden(text: str) -> tuple[int, ...]:
+    """`--mlp-hidden`: comma-separated positive widths; empty means no hidden layer."""
+    try:
+        widths = tuple(int(part) for part in text.split(",") if part.strip())
+    except ValueError:
+        raise ValueError(
+            f"--mlp-hidden {text!r} must be comma-separated integers, e.g. 64,64"
+        ) from None
+    if any(width < 1 for width in widths):
+        raise ValueError(f"--mlp-hidden {text!r} widths must be positive")
+    return widths
+
+
+def mlp_fit_options(args: argparse.Namespace) -> dict:
+    """The `fit_mlp` keywords the caller gave as `--mlp-*`; `fit_mlp`'s own defaults stand
+    for the rest."""
+    options = {
+        dest.removeprefix("mlp_"): getattr(args, dest)
+        for _, dest in _MLP_OPTIONS
+        if getattr(args, dest) is not None
+    }
+    if "hidden" in options:
+        options["hidden"] = _parse_mlp_hidden(options["hidden"])
+    return options
+
+
+def _fit_mlp(
+    args: argparse.Namespace,
+    df: pd.DataFrame,
+    matrix: np.ndarray,
+    groups: list | None = None,
+):
+    """The ensemble fit of mlp_data on log(target). Returns the ensemble and what the
+    manifest records. `groups` are the columns identifying a problem (None for a corpus
+    without problem identity)."""
+    from .mlp import fit_mlp
+
+    target = df[args.target].to_numpy(dtype=np.float64)
+    if not np.isfinite(target).all() or (target <= 0).any():
+        # RFC 0019 §8.3: a non-positive measurement is no measurement.
+        raise ValueError(
+            f"target {args.target!r} must contain finite, strictly positive values"
+        )
+    # Rows are candidates of a problem (a catalog) or one engine's measurement of a graph on
+    # a device (an L1 corpus): hold out whole problems for early stopping, keyed as the tree
+    # trainer's GroupKFold keys them (benchmark first, so every device's measurements of one
+    # graph or shape fall on one side). Only rows without problem identity split by row.
+    problems = None
+    if groups:
+        if groups[0] not in df.columns:
+            raise ValueError(
+                f"problem column {groups[0]!r} is not in the corpus, so mlp_data cannot "
+                "hold out whole problems for early stopping"
+            )
+        problems = df.groupby(groups[0]).ngroup().to_numpy()
+    ensemble, fit = fit_mlp(
+        matrix,
+        score_transform.forward(target),
+        groups=problems,
+        **mlp_fit_options(args),
+    )
+    logger.info(
+        "Fitted %d network(s) on %d of %d rows; held-out L1 %.4f in log units",
+        len(ensemble.networks),
+        fit["rows"],
+        fit["rows_available"],
+        fit["validation_l1_log"],
+    )
+    return ensemble, fit
+
+
 def _run_train(args: argparse.Namespace) -> int:
-    from .provenance import record_feature_semantics
+    from .provenance import minimum_uhd_version, record_feature_semantics
     from .immediate import ROLE, check_signature_evaluates, validate_signature
 
     immediate = args.role == ROLE
@@ -842,6 +1385,11 @@ def _run_train(args: argparse.Namespace) -> int:
             args.descriptor_name
         ).name != args.descriptor_name or args.descriptor_name in ("", ".", ".."):
             raise ValueError("--descriptor-name must be a file stem, not a path")
+        if args.model_family != LIGHTGBM and args.adapter != "tree_data":
+            raise ValueError(
+                f"--model-family {args.model_family} fits a tree_data ensemble, not "
+                f"--adapter {args.adapter}"
+            )
         if args.model_family != LIGHTGBM and (args.group_by_feature or args.keep_lgbm):
             raise ValueError(
                 f"--model-family {args.model_family} fits a single ensemble: "
@@ -890,14 +1438,33 @@ def _run_train(args: argparse.Namespace) -> int:
         if not isinstance(signature, list) or not signature:
             raise ValueError("features_signature must be a nonempty JSON array")
         signature = [parse_signature_entry(entry) for entry in signature]
+        # RFC 0019 §6.7 (absent is not zero) and §6.8 item 9: a feature a valid graph may leave
+        # unbound is read through value_or_default, so a row without it trains on the value the
+        # runtime reads.
+        # Wrapping turns a bare read into an expression, so the column check below must look at
+        # the signature as requested: a column no row publishes is a typo, not an absent value.
+        requested_columns = (
+            None
+            if any(isinstance(entry, dict) for entry in signature)
+            else {reference[1:] for reference in signature_references(signature)}
+        )
+        signature, wrapped = safe_signature(
+            signature, args.metric, args.feature_evaluator
+        )
+        if wrapped:
+            logger.info(
+                "Reading %d optional feature(s) through value_or_default: %s",
+                len(wrapped),
+                ", ".join(f"{item['reference']}={item['default']}" for item in wrapped),
+            )
         requested_signature = list(signature)
         references = signature_references(signature)
         if immediate:
             validate_signature(signature)
-        if not any(isinstance(entry, dict) for entry in signature):
+        if requested_columns is not None:
             # A raw reference is a column gather; expression inputs may be legally absent
             # (value_or_default/present), so the shared evaluator decides for those.
-            missing = {reference[1:] for reference in references} - set(df.columns)
+            missing = requested_columns - set(df.columns)
             if missing:
                 raise ValueError(f"Missing feature columns: {sorted(missing)}")
         if args.target not in df.columns:
@@ -932,10 +1499,7 @@ def _run_train(args: argparse.Namespace) -> int:
             trained_against,
             evaluator_feature_semantics_revision(args.feature_evaluator),
         )
-        names = [
-            entry[1:] if isinstance(entry, str) else f"expression_{index}"
-            for index, entry in enumerate(signature)
-        ]
+        names = [feature_name(entry, index) for index, entry in enumerate(signature)]
         signature, names, matrix, categorical_encoding, pruned_hash, dropped = (
             _drop_constant_features(
                 df,
@@ -959,59 +1523,18 @@ def _run_train(args: argparse.Namespace) -> int:
         groups = args.group_by
         if groups is None and "benchmark" in df.columns:
             groups = ["benchmark"] + (["device"] if "device" in df.columns else [])
-        # Layer 1 ranks groups, so fit it on one row per (problem, group) with that
-        # group's best target, not on every candidate.
-        layer_one_df, layer_one_matrix = df, matrix
-        if args.group_by_feature:
-            if not groups:
-                raise ValueError(
-                    "--group-by-feature needs --group-by: layer 1 is fitted on one row per "
-                    "(problem, group), so it has to know which columns identify a problem. "
-                    "Without them every group would collapse to a single row."
-                )
-            keys = list(groups) + [args.group_by_feature]
-            positions = (
-                df.assign(_uhd_row=np.arange(len(df)))
-                .sort_values(args.target, ascending=(args.objective == "min"))
-                .drop_duplicates(subset=keys, keep="first")["_uhd_row"]
-                .to_numpy()
-            )
-            positions = np.sort(positions)
-            layer_one_df = df.iloc[positions].reset_index(drop=True)
-            layer_one_matrix = None if matrix is None else matrix[positions]
-            logger.info(
-                "Layer 1 fitted on %d group rows (from %d candidates)",
-                len(layer_one_df),
-                len(df),
-            )
-
-        if args.model_family == LIGHTGBM:
-            model = train_model(
-                layer_one_df,
-                names,
-                args.target,
-                groups,
-                num_boost_round=args.num_boost_round,
-                early_stopping_rounds=args.early_stopping,
-                categorical_encoding=categorical_encoding,
-                feature_matrix=layer_one_matrix,
-            )
+        if args.adapter == "linear_data":
+            ranker, linear_fit = _fit_linear(args, df, signature, names, matrix, groups)
+            model, group_index, group_models = None, -1, []
+            early_exit, early_exit_record = [], None
+        elif args.adapter == "mlp_data":
+            ensemble, mlp_fit = _fit_mlp(args, df, matrix, groups)
+            model, group_index, group_models = None, -1, []
+            early_exit, early_exit_record = [], None
         else:
-            model = train_family(
-                args.model_family,
-                layer_one_df,
-                names,
-                args.target,
-                groups,
-                num_boost_round=args.num_boost_round,
-                early_stopping_rounds=args.early_stopping,
-                categorical_encoding=categorical_encoding,
-                feature_matrix=layer_one_matrix,
+            model, group_index, group_models, (early_exit, early_exit_record) = (
+                _fit_trees(args, df, names, matrix, groups, categorical_encoding)
             )
-
-        group_index, group_models = _group_models(
-            args, df, names, groups, matrix, categorical_encoding
-        )
         # Read before anything is written: a bad SOURCE_DATE_EPOCH or an unreadable input
         # fails the run here, with no partial output.
         training_date = resolve_training_date()
@@ -1023,7 +1546,45 @@ def _run_train(args: argparse.Namespace) -> int:
     # No descriptor or model artifact is published before all input checks and fitting.
     output_dir.mkdir(parents=True, exist_ok=True)
     fb_path = output_dir / "model.bin"
-    if args.model_family == LIGHTGBM:
+    if args.adapter == "linear_data":
+        from .linear_to_flatbuffer import write_linear_model
+
+        model_sha256 = write_linear_model(
+            ranker,
+            features_hash,
+            fb_path,
+            num_training_samples=len(df),
+            training_arches=args.training_arches,
+            model_version=args.model_version,
+            training_date=training_date,
+        )
+    elif args.adapter == "mlp_data":
+        from .mlp_to_flatbuffer import write_mlp_model
+
+        model_sha256 = write_mlp_model(
+            ensemble,
+            args.metric,
+            features_hash,
+            fb_path,
+            num_training_samples=mlp_fit["rows"],
+            training_arches=args.training_arches,
+            model_version=args.model_version,
+            training_date=training_date,
+        )
+    elif args.model_family != LIGHTGBM:
+        # Written in the node_arrays encoding with float64 leaves, which is what keeps the
+        # export bit-exact against the library; --model-encoding and --leaf-precision
+        # apply to LightGBM models only.
+        model_sha256 = export_family(
+            model,
+            features_hash,
+            fb_path,
+            num_training_samples=len(df),
+            training_arches=args.training_arches,
+            model_version=args.model_version,
+            training_date=training_date,
+        )
+    else:
         lgbm_path = output_dir / "model.lgbm"
         model.save_model(str(lgbm_path))
         model_sha256 = convert(
@@ -1038,41 +1599,38 @@ def _run_train(args: argparse.Namespace) -> int:
             group_models=group_models or None,
             encoding=args.model_encoding,
             leaf_precision=args.leaf_precision,
+            early_exit=early_exit,
         )
         if not args.keep_lgbm:
             lgbm_path.unlink()
-    else:
-        # Written in the node_arrays encoding with float64 leaves, which is what keeps the
-        # export bit-exact against the library; --model-encoding and --leaf-precision
-        # apply to LightGBM models only.
-        model_sha256 = export_family(
-            model,
-            features_hash,
-            fb_path,
-            num_training_samples=len(df),
-            training_arches=args.training_arches,
-            model_version=args.model_version,
-            training_date=training_date,
-        )
     descriptor = {
-        "version": "1.0",
+        "version": minimum_uhd_version(trained_against),
         "id": uhd_id,
         "name": args.name,
-        "adapter": "tree_data",
+        "adapter": args.adapter,
         "features_signature": signature,
         "features_hash": features_hash,
         "trained_against": trained_against,
-        "objective": args.objective,
+        # A linear_data score is a log slowdown, so lower is better whatever the corpus's
+        # own direction (RFC 0019 §7.5); the manifest keeps the corpus's.
+        "objective": "min" if args.adapter == "linear_data" else args.objective,
         # RFC 0019 §4.1: `metric` names the registered quantity the score estimates, and
-        # is absent from a within-engine ranker that estimates none of them.
-        "score": {
-            **({"metric": args.metric} if args.metric else {}),
-            "calibrated": args.calibrated,
-            "transform": score_transform.TRAINED,
-        },
-        # RFC 0019 §7.2: TreeDataAdapter verifies this artifact digest before parsing.
+        # is absent from a within-engine ranker that estimates none of them; linear_data
+        # declares no score at all.
+        **(
+            {}
+            if args.adapter == "linear_data"
+            else {
+                "score": {
+                    **({"metric": args.metric} if args.metric else {}),
+                    "calibrated": args.calibrated,
+                    "transform": score_transform.TRAINED,
+                }
+            }
+        ),
+        # RFC 0019 §7.2: the adapter verifies this artifact digest before parsing.
         # Bare hex, matching `sha256(buffer, size)` on the runtime side.
-        "tree_data": {"artifact": fb_path.name, "hash": model_sha256},
+        args.adapter: {"artifact": fb_path.name, "hash": model_sha256},
     }
     if categorical_encoding:
         descriptor["categorical_encoding"] = categorical_encoding
@@ -1101,24 +1659,43 @@ def _run_train(args: argparse.Namespace) -> int:
         # RFC 0019.13 §10.5/§11.2: models trained on different statistics are not
         # comparable, so the artifact records which one it used.
         "timing_statistic": args.timing_statistic,
-        "score_transform": score_transform.TRAINED,
+        "score_transform": (
+            "identity" if args.adapter == "linear_data" else score_transform.TRAINED
+        ),
         "group_by": groups or [],
         # The artifact holds only a slot index; the name lets a report attribute regret
         # to the group choice versus the member choice.
         "group_by_feature": args.group_by_feature,
         "group_models": len(group_models or []),
-        "model_family": args.model_family,
-        **model_summary(model, names),
+        **(
+            linear_fit
+            if args.adapter == "linear_data"
+            else (
+                {"adapter": "mlp_data", "mlp_fit": mlp_fit}
+                if args.adapter == "mlp_data"
+                else {
+                    "model_family": args.model_family,
+                    **model_summary(model, names),
+                }
+            )
+        ),
         "num_samples": len(df),
         "input_file": str(input_path.resolve()),
         "input_sha256": input_sha256,
         "training_arches": args.training_arches or [],
         "model_version": args.model_version,
-        "training_options": {
-            "model_family": args.model_family,
-            "num_boost_round": args.num_boost_round,
-            "early_stopping_rounds": args.early_stopping,
-        },
+        **(
+            {
+                "training_options": {
+                    "model_family": args.model_family,
+                    "num_boost_round": args.num_boost_round,
+                    "early_stopping_rounds": args.early_stopping,
+                },
+                "early_exit": early_exit_record,
+            }
+            if args.adapter == "tree_data"
+            else {}
+        ),
     }
     if immediate:
         manifest.update(

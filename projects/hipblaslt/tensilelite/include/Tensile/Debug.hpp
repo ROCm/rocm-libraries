@@ -27,7 +27,6 @@
 #pragma once
 
 #include <cstdlib>
-#include <set>
 #include <string>
 #include <tensilelitehost/export.h>
 
@@ -37,8 +36,6 @@
 
 namespace TensileLite
 {
-    using StringSet = std::set<std::string>;
-
     /**
      * @brief Common place for defining flags which enable debug behaviour.
      */
@@ -95,6 +92,11 @@ namespace TensileLite
         // on 0x200000 above.
         bool printNoSolutionUniformSummationOrder() const;
 
+        // Debug override from HIPBLASLT_USO_BYPASS_REFUSALS (1, on or true): when the uniform
+        // summation order is on, its selection filter and launch gate admit every kernel
+        // instead of refusing one. The USO launch arguments are unchanged.
+        bool bypassUniformSummationOrderRefusals() const;
+
         bool naivePropertySearch() const;
 
         bool skipKernelLaunch() const;
@@ -127,11 +129,9 @@ namespace TensileLite
 
         bool gridBasedBatchExp() const;
 
+        bool useMeshBasedLibrary() const;
+
         bool disableStaggerU() const;
-
-        StringSet excludedLibFromGetAll() const;
-
-        void setExcludedLibFromGetAll(StringSet& excludedSet);
 
         __attribute__((always_inline)) inline void markerStart(const char* name) const
         {
@@ -178,11 +178,12 @@ namespace TensileLite
         bool        m_benchmark           = false;
         bool        m_gridbasedKdTree     = false;
         bool        m_gridbasedBatchExp   = false;
+        bool        m_meshbasedLib        = false;
         bool        m_printMarker         = false;
         bool        m_disableStaggerU     = false;
+        bool        m_usoBypassRefusals   = false;
         // -1 = unset (use API attribute); 0 = force static SK3; 1 = force dynamic SK4
         int         m_streamK5ForceMode   = -1;
-        StringSet   m_excludedFromGetAll;
 
         Debug();
     };

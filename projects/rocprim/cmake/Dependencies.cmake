@@ -39,6 +39,12 @@ set(USER_CXX_FLAGS ${CMAKE_CXX_FLAGS})
 if(DEFINED BUILD_SHARED_LIBS)
   set(USER_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
 endif()
+# Capture the CACHE entry separately: the normal variable here is already
+# rocPRIM's own OFF, set just before this file is included, so it cannot restore
+# what the user asked for.
+if(DEFINED CACHE{BUILD_SHARED_LIBS})
+  set(USER_CACHE_BUILD_SHARED_LIBS "$CACHE{BUILD_SHARED_LIBS}")
+endif()
 set(USER_ROCM_WARN_TOOLCHAIN_VAR ${ROCM_WARN_TOOLCHAIN_VAR})
 
 set(ROCM_WARN_TOOLCHAIN_VAR OFF CACHE BOOL "")
@@ -198,10 +204,19 @@ endif()
 
 # Restore user global state
 set(CMAKE_CXX_FLAGS ${USER_CXX_FLAGS})
-if(DEFINED USER_BUILD_SHARED_LIBS)
-  set(BUILD_SHARED_LIBS ${USER_BUILD_SHARED_LIBS})
+# Restore the CACHE entry, not just the normal variable. The FORCE above is
+# global and permanent, so leaving it silently switches every project configured
+# after rocPRIM to static linking -- in a superbuild, siblings then build the
+# wrong library kind with no error anywhere.
+if(DEFINED USER_CACHE_BUILD_SHARED_LIBS)
+  set(BUILD_SHARED_LIBS "${USER_CACHE_BUILD_SHARED_LIBS}" CACHE BOOL
+      "Global flag to cause add_library() to create shared libraries if on." FORCE)
 else()
   unset(BUILD_SHARED_LIBS CACHE )
+endif()
+# Must come after the cache write, which drops any same-named normal variable.
+if(DEFINED USER_BUILD_SHARED_LIBS)
+  set(BUILD_SHARED_LIBS ${USER_BUILD_SHARED_LIBS})
 endif()
 set(ROCM_WARN_TOOLCHAIN_VAR ${USER_ROCM_WARN_TOOLCHAIN_VAR} CACHE BOOL "")
 

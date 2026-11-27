@@ -228,8 +228,9 @@ rocke_value_t* rocke_b_load_q_scale_for_block(rocke_ir_builder_t* b,
     off = rocke_qk__scale_offset_for_block(b, spec, batch_idx, head_idx, q_block_idx);
 
     /* return b.global_load_f32(q_scale_ptr, off)
-     * Python passes no align kwarg -> default (4); the C global_load_f32 maps a
-     * non-positive align to its f32 default, so 0 reproduces the default. */
+     * Python passes no align kwarg -> default (4); in the C global_load_f32 only
+     * align 0 requests that default (a negative align is refused), so 0
+     * reproduces it. */
     return rocke_b_global_load_f32(b, q_scale_ptr, off, 0);
 }
 

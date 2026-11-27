@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "id": "8db17369-bc30-4ae7-b5cf-bd573b082ebe",
+  "name": "Gfx942AttentionUnified2D selector",
+  "adapter": "native",
+  "objective": "max",
+  "native": {
+    "symbol": "hipkernel.gfx942_attention_unified_2d.score"
+  }
+}

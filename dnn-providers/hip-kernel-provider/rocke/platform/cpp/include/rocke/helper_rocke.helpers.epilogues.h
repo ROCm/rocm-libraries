@@ -187,6 +187,13 @@ typedef struct rocke_cshuffle_epilogue
 rocke_cshuffle_epilogue_t rocke_cshuffle_epilogue_make(const rocke_mfma_atom_t* atom,
                                                        const rocke_warp_grid_t* grid);
 
+/* CShuffleEpilogue.pick_store_vec: the widest store width (<= max_store_vec,
+ * and <= 4 for fp32 output) that spreads a tile_m x tile_n tile evenly over
+ * block_size threads. The single store-width rule shared by from_grid,
+ * from_grid_op and callers that need the width before building the epilogue. */
+int rocke_cshuffle_pick_store_vec(
+    int tile_m, int tile_n, int block_size, int max_store_vec, bool fp32_out);
+
 /* CShuffleEpilogue.from_grid(atom, grid, max_store_vec=8):
  * pick the widest store_vec that distributes the tile evenly over block_size.
  * For fp32 output store_vec is capped at 4 (= 16 bytes, hw limit). */
@@ -195,8 +202,8 @@ rocke_cshuffle_epilogue_t rocke_cshuffle_epilogue_from_grid(const rocke_mfma_ato
                                                             int max_store_vec);
 
 /* CShuffleEpilogue.from_grid_op(op, grid, max_store_vec=8): WMMA variant.
- * Uses op->c_frag_len / op->c_layout() for the LDS scatter in place of the
- * MFMA-specific atom.lane_to_output. */
+ * Uses op->dst.frag_len / rocke_mma_op_dst_layout() for the LDS scatter in
+ * place of the MFMA-specific atom.lane_to_output. */
 rocke_cshuffle_epilogue_t rocke_cshuffle_epilogue_from_grid_op(const rocke_mmaop_t* op,
                                                                const rocke_warp_grid_t* grid,
                                                                int max_store_vec);
@@ -230,6 +237,24 @@ void rocke_cshuffle_epilogue_atomic_store(rocke_ir_builder_t* b,
                                           rocke_value_t* wg_N,
                                           rocke_value_t* bounds_m, /* NULL => no bounds */
                                           rocke_value_t* bounds_n);
+
+/* CShuffleEpilogue.atomic_store(b, accs, dw_ptr, wg_N=None, bounds=None, addr_fn=...).
+ * As rocke_cshuffle_epilogue_atomic_store, with an optional addr_fn for an
+ * output that is not a flat m * wg_N + n matrix (dgrad's dX). addr_fn (NULL =>
+ * m * wg_N + n) returns the element offset; its validity (NULL => none) is
+ * and-ed into the guard. A pair's partner is offset + 1, so n must be
+ * contiguous in memory over the store vector. wg_N may be NULL when addr_fn is
+ * set; both NULL is an error. */
+void rocke_cshuffle_epilogue_atomic_store_addr(rocke_ir_builder_t* b,
+                                               const rocke_cshuffle_epilogue_t* epi,
+                                               rocke_value_t* const* accs,
+                                               int num_accs,
+                                               rocke_value_t* dw_ptr,
+                                               rocke_value_t* wg_N, /* NULL with addr_fn */
+                                               rocke_epilogue_addr_fn addr_fn,
+                                               void* addr_user,
+                                               rocke_value_t* bounds_m, /* NULL => no bounds */
+                                               rocke_value_t* bounds_n);
 
 #ifdef __cplusplus
 } /* extern "C" */

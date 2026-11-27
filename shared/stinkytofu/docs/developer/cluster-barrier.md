@@ -129,11 +129,29 @@ load whose segment contains a preceding workgroup `s_barrier_signal -1` (the
 Multiple loads sharing the same workgroup signal receive one handshake.
 
 `ReduceClusterBarrierPerLoop` (module option, `<0` unset, `0` off, `>0` on)
-selects the reduced cadence. On, the first Rule 3 trigger of each enclosing
-loop handshakes, and a later trigger in that same loop handshakes again only
-after 2000 estimated cycles (`kReducedClusterBarrierIntervalCycles`). Nearby
-HalfPLR / ExpandPointerSwap copies still share one handshake. Off, every loop
-trigger handshakes. Unset resolves through `SchedulingKnobHeuristics`.
+selects the reduced cadence. Off, every loop trigger handshakes. Unset resolves
+through `SchedulingKnobHeuristics`.
+
+On, the pass first scans the whole block and records every Rule 3 trigger of each
+enclosing loop as a candidate, then decides per loop which candidates handshake
+(`selectReducedHandshakeTriggers`):
+
+1. **Lead.** Each candidate is scored with the signal lead its Rule 3 climb reaches,
+   capped at `ClusterBarrierRule3SignalLeadCycles`. A trigger whose signal is pinned
+   by the loop head, a tensor-counter drain or a prior handshake scores below the
+   cap and loses to one with room.
+2. **Count.** A loop takes `max(1, ceil(period / 2000))` handshakes
+   (`kReducedClusterBarrierIntervalCycles`), where `period` is the estimated cycles
+   of one trip, loop head to latch.
+3. **Picks.** The first pick is the highest score, the earliest on a tie. Each later
+   pick is, among the highest score still unpicked, the candidate whose distance to
+   the nearest earlier pick is closest to 2000 cycles. Distance is measured around
+   the loop (the shorter way), since the body repeats. The interval therefore
+   decides how many handshakes there are and breaks lead ties; it is not a hard
+   minimum spacing.
+
+A loop that already holds a cluster wait is left as it is (the period estimate moves
+once a handshake is in, so recounting would add more on every pass).
 `propose()` turns it on when the `loopWithPrefetch` WMMA latency sum is greater
 than 2500 and that sum covers at least 5 cycles per ds_load (integer division,
 `sumWmmaLatencyCycles / dsLoadCount >= 5`). A main loop missing WMMAs or
@@ -163,6 +181,13 @@ Cross-segment hoisting and loop-carried compensation are gated by the compile-ti
 switch `cluster_barrier::kRule3CrossLoop` in
 `InsertClusterBarrierPass.hpp` (default **false**). See
 [`kRule3CrossLoop`](#krule3crossloop) below.
+
+### GIR frame RAW points and the Rule 3 signal
+
+The Rule 3 backward signal search treats `s_wait_tensorcnt` as a hard stop and settles after that
+RAW point's workgroup fence. Therefore no tensor-counter wait may occur between a Rule 3
+`s_barrier_signal -3` and its matching `s_barrier_wait -3`. This is in-segment behavior and does
+not enable `kRule3CrossLoop`.
 
 ### SCC
 
@@ -397,7 +422,7 @@ exit has drain wait + skip path.
 
 ## Entry handoff regression tests
 
-`Tensile/Tests/unit/test_cluster_entry_handoff_codegen.py` loads the executable
+`tensilelite/Tests/unit/test_cluster_entry_handoff_codegen.py` loads the executable
 `common/gemm/gfx1250/cluster_entry_handoff.yaml` through the real Python and
 backend pipeline. It checks SIA0 barrier reuse and the required SIA4 entry pair
 for three layouts, with iteration cloning enabled and disabled, and assembles all

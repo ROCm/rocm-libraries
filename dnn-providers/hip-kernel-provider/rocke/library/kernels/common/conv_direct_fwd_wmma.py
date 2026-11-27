@@ -76,15 +76,14 @@ loop, so they are build-time capabilities, like the tile geometry.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
-from rocke.core.arch import ArchTarget
 from rocke.core.codegen_policy import (
     CodegenPolicy,
     apply_codegen_policy,
-    normalize_scheduler_strategy,
 )
 from rocke.core.ir import I32, IRBuilder, KernelDef, Value, VectorType
+from rocke.helpers.spec import align_up, ceil_div
 
 from kernels.common.conv_direct_grouped import (
     DirectConvProblem,
@@ -92,20 +91,25 @@ from kernels.common.conv_direct_grouped import (
     emit_direct_params,
 )
 from kernels.common.conv_fwd_wmma_gate import (
+    CH_PAD,
     WMMA_K,
-    WMMA_M,
-    WMMA_N,
-    wmma_ab_dtype,
     wmma_fwd_gate,
+    wmma_fwd_halo_cols,
+    wmma_fwd_halo_extent,
+    wmma_fwd_lead_cols,
+    wmma_fwd_limits_reason,
+    wmma_fwd_op,
 )
 
-CH_PAD = 8  # channels of row skew past each LDS row (16 bytes)
 FWD_WMMA_VGPR_BUDGET = 512
-_I32_MAX = (1 << 31) - 1
+# Channels one lane zeroes (one 16-byte store) when a single wave clears the
+# leading view pixel of a padded poly_view chunk.
+POLY_ZERO_LANE_CH = 8
 
 
-def _ceil_div(a: int, b: int) -> int:
-    return -(-a // b)
+def poly_view_zero_channels(wave_size: int) -> int:
+    """Most channels of a padded poly_view chunk its one zeroing wave clears."""
+    return POLY_ZERO_LANE_CH * wave_size
 
 
 @dataclass(frozen=True)
@@ -178,32 +182,86 @@ class DirectFwdWmmaSpec:
     # lane l + dil of the same 16-lane row) plus a 2-lane LDS read for the
     # column that enters at the right edge, instead of a full LDS read.
     tap_shift: bool = False
+    # Stride-2 filters with no overlap (1x1 s2, 2x2 s2, no padding) as a
+    # strided GEMM: the kernel runs the 1x1 stride-1 tile loop over a view of
+    # X whose rows and columns step by the stride (so no halo element is
+    # unused) and whose reduction runs over the KH * KW * cpg patch. A 2x2
+    # patch is KH runs of KW * cpg contiguous channels, one input row apart:
+    # each channel chunk lies within one run, so a chunk's transfer starts at
+    # its run. The weights are [k][r][s][c], already the patch order.
+    strided_view: bool = False
+    # With strided_view on an input of exactly stride * Ho rows: an image's
+    # view rows continue the previous image's (x's image stride is Ho view
+    # rows, y's Ho output rows), so the batch folds into the rows and a tile
+    # can span images: N * Ho rows of one image.
+    fold_n: bool = False
+    # A 1-D strided filter whose width is a multiple of the stride (1 x m*S,
+    # stride S, column padding below S, H = 1, W a multiple of S) as a 1 x m
+    # stride-1 conv over a polyphase view of X: view pixel j is input pixels
+    # S*j - pw .. S*j - pw + S - 1, S*cpg contiguous channels. The weights
+    # [k][t][c] are already [k][tap][S*cpg]. A chunk lies in one input pixel
+    # of its view pixel, so it reads S*j - pw + i at its own bounds: the view's
+    # first pixel is a leading zero for the chunks with i < pw (zeroed per
+    # chunk) and its last a trailing one for the others (the TDM extent).
+    poly_view: bool = False
+
+    @property
+    def vp(self) -> DirectConvProblem:
+        """The problem the tile loop sees: ``problem`` itself, its polyphase
+        view (1 x m, stride 1) or its strided-GEMM view (1x1, stride 1, over
+        the Ho x Wo output grid)."""
+        p = self.problem
+        if self.poly_view:
+            m = p.KW // p.stride
+            return replace(
+                p,
+                H=1,
+                W=p.Wo + m - 1,
+                cpg=p.stride * p.cpg,
+                KH=1,
+                KW=m,
+                PAD=0,
+                pad_w=-1,
+                stride=1,
+            )
+        if not self.strided_view:
+            return p
+        rows = p.N * p.Ho if self.fold_n else p.Ho
+        return replace(
+            p,
+            N=1 if self.fold_n else p.N,
+            H=rows,
+            W=p.Wo,
+            cpg=p.KH * p.KW * p.cpg,
+            KH=1,
+            KW=1,
+            PAD=0,
+            pad_w=-1,
+            stride=1,
+        )
 
     @property
     def ring_taps(self) -> int:
         """Taps per weight slot."""
-        p = self.problem
+        p = self.vp
         if self.tap_ring:
             return 1
         return p.KW if self.row_ring else p.KH * p.KW
 
     @property
     def phases_w(self) -> int:
-        return self.problem.stride if self.phase_split else 1
+        return self.vp.stride if self.phase_split else 1
 
     @property
     def halo_cols(self) -> int:
         """Columns of one (phase) sub-halo."""
-        p = self.problem
-        if self.phase_split:
-            return self.tile_w + ((p.KW - 1) * p.dil_w) // p.stride
-        return self.halo_w
+        return wmma_fwd_halo_cols(self.vp, self.tile_w, self.phase_split)
 
     @property
     def lead_cols(self) -> int:
         """Most leading zero columns a (phase) sub-halo gets at the left edge."""
-        p = self.problem
-        return _ceil_div(p.PAD, p.stride) if self.phase_split else p.PAD
+        p = self.vp
+        return wmma_fwd_lead_cols(p.PAD_W, p.stride, self.phase_split)
 
     @property
     def phase_elems(self) -> int:
@@ -214,11 +272,11 @@ class DirectFwdWmmaSpec:
 
     @property
     def stride(self) -> int:
-        return self.problem.stride
+        return self.vp.stride
 
     @property
     def cpg_eff(self) -> int:
-        return self.pack_groups * self.problem.cpg
+        return self.pack_groups * self.vp.cpg
 
     @property
     def kpg_eff(self) -> int:
@@ -247,13 +305,13 @@ class DirectFwdWmmaSpec:
 
     @property
     def halo_h(self) -> int:
-        p = self.problem
-        return p.stride * (self.tile_h - 1) + (p.KH - 1) * p.dil_h + 1
+        p = self.vp
+        return wmma_fwd_halo_extent(p.stride, self.tile_h, p.KH, p.dil_h)
 
     @property
     def halo_w(self) -> int:
-        p = self.problem
-        return p.stride * (self.tile_w - 1) + (p.KW - 1) * p.dil_w + 1
+        p = self.vp
+        return wmma_fwd_halo_extent(p.stride, self.tile_w, p.KW, p.dil_w)
 
     @property
     def x_pitch(self) -> int:
@@ -275,14 +333,14 @@ class DirectFwdWmmaSpec:
 
     @property
     def wei_elems(self) -> int:
-        p = self.problem
+        p = self.vp
         return self.ring_taps * self.block_k * self.x_pitch
 
     @property
     def halo_slack(self) -> int:
-        # A left-edge block's last row wraps up to PAD columns past the ring
+        # A left-edge block's last row wraps up to PAD_W columns past the ring
         # (a split halo carries the slack in each phase).
-        return 0 if self.phase_split else self.problem.PAD * self.x_pitch
+        return 0 if self.phase_split else self.vp.PAD_W * self.x_pitch
 
     def lds_bytes(self) -> int:
         # Each halo slot carries its own wrap slack (see the module docstring).
@@ -306,6 +364,7 @@ class DirectFwdWmmaSpec:
             self.name,
             f"f{p.KH}x{p.KW}",
             f"p{p.PAD}",
+            f"pw{p.PAD_W}" if p.PAD_W != p.PAD else "",
             f"wk{self.waves_k}",
             f"wp{self.waves_p}",
             f"tk{self.tiles_k}",
@@ -328,16 +387,19 @@ class DirectFwdWmmaSpec:
             f"pg{self.pp_group}" if self.pp_group > 1 else "",
             "tu" if self.tap_reuse else "",
             "tsh" if self.tap_shift else "",
+            "sv" if self.strided_view else "",
+            "fn" if self.fold_n else "",
+            "pv" if self.poly_view else "",
             flags={"bf16": p.dtype == "bf16"},
         )
 
     def grid(self) -> tuple[int, int, int]:
-        p = self.problem
-        n_kt = _ceil_div(self.kpg_eff, self.block_k)
-        n_ht = _ceil_div(p.Ho, self.tile_h)
-        n_wt = _ceil_div(p.Wo, self.tile_w)
+        p = self.vp
+        n_kt = ceil_div(self.kpg_eff, self.block_k)
+        n_ht = ceil_div(p.Ho, self.tile_h)
+        n_wt = ceil_div(p.Wo, self.tile_w)
         return (
-            _ceil_div(p.N, self.tile_n) * self.groups_eff * n_ht * n_wt * n_kt,
+            ceil_div(p.N, self.tile_n) * self.groups_eff * n_ht * n_wt * n_kt,
             1,
             1,
         )
@@ -348,12 +410,12 @@ class DirectFwdWmmaSpec:
 
 def fwd_wmma_tile_efficiency(spec: DirectFwdWmmaSpec) -> float:
     """Share of ``spec``'s padded tile grid that is real work on its problem."""
-    p = spec.problem
+    p = spec.vp
     tiles = (
-        _ceil_div(p.N, spec.tile_n) * spec.tile_n,
-        _ceil_div(p.Ho, spec.tile_h) * spec.tile_h,
-        _ceil_div(p.Wo, spec.tile_w) * spec.tile_w,
-        _ceil_div(spec.kpg_eff, spec.block_k) * spec.block_k,
+        align_up(p.N, spec.tile_n),
+        align_up(p.Ho, spec.tile_h),
+        align_up(p.Wo, spec.tile_w),
+        align_up(spec.kpg_eff, spec.block_k),
     )
     return (p.N * p.Ho * p.Wo * spec.kpg_eff) / (
         tiles[0] * tiles[1] * tiles[2] * tiles[3]
@@ -363,17 +425,86 @@ def fwd_wmma_tile_efficiency(spec: DirectFwdWmmaSpec) -> float:
 def fwd_wmma_reason(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> str | None:
     """Why ``spec`` cannot run on ``arch`` (None when it can)."""
     p = spec.problem
-    why, target = wmma_fwd_gate(p, arch, "direct_fwd_wmma", spec.wave_size)
+    why, target = wmma_fwd_gate(
+        p, arch, "direct_fwd_wmma", spec.wave_size, per_axis_pad=True
+    )
     if why:
         return why
+    real = p
+    if spec.strided_view:
+        if (
+            p.PAD
+            or p.PAD_W
+            or p.is_dilated
+            or p.KH != p.KW
+            or p.KH not in (1, p.stride)
+        ):
+            return "strided_view serves undilated 1x1 or KxK stride-K, no padding"
+        if p.stride < 2:
+            return "strided_view serves stride > 1"
+        if spec.phase_split or spec.pack_groups > 1 or spec.tap_reuse:
+            return "strided_view is a 1x1 stride-1 loop (no phases, packs or reuse)"
+        if p.KH > 1 and p.groups > 1:
+            # A patch run of KW * cpg contiguous channels exists only when
+            # one group holds all of a pixel's channels.
+            return "a KxK strided_view serves ungrouped convs"
+        if p.KH > 1 and spec.ck and (p.KW * p.cpg) % spec.ck:
+            return (
+                f"a {p.KW * p.cpg}-channel patch run is not whole ck {spec.ck} chunks"
+            )
+        if spec.fold_n and (p.H != p.stride * p.Ho or spec.tile_n != 1):
+            return "fold_n needs H == stride * Ho and one image per tile"
+    elif spec.fold_n:
+        return "fold_n builds on strided_view"
+    if spec.poly_view:
+        S = p.stride
+        if spec.strided_view or p.H != 1 or p.KH != 1 or p.PAD or p.is_dilated:
+            return "poly_view serves 1-D (H = 1, 1 x R) undilated filters"
+        if S < 2 or p.KW % S or not 0 <= p.PAD_W < S or p.W % S:
+            return "poly_view needs R = m * S, column padding below S and W % S == 0"
+        if 0 < 2 * p.PAD_W < S:
+            # The view's last pixel is then all input, not a trailing zero.
+            return "poly_view needs column padding 0 or at least S / 2"
+        if p.groups != 1:
+            return "poly_view serves ungrouped convs"
+        if spec.phase_split or spec.pack_groups > 1:
+            return "poly_view is a plain stride-1 1-D loop"
+        if not spec.ck or p.cpg % spec.ck or (p.PAD_W * p.cpg) % spec.ck:
+            return f"a chunk must lie in one input pixel (cpg {p.cpg}, ck {spec.ck})"
+        zero_ch = poly_view_zero_channels(spec.wave_size)
+        if p.PAD_W and spec.ck > zero_ch:
+            # One wave zeroes a leading-pad chunk's view pixel.
+            return (
+                f"a padded poly_view zeroes at most {zero_ch} channels "
+                f"of a chunk (ck {spec.ck})"
+            )
+        if spec.tile_h != 1:
+            return "poly_view tiles one row (tile_w * tile_n == block_p)"
+        p = spec.vp
     if p.stride not in (1, 2):
         return f"stride {p.stride} not in (1, 2)"
     if p.dil_h < 1 or p.dil_w < 1:
         return f"dilation {p.dil_h}x{p.dil_w} < 1"
+    # Non-square filters: 1 x R stride-1 rows on 1-D signals (dilated or
+    # not), and undilated rectangular filters (7x1, 1x7); all unpacked,
+    # without tap_reuse or a phase split.
     if p.KH != p.KW:
-        return f"filter {p.KH}x{p.KW} is not square"
+        if spec.pack_groups > 1 or spec.tap_reuse or spec.phase_split:
+            return (
+                f"a {p.KH}x{p.KW} filter is served unpacked, without tap_reuse "
+                "or phase split"
+            )
+        if p.is_dilated and (p.KH != 1 or p.stride != 1):
+            return f"a dilated {p.KH}x{p.KW} filter is served only as 1 x R, stride 1"
+    if p.PAD_W != p.PAD:
+        if spec.pack_groups > 1:
+            return "per-axis padding is served unpacked"
+        if p.is_dilated and (p.KH != 1 or p.stride != 1):
+            return "per-axis padding with dilation is served only as 1 x R, stride 1"
     if p.PAD < 0 or p.PAD > (p.KH - 1) * max(p.dil_h, p.dil_w):
         return f"PAD {p.PAD} outside 0..(K-1)*dilation"
+    if p.PAD_W < 0 or p.PAD_W > (p.KW - 1) * max(p.dil_h, p.dil_w):
+        return f"PAD_W {p.PAD_W} outside 0..(KW-1)*dilation"
     if p.Ho < 1 or p.Wo < 1:
         return f"empty output {p.Ho}x{p.Wo}"
     G = spec.pack_groups
@@ -463,21 +594,7 @@ def fwd_wmma_reason(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> str | Non
         vgprs += 8 * ((p.KH - 1) * p.dil_h * (tw // 16))
     if vgprs > FWD_WMMA_VGPR_BUDGET:
         return f"~{vgprs} VGPRs of accumulators and fragments"
-    try:
-        normalize_scheduler_strategy(spec.sched)
-    except ValueError as e:
-        return str(e)
-    # Global offsets are i32 bytes and the tile index is a flat block id.
-    tensor_bytes = (
-        2 * p.N * p.H * p.W * p.total_c,
-        2 * p.total_k * p.KH * p.KW * p.cpg,
-        2 * p.N * p.Ho * p.Wo * p.total_k,
-    )
-    if max(tensor_bytes) > _I32_MAX:
-        return f"tensors of {max(tensor_bytes)} B exceed the i32 byte offsets"
-    if spec.grid()[0] > _I32_MAX:
-        return f"{spec.grid()[0]} workgroups exceed the i32 block id"
-    return None
+    return wmma_fwd_limits_reason(real, spec.sched, spec.grid()[0])
 
 
 def is_valid_fwd_wmma_spec(
@@ -495,7 +612,7 @@ def _tdm_descriptor_3d(
     dims: Sequence[Value],
     strides: Sequence[Value],
     tile0: int,
-    tile1: int,
+    tile1: int | Value,
     tile2: Value,
 ) -> tuple[Value, Value, Value, Value, Value]:
     """The five D# groups of a rank-3 TDM tile transfer (2-byte elements).
@@ -523,7 +640,10 @@ def _tdm_descriptor_3d(
         b.shl(d0, c16),
         b.lor(b.lshr(d0, c16), b.shl(d1, c16)),
         b.lor(b.lshr(d1, c16), b.const_i32(tile0 << 16)),
-        b.lor(b.const_i32(tile1), b.shl(tile2, c16)),
+        b.lor(
+            b.const_i32(tile1) if isinstance(tile1, int) else tile1,
+            b.shl(tile2, c16),
+        ),
         s1,
         b.shl(s2, c16),
         b.lshr(s2, c16),
@@ -536,28 +656,61 @@ def _tdm_descriptor_3d(
     return pk(group0), pk(group1), pk(group2), b.zero_vec(I32, 4), b.zero_vec(I32, 8)
 
 
+def _tdm_ring_wait(b: IRBuilder, step: Value, stages: int, n_steps: Value) -> None:
+    """Wait until this wave's TDM transfer of ring step ``step`` has landed.
+
+    With ``stages`` ring slots the step's transfer is the oldest in flight;
+    the ``stages - 2`` younger ones exist only while steps below ``n_steps``
+    remain to be issued, so the wait leaves those in flight or none.
+    """
+    if stages == 2:
+        b.s_wait_tensorcnt(0)
+        return
+    more = b.cmp_lt(b.add(step, b.const_i32(stages - 2)), n_steps)
+    with b.scf_if_else(more) as (then_ctx, else_ctx):
+        with then_ctx:
+            b.s_wait_tensorcnt(stages - 2)
+        with else_ctx:
+            b.s_wait_tensorcnt(0)
+
+
+def _lds_frag16(
+    b: IRBuilder,
+    lds: Value,
+    base: Value,
+    off: Value | None = None,
+    const_off: int = 0,
+    *,
+    c0: Value,
+    c8: Value,
+    io_type,
+) -> Value:
+    """One 16-element WMMA operand fragment from the ``[1, n]`` LDS buffer
+    ``lds``: the 8 elements at ``base`` (``base + (off + const_off)`` when
+    ``off`` is given) and the 8 after them. ``c0`` / ``c8`` are the caller's
+    i32 constants 0 and 8."""
+    addr = base if off is None else b.add(base, b.add(off, b.const_i32(const_off)))
+    lo = b.smem_load_vN(lds, c0, addr, dtype=io_type, n=8)
+    hi = b.smem_load_vN(lds, c0, b.add(addr, c8), dtype=io_type, n=8)
+    return b.vec_concat(lo, hi)
+
+
 def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> KernelDef:
     why = fwd_wmma_reason(spec, arch)
     if why is not None:
         raise ValueError(f"invalid DirectFwdWmmaSpec for {arch}: {why}")
 
-    p = spec.problem
+    rp = spec.problem  # the real problem; p is the one the tile loop runs
+    p = spec.vp
+    SV = spec.strided_view
     KH, KW = p.KH, p.KW
     S = p.stride
     DH, DW = p.dil_h, p.dil_w
     PAD = p.PAD
+    PAD_W = p.PAD_W
     G = spec.pack_groups
     io_type = _io_type(p.dtype)
-    ab = wmma_ab_dtype(p.dtype)
-    wmma_op = ArchTarget.from_gfx(arch).mma.op_for_shape(
-        family="wmma",
-        a_dtype=ab,
-        b_dtype=ab,
-        c_dtype="fp32",
-        m=WMMA_M,
-        n=WMMA_N,
-        k=WMMA_K,
-    )
+    wmma_op = wmma_fwd_op(p.dtype, arch)
 
     WAVE = spec.wave_size
     WK, WP = spec.waves_k, spec.waves_p
@@ -599,6 +752,18 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
         c_cpg = b.div(params["p_total_c"], c_groups)
         c_kpg = b.div(params["p_total_k"], c_groups)
         c_cpg0 = c_cpg
+    c_run = c_cpg  # channels of one contiguous patch run (strided_view)
+    PV = spec.poly_view
+    PV_PAD = rp.PAD_W if PV else 0
+    if PV:
+        # elements of the leading pad: pw input pixels (C runtime)
+        c_pv_lead = b.mul(c_cpg, b.const_i32(PV_PAD))
+        c_cpg = b.mul(c_cpg, b.const_i32(rp.stride))
+        c_cpg0 = c_cpg
+    if SV:
+        c_run = b.mul(c_cpg, b.const_i32(rp.KW))
+        c_cpg = b.mul(c_cpg, b.const_i32(rp.KH * rp.KW))
+        c_cpg0 = c_cpg
     c_N = params["p_N"]
     c_H, c_W = params["p_Hi"], params["p_Wi"]
     c_Ho, c_Wo = params["p_Ho"], params["p_Wo"]
@@ -607,6 +772,20 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
         params["p_A_stride_hi"],
         params["p_A_stride_wi"],
     )
+    xs_h_real = xs_h
+    if PV:
+        # The view's columns: Wo + m - 1 view pixels of S input pixels each.
+        c_W = b.add(params["p_Wo"], b.const_i32(p.KW - 1))
+        xs_w = b.mul(xs_w, b.const_i32(rp.stride))
+    if SV:
+        # The view's rows and columns are the output grid: input row S * i.
+        c_H, c_W = params["p_Ho"], params["p_Wo"]
+        if spec.fold_n:
+            c_Ho = b.mul(c_N, c_Ho)
+            c_H = c_Ho
+            c_N = c1
+        xs_h = b.mul(xs_h, b.const_i32(rp.stride))
+        xs_w = b.mul(xs_w, b.const_i32(rp.stride))
     ys_n, ys_h, ys_w = (
         params["p_D_stride_n"],
         params["p_D_stride_ho"],
@@ -659,7 +838,7 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
 
     # Halo origin in X coordinates and the edge shifts (module docstring).
     h0 = b.sub(h_tile if S == 1 else b.mul(h_tile, b.const_i32(S)), b.const_i32(PAD))
-    w0 = b.sub(w_tile if S == 1 else b.mul(w_tile, b.const_i32(S)), b.const_i32(PAD))
+    w0 = b.sub(w_tile if S == 1 else b.mul(w_tile, b.const_i32(S)), b.const_i32(PAD_W))
     # Leading zero rows / columns; a padding wider than the filter's reach
     # (dilation along one axis only) can zero a whole (sub-)halo, never more.
     hs = b.smin(b.smax(b.sub(c0, h0), c0), b.const_i32(HALO_H))
@@ -670,6 +849,7 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
     # elements, column extent). Phase a holds the input columns w0 + a + S*j.
     c_S = b.const_i32(S)
     sub_halos = []
+    pv_w_start = None
     for a in range(NPW):
         wa = b.add(w0, b.const_i32(a)) if a else w0
         if PS:
@@ -688,6 +868,8 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
             b.add(b.mul(w_start, xs_w), c_grp),
         )
         sub_halos.append((base, z_elems, w_ext))
+        if a == 0:
+            pv_w_start = w_start
     xs_col = b.mul(xs_w, c_S) if PS else xs_w
     k_ext = b.smax(b.smin(b.sub(c_kpg, k_base), b.const_i32(BK)), c0)
     w_base = b.mul(b.add(k_grp, k_base), w_row)
@@ -698,7 +880,7 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
         zero_v = b.zero_vec(io_type, 8)
         for a, (_, z_elems, _) in enumerate(sub_halos):
             z_vecs = b.div(z_elems, b.const_i32(8))
-            for j in range(0, _ceil_div(max_z, 8), THREADS):
+            for j in range(0, ceil_div(max_z, 8), THREADS):
                 v = b.add(tid, b.const_i32(j))
                 with b.scf_if(b.cmp_lt(v, z_vecs)):
                     flat = b.mul(v, b.const_i32(8))
@@ -735,7 +917,44 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
                 )
                 with b.scf_if(issue):
                     img_off = b.add(stage_off, b.const_i32(im * IMG + a * PSTR))
-                    img = b.add(b.add(x_base, k0), b.mul(b.const_i32(im), xs_n))
+                    x_k0 = k0
+                    w_ext_c = x_w_ext
+                    tile1_c = HC
+                    if PV:
+                        # View pixel j, chunk k0: input pixel S*j - pw + k0 // C.
+                        # A chunk of the leading pad skips the image's first view
+                        # pixel (zeroed here), the others its last one.
+                        lead_c = b.cmp_lt(k0, c_pv_lead)
+                        first = b.cmp_eq(pv_w_start, c0)
+                        skip = b.select(b.land(lead_c, first), c1, c0)
+                        last_w = (
+                            b.select(lead_c, c_W, b.sub(c_W, c1)) if PV_PAD else c_W
+                        )
+                        tile1_c = b.sub(b.const_i32(HC), skip)
+                        w_ext_c = b.smax(
+                            b.sub(
+                                b.smin(b.add(pv_w_start, x_w_ext), last_w),
+                                b.add(pv_w_start, skip),
+                            ),
+                            c0,
+                        )
+                        zero_lane = b.cmp_lt(lane, b.const_i32(XP // POLY_ZERO_LANE_CH))
+                        with b.scf_if(b.land(b.land(lead_c, first), zero_lane)):
+                            zero_v = b.zero_vec(io_type, POLY_ZERO_LANE_CH)
+                            b.smem_store_vN(
+                                lds,
+                                [c0, b.add(b.add(img_off, z_elems), b.mul(lane, c8))],
+                                zero_v,
+                                n=POLY_ZERO_LANE_CH,
+                            )
+                            b.s_waitcnt(lgkmcnt=0)
+                        x_k0 = b.add(b.sub(k0, c_pv_lead), b.mul(skip, xs_w))
+                        img_off = b.add(img_off, b.mul(skip, b.const_i32(XP)))
+                    if SV and rp.KH > 1:
+                        # Patch run r of the chunk: one input row further on.
+                        run = b.div(k0, c_run)
+                        x_k0 = b.add(k0, b.mul(run, b.sub(xs_h_real, c_run)))
+                    img = b.add(b.add(x_base, x_k0), b.mul(b.const_i32(im), xs_n))
                     src = b.global_ptr_add(Xp, b.mul(img, c2))
                     dst = b.add(halo_addr, b.mul(b.add(img_off, z_elems), c2))
                     h_ext = x_h_ext
@@ -748,10 +967,10 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
                             b,
                             src,
                             dst,
-                            dims=(c_ext, x_w_ext, h_ext),
+                            dims=(c_ext, w_ext_c, h_ext),
                             strides=(xs_col, xs_h),
                             tile0=XP,
-                            tile1=HC,
+                            tile1=tile1_c,
                             tile2=x_tile2,
                         )
                     )
@@ -818,10 +1037,9 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
         )
 
     def _read16(stage_base: Value, off: Value, const_off: int) -> Value:
-        addr = b.add(stage_base, b.add(off, b.const_i32(const_off)))
-        lo = b.smem_load_vN(lds, c0, addr, dtype=io_type, n=8)
-        hi = b.smem_load_vN(lds, c0, b.add(addr, c8), dtype=io_type, n=8)
-        return b.vec_concat(lo, hi)
+        return _lds_frag16(
+            b, lds, stage_base, off, const_off, c0=c0, c8=c8, io_type=io_type
+        )
 
     TU = spec.tap_reuse
     TSH = spec.tap_shift
@@ -870,17 +1088,7 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
 
     def _wait_landed(kc: Value) -> None:
         """Wait until this wave's transfer of chunk ``kc`` has landed."""
-        if NS == 2:
-            b.s_wait_tensorcnt(0)
-        else:
-            # This chunk's transfer is the oldest in flight; younger ones
-            # exist only while chunks remain to be issued.
-            more = b.cmp_lt(b.add(kc, b.const_i32(NS - 2)), n_chunks)
-            with b.scf_if_else(more) as (then_ctx, else_ctx):
-                with then_ctx:
-                    b.s_wait_tensorcnt(NS - 2)
-                with else_ctx:
-                    b.s_wait_tensorcnt(0)
+        _tdm_ring_wait(b, kc, NS, n_chunks)
 
     def _signal_next(kc: Value) -> None:
         """Split barrier, first half: this wave's reads of chunk ``kc`` are
@@ -1037,15 +1245,7 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
             # row the halo issuers wait for its halo (their only transfer in
             # flight: the next chunk's goes out below, after the barrier).
             with b.scf_if(b.cmp_eq(wave_id, b.const_i32(NB))):
-                if NS == 2:
-                    b.s_wait_tensorcnt(0)
-                else:
-                    more = b.cmp_lt(b.add(u, b.const_i32(NS - 2)), n_steps)
-                    with b.scf_if_else(more) as (then_ctx, else_ctx):
-                        with then_ctx:
-                            b.s_wait_tensorcnt(NS - 2)
-                        with else_ctx:
-                            b.s_wait_tensorcnt(0)
+                _tdm_ring_wait(b, u, NS, n_steps)
             if r == 0:
                 with b.scf_if(b.cmp_ne(wave_id, b.const_i32(NB))):
                     b.s_wait_tensorcnt(0)

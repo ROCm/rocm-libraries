@@ -28,17 +28,67 @@
 // fixing 5409 only removes the gfx90a REJECT here; the 6979 test-side skip
 // stays in place until CK fusion kernels exist for the remaining archs.
 //
-// To remove after the 5409 fix: delete this file, drop its includes, and
-// remove the REJECT_IF_WORKAROUND_ISSUE_5409 call sites. The test-side
+// To remove after the 5409 fix: delete its block and the REJECT_IF_WORKAROUND_ISSUE_5409
+// call sites; delete this file only once no other workaround remains. The test-side
 // 6979 helpers stay until that issue is independently resolved.
 // `git grep WORKAROUND_ISSUE_5409` finds them all.
 // ----------------------------------------------------------------------------
+// ROCm/rocm-libraries#16024 — MIOpen's forward activation reads a pair of
+// tensors that is not both packed through its strided addressing only when the
+// N stride exceeds C*H*W. Its network config for a non-packed problem carries
+// neither the strides nor the solver id, and a cached invoker is reused for a
+// later problem without an applicability check, so one problem can run another
+// problem's kernel. The unary activation applicability check therefore
+// declines every pair that is not both packed. Applies on all arches (no
+// gating).
+//
+// REJECT_IF_WORKAROUND_ISSUE_16024(inputTensor, outputTensor) takes the two
+// flatbuffer TensorAttributes of the activation and must only be invoked from
+// a function whose return type is `bool` since it contains a `return`. It runs
+// after the generic tensor checks, which already guarantee equal dims, and
+// equal strides on non-unit axes for a packed pair; so "both packed" is
+// exactly "packed with one layout".
+//
+// To remove after the 16024 fix: delete the REJECT_IF_WORKAROUND_ISSUE_16024
+// call site and this block. The two-dimensional-shortcut and rank-1 blocks in
+// MiopenUnaryActivationChecks.cpp remain the guards for ActivFwdSolver0.
+// `git grep WORKAROUND_ISSUE_16024` finds them all.
+// ----------------------------------------------------------------------------
+// ROCm/rocm-libraries#16803 — MIOpen caches the invoker of a fused batchnorm
+// (forward training, inference and backward) under a network config that holds
+// the activation mode but not the activation parameters, and the cached invoker
+// reads those parameters from the problem it was built with. A later graph with
+// the same shapes, data types and activation mode but different clip values
+// therefore runs with the first graph's clips and returns wrong results with no
+// error. The provider cannot make the parameters part of the key, so it declines
+// the case it enabled for batchnorm fusion in #16513: a ReLU with a non-zero
+// `relu_lower_clip`, no `relu_upper_clip` and no leaky slope, which maps to CLAMP
+// with the float maximum as its upper bound. A ReLU with both clips, with only an
+// upper clip or with no clip is unchanged, and so are the unary activation and the
+// convolution + (bias) + activation paths, which pass their parameters with each
+// call.
+//
+// REJECT_IF_WORKAROUND_ISSUE_16803(activationAttributes) takes the flatbuffer
+// PointwiseAttributes of the fused ReLU. It declines by throwing a
+// HipdnnPluginException, so it must only be invoked from the batchnorm
+// activation-mode check, whose callers turn an exception into "not applicable".
+// It runs after the leaky-ReLU check.
+//
+// To remove after the 16803 fix: delete the REJECT_IF_WORKAROUND_ISSUE_16803
+// call site and this block, and restore the "AcceptsReluLowerClipOnly" cases of
+// the batchnorm activation-mode tests. `git grep WORKAROUND_ISSUE_16803` finds
+// them all.
+// ----------------------------------------------------------------------------
 
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_plugin_sdk/ArchMatch.hpp>
 #include <hipdnn_plugin_sdk/DeviceQuery.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
+#include <cstdint>
 #include <exception>
+#include <vector>
 
 #define REJECT_IF_WORKAROUND_ISSUE_5409(handle)                                            \
     do                                                                                     \
@@ -60,4 +110,42 @@
                 "Arch query failed; treating as not-applicable: " << issue_5409_e.what()); \
             return false;                                                                  \
         }                                                                                  \
+    } while(0)
+
+#define REJECT_IF_WORKAROUND_ISSUE_16024(inputTensor, outputTensor)                          \
+    do                                                                                       \
+    {                                                                                        \
+        const std::vector<int64_t> issue_16024_inDims((inputTensor).dims()->begin(),         \
+                                                      (inputTensor).dims()->end());          \
+        const std::vector<int64_t> issue_16024_inStrides((inputTensor).strides()->begin(),   \
+                                                         (inputTensor).strides()->end());    \
+        const std::vector<int64_t> issue_16024_outDims((outputTensor).dims()->begin(),       \
+                                                       (outputTensor).dims()->end());        \
+        const std::vector<int64_t> issue_16024_outStrides((outputTensor).strides()->begin(), \
+                                                          (outputTensor).strides()->end());  \
+        if(!::hipdnn_data_sdk::utilities::isTensorPacked(issue_16024_inDims,                 \
+                                                         issue_16024_inStrides)              \
+           || !::hipdnn_data_sdk::utilities::isTensorPacked(issue_16024_outDims,             \
+                                                            issue_16024_outStrides))         \
+        {                                                                                    \
+            HIPDNN_PLUGIN_LOG_INFO(                                                          \
+                "Unary activation plan builder declines a pair that is not both packed "     \
+                "(issue 16024)");                                                            \
+            return false;                                                                    \
+        }                                                                                    \
+    } while(0)
+
+#define REJECT_IF_WORKAROUND_ISSUE_16803(activationAttributes)                              \
+    do                                                                                      \
+    {                                                                                       \
+        const auto& issue_16803_attrs = (activationAttributes);                             \
+        if(!issue_16803_attrs.relu_upper_clip().has_value()                                 \
+           && issue_16803_attrs.relu_lower_clip().has_value()                               \
+           && *issue_16803_attrs.relu_lower_clip() != 0.f)                                  \
+        {                                                                                   \
+            throw ::hipdnn_plugin_sdk::HipdnnPluginException(                               \
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,                                             \
+                "Batchnorm fused ReLU with a non-zero lower_clip and no upper_clip is not " \
+                "supported (issue 16803).");                                                \
+        }                                                                                   \
     } while(0)

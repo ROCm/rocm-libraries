@@ -3,15 +3,19 @@
 """Descriptor snapshots name real owned dependencies, never inferred versions."""
 import copy
 import json
+from pathlib import Path
 
 import pytest
 
 from uhd_gen.provenance import (
     ProvenanceError,
     compare_provenance,
+    hard_provenance,
     record_feature_semantics,
     require_feature_semantics,
+    shared_provenance,
     snapshot_provenance,
+    uhd_version_refusal,
     validate_provenance,
 )
 
@@ -211,6 +215,58 @@ def test_a_stale_selector_revision_is_refused_rather_than_scored():
         compare_provenance(trained, {"selector_revision": "aiter-fwd-2"})
 
 
+def test_another_compilers_code_objects_are_warned_about_not_refused(caplog):
+    """The runtime binds a model whose codegen_revision differs, and warns."""
+    trained = {"selector_revision": "aiter-fwd-1", "codegen_revision": "cg-A"}
+    compare_provenance(trained, {**trained})
+    assert "codegen_revision" not in caplog.text
+    # A model that records none, as every shipped FlyDSL one, is not checked.
+    compare_provenance({"selector_revision": "aiter-fwd-1"}, {**trained})
+    assert "codegen_revision" not in caplog.text
+    compare_provenance(trained, {**trained, "codegen_revision": "cg-B"})
+    assert "'cg-A'" in caplog.text and "'cg-B'" in caplog.text
+    with pytest.raises(ProvenanceError, match="selector_revision"):
+        compare_provenance(
+            trained, {"selector_revision": "aiter-fwd-2", "codegen_revision": "cg-A"}
+        )
+
+
+@pytest.mark.parametrize(
+    "revisions, shared",
+    [
+        (("cg-A", "cg-A"), "cg-A"),
+        (("cg-A", "cg-B"), None),
+        (("cg-A", None), None),
+        ((None, None), None),
+    ],
+    ids=["one_compiler", "two_compilers", "one_unrecorded", "none_recorded"],
+)
+def test_a_codegen_revision_is_shared_only_when_every_snapshot_records_it(
+    revisions, shared
+):
+    snapshots = [
+        {"selector_revision": "r", **({"codegen_revision": c} if c else {})}
+        for c in revisions
+    ]
+    provenance, warning = shared_provenance(snapshots)
+    assert provenance == {
+        "selector_revision": "r",
+        **({"codegen_revision": shared} if shared else {}),
+    }
+    assert (warning is not None) == (len(set(revisions)) > 1)
+    assert hard_provenance(snapshots[0]) == {"selector_revision": "r"}
+
+
+def test_snapshots_that_differ_beyond_their_codegen_revision_share_nothing():
+    with pytest.raises(ProvenanceError, match="beyond its codegen_revision"):
+        shared_provenance(
+            [
+                {"selector_revision": "r1", "codegen_revision": "cg-A"},
+                {"selector_revision": "r2", "codegen_revision": "cg-A"},
+            ]
+        )
+
+
 def test_feature_semantics_absent_means_revision_1_and_a_mismatch_names_both():
     shipped = {"selector_revision": "hip-kernel-provider/asm-sdpa-fwd/b162a5ffd743c21d"}
     require_feature_semantics(shipped, 1)
@@ -264,3 +320,332 @@ def test_feature_semantics_is_kept_by_both_provenance_forms():
         ProvenanceError, match="must name a descriptor set or a selector_revision"
     ):
         validate_provenance({"feature_semantics_revision": 1})
+
+
+# --- RFC 0021 kernel slots ---------------------------------------------------------------
+
+KMD_PREP = "a10c7e1d-5b3f-4c22-8d61-0e9f4a7b2c31"
+KMD_DKDV = "b27e90a4-1d6c-4f58-9a03-7c2e5d81f640"
+KMD_DQ = "d48a31bc-6e07-4d95-b1f2-3a8c0e5792d6"
+MATCH_PREP = "5a1c0e11-02a7-4ec2-b79c-e849951f8c24"
+MATCH_DKDV = "6b2d1f22-02a7-4ec2-b79c-e849951f8c24"
+MATCH_DQ = "7c3e2033-02a7-4ec2-b79c-e849951f8c24"
+MATCH_SHARED = "8d4f3144-02a7-4ec2-b79c-e849951f8c24"
+MATCH_OTHER_ARCH = "9e505255-02a7-4ec2-b79c-e849951f8c24"
+UED_SLOTTED = "1f2a3b4c-5d6e-4f70-8192-a3b4c5d6e7f8"
+SLOTS = ("prep", "dkdv", "dq")
+
+
+def _slotted_tree(root):
+    """A three-slot engine: UED/KDPs are 1.1, the dependencies they name stay 1.0."""
+    _write(
+        root / "engine.ued.json",
+        {
+            "version": "1.1",
+            "id": UED_SLOTTED,
+            "name": "test:slotted",
+            "slots": [
+                {"name": "prep", "metadata": KMD_PREP},
+                {"name": "dkdv", "metadata": KMD_DKDV, "knobs": ["block_m"]},
+                {"name": "dq", "metadata": KMD_DQ, "knobs": ["block_m"]},
+            ],
+        },
+    )
+    for kmd, revision_ in ((KMD_PREP, "1.0"), (KMD_DKDV, "2.3"), (KMD_DQ, "1.4")):
+        _write(root / f"{kmd}.kmd.json", {"id": kmd, "revision": revision_})
+    for matcher in (MATCH_PREP, MATCH_DKDV, MATCH_DQ, MATCH_SHARED, MATCH_OTHER_ARCH):
+        _write(root / f"{matcher}.umd.json", {"id": matcher})
+    packs = (
+        ("prep", [MATCH_SHARED, MATCH_PREP], []),
+        ("dkdv", [MATCH_SHARED, MATCH_DKDV], ["gfx950"]),
+        ("dkdv", [MATCH_OTHER_ARCH], ["gfx942"]),
+        ("dq", [MATCH_SHARED, MATCH_DQ], []),
+    )
+    for number, (slot, matchers, arch) in enumerate(packs):
+        _write(
+            root / f"pack{number}.kdp.json",
+            {
+                "version": "1.1",
+                "id": f"{number:02d}be5fe7-02a7-4ec2-b79c-e849951f8c24",
+                "engine": UED_SLOTTED,
+                "slot": slot,
+                "arch": arch,
+                "matchers": matchers,
+            },
+        )
+    return root
+
+
+def _dep(identity, revision_):
+    return {"id": identity, "revision": revision_}
+
+
+def test_a_slot_ranker_snapshot_names_only_its_slots_kmd_and_packs(tmp_path):
+    tree = _slotted_tree(tmp_path)
+    snapshot = snapshot_provenance(tree, arch="gfx950", slot="dkdv")
+    assert snapshot == {
+        "ued": _dep(UED_SLOTTED, "1.0"),
+        "kmd": _dep(KMD_DKDV, "2.3"),
+        "slot": "dkdv",
+        "umd": [_dep(MATCH_DKDV, "1.0"), _dep(MATCH_SHARED, "1.0")],
+    }
+    # The other arch's dkdv pack is not this arch's; the other slots' packs never are.
+    assert snapshot_provenance(tree, arch="gfx942", slot="dkdv")["umd"] == [
+        _dep(MATCH_OTHER_ARCH, "1.0")
+    ]
+    assert snapshot_provenance(tree, slot="prep")["umd"] == sorted(
+        [_dep(MATCH_SHARED, "1.0"), _dep(MATCH_PREP, "1.0")], key=lambda d: d["id"]
+    )
+
+
+def test_an_engine_level_snapshot_of_a_slotted_engine_names_every_slots_kmd(tmp_path):
+    tree = _slotted_tree(tmp_path)
+    snapshot = snapshot_provenance(tree, arch="gfx950")
+    assert "kmd" not in snapshot and "slot" not in snapshot
+    assert snapshot["kmds"] == [
+        {"slot": "prep", **_dep(KMD_PREP, "1.0")},
+        {"slot": "dkdv", **_dep(KMD_DKDV, "2.3")},
+        {"slot": "dq", **_dep(KMD_DQ, "1.4")},
+    ]
+    assert {item["id"] for item in snapshot["umd"]} == {
+        MATCH_SHARED,
+        MATCH_PREP,
+        MATCH_DKDV,
+        MATCH_DQ,
+    }
+
+
+@pytest.mark.parametrize("slot", SLOTS)
+def test_slot_snapshots_round_trip_through_validation_and_comparison(tmp_path, slot):
+    tree = _slotted_tree(tmp_path)
+    snapshot = snapshot_provenance(tree, arch="gfx950", slot=slot)
+    assert validate_provenance(snapshot) == snapshot
+    compare_provenance(snapshot, snapshot_provenance(tree, arch="gfx950", slot=slot))
+    engine_level = snapshot_provenance(tree, arch="gfx950")
+    assert validate_provenance(engine_level) == engine_level
+    compare_provenance(engine_level, snapshot_provenance(tree, arch="gfx950"))
+
+
+def test_a_slot_ranker_survives_a_compatible_revision_of_its_own_kmd(tmp_path):
+    tree = _slotted_tree(tmp_path)
+    trained = snapshot_provenance(tree, arch="gfx950", slot="dkdv")
+    _write(tree / f"{KMD_DKDV}.kmd.json", {"id": KMD_DKDV, "revision": "2.4"})
+    compare_provenance(trained, snapshot_provenance(tree, arch="gfx950", slot="dkdv"))
+    _write(tree / f"{KMD_DKDV}.kmd.json", {"id": KMD_DKDV, "revision": "3.0"})
+    with pytest.raises(ProvenanceError, match="trained_against.kmd: .* incompatible"):
+        compare_provenance(
+            trained, snapshot_provenance(tree, arch="gfx950", slot="dkdv")
+        )
+
+
+def test_another_slots_kmd_revision_does_not_invalidate_a_slot_ranker(tmp_path):
+    tree = _slotted_tree(tmp_path)
+    ranker = snapshot_provenance(tree, arch="gfx950", slot="dkdv")
+    engine_level = snapshot_provenance(tree, arch="gfx950")
+    _write(tree / f"{KMD_DQ}.kmd.json", {"id": KMD_DQ, "revision": "9.0"})
+    compare_provenance(ranker, snapshot_provenance(tree, arch="gfx950", slot="dkdv"))
+    # The engine-level model names every slot's KMD, so it does see the dq major bump.
+    with pytest.raises(ProvenanceError, match="trained_against.kmds: .* incompatible"):
+        compare_provenance(engine_level, snapshot_provenance(tree, arch="gfx950"))
+
+
+def test_a_slot_ranker_cannot_be_applied_to_another_slot(tmp_path):
+    tree = _slotted_tree(tmp_path)
+    trained = snapshot_provenance(tree, arch="gfx950", slot="dkdv")
+    with pytest.raises(
+        ProvenanceError,
+        match="names slot 'dkdv', but the ranker serves slot 'dq'",
+    ):
+        compare_provenance(trained, snapshot_provenance(tree, arch="gfx950", slot="dq"))
+
+
+def test_a_slot_ranker_must_name_the_slot_it_was_trained_for(tmp_path):
+    tree = _slotted_tree(tmp_path)
+    trained = snapshot_provenance(tree, arch="gfx950", slot="dkdv")
+    anonymous = {k: v for k, v in trained.items() if k != "slot"}
+    with pytest.raises(
+        ProvenanceError,
+        match="names no slot, but the ranker of slot 'dkdv' must name the slot it was "
+        "trained for",
+    ):
+        compare_provenance(
+            anonymous, snapshot_provenance(tree, arch="gfx950", slot="dkdv")
+        )
+
+
+def test_slot_ranker_and_engine_level_provenance_are_not_interchangeable(tmp_path):
+    tree = _slotted_tree(tmp_path)
+    ranker = snapshot_provenance(tree, arch="gfx950", slot="dkdv")
+    engine_level = snapshot_provenance(tree, arch="gfx950")
+    with pytest.raises(
+        ProvenanceError,
+        match="names a single slot, but a slotted engine's predict_engine",
+    ):
+        compare_provenance(ranker, engine_level)
+    with pytest.raises(
+        ProvenanceError, match="names kmds, but the ranker of slot 'dkdv'"
+    ):
+        compare_provenance(engine_level, ranker)
+
+
+def test_an_engine_level_model_must_name_every_slot(tmp_path):
+    tree = _slotted_tree(tmp_path)
+    trained = snapshot_provenance(tree, arch="gfx950")
+    trained["kmds"] = [e for e in trained["kmds"] if e["slot"] != "dq"]
+    with pytest.raises(ProvenanceError, match="kmds does not name slot 'dq'"):
+        compare_provenance(trained, snapshot_provenance(tree, arch="gfx950"))
+    trained["kmds"].append({"slot": "extra", **_dep(KMD_DQ, "1.4")})
+    with pytest.raises(
+        ProvenanceError,
+        match="kmds names slot 'extra', which the engine does not declare",
+    ):
+        compare_provenance(trained, snapshot_provenance(tree, arch="gfx950"))
+
+
+def test_an_unslotted_engine_cannot_satisfy_slot_provenance(tmp_path):
+    slotted = _slotted_tree(tmp_path / "slotted")
+    plain = _tree(tmp_path / "plain")
+    # The same engine identity, so only the missing slots can refuse the model.
+    _write(
+        plain / "engine.ued.json",
+        {"id": UED_SLOTTED, "name": "test:slotted", "metadata": KMD},
+    )
+    for trained in (
+        snapshot_provenance(slotted, arch="gfx950", slot="dkdv"),
+        snapshot_provenance(slotted, arch="gfx950"),
+    ):
+        with pytest.raises(ProvenanceError, match="declares no slots"):
+            compare_provenance(trained, snapshot_provenance(plain, arch="gfx942"))
+    with pytest.raises(
+        ProvenanceError, match="declares no slots, so it has no slot 'dkdv'"
+    ):
+        snapshot_provenance(plain, arch="gfx942", slot="dkdv")
+
+
+def test_a_snapshot_of_an_undeclared_slot_is_refused(tmp_path):
+    tree = _slotted_tree(tmp_path)
+    with pytest.raises(ProvenanceError, match="declares no slot 'nope'"):
+        snapshot_provenance(tree, slot="nope")
+
+
+def test_a_matcher_owned_only_by_another_arch_is_foreign_to_a_slot_ranker(tmp_path):
+    from uhd_gen.provenance import (
+        foreign_matcher_ids,
+        load_descriptor_tree,
+        select_engine,
+    )
+
+    tree = _slotted_tree(tmp_path)
+    trained = snapshot_provenance(tree, arch=None, slot="dkdv")
+    actual = snapshot_provenance(tree, arch="gfx950", slot="dkdv")
+    with pytest.raises(
+        ProvenanceError, match="trained_against.umd: dependency .* missing"
+    ):
+        compare_provenance(trained, actual)
+    index = load_descriptor_tree(tree)
+    _, ued = select_engine(index, None)
+    foreign = foreign_matcher_ids(index, ued, "gfx950", "dkdv")
+    assert foreign == {MATCH_OTHER_ARCH}
+    compare_provenance(trained, actual, foreign_matchers=foreign)
+
+
+def test_version_1_1_descriptors_load_and_unknown_versions_do_not(tmp_path):
+    tree = _slotted_tree(tmp_path)
+    snapshot_provenance(tree, slot="dq")
+    _write(tree / "engine.ued.json", {"version": "1.2", "id": UED_SLOTTED})
+    with pytest.raises(ProvenanceError, match="unsupported file-format version '1.2'"):
+        snapshot_provenance(tree)
+
+
+def _ranker(**overrides):
+    base = {
+        "ued": _dep(UED_SLOTTED, "1.0"),
+        "kmd": _dep(KMD_DKDV, "2.3"),
+        "slot": "dkdv",
+        "umd": [],
+    }
+    base.update(overrides)
+    return base
+
+
+_SLOT_CORPUS = json.loads(
+    (
+        Path(__file__).resolve().parents[3]
+        / "plugin_sdk/tests/ingestor/uhd/fixtures/conformance/trained_against_slots.json"
+    ).read_text(encoding="utf-8")
+)
+
+
+def _patched(base, patch):
+    """@p base with the RFC 6902 add/replace/remove steps of @p patch applied."""
+    doc = copy.deepcopy(base)
+    for step in patch:
+        *parents, leaf = step["path"].split("/")[1:]
+        node = doc
+        for token in parents:
+            node = node[int(token) if isinstance(node, list) else token]
+        if isinstance(node, list):
+            leaf = len(node) if leaf == "-" else int(leaf)
+        if step["op"] == "remove":
+            del node[leaf]
+        elif step["op"] == "add" and isinstance(node, list):
+            node.insert(leaf, step["value"])
+        else:
+            node[leaf] = step["value"]
+    return doc
+
+
+@pytest.mark.parametrize(
+    "row",
+    [row for row in _SLOT_CORPUS["rows"] if "uhd_gen" not in row.get("skip", [])],
+    ids=lambda row: row["name"],
+)
+def test_slot_provenance_is_refused_like_the_loader_refuses_it(row):
+    """The corpus the runtime parser and the packer also run: `trained_against` rows,
+    including the UHD version each member needs (`uhd_version_refusal`, which promote
+    applies)."""
+    document = _patched(_SLOT_CORPUS["bases"][row["base"]], row["patch"])
+    trained = document["trained_against"]
+
+    def check():
+        validated = validate_provenance(trained)
+        refusal = uhd_version_refusal(document["version"], trained)
+        if refusal is not None:
+            raise ProvenanceError(refusal)
+        return validated
+
+    if not row.get("reject"):
+        assert check() == trained
+        return
+    with pytest.raises(ProvenanceError, match=row.get("uhd_gen")):
+        check()
+
+
+def test_a_slot_ranker_may_omit_the_optional_slot_member():
+    anonymous = {k: v for k, v in _ranker().items() if k != "slot"}
+    assert validate_provenance(anonymous) == anonymous
+
+
+@pytest.mark.parametrize(
+    "name, edit",
+    [
+        ("engine.ued.json", {"version": "1.0"}),
+        ("pack0.kdp.json", {"version": "1.0"}),
+    ],
+)
+def test_slot_members_need_file_format_1_1(tmp_path, name, edit):
+    tree = _slotted_tree(tmp_path)
+    path = tree / name
+    path.write_text(
+        json.dumps({**json.loads(path.read_text(encoding="utf-8")), **edit}),
+        encoding="utf-8",
+    )
+    with pytest.raises(ProvenanceError, match="require file-format version 1.1"):
+        snapshot_provenance(tree, slot="dkdv")
+
+
+def test_only_a_ued_or_kdp_may_be_format_1_1(tmp_path):
+    tree = _slotted_tree(tmp_path)
+    _write(tree / f"{KMD_DKDV}.kmd.json", {"version": "1.1", "id": KMD_DKDV})
+    with pytest.raises(ProvenanceError, match="unsupported file-format version '1.1'"):
+        snapshot_provenance(tree, slot="dkdv")

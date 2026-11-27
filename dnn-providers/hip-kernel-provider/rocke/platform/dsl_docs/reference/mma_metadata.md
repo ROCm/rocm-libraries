@@ -53,13 +53,32 @@ entrypoints mirror the gfx1250 scaled-GEMM structure. See the
 
 ## Operand Metadata
 
-MMA metadata uses `a_dtype`, `b_dtype`, and `c_dtype`, with C describing both
-the accumulator input and result. Optional `a_scale_dtype`, `b_scale_dtype`,
-and `scale_block_k` fields describe independent scale types and a shared K-group
-size. `MmaScaleBlockK.K16` and `MmaScaleBlockK.K32` are the only scaled sizes;
-all three fields are `None` for unscaled atoms. Integer 16/32 values from JSON
-are normalized to the enum. Scale types are independent of matrix dtypes and
-packed register types. Matrix fragment and layout accessors retain their A/B/C roles.
+MMA metadata stores three `srcs` and an independent `dst`. `srcs[0]` and
+`srcs[1]` are the multiplicands; `srcs[2]` is the accumulator input. Each source
+and the destination have their own dtype, fragment length, and layout. Historical
+A/B/C projections refer to `srcs[0]`/`srcs[1]`/`srcs[2]`, matching the source
+query arguments. Result consumers use `dst` and `dst_layout()` explicitly;
+`dst_dtype` projects only the independent result dtype.
+
+A source's optional `MmaScaleOperand` owns its scale `dtype`, `block_size`,
+logical `frag_len`, and `layout`. `block_size` is the number of matrix elements
+along K that share one scale value: 16 or 32, independently of the atom's K. Scale values are independent of matrix dtypes
+and register carriers. Block sizes normalize to `MmaScaleBlockK.K16` or `K32`.
+Generic metadata can describe different block sizes for each source. Scaled
+WMMA requires a complete pair with a shared block size; its backend also checks
+supported formats, fragment counts, and both accumulator and result dtypes.
+
+`a_scale_dtype`, `b_scale_dtype`, `a_scale_frag_len`, and `b_scale_frag_len`
+are computed compatibility properties. `scale_block_k` projects the shared
+block size and raises when the two sources cannot form that shared contract.
+Unscaled sources have `scale=None`; the compatibility properties return
+`None` for their dtypes and shared block size, and zero for fragment counts.
+Construct or replace the nested source descriptors to change scale metadata.
+The JSON loader accepts indexed rows and legacy A/B/C rows with top-level scales;
+conflicting indexed and legacy matrix dtypes or scales are rejected. Equivalent
+aliases remain accepted. Legacy JSON C describes `srcs[2]`. In both row forms,
+omitted `dst` inherits `srcs[2]`; an explicit result may differ. Present-null `srcs` or
+`dst`, incomplete rows and missing dtype fields are rejected before scale merging.
 
 Scale dtypes normalize to the string-backed `MmaScaleDType` enum: `E8M0`,
 `E4M3`, or `E5M3`. Existing string inputs remain accepted, and string formatting
@@ -79,12 +98,17 @@ target catalog and backend.
 are separate from register byte packing and global tensor strides. Unscaled
 atoms default to zero scale fragments and absent maps. An unavailable map raises
 `NotImplementedError`, including for a scaled atom whose layout is not verified.
-The native record appends corresponding counts and map pointers, so native
-consumers must rebuild; existing role enum values remain unchanged.
+The canonical accessor is `src_scale_layout(index)`; stored roles are
+`scale_src0` and `scale_src1`, matching the ISA fields `SCALE_SRC0` and
+`SCALE_SRC1`. The C source record owns `scale_dtype`,
+`scale_block_size`, `scale_frag_len`, and `scale_layout`. Native consumers must
+rebuild against matching ABI12 headers and libraries for the indexed struct
+layout and role enum changes. ABI11 libraries are incompatible with this combined
+native layout and are refused before binding; the recipe ABI remains 4.
 
 ### gfx1250 Scale Mapping and Packing
 
-The four gfx1250 FP8/BF8 scaled atoms provide these scale maps: lane `l` and
+The ten gfx1250 FP8/BF8/FP6/BF6/FP4 scaled atoms provide these scale maps: lane `l` and
 slot `j` map to `(l % 16, j)` for A and `(j, l % 16)` for B. Both half-waves
 duplicate the scales. K32 uses four E8M0 elements per lane packed into i32;
 K16 uses eight packed into i64, with slot `j` at bit offset `8*j`. Matrix A/B
@@ -101,13 +125,37 @@ from rocke.core.arch import ArchTarget, MmaScaleBlockK, MmaScaleDType
 
 atom = ArchTarget.from_gfx("gfx1250").mma.op_for_shape(
     family="wmma_scaled",
-    a_dtype="fp8", b_dtype="fp8", c_dtype="fp32",
+    src_dtypes=("fp8", "fp8", "fp32"), dst_dtype="fp32",
     scales=(MmaScaleDType.E8M0, MmaScaleDType.E8M0, MmaScaleBlockK.K32),
     m=16, n=16, k=128,
 )
 assert atom is not None
 # result = builder.mma(atom, a, b, c, scale_a, scale_b)
 ```
+
+All Python query methods accept `src_dtypes` and `dst_dtype`; native queries
+provide corresponding `_indexed` entry points with the same optional scale filter.
+Native three-dtype queries also accept a trailing nullable `dst_dtype` argument
+(defaulted in C++). Omitted destinations default to `src2`, not a wildcard.
+C callers must supply the trailing argument and rebuild against matching native
+headers and libraries. When
+Python callers also supply indexed source dtypes, each supplied legacy dtype
+must agree with its corresponding source after alias normalization.
+
+The instruction takes A and B as sixteen 32-bit words per lane. Each operand may
+arrive in any shape its own matrix format allows:
+
+| Operand holds | Shape | Reaches the register by |
+|---|---|---|
+| the sixteen register words | `vec<i32x16>` | nothing (passed unchanged) |
+| 64 fp8 or bf8 values | `vec<fp8e4m3x64>`, `vec<bf8e5m2x64>` | one bitcast |
+| the packed words of 64 fp6 or bf6 values | `vec<i32x12>` | four zero words appended |
+| the packed words of 64 fp4 values | `vec<i32x8>` | eight zero words appended |
+
+A mixed op such as fp8 x fp4 takes `vec<fp8e4m3x64>` for A and `vec<i32x8>` for
+B. Any other shape is refused with an error naming the operand and the register
+type, including a packed payload of fewer words than its format needs (an
+incomplete matrix). These operations lower with LLVM 23 only.
 
 For gfx950, select the 32x32x64 scaled-MFMA family in the same way. This
 example selects FP8 A and FP4 B, with independent E8M0 scales over K32:
@@ -177,10 +225,18 @@ int main()
 The helper requires the trailing filter argument in both C and C++.
 Pass `NULL` (`nullptr` in C++) for unconstrained scales, or a pointer to
 `{NULL, NULL, ROCKE_MMA_SCALE_NONE}` to select only unscaled atoms.
-The scale-contract rules above apply. No match, or a null target, returns
+The scale-contract rules above apply. Indexed queries default a NULL `dst_dtype`
+to the third source dtype, matching Python's omitted `dst_dtype`. Required source
+dtype pointers must be non-NULL; an explicit empty destination stays an exact
+filter. Legacy three-dtype catalog queries use the same default: a NULL
+`dst_dtype` selects the accumulator-source dtype (`c_dtype`, or `srcs[2]`).
+An explicit `dst_dtype` filters the result independently, so it may differ from
+`c_dtype`. Query `c_dtype` and the legacy C metadata accessors both describe
+the accumulator input; destination metadata and queries remain independent.
+No match, or a null target, returns
 `NULL`; invalid filters and ambiguous matches raise `ckc::Error`. Handle those
 errors at a C++ boundary before returning to C. In particular, the scaled
-FP8/BF8 `16x16x128` shapes have both K16 and K32 records, so an unconstrained
+FP8/BF8/FP6/BF6/FP4 `16x16x128` shapes have both K16 and K32 records, so an unconstrained
 lookup is ambiguous.
 
 ## Operation IDs and Migration
@@ -191,6 +247,18 @@ For example, `wmma_gfx1250_f32_16x16x128_fp8_fp8_scale_e8m0_e8m0_k32`
 has atom K=128 and one scale per 32 K elements for both inputs. Both scale
 types are written even when equal. Lowering reads the catalog fields, never
 parses the ID, and selects LLVM intrinsic names and packed carriers separately.
+The scaled backend requires exact integer `(16, 16, 128)` shape fields and
+positive integer A/B carrier widths, checked independently before signatures are
+constructed. Accumulator and result widths must each be exactly eight.
+
+[`IRBuilder.mma`](../../python/rocke/core/ir.py) resolves the result element
+type through [`dtype_to_ir_type`](../../python/rocke/core/ir.py), using
+[`dst.dtype`](../../python/rocke/core/arch/target.py) for an object or the
+catalog destination dtype for a raw ID.
+This includes FP64 for supported MFMA atoms. A raw ID absent from the catalog
+retains its historical FP32 dtype default; an unrecognized destination dtype
+is rejected. Lowering enforces the selected instruction's operand and result
+types.
 Existing `wmma_scale*_f32_*` and dotted `wmma.scaled.*` IDs are retired, as are
 the dedicated scaled builder wrappers; serialized IR using those IDs must be regenerated.
 Use `tile.mma` with a resolved catalog atom. Other MMA operation IDs retain
@@ -221,8 +289,9 @@ and for a reproducible comparison through both engines.
 ## FP64 operands
 
 On gfx942, an `fp64`/`fp64`/`fp64` query selects `mfma_f64_16x16x4_f64`
-(`m=n=16`) or `mfma_f64_4x4x4_f64` (`m=n=4`, four independent blocks). A/B take
-one f64 element per lane, as `f64` or a one-element `vec<f64x1>` (reinterpreted
+(`m=n=16`) or `mfma_f64_4x4x4_f64` (`m=n=4`, four independent blocks); gfx90a
+and gfx950 list only `mfma_f64_16x16x4_f64`. A/B take one f64 element per lane,
+as `f64` or a one-element `vec<f64x1>` (reinterpreted
 with one bitcast); another number format is rejected. C/D take four and one, so
 `IRBuilder.mma` returns `<4 x f64>` or `<1 x f64>`. The accumulator element
 follows the atom's `c_dtype`. Both C/D layouts differ from the f32 atoms (see

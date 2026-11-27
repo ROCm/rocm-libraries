@@ -113,6 +113,79 @@ template <typename T>
     return value;
 }
 
+/// Gets an optional scalar attribute. Returns std::nullopt if the attribute has no
+/// elements set or is not supported by the backend.
+template <typename T>
+[[nodiscard]] inline Error getDescriptorAttrOptionalScalar(hipdnnBackendDescriptor_t desc,
+                                                           hipdnnBackendAttributeName_t attrName,
+                                                           hipdnnBackendAttributeType_t attrType,
+                                                           std::optional<T>& value,
+                                                           const std::string& errorContext)
+{
+    int64_t count = 0;
+    auto status
+        = hipdnnBackend()->backendGetAttribute(desc, attrName, attrType, 0, &count, nullptr);
+    if(status == HIPDNN_STATUS_NOT_SUPPORTED || count <= 0)
+    {
+        value = std::nullopt;
+        return {};
+    }
+    if(status != HIPDNN_STATUS_SUCCESS)
+    {
+        std::array<char, HIPDNN_ERROR_STRING_MAX_LENGTH> backendErrMsg{};
+        hipdnnBackend()->getLastErrorString(backendErrMsg.data(), backendErrMsg.size());
+        return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                "Failed to get count for " + errorContext
+                    + " Backend error: " + backendErrMsg.data()};
+    }
+    T raw{};
+    HIPDNN_CHECK_ERROR(getDescriptorAttrScalar(desc, attrName, attrType, raw, errorContext));
+    value = raw;
+    return {};
+}
+
+/// Whether @p status, from the count query of a tensor schema extension (byte alignment, ragged
+/// offset, ragged-offset multiplier), means a backend that does not serve the attribute as this
+/// frontend reads it: NOT_SUPPORTED from one older than the attribute, or BAD_PARAM from one that
+/// types it otherwise (a therock-10.0 backend, 0.3.0, serves the ragged offset as INT64 and
+/// rejects a descriptor-typed query). The frontend must work with every backend of its major
+/// version (RFC 0005), so the attribute reads as unset there.
+inline bool isUnservedTensorExtension(hipdnnStatus_t status)
+{
+    return status == HIPDNN_STATUS_NOT_SUPPORTED || status == HIPDNN_STATUS_BAD_PARAM;
+}
+
+/// getDescriptorAttrOptionalScalar() for a tensor schema extension: std::nullopt also when the
+/// backend does not serve it (isUnservedTensorExtension()).
+template <typename T>
+[[nodiscard]] inline Error getTensorExtensionScalar(hipdnnBackendDescriptor_t desc,
+                                                    hipdnnBackendAttributeName_t attrName,
+                                                    hipdnnBackendAttributeType_t attrType,
+                                                    std::optional<T>& value,
+                                                    const std::string& errorContext)
+{
+    int64_t count = 0;
+    const auto status
+        = hipdnnBackend()->backendGetAttribute(desc, attrName, attrType, 0, &count, nullptr);
+    if(isUnservedTensorExtension(status) || (status == HIPDNN_STATUS_SUCCESS && count <= 0))
+    {
+        value = std::nullopt;
+        return {};
+    }
+    if(status != HIPDNN_STATUS_SUCCESS)
+    {
+        std::array<char, HIPDNN_ERROR_STRING_MAX_LENGTH> backendErrMsg{};
+        hipdnnBackend()->getLastErrorString(backendErrMsg.data(), backendErrMsg.size());
+        return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                "Failed to get count for " + errorContext
+                    + " Backend error: " + backendErrMsg.data()};
+    }
+    T raw{};
+    HIPDNN_CHECK_ERROR(getDescriptorAttrScalar(desc, attrName, attrType, raw, errorContext));
+    value = raw;
+    return {};
+}
+
 /// Gets a string attribute (char array) from a backend descriptor.
 /// Queries the character count first, then retrieves the string value.
 /// If the attribute is not supported or the string is empty, sets value to empty and returns
@@ -490,6 +563,103 @@ template <typename T>
               .value_or(false);
     tensor->set_is_pass_by_value(isRuntime);
 
+    // Restore the byte alignment. Lowering sends it only when non-default, so an absent value
+    // (count 0, or a backend that does not serve the attribute) keeps the TensorAttributes
+    // default. Dropping it is a silent misread: a re-lowered graph would claim the default
+    // 16-byte alignment. The ragged offset and its multiplier are read by unpackRaggedOffset(),
+    // which needs the tensor map, and only for a tensor that has an offset.
+    std::optional<int64_t> alignment;
+    HIPDNN_CHECK_ERROR(getTensorExtensionScalar(tensorDesc,
+                                                HIPDNN_ATTR_TENSOR_BYTE_ALIGNMENT,
+                                                HIPDNN_TYPE_INT64,
+                                                alignment,
+                                                "tensor byte alignment"));
+    if(alignment.has_value())
+    {
+        tensor->set_alignment(*alignment);
+    }
+
+    return {};
+}
+
+/// Links @p tensor to its ragged-offset aux tensor (RFC 0014), read from @p tensorDesc
+/// and shared through @p tensorMap by UID like every other tensor, so an aux that
+/// several tensors share (or that is also an operand) is one TensorAttributes.
+///
+/// Without it a ragged tensor lifts as a dense one, and a graph re-lowered from the
+/// lifted nodes -- Graph::deserialize() without a handle and then
+/// build_operation_graph(), the from_json() path -- reaches the engines dense, its
+/// offset tables gone. A tensor without an aux (count 0), or a backend that does not
+/// serve the attribute (isUnservedTensorExtension()), leaves the tensor dense. The backend
+/// rejects an aux that is itself ragged, so the aux is unpacked without following its own
+/// link. A ragged tensor also gets its ragged-offset multiplier back, which lowering sends
+/// only when it is not 1; a dense tensor is never asked for it.
+[[nodiscard]] inline Error unpackRaggedOffset(
+    hipdnnBackendDescriptor_t tensorDesc,
+    std::unordered_map<int64_t, std::shared_ptr<graph::TensorAttributes>>& tensorMap,
+    graph::TensorAttributes& tensor)
+{
+    const std::string context = "ragged offset of tensor " + std::to_string(tensor.get_uid());
+
+    int64_t count = 0;
+    auto status = hipdnnBackend()->backendGetAttribute(tensorDesc,
+                                                       HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_DESC,
+                                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                                       0,
+                                                       &count,
+                                                       nullptr);
+    if(isUnservedTensorExtension(status) || (status == HIPDNN_STATUS_SUCCESS && count <= 0))
+    {
+        return {};
+    }
+    if(status != HIPDNN_STATUS_SUCCESS)
+    {
+        std::array<char, HIPDNN_ERROR_STRING_MAX_LENGTH> backendErrMsg{};
+        hipdnnBackend()->getLastErrorString(backendErrMsg.data(), backendErrMsg.size());
+        return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                "Failed to query count for " + context + " Backend error: " + backendErrMsg.data()};
+    }
+
+    auto [auxDesc, auxErr]
+        = getDescriptorAttrDesc(tensorDesc, HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_DESC, context);
+    if(auxErr.is_bad())
+    {
+        return auxErr;
+    }
+    if(auxDesc.get() == nullptr)
+    {
+        return {ErrorCode::HIPDNN_BACKEND_ERROR, "Null tensor descriptor for " + context};
+    }
+
+    int64_t auxUid = 0;
+    HIPDNN_CHECK_ERROR(getDescriptorAttrScalar(
+        auxDesc.get(), HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, auxUid, context + " UID"));
+
+    std::shared_ptr<graph::TensorAttributes> aux;
+    auto it = tensorMap.find(auxUid);
+    if(it != tensorMap.end())
+    {
+        aux = it->second;
+    }
+    else
+    {
+        HIPDNN_CHECK_ERROR(unpackTensorAttributes(auxDesc.get(), aux));
+        tensorMap[auxUid] = aux;
+    }
+    tensor.set_ragged_offset(aux);
+
+    // Dropping the multiplier would be a silent misread: a re-lowered graph would count its
+    // offsets in elements.
+    std::optional<int64_t> multiplier;
+    HIPDNN_CHECK_ERROR(getTensorExtensionScalar(tensorDesc,
+                                                HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_MULTIPLIER,
+                                                HIPDNN_TYPE_INT64,
+                                                multiplier,
+                                                context + " multiplier"));
+    if(multiplier.has_value())
+    {
+        tensor.set_ragged_offset_multiplier(*multiplier);
+    }
     return {};
 }
 
@@ -541,7 +711,7 @@ template <typename T>
     // Register in map for future sharing
     tensorMap[uid] = outTensor;
 
-    return {};
+    return unpackRaggedOffset(tensorDesc.get(), tensorMap, *outTensor);
 }
 
 /// Unpacks an optional tensor attribute. Returns nullptr if the attribute has no
@@ -572,37 +742,6 @@ template <typename T>
     }
 
     return unpackAndRegisterTensor(opDesc, tensorAttrName, tensorMap, outTensor, errorContext);
-}
-
-/// Gets an optional scalar attribute. Returns std::nullopt if the attribute has no
-/// elements set or is not supported by the backend.
-template <typename T>
-[[nodiscard]] inline Error getDescriptorAttrOptionalScalar(hipdnnBackendDescriptor_t desc,
-                                                           hipdnnBackendAttributeName_t attrName,
-                                                           hipdnnBackendAttributeType_t attrType,
-                                                           std::optional<T>& value,
-                                                           const std::string& errorContext)
-{
-    int64_t count = 0;
-    auto status
-        = hipdnnBackend()->backendGetAttribute(desc, attrName, attrType, 0, &count, nullptr);
-    if(status == HIPDNN_STATUS_NOT_SUPPORTED || count <= 0)
-    {
-        value = std::nullopt;
-        return {};
-    }
-    if(status != HIPDNN_STATUS_SUCCESS)
-    {
-        std::array<char, HIPDNN_ERROR_STRING_MAX_LENGTH> backendErrMsg{};
-        hipdnnBackend()->getLastErrorString(backendErrMsg.data(), backendErrMsg.size());
-        return {ErrorCode::HIPDNN_BACKEND_ERROR,
-                "Failed to get count for " + errorContext
-                    + " Backend error: " + backendErrMsg.data()};
-    }
-    T raw{};
-    HIPDNN_CHECK_ERROR(getDescriptorAttrScalar(desc, attrName, attrType, raw, errorContext));
-    value = raw;
-    return {};
 }
 
 /// Unpacks a tensor array attribute from an operation descriptor, deduplicating
@@ -647,6 +786,7 @@ template <typename T>
             std::shared_ptr<graph::TensorAttributes> tensor;
             HIPDNN_CHECK_ERROR(unpackTensorAttributes(scopedDesc.get(), tensor));
             tensorMap[uid] = tensor;
+            HIPDNN_CHECK_ERROR(unpackRaggedOffset(scopedDesc.get(), tensorMap, *tensor));
             outTensors.push_back(std::move(tensor));
         }
     }

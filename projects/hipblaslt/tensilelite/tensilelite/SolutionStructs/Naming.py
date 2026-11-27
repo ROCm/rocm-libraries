@@ -26,7 +26,7 @@ from functools import lru_cache
 
 from ..Common.Constants import MAX_FILENAME_LENGTH
 from ..Common.RequiredParameters import getRequiredParametersMin, getRequiredParametersFull
-from ..Common.Utilities import isMxf4SubtilePath, printWarning
+from ..Common.Utilities import isMxf4SubtilePath, plsinDataTypes, printWarning, storeCachelineAlignEnabled
 from ..Common.ValidParameters import parseStinkyTofuRegisterAllocation
 
 from .Problem import ProblemType
@@ -236,12 +236,28 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     if state.get("TileProcessingStrategy", "None") == "None":
       requiredParametersTemp.difference_update({"WorkAssignment", "PersistentXCCMapping", "WorkQueueStealing"})
 
+    # LDSTrStoreShuffle 0 emits byte-identical assembly to a kernel generated before the parameter
+    # existed, so encoding AS0 would rename every kernel in the library without changing one
+    # instruction. Omit it at 0 and let 1/2 carry the tag; absence therefore means 0, and the
+    # three values still map to three distinct names.
+    if not state.get("LDSTrStoreShuffle", 0):
+      requiredParametersTemp.discard("LDSTrStoreShuffle")
 
-    # PostLoopStoreInNll only ever applies on the MXF4 subtile path, where
-    # assignPostLoopStoreInNll auto-disables it for everything else. Naming it
-    # unconditionally would append PLSIN0 to every kernel in the library and change
-    # its name hash, so drop it where it cannot be set.
-    if not isMxf4SubtilePath(state):
+    # PostLoopStoreInNll changes codegen only when it is ON, and
+    # assignPostLoopStoreInNll resolves it independently of isMxf4SubtilePath -- an
+    # NT/NN/TT fp4 subtile kernel can carry it ON while isMxf4SubtilePath is False, and
+    # dropping it there gave the ON and OFF variants one name and one .s file. Naming it
+    # unconditionally would append PLSIN0 to every kernel in the library and change its
+    # name hash, so keep it only where the fused store can exist.
+    #
+    # The flag alone is not a safe test: Solution.__init__ pre-fills it from
+    # defaultSolution (True) before derivation, so a solution rejected ahead of
+    # assignPostLoopStoreInNll keeps a stale True it never earned. Re-test the two
+    # datatype/path conditions the gate itself requires, which no default can forge.
+    plsinReachable = (bool(state.get("PostLoopStoreInNll", False))
+                      and bool(state.get("UseSubtileImpl", False))
+                      and plsinDataTypes(state))
+    if not isMxf4SubtilePath(state) and not plsinReachable:
       requiredParametersTemp.discard("PostLoopStoreInNll")
 
     if ignoreInternalArgs:
@@ -291,7 +307,8 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
       requiredParametersTemp.discard("SpaceFillingAlgo")
 
     # Non-default debug modes replace or remove generated control flow.
-    for key in ("DebugStreamK", "StreamKAtomic", "MbskPrefetchMethod", "DebugPersistentKernelLoopForever"):
+    for key in ("DebugStreamK", "StreamKAtomic", "MbskPrefetchMethod", "DebugPersistentKernelLoopForever",
+                "DebugDisableInstrMask"):
       if state.get(key, 0) != 0:
         requiredParametersTemp.add(key)
 
@@ -302,6 +319,15 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     else:
       requiredParametersTemp.discard("TDMFuse")
 
+    # StoreCachelineAlign only changes codegen on the gfx950 MXF4 subtile path, and there
+    # only on kernels whose waves hold both halves of a line. Name it only where it acts,
+    # so every other kernel keeps its existing name.
+    if storeCachelineAlignEnabled(state) \
+        and tuple(state.get("ISA", ())[:2]) == (9, 5) and isMxf4SubtilePath(state):
+      requiredParametersTemp.add("StoreCachelineAlign")
+    else:
+      requiredParametersTemp.discard("StoreCachelineAlign")
+
     # StinkyTofuRegisterAllocation=0 leaves Tensile's colouring, so naming it
     # would rename every kernel that does not opt in. Any other value changes
     # the colouring (and mode 3 changes which kernels are accepted), so it
@@ -311,17 +337,34 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     else:
       requiredParametersTemp.discard("StinkyTofuRegisterAllocation")
 
+    if pt.get("FusedA2A") == "A2AGemm":
+      requiredParametersTemp.add("A2ASubRounds")
+    else:
+      requiredParametersTemp.discard("A2ASubRounds")
+
     # LDSSegmentBRotate=0 is the default layout; naming it would rename every kernel.
     if state.get("LDSSegmentBRotate", 0):
       requiredParametersTemp.add("LDSSegmentBRotate")
     else:
       requiredParametersTemp.discard("LDSSegmentBRotate")
 
+    if state.get("WaveTileContiguousA", False):
+      requiredParametersTemp.add("WaveTileContiguousA")
+    else:
+      requiredParametersTemp.discard("WaveTileContiguousA")
+
     # ClusterAIDMapping=-1 (disabled) is the default; naming it would rename every kernel.
     if state.get("ClusterAIDMapping", -1) != -1:
       requiredParametersTemp.add("ClusterAIDMapping")
     else:
       requiredParametersTemp.discard("ClusterAIDMapping")
+
+    # PrefetchGL2Inc64Bit=False (32-bit increment) is the default; naming it would rename every kernel.
+    if not state.get("PrefetchGL2Inc64Bit", False):
+      requiredParametersTemp.discard("PrefetchGL2Inc64Bit")
+    # PrefetchGL2SAddr=False (vgpr-pair address) is the default; naming it would rename every kernel.
+    if not state.get("PrefetchGL2SAddr", False):
+      requiredParametersTemp.discard("PrefetchGL2SAddr")
 
     for key in sorted(requiredParametersTemp):
       if key not in state or key == "CustomKernel":

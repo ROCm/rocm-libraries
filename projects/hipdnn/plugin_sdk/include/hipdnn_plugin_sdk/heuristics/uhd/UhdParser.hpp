@@ -6,10 +6,12 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <limits>
 #include <set>
 #include <string>
@@ -31,6 +33,13 @@ namespace parser_detail
 inline constexpr size_t MAX_DOCUMENT_BYTES = size_t{8} * 1024 * 1024;
 inline constexpr size_t MAX_DOCUMENT_NODES = 131072;
 inline constexpr size_t MAX_DOCUMENT_DEPTH = 2 * ExpressionSet::MAX_EXPRESSION_DEPTH + 8;
+/// The UHD minor this build reads, under major 1. An older reader skips a newer file at the
+/// version gate; provenance() refuses a key under a document that declares an older minor.
+inline constexpr int UHD_VERSION_MINOR = 2;
+/// The first UHD minor whose `trained_against` may use the RFC 0021 §9 slot forms.
+inline constexpr int UHD_SLOT_MINOR = 1;
+/// The first UHD minor whose `trained_against` may record `codegen_revision`.
+inline constexpr int UHD_CODEGEN_MINOR = 2;
 
 [[noreturn]] inline void fail(const std::string& message)
 {
@@ -202,12 +211,54 @@ inline void dependency(const nlohmann::json& value, const std::string& where)
     revision(text(value, "revision", where), where);
 }
 
+/// RFC 0021 §4: the form of a slot name, a lowercase identifier `^[a-z][a-z0-9_]*$`.
+inline bool hasSlotNameForm(std::string_view name)
+{
+    return !name.empty() && name.front() >= 'a' && name.front() <= 'z'
+           && std::all_of(name.begin(), name.end(), [](unsigned char c) {
+                  return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_';
+              });
+}
+
+/// RFC 0021 §4: a slot name has the slot-name form and is not `global`, which RFC 0004 reserves
+/// for engine-wide knobs.
+inline bool isSlotName(std::string_view name)
+{
+    return hasSlotNameForm(name) && name != "global";
+}
+
 /// Validate `trained_against` (RFC 0019 §4.1): a descriptor set (`ued`/`kmd`/`umd`, all
 /// three) for UED-bound models, and/or a `selector_revision` for engines without a UED.
 /// `feature_semantics_revision` is optional and does not satisfy either form on its own.
-inline void provenance(const nlohmann::json& value, const std::string& where)
+///
+/// RFC 0021 §9 adds two slot forms, valid from UHD 1.1: `slot` beside `kmd` for one slot's
+/// ranker, and `kmds: [{slot, id, revision}]` in place of `kmd` for a slotted engine's
+/// `predict_engine` model. `codegen_revision` is valid from UHD 1.2. @p minor is the minor of
+/// the document's version; a document below the minor a key needs is rejected, naming the
+/// version it requires.
+inline void provenance(const nlohmann::json& value, const std::string& where, int minor)
 {
-    keys(value, {"ued", "kmd", "umd", "selector_revision", "feature_semantics_revision"}, where);
+    if(minor < UHD_SLOT_MINOR && value.is_object()
+       && (value.contains("slot") || value.contains("kmds")))
+    {
+        fail("trained_against uses slot provenance ('slot' or 'kmds') in " + where
+             + ", which requires UHD version 1.1");
+    }
+    if(minor < UHD_CODEGEN_MINOR && value.is_object() && value.contains("codegen_revision"))
+    {
+        fail("trained_against records codegen_revision in " + where
+             + ", which requires UHD version 1.2");
+    }
+    keys(value,
+         {"ued",
+          "kmd",
+          "kmds",
+          "slot",
+          "umd",
+          "selector_revision",
+          "codegen_revision",
+          "feature_semantics_revision"},
+         where);
     if(value.contains("feature_semantics_revision"))
     {
         // Integer only (not 1.0 or a bool), and must fit int64_t. Parsed JSON is unsigned;
@@ -223,8 +274,8 @@ inline void provenance(const nlohmann::json& value, const std::string& where)
             fail("trained_against.feature_semantics_revision must be an integer >= 1 in " + where);
         }
     }
-    const bool namesDescriptorSet
-        = value.contains("ued") || value.contains("kmd") || value.contains("umd");
+    const bool namesDescriptorSet = value.contains("ued") || value.contains("kmd")
+                                    || value.contains("kmds") || value.contains("umd");
     const bool namesSelector = value.contains("selector_revision");
     if(!namesDescriptorSet && !namesSelector)
     {
@@ -235,13 +286,69 @@ inline void provenance(const nlohmann::json& value, const std::string& where)
         // Opaque: only the provider that produced it can interpret it.
         (void)text(value, "selector_revision", where);
     }
+    if(value.contains("codegen_revision"))
+    {
+        // Opaque like selector_revision, but satisfies neither form: it only qualifies one.
+        (void)text(value, "codegen_revision", where);
+    }
+    if(value.contains("slot") && !value.contains("kmd"))
+    {
+        fail("trained_against.slot requires kmd, and excludes kmds, in " + where);
+    }
+    if(value.contains("kmd") && value.contains("kmds"))
+    {
+        fail("trained_against names both kmd and kmds in " + where);
+    }
     if(!namesDescriptorSet)
     {
         return;
     }
-    // All three or none: a partial descriptor set is unverifiable.
+    // All three or none: a partial descriptor set is unverifiable. `kmds` stands in for `kmd`.
     dependency(required(value, "ued", where), where + " ued");
-    dependency(required(value, "kmd", where), where + " kmd");
+    if(value.contains("kmds"))
+    {
+        const auto& slots = value.at("kmds");
+        if(!slots.is_array() || slots.empty())
+        {
+            fail("trained_against.kmds must be a non-empty array in " + where);
+        }
+        std::set<std::string> names;
+        for(const auto& entry : slots)
+        {
+            keys(entry, {"slot", "id", "revision"}, where + " kmds");
+            const auto name = text(entry, "slot", where + " kmds");
+            if(!isSlotName(name))
+            {
+                std::string message = "trained_against.kmds slot '";
+                message += name;
+                message += "' is not a valid slot name in ";
+                message += where;
+                fail(message);
+            }
+            if(!names.insert(name).second)
+            {
+                std::string message = "trained_against.kmds names slot '";
+                message += name;
+                message += "' twice in ";
+                message += where;
+                fail(message);
+            }
+            (void)hipdnn_flatbuffers_sdk::utilities::parseUuid(text(entry, "id", where + " kmds"));
+            revision(text(entry, "revision", where + " kmds"), where + " kmds");
+        }
+    }
+    else
+    {
+        dependency(required(value, "kmd", where), where + " kmd");
+    }
+    if(value.contains("slot"))
+    {
+        const auto name = text(value, "slot", where);
+        if(!isSlotName(name))
+        {
+            fail("trained_against.slot '" + name + "' is not a valid slot name in " + where);
+        }
+    }
     const auto& matchers = required(value, "umd", where);
     if(!matchers.is_array())
     {
@@ -393,13 +500,21 @@ inline UhdConfig parseUhdConfig(const nlohmann::json& root, const std::filesyste
           "native",
           "tree_data",
           "table",
+          "linear_data",
+          "mlp_data",
           "onnx",
           "custom_library",
           "trained_against",
           // Free-form authoring notes, never read; root only (RFC 0019 §4.1).
           "provenance"},
          where);
-    if(text(root, "version", where) != "1.0")
+    // Major 1, minor 0 through UHD_VERSION_MINOR; the minor gates provenance().
+    static constexpr std::array<std::string_view, UHD_VERSION_MINOR + 1> VERSIONS
+        = {"1.0", "1.1", "1.2"};
+    const auto declaredVersion = text(root, "version", where);
+    const auto minor = static_cast<int>(std::distance(
+        VERSIONS.begin(), std::find(VERSIONS.begin(), VERSIONS.end(), declaredVersion)));
+    if(minor > UHD_VERSION_MINOR)
     {
         fail("unsupported UHD version in " + where);
     }
@@ -409,15 +524,20 @@ inline UhdConfig parseUhdConfig(const nlohmann::json& root, const std::filesyste
     result.name = text(root, "name", where);
     result.adapterType = text(root, "adapter", where);
     size_t bodies = 0;
-    for(const auto* adapter :
-        {"static_order", "native", "tree_data", "table", "onnx", "custom_library"})
+    static constexpr std::array<std::string_view, 8> ADAPTERS = {"static_order",
+                                                                 "native",
+                                                                 "tree_data",
+                                                                 "table",
+                                                                 "linear_data",
+                                                                 "mlp_data",
+                                                                 "onnx",
+                                                                 "custom_library"};
+    for(const auto adapter : ADAPTERS)
     {
-        bodies += root.contains(adapter) ? size_t{1} : size_t{0};
+        bodies += root.contains(std::string(adapter)) ? size_t{1} : size_t{0};
     }
     if(bodies != 1 || !root.contains(result.adapterType)
-       || (result.adapterType != "static_order" && result.adapterType != "native"
-           && result.adapterType != "tree_data" && result.adapterType != "table"
-           && result.adapterType != "onnx" && result.adapterType != "custom_library"))
+       || std::find(ADAPTERS.begin(), ADAPTERS.end(), result.adapterType) == ADAPTERS.end())
     {
         fail("UHD requires exactly one body matching its adapter in " + where);
     }
@@ -534,10 +654,28 @@ inline UhdConfig parseUhdConfig(const nlohmann::json& root, const std::filesyste
                  + " in " + where);
         }
     }
+    // A linear_data score is a log slowdown against the catalog's best candidate: lower is
+    // better, and it estimates no registered metric, so no other declaration can be true.
+    if(result.adapterType == "linear_data"
+       && (result.objective != "min" || !result.scoreMetric.empty() || result.scoreCalibrated
+           || (!result.scoreTransform.empty() && result.scoreTransform != "identity")))
+    {
+        fail("linear_data requires objective min and no score.metric, calibration or transform "
+             "in "
+             + where);
+    }
+    // An mlp_data network's output is the log of the metric its artifact names (checked
+    // against score.metric at load), so the score must declare both. `calibrated` is left to
+    // the L1 binding, like any other adapter.
+    if(result.adapterType == "mlp_data"
+       && (result.scoreMetric.empty() || result.scoreTransform != "log"))
+    {
+        fail("mlp_data requires score.metric and score.transform log in " + where);
+    }
     if(root.contains("trained_against"))
     {
         result.trainedAgainst = root.at("trained_against");
-        provenance(result.trainedAgainst, where + " trained_against");
+        provenance(result.trainedAgainst, where + " trained_against", minor);
     }
     if(!result.featuresSignature.empty()
        && (result.featuresHash.empty() || result.trainedAgainst.is_null()))

@@ -38,6 +38,7 @@ add_executable(
     IntegrationCustomOpDescriptorLowering.cpp
     IntegrationFrontendUserLogging.cpp
     IntegrationGraphEngineFiltering.cpp
+    IntegrationGlobalObjectsDestroyedAtExit.cpp
     IntegrationGraphKnobsApi.cpp
     IntegrationGraphKnobSettingsDescriptorLowering.cpp
     IntegrationGraphKnobsDescriptorLifting.cpp
@@ -88,6 +89,13 @@ add_executable(
     # only built when the shim is enabled.
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:IntegrationCudnnShimUmbrella.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:IntegrationCudnnShimHandle.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:IntegrationCudnnShimGlobalObjectDestroyedAtExit.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:IntegrationCudnnCompatibilityV8Builders.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:IntegrationCudnnCompatibilityV8FindPlan.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:IntegrationCudnnCompatibilityV8BuilderEngines.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:IntegrationCudnnCompatibilityV8BuilderExecute.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:IntegrationCudnnCompatibilityV8BuilderKnobs.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:IntegrationCudnnCompatibilityV8BuilderLowering.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:IntegrationOverrideExecute.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:IntegrationOverrideValidation.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:IntegrationTestPluginInfrastructure.cpp>
@@ -141,6 +149,7 @@ function(configure_hipdnn_public_frontend_test_target TARGET_NAME)
                 TEST_PASS_BY_VALUE_RECORDER_PLUGIN_NAME="${HIPDNN_TEST_PASS_BY_VALUE_RECORDER_PLUGIN_TARGET}"
                 TEST_GOOD_HEURISTIC_PLUGIN_NAME="${TEST_GOOD_HEURISTIC_PLUGIN_NAME}"
                 TEST_AUTOTUNE_PLUGIN_NAME="${TEST_AUTOTUNE_PLUGIN_NAME}"
+                TEST_CUDNN_COMPATIBILITY_V8_PLUGIN_NAME="${TEST_CUDNN_COMPATIBILITY_V8_PLUGIN_NAME}"
     )
 
     # Ensure test plugins are built before tests
@@ -169,6 +178,7 @@ function(configure_hipdnn_public_frontend_test_target TARGET_NAME)
         ${HIPDNN_TEST_PASS_BY_VALUE_PLUGIN_TARGET}
         ${HIPDNN_TEST_PASS_BY_VALUE_RECORDER_PLUGIN_TARGET}
         ${TEST_GOOD_HEURISTIC_PLUGIN_NAME}
+        ${TEST_CUDNN_COMPATIBILITY_V8_PLUGIN_NAME}
         test_autotune_plugin
     )
 endfunction()
@@ -176,7 +186,7 @@ endfunction()
 configure_hipdnn_public_frontend_test_target(hipdnn_public_frontend_tests)
 
 clang_tidy_check(hipdnn_public_frontend_tests)
-add_hipdnn_test(hipdnn_public_frontend_tests ${CMAKE_CURRENT_BINARY_DIR})
+add_hipdnn_test(hipdnn_public_frontend_tests ${CMAKE_CURRENT_BINARY_DIR} GTEST_CATEGORIES)
 
 add_executable(
     hipdnn_public_frontend_dynamic_load_tests

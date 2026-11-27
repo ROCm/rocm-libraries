@@ -138,7 +138,8 @@ inline bool isF16Supported()
            || (deviceName.find("gfx1171") != std::string::npos)
            || (deviceName.find("gfx1200") != std::string::npos)
            || (deviceName.find("gfx1201") != std::string::npos)
-           || (deviceName.find("gfx1250") != std::string::npos);
+           || (deviceName.find("gfx1250") != std::string::npos)
+           || (deviceName.find("gfx1251") != std::string::npos);
 }
 
 inline bool isF32Supported()
@@ -167,7 +168,8 @@ inline bool isF32Supported()
            || (deviceName.find("gfx1171") != std::string::npos)
            || (deviceName.find("gfx1200") != std::string::npos)
            || (deviceName.find("gfx1201") != std::string::npos)
-           || (deviceName.find("gfx1250") != std::string::npos);
+           || (deviceName.find("gfx1250") != std::string::npos)
+           || (deviceName.find("gfx1251") != std::string::npos);
 }
 
 inline bool isF64Supported()
@@ -183,7 +185,8 @@ inline bool isF64Supported()
     return (deviceName.find("gfx90a") != std::string::npos)
            || (deviceName.find("gfx942") != std::string::npos)
            || (deviceName.find("gfx950") != std::string::npos)
-           || (deviceName.find("gfx1250") != std::string::npos);
+           || (deviceName.find("gfx1250") != std::string::npos)
+           || (deviceName.find("gfx1251") != std::string::npos);
 }
 
 inline bool isF16F16MatrixCoreSupported()
@@ -208,7 +211,8 @@ inline bool isF16F16MatrixCoreSupported()
            || (deviceName.find("gfx1171") != std::string::npos)
            || (deviceName.find("gfx1200") != std::string::npos)
            || (deviceName.find("gfx1201") != std::string::npos)
-           || (deviceName.find("gfx1250") != std::string::npos);
+           || (deviceName.find("gfx1250") != std::string::npos)
+           || (deviceName.find("gfx1251") != std::string::npos);
 }
 
 inline bool isF32F16MatrixCoreSupported()
@@ -237,7 +241,8 @@ inline bool isF32F16MatrixCoreSupported()
            || (deviceName.find("gfx1171") != std::string::npos)
            || (deviceName.find("gfx1200") != std::string::npos)
            || (deviceName.find("gfx1201") != std::string::npos)
-           || (deviceName.find("gfx1250") != std::string::npos);
+           || (deviceName.find("gfx1250") != std::string::npos)
+           || (deviceName.find("gfx1251") != std::string::npos);
 }
 
 inline bool isF32F32MatrixCoreSupported()
@@ -254,7 +259,8 @@ inline bool isF32F32MatrixCoreSupported()
            || (deviceName.find("gfx90a") != std::string::npos)
            || (deviceName.find("gfx942") != std::string::npos)
            || (deviceName.find("gfx950") != std::string::npos)
-           || (deviceName.find("gfx1250") != std::string::npos);
+           || (deviceName.find("gfx1250") != std::string::npos)
+           || (deviceName.find("gfx1251") != std::string::npos);
 }
 
 inline bool isF16F32MatrixCoreSupported()
@@ -274,7 +280,8 @@ inline bool isF64F64MatrixCoreSupported()
 
     return (deviceName.find("gfx90a") != std::string::npos)
            || (deviceName.find("gfx942") != std::string::npos)
-           || (deviceName.find("gfx950") != std::string::npos);
+           || (deviceName.find("gfx950") != std::string::npos)
+           || (deviceName.find("gfx1251") != std::string::npos);
 }
 
 inline bool isF64F32MatrixCoreSupported()
@@ -290,7 +297,8 @@ inline bool isF64F32MatrixCoreSupported()
     return (deviceName.find("gfx90a") != std::string::npos)
            || (deviceName.find("gfx942") != std::string::npos)
            || (deviceName.find("gfx950") != std::string::npos)
-           || (deviceName.find("gfx1250") != std::string::npos);
+           || (deviceName.find("gfx1250") != std::string::npos)
+           || (deviceName.find("gfx1251") != std::string::npos);
 }
 
 inline bool isDataType16Bits(hiptensorDataType_t dataType)
@@ -364,6 +372,10 @@ __host__ static inline void
     hipLaunchKernelGGL(
         (fillValKernel<DataType>), gridDim, blockDim, 0, 0, data, elementSize, value);
 }
+
+// Relative tolerance for R_64F results: tight enough that a float
+// rounding (~1e-8) fails
+static const double fp64Tolerance = 1e-12;
 
 template <typename DDataType>
 std::pair<bool, double> compareEqual(DDataType const*             deviceD,
@@ -516,7 +528,7 @@ std::pair<bool, double> compareEqualLaunchKernel(DDataType*                   de
         gridDim       = dim3(ceilDiv(i, maxElements), 1, 1);
         auto elements = i > maxElements ? maxElements : i;
 
-        hipLaunchKernelGGL((maxReduceKernel),
+        hipLaunchKernelGGL((maxReduceKernel<double>),
                            gridDim,
                            blockDim,
                            0,

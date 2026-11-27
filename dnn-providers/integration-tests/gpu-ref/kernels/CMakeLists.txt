@@ -3,6 +3,8 @@
 
 # Kernel files to embed as C++ string literals at build time.
 set(GPU_REF_KERNEL_FILES
+    ${CMAKE_CURRENT_SOURCE_DIR}/block-scale/GpuRefBlockScaleQuantize.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/block-scale/GpuRefBlockScaleDequantize.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/convolution/GpuRefConvFwd.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/convolution/GpuRefConvBwd.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/convolution/GpuRefConvWrw.cpp
@@ -12,6 +14,7 @@ set(GPU_REF_KERNEL_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/sdpa/GpuRefSdpaFwd.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/sdpa/GpuRefSdpaBwd.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/sdpa/GpuRefSdpaCommon.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include/hipdnn-gpu-ref/detail/RaggedBatchMapping.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/sdpa/GpuRefSdpaFp8.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/reduction/GpuRefReduction.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/resample/GpuRefResampleBwd.cpp
@@ -25,6 +28,7 @@ set(GPU_REF_KERNEL_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/GpuRefBatchnormFwdTrain.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/pointwise/GpuRefPointwiseUnary.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/pointwise/GpuRefPointwiseBinary.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/pointwise/GpuRefPointwiseTernary.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/validator/GpuRefValidator.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/common/GpuRefScaleUniform.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/common/GpuRefUtils.hpp
@@ -36,6 +40,7 @@ set(GPU_REF_KERNEL_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/types/GpuRefResampleArgs.h
     ${CMAKE_CURRENT_SOURCE_DIR}/types/GpuRefRMSNormArgs.h
     ${CMAKE_CURRENT_SOURCE_DIR}/types/GpuRefBatchnormArgs.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/types/GpuRefBlockScaleArgs.h
     ${CMAKE_CURRENT_SOURCE_DIR}/types/GpuRefPointwiseArgs.h
     ${CMAKE_CURRENT_SOURCE_DIR}/types/GpuRefCommonArgs.h
     ${CMAKE_CURRENT_SOURCE_DIR}/types/GpuRefValidatorArgs.h

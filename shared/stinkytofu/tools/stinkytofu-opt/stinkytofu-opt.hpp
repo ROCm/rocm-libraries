@@ -45,7 +45,8 @@
 #include "stinkytofu/transforms/asm/DefUseAnalysisCleanup.hpp"
 #include "stinkytofu/transforms/asm/EpilogueStoreSinkPass.hpp"
 #include "stinkytofu/transforms/asm/FlattenCFGPass.hpp"
-#include "stinkytofu/transforms/asm/Gfx1250HazardPass.hpp"
+#include "stinkytofu/transforms/asm/Gfx1250XnackHazardPass.hpp"
+#include "stinkytofu/transforms/asm/GirFencePlacementPass.hpp"
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
 #include "stinkytofu/transforms/asm/InsertCoexecHazardPass.hpp"
 #include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
@@ -129,19 +130,22 @@ const std::vector<PassInfo> availablePasses = {
          return createStinkyRemoveWaitCntPass(options);
      }},
     {"StinkyRemoveNopPass", [](const auto&) { return createStinkyRemoveNopPass(); }},
+    {"GirFencePlacementPass", [](const auto&) { return createGirFencePlacementPass(); }},
     {"RemoveDscntPass", [](const auto&) { return createRemoveDscntPass(); }},
     {"StinkyWaitCntInsertionPass",
      [](const std::vector<std::string>& args) {
          WaitCntInsertionOptions options;
          options.enableLoopCarriedTokenDeps = hasPassArg(args, "enableLoopCarriedTokenDeps");
          options.mergeWaitsInWmmaRuns = hasPassArg(args, "mergeWaitsInWmmaRuns");
+         options.disableTensorcntInsertion = hasPassArg(args, "disableTensorcntInsertion");
+         options.girFrameWaits = hasPassArg(args, "girFrameWaits");
          return createStinkyWaitCntInsertionPass(options);
      }},
-    // Gfx1250HazardPass accepts:
+    // Gfx1250XnackHazardPass accepts:
     //   profile — print the xcnt drain summary (per rule and drain site) to stderr
-    {"Gfx1250HazardPass",
+    {"Gfx1250XnackHazardPass",
      [](const std::vector<std::string>& args) {
-         return createGfx1250HazardPass(hasPassArg(args, "profile"));
+         return createGfx1250XnackHazardPass(hasPassArg(args, "profile"));
      }},
     // BuildUseDefChainPass accepts:
     //   includePseudo    — also build chains for pseudo registers (memtokens)
@@ -307,7 +311,7 @@ const std::vector<PassInfo> availablePasses = {
          return createInsertWaitAluPass(
              {hasPassArg(args, "enableESM2TrackValuVsrc"),
               hasPassArg(args, "sharedOrderCountFollowers"),
-              hasPassArg(args, "xdlCountFromNextWmma")});
+              hasPassArg(args, "xdlCountFromNextWmma"), hasPassArg(args, "ignoreWaitHide")});
      }},
     {"InsertCoexecHazardPass", [](const auto&) { return createInsertCoexecHazardPass(); }},
     {"RegionClonePass",

@@ -2,8 +2,15 @@
 // SPDX-License-Identifier:  MIT
 
 #include "Utils.hpp"
+#include "Handle.hpp"
+
+#include <algorithm>
+#include <memory>
+#include <utility>
 
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
+#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
 namespace hip_kernel_provider::core::utils
@@ -109,6 +116,24 @@ bool isChannelLastLayout(const hipdnn_flatbuffers_sdk::data_objects::TensorAttri
         = hipdnn_data_sdk::utilities::extractStrideOrder(stridesVec);
 
     // Compare against known layouts
+    if(numDims == 3)
+    {
+        const auto layoutNcl = hipdnn_data_sdk::utilities::TensorLayout::NCL;
+        const auto layoutNlc = hipdnn_data_sdk::utilities::TensorLayout::NLC;
+
+        if(strideOrder == layoutNlc.strideOrder)
+        {
+            return true;
+        }
+        if(strideOrder == layoutNcl.strideOrder)
+        {
+            return false;
+        }
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Unsupported tensor layout for 3D tensor. Only NCL and NLC are supported.");
+    }
+
     if(numDims == 4)
     {
         const auto layoutNchw = hipdnn_data_sdk::utilities::TensorLayout::NCHW;
@@ -147,8 +172,58 @@ bool isChannelLastLayout(const hipdnn_flatbuffers_sdk::data_objects::TensorAttri
 
     throw hipdnn_plugin_sdk::HipdnnPluginException(
         HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-        "Tensor must be 4D or 5D for layout detection. Got " + std::to_string(numDims)
+        "Tensor must be 3D, 4D or 5D for layout detection. Got " + std::to_string(numDims)
             + "D tensor.");
+}
+
+bool hasOnly16ByteAlignedTensors(
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
+{
+    constexpr int64_t REQUIRED_ALIGNMENT = 16;
+    return std::all_of(tensorMap.begin(), tensorMap.end(), [](const auto& entry) {
+        const auto* tensor = entry.second;
+        return hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(tensor)
+               || (tensor->alignment() >= REQUIRED_ALIGNMENT
+                   && tensor->alignment() % REQUIRED_ALIGNMENT == 0);
+    });
+}
+
+void storeEngineDetails(Handle& handle,
+                        int64_t engineId,
+                        const std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT>& knobs,
+                        const std::vector<int32_t>& behaviorNotes,
+                        hipdnnPluginConstData_t& detailsOut)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Knob>> knobOffsets;
+    knobOffsets.reserve(knobs.size());
+    for(const auto& knob : knobs)
+    {
+        knobOffsets.push_back(hipdnn_flatbuffers_sdk::data_objects::Knob::Pack(builder, &knob));
+    }
+    const auto knobVector = builder.CreateVector(knobOffsets);
+    const auto behaviorNoteVector = builder.CreateVector(behaviorNotes);
+    builder.Finish(hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
+        builder, engineId, knobVector, behaviorNoteVector));
+
+    auto detachedBuffer = std::make_unique<flatbuffers::DetachedBuffer>(builder.Release());
+    detailsOut.ptr = detachedBuffer->data();
+    detailsOut.size = detachedBuffer->size();
+    handle.storeEngineDetailsDetachedBuffer(detailsOut.ptr, std::move(detachedBuffer));
+}
+
+bool hasNoStrayRaggedOffsetMultiplier(
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
+{
+    return std::all_of(tensorMap.begin(), tensorMap.end(), [](const auto& entry) {
+        const auto* tensor = entry.second;
+        return tensor->ragged_offset_tensor_uid().has_value()
+               || tensor->ragged_offset_multiplier() == 1;
+    });
 }
 
 } // namespace hip_kernel_provider::core::utils

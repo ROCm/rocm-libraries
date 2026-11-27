@@ -150,8 +150,8 @@ def ctest_ready(build_root: Path, config: str) -> bool:
 
 # Native C++ test binaries that a pytest file drives through an env var. With a
 # configured build each one is resolved from CTest, so its pytest cases run
-# instead of skipping: (env var, CTest name, label). The installed rocke_pytest
-# CTest entry (platform/CMakeLists.txt) sets the same variables to the installed
+# instead of skipping: (env var, CTest name, label). The installed rocke_pytest_*
+# CTest entries (platform/CMakeLists.txt) set the same variables to the installed
 # binaries; add a new pair in both places.
 _ARCH_DOMAIN_COMPLETE_ENV = "ROCKE_RUN_ALL_ARCH_DOMAIN_COMPLETE"
 
@@ -168,6 +168,21 @@ NATIVE_PARITY_TESTS = (
         "ROCKE_UNSIGNED_INT_OPS_CLI",
         "rocke_unsigned_int_ops",
         "native unsigned integer op C API parity",
+    ),
+    (
+        "ROCKE_INTEXPR_CLI",
+        "rocke_intexpr",
+        "native integer-expression evaluator parity",
+    ),
+    (
+        "ROCKE_PARAM_FACTS_CLI",
+        "rocke_param_facts",
+        "native parameter-fact print, verify and canonicalize parity",
+    ),
+    (
+        "ROCKE_GPU_CHECKED_VALUE_CLI",
+        "rocke_gpu_checked_value",
+        "native GPU check builder and range marker verifier parity",
     ),
     (
         "ROCKE_ARCH_TARGET_TEST_EXE",

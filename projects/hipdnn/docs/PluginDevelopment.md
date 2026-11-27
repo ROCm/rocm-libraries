@@ -15,6 +15,7 @@
     - [Plugin SDK Knob Utilities](#plugin-sdk-knob-utilities)
     - [Registering Knobs with the Plugin SDK](#registering-knobs-with-the-plugin-sdk)
     - [Accessing Knob Settings in Your Plugin](#accessing-knob-settings-in-your-plugin)
+  - [Reporting Numerical Notes](#reporting-numerical-notes)
   - [Saving Execution Plans from Ingestor Engines](#saving-execution-plans-from-ingestor-engines)
 - [Plugin Architecture](#plugin-architecture)
 - [Plugin Loading](#plugin-loading)
@@ -198,7 +199,7 @@ The **EngineManager** ([`EngineManager.hpp`](../plugin_sdk/include/hipdnn_plugin
 For **Engine Implementations** ([`IEngine.hpp`](../plugin_sdk/include/hipdnn_plugin_sdk/interfaces/IEngine.hpp)):
 - Each engine must have a unique inter-plugin `int64_t` identifier
 - Implement `isApplicable()` to report graph support
-- Implement `getDetails()` to return engine metadata and knobs
+- Implement `getDetails()` to return engine metadata and knobs, including numerical notes (see [Reporting Numerical Notes](#reporting-numerical-notes): an explicit empty list claims determinism and must not go through `EngineDetailsT::Pack`; an absent field reads as `NONDETERMINISTIC`)
 - Delegate plan building to `IPlanBuilder` implementations
 
 For **Plan Builder Implementations** ([`IPlanBuilder.hpp`](../plugin_sdk/include/hipdnn_plugin_sdk/interfaces/IPlanBuilder.hpp)):
@@ -414,6 +415,10 @@ public:
 - `global.benchmarking`: Enable benchmarking for kernel selection
 - `global.workspace_size_limit`: Limit workspace memory (when applicable)
 
+#### Engine-config workspace contract
+
+The engine-config workspace query (`getMaxWorkspaceSize` in `IEngine`, `hipdnnEnginePluginGetWorkspaceSize` in the C API) **must** return at least the workspace of any plan the engine finalizes from that config. The frontend filters by this value before it finalizes a plan (`deselect_workspace_greater_than()`), so a smaller value lets a plan through. When a workspace limit is set, the frontend rejects a plan its call finalizes over the limit; otherwise it rejects nothing and logs a WARN when WARN logging is enabled. The frontend also sizes its estimate from this value.
+
 #### Implementing `global.benchmarking`
 
 The generic kernel ingestor engine (`hipdnn_plugin_sdk::ingestor`) implements the global benchmarking knob: setting `global.benchmarking=1` makes it build one candidate plan per catalog entry left after the knob filter and `global.workspace_size_limit` at plan build, time each on the device on the first `execute()`, and memoize the ranking per (graph content, device). The ranking survives the plan that measured it, and persists across processes when disk caching is enabled; a record is served only when it covers every kernel applicable to the graph, so a run whose filters remove a kernel benchmarks again each time. Per-field knobs plus `add_engine_sweep()` remain the way to sweep one metadata dimension and reach every kernel a declared field distinguishes; the two mechanisms are complementary. On a cold benchmarked build a kernel's preparation cost is paid once per candidate, and preparation errors surface at plan build; [Environment Configuration](./Environment.md#hipdnn_force_benchmarking) covers when a benchmarked record skips this. A provider adopting the ingestor needs no benchmarking code of its own: carry one `hipdnn_plugin_sdk::ingestor::IngestorSettings ingestorSettings` member on its `TSettings` type and a handle exposing `hipStream_t getStream() const`, and `GenericPlanBuilder` handles advertisement, knob reading, the `HIPDNN_FORCE_BENCHMARKING` override, and the composite plan.
@@ -434,6 +439,15 @@ When a knob is no longer needed, mark it as deprecated rather than removing it. 
 
 3. **Remove only during major version updates** to maintain backward compatibility.
 
+### Reporting Numerical Notes
+
+An engine reports numerical notes through the `numerical_notes` list of its `EngineDetails` (values from `<hipdnn_plugin_sdk/NumericalNote.h>`, see [RFC 0025](./rfcs/0025_NumericalNotes.md)). A plugin that does not set the field is reported `HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC`, so deterministic selection skips its engines. A UED declares notes by the ten lowercase cuDNN names; see [RFC 0020](./rfcs/0020_UniversalEngineDescriptor.md) §9.
+
+- **Claim determinism with an explicit empty list.** Create the details with `CreateEngineDetails` or `CreateEngineDetailsDirect` and pass an empty vector. An empty list is a claim that no numerical note applies to the engine; make it only when a test proves bitwise-reproducible results across repeated runs of the same plan and inputs. Do not build the details with `EngineDetailsT::Pack`, which drops an empty list and so turns the claim into an absent field.
+- **List the notes that apply.** An engine that is not deterministic lists `HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC` and any precision note that applies.
+- **Omit the field when no test proves determinism.** Every engine defaults to `NONDETERMINISTIC`: results are not guaranteed bitwise reproducible.
+- **Make the claim for the engine ID and the finalized graph.** Notes describe the engine for the finalized graph passed to `GetEngineDetails`, never a plan, a configuration or a knob setting.
+
 ### Saving Execution Plans from Ingestor Engines
 
 A provider that builds plans with the generic kernel ingestor can let users save and load them. The plugin SDK supplies the pieces each dispatch handler needs; the provider supplies the payload format and the three plugin hooks. To support saving:
@@ -449,6 +463,7 @@ A provider that builds plans with the generic kernel ingestor can let users save
 - **Save the chosen plan.** `IPlan::saveablePlan()` gives the single-kernel plan to save. A `BenchmarkPlan` returns one only after its first execute has chosen a kernel.
 - **Export the hooks.** Export the three hooks listed under [Plugin API](#plugin-api). Tell your own plans apart from the plans of your other engines in the save hook, for example by the plan type.
 - **Report the note.** Report `HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION` only for an engine that can save every plan. Every kernel must be a single-launch kernel with a source kind that the save hook accepts. Every dispatch handler must return true from `supportsSaving`.
+- **Report SUPPORTS_GRAPH_CAPTURE only for a capture-safe engine.** Report `HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE` only when `execute` only enqueues work on the handle's stream, with default settings (benchmarking off), including on the first execute of a plan. `execute` must not synchronize the host, wait on an event, allocate or free memory, call a synchronous memcpy, read device memory on the host, or unload a module. For a kernel ingestor engine, declare the `supports_graph_capture` tag in `behavior_notes` of the descriptor.
 - **Keep the note and the hooks in agreement.** The frontend's `to_binary()` includes the plan for every engine that reports the note, and fails if that save fails, with no fallback to the graph only.
 
 ## Plugin Architecture
@@ -612,7 +627,7 @@ hipdnnSetEnginePluginPaths_ext(
 );
 ```
 
-Plugins are loaded according to the selected path schema during hipDNN handle creation. Changing paths after handle creation has no effect until another handle is created.
+Plugins are loaded according to the selected path schema during hipDNN handle creation. While a handle is live, a call succeeds only when its paths equal the full configured path set (compared as written, ignoring order and duplicates) and its loading mode equals the current one; it then changes nothing. Any other call fails with `HIPDNN_STATUS_NOT_SUPPORTED`, including an `HIPDNN_PLUGIN_LOADING_ADDITIVE` call whose paths are all configured already but are not the whole set. Destroy every handle before changing the paths.
 
 ### Querying Loaded Plugins
 

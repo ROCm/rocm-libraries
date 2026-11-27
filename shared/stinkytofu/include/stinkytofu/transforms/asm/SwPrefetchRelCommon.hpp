@@ -25,20 +25,17 @@ inline constexpr int64_t kSwPrefetchSpacingBytes = int64_t(32) * 128;
 /// klength simm5: 31 => 32 instruction cache lines (128 B each).
 inline constexpr int32_t kSwPrefetchPcRelKlengthImm = 31;
 
-/// Size of the `s_wait_xcnt 0` emitted before a SW instruction prefetch, when one is emitted at
-/// all: a fixed 4-byte SOPP (MC_SOPP => 0 literal bytes). Whether to emit it is the caller's
-/// `emitXnackWait` (see below), so byte accounting reads `emitXnackWait ? kSwPrefetchXnackWaitBytes
-/// : 0` rather than this alone.
-inline constexpr int64_t kSwPrefetchXnackWaitBytes = int64_t(4);
-
-/// Whether to emit `s_wait_xcnt 0` before each SW instruction prefetch (relative & absolute) is
-/// decided per run and threaded in as `bool emitXnackWait`. A shader must drain outstanding
-/// address translations before any `s_prefetch_inst[_pc_rel]`, else the prefetch can be caught in
-/// an XNACK replay group -- but only where XNACK replay can happen at all, so the passes take it
-/// from `AsmCapsConfig::enableXnackReplay`. A gfx1250 built for a driver configuration with XNACK
-/// off reports false and pays nothing. Relative emits one wait per (scattered) prefetch; absolute
-/// one per contiguous burst. Insertion is additionally gated on opcode availability
-/// (`getMCIDByUOp(GFX::s_wait_xcnt) != nullptr`), so it is a no-op off gfx1250 either way.
+/// Whether a SW instruction prefetch may emit `s_wait_xcnt 0` is decided per run and threaded in
+/// as `bool emitXnackWait`. A shader must drain outstanding address translations before an
+/// `s_prefetch_inst[_pc_rel]` that could otherwise be caught in an XNACK replay group -- but only
+/// where XNACK replay can happen at all, so the relative passes take it from
+/// `AsmCapsConfig::enableXnackReplay`. A gfx1250 built for a driver configuration with XNACK off
+/// reports false and pays nothing. With it on, relative prefetch uses the hazard pass's
+/// single-group model and emits a wait only when an SMEM replay group reaches the insertion site,
+/// including across a fall-through block boundary. Absolute prefetch emits a scalar address setup
+/// before each burst, which is already a non-memory boundary, so it never emits one. Insertion is
+/// additionally gated on opcode availability (`getMCIDByUOp(GFX::s_wait_xcnt) != nullptr`), so it
+/// is a no-op off gfx1250.
 
 /// Grid boundary P(k) = kSwPrefetchFirstGlobalByte + k * kSwPrefetchSpacingBytes.
 inline constexpr int64_t swPrefetchGridOffset(int64_t k) {
@@ -76,7 +73,7 @@ STINKYTOFU_EXPORT uint32_t absPrefetchEntrySgprBase(const Function& function);
 /// window, and tail-flush rules.
 ///
 /// \p blockGlobalByteOffset  Global layout offset of this BB's first byte.
-/// \p emitXnackWait  Emit `s_wait_xcnt 0` before each prefetch; from
+/// \p emitXnackWait  Allow `s_wait_xcnt 0` before a prefetch whose insertion site needs one; from
 ///                   `AsmCapsConfig::enableXnackReplay`.
 /// \p allowSwPrefetchInsertion  If false, identical walk without IR mutation.
 ///

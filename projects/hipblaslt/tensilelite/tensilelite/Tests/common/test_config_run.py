@@ -54,9 +54,31 @@ import py
 import pytest
 import yaml
 
-from tensilelite import Tensile as tensilelite
+from tensilelite import run
 
-from artifact_helpers import artifact_name_for_config, extract_artifact
+from artifact_helpers import artifact_name_for_config, artifact_timing, extract_artifact
+
+
+def _require_verification(log, verify_reuse: bool, verify_upload: bool) -> None:
+    log.seek(0)
+    output = log.read()
+    print(output, end="")
+    if verify_reuse:
+        counts = re.findall(r"^REFERENCE_REUSE_VERIFIED:(\d+)$", output, re.MULTILINE)
+        assert sum(map(int, counts)) > 0, "No CPU reference reuse verification executed"
+    if verify_upload:
+        for kind in ("input", "batched-pointer"):
+            counts = re.findall(
+                rf"^Verified (\d+) skipped GPU {kind} uploads(?: against the host data)?\.$",
+                output, re.MULTILINE)
+            assert sum(map(int, counts)) > 0, f"No GPU {kind} upload-skip verification executed"
+
+
+def _run_client_process(args: list[str], env: dict[str, str], log) -> None:
+    result = subprocess.run(
+        [sys.executable, "-c", "import sys; from tensilelite.run import main; main(sys.argv[1:])",
+         *args], env=env, stdout=log, stderr=subprocess.STDOUT)
+    assert result.returncode == 0, f"Numerical run failed: {log.name}"
 
 
 def _run(config: str, output_dir: str, artifact_dir: str, tensile_args: list[str]) -> None:
@@ -68,19 +90,35 @@ def _run(config: str, output_dir: str, artifact_dir: str, tensile_args: list[str
     artifact_name = artifact_name_for_config(config)
     tarball = os.path.join(artifact_dir, artifact_name + ".tar.gz")
     assert os.path.isfile(tarball), f"Artifact tarball not found: {tarball}"
-    extract_artifact(tarball, output_dir)
+    with artifact_timing("python_artifact_extract", tensile_args):
+        extract_artifact(tarball, output_dir)
     args = [config, output_dir, "--use-cache", *tensile_args]
     with open(config) as source:
-        schedules = yaml.safe_load(source).get("TestParameters", {}).get("streamk_schedules", [])
+        parameters = yaml.safe_load(source).get("TestParameters", {})
+    schedules = parameters.get("streamk_schedules", [])
+    verify_reuse = parameters.get("verify_reference_reuse", False)
+    verify_upload = parameters.get("verify_upload_skip", False)
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)}
+    if verify_reuse:
+        env["TENSILELITE_VERIFY_REFERENCE_REUSE"] = "1"
+    if verify_upload:
+        env["TENSILELITE_VERIFY_UPLOAD_SKIP"] = "1"
     if not schedules:
-        tensilelite.Tensile(args)
+        if verify_reuse or verify_upload:
+            # A separate process scopes verification to this config and captures the
+            # client's count even when it inherits its stdout file descriptor.
+            with open(os.path.join(output_dir, "reuse-verification.log"), "w+") as log:
+                _run_client_process(args, env, log)
+                _require_verification(log, verify_reuse, verify_upload)
+        else:
+            run.main(args)
         return
     for index, schedule in enumerate(schedules):
         mode = schedule["reduction"]
         assert mode in ("tree", "parallel", "whole"), mode
-        env = {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path), "TENSILE_DB": "0x200000",
-               "TENSILE_PERSISTENT_FIXED_GRID": str(schedule["grid"]),
-               "TENSILE_PERSISTENT_DYNAMIC_GRID": "6" if mode == "parallel" else "0"}
+        schedule_env = {**env, "TENSILE_DB": "0x200000",
+                        "TENSILE_PERSISTENT_FIXED_GRID": str(schedule["grid"]),
+                        "TENSILE_PERSISTENT_DYNAMIC_GRID": "6" if mode == "parallel" else "0"}
         parameters = {"ParallelGpuExecution": 1, "ForceRedoBenchmarkProblems": True,
                       "ExitOnFails": 1, **schedule.get("parameters", {})}
         overrides = [f"{key}={value!r}" for key, value in parameters.items()]
@@ -88,10 +126,9 @@ def _run(config: str, output_dir: str, artifact_dir: str, tensile_args: list[str
         log_path = os.path.join(output_dir, f"streamk-schedule-{index}.log")
         # Each client run uses a fresh process and the same compiled artifact.
         with open(log_path, "w+") as log:
-            result = subprocess.run(
-                [sys.executable, "-c", "import sys; from tensilelite.Tensile import Tensile; "
-                 "Tensile(sys.argv[1:])", *run_args], env=env, stdout=log, stderr=subprocess.STDOUT)
-            assert result.returncode == 0, f"Numerical run failed: {log_path}"
+            _run_client_process(run_args, schedule_env, log)
+            if verify_reuse or verify_upload:
+                _require_verification(log, verify_reuse, verify_upload)
             log.seek(0)
             records = {}
             for block in log.read().split("TensileLite::"):

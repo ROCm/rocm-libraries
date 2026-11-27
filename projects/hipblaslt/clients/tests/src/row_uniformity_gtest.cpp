@@ -4,12 +4,13 @@
 // Numeric tests for the uniform summation order mode
 // (HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT).
 //
-// Every case builds a column-major fp32 NN GEMM whose A holds one identical
-// K-vector in every row, so D is mathematically row-invariant and any bitwise
-// difference between two rows of D is purely an artifact of the reduction order
-// the kernel used. Rows are compared bit for bit, never with a tolerance, and a
-// case only claims the guarantee for an algorithm shown, in that same run, to
-// produce differing rows with the mode off; otherwise it skips with a
+// Every case builds a column-major GEMM (fp32 NN unless the problem says
+// otherwise) whose A holds one identical K-vector in every row, so D is
+// mathematically row-invariant and any bitwise difference between two rows of
+// D is purely an artifact of the reduction order the kernel used. Rows are
+// compared bit for bit, never with a tolerance, and a case only claims the
+// guarantee for an algorithm shown, in that same run, to produce differing rows
+// with the mode off; otherwise it skips with a
 // diagnostic rather than reporting a green result it did not earn.
 //
 // The suite name carries the "pre_checkin" token on purpose:
@@ -19,6 +20,7 @@
 
 #include <gtest/gtest.h>
 #include <hip/hip_bfloat16.h>
+#include <hip/hip_fp8.h>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/hipblaslt.h>
@@ -37,7 +39,7 @@
 #include <origami/hardware.hpp>
 #include <origami/streamk.hpp>
 
-#include "../../../library/src/amd_detail/rocblaslt/src/include/rocblaslt_arch_revision.hpp"
+#include "mx_tile128x4.hpp"
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -53,13 +55,67 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <functional>
+#include <ios>
+#include <iterator>
+#include <map>
 #include <memory>
+#include <ostream>
 #include <random>
 #include <string>
+#include <utility>
 #include <vector>
+
+// The cancelling fill for E4M3 A and B, whose maximum is 448: small values
+// in [2^-6, 2^-3) of either sign, plus one large product at k = 0 and its
+// exact negation at k / 2 in every column of B. The large values are
+// ldexp(1 + i / 8, 8), at most 448, so E4M3 holds them exactly.
+static void fillCancellingE4m3(std::mt19937&       rng,
+                               int64_t             k,
+                               int64_t             n,
+                               std::vector<float>& aVector,
+                               std::vector<float>& hostB)
+{
+    std::uniform_int_distribution<int32_t> exponentOf{-6, -4};
+    std::uniform_real_distribution<float>  mantissaOf{0.0f, 1.0f};
+    std::uniform_int_distribution<int32_t> signOf{0, 1};
+    std::uniform_int_distribution<int32_t> eighthsOf{0, 6};
+
+    std::function<float()> smallValue = [&] {
+        const float magnitude = std::ldexp(1.0f + mantissaOf(rng), exponentOf(rng));
+        return signOf(rng) ? magnitude : -magnitude;
+    };
+    std::function<float()> large = [&] {
+        return std::ldexp(1.0f + static_cast<float>(eighthsOf(rng)) / 8.0f, 8);
+    };
+
+    for(auto& value : aVector)
+        value = smallValue();
+    for(auto& value : hostB)
+        value = smallValue();
+    aVector[0] = aVector[static_cast<size_t>(k / 2)] = large();
+    for(int64_t col = 0; col < n; ++col)
+    {
+        const float value                           = large();
+        hostB[static_cast<size_t>(col * k)]         = value;
+        hostB[static_cast<size_t>(col * k + k / 2)] = -value;
+    }
+}
+
+// Scale bytes of one MXFP8 operand in the pre-swizzled 32-block E8M0 format,
+// padded as clients/common/include/hipblaslt_datatype2string.hpp
+// scaleBufferSize does: K blocks to a multiple of 8, the free extent to a
+// multiple of 32.
+static size_t mxScaleBytes(int64_t k, int64_t freeExtent)
+{
+    const size_t kBlocks = static_cast<size_t>((k + 31) / 32 + 7) / 8 * 8;
+    const size_t padded  = static_cast<size_t>((freeExtent + 31) / 32) * 32;
+    return kBlocks * padded;
+}
 
 namespace
 {
@@ -171,15 +227,6 @@ namespace
             // that never appear in the library filename.
             const std::string arch      = gpuArchName();
             const std::string processor = arch.substr(0, arch.find(':'));
-            // The subtree the runtime loads, which for an A0 part reporting
-            // gfx1250 is not the one named for processor.
-            hipDeviceProp_t props{};
-            int             device = 0;
-            const int       rev    = hipGetDevice(&device) == hipSuccess
-                                    && hipGetDeviceProperties(&props, device) == hipSuccess
-                                ? props.asicRevision
-                                : -1;
-            const std::string libArch = rocblaslt_revisioned_arch_name(processor, rev);
 
             std::string tried;
             for(const auto& root : libraryRootCandidates())
@@ -187,7 +234,7 @@ namespace
                 // Always the logical single-extension name: the loader resolves
                 // the shipped ".dat.zlib" by appending the suffix itself.
                 const std::filesystem::path logical
-                    = root / libArch / ("TensileLibrary_lazy_" + processor + ".dat");
+                    = root / processor / ("TensileLibrary_lazy_" + processor + ".dat");
                 tried += (tried.empty() ? "" : ", ") + logical.string();
 
                 if(!std::filesystem::exists(logical)
@@ -217,6 +264,14 @@ namespace
         static std::shared_ptr<TensileLite::Hardware> hardware
             = TensileLite::hip::GetCurrentDevice();
         return hardware;
+    }
+
+    // The CU count library logic is selected by, or 0 when the device cannot
+    // be described.
+    int currentCUCount()
+    {
+        const auto* gpu = dynamic_cast<const TensileLite::AMDGPU*>(currentHardware().get());
+        return gpu != nullptr ? gpu->computeUnitCount : 0;
     }
 
     // The solution record behind an enumerated algorithm, or null with a
@@ -278,6 +333,18 @@ namespace
         return sign * std::ldexp(mantissa, exponent);
     }
 
+    // The small values of the cancelling fill used with a 16-bit D, in
+    // [2^-4, 2^3) and of either sign.
+    float smallSample(std::mt19937& rng)
+    {
+        std::uniform_int_distribution<int>    exponentOf{-4, 2};
+        std::uniform_real_distribution<float> mantissaOf{0.0f, 1.0f};
+        std::uniform_int_distribution<int>    signOf{0, 1};
+
+        const float magnitude = std::ldexp(1.0f + mantissaOf(rng), exponentOf(rng));
+        return signOf(rng) ? magnitude : -magnitude;
+    }
+
     // The A/B storage type is a parameter because the only shipped shape known
     // to reach the newly admitted StreamK split regime through a public API
     // attribute is a bf16-in / f32-out entry; every pre-existing case stays on
@@ -294,11 +361,26 @@ namespace
         // vector of length m. Needed to select the gfx942 GridBased Bias exact
         // size that reaches the newly admitted Stream-K split (report 09).
         bool useBias = false;
+        // HIPBLAS_OP_T stores A as k x m (lda = k), the layout the gfx950
+        // skinny custom kernels take.
+        hipblasOperation_t transA = HIPBLAS_OP_N;
+        // The type of C and D. The skinny bf16 and f16 custom kernels write D
+        // in A's type. HIP_R_8F_E4M3 for abType runs an MXFP8 GEMM with
+        // pre-swizzled E8M0 block scales and takes a 16-bit dType.
+        hipDataType dType = HIP_R_32F;
     };
 
     size_t elementSizeOf(hipDataType type)
     {
-        return type == HIP_R_32F ? sizeof(float) : sizeof(uint16_t);
+        switch(type)
+        {
+        case HIP_R_32F:
+            return sizeof(float);
+        case HIP_R_8F_E4M3:
+            return sizeof(uint8_t);
+        default:
+            return sizeof(uint16_t);
+        }
     }
 
     // Rounds values in place to what the device will actually hold, then
@@ -306,8 +388,9 @@ namespace
     // reference below must see the same numbers the kernel does, or its
     // order-sensitivity self-check describes a different problem.
     //
-    // HIP_R_16BF uses hip_bfloat16. hipBLASLt leaves mxDataGenerator off on
-    // Windows, so this harness cannot depend on DGen headers.
+    // HIP_R_16BF uses hip_bfloat16, HIP_R_16F _Float16 and HIP_R_8F_E4M3 the OCP
+    // __hip_fp8_e4m3. hipBLASLt leaves mxDataGenerator off on Windows, so this
+    // harness cannot depend on DGen headers.
     std::vector<uint8_t> encodeOperand(std::vector<float>& values, hipDataType type)
     {
         std::vector<uint8_t> bytes(values.size() * elementSizeOf(type));
@@ -317,9 +400,27 @@ namespace
             return bytes;
         }
 
+        if(type == HIP_R_8F_E4M3)
+        {
+            for(size_t idx = 0; idx < values.size(); ++idx)
+            {
+                const __hip_fp8_e4m3 packed{values[idx]};
+                bytes[idx]  = packed.__x;
+                values[idx] = static_cast<float>(packed);
+            }
+            return bytes;
+        }
+
         auto* out = reinterpret_cast<uint16_t*>(bytes.data());
         for(size_t idx = 0; idx < values.size(); ++idx)
         {
+            if(type == HIP_R_16F)
+            {
+                const _Float16 half = static_cast<_Float16>(values[idx]);
+                std::memcpy(&out[idx], &half, sizeof(half));
+                values[idx] = static_cast<float>(half);
+                continue;
+            }
             const hip_bfloat16 packed{values[idx]};
             out[idx]     = packed.data;
             values[idx]  = static_cast<float>(packed);
@@ -348,6 +449,8 @@ namespace
             if(m_layoutA)
                 hipblasLtMatrixLayoutDestroy(m_layoutA);
             static_cast<void>(hipFree(m_deviceWorkspace));
+            static_cast<void>(hipFree(m_deviceScaleB));
+            static_cast<void>(hipFree(m_deviceScaleA));
             static_cast<void>(hipFree(m_deviceBias));
             static_cast<void>(hipFree(m_deviceD));
             static_cast<void>(hipFree(m_deviceB));
@@ -378,9 +481,10 @@ namespace
             }
 
             const size_t abBytes = elementSizeOf(m_problem.abType);
+            const size_t dBytes  = elementSizeOf(m_problem.dType);
             if(hipMalloc(&m_deviceA, static_cast<size_t>(m * k) * abBytes) != hipSuccess
                || hipMalloc(&m_deviceB, static_cast<size_t>(k * n) * abBytes) != hipSuccess
-               || hipMalloc(&m_deviceD, static_cast<size_t>(m * n) * sizeof(float)) != hipSuccess
+               || hipMalloc(&m_deviceD, static_cast<size_t>(m * n) * dBytes) != hipSuccess
                || hipMalloc(&m_deviceWorkspace, kWorkspaceBytes) != hipSuccess)
             {
                 skipReason = "hipMalloc failed: not enough device memory for " + std::to_string(m)
@@ -399,13 +503,15 @@ namespace
             if(!uploadOperands(skipReason))
                 return false;
 
-            m_hostD.resize(static_cast<size_t>(m * n));
+            m_hostD.resize(static_cast<size_t>(m * n) * dBytes);
 
-            if(hipblasLtMatrixLayoutCreate(&m_layoutA, m_problem.abType, m, k, m)
+            const bool transA = m_problem.transA == HIPBLAS_OP_T;
+            if(hipblasLtMatrixLayoutCreate(
+                   &m_layoutA, m_problem.abType, transA ? k : m, transA ? m : k, transA ? k : m)
                    != HIPBLAS_STATUS_SUCCESS
                || hipblasLtMatrixLayoutCreate(&m_layoutB, m_problem.abType, k, n, k)
                       != HIPBLAS_STATUS_SUCCESS
-               || hipblasLtMatrixLayoutCreate(&m_layoutD, HIP_R_32F, m, n, m)
+               || hipblasLtMatrixLayoutCreate(&m_layoutD, m_problem.dType, m, n, m)
                       != HIPBLAS_STATUS_SUCCESS
                || hipblasLtMatmulDescCreate(&m_desc, HIPBLAS_COMPUTE_32F, HIP_R_32F)
                       != HIPBLAS_STATUS_SUCCESS)
@@ -414,9 +520,10 @@ namespace
                 return false;
             }
 
+            const int32_t opA = m_problem.transA;
             const int32_t opN = HIPBLAS_OP_N;
             hipblasLtMatmulDescSetAttribute(
-                m_desc, HIPBLASLT_MATMUL_DESC_TRANSA, &opN, sizeof(opN));
+                m_desc, HIPBLASLT_MATMUL_DESC_TRANSA, &opA, sizeof(opA));
             hipblasLtMatmulDescSetAttribute(
                 m_desc, HIPBLASLT_MATMUL_DESC_TRANSB, &opN, sizeof(opN));
 
@@ -434,6 +541,9 @@ namespace
                 ADD_FAILURE() << "Setting SM_COUNT_TARGET must succeed";
                 return false;
             }
+
+            if(m_problem.abType == HIP_R_8F_E4M3 && !setUpMxScales(skipReason))
+                return false;
 
             if(m_problem.useBias)
             {
@@ -477,18 +587,39 @@ namespace
         }
 
         // The fill only means something if fp32 summation of this data actually
-        // depends on the order; otherwise every assertion below is vacuous.
+        // depends on the order, as D holds it; otherwise every assertion below is
+        // vacuous.
         bool referenceOrderMatters() const
         {
+            auto product = [&](int64_t idx) {
+                return m_aVector[static_cast<size_t>(idx)] * m_hostB[static_cast<size_t>(idx)];
+            };
+
             float forward = 0.0f;
             for(int64_t idx = 0; idx < m_problem.k; ++idx)
-                forward += m_aVector[static_cast<size_t>(idx)] * m_hostB[static_cast<size_t>(idx)];
+                forward += product(idx);
 
             float reverse = 0.0f;
             for(int64_t idx = m_problem.k - 1; idx >= 0; --idx)
-                reverse += m_aVector[static_cast<size_t>(idx)] * m_hostB[static_cast<size_t>(idx)];
+                reverse += product(idx);
 
-            return std::memcmp(&forward, &reverse, sizeof(float)) != 0;
+            if(m_problem.dType == HIP_R_32F)
+                return std::memcmp(&forward, &reverse, sizeof(float)) != 0;
+
+            // A 16-bit D must still tell some orders apart once rounded to it:
+            // these two, or K split over 64 lanes, as the skinny kernels split it.
+            float strided = 0.0f;
+            for(int64_t lane = 0; lane < 64; ++lane)
+            {
+                float part = 0.0f;
+                for(int64_t idx = lane; idx < m_problem.k; idx += 64)
+                    part += product(idx);
+                strided += part;
+            }
+            std::vector<float>         sums{forward, reverse, strided};
+            const std::vector<uint8_t> held = encodeOperand(sums, m_problem.dType);
+            return std::memcmp(held.data(), held.data() + 2, 2) != 0
+                   || std::memcmp(held.data(), held.data() + 4, 2) != 0;
         }
 
         std::vector<hipblasLtMatmulHeuristicResult_t> candidateAlgos(
@@ -527,12 +658,12 @@ namespace
             std::vector<hipblasLtMatmulHeuristicResult_t> enumerated;
             hipblaslt_ext::getAllAlgos(m_handle,
                                        hipblaslt_ext::GemmType::HIPBLASLT_GEMM,
-                                       HIPBLAS_OP_N,
+                                       m_problem.transA,
                                        HIPBLAS_OP_N,
                                        m_problem.abType,
                                        m_problem.abType,
-                                       HIP_R_32F,
-                                       HIP_R_32F,
+                                       m_problem.dType,
+                                       m_problem.dType,
                                        HIPBLAS_COMPUTE_32F,
                                        enumerated);
             enumeratedCount = static_cast<int>(enumerated.size());
@@ -570,8 +701,7 @@ namespace
             if(setStatus != HIPBLAS_STATUS_SUCCESS)
                 return setStatus;
 
-            static_cast<void>(
-                hipMemsetAsync(m_deviceD, 0, m_hostD.size() * sizeof(float), m_stream));
+            static_cast<void>(hipMemsetAsync(m_deviceD, 0, m_hostD.size(), m_stream));
 
             const float           alpha = 1.0f;
             const float           beta  = 0.0f;
@@ -599,8 +729,7 @@ namespace
             if(hipStreamSynchronize(m_stream) != hipSuccess)
                 return HIPBLAS_STATUS_EXECUTION_FAILED;
 
-            if(hipMemcpy(
-                   m_hostD.data(), m_deviceD, m_hostD.size() * sizeof(float), hipMemcpyDeviceToHost)
+            if(hipMemcpy(m_hostD.data(), m_deviceD, m_hostD.size(), hipMemcpyDeviceToHost)
                != hipSuccess)
                 return HIPBLAS_STATUS_EXECUTION_FAILED;
 
@@ -615,22 +744,17 @@ namespace
         // column at memcmp speed.
         int64_t firstNonUniformRowOfLastRun() const
         {
-            const int64_t m = m_problem.m;
+            const int64_t m    = m_problem.m;
+            const size_t  size = elementSizeOf(m_problem.dType);
             for(int64_t col = 0; col < m_problem.n; ++col)
             {
-                const float* base = m_hostD.data() + col * m;
-                if(std::memcmp(base, base + 1, static_cast<size_t>(m - 1) * sizeof(float)) == 0)
+                const uint8_t* base = m_hostD.data() + static_cast<size_t>(col * m) * size;
+                if(std::memcmp(base, base + size, static_cast<size_t>(m - 1) * size) == 0)
                     continue;
 
-                uint32_t row0 = 0;
-                std::memcpy(&row0, base, sizeof(row0));
                 for(int64_t row = 1; row < m; ++row)
-                {
-                    uint32_t bits = 0;
-                    std::memcpy(&bits, base + row, sizeof(bits));
-                    if(bits != row0)
+                    if(std::memcmp(base + static_cast<size_t>(row) * size, base, size) != 0)
                         return row;
-                }
             }
             return -1;
         }
@@ -690,6 +814,50 @@ namespace
             }
         }
 
+        // Constant scales keep every row of A identical and make the swizzle
+        // layout irrelevant: each byte is 127, the E8M0 encoding of 1.0.
+        bool setUpMxScales(std::string& skipReason)
+        {
+            const size_t scaleABytes = mxScaleBytes(m_problem.k, m_problem.m);
+            const size_t scaleBBytes = mxScaleBytes(m_problem.k, m_problem.n);
+            if(hipMalloc(&m_deviceScaleA, scaleABytes) != hipSuccess
+               || hipMalloc(&m_deviceScaleB, scaleBBytes) != hipSuccess)
+            {
+                skipReason = "hipMalloc failed for the MX block scales";
+                return false;
+            }
+            if(hipMemset(m_deviceScaleA, 127, scaleABytes) != hipSuccess
+               || hipMemset(m_deviceScaleB, 127, scaleBBytes) != hipSuccess)
+            {
+                skipReason = "hipMemset of the MX block scales failed";
+                return false;
+            }
+
+            const hipblasLtMatmulMatrixScale_t mode
+                = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT;
+            if(hipblasLtMatmulDescSetAttribute(
+                   m_desc, HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, &mode, sizeof(mode))
+                   != HIPBLAS_STATUS_SUCCESS
+               || hipblasLtMatmulDescSetAttribute(
+                      m_desc, HIPBLASLT_MATMUL_DESC_B_SCALE_MODE, &mode, sizeof(mode))
+                      != HIPBLAS_STATUS_SUCCESS
+               || hipblasLtMatmulDescSetAttribute(m_desc,
+                                                  HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER,
+                                                  &m_deviceScaleA,
+                                                  sizeof(m_deviceScaleA))
+                      != HIPBLAS_STATUS_SUCCESS
+               || hipblasLtMatmulDescSetAttribute(m_desc,
+                                                  HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER,
+                                                  &m_deviceScaleB,
+                                                  sizeof(m_deviceScaleB))
+                      != HIPBLAS_STATUS_SUCCESS)
+            {
+                ADD_FAILURE() << "Setting MX block scale attributes must succeed";
+                return false;
+            }
+            return true;
+        }
+
         bool uploadOperands(std::string& skipReason)
         {
             const int64_t m = m_problem.m;
@@ -699,12 +867,38 @@ namespace
             std::mt19937 rng(0x52755f31u ^ static_cast<uint32_t>(m * 31 + n * 17 + k));
 
             m_aVector.resize(static_cast<size_t>(k));
-            for(auto& value : m_aVector)
-                value = wideRangeSample(rng);
-
             m_hostB.resize(static_cast<size_t>(k * n));
-            for(auto& value : m_hostB)
-                value = wideRangeSample(rng);
+            if(m_problem.abType == HIP_R_8F_E4M3)
+                fillCancellingE4m3(rng, k, n, m_aVector, m_hostB);
+            else if(m_problem.dType == HIP_R_32F)
+            {
+                for(auto& value : m_aVector)
+                    value = wideRangeSample(rng);
+                for(auto& value : m_hostB)
+                    value = wideRangeSample(rng);
+            }
+            else
+            {
+                // Sums of the wide-range fill differ between orders only in bits
+                // a 16-bit D rounds away. Instead, each column pairs one large
+                // product, at k = 0, with its exact negation at k / 2, among
+                // small ones: what the large product absorbs of the small ones
+                // while it is pending depends on the order, by far more than D's
+                // precision.
+                for(auto& value : m_aVector)
+                    value = smallSample(rng);
+                for(auto& value : m_hostB)
+                    value = smallSample(rng);
+                std::uniform_real_distribution<float> mantissaOf{1.0f, 2.0f};
+                m_aVector[0] = m_aVector[static_cast<size_t>(k / 2)]
+                    = std::ldexp(mantissaOf(rng), 12);
+                for(int64_t col = 0; col < n; ++col)
+                {
+                    const float large                             = std::ldexp(mantissaOf(rng), 12);
+                    m_hostB[static_cast<size_t>(col * k)]         = large;
+                    m_hostB[static_cast<size_t>(col * k + k / 2)] = -large;
+                }
+            }
 
             const std::vector<uint8_t> bBytes = encodeOperand(m_hostB, m_problem.abType);
             if(hipMemcpy(m_deviceB, bBytes.data(), bBytes.size(), hipMemcpyHostToDevice)
@@ -714,9 +908,28 @@ namespace
                 return false;
             }
 
+            const size_t abBytes = elementSizeOf(m_problem.abType);
+            if(m_problem.transA == HIPBLAS_OP_T)
+            {
+                // Every column of a k x m A is the vector itself. encodeOperand
+                // rounds the reference vector to what the device will hold.
+                const std::vector<uint8_t> aColumn = encodeOperand(m_aVector, m_problem.abType);
+                std::vector<uint8_t>       aBytes(aColumn.size() * static_cast<size_t>(m));
+                for(int64_t col = 0; col < m; ++col)
+                    std::memcpy(aBytes.data() + static_cast<size_t>(col) * aColumn.size(),
+                                aColumn.data(),
+                                aColumn.size());
+                if(hipMemcpy(m_deviceA, aBytes.data(), aBytes.size(), hipMemcpyHostToDevice)
+                   != hipSuccess)
+                {
+                    skipReason = "hipMemcpy of A failed";
+                    return false;
+                }
+                return true;
+            }
+
             // Column k of a column-major A is M copies of a[k], so A goes up one
             // column at a time and never needs an M*K host buffer.
-            const size_t         abBytes = elementSizeOf(m_problem.abType);
             std::vector<float>   column(static_cast<size_t>(m));
             std::vector<uint8_t> aColumn;
             for(int64_t idx = 0; idx < k; ++idx)
@@ -750,10 +963,12 @@ namespace
         void*                   m_deviceB         = nullptr;
         void*                   m_deviceD         = nullptr;
         void*                   m_deviceBias      = nullptr;
+        void*                   m_deviceScaleA    = nullptr;
+        void*                   m_deviceScaleB    = nullptr;
         void*                   m_deviceWorkspace = nullptr;
         std::vector<float>      m_aVector;
         std::vector<float>      m_hostB;
-        std::vector<float>      m_hostD;
+        std::vector<uint8_t>    m_hostD;
     };
 
     // A fixture rather than bare TEST() only so the shared drivers can reach
@@ -976,8 +1191,10 @@ namespace
 
         // Unlike checkRowUniformity, needs no witness with the mode off: the
         // default heuristic picks run once with the mode on and must either be
-        // row-uniform or refused cleanly.
-        void checkDefaultPicksUniform(const Problem& problem)
+        // row-uniform or refused cleanly. With gfx950Pick, the first pick on a
+        // 256-CU gfx950 must be a kernel whose name starts with it; elsewhere a
+        // problem with no pick is skipped.
+        void checkDefaultPicksUniform(const Problem& problem, const char* gfx950Pick = nullptr)
         {
             RowUniformityHarness harness(problem);
             prepare(harness);
@@ -986,7 +1203,27 @@ namespace
 
             int        enumeratedCount = 0;
             const auto candidates = harness.candidateAlgos(enumeratedCount, /*sweepBudget=*/0);
+            // The logic that routes these shapes to the gfx950 skinny kernels
+            // declares CUCount: 256, so other CU counts (MI350P, compute
+            // partitions) keep the Tensile picks. Rows for another CU count in
+            //   asm_full/gfx950/gfx950/Range/gfx950_Cijk_Alik_Bljk_BBS_BH_UserArgs.yaml
+            //   asm_full/gfx950/gfx950/Range/gfx950_Cijk_Alik_Bljk_HHS_BH_UserArgs.yaml
+            // that route here need expectPick to cover that count too.
+            const bool gfx950 = gpuArchName().rfind("gfx950", 0) == 0;
+            if(gfx950Pick != nullptr && gfx950)
+                ASSERT_NE(currentCUCount(), 0)
+                    << "TensileLite cannot describe this gfx950, so the test cannot tell whether "
+                       "the skinny-kernel logic applies";
+            const bool expectPick = gfx950Pick != nullptr && gfx950 && currentCUCount() == 256;
+            if(candidates.empty() && gfx950Pick != nullptr && !expectPick)
+                GTEST_SKIP() << "No heuristic pick for this problem on " << gpuArchName();
             ASSERT_FALSE(candidates.empty()) << "No heuristic pick for this problem";
+            if(expectPick)
+            {
+                const std::string pick = harness.solutionName(candidates.front());
+                ASSERT_EQ(pick.rfind(gfx950Pick, 0), 0u)
+                    << "The default pick is " << pick << ", not a " << gfx950Pick << " kernel";
+            }
 
             for(const auto& candidate : candidates)
             {
@@ -1003,15 +1240,953 @@ namespace
         }
     };
 
-    // Uniform summation order keeps a mapping-1 StaggerU on Hybrid StreamK
-    // kernels (perTileExtraIters). A CU budget makes the heuristic pick the
-    // dynamic work-queue sub-mode; with tiles > grid one workgroup runs several
-    // whole tiles, and declareStaggerParms masks sgpr StaggerU to its low 8 bits
-    // on the first tile, so later tiles stagger by mapping 0 (M tile index).
+    // A CU budget makes the heuristic pick the dynamic work-queue sub-mode of
+    // Hybrid StreamK (perTileExtraIters); with tiles > grid one workgroup runs
+    // several whole tiles, and every one of them must reduce in the same
+    // order. Uniform summation order turns StaggerU off; a stagger that reached
+    // only the later tiles a workgroup picks up would still show up here, as
+    // rows of one tile reducing differently from rows of another.
     // gfx950: MT96x32x128 Hybrid, 768 tiles on a 512-workgroup grid.
-    TEST_F(RowUniformity_pre_checkin, HybridDynamicStagger_1536x1536x2048_SmCount160)
+    TEST_F(RowUniformity_pre_checkin, HybridDynamicMultiTile_1536x1536x2048_SmCount160)
     {
         checkDefaultPicksUniform({1536, 1536, 2048, HIP_R_32F, 160});
+    }
+
+    // The gfx950 skinny TN custom kernels declare uniformSummationOrder in their
+    // custom.config. Library logic routes these shapes to them on 256-CU gfx950,
+    // so there the default pick must be one of them: when uniform summation
+    // order refused them (#14010), nothing failed, they just stopped being
+    // picked. Other devices check that their default picks keep rows uniform.
+    // A is TN and D takes A's type, as the kernels require.
+    TEST_F(RowUniformity_pre_checkin, SkinnyTnBf16_4096x1x4096)
+    {
+        checkDefaultPicksUniform({4096, 1, 4096, HIP_R_16BF, 0, false, HIPBLAS_OP_T, HIP_R_16BF},
+                                 "wvSplitK_vllm_bf16_tn_n1_");
+    }
+
+    // m % 3 != 0: the last YTILE = 3 row tile shifts down over rows the
+    // previous one wrote.
+    TEST_F(RowUniformity_pre_checkin, SkinnyTnF16Tail_8191x5x1024)
+    {
+        checkDefaultPicksUniform({8191, 5, 1024, HIP_R_16F, 0, false, HIPBLAS_OP_T, HIP_R_16F},
+                                 "wvSplitK_vllm_f16_tn_n5_y3");
+    }
+
+    // n * K past the 80K-element LDS stage: K is staged in chunks.
+    TEST_F(RowUniformity_pre_checkin, SkinnyTnBf16LdsChunked_1024x3x28672)
+    {
+        checkDefaultPicksUniform({1024, 3, 28672, HIP_R_16BF, 0, false, HIPBLAS_OP_T, HIP_R_16BF},
+                                 "wvSplitK_vllm_bf16_tn_n3_");
+    }
+
+    // The rocBLAS kernel that reads n from its arguments.
+    TEST_F(RowUniformity_pre_checkin, SkinnyTnBf16Rocblas_4096x3x256)
+    {
+        checkDefaultPicksUniform({4096, 3, 256, HIP_R_16BF, 0, false, HIPBLAS_OP_T, HIP_R_16BF},
+                                 "wvSpltK_bf16_tn_m4");
+    }
+
+    // OCP FP6 code of halves / 2. Every |halves| <= 8 is exact in both E2M3 and E3M2.
+    uint8_t fp6Code(int halves, bool e3m2)
+    {
+        const int manBits = e3m2 ? 2 : 3;
+        const int bias    = e3m2 ? 3 : 1;
+        for(int code = 0; code < 32; ++code)
+        {
+            const int    exp = code >> manBits;
+            const int    man = code & ((1 << manBits) - 1);
+            const double value
+                = std::ldexp(exp ? (1 << manBits) + man : man, std::max(exp, 1) - bias - manBits);
+            if(value * 2 == std::abs(halves))
+                return static_cast<uint8_t>(code | (halves < 0 ? 0x20 : 0));
+        }
+        ADD_FAILURE() << halves << " / 2 has no FP6 code";
+        return 0;
+    }
+
+    // 6-bit LSB-first packing of one K-contiguous row.
+    void packFp6Row(uint8_t* dst, const uint8_t* codes, size_t k)
+    {
+        std::memset(dst, 0, k * 6 / 8);
+        for(size_t idx = 0; idx < k; ++idx)
+        {
+            const size_t bit = 6 * idx;
+            dst[bit / 8] |= static_cast<uint8_t>(codes[idx] << (bit % 8));
+            if(bit % 8 > 2)
+                dst[bit / 8 + 1] |= static_cast<uint8_t>(codes[idx] >> (8 - bit % 8));
+        }
+    }
+
+    struct MXFp6Case
+    {
+        const char* name;
+        hipDataType type;
+        int64_t     k;
+        const char* gfx950Pick;
+        bool        tiledB;
+        int64_t     m = 4096;
+    };
+
+    // gtest's default printer dumps the raw bytes, padding included, which valgrind flags.
+    void PrintTo(const MXFp6Case& c, std::ostream* os)
+    {
+        *os << "{name=" << c.name << " type=" << c.type << " k=" << c.k
+            << " gfx950Pick=" << c.gfx950Pick << " tiledB=" << c.tiledB << " m=" << c.m << "}";
+    }
+
+    // The gfx950 chips the MXFP6 128x4 kernels are registered for: MI350X and MI355X.
+    bool onMXFp6RegisteredChip()
+    {
+        int device = 0;
+        int chipId = 0;
+        return gpuArchName().rfind("gfx950", 0) == 0 && hipGetDevice(&device) == hipSuccess
+               && hipDeviceGetAttribute(&chipId, hipDeviceAttributePciChipId, device) == hipSuccess
+               && (chipId == 0x75a0 || chipId == 0x75a3);
+    }
+
+    constexpr const char* kMXFp6ChipSkip
+        = "The MXFP6 128x4 kernels are registered for gfx950 chips 0x75a0 and 0x75a3 only";
+
+    class RowUniformityMXFp6_smoke : public ::testing::TestWithParam<MXFp6Case>
+    {
+    };
+
+    // Round to nearest even of x, exact in double and in the normal bf16 range.
+    uint16_t bf16BitsRne(double x)
+    {
+        if(x == 0)
+            return std::signbit(x) ? 0x8000 : 0;
+        int          exp     = 0;
+        const double scaled  = std::frexp(std::abs(x), &exp) * 256;
+        double       rounded = std::floor(scaled);
+        if(scaled - rounded > 0.5 || (scaled - rounded == 0.5 && std::fmod(rounded, 2) != 0))
+            rounded += 1;
+        const float value = static_cast<float>(std::copysign(std::ldexp(rounded, exp - 8), x));
+        uint32_t    bits  = 0;
+        std::memcpy(&bits, &value, sizeof(bits));
+        return static_cast<uint16_t>(bits >> 16);
+    }
+
+    // The gfx950 MXFP6 custom kernels on the 128x4 scale layout, with A, and B when
+    // tiledB is set, in the COL256_R128 data layout, declare uniformSummationOrder. They
+    // need beta == 0, which the C heuristic never assumes, so the case goes through the
+    // extension API. Every row of the transposed A
+    // holds the same values, but each (row, K block) picks one of two encodings, v at
+    // scale s or v / 2 at scale s + 1, so D is row-invariant only if each row's data and
+    // scales are read from where the host layouts put them. Blocks 0 and K / 64 carry
+    // large products that cancel; what they absorb of the small ones while pending
+    // depends on the summation order, by more than D's bf16 precision.
+    // A second run on the same data lowers those two blocks' scales into the small
+    // range. Every partial sum is then exact in fp32 in any order, so sampled D must
+    // equal the exact dot product rounded to bf16. The matmul_mx_fp6_tile128x4* entries
+    // of matmul_gtest.yaml check all of D exactly, in the pre_checkin and nightly tiers.
+    TEST_P(RowUniformityMXFp6_smoke, DefaultPickIsExactAndRowUniform)
+    {
+        const MXFp6Case&  c       = GetParam();
+        const bool        e3m2    = c.type == HIP_R_6F_E3M2;
+        const int64_t     m       = c.m;
+        constexpr int64_t n       = 4096;
+        const int64_t     k       = c.k;
+        const int64_t     kBlocks = k / 32;
+        constexpr int64_t large0  = 0;
+        const int64_t     large1  = kBlocks / 2;
+        constexpr int     one     = 127;
+        // One kernel per registered K and B order: the pick must be the one built for them.
+        const std::string kTag = "_" + std::to_string(m) + "x4096x" + std::to_string(k) + "_";
+        auto              isExpectedPick = [&](const std::string& pick) {
+            return pick.rfind(c.gfx950Pick, 0) == 0 && pick.find(kTag) != std::string::npos
+                   && (pick.find("_Acanonical_") == std::string::npos) == c.tiledB;
+        };
+
+        if(!gpuAvailable())
+            GTEST_SKIP() << "No GPU available";
+        if(!onMXFp6RegisteredChip())
+            GTEST_SKIP() << kMXFp6ChipSkip;
+
+        std::mt19937                       rng(0x6d786636u);
+        std::uniform_int_distribution<int> valueOf{-4, 4};
+        std::uniform_int_distribution<int> smallScaleOf{one - 3, one};
+        std::uniform_int_distribution<int> bitOf{0, 1};
+
+        // Row values of A and their scales, and the rows of B, both K-contiguous.
+        std::vector<int> aValue(k);
+        for(auto& value : aValue)
+            value = valueOf(rng);
+        std::vector<int> aScale(kBlocks);
+        for(auto& scale : aScale)
+            scale = smallScaleOf(rng);
+        aScale[large0] = aScale[large1] = one + 10;
+        std::copy_n(aValue.begin() + large0 * 32, 32, aValue.begin() + large1 * 32);
+
+        uint8_t codeOfHalves[17];
+        for(int halves = -8; halves <= 8; ++halves)
+            codeOfHalves[halves + 8] = fp6Code(halves, e3m2);
+        ASSERT_FALSE(HasFailure());
+
+        // B is packed, and tiled one 256-row block at a time when tiledB is set, which is
+        // contiguous in the tiled layout; only the columns read below keep their values.
+        constexpr int64_t    kProbeCols   = 64;
+        const int64_t        sampleRows[] = {0, 1, 15, 16, 255, 256, 2047, m - 1};
+        const int64_t        sampleCols[] = {0, 1, 63, 64, 255, 256, 2049, n - 1};
+        const size_t         rowBytes     = k * 6 / 8;
+        const size_t         blockBytes   = mx_tile128x4::kTileRows * rowBytes;
+        std::vector<uint8_t> codes(k);
+        std::vector<uint8_t> packedBlock(blockBytes);
+        std::vector<int8_t>  colValues(k);
+        std::vector<uint8_t> dataB(static_cast<size_t>(n) * rowBytes);
+        std::vector<uint8_t> bScale(static_cast<size_t>(n * kBlocks));
+
+        std::map<int64_t, std::vector<int8_t>> bValue;
+        for(int64_t col = 0; col < n; ++col)
+        {
+            for(int64_t idx = 0; idx < k; ++idx)
+                colValues[idx] = static_cast<int8_t>(valueOf(rng));
+            for(int64_t idx = 0; idx < 32; ++idx)
+                colValues[large1 * 32 + idx] = static_cast<int8_t>(-colValues[large0 * 32 + idx]);
+            for(int64_t kb = 0; kb < kBlocks; ++kb)
+                bScale[col * kBlocks + kb] = static_cast<uint8_t>(
+                    kb == large0 || kb == large1 ? one + 10 : smallScaleOf(rng));
+            if(col < kProbeCols
+               || std::find(std::begin(sampleCols), std::end(sampleCols), col)
+                      != std::end(sampleCols))
+                bValue[col] = colValues;
+
+            const int64_t blockRow = col % mx_tile128x4::kTileRows;
+            for(int64_t idx = 0; idx < k; ++idx)
+                codes[idx] = codeOfHalves[2 * colValues[idx] + 8];
+            if(!c.tiledB)
+            {
+                packFp6Row(dataB.data() + col * rowBytes, codes.data(), k);
+                continue;
+            }
+            packFp6Row(packedBlock.data() + blockRow * rowBytes, codes.data(), k);
+            if(blockRow == mx_tile128x4::kTileRows - 1)
+                mx_tile128x4::tileFp6Data(dataB.data() + (col - blockRow) * rowBytes,
+                                          packedBlock.data(),
+                                          mx_tile128x4::kTileRows,
+                                          k);
+        }
+
+        // The device sums whole-block products, each exact; only the order in which the
+        // blocks meet the fp32 accumulator can change D.
+        bool orderMatters = false;
+        for(int64_t col = 0; col < kProbeCols && !orderMatters; ++col)
+        {
+            std::vector<float> blockSums(kBlocks);
+            for(int64_t kb = 0; kb < kBlocks; ++kb)
+            {
+                int dot = 0;
+                for(int64_t idx = kb * 32; idx < kb * 32 + 32; ++idx)
+                    dot += aValue[idx] * bValue[col][idx];
+                blockSums[kb] = static_cast<float>(
+                    std::ldexp(dot, aScale[kb] + bScale[col * kBlocks + kb] - 2 * one));
+            }
+            float forward = 0.0f;
+            float reverse = 0.0f;
+            for(int64_t kb = 0; kb < kBlocks; ++kb)
+            {
+                forward += blockSums[kb];
+                reverse += blockSums[kBlocks - 1 - kb];
+            }
+            orderMatters = hip_bfloat16{forward}.data != hip_bfloat16{reverse}.data;
+        }
+        ASSERT_TRUE(orderMatters) << "Forward and reverse block orders agree in bf16 for every "
+                                     "probed column, so this fill cannot detect an order change";
+
+        // Both encodings of A's row, packed: a block is a whole 24-byte group, so a row is
+        // assembled group by group from one or the other.
+        std::vector<uint8_t> packedAtScale(rowBytes);
+        std::vector<uint8_t> packedHalved(rowBytes);
+        for(int64_t idx = 0; idx < k; ++idx)
+            codes[idx] = codeOfHalves[2 * aValue[idx] + 8];
+        packFp6Row(packedAtScale.data(), codes.data(), k);
+        for(int64_t idx = 0; idx < k; ++idx)
+            codes[idx] = codeOfHalves[aValue[idx] + 8];
+        packFp6Row(packedHalved.data(), codes.data(), k);
+
+        std::vector<uint8_t> tiledA(static_cast<size_t>(m) * rowBytes);
+        std::vector<uint8_t> scalesA(static_cast<size_t>(m * kBlocks));
+        for(int64_t row = 0; row < m; ++row)
+        {
+            const int64_t blockRow = row % mx_tile128x4::kTileRows;
+            for(int64_t kb = 0; kb < kBlocks; ++kb)
+            {
+                const bool halved = bitOf(rng) != 0;
+                std::memcpy(packedBlock.data() + blockRow * rowBytes + kb * 24,
+                            (halved ? packedHalved : packedAtScale).data() + kb * 24,
+                            24);
+                scalesA[row * kBlocks + kb] = static_cast<uint8_t>(aScale[kb] + (halved ? 1 : 0));
+            }
+            if(blockRow == mx_tile128x4::kTileRows - 1)
+                mx_tile128x4::tileFp6Data(tiledA.data() + (row - blockRow) * rowBytes,
+                                          packedBlock.data(),
+                                          mx_tile128x4::kTileRows,
+                                          k);
+        }
+        packedBlock = {};
+
+        const std::vector<uint8_t> shuffledA = mx_tile128x4::shuffleScales(scalesA, m, kBlocks);
+        const std::vector<uint8_t> shuffledB = mx_tile128x4::shuffleScales(bScale, n, kBlocks);
+
+        // The exact run: the large blocks at the small range's top scale, so every block
+        // product is a multiple of 2^-6 of magnitude at most 512.
+        for(int64_t row = 0; row < m; ++row)
+            for(const int64_t kb : {large0, large1})
+                scalesA[row * kBlocks + kb] -= 10;
+        for(int64_t col = 0; col < n; ++col)
+            for(const int64_t kb : {large0, large1})
+                bScale[col * kBlocks + kb] -= 10;
+        aScale[large0] = aScale[large1] = one;
+        const std::vector<uint8_t> exactShuffledA
+            = mx_tile128x4::shuffleScales(scalesA, m, kBlocks);
+        const std::vector<uint8_t> exactShuffledB = mx_tile128x4::shuffleScales(bScale, n, kBlocks);
+        scalesA.clear();
+        scalesA.shrink_to_fit();
+
+        // Exact D of each sampled column in units of 2^-6; every row of A has the same
+        // values. Sum |product| < 2^24 bounds every fp32 partial sum below 2^18, so the
+        // device result in any summation order is the exact sum.
+        std::map<int64_t, int64_t> exactSum;
+        for(const int64_t col : sampleCols)
+        {
+            int64_t sum    = 0;
+            int64_t absSum = 0;
+            for(int64_t kb = 0; kb < kBlocks; ++kb)
+            {
+                int64_t dot = 0;
+                for(int64_t idx = kb * 32; idx < kb * 32 + 32; ++idx)
+                    dot += aValue[idx] * bValue[col][idx];
+                const int shift = aScale[kb] + bScale[col * kBlocks + kb] - 2 * one + 6;
+                ASSERT_TRUE(shift >= 0 && shift <= 6) << "block " << kb << " shift " << shift;
+                sum += dot * (int64_t(1) << shift);
+                absSum += std::abs(dot) * (int64_t(1) << shift);
+            }
+            ASSERT_LT(absSum, int64_t(1) << 24)
+                << "Column " << col << " can round in fp32, so the exact check does not hold";
+            exactSum[col] = sum;
+        }
+
+        void* dA         = nullptr;
+        void* dB         = nullptr;
+        void* dScaleA    = nullptr;
+        void* dScaleB    = nullptr;
+        void* dD         = nullptr;
+        void* dWorkspace = nullptr;
+        auto  release    = [&] {
+            for(void* ptr : {dA, dB, dScaleA, dScaleB, dD, dWorkspace})
+                static_cast<void>(hipFree(ptr));
+        };
+        if(hipMalloc(&dA, tiledA.size()) != hipSuccess || hipMalloc(&dB, dataB.size()) != hipSuccess
+           || hipMalloc(&dScaleA, shuffledA.size()) != hipSuccess
+           || hipMalloc(&dScaleB, shuffledB.size()) != hipSuccess
+           || hipMalloc(&dD, static_cast<size_t>(m * n) * sizeof(uint16_t)) != hipSuccess
+           || hipMalloc(&dWorkspace, kWorkspaceBytes) != hipSuccess)
+        {
+            release();
+            GTEST_SKIP() << "hipMalloc failed: not enough device memory";
+        }
+        const bool uploaded
+            = hipMemcpy(dA, tiledA.data(), tiledA.size(), hipMemcpyHostToDevice) == hipSuccess
+              && hipMemcpy(dB, dataB.data(), dataB.size(), hipMemcpyHostToDevice) == hipSuccess
+              && hipMemcpy(dScaleA, shuffledA.data(), shuffledA.size(), hipMemcpyHostToDevice)
+                     == hipSuccess
+              && hipMemcpy(dScaleB, shuffledB.data(), shuffledB.size(), hipMemcpyHostToDevice)
+                     == hipSuccess;
+
+        hipblasLtHandle_t handle = nullptr;
+        hipStream_t       stream = nullptr;
+        if(!uploaded || hipblasLtCreate(&handle) != HIPBLAS_STATUS_SUCCESS
+           || hipStreamCreate(&stream) != hipSuccess)
+        {
+            if(handle)
+                hipblasLtDestroy(handle);
+            release();
+            FAIL() << "Upload, hipblasLt handle or stream creation failed";
+        }
+
+        std::vector<uint16_t> hostD(static_cast<size_t>(m * n));
+        std::vector<uint16_t> exactD(static_cast<size_t>(m * n));
+        {
+            const float alpha = 1.0f;
+            const float beta  = 0.0f;
+
+            hipblaslt_ext::GemmProblemType problemType(HIPBLAS_OP_T,
+                                                       HIPBLAS_OP_N,
+                                                       c.type,
+                                                       c.type,
+                                                       HIP_R_16BF,
+                                                       HIP_R_16BF,
+                                                       HIPBLAS_COMPUTE_32F);
+            problemType.setOrderA(HIPBLASLT_ORDER_COL256_R128_EXT);
+            if(c.tiledB)
+                problemType.setOrderB(HIPBLASLT_ORDER_COL256_R128_EXT);
+            hipblaslt_ext::GemmEpilogue epilogue;
+            epilogue.setScalingAType(HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT);
+            epilogue.setScalingBType(HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT);
+            hipblaslt_ext::GemmInputs inputs;
+            inputs.setA(dA);
+            inputs.setB(dB);
+            inputs.setC(dD);
+            inputs.setD(dD);
+            inputs.setAlpha(&alpha);
+            inputs.setBeta(&beta);
+            inputs.setScaleA(dScaleA);
+            inputs.setScaleB(dScaleB);
+
+            hipblaslt_ext::Gemm gemm(handle,
+                                     HIPBLAS_OP_T,
+                                     HIPBLAS_OP_N,
+                                     c.type,
+                                     c.type,
+                                     HIP_R_16BF,
+                                     HIP_R_16BF,
+                                     HIPBLAS_COMPUTE_32F);
+
+            hipblaslt_ext::GemmPreference preference;
+            preference.setMaxWorkspaceBytes(kWorkspaceBytes);
+            preference.setUniformSummationOrder(1);
+            std::vector<hipblasLtMatmulHeuristicResult_t> picks;
+            hipblasLtMatmulAlgo_t                         algo{};
+            size_t                                        workspaceBytes = 0;
+
+            const bool picked
+                = gemm.setProblem(m,
+                                  n,
+                                  k,
+                                  1,
+                                  k,
+                                  k,
+                                  m,
+                                  m,
+                                  k * m,
+                                  k * n,
+                                  m * n,
+                                  m * n,
+                                  epilogue,
+                                  inputs,
+                                  problemType)
+                      == HIPBLAS_STATUS_SUCCESS
+                  && gemm.algoGetHeuristic(1, preference, picks) == HIPBLAS_STATUS_SUCCESS
+                  && !picks.empty();
+            std::string pick = picked
+                                   ? hipblaslt_ext::getSolutionNameFromAlgo(handle, picks[0].algo)
+                                   : std::string("<none>");
+            if(picked)
+                algo = picks[0].algo;
+            const bool ran
+                = picked && isExpectedPick(pick)
+                  && gemm.isAlgoSupported(algo, workspaceBytes) == HIPBLAS_STATUS_SUCCESS
+                  && workspaceBytes <= kWorkspaceBytes
+                  && gemm.initialize(algo, dWorkspace) == HIPBLAS_STATUS_SUCCESS
+                  && gemm.run(stream) == HIPBLAS_STATUS_SUCCESS
+                  && hipStreamSynchronize(stream) == hipSuccess
+                  && hipMemcpy(
+                         hostD.data(), dD, hostD.size() * sizeof(uint16_t), hipMemcpyDeviceToHost)
+                         == hipSuccess;
+            EXPECT_TRUE(isExpectedPick(pick)) << "The default pick is " << pick << ", not a "
+                                              << c.gfx950Pick << "*" << kTag << "* kernel";
+            EXPECT_TRUE(ran || !isExpectedPick(pick)) << pick << " was picked but could not be run";
+            const bool ranExact
+                = ran
+                  && hipMemcpy(dScaleA,
+                               exactShuffledA.data(),
+                               exactShuffledA.size(),
+                               hipMemcpyHostToDevice)
+                         == hipSuccess
+                  && hipMemcpy(dScaleB,
+                               exactShuffledB.data(),
+                               exactShuffledB.size(),
+                               hipMemcpyHostToDevice)
+                         == hipSuccess
+                  && gemm.run(stream) == HIPBLAS_STATUS_SUCCESS
+                  && hipStreamSynchronize(stream) == hipSuccess
+                  && hipMemcpy(
+                         exactD.data(), dD, exactD.size() * sizeof(uint16_t), hipMemcpyDeviceToHost)
+                         == hipSuccess;
+            EXPECT_TRUE(ranExact || !ran) << pick << " could not be run with the exact scales";
+        }
+        static_cast<void>(hipStreamDestroy(stream));
+        hipblasLtDestroy(handle);
+        release();
+        if(HasFailure())
+            return;
+
+        // Column-major D: every row equals row 0 exactly when every column is constant.
+        int64_t badRow = -1;
+        int64_t badCol = -1;
+        for(int64_t col = 0; col < n && badRow < 0; ++col)
+        {
+            const uint16_t* column = hostD.data() + col * m;
+            for(int64_t row = 1; row < m; ++row)
+                if(column[row] != column[0])
+                {
+                    badRow = row;
+                    badCol = col;
+                    break;
+                }
+        }
+        EXPECT_EQ(badRow, -1) << "D(" << badRow << ", " << badCol << ") differs bitwise from D(0, "
+                              << badCol << ") with uniform summation order enabled";
+        EXPECT_NE(std::count(hostD.begin(), hostD.begin() + m * n, hostD[0]),
+                  static_cast<std::ptrdiff_t>(m * n))
+            << "D is constant, so the fill did not reach the output";
+
+        int mismatches = 0;
+        for(const int64_t col : sampleCols)
+        {
+            const uint16_t expected
+                = bf16BitsRne(std::ldexp(static_cast<double>(exactSum[col]), -6));
+            for(const int64_t row : sampleRows)
+            {
+                const uint16_t actual = exactD[col * m + row];
+                if(actual != expected && ++mismatches <= 8)
+                    ADD_FAILURE() << "Exact run: D(" << row << ", " << col << ") = 0x" << std::hex
+                                  << actual << ", exact sum rounded to bf16 = 0x" << expected
+                                  << std::dec;
+            }
+        }
+        EXPECT_EQ(mismatches, 0) << "sampled outputs differ from the exact sum";
+    }
+
+    // Every kernel in the quick tier, so every pull request on a registered chip runs
+    // each of them.
+    INSTANTIATE_TEST_SUITE_P(
+        RowUniformity,
+        RowUniformityMXFp6_smoke,
+        ::testing::Values(
+            MXFp6Case{"E2M3_K2048", HIP_R_6F_E2M3, 2048, "rocke_gemm_mx_e2m3_e2m3_", true},
+            MXFp6Case{"E3M2_K2048", HIP_R_6F_E3M2, 2048, "rocke_gemm_mx_e3m2_e3m2_", true},
+            MXFp6Case{
+                "E2M3_K2048_CanonicalB", HIP_R_6F_E2M3, 2048, "rocke_gemm_mx_e2m3_e2m3_", false},
+            MXFp6Case{
+                "E3M2_K2048_CanonicalB", HIP_R_6F_E3M2, 2048, "rocke_gemm_mx_e3m2_e3m2_", false},
+            MXFp6Case{
+                "E2M3_M32768_K6144", HIP_R_6F_E2M3, 6144, "rocke_gemm_mx_e2m3_e2m3_", true, 32768},
+            MXFp6Case{
+                "E3M2_M32768_K6144", HIP_R_6F_E3M2, 6144, "rocke_gemm_mx_e3m2_e3m2_", true, 32768},
+            MXFp6Case{"E2M3_K65536", HIP_R_6F_E2M3, 65536, "rocke_gemm_mx_e2m3_e2m3_", true},
+            MXFp6Case{
+                "E2M3_K65536_CanonicalB", HIP_R_6F_E2M3, 65536, "rocke_gemm_mx_e2m3_e2m3_", false},
+            MXFp6Case{"E3M2_K65536", HIP_R_6F_E3M2, 65536, "rocke_gemm_mx_e3m2_e3m2_", true},
+            MXFp6Case{"E2M3_K131584", HIP_R_6F_E2M3, 131584, "rocke_gemm_mx_e2m3_e2m3_", true},
+            MXFp6Case{"E3M2_K131584", HIP_R_6F_E3M2, 131584, "rocke_gemm_mx_e3m2_e3m2_", true}),
+        [](const ::testing::TestParamInfo<MXFp6Case>& info) {
+            return std::string(info.param.name);
+        });
+
+    struct MXFp6SelectionCase
+    {
+        const char* name;
+        hipDataType type;
+        int64_t     k;
+        bool        tiledB;
+        float       alpha;
+        float       beta;
+        bool        hasKernel;
+    };
+
+    // gtest's default printer dumps the raw bytes, padding included, which valgrind flags.
+    void PrintTo(const MXFp6SelectionCase& c, std::ostream* os)
+    {
+        *os << "{name=" << c.name << " type=" << c.type << " k=" << c.k << " tiledB=" << c.tiledB
+            << " alpha=" << c.alpha << " beta=" << c.beta << " hasKernel=" << c.hasKernel << "}";
+    }
+
+    class RowUniformityMXFp6Selection_smoke
+        : public ::testing::TestWithParam<MXFp6SelectionCase>
+    {
+    };
+
+    // The kernels do not bound their loads and stores, so only their predicates keep
+    // another problem away from them: a problem one predicate rejects gets no solution.
+    // Nothing is launched.
+    TEST_P(RowUniformityMXFp6Selection_smoke, OnlyRegisteredProblemsHaveASolution)
+    {
+        const MXFp6SelectionCase& c = GetParam();
+        constexpr int64_t         m = 4096;
+        constexpr int64_t         n = 4096;
+
+        if(!gpuAvailable())
+            GTEST_SKIP() << "No GPU available";
+        if(!onMXFp6RegisteredChip())
+            GTEST_SKIP() << kMXFp6ChipSkip;
+
+        void*             storage = nullptr;
+        hipblasLtHandle_t handle  = nullptr;
+        ASSERT_EQ(hipMalloc(&storage, 256), hipSuccess);
+        ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+
+        hipblaslt_ext::GemmProblemType problemType(HIPBLAS_OP_T,
+                                                   HIPBLAS_OP_N,
+                                                   c.type,
+                                                   c.type,
+                                                   HIP_R_16BF,
+                                                   HIP_R_16BF,
+                                                   HIPBLAS_COMPUTE_32F);
+        problemType.setOrderA(HIPBLASLT_ORDER_COL256_R128_EXT);
+        if(c.tiledB)
+            problemType.setOrderB(HIPBLASLT_ORDER_COL256_R128_EXT);
+        hipblaslt_ext::GemmEpilogue epilogue;
+        epilogue.setScalingAType(HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT);
+        epilogue.setScalingBType(HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT);
+        hipblaslt_ext::GemmInputs inputs;
+        inputs.setA(storage);
+        inputs.setB(storage);
+        inputs.setC(storage);
+        inputs.setD(storage);
+        inputs.setAlpha(&c.alpha);
+        inputs.setBeta(&c.beta);
+        inputs.setScaleA(storage);
+        inputs.setScaleB(storage);
+
+        hipblaslt_ext::Gemm           gemm(handle,
+                                 HIPBLAS_OP_T,
+                                 HIPBLAS_OP_N,
+                                 c.type,
+                                 c.type,
+                                 HIP_R_16BF,
+                                 HIP_R_16BF,
+                                 HIPBLAS_COMPUTE_32F);
+        hipblaslt_ext::GemmPreference preference;
+        preference.setMaxWorkspaceBytes(kWorkspaceBytes);
+        std::vector<hipblasLtMatmulHeuristicResult_t> picks;
+        EXPECT_EQ(gemm.setProblem(m,
+                                  n,
+                                  c.k,
+                                  1,
+                                  c.k,
+                                  c.k,
+                                  m,
+                                  m,
+                                  c.k * m,
+                                  c.k * n,
+                                  m * n,
+                                  m * n,
+                                  epilogue,
+                                  inputs,
+                                  problemType),
+                  HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(gemm.algoGetHeuristic(8, preference, picks), HIPBLAS_STATUS_SUCCESS);
+        if(c.hasKernel)
+        {
+            ASSERT_FALSE(picks.empty());
+            EXPECT_EQ(
+                hipblaslt_ext::getSolutionNameFromAlgo(handle, picks[0].algo).rfind("rocke_", 0),
+                0u);
+        }
+        else
+        {
+            for(auto& pick : picks)
+                ADD_FAILURE() << "Unexpected solution "
+                              << hipblaslt_ext::getSolutionNameFromAlgo(handle, pick.algo);
+        }
+
+        EXPECT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(hipFree(storage), hipSuccess);
+    }
+
+    INSTANTIATE_TEST_SUITE_P(
+        RowUniformity,
+        RowUniformityMXFp6Selection_smoke,
+        ::testing::Values(
+            MXFp6SelectionCase{"E2M3_K65536", HIP_R_6F_E2M3, 65536, true, 1.0f, 0.0f, true},
+            MXFp6SelectionCase{"E2M3_K131072", HIP_R_6F_E2M3, 131072, true, 1.0f, 0.0f, false},
+            MXFp6SelectionCase{"E2M3_K32768", HIP_R_6F_E2M3, 32768, true, 1.0f, 0.0f, false},
+            MXFp6SelectionCase{"E2M3_K65536_Alpha2", HIP_R_6F_E2M3, 65536, true, 2.0f, 0.0f, false},
+            MXFp6SelectionCase{"E2M3_K65536_Beta1", HIP_R_6F_E2M3, 65536, true, 1.0f, 1.0f, false},
+            MXFp6SelectionCase{
+                "E3M2_K65536_CanonicalB", HIP_R_6F_E3M2, 65536, false, 1.0f, 0.0f, false},
+            MXFp6SelectionCase{
+                "E2M3_K131584_CanonicalB", HIP_R_6F_E2M3, 131584, false, 1.0f, 0.0f, false}),
+        [](const ::testing::TestParamInfo<MXFp6SelectionCase>& info) {
+            return std::string(info.param.name);
+        });
+
+    // The algo of the registered E2M3 kernel at K = 65536, reused for a problem one of
+    // its predicates rejects (another K, alpha != 1), is refused by the ext and the C
+    // API before anything launches.
+    class RowUniformityMXFp6AlgoReuse_smoke : public ::testing::Test
+    {
+    protected:
+        static constexpr int64_t m           = 4096;
+        static constexpr int64_t n           = 4096;
+        static constexpr int64_t kRegistered = 65536;
+
+        hipblasLtHandle_t handle    = nullptr;
+        void*             a         = nullptr;
+        void*             b         = nullptr;
+        void*             d         = nullptr;
+        void*             scaleA    = nullptr;
+        void*             scaleB    = nullptr;
+        void*             workspace = nullptr;
+        const size_t      dBytes    = m * n * sizeof(uint16_t);
+
+        void SetUp() override
+        {
+            if(!gpuAvailable())
+                GTEST_SKIP() << "No GPU available";
+            if(!onMXFp6RegisteredChip())
+                GTEST_SKIP() << kMXFp6ChipSkip;
+
+            // Sized for the registered K, the largest these cases use: 6-bit elements and
+            // one scale byte per 32 elements of K.
+            const size_t operandBytes = m * kRegistered * 6 / 8;
+            const size_t scaleBytes   = m * kRegistered / 32;
+            for(auto [ptr, bytes] : {std::pair{&a, operandBytes},
+                                     std::pair{&b, operandBytes},
+                                     std::pair{&scaleA, scaleBytes},
+                                     std::pair{&scaleB, scaleBytes}})
+            {
+                ASSERT_EQ(hipMalloc(ptr, bytes), hipSuccess);
+                ASSERT_EQ(hipMemset(*ptr, 0, bytes), hipSuccess);
+            }
+            ASSERT_EQ(hipMalloc(&d, dBytes), hipSuccess);
+            ASSERT_EQ(hipMalloc(&workspace, kWorkspaceBytes), hipSuccess);
+            ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+        }
+
+        void TearDown() override
+        {
+            if(handle)
+                EXPECT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
+            for(void* p : {a, b, d, scaleA, scaleB, workspace})
+                if(p)
+                    EXPECT_EQ(hipFree(p), hipSuccess);
+        }
+
+        // Fills D with a pattern a GEMM of zero inputs does not write, so a launch shows.
+        void poisonD()
+        {
+            ASSERT_EQ(hipMemset(d, 0x7f, dBytes), hipSuccess);
+        }
+
+        bool dUntouched()
+        {
+            EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+            std::vector<uint8_t> host(dBytes);
+            EXPECT_EQ(hipMemcpy(host.data(), d, dBytes, hipMemcpyDeviceToHost), hipSuccess);
+            return std::all_of(host.begin(), host.end(), [](uint8_t byte) { return byte == 0x7f; });
+        }
+
+        hipblasStatus_t setExtProblem(hipblaslt_ext::Gemm& gemm, int64_t k, const float* alpha)
+        {
+            static const float             beta = 0.0f;
+            hipblaslt_ext::GemmProblemType problemType(HIPBLAS_OP_T,
+                                                       HIPBLAS_OP_N,
+                                                       HIP_R_6F_E2M3,
+                                                       HIP_R_6F_E2M3,
+                                                       HIP_R_16BF,
+                                                       HIP_R_16BF,
+                                                       HIPBLAS_COMPUTE_32F);
+            problemType.setOrderA(HIPBLASLT_ORDER_COL256_R128_EXT);
+            problemType.setOrderB(HIPBLASLT_ORDER_COL256_R128_EXT);
+            hipblaslt_ext::GemmEpilogue epilogue;
+            epilogue.setScalingAType(HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT);
+            epilogue.setScalingBType(HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT);
+            hipblaslt_ext::GemmInputs inputs;
+            inputs.setA(a);
+            inputs.setB(b);
+            inputs.setC(d);
+            inputs.setD(d);
+            inputs.setAlpha(alpha);
+            inputs.setBeta(&beta);
+            inputs.setScaleA(scaleA);
+            inputs.setScaleB(scaleB);
+            return gemm.setProblem(
+                m, n, k, 1, k, k, m, m, k * m, k * n, m * n, m * n, epilogue, inputs, problemType);
+        }
+
+        hipblaslt_ext::Gemm makeGemm()
+        {
+            return hipblaslt_ext::Gemm(handle,
+                                       HIPBLAS_OP_T,
+                                       HIPBLAS_OP_N,
+                                       HIP_R_6F_E2M3,
+                                       HIP_R_6F_E2M3,
+                                       HIP_R_16BF,
+                                       HIP_R_16BF,
+                                       HIPBLAS_COMPUTE_32F);
+        }
+
+        hipblasLtMatmulAlgo_t registeredAlgo()
+        {
+            const float                                   alpha = 1.0f;
+            hipblaslt_ext::Gemm                           gemm  = makeGemm();
+            hipblaslt_ext::GemmPreference                 preference;
+            std::vector<hipblasLtMatmulHeuristicResult_t> picks;
+            preference.setMaxWorkspaceBytes(kWorkspaceBytes);
+            EXPECT_EQ(setExtProblem(gemm, kRegistered, &alpha), HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(gemm.algoGetHeuristic(1, preference, picks), HIPBLAS_STATUS_SUCCESS);
+            if(picks.empty())
+            {
+                ADD_FAILURE() << "No solution for the registered problem";
+                return {};
+            }
+            EXPECT_EQ(
+                hipblaslt_ext::getSolutionNameFromAlgo(handle, picks[0].algo).rfind("rocke_", 0),
+                0u);
+            return picks[0].algo;
+        }
+
+        hipblasStatus_t cMatmul(int64_t k, float alpha, const hipblasLtMatmulAlgo_t& algo)
+        {
+            const float              beta   = 0.0f;
+            const hipblasOperation_t opA    = HIPBLAS_OP_T;
+            const hipblasOperation_t opB    = HIPBLAS_OP_N;
+            const int32_t            order  = HIPBLASLT_ORDER_COL256_R128_EXT;
+            const uint32_t           mode   = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT;
+            hipblasLtMatmulDesc_t    desc   = nullptr;
+            hipblasLtMatrixLayout_t  la     = nullptr;
+            hipblasLtMatrixLayout_t  lb     = nullptr;
+            hipblasLtMatrixLayout_t  ld     = nullptr;
+            hipblasStatus_t          status = HIPBLAS_STATUS_INTERNAL_ERROR;
+            if(hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_32F, HIP_R_32F)
+                   == HIPBLAS_STATUS_SUCCESS
+               && hipblasLtMatmulDescSetAttribute(
+                      desc, HIPBLASLT_MATMUL_DESC_TRANSA, &opA, sizeof(opA))
+                      == HIPBLAS_STATUS_SUCCESS
+               && hipblasLtMatmulDescSetAttribute(
+                      desc, HIPBLASLT_MATMUL_DESC_TRANSB, &opB, sizeof(opB))
+                      == HIPBLAS_STATUS_SUCCESS
+               && hipblasLtMatmulDescSetAttribute(
+                      desc, HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, &mode, sizeof(mode))
+                      == HIPBLAS_STATUS_SUCCESS
+               && hipblasLtMatmulDescSetAttribute(
+                      desc, HIPBLASLT_MATMUL_DESC_B_SCALE_MODE, &mode, sizeof(mode))
+                      == HIPBLAS_STATUS_SUCCESS
+               && hipblasLtMatmulDescSetAttribute(
+                      desc, HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER, &scaleA, sizeof(scaleA))
+                      == HIPBLAS_STATUS_SUCCESS
+               && hipblasLtMatmulDescSetAttribute(
+                      desc, HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER, &scaleB, sizeof(scaleB))
+                      == HIPBLAS_STATUS_SUCCESS
+               && hipblasLtMatrixLayoutCreate(&la, HIP_R_6F_E2M3, k, m, k) == HIPBLAS_STATUS_SUCCESS
+               && hipblasLtMatrixLayoutCreate(&lb, HIP_R_6F_E2M3, k, n, k) == HIPBLAS_STATUS_SUCCESS
+               && hipblasLtMatrixLayoutCreate(&ld, HIP_R_16BF, m, n, m) == HIPBLAS_STATUS_SUCCESS
+               && hipblasLtMatrixLayoutSetAttribute(
+                      la, HIPBLASLT_MATRIX_LAYOUT_ORDER, &order, sizeof(order))
+                      == HIPBLAS_STATUS_SUCCESS
+               && hipblasLtMatrixLayoutSetAttribute(
+                      lb, HIPBLASLT_MATRIX_LAYOUT_ORDER, &order, sizeof(order))
+                      == HIPBLAS_STATUS_SUCCESS)
+            {
+                status = hipblasLtMatmul(handle,
+                                         desc,
+                                         &alpha,
+                                         a,
+                                         la,
+                                         b,
+                                         lb,
+                                         &beta,
+                                         d,
+                                         ld,
+                                         d,
+                                         ld,
+                                         &algo,
+                                         workspace,
+                                         kWorkspaceBytes,
+                                         nullptr);
+            }
+            for(auto* layout : {la, lb, ld})
+                if(layout)
+                    hipblasLtMatrixLayoutDestroy(layout);
+            if(desc)
+                hipblasLtMatmulDescDestroy(desc);
+            return status;
+        }
+    };
+
+    TEST_F(RowUniformityMXFp6AlgoReuse_smoke, ExtApiRefusesAlgoForAnotherProblem)
+    {
+        const hipblasLtMatmulAlgo_t algo = registeredAlgo();
+        if(HasFailure())
+            return;
+        const float one = 1.0f;
+        const float two = 2.0f;
+
+        hipblaslt_ext::Gemm gemm = makeGemm();
+        ASSERT_EQ(setExtProblem(gemm, kRegistered, &one), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(gemm.initialize(algo, workspace), HIPBLAS_STATUS_SUCCESS);
+
+        ASSERT_EQ(setExtProblem(gemm, 32768, &one), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(gemm.initialize(algo, workspace), HIPBLAS_STATUS_INVALID_VALUE);
+
+        ASSERT_EQ(setExtProblem(gemm, kRegistered, &two), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(gemm.initialize(algo, workspace), HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
+    TEST_F(RowUniformityMXFp6AlgoReuse_smoke, CApiRefusesAlgoForAnotherProblem)
+    {
+        const hipblasLtMatmulAlgo_t algo = registeredAlgo();
+        if(HasFailure())
+            return;
+
+        EXPECT_EQ(cMatmul(kRegistered, 1.0f, algo), HIPBLAS_STATUS_SUCCESS);
+
+        poisonD();
+        EXPECT_EQ(cMatmul(32768, 1.0f, algo), HIPBLAS_STATUS_INVALID_VALUE);
+        EXPECT_EQ(cMatmul(kRegistered, 2.0f, algo), HIPBLAS_STATUS_INVALID_VALUE);
+        EXPECT_TRUE(dUntouched()) << "a refused algo launched";
+    }
+
+    // The five gfx950 skinny MXFP8 TN kernels declare uniformSummationOrder.
+    // Each case is a shard key that routes to one of them, once per orientation
+    // the shard routes it in (the VALU kernel takes skinny n only); f8 E4M3 A
+    // and B, pre-swizzled E8M0 scales, bf16 D.
+    TEST_F(RowUniformity_pre_checkin, SkinnyTnMxfp8_1152x4x5120)
+    {
+        checkDefaultPicksUniform(
+            {1152, 4, 5120, HIP_R_8F_E4M3, 0, false, HIPBLAS_OP_T, HIP_R_16BF},
+            "gemm_BM16_TN1_LANES_K64_WAVES2_UP_ITERS0_PF4_GROUP1_NUM_XCDS8_GRID_3D0_USE_BETA1_MFMA1_LDS1");
+    }
+
+    TEST_F(RowUniformity_pre_checkin, SkinnyTnMxfp8_4x1152x5120)
+    {
+        checkDefaultPicksUniform(
+            {4, 1152, 5120, HIP_R_8F_E4M3, 0, false, HIPBLAS_OP_T, HIP_R_16BF},
+            "gemm_BM16_TN1_LANES_K64_WAVES2_UP_ITERS0_PF4_GROUP1_NUM_XCDS8_GRID_3D0_USE_BETA1_MFMA1_LDS1");
+    }
+
+    TEST_F(RowUniformity_pre_checkin, SkinnyTnMxfp8_16384x3x25600)
+    {
+        checkDefaultPicksUniform(
+            {16384, 3, 25600, HIP_R_8F_E4M3, 0, false, HIPBLAS_OP_T, HIP_R_16BF},
+            "gemm_BM16_TN2_LANES_K64_WAVES1_UP_ITERS0_PF3_GROUP8_NUM_XCDS1_GRID_3D0_USE_BETA1_MFMA1_LDS1");
+    }
+
+    TEST_F(RowUniformity_pre_checkin, SkinnyTnMxfp8_2x32768x14336)
+    {
+        checkDefaultPicksUniform(
+            {2, 32768, 14336, HIP_R_8F_E4M3, 0, false, HIPBLAS_OP_T, HIP_R_16BF},
+            "gemm_BM16_TN2_LANES_K64_WAVES1_UP_ITERS0_PF3_GROUP8_NUM_XCDS1_GRID_3D0_USE_BETA1_MFMA1_LDS1");
+    }
+
+    TEST_F(RowUniformity_pre_checkin, SkinnyTnMxfp8_10240x1x5120)
+    {
+        checkDefaultPicksUniform(
+            {10240, 1, 5120, HIP_R_8F_E4M3, 0, false, HIPBLAS_OP_T, HIP_R_16BF},
+            "gemm_BM1_TN1_LANES_K16_WAVES1_UP_ITERS0_PF2_GROUP1_NUM_XCDS1_GRID_3D1_USE_BETA1");
+    }
+
+    TEST_F(RowUniformity_pre_checkin, SkinnyTnMxfp8_4096x4x1280)
+    {
+        checkDefaultPicksUniform(
+            {4096, 4, 1280, HIP_R_8F_E4M3, 0, false, HIPBLAS_OP_T, HIP_R_16BF},
+            "gemm_BM16_TN2_LANES_K64_WAVES1_UP_ITERS0_PF4_GROUP1_NUM_XCDS8_GRID_3D0_USE_BETA1_MFMA1_LDS1");
+    }
+
+    TEST_F(RowUniformity_pre_checkin, SkinnyTnMxfp8_4x4096x1280)
+    {
+        checkDefaultPicksUniform(
+            {4, 4096, 1280, HIP_R_8F_E4M3, 0, false, HIPBLAS_OP_T, HIP_R_16BF},
+            "gemm_BM16_TN2_LANES_K64_WAVES1_UP_ITERS0_PF4_GROUP1_NUM_XCDS8_GRID_3D0_USE_BETA1_MFMA1_LDS1");
+    }
+
+    TEST_F(RowUniformity_pre_checkin, SkinnyTnMxfp8_3x16384x25600)
+    {
+        checkDefaultPicksUniform(
+            {3, 16384, 25600, HIP_R_8F_E4M3, 0, false, HIPBLAS_OP_T, HIP_R_16BF},
+            "gemm_BM16_TN2_LANES_K64_WAVES1_UP_ITERS0_PF4_GROUP8_NUM_XCDS1_GRID_3D0_USE_BETA1_MFMA1_LDS1");
     }
 
     // Measured non-uniform on gfx950 with the default heuristic path.
@@ -1143,27 +2318,28 @@ namespace
     {
         const SplitCase& c = GetParam();
 
-        const TensileLite::StreamKStaticSplit split = TensileLite::streamKStaticSplit(
-            c.tiles, c.itersPerTile, c.grid, c.skFullTiles, c.forceDPOnly);
+        const TensileLite::StreamK::Static::Split split
+            = TensileLite::StreamK::Static::computeSplit(
+                c.tiles, c.itersPerTile, c.grid, c.skFullTiles, c.forceDPOnly);
 
-        EXPECT_EQ(split.skTiles, c.skTiles) << "packed skTiles";
-        EXPECT_EQ(split.skItersPerWG, c.skItersPerWG) << "packed SKItersPerWG";
+        EXPECT_EQ(split.args.skTiles, c.skTiles) << "packed skTiles";
+        EXPECT_EQ(split.args.itersPerWG, c.skItersPerWG) << "packed SKItersPerWG";
         EXPECT_EQ(split.extraIters, c.extraIters)
             << "skTiles*itersPerTile - SKItersPerWG*skGrid, the leftover the kernel recomputes";
 
         // The per-tile extra-iters mapping runs only under uniform summation order, so
         // the mode term is pinned on and c.perTileExtraIters stays the variable.
-        EXPECT_EQ(TensileLite::streamKStaticSplitRowUniform(split,
-                                                            c.tiles,
-                                                            c.itersPerTile,
-                                                            c.grid,
-                                                            c.perTileExtraIters,
-                                                            /*uniformSummationOrder=*/true),
+        EXPECT_EQ(TensileLite::StreamK::Static::isRowUniform(split,
+                                                             c.tiles,
+                                                             c.itersPerTile,
+                                                             c.grid,
+                                                             c.perTileExtraIters,
+                                                             /*uniformSummationOrder=*/true),
                   c.rowUniform)
             << "tiles=" << c.tiles << " itersPerTile=" << c.itersPerTile << " grid=" << c.grid
             << " skFullTiles=" << c.skFullTiles << " forceDPOnly=" << c.forceDPOnly
             << " perTileExtraIters=" << c.perTileExtraIters
-            << " -> skTiles=" << split.skTiles << " skItersPerWG=" << split.skItersPerWG
+            << " -> skTiles=" << split.args.skTiles << " skItersPerWG=" << split.args.itersPerWG
             << " extraIters=" << split.extraIters;
     }
 
@@ -1190,12 +2366,12 @@ namespace
         for(size_t w = 0; w < skGrid; ++w)
         {
             const auto range
-                = TensileLite::streamKWorkgroupIterRange(w,
-                                                         tiles,
-                                                         itersPerTile,
-                                                         skGrid,
-                                                         /*perTileCapable=*/true,
-                                                         /*uniformSummationOrder=*/true);
+                = TensileLite::StreamK::Static::workgroupIterRange(w,
+                                                                   tiles,
+                                                                   itersPerTile,
+                                                                   skGrid,
+                                                                   /*perTileCapable=*/true,
+                                                                   /*uniformSummationOrder=*/true);
             for(size_t it = range.start; it < range.end; ++it)
             {
                 ASSERT_LT(it, size_t{68});
@@ -1207,41 +2383,213 @@ namespace
         // Without the capability, the same shape stays on the global first-E
         // mapping and is not row-uniform.
         const auto split
-            = TensileLite::streamKStaticSplit(tiles, itersPerTile, skGrid, 1, false);
-        EXPECT_FALSE(TensileLite::streamKStaticSplitRowUniform(split,
-                                                              tiles,
-                                                              itersPerTile,
-                                                              skGrid,
-                                                              /*perTileCapable=*/false,
-                                                              /*uniformSummationOrder=*/true));
-        EXPECT_TRUE(TensileLite::streamKStaticSplitRowUniform(split,
-                                                             tiles,
-                                                             itersPerTile,
-                                                             skGrid,
-                                                             /*perTileCapable=*/true,
-                                                             /*uniformSummationOrder=*/true));
+            = TensileLite::StreamK::Static::computeSplit(tiles, itersPerTile, skGrid, 1, false);
+        EXPECT_FALSE(TensileLite::StreamK::Static::isRowUniform(split,
+                                                                tiles,
+                                                                itersPerTile,
+                                                                skGrid,
+                                                                /*perTileCapable=*/false,
+                                                                /*uniformSummationOrder=*/true));
+        EXPECT_TRUE(TensileLite::StreamK::Static::isRowUniform(split,
+                                                               tiles,
+                                                               itersPerTile,
+                                                               skGrid,
+                                                               /*perTileCapable=*/true,
+                                                               /*uniformSummationOrder=*/true));
         // Capability alone is not enough: with the mode off the kernel still runs the
         // global first-E mapping.
-        EXPECT_FALSE(TensileLite::streamKStaticSplitRowUniform(split,
-                                                              tiles,
-                                                              itersPerTile,
-                                                              skGrid,
-                                                              /*perTileCapable=*/true,
-                                                              /*uniformSummationOrder=*/false));
+        EXPECT_FALSE(TensileLite::StreamK::Static::isRowUniform(split,
+                                                                tiles,
+                                                                itersPerTile,
+                                                                skGrid,
+                                                                /*perTileCapable=*/true,
+                                                                /*uniformSummationOrder=*/false));
 
         // When I % F == 0 the per-tile mapping must match the global E==0 path.
         constexpr size_t evenI = 16;
         for(size_t w = 0; w < skGrid; ++w)
         {
-            const auto perTile = TensileLite::streamKWorkgroupIterRange(
+            const auto perTile = TensileLite::StreamK::Static::workgroupIterRange(
                 w, tiles, evenI, skGrid, /*perTileCapable=*/true,
                 /*uniformSummationOrder=*/true);
-            const auto global = TensileLite::streamKWorkgroupIterRange(
+            const auto global = TensileLite::StreamK::Static::workgroupIterRange(
                 w, tiles, evenI, skGrid, /*perTileCapable=*/false,
                 /*uniformSummationOrder=*/true);
             EXPECT_EQ(perTile.start, global.start) << "w=" << w;
             EXPECT_EQ(perTile.end, global.end) << "w=" << w;
         }
+    }
+
+    // Stream-K must not cut K inside a scale epoch.
+    //
+    // A dual-period MXFP8 kernel reuses one 256-K scale fetch across several
+    // 128-K data iterations and picks the phase within the epoch from a
+    // compile-time constant, so a workgroup handed a range that starts partway
+    // through one silently applies the wrong half of every scale. Both mappings
+    // therefore hand their leftover out in whole epochs, and the property the
+    // kernel depends on is that every start is a multiple of the granularity.
+    //
+    // Checked here rather than in a GEMM config because the Tests/common client
+    // launches with a grid equal to the tile count, which never splits K; it
+    // takes a forced grid to make a kernel reach a ragged range at all.
+    TEST(RowUniformityScaleEpoch_pre_checkin, EveryWorkgroupStartsOnAKUnit)
+    {
+        constexpr size_t g = 2; // 256-K epoch over a 128-K DepthU
+
+        // Shapes whose unquantised SKItersPerWG is odd, which is exactly when
+        // the historical mapping lands a workgroup mid-epoch.
+        struct Shape
+        {
+            size_t tiles;
+            size_t itersPerTile;
+            size_t grid;
+        };
+        const Shape shapes[] = {
+            {1, 64, 3},    {1, 64, 7},     {1, 64, 9},     {1, 64, 11},
+            {576, 4, 448}, {576, 8, 320},  {576, 16, 512}, {256, 64, 448},
+            {4, 16, 3},    {12, 8, 5},     {48, 12, 7},
+        };
+
+        for(const Shape& s : shapes)
+        {
+            const size_t total = s.tiles * s.itersPerTile;
+            SCOPED_TRACE("tiles=" + std::to_string(s.tiles) + " itersPerTile="
+                         + std::to_string(s.itersPerTile) + " grid=" + std::to_string(s.grid));
+
+            for(bool perTile : {false, true})
+            {
+                size_t covered = 0;
+                for(size_t w = 0; w < s.grid; ++w)
+                {
+                    const auto range = TensileLite::StreamK::Static::workgroupIterRange(
+                        w, s.tiles, s.itersPerTile, s.grid, perTile,
+                        /*uniformSummationOrder=*/true, g);
+
+                    EXPECT_EQ(range.start % g, size_t{0})
+                        << "w=" << w << " perTile=" << perTile << " start=" << range.start;
+                    EXPECT_LE(range.start, range.end) << "w=" << w;
+                    covered += range.end - range.start;
+                }
+                // Quantising must not drop or duplicate work.
+                EXPECT_EQ(covered, total) << "perTile=" << perTile;
+            }
+
+            // The packed stride is itself a whole number of units, so the
+            // device's w*W term cannot land mid-epoch either, and the leftover
+            // it distributes is a whole number of units.
+            const TensileLite::StreamK::Static::Split split = TensileLite::StreamK::Static::computeSplit(
+                s.tiles, s.itersPerTile, s.grid, /*skFullTiles=*/1, /*forceDPOnly=*/false, g);
+            EXPECT_EQ(split.args.itersPerWG % g, size_t{0}) << "packed SKItersPerWG";
+            EXPECT_EQ(split.extraIters % g, size_t{0}) << "leftover";
+        }
+    }
+
+    // A tile whose K is not a whole number of units is the case the quantum
+    // exists for, and the one a quantised stride alone does not cover: tile t
+    // begins at t*itersPerTile, which is odd for odd t. Padding each tile to a
+    // whole unit in the flat space moves every tile start onto a unit boundary,
+    // so the leftover is a whole number of units in every tile at once.
+    //
+    // The padded iterations are not work. This replays the device's per-tile
+    // clamp (skTileIndex caps the local end at the real itersPerTile) and
+    // checks that each real iteration is claimed exactly once and the padding
+    // by nobody.
+    TEST(RowUniformityScaleEpoch_pre_checkin, PartialUnitTileStaysQuantised)
+    {
+        constexpr size_t g = 2;
+
+        const size_t oddIters[] = {1, 3, 5, 15, 33};
+        const size_t tiles[]    = {1, 4, 17, 576};
+        const size_t grids[]    = {1, 2, 3, 8, 320};
+
+        for(size_t i : oddIters)
+            for(size_t t : tiles)
+                for(size_t grid : grids)
+                {
+                    SCOPED_TRACE("tiles=" + std::to_string(t) + " itersPerTile="
+                                 + std::to_string(i) + " grid=" + std::to_string(grid));
+
+                    const size_t padded = TensileLite::StreamK::paddedItersPerTile(i, g);
+                    EXPECT_EQ(padded % g, size_t{0});
+                    EXPECT_GE(padded, i);
+                    EXPECT_LT(padded - i, g);
+
+                    const auto split = TensileLite::StreamK::Static::computeSplit(t, i, grid, 1, false, g);
+                    EXPECT_EQ(split.args.itersPerWG % g, size_t{0}) << "packed SKItersPerWG";
+                    EXPECT_EQ(split.extraIters % g, size_t{0}) << "leftover";
+
+                    for(bool perTile : {false, true})
+                    {
+                        std::vector<int> claims(t * i, 0);
+                        for(size_t w = 0; w < grid; ++w)
+                        {
+                            const auto r = TensileLite::StreamK::Static::workgroupIterRange(
+                                w, t, i, grid, perTile, true, g);
+                            EXPECT_EQ(r.start % g, size_t{0})
+                                << "w=" << w << " perTile=" << perTile;
+                            EXPECT_LE(r.start, r.end) << "w=" << w;
+
+                            for(size_t f = r.start; f < r.end; ++f)
+                            {
+                                const size_t tile  = f / padded;
+                                const size_t local = f % padded;
+                                if(tile < t && local < i)
+                                    claims[tile * i + local]++;
+                            }
+                        }
+                        for(size_t n = 0; n < claims.size(); ++n)
+                            EXPECT_EQ(claims[n], 1)
+                                << "perTile=" << perTile << " tile=" << (n / i)
+                                << " iter=" << (n % i);
+                    }
+                }
+    }
+
+    // Padding to one unit is no padding, so the flat space, the split and every
+    // range stay exactly what they were before the unit existed.
+    TEST(RowUniformityScaleEpoch_pre_checkin, UnitOnePadsNothing)
+    {
+        const size_t itersPerTile[] = {0, 1, 2, 7, 16, 33, 64, 257};
+        for(size_t i : itersPerTile)
+        {
+            EXPECT_EQ(TensileLite::StreamK::paddedItersPerTile(i, 0), i);
+            EXPECT_EQ(TensileLite::StreamK::paddedItersPerTile(i, 1), i);
+        }
+        EXPECT_EQ(TensileLite::StreamK::paddedItersPerTile(0, 2), size_t{0});
+        EXPECT_EQ(TensileLite::StreamK::paddedItersPerTile(17, 2), size_t{18});
+        EXPECT_EQ(TensileLite::StreamK::paddedItersPerTile(18, 2), size_t{18});
+        EXPECT_EQ(TensileLite::StreamK::paddedItersPerTile(17, 4), size_t{20});
+    }
+
+    // Granularity one has to leave every existing kernel exactly as it was.
+    TEST(RowUniformityScaleEpoch_pre_checkin, GranularityOneIsTheDefault)
+    {
+        const size_t tiles[]        = {1, 4, 17, 256, 576};
+        const size_t itersPerTile[] = {1, 7, 16, 64};
+        const size_t grids[]        = {1, 3, 8, 64, 448};
+
+        for(size_t t : tiles)
+            for(size_t i : itersPerTile)
+                for(size_t grid : grids)
+                {
+                    const auto implicit = TensileLite::StreamK::Static::computeSplit(t, i, grid, 1, false);
+                    const auto explicit1 = TensileLite::StreamK::Static::computeSplit(t, i, grid, 1, false, 1);
+                    EXPECT_EQ(implicit.args.skTiles, explicit1.args.skTiles);
+                    EXPECT_EQ(implicit.args.itersPerWG, explicit1.args.itersPerWG);
+                    EXPECT_EQ(implicit.extraIters, explicit1.extraIters);
+
+                    for(size_t w = 0; w < grid; ++w)
+                        for(bool perTile : {false, true})
+                        {
+                            const auto a = TensileLite::StreamK::Static::workgroupIterRange(
+                                w, t, i, grid, perTile, true);
+                            const auto b = TensileLite::StreamK::Static::workgroupIterRange(
+                                w, t, i, grid, perTile, true, 1);
+                            EXPECT_EQ(a.start, b.start) << "t=" << t << " i=" << i
+                                                        << " grid=" << grid << " w=" << w;
+                            EXPECT_EQ(a.end, b.end);
+                        }
+                }
     }
 
     // =======================================================================
@@ -1345,19 +2693,23 @@ namespace
         ASSERT_GT(grid, 0u);
         const size_t iters
             = std::max(size_t{1}, problem.getItersPerTile(solution->sizeMapping));
-        const auto split = TensileLite::streamKStaticSplit(
-            tiles, iters, grid, hardware.skFullTiles, solution->sizeMapping.isPersistentDataParallel());
+        const auto split = TensileLite::StreamK::Static::computeSplit(
+            tiles,
+            iters,
+            grid,
+            hardware.skFullTiles,
+            solution->sizeMapping.isPersistentDataParallel());
         EXPECT_TRUE(
-            TensileLite::streamKStaticSplitRowUniform(split,
-                                                      tiles,
-                                                      iters,
-                                                      grid,
-                                                      solution->internalArgsSupport.perTileExtraIters,
-                                                      problem.getParams().uniformSummationOrder()))
+            TensileLite::StreamK::Static::isRowUniform(split,
+                                                       tiles,
+                                                       iters,
+                                                       grid,
+                                                       solution->internalArgsSupport.perTileExtraIters,
+                                                       problem.getParams().uniformSummationOrder()))
             << "the unmodified probe must be launch-legal on the static split "
                "(tiles="
-            << tiles << " grid=" << grid << " skTiles=" << split.skTiles
-            << " skItersPerWG=" << split.skItersPerWG << " extraIters=" << split.extraIters
+            << tiles << " grid=" << grid << " skTiles=" << split.args.skTiles
+            << " skItersPerWG=" << split.args.itersPerWG << " extraIters=" << split.extraIters
             << "); the Synchronizer pointer is the one clause selection skips";
 
         EXPECT_TRUE(solution->uniformSummationOrderSupported(problem, hardware))
@@ -1456,6 +2808,24 @@ namespace
             << "A handwritten custom kernel must be refused under uniform summation order";
     }
 
+    // A handwritten kernel that declares uniformSummationOrder in its
+    // custom.config (one that reduces every row of D in the same order, like the
+    // wave-split-K skinny GEMMs) is admitted when nothing else in its launch
+    // would break row uniformity.
+    TEST(RowUniformityStreamKRejection_pre_checkin, HandwrittenCustomKernelDeclaringUniformOrder)
+    {
+        const auto hardware                           = probeHardware();
+        auto       solution                           = probeSolution();
+        solution->sizeMapping.tileProcessingStrategy  = TensileLite::TileProcessingStrategy::None;
+        solution->customKernel.name                   = "DummyCustomKernel";
+        solution->customKernel.generated              = false;
+        solution->customKernel.macrotile              = TensileLite::dim3(128, 128, 32);
+        solution->customKernel.uniformSummationOrder  = true;
+
+        EXPECT_TRUE(admitsUniformSummationOrder(*solution, hardware))
+            << "a handwritten custom kernel that declares uniform summation order must be admitted";
+    }
+
     // SupportCustomStaggerU: False does not mean the kernel found its stagger
     // somewhere the clamp cannot reach. It means only that the host declines to
     // write the packed StaggerU field, which leaves it 0, and a generated
@@ -1486,7 +2856,10 @@ namespace
                "reaches it and a declared StaggerU must not refuse it";
     }
 
-    TEST(RowUniformityStreamKRejection_pre_checkin, UsoKeepsStaggerOnlyWhenMappingIsAlready1)
+    // Uniform summation order turns StaggerU off whatever its mapping, and the
+    // solution stays admitted because the clamp settles the launch. Mapping 1
+    // staggers by the N tile index, which keeps rows uniform but not columns.
+    TEST(RowUniformityStreamKRejection_pre_checkin, UsoTurnsStaggerOffForEveryMapping)
     {
         const auto hardware                    = probeHardware();
         auto       solution                    = probeSolution();
@@ -1496,13 +2869,27 @@ namespace
         solution->sizeMapping.staggerU         = 16;
         auto problem                           = probeProblem();
         {
+            // With the mode off the declared stagger survives, so the zeros
+            // below are the clamp's doing and not the probe's.
+            auto off = problem;
+            off.setParams().setUniformSummationOrder(0);
+            const int32_t autoWGM
+                = std::get<0>(solution->calculateAutoWGM(off, &hardware, /*skgrid=*/0));
+            const auto [mapping, stagger, shift]
+                = solution->calculateAutoStaggerU(off, &hardware, 0, autoWGM);
+            ASSERT_EQ(mapping, 1u);
+            ASSERT_EQ(stagger, 16u);
+        }
+        {
             const int32_t autoWGM
                 = std::get<0>(solution->calculateAutoWGM(problem, &hardware, /*skgrid=*/0));
             const auto [mapping, stagger, shift]
                 = solution->calculateAutoStaggerU(problem, &hardware, 0, autoWGM);
-            EXPECT_EQ(mapping, 1u);
-            EXPECT_EQ(stagger, 16u);
-            EXPECT_TRUE(solution->uniformSummationOrderSupported(problem, hardware));
+            EXPECT_EQ(mapping, 0u);
+            EXPECT_EQ(stagger, 0u);
+            EXPECT_EQ(shift, 0u);
+            EXPECT_TRUE(solution->uniformSummationOrderSupported(problem, hardware))
+                << "mapping 1 is zeroed too, and the solution stays admitted";
         }
 
         auto remap = probeSolution();
@@ -1545,7 +2932,8 @@ namespace
             << "StreamK remains enabled, staggeru gets disabled";
     }
 
-    TEST(RowUniformityStreamKRejection_pre_checkin, StreamKWithPerTileKeepsMapping1Stagger)
+    // The per-tile extra-iters capability does not bring StaggerU back.
+    TEST(RowUniformityStreamKRejection_pre_checkin, StreamKWithPerTileDisablesStagger)
     {
         const auto hardware                             = probeHardware();
         auto       solution                             = probeSolution();
@@ -1562,23 +2950,22 @@ namespace
         const auto [mapping, stagger, shift]
             = solution->calculateAutoStaggerU(problem, &hardware, grid, autoWGM);
 
-        EXPECT_EQ(mapping, 1u);
-        EXPECT_EQ(stagger, 16u);
-        EXPECT_TRUE(solution->uniformSummationOrderSupported(problem, hardware));
+        EXPECT_EQ(mapping, 0u);
+        EXPECT_EQ(stagger, 0u);
+        EXPECT_EQ(shift, 0u);
+        EXPECT_TRUE(solution->uniformSummationOrderSupported(problem, hardware))
+            << "StreamK remains enabled, staggeru gets disabled";
     }
 
     // The other half of the same rule: frozen hand-written assembly can bake a
     // literal rotation into its main loop where no host-side clamp reaches, so
     // a compiled-in StaggerU there must still be refused.
     //
-    // The refusal this pins is the outcome, not one particular clause. The
-    // CustomKernel clause at the top of the predicate already refuses every
-    // hand-written custom kernel outright, so it is what fires here; the
-    // narrower CompiledInStaggerU clause sits behind it as defense in depth,
-    // for the day that first clause is relaxed to admit individually vetted
-    // custom kernels. Both are private, so the public predicate cannot say
-    // which one objected -- what matters is that this configuration never
-    // becomes admissible.
+    // The kernel declares uniform summation order, so the CustomKernel clause
+    // at the top of the predicate lets it through and the narrower
+    // CompiledInStaggerU clause is the one that refuses it. Both are private,
+    // so the public predicate cannot say which one objected -- what matters is
+    // that this configuration never becomes admissible.
     TEST(RowUniformityStreamKRejection_pre_checkin, HandwrittenCustomKernelWithCompiledInStaggerU)
     {
         const auto hardware                    = probeHardware();
@@ -1588,6 +2975,7 @@ namespace
         solution->sizeMapping.staggerU         = 16;
         solution->customKernel.name            = "DummyCustomKernel";
         solution->customKernel.generated       = false;
+        solution->customKernel.uniformSummationOrder = true;
         auto problem                           = probeProblem();
 
         EXPECT_FALSE(solution->uniformSummationOrderSupported(problem, hardware))
@@ -1742,19 +3130,30 @@ namespace
         const char* name;
         int         mxBlock;
         size_t      depthU;
+        size_t      k;
         bool        rejected;
     };
 
     const MXCase kMXCases[] = {
         // Every shipped MX StreamK solution sits at DepthU 256 or 512.
-        {"MXDepthU256", 32, 256, false},
-        {"MXDepthU512", 32, 512, false},
+        {"MXDepthU256", 32, 256, 1024, false},
+        {"MXDepthU512", 32, 512, 1024, false},
         // Reachable through the generator's own validation for MX fp8, where
         // duUnit is numSubIterK(1) * MatrixInstK(128) * LocalSplitU(1) = 128.
-        {"MXDepthU128", 32, 128, true},
+        // Stream-K divides K in whole 256-K scale epochs there
+        // (ContractionSolution::skKGranularity), so a cut cannot land inside a
+        // granule: K=1024 is eight DepthU, four epochs.
+        {"MXDepthU128EpochAligned", 32, 128, 1024, false},
+        // An odd number of DepthU per tile used to be refused: the leftover
+        // half-epoch forced the split back to single iterations, which let a
+        // cut straddle a granule. The flat space is now measured in tiles
+        // padded to a whole epoch (StreamK::paddedItersPerTile), so the quantum holds
+        // whatever the tile's K is and the tile's own iteration count no
+        // longer enters the audit.
+        {"MXDepthU128EpochRagged", 32, 128, 896, false},
         // The guard must scope to MX problems and nothing else.
-        {"NonMXDepthU128", 0, 128, false},
-        {"NonMXDepthU16", 0, 16, false},
+        {"NonMXDepthU128", 0, 128, 1024, false},
+        {"NonMXDepthU16", 0, 16, 1024, false},
     };
 
     class RowUniformityStreamKMX_pre_checkin : public ::testing::TestWithParam<MXCase>
@@ -1771,8 +3170,17 @@ namespace
         solution->problemType.mxBlockB   = c.mxBlock;
         solution->sizeMapping.depthU     = c.depthU;
 
-        EXPECT_EQ(!admitsUniformSummationOrder(*solution, hardware), c.rejected)
-            << "mxBlock=" << c.mxBlock << " depthU=" << c.depthU;
+        // K decides how many DepthU a tile holds. A ragged count is carried by
+        // the padding rather than by dropping the quantum, so it is admitted
+        // alongside the aligned one; the parameter stays to pin that.
+        auto problem = TensileLite::ContractionProblemGemm::GEMM(
+            false, false, 1024, 1024, c.k, 1024, 1024, 1024, 0.0, false, 1);
+        problem.setComputeInputTypeA(rocisa::DataType::Float);
+        problem.setComputeInputTypeB(rocisa::DataType::Float);
+        problem.setParams().setUniformSummationOrder(1);
+
+        EXPECT_EQ(!solution->uniformSummationOrderSupported(problem, hardware), c.rejected)
+            << "mxBlock=" << c.mxBlock << " depthU=" << c.depthU << " k=" << c.k;
     }
 
     INSTANTIATE_TEST_SUITE_P(RowUniformity,
@@ -1791,10 +3199,16 @@ namespace
         auto       solution                  = probeSolution();
         solution->problemType.mxBlockA      = 32;
         solution->problemType.mxBlockB      = 32;
-        solution->problemType.mxScaleFormat = 2; // InMemorySwizzle
-
-        EXPECT_FALSE(admitsUniformSummationOrder(*solution, hardware))
-            << "An unaudited MX scale layout must be refused";
+        // Format 1 retains the HostPreSwizzle envelope. Format 2's TDM
+        // iteration increments need no extra USO geometry check, independent
+        // of this mock processor; kernel compatibility is checked separately.
+        for(int format : {0, 1, 2, 3})
+        {
+            solution->problemType.mxScaleFormat = format;
+            EXPECT_EQ(admitsUniformSummationOrder(*solution, hardware),
+                      format == 1 || format == 2)
+                << "MXScaleFormat=" << format;
+        }
     }
 
     TEST(RowUniformityStreamKRejection_pre_checkin, MXMatrixInstKEnvelope)
@@ -1823,8 +3237,8 @@ namespace
         size_t                          tiles         = 0;
         size_t                          itersPerTile  = 0;
         size_t                          grid          = 0;
-        TensileLite::StreamKStaticSplit split;
-        bool                            rowUniform = false;
+        TensileLite::StreamK::Static::Split split;
+        bool                                rowUniform = false;
         // Row-uniform and refused by the pre-existing tiles % grid == 0 test,
         // i.e. exactly the regime this change adds.
         bool newlyAdmitted     = false;
@@ -1892,6 +3306,35 @@ namespace
 
         out.streamK = true;
 
+        // Clustered Stream-K schedules spatial blocks and may switch parallel
+        // reduction to tree or fall back to whole blocks, so read the launch
+        // settings from resolvePersistentSettings().
+        if(solution.usesStreamKSpatialCluster())
+        {
+            const auto  launch  = solution.resolvePersistentSettings(tensile, hardware);
+            const auto& cluster = launch.clusterSchedule;
+            out.staticPacking   = true;
+            out.tree            = launch.reduction == origami::reduction_t::tree;
+            out.tiles           = cluster.blocks;
+            out.itersPerTile    = cluster.itersPerTile;
+            out.grid            = launch.grid;
+            if(!out.tree || out.grid == 0)
+                return out;
+            out.split             = cluster.split;
+            out.perTileExtraIters = solution.internalArgsSupport.perTileExtraIters;
+            out.rowUniform        = TensileLite::StreamK::Static::isRowUniform(
+                out.split,
+                out.tiles,
+                out.itersPerTile,
+                out.grid,
+                out.perTileExtraIters,
+                tensile.getParams().uniformSummationOrder(),
+                solution.skKGranularity());
+            out.newlyAdmitted
+                = out.rowUniform && out.split.args.skTiles != 0 && out.tiles % out.grid != 0;
+            return out;
+        }
+
         const bool effectiveDynamic = solution.sizeMapping.workAssignment == TensileLite::WorkAssignment::Hybrid
                                           ? solution.streamK5EffectiveDynamic(tensile, hardware)
                                           : false;
@@ -1912,14 +3355,14 @@ namespace
             return out;
 
         auto const* amdgpu = dynamic_cast<TensileLite::AMDGPU const*>(&hardware);
-        out.split          = TensileLite::streamKStaticSplit(
+        out.split          = TensileLite::StreamK::Static::computeSplit(
             out.tiles,
             out.itersPerTile,
             out.grid,
             amdgpu != nullptr ? amdgpu->skFullTiles : 1,
             solution.sizeMapping.isPersistentDataParallel());
         out.perTileExtraIters = solution.internalArgsSupport.perTileExtraIters;
-        out.rowUniform        = TensileLite::streamKStaticSplitRowUniform(
+        out.rowUniform        = TensileLite::StreamK::Static::isRowUniform(
             out.split,
             out.tiles,
             out.itersPerTile,
@@ -1927,7 +3370,7 @@ namespace
             out.perTileExtraIters,
             tensile.getParams().uniformSummationOrder());
         out.newlyAdmitted
-            = out.rowUniform && out.split.skTiles != 0 && out.tiles % out.grid != 0;
+            = out.rowUniform && out.split.args.skTiles != 0 && out.tiles % out.grid != 0;
         return out;
     }
 
@@ -2055,9 +3498,9 @@ namespace
                         << name << ": clause 2 requires the grid to be a multiple of the tile count";
                     EXPECT_NE(resolved.grid, resolved.tiles)
                         << name << ": a grid equal to the tile count is the pre-existing regime";
-                    EXPECT_EQ(resolved.split.skTiles, resolved.tiles);
-                    EXPECT_NE(resolved.split.skItersPerWG, resolved.itersPerTile);
-                    ASSERT_NE(resolved.split.skItersPerWG, 0u);
+                    EXPECT_EQ(resolved.split.args.skTiles, resolved.tiles);
+                    EXPECT_NE(resolved.split.args.itersPerWG, resolved.itersPerTile);
+                    ASSERT_NE(resolved.split.args.itersPerWG, 0u);
 
                     const bool leftoverSplit = resolved.split.extraIters != 0u;
                     if(leftoverSplit)
@@ -2065,14 +3508,14 @@ namespace
                         EXPECT_TRUE(resolved.perTileExtraIters)
                             << name << ": leftover extraIters=" << resolved.split.extraIters
                             << " (itersPerTile%skItersPerWG="
-                            << (resolved.itersPerTile % resolved.split.skItersPerWG)
+                            << (resolved.itersPerTile % resolved.split.args.itersPerWG)
                             << ") is admitted only with per-tile extra-iters; do not "
                                "classify it as the even K-split";
                     }
                     else
                     {
                         EXPECT_EQ(resolved.split.extraIters, 0u);
-                        EXPECT_EQ(resolved.itersPerTile % resolved.split.skItersPerWG, 0u);
+                        EXPECT_EQ(resolved.itersPerTile % resolved.split.args.itersPerWG, 0u);
                     }
 
                     if(admitted == 0)
@@ -2083,9 +3526,9 @@ namespace
                         RecordProperty("sk_grid", static_cast<int>(resolved.grid));
                         RecordProperty("grid_over_tiles",
                                        static_cast<int>(resolved.grid / resolved.tiles));
-                        RecordProperty("sk_tiles", static_cast<int>(resolved.split.skTiles));
+                        RecordProperty("sk_tiles", static_cast<int>(resolved.split.args.skTiles));
                         RecordProperty("sk_iters_per_wg",
-                                       static_cast<int>(resolved.split.skItersPerWG));
+                                       static_cast<int>(resolved.split.args.itersPerWG));
                         RecordProperty("extra_iters",
                                        static_cast<int>(resolved.split.extraIters));
                         RecordProperty("leftover_split", leftoverSplit ? 1 : 0);
@@ -2095,8 +3538,8 @@ namespace
                     EXPECT_EQ(harness.run(candidate, /*uniformMode=*/true), HIPBLAS_STATUS_SUCCESS)
                         << name << " has a row-uniform StreamK split (tiles=" << resolved.tiles
                         << " itersPerTile=" << resolved.itersPerTile << " grid=" << resolved.grid
-                        << " skTiles=" << resolved.split.skTiles
-                        << " skItersPerWG=" << resolved.split.skItersPerWG
+                        << " skTiles=" << resolved.split.args.skTiles
+                        << " skItersPerWG=" << resolved.split.args.itersPerWG
                         << " extraIters=" << resolved.split.extraIters
                         << (leftoverSplit ? ", leftover per-tile extra-iters" : ", even K-split")
                         << ") and must be admitted rather than refused";
@@ -2264,11 +3707,12 @@ namespace
 
         const size_t grid
             = solution->getSKGrid(problem, device, tiles, origami::reduction_t::parallel);
-        TensileLite::StreamKSettings sk;
-        sk.reduction = origami::reduction_t::parallel;
-        sk.grid      = grid;
-        EXPECT_TRUE(TensileLite::streamKParallelReductionRowUniform(
-            sk, solution->sizeMapping.streamKAtomic, /*staticTwoTilePacking=*/true, tiles))
+        EXPECT_TRUE(TensileLite::StreamK::isParallelReductionRowUniform(
+            origami::reduction_t::parallel,
+            grid,
+            solution->sizeMapping.streamKAtomic,
+            /*staticTwoTilePacking=*/true,
+            tiles))
             << "gate helper must admit the resolved parallel settings (grid=" << grid
             << " tiles=" << tiles << ")";
         // Empirical note: report 15 measured UNIFORM for this parallel-window
@@ -2662,21 +4106,23 @@ namespace
         EXPECT_EQ(grid % tiles, 0u) << "the selected grid must stay a multiple of the tiles";
 
         // The grid is admissible on its own terms, not merely small enough.
-        const TensileLite::StreamKStaticSplit split = TensileLite::streamKStaticSplit(
-            tiles, I, grid, /*skFullTiles=*/1, /*forceDPOnly=*/false);
+        const TensileLite::StreamK::Static::Split split
+            = TensileLite::StreamK::Static::computeSplit(
+                tiles, I, grid, /*skFullTiles=*/1, /*forceDPOnly=*/false);
         EXPECT_TRUE(
-            TensileLite::streamKStaticSplitRowUniform(split,
-                                                      tiles,
-                                                      I,
-                                                      grid,
-                                                      solution->internalArgsSupport.perTileExtraIters,
-                                                      problem.getParams().uniformSummationOrder()))
+            TensileLite::StreamK::Static::isRowUniform(split,
+                                                       tiles,
+                                                       I,
+                                                       grid,
+                                                       solution->internalArgsSupport.perTileExtraIters,
+                                                       problem.getParams().uniformSummationOrder()))
             << "grid=" << grid << " must pack row-uniformly";
 
         // What clamping after selection produces instead -- the mode-off grid above.
-        const TensileLite::StreamKStaticSplit clamped = TensileLite::streamKStaticSplit(
-            tiles, I, TensileLite::StreamKFlagElements, 1, false);
-        EXPECT_FALSE(TensileLite::streamKStaticSplitRowUniform(
+        const TensileLite::StreamK::Static::Split clamped
+            = TensileLite::StreamK::Static::computeSplit(
+                tiles, I, TensileLite::StreamKFlagElements, 1, false);
+        EXPECT_FALSE(TensileLite::StreamK::Static::isRowUniform(
             clamped,
             tiles,
             I,
@@ -2724,15 +4170,16 @@ namespace
             << "all-full leaves no partial tiles, so the launch takes no flag region and the "
                "bound does not apply -- the grid may legally exceed it";
 
-        const TensileLite::StreamKStaticSplit split = TensileLite::streamKStaticSplit(
-            tiles, I, grid, /*skFullTiles=*/1, /*forceDPOnly=*/false);
+        const TensileLite::StreamK::Static::Split split
+            = TensileLite::StreamK::Static::computeSplit(
+                tiles, I, grid, /*skFullTiles=*/1, /*forceDPOnly=*/false);
         EXPECT_TRUE(
-            TensileLite::streamKStaticSplitRowUniform(split,
-                                                      tiles,
-                                                      I,
-                                                      grid,
-                                                      solution->internalArgsSupport.perTileExtraIters,
-                                                      problem.getParams().uniformSummationOrder()))
+            TensileLite::StreamK::Static::isRowUniform(split,
+                                                       tiles,
+                                                       I,
+                                                       grid,
+                                                       solution->internalArgsSupport.perTileExtraIters,
+                                                       problem.getParams().uniformSummationOrder()))
             << "the all-full grid must remain admissible above the bound";
     }
 

@@ -23,9 +23,11 @@
  # THE SOFTWARE.
  #
  ###############################################################################
- set(ContractionCommonSources ${HIPTENSOR_COMMON_TEST_SOURCES}
+ add_hiptensor_test_objects(hiptensor_contraction_test_objects
  ${CMAKE_CURRENT_SOURCE_DIR}/contraction_resource.cpp
  ${CMAKE_CURRENT_SOURCE_DIR}/contraction_test.cpp)
+ set(ContractionCommonSources ${HIPTENSOR_COMMON_TEST_SOURCES}
+ $<TARGET_OBJECTS:hiptensor_contraction_test_objects>)
 
 # Bilinear M1N1K1 tests
 set (BilinearContractionTestSources ${ContractionCommonSources}
@@ -133,9 +135,11 @@ add_hiptensor_test(complex_scale_contraction_test_m6n6k6 ${ComplexScaleContracti
 
 
 # Trinary contraction common sources
-set(TrinaryContractionCommonSources ${HIPTENSOR_COMMON_TEST_SOURCES}
+add_hiptensor_test_objects(hiptensor_trinary_contraction_test_objects
 ${CMAKE_CURRENT_SOURCE_DIR}/trinary_contraction_resource.cpp
 ${CMAKE_CURRENT_SOURCE_DIR}/trinary_contraction_test.cpp)
+set(TrinaryContractionCommonSources ${HIPTENSOR_COMMON_TEST_SOURCES}
+$<TARGET_OBJECTS:hiptensor_trinary_contraction_test_objects>)
 
 # Trinary Bilinear contraction tests
 set (TrinaryBilinearContractionTestSources ${TrinaryContractionCommonSources}
@@ -148,6 +152,11 @@ set (TrinaryScaleContractionTestSources ${TrinaryContractionCommonSources}
      ${CMAKE_CURRENT_SOURCE_DIR}/trinary_scale_contraction_test.cpp)
 set (TrinaryScaleContractionTestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/validation/standard/trinary_scale_test_params.yaml)
 add_hiptensor_test(trinary_scale_contraction_test ${TrinaryScaleContractionTestConfig} ${TrinaryScaleContractionTestSources})
+
+# Contraction with padded strides planned by the timing selection algorithms
+add_hiptensor_unit_test(contraction_padded_strides_test
+    ${HIPTENSOR_COMMON_TEST_SOURCES}
+    ${CMAKE_CURRENT_SOURCE_DIR}/contraction_padded_strides_test.cpp)
 
 # Contraction mode tests
 set (ContractionModeTestSources ${ContractionCommonSources}
@@ -172,3 +181,8 @@ set (ScaleContractionUnaryOpsTestSources ${ContractionCommonSources}
 ${CMAKE_CURRENT_SOURCE_DIR}/scale_contraction_with_unary_ops_test.cpp)
 set (ScaleContractionUnaryOpsTestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/validation/standard/scale_contraction_unary_ops_params.yaml)
 add_hiptensor_test(scale_contraction_with_unary_ops_test ${ScaleContractionUnaryOpsTestConfig}  ${ScaleContractionUnaryOpsTestSources})
+
+# Trinary contraction with a workspace that holds NaN before each execution
+add_hiptensor_unit_test(trinary_contraction_workspace_test
+    ${HIPTENSOR_COMMON_TEST_SOURCES}
+    ${CMAKE_CURRENT_SOURCE_DIR}/trinary_contraction_workspace_test.cpp)

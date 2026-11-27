@@ -54,7 +54,9 @@ std::vector<char> random_bytes(size_t length)
     return v;
 }
 
-TEST(CPU_Cache_NONE, check_bz2_compress)
+using CPU_Cache_NONE = testing::TestWithParam<int>;
+
+TEST_P(CPU_Cache_NONE, check_bz2_compress)
 {
     std::vector<char> to_compress;
     bool success = false;
@@ -71,7 +73,7 @@ TEST(CPU_Cache_NONE, check_bz2_compress)
     ASSERT_TRUE(cmprsd.size() < to_compress.size());
 }
 
-TEST(CPU_Cache_NONE, check_bz2_decompress)
+TEST_P(CPU_Cache_NONE, check_bz2_decompress)
 {
     std::vector<char> empty;
 
@@ -93,7 +95,7 @@ TEST(CPU_Cache_NONE, check_bz2_decompress)
     ASSERT_TRUE(decompressed == miopen::decompress(compressed, original.size() + 10));
 }
 
-TEST(CPU_Cache_NONE, check_kern_db)
+TEST_P(CPU_Cache_NONE, check_kern_db)
 {
     miopen::KernelConfig cfg0;
     cfg0.kernel_name = "kernel1";
@@ -144,7 +146,7 @@ static_assert(std::is_lvalue_reference_v<decltype(miopen::GetDbInstance<miopen::
                   miopen::DbKinds::KernelDb, {}, true))>,
               "GetDbInstance<KernDb> should return an lvalue reference (cached overload)");
 
-TEST(CPU_Cache_NONE, check_kern_db_cached_reuse)
+TEST_P(CPU_Cache_NONE, check_kern_db_cached_reuse)
 {
     miopen::TempFile temp_file("tmp-kerndb-cached");
     auto& db1 = miopen::KernDb::GetCached(miopen::DbKinds::KernelDb, temp_file, false);
@@ -153,7 +155,7 @@ TEST(CPU_Cache_NONE, check_kern_db_cached_reuse)
     miopen::KernDb::EvictCached(temp_file, false);
 }
 
-TEST(CPU_Cache_NONE, check_kern_db_cached_distinct_paths)
+TEST_P(CPU_Cache_NONE, check_kern_db_cached_distinct_paths)
 {
     miopen::TempFile temp_file_a("tmp-kerndb-cached-a");
     miopen::TempFile temp_file_b("tmp-kerndb-cached-b");
@@ -164,7 +166,7 @@ TEST(CPU_Cache_NONE, check_kern_db_cached_distinct_paths)
     miopen::KernDb::EvictCached(temp_file_b, false);
 }
 
-TEST(CPU_Cache_NONE, check_kern_db_cached_thread_safety)
+TEST_P(CPU_Cache_NONE, check_kern_db_cached_thread_safety)
 {
     miopen::TempFile temp_file("tmp-kerndb-cached-mt");
     auto& db = miopen::KernDb::GetCached(miopen::DbKinds::KernelDb, temp_file, false);
@@ -212,8 +214,10 @@ TEST(CPU_Cache_NONE, check_kern_db_cached_thread_safety)
 }
 #endif
 
-TEST(CPU_Cache_NONE, check_cache_file)
+TEST_P(CPU_Cache_NONE, check_cache_file)
 {
     auto p = miopen::GetCacheFile("gfx", "base", "args");
     EXPECT_TRUE(p.filename() == miopen::make_object_file_name("base"));
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_Cache_NONE, testing::Values(0));

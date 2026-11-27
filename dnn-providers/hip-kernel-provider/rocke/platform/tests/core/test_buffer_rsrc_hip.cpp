@@ -13,6 +13,9 @@
  * the HIP flags word is the expected value for that target family and is the
  * same number the LLVM lowerer passes to llvm.amdgcn.make.buffer.rsrc.
  *
+ * The self-check also runs the tile.buffer_atomic_fadd_f32 checks of
+ * tests/core/test_buffer_atomic_fadd.cpp, which is linked into this binary.
+ *
  * With `--hip <arch>` it prints the lowered HIP source of one copy kernel built
  * exactly like tests/core/test_buffer_rsrc_hip.py's _copy_kernel, so that test
  * can byte-compare the two engines.
@@ -151,6 +154,9 @@ void check(const char* arch, unsigned word3)
 
 } // namespace
 
+/* tests/core/test_buffer_atomic_fadd.cpp: the number of failed checks. */
+int rocke_test_buffer_atomic_fadd();
+
 int main(int argc, char** argv)
 {
     if(argc == 3 && strcmp(argv[1], "--hip") == 0)
@@ -173,6 +179,7 @@ int main(int argc, char** argv)
      * from the gfx12 backend. */
     for(const char* arch : {"gfx1151", "gfx11-generic", "gfx1201", "gfx12-generic", "gfx1250"})
         check(arch, 0x31014000u);
+    g_failures += rocke_test_buffer_atomic_fadd();
     if(g_failures)
     {
         fprintf(stderr, "%d failure(s)\n", g_failures);

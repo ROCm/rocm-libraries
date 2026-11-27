@@ -14,6 +14,7 @@ from uhd_gen.tests.model_bin import ENCODING_FLAGS, encoding_of  # noqa: E402
 
 UED = "6d2b90f4-8c15-4a37-9e58-04b7c3fa1d62"
 KMD = "3f8a1c07-52d9-4e61-b0a4-9c7d61e2830f"
+DQ_KMD = "d48a31bc-6e07-4d95-b1f2-3a8c0e5792d6"
 
 
 def _l1_corpus(path, metric="tflops"):
@@ -97,6 +98,190 @@ def test_a_bad_source_date_epoch_fails_training_before_anything_is_written(
     )
     assert "SOURCE_DATE_EPOCH" in caplog.text
     assert not (tmp_path / "model").exists()
+
+
+def _trained_version(output):
+    return json.loads((output / "heuristic.uhd.json").read_text("utf-8"))["version"]
+
+
+def test_an_unslotted_model_stays_uhd_1_0(tmp_path, evaluator):
+    """Unslotted output is byte-for-byte what it was before slots: no 1.1 stamp."""
+    corpus = _l1_corpus(tmp_path / "corpus.json")
+    output = tmp_path / "model"
+    assert _l1_train(corpus, output, "--feature-evaluator", evaluator) == 0
+    assert _trained_version(output) == "1.0"
+
+
+def test_train_reads_an_optional_attribute_through_its_default(tmp_path, evaluator):
+    """RFC 0019 §6.7 and §6.8 item 9: rows whose graph left the SDPA scale unset train on the
+    1.0 the runtime reads, and the signature and hash the model records are the wrapped ones.
+    """
+    from uhd_gen.features import compute_features_hash
+
+    scale = "graph.nodes[0].attn_scale_value"
+    corpus = _l1_corpus(tmp_path / "corpus.json")
+    rows = json.loads(corpus.read_text(encoding="utf-8"))
+    for index, row in enumerate(rows):
+        if index % 2:
+            row["features"][scale] = 0.125
+    corpus.write_text(json.dumps(rows), encoding="utf-8")
+    output = tmp_path / "model"
+    assert (
+        _l1_train(
+            corpus,
+            output,
+            "--features",
+            "graph.flops",
+            "graph.nodes[0].x.dims[0]",
+            scale,
+            "--feature-evaluator",
+            evaluator,
+        )
+        == 0
+    )
+
+    descriptor = json.loads((output / "heuristic.uhd.json").read_text(encoding="utf-8"))
+    assert descriptor["features_signature"] == [
+        "$graph.flops",
+        "$graph.nodes[0].x.dims[0]",
+        {"value_or_default": ["$" + scale, 1.0]},
+    ]
+    assert descriptor["features_hash"] == compute_features_hash(
+        descriptor["features_signature"], None, evaluator
+    )
+
+
+def test_a_requested_optional_column_no_row_publishes_is_still_a_missing_column(
+    tmp_path, evaluator, caplog
+):
+    """Wrapping reads every optional feature through a default, so a column no row publishes
+    would train as a constant: the check for missing columns looks at what was requested.
+    """
+    corpus = _l1_corpus(tmp_path / "corpus.json")
+    code = _l1_train(
+        corpus,
+        tmp_path / "model",
+        "--features",
+        "graph.flops",
+        "graph.nodes[0].x.dims[0]",
+        "graph.nodes[0].attn_scale_value",
+        "--feature-evaluator",
+        evaluator,
+    )
+    assert code == 1
+    assert "Missing feature columns" in caplog.text
+    assert "graph.nodes[0].attn_scale_value" in caplog.text
+    assert not (tmp_path / "model").exists()
+
+
+def test_a_model_trained_against_every_slots_kmd_is_uhd_1_1(tmp_path, evaluator):
+    """A slotted engine's L1 model records `kmds`, which only UHD 1.1 may carry; the
+    snapshot is replayed with `--provenance`, so no GPU or descriptor tree is needed."""
+    provenance = {
+        "ued": {"id": UED, "revision": "1.0"},
+        "kmds": [
+            {"slot": "prep", "id": KMD, "revision": "1.0"},
+            {"slot": "dq", "id": DQ_KMD, "revision": "1.0"},
+        ],
+        "umd": [],
+    }
+    corpus = _l1_corpus(tmp_path / "corpus.json")
+    rows = json.loads(corpus.read_text("utf-8"))
+    for row in rows:
+        row["binding"]["trained_against"] = provenance
+    corpus.write_text(json.dumps(rows), encoding="utf-8")
+    snapshot = tmp_path / "provenance.json"
+    snapshot.write_text(json.dumps(provenance), encoding="utf-8")
+    output = tmp_path / "model"
+    assert (
+        _l1_train(
+            corpus,
+            output,
+            "--provenance",
+            str(snapshot),
+            "--feature-evaluator",
+            evaluator,
+        )
+        == 0
+    )
+    assert _trained_version(output) == "1.1"
+
+
+def test_a_model_that_records_a_codegen_revision_is_uhd_1_2(tmp_path, evaluator):
+    """`trained_against.codegen_revision` is a UHD 1.2 key: a model whose measurements
+    agree on one records it and is written as 1.2."""
+    corpus = _l1_corpus(tmp_path / "corpus.json")
+    rows = json.loads(corpus.read_text("utf-8"))
+    for row in rows:
+        row["binding"]["trained_against"]["codegen_revision"] = "cg-A"
+    corpus.write_text(json.dumps(rows), encoding="utf-8")
+    output = tmp_path / "model"
+    assert _l1_train(corpus, output, "--feature-evaluator", evaluator) == 0
+    descriptor = json.loads((output / "heuristic.uhd.json").read_text("utf-8"))
+    assert descriptor["version"] == "1.2"
+    assert descriptor["trained_against"]["codegen_revision"] == "cg-A"
+
+
+def test_a_catalog_ranker_records_no_codegen_revision_from_its_snapshot(
+    tmp_path, evaluator
+):
+    """RFC 0019.13: an L2 ranker records no codegen revision, so a `--provenance`
+    snapshot copied from a runtime binding still trains a 1.0 UHD."""
+    provenance = tmp_path / "provenance.json"
+    provenance.write_text(
+        json.dumps(
+            {
+                "ued": {"id": UED, "revision": "1.0"},
+                "kmd": {"id": KMD, "revision": "1.0"},
+                "umd": [],
+                "codegen_revision": "cg-A",
+            }
+        ),
+        encoding="utf-8",
+    )
+    rows = [
+        {
+            "benchmark": f"p{problem}",
+            "device": "board",
+            "kernel": f"k{variant}",
+            "kernel.variant": variant,
+            "graph.size": problem + 1,
+            "tflops": 20.0 + problem + variant,
+        }
+        for problem in range(10)
+        for variant in range(2)
+    ]
+    corpus = tmp_path / "corpus.json"
+    corpus.write_text(json.dumps(rows), encoding="utf-8")
+    output = tmp_path / "model"
+    assert (
+        main(
+            [
+                "train",
+                "--input",
+                str(corpus),
+                "--output-dir",
+                str(output),
+                "--provenance",
+                str(provenance),
+                "--features",
+                "kernel.variant",
+                "graph.size",
+                "--metric",
+                "tflops",
+                "--num-boost-round",
+                "2",
+                "--early-stopping",
+                "1",
+                "--feature-evaluator",
+                evaluator,
+            ]
+        )
+        == 0
+    )
+    descriptor = json.loads((output / "heuristic.uhd.json").read_text(encoding="utf-8"))
+    assert descriptor["version"] == "1.0"
+    assert "codegen_revision" not in descriptor["trained_against"]
 
 
 def test_rows_collected_under_another_metric_cannot_train_a_model(

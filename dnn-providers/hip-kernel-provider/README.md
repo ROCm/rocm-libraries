@@ -25,11 +25,35 @@ HipKernelEngine
 
 - **Engines** (`src/engines/`): High-level operation orchestration
     - **HIP MLops engine** (`src/engines/hip_mlops_engine/`): Kernel-specific execution logic. Enabled via the compile flag `ENABLE_HIP_MLOPS_ENGINE` (on by default)
-    - **ASM SDPA engine** (`src/engines/asm_sdpa_engine/`): Assembly kernels to do scaled dot-product attention (SDPA). Enabled via `ENABLE_ASM_SDPA_ENGINE` (on by default)
+    - **ASM SDPA engine** (`src/engines/asm_sdpa_engine/`): Assembly kernels to do scaled dot-product attention (SDPA). Enabled via `ENABLE_ASM_SDPA_ENGINE` (on by default). Data-type contract: [asm_kernels/README.md](src/engines/asm_sdpa_engine/asm/asm_kernels/README.md#data-type-contract)
     - **HIP Flash2 engine** (`src/engines/hip_flash2_engine/`): Flash-Attention 2 V7 SDPA kernel using precompiled `.co` files for gfx942/gfx950 (FP16). Enabled via `ENABLE_HIP_FLASH2_ENGINE` (off by default)
+    - **Packaged gfx950 convolution** (`hipkernel:Gfx950ConvFwdAot`): rocKE forward convolution with FP16/BF16 channels-last storage. See the [integration guide](docs/gfx950_conv_fwd/README.md) for catalog scope, packaging, and tests.
 - **HIP Infrastructure** (`src/hip/`): HIPRTC wrapper classes for compilation and execution
 - **Kernels** (`kernels/`): Device-side kernel source code embedded at build time
 - **Plugin SDK Integration**: Implements `IPlan`, `IPlanBuilder`, `IEngine` interfaces
+
+### HIP MLops normalization fusion
+
+The HIP MLops batch normalization and RMS normalization plans support
+ReLU, clipped ReLU, and clamp with
+`RELU_FWD` for forward plans or `RELU_BWD` for backward plans. Batch normalization
+forward plans, including training, also accept a fused `IDENTITY` node.
+RMS normalization accepts unary `IDENTITY` in either direction; backward
+passthrough does not require ReLU's second input. Existing tensor/layout and
+graph connectivity requirements still apply.
+
+Batch normalization and RMS normalization share the same activation-mode
+validation for direction, passthrough and supported ReLU parameters.
+
+Leaky ReLU is **unsupported** in these normalization fusions: any supplied
+`relu_lower_clip_slope` on a ReLU node (including an explicit zero) is rejected.
+Although the common activation enum names `LEAKY_RELU`, the shared scalar kernels
+do not implement its forward function or gradient, so accepting the slope would
+silently produce incorrect results.
+
+Layer normalization supports only a single normalization node, not fused
+pointwise graphs (including `IDENTITY`, ReLU, and leaky ReLU). These restrictions
+describe the HIP MLops engine, not kernel-ingestor descriptor support.
 
 ## Building
 
@@ -82,7 +106,7 @@ Packaging probes pack descriptors with the real packer for one explicit architec
 
 ### rocKE and FlyDSL descriptors (DVC)
 
-With `HIPKERNELPROVIDER_ENABLE_ROCKE=ON`, the shipped rocKE descriptor bundles keep their large files (the KDPs, kernel objects, and heuristic model files) in DVC, not git. FlyDSL's prebuilt kernels (one folder per op and target, under `descriptors/FlyDSL/`) do the same when `HIPKERNELPROVIDER_ENABLE_FLYDSL` is ON with the kernel ingestor, and are checked the same way. Run `dvc pull -r ingestor <pointer>.dvc`, or let TheRock's `fetch_sources` do it, to get them. Without the pull, configure warns and the shipped bundle is not packed; builds and tests still run. Release builds should set `-DHIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON` to make a missing file an error. To skip the shipped bundles, set `-DHIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` to another tree, such as `descriptor-packaging/examples/descriptors`. See [Large rocKE files live in DVC](src/engines/kernel_ingestor_engine/descriptors/README.md#large-rocke-files-live-in-dvc).
+With `HIPKERNELPROVIDER_ENABLE_ROCKE=ON`, the shipped rocKE descriptor bundles keep their large files (the KDPs, kernel objects, and heuristic model files) in DVC, not git. Each trained model is its own output: `heuristics/<ued-id>/<role>/<arch>/<metric>/model.bin` with a `model.bin.dvc` pointer beside its `heuristic.uhd.json`. FlyDSL's prebuilt kernels (one folder per op and target, under `descriptors/FlyDSL/`) do the same when `HIPKERNELPROVIDER_ENABLE_FLYDSL` is ON with the kernel ingestor, and are checked the same way. Run `dvc pull -r ingestor <pointer>.dvc`, or let TheRock's `fetch_sources` do it, to get them. Without the pull, configure warns and the shipped bundle is not packed; builds and tests still run. A model that was not pulled is left out of an otherwise complete bundle: the pack warns, does not ship that model's UHD, and the engine runs with that role off. Release builds should set `-DHIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON` to make a missing file, a missing model included, an error. To skip the shipped bundles, set `-DHIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT` to another tree, such as `descriptor-packaging/examples/descriptors`. See [Large rocKE files live in DVC](src/engines/kernel_ingestor_engine/descriptors/README.md#large-rocke-files-live-in-dvc).
 
 ### Testing
 
@@ -108,7 +132,7 @@ You can save a built execution plan to bytes and load it later, in the same proc
 
 ### Supported Engines
 
-Only kernel ingestor engines support saving and loading plans, and only when every kernel of the engine is a single-launch kpack code object. A multi-launch kernel cannot be saved yet. Every dispatch handler of the engine must also support saving. The kernel ingestor needs a build with `HIPDNN_ENABLE_KERNEL_INGESTOR=ON` (off by default). A supported engine reports the behavior note `SUPPORTS_EXECUTION_PLAN_SERIALIZATION`. To check the engine of a built plan:
+Only kernel ingestor engines support saving and loading plans, and only when every kernel of the engine is a single-launch kpack code object. A multi-launch kernel cannot be saved yet, and an engine that declares slots (RFC 0021) does not advertise plan serialization, whatever its kernels are. Every dispatch handler of the engine must also support saving. The kernel ingestor needs a build with `HIPDNN_ENABLE_KERNEL_INGESTOR=ON` (off by default). A supported engine reports the behavior note `SUPPORTS_EXECUTION_PLAN_SERIALIZATION`. To check the engine of a built plan:
 
 ```cpp
 #include <algorithm>

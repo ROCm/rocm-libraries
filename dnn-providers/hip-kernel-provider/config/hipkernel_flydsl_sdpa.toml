@@ -1,0 +1,7 @@
+# Integration test configuration for the FlyDSL SDPA forward engines (hipkernel:flydsl_sdpa_*)
+# (one file for all six engines: src/CMakeLists.txt writes each (engine, arch) copy with its own header line)
+# Filters use GTest-style globs: * matches any sequence of characters
+# The first matching skip entry wins.
+
+[meta]
+version = 1

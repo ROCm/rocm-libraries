@@ -76,7 +76,7 @@ enum class WaitReconstruction {
     /// StinkyWaitCntInsertionPass re-derives it from this dataflow. Every
     /// counter in WaitCountSpec lands here.
     WaitCntInsertion,
-    /// Gfx1250HazardPass re-derives it from its XNACK replay-group model, by its
+    /// Gfx1250XnackHazardPass re-derives it from its XNACK replay-group model, by its
     /// own rules rather than from this dataflow. s_wait_xcnt only.
     HazardPass,
     /// Nothing rebuilds it, so stripping one silently drops the hazard it
@@ -105,6 +105,12 @@ WaitReconstruction waitReconstruction(const StinkyInstruction& inst);
 /// out-of-order counter (kmcnt) a nonzero immediate names no particular op, so
 /// the answer is a full drain. Never derive a wait from a queue index directly.
 int waitToDrain(CounterKind c, int countFrom);
+
+/// Drains already proved by an `s_wait_*` in the input stream: true when `inst` IS a wait, with
+/// `counts[c]` the immediate it drains.  The counter comes from the OPCODE and the value from the
+/// literal operand, because `legalizeWaitCnt` attaches the whole pre-split spec to the last member
+/// of a split group and none to the others.
+bool observedWaitDrains(const StinkyInstruction& inst, int counts[CK_Count]);
 
 /// One queue of in-flight memops on a given counter, tagged by the CFG
 /// predecessor it was seeded from. For an op OP, the wait value is
@@ -197,6 +203,15 @@ class WaitDataflow {
         loopCarriedTokenDepsEnabled = enabled;
     }
 
+    /// Whether the GIR frame pipeline actually derives this function's waits.
+    /// Off by default, so a caller that does not say so keeps the conservative
+    /// MemTokenData fallbacks: the frame contract alone only means the map was
+    /// imported, and the map replaces a drain only when the frame waits are
+    /// emitted from it.
+    void setGirFrameWaitsEnabled(bool enabled) {
+        girFrameWaitsEnabled = enabled;
+    }
+
     /// Materialise the conservative per-consumer wait plan from the
     /// converged dataflow state. Run WaitPlanOptimizer(s) on the result,
     /// then finalizePlan() before emit.
@@ -235,6 +250,7 @@ class WaitDataflow {
     bool capHit = false;
     unsigned iterationCap = 0;
     bool loopCarriedTokenDepsEnabled = false;
+    bool girFrameWaitsEnabled = false;
 
     /// (block, counter) pairs whose per-pred queue exceeded the bounded
     /// hardware-count window during a solver sweep. Older producers are

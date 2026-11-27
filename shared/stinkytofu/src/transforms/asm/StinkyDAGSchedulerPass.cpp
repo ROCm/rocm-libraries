@@ -44,6 +44,7 @@
 #include "stinkytofu/support/LoopDetection.hpp"
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 #include "stinkytofu/transforms/asm/ExecMaskGrouping.hpp"
+#include "stinkytofu/transforms/asm/GirFencePlacementPass.hpp"
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
 
 // Before dag/CDNA*.hpp so PASS_DEBUG inside those headers uses this pass name.
@@ -193,6 +194,93 @@ static std::vector<char> reachableFrom(unsigned start,
 // kRule3CrossLoop true only.
 constexpr int kLiveOutSccDefLeadCycles = 50;
 
+// The chain's last node, i.e. the far end of the range a barrier must not fall inside.
+static DAGNode* chainLast(const SccChain& chain) {
+    return chain.readers.empty() ? chain.def : chain.readers.back();
+}
+
+// Does any reader of the chain depend on this barrier? Then the chain cannot be kept off
+// it, and the def has to follow it instead.
+static bool readerDependsOnBarrier(const SccChain& chain, const std::vector<char>& reach) {
+    for (const DAGNode* reader : chain.readers)
+        if (reach[reader->id]) return true;
+    return false;
+}
+
+// A barrier signal already sitting strictly inside the chain's range.
+static bool chainSpansBarrier(const SccChain& chain,
+                              const std::vector<HandshakeBarrier>& barriers) {
+    const unsigned first = chain.def->id;
+    const unsigned last = chainLast(chain)->id;
+    for (const HandshakeBarrier& barrier : barriers)
+        if (barrier.signal->id > first && barrier.signal->id < last) return true;
+    return false;
+}
+
+// Pin one chain after the barriers it must follow. \p pinned records which barriers this
+// chain has already been pinned after, so a repeated pass adds each edge at most once and
+// the `true` return means genuinely new reachability.
+static bool pinChainAfterBarriers(const SccChain& chain,
+                                  const std::vector<HandshakeBarrier>& barriers,
+                                  const std::vector<std::vector<char>>& reach,
+                                  std::vector<char>& pinned,
+                                  std::vector<std::unordered_set<unsigned>>& dagGraph,
+                                  int regionCycles) {
+    DAGNode* first = chain.def;
+    bool added = false;
+
+    // A live-out value is read past the end of the region (the loop terminator, a
+    // later region, a successor), so there is no reader here for the queue to close
+    // the chain on, and no freedom to preserve either -- that reader is fixed at the
+    // region end. The range therefore reaches from the def to the end of the region,
+    // and the only way for no barrier to fall inside it is for the def to follow every
+    // barrier in the region -- including the ones it currently comes before.
+    //
+    // Those are edges that point back up the program order, so they are the one place
+    // a cycle could be introduced. Skipping the barriers the def can reach is what
+    // rules that out, and the skip costs little: a barrier takes no register operands,
+    // so the only way to reach one is through an edge this rule itself added.
+    if (chain.liveOut) {
+        const std::vector<char> fromDef = reachableFrom(first->id, dagGraph);
+        for (size_t i = 0; i < barriers.size(); ++i) {
+            if (pinned[i] || fromDef[barriers[i].wait->id]) continue;
+            addEdgeById(barriers[i].wait, first, dagGraph);
+            pinned[i] = 1;
+            added = true;
+            PASS_DEBUG(std::cerr << "[DAG schedule] cluster-barrier SCC rule: pinned live-out"
+                                 << " chain (dagId=" << first->id << ") after barrier wait"
+                                 << " (dagId=" << barriers[i].wait->id << ")\n");
+        }
+        // kRule3CrossLoop true only: lead ceiling on live-out SCC def (see cluster-barrier.md).
+        if (cluster_barrier::kRule3CrossLoop) {
+            first->earliestClock = regionCycles - kLiveOutSccDefLeadCycles;
+            PASS_DEBUG(std::cerr << "[DAG schedule] cluster-barrier SCC rule: live-out chain"
+                                 << " (dagId=" << first->id
+                                 << ") held back to clock >= " << first->earliestClock
+                                 << " (region " << regionCycles << " cycles)\n");
+        }
+        return added;
+    }
+
+    for (size_t i = 0; i < barriers.size(); ++i) {
+        // The def already depends on the barrier, so the whole chain follows it and
+        // there is nothing to keep apart.
+        if (pinned[i] || reach[i][first->id]) continue;
+        if (!readerDependsOnBarrier(chain, reach[i])) continue;
+        // Only a barrier the def already comes after can be pinned to; the other
+        // direction is the live-out arm's backward edge, and is not wanted here.
+        if (barriers[i].wait->id >= first->id) continue;
+        addEdgeById(barriers[i].wait, first, dagGraph);
+        pinned[i] = 1;
+        added = true;
+        PASS_DEBUG(
+            std::cerr << "[DAG schedule] cluster-barrier SCC rule: chain [" << first->id << ".."
+                      << chainLast(chain)->id << "] has a reader depending on barrier (dagId="
+                      << barriers[i].signal->id << "); pinned after it instead of locking\n");
+    }
+    return added;
+}
+
 static void applyClusterBarrierSccRule(
     DAGNodeList& dagNodes, const std::unordered_map<StinkyInstruction*, unsigned>& instToId,
     std::vector<std::unordered_set<unsigned>>& dagGraph, int regionCycles) {
@@ -204,13 +292,10 @@ static void applyClusterBarrierSccRule(
         barrier.wait->handshakeBarrier = true;
     }
 
-    std::vector<std::vector<char>> reach;
-    reach.reserve(barriers.size());
-    for (const HandshakeBarrier& barrier : barriers)
-        reach.push_back(reachableFrom(barrier.signal->id, dagGraph));
+    const std::vector<SccChain> chains = collectSccChains(dagNodes, instToId);
 
-    unsigned nextChainId = 0;
-    for (const SccChain& chain : collectSccChains(dagNodes, instToId)) {
+    std::vector<const SccChain*> live;
+    for (const SccChain& chain : chains) {
         // Nothing reads the value inside the region and nothing outside does either:
         // it is dead here, so a clobber cannot hurt it.
         if (chain.readers.empty() && !chain.liveOut) continue;
@@ -222,84 +307,47 @@ static void applyClusterBarrierSccRule(
                 "applyClusterBarrierSccRule: region has SCC reader(s) but no SCC writer");
         }
 
-        DAGNode* first = chain.def;
-        DAGNode* last = chain.readers.empty() ? first : chain.readers.back();
-
-        // A live-out value is read past the end of the region (the loop terminator, a
-        // later region, a successor), so there is no reader here for the queue to close
-        // the chain on, and no freedom to preserve either -- that reader is fixed at the
-        // region end. The range therefore reaches from the def to the end of the region,
-        // and the only way for no barrier to fall inside it is for the def to follow every
-        // barrier in the region -- including the ones it currently comes before.
-        //
-        // Those are edges that point back up the program order, so they are the one place
-        // a cycle could be introduced. Skipping the barriers the def can reach is what
-        // rules that out, and the skip costs little: a barrier takes no register operands,
-        // so the only way to reach one is through an edge this rule itself added.
-        if (chain.liveOut) {
-            const std::vector<char> fromDef = reachableFrom(first->id, dagGraph);
-            for (const HandshakeBarrier& barrier : barriers) {
-                if (fromDef[barrier.wait->id]) continue;
-                addEdgeById(barrier.wait, first, dagGraph);
-                PASS_DEBUG(std::cerr << "[DAG schedule] cluster-barrier SCC rule: pinned live-out"
-                                     << " chain (dagId=" << first->id << ") after barrier wait"
-                                     << " (dagId=" << barrier.wait->id << ")\n");
-            }
-            // kRule3CrossLoop true only: lead ceiling on live-out SCC def (see cluster-barrier.md).
-            if (cluster_barrier::kRule3CrossLoop) {
-                first->earliestClock = regionCycles - kLiveOutSccDefLeadCycles;
-                PASS_DEBUG(std::cerr << "[DAG schedule] cluster-barrier SCC rule: live-out chain"
-                                     << " (dagId=" << first->id
-                                     << ") held back to clock >= " << first->earliestClock
-                                     << " (region " << regionCycles << " cycles)\n");
-            }
-            continue;
-        }
-
-        bool alreadySplit = false;
-        bool needsLock = false;
-        std::vector<const HandshakeBarrier*> pinAfter;
-        for (size_t i = 0; i < barriers.size(); ++i) {
-            const HandshakeBarrier& barrier = barriers[i];
-            if (barrier.signal->id > first->id && barrier.signal->id < last->id) {
-                alreadySplit = true;
-                break;
-            }
-            // The def already depends on the barrier, so the whole chain follows it and
-            // there is nothing to keep apart.
-            if (reach[i][first->id]) continue;
-
-            bool readerDependsOnBarrier = false;
-            for (const DAGNode* reader : chain.readers) {
-                if (!reach[i][reader->id]) continue;
-                readerDependsOnBarrier = true;
-                break;
-            }
-            if (readerDependsOnBarrier)
-                pinAfter.push_back(&barrier);
-            else
-                needsLock = true;
-        }
-
-        if (alreadySplit) {
+        if (!chain.liveOut && chainSpansBarrier(chain, barriers)) {
             // The incoming order already spans the barrier, so the scheduler is not what
             // broke it and no ordering it can pick will put it back together.
-            PASS_DEBUG(std::cerr << "[DAG schedule] cluster-barrier SCC rule: chain [" << first->id
-                                 << ".." << last->id
+            PASS_DEBUG(std::cerr << "[DAG schedule] cluster-barrier SCC rule: chain ["
+                                 << chain.def->id << ".." << chainLast(chain)->id
                                  << "] already spans a barrier; leaving it to the"
                                     " barrier pass\n");
             continue;
         }
+        live.push_back(&chain);
+    }
+    if (live.empty()) return;
 
-        for (const HandshakeBarrier* barrier : pinAfter) {
-            if (barrier->wait->id >= first->id) continue;
-            addEdgeById(barrier->wait, first, dagGraph);
-            PASS_DEBUG(
-                std::cerr << "[DAG schedule] cluster-barrier SCC rule: chain [" << first->id << ".."
-                          << last->id << "] has a reader depending on barrier (dagId="
-                          << barrier->signal->id << "); pinned after it instead of locking\n");
-        }
+    // A pin is an edge, and an edge changes what depends on what: pinning one chain after a
+    // barrier can make another chain's reader depend on that barrier too. Deciding locks
+    // against the pre-pin picture is what let a lock and a barrier block each other -- the
+    // queue holds the barrier back while the chain is open, and the chain cannot close
+    // because its reader is waiting on that barrier. So pin to a fixpoint, then lock.
+    std::vector<std::vector<char>> reach;
+    std::vector<std::vector<char>> pinned(live.size(), std::vector<char>(barriers.size(), 0));
+    for (bool changed = true; changed;) {
+        changed = false;
+        reach.clear();
+        reach.reserve(barriers.size());
+        for (const HandshakeBarrier& barrier : barriers)
+            reach.push_back(reachableFrom(barrier.signal->id, dagGraph));
+        for (size_t c = 0; c < live.size(); ++c)
+            changed |=
+                pinChainAfterBarriers(*live[c], barriers, reach, pinned[c], dagGraph, regionCycles);
+    }
 
+    // Every pin is in, so a barrier a chain still cannot be kept off is one the queue has
+    // to close the chain on.
+    unsigned nextChainId = 0;
+    for (const SccChain* chainPtr : live) {
+        const SccChain& chain = *chainPtr;
+        if (chain.liveOut) continue;
+
+        bool needsLock = false;
+        for (size_t i = 0; i < barriers.size() && !needsLock; ++i)
+            needsLock = !reach[i][chain.def->id] && !readerDependsOnBarrier(chain, reach[i]);
         if (!needsLock) continue;
 
         const unsigned chainId = ++nextChainId;
@@ -307,9 +355,9 @@ static void applyClusterBarrierSccRule(
         chain.def->sccChainDef = true;
         chain.def->sccChainReaders = static_cast<unsigned>(chain.readers.size());
         for (DAGNode* reader : chain.readers) reader->sccChainId = chainId;
-        PASS_DEBUG(std::cerr << "[DAG schedule] cluster-barrier SCC rule: chain [" << first->id
-                             << ".." << last->id << "] locked as chain " << chainId << " ("
-                             << chain.readers.size() << " readers)\n");
+        PASS_DEBUG(std::cerr << "[DAG schedule] cluster-barrier SCC rule: chain [" << chain.def->id
+                             << ".." << chainLast(chain)->id << "] locked as chain " << chainId
+                             << " (" << chain.readers.size() << " readers)\n");
     }
 }
 
@@ -383,7 +431,9 @@ static int matrixInputKindOfValu(const StinkyInstruction& matrix, const StinkyIn
 static void scheduleRegionWithMovableSideEffects(
     IRList::iterator regionStart, IRList::iterator regionEnd, IRList::iterator blockBegin,
     std::vector<IRBase*>& scheduled, ReadyQueue& readyQueue,
-    const std::unordered_map<StinkyInstruction*, unsigned>& wmmaIndex, int& fillerCount) {
+    const std::unordered_map<StinkyInstruction*, unsigned>& wmmaIndex,
+    const GirFrameHazardAnalysis::Result& girHazards, const GirFrameAnalysis::Result& girFrames,
+    const GirPlanFenceCoverage& girFenceCoverage, int& fillerCount) {
     if (regionStart == regionEnd) {
         return;  // Empty region, nothing to schedule.
     }
@@ -397,6 +447,8 @@ static void scheduleRegionWithMovableSideEffects(
 
     // Map each instruction to an unique id [0..n-1] and build register deps.
     dag::RegionDAG regionDag = dag::buildRegisterDependencyDAG(regionStart, regionEnd);
+    // Only GIR places the fences these edges order, so a region with no frames has none to order.
+    if (!girFrames.empty()) dag::addGirFrameHazardEdges(regionDag, girHazards, girFenceCoverage);
     dag::DAGNodeList& dagNodes = regionDag.nodes;
     std::vector<std::unordered_set<unsigned>>& dagGraph = regionDag.graph;
     std::unordered_map<StinkyInstruction*, unsigned>& instToId = regionDag.instToId;
@@ -414,9 +466,14 @@ static void scheduleRegionWithMovableSideEffects(
     // co-issue window; otherwise issueCycles): where the terminator that follows it sits, which
     // DAGNode::earliestClock is built from.
     int regionCycles = 0;
+    // Prefix sum of the same cost, for the rules that need the SPAN between two nodes rather
+    // than the region total: cumCycles[k] is the cycles before node k, so the last element IS
+    // regionCycles.
+    std::vector<int> cumCycles(regionSize + 1, 0);
     for (unsigned k = 0; k < regionSize; ++k) {
         const StinkyInstruction* inst = dagNodes[k].inst;
         regionCycles += isMatrixInstruction(*inst) ? inst->latencyCycles : inst->issueCycles;
+        cumCycles[k + 1] = regionCycles;
     }
 
     if (readyQueue.clusterBarrierEnabled())
@@ -489,26 +546,54 @@ static void scheduleRegionWithMovableSideEffects(
         });
 
         struct DsInfo {
-            unsigned idx, affinity, srcReg, kindRank, consumer;
+            unsigned idx, affinity, srcReg, kindRank, schedulingDeadline;
         };
 
-        // DAG id of the earliest in-region matrix op fed by ds_load \p i, directly
-        // or through a parent VALU. UINT_MAX for a next-iteration preload: its
-        // consumers lie in a later trip, so nothing in this region waits on it.
-        auto earliestRegionMatrixConsumer = [&](unsigned i) {
-            unsigned consumer = UINT_MAX;
+        struct MatrixConsumers {
+            // Existing DS scheduling deadline. This intentionally follows every DAG successor,
+            // including ordering-only edges, to preserve the scheduler's baseline priorities.
+            unsigned schedulingDeadline = UINT_MAX;
+            // Exact register-data consumer used only by the queue-fill policy.
+            unsigned dataConsumer = UINT_MAX;
+            bool dataConsumerThroughValu = false;
+        };
+
+        // Analyze matrix consumers once, but keep the existing scheduling deadline separate from
+        // the exact register-data relationship queried by the queue-fill policy.
+        auto matrixConsumers = [&](unsigned i) {
+            std::unordered_set<uint32_t> dsDestVgprs;
+            for (const StinkyRegister& reg : dagNodes[i].inst->getDestRegs())
+                addVgprIdxs(reg, dsDestVgprs);
+            MatrixConsumers result;
             for (unsigned succId : dagGraph[i]) {
                 const DAGNode& succ = dagNodes[succId];
                 if (isMatrixInstruction(*succ.inst)) {
-                    consumer = std::min(consumer, succId);
+                    result.schedulingDeadline = std::min(result.schedulingDeadline, succId);
+                    if (instVgprsOverlap(*succ.inst, /*useDest=*/false, dsDestVgprs) &&
+                        succId < result.dataConsumer) {
+                        result.dataConsumer = succId;
+                        result.dataConsumerThroughValu = false;
+                    }
                     continue;
                 }
                 if (!succ.feedsWmma) continue;
-                for (unsigned mId : dagGraph[succId])
-                    if (isMatrixInstruction(*dagNodes[mId].inst))
-                        consumer = std::min(consumer, mId);
+                const bool dsFeedsValu =
+                    instVgprsOverlap(*succ.inst, /*useDest=*/false, dsDestVgprs);
+                std::unordered_set<uint32_t> valuDestVgprs;
+                for (const StinkyRegister& reg : succ.inst->getDestRegs())
+                    addVgprIdxs(reg, valuDestVgprs);
+                for (unsigned mId : dagGraph[succId]) {
+                    if (!isMatrixInstruction(*dagNodes[mId].inst)) continue;
+                    result.schedulingDeadline = std::min(result.schedulingDeadline, mId);
+                    if (dsFeedsValu &&
+                        instVgprsOverlap(*dagNodes[mId].inst, /*useDest=*/false, valuDestVgprs) &&
+                        mId < result.dataConsumer) {
+                        result.dataConsumer = mId;
+                        result.dataConsumerThroughValu = true;
+                    }
+                }
             }
-            return consumer;
+            return result;
         };
 
         auto dsKindOf = [&](const StinkyInstruction& inst) -> int {
@@ -542,7 +627,18 @@ static void scheduleRegionWithMovableSideEffects(
                     continue;
                 }
                 auto it = wmmaIndex.find(u);
-                if (it != wmmaIndex.end()) affinity = std::min(affinity, it->second);
+                if (it != wmmaIndex.end()) {
+                    unsigned candidate = it->second;
+                    BasicBlock* producerBlock = dagNodes[i].inst->getParent();
+                    BasicBlock* consumerBlock = u->getParent();
+                    if (readyQueue.getPassContext()
+                            .getPassFeatureConfig()
+                            .dagFeatures.girFramePipeline &&
+                        producerBlock != nullptr && consumerBlock != nullptr &&
+                        girFrames.isBackEdge(producerBlock, consumerBlock))
+                        candidate += static_cast<unsigned>(wmmaIndex.size());
+                    affinity = std::min(affinity, candidate);
+                }
                 auto uit = instToId.find(u);
                 if (uit != instToId.end() && dagNodes[uit->second].feedsWmma &&
                     !isMatrixInstruction(*u))
@@ -572,7 +668,10 @@ static void scheduleRegionWithMovableSideEffects(
             const int destKind = dsKindOf(*dagNodes[i].inst);
             const int kind = destKind >= 0 ? destKind : inferredKind;
             const unsigned kindRank = kind >= 0 ? static_cast<unsigned>(kind) : kDsNumKinds;
-            DsInfo info{i, affinity, srcReg, kindRank, earliestRegionMatrixConsumer(i)};
+            const MatrixConsumers consumers = matrixConsumers(i);
+            dagNodes[i].dsFirstMatrixConsumer = consumers.dataConsumer;
+            dagNodes[i].dsConsumerThroughValu = consumers.dataConsumerThroughValu;
+            DsInfo info{i, affinity, srcReg, kindRank, consumers.schedulingDeadline};
             if (userIsParentValu)
                 parentFed.push_back(info);
             else
@@ -633,7 +732,7 @@ static void scheduleRegionWithMovableSideEffects(
                     if (a.affinity != b.affinity) return a.affinity < b.affinity;
                     return a.idx < b.idx;
                 });
-                for (auto& d : dsReads) dagNodes[d.idx].dsReadPriority = pri++;
+                for (const auto& d : dsReads) dagNodes[d.idx].dsReadPriority = pri++;
                 return;
             }
 
@@ -657,7 +756,7 @@ static void scheduleRegionWithMovableSideEffects(
                         group.begin(), group.end(),
                         [](const DsInfo* a, const DsInfo* b) { return a->srcReg > b->srcReg; });
                 }
-                for (auto* d : group) dagNodes[d->idx].dsReadPriority = pri++;
+                for (const auto* d : group) dagNodes[d->idx].dsReadPriority = pri++;
                 group.clear();
             };
             for (auto& d : dsReads) {
@@ -670,18 +769,21 @@ static void scheduleRegionWithMovableSideEffects(
             flushGroup();
         };
 
-        unsigned pri = 0;
+        // DS ordering has one model regardless of whether reset-time queue fill is enabled.
+        // The exact data consumer above is gate metadata only; ordering keeps the existing
+        // scheduling deadline, including ordering-only DAG edges.
         const std::map<unsigned, bool> restGroupAsc = mixedGroupAscending(rest);
+        unsigned pri = 0;
         // LDS returns in order, so issuing by deadline (earliest in-region
         // matrix consumer) keeps a later consumer's load from being waited
         // out by an earlier one. Loads with no in-region consumer (next-trip
         // preloads) have no deadline and go last. Within one deadline the
         // parent tier leads: those loads still need the splat VALU.
         std::map<unsigned, std::pair<std::vector<DsInfo>, std::vector<DsInfo>>> byDeadline;
-        for (const DsInfo& d : parentFed) byDeadline[d.consumer].first.push_back(d);
-        for (const DsInfo& d : rest) byDeadline[d.consumer].second.push_back(d);
+        for (const DsInfo& d : parentFed) byDeadline[d.schedulingDeadline].first.push_back(d);
+        for (const DsInfo& d : rest) byDeadline[d.schedulingDeadline].second.push_back(d);
         if (dsOrder == DsReadOrder::ProgramOrder) {
-            // No reorder (AABB): DAG id order; the deadline and parent-tier grouping is skipped.
+            // No reorder (AABB): DAG id order; deadline and parent-tier grouping are skipped.
             for (const DsInfo& d : parentFed) dagNodes[d.idx].dsReadPriority = d.idx;
             for (const DsInfo& d : rest) dagNodes[d.idx].dsReadPriority = d.idx;
         } else {
@@ -713,8 +815,10 @@ static void scheduleRegionWithMovableSideEffects(
     // (these orderings are heuristic, not derived from real data dependencies, so
     // contradictory requests across barrier groups are possible).
     std::vector<HardSchedulingConstraint> requestedConstraints;
-    const dag::RegionDependencies regionDeps{.dag = regionDag,
-                                             .requestedConstraints = requestedConstraints};
+    const dag::RegionDependencies regionDeps{
+        .dag = regionDag,
+        .requestedConstraints = requestedConstraints,
+        .storageRing = girFrames.empty() ? nullptr : &girFrames.storageRing};
     readyQueue.onInitRegion(regionStart, regionEnd, blockBegin, regionDeps);
     // Provenance only (not consulted by scheduling): which merged dagGraph edges are
     // policy-injected rather than real register dependencies, so debug output can still
@@ -746,7 +850,6 @@ static void scheduleRegionWithMovableSideEffects(
 
     assert(readyQueue.empty() && "Ready queue must be empty before scheduling a region");
 
-    // Initialize the ready queue with instructions that have in-degree 0.
     for (unsigned i = 0; i < regionSize; ++i) {
         if (dagNodes[i].inDegree == 0) readyQueue.push(&dagNodes[i]);
     }
@@ -801,7 +904,10 @@ static void scheduleRegionWithMovableSideEffects(
 // In the end, the instructions will be reordered in the block
 // to reflect the scheduling order.
 static void scheduleInDAG(BasicBlock& bb, ReadyQueue& readyQueue,
-                          const std::unordered_map<StinkyInstruction*, unsigned>& wmmaIndex) {
+                          const std::unordered_map<StinkyInstruction*, unsigned>& wmmaIndex,
+                          const GirFrameHazardAnalysis::Result& girHazards,
+                          const GirFrameAnalysis::Result& girFrames,
+                          const GirPlanFenceCoverage& girFenceCoverage) {
     PASS_DEBUG(std::cerr << "*** Scheduling Instructions in DAG: ***\n");
 
     if (bb.empty()) return;
@@ -828,7 +934,8 @@ static void scheduleInDAG(BasicBlock& bb, ReadyQueue& readyQueue,
             // Non-instruction IR (e.g. AsmDirective): treat as non-movable
             // side-effect boundary so its position is strictly preserved.
             scheduleRegionWithMovableSideEffects(regionStart, it, beginIt, scheduled, readyQueue,
-                                                 wmmaIndex, fillerCount);
+                                                 wmmaIndex, girHazards, girFrames, girFenceCoverage,
+                                                 fillerCount);
             scheduled.push_back(irNode);
             regionStart = std::next(it);
             continue;
@@ -837,7 +944,8 @@ static void scheduleInDAG(BasicBlock& bb, ReadyQueue& readyQueue,
         StinkyInstruction& inst = *instPtr;
         if (hasSideEffect(inst)) {
             scheduleRegionWithMovableSideEffects(regionStart, it, beginIt, scheduled, readyQueue,
-                                                 wmmaIndex, fillerCount);
+                                                 wmmaIndex, girHazards, girFrames, girFenceCoverage,
+                                                 fillerCount);
 
             scheduled.push_back(&inst);
             readyQueue.onScheduled(inst);
@@ -851,7 +959,8 @@ static void scheduleInDAG(BasicBlock& bb, ReadyQueue& readyQueue,
     }
     // Flush the last region if it has not been flushed yet.
     scheduleRegionWithMovableSideEffects(regionStart, endIt, beginIt, scheduled, readyQueue,
-                                         wmmaIndex, fillerCount);
+                                         wmmaIndex, girHazards, girFrames, girFenceCoverage,
+                                         fillerCount);
 
     assert(scheduled.size() == bb.size() + static_cast<size_t>(fillerCount) &&
            "Scheduled instructions size must match original plus filler insts");
@@ -909,20 +1018,36 @@ Layer2BarrierOverlapAnalysis::Result validateLayer2BarrierOverlaps(
     return result;
 }
 
-std::unique_ptr<ReadyQueue> chooseReadyQueue(const PassContext& passCtx) {
-    if (passCtx.getGemmTileConfig().arch[0] == 12 && passCtx.getGemmTileConfig().arch[1] == 5) {
-        PASS_DEBUG(std::cerr << "Using CDNA5ReadyQueue for scheduling\n");
-        return std::make_unique<CDNA5ReadyQueue>(passCtx);
+// Checked on both sides of scheduling: the INCOMING order is the topological witness that keeps
+// the same-trip frame hazard edges acyclic, the SCHEDULED order is what the scheduler owes.
+void validateGirFrameHazardOrder(const GirFrameHazardAnalysis::Result& hazards, const char* when) {
+    std::unordered_map<const StinkyInstruction*, size_t> orderIndex;
+    std::unordered_map<const StinkyInstruction*, const BasicBlock*> orderBlock;
+    std::unordered_set<const BasicBlock*> visited;
+    for (const GirFrameHazard& hazard : hazards.hazards) {
+        for (BasicBlock* block : {hazard.producer->getParent(), hazard.consumer->getParent()}) {
+            if (!block || !visited.insert(block).second) continue;
+            size_t index = 0;
+            for (IRBase& node : *block) {
+                auto* inst = dyn_cast<StinkyInstruction>(&node);
+                if (!inst) continue;
+                orderIndex[inst] = index++;
+                orderBlock[inst] = block;
+            }
+        }
     }
-    // The SCC chain lock applyClusterBarrierSccRule sets up is carried in the node fields and
-    // honoured only by CDNA5ReadyQueue's pick loop. ReadyQueueByDAGid pops by id and reads
-    // none of them, so it would issue a handshake barrier straight through an open chain --
-    // the clobber this rule exists to prevent, and silently.
-    if (passCtx.getPassFeatureConfig().dagFeatures.clusterBarrier) {
-        STINKY_UNREACHABLE("ClusterBarrier scheduling requires CDNA5ReadyQueue");
+    for (const GirFrameHazard& hazard : hazards.hazards) {
+        if (hazard.gap != 0 || hazard.producer == hazard.consumer) continue;
+        auto producer = orderIndex.find(hazard.producer);
+        auto consumer = orderIndex.find(hazard.consumer);
+        if (producer == orderIndex.end() || consumer == orderIndex.end()) continue;
+        if (orderBlock[hazard.producer] == orderBlock[hazard.consumer] &&
+            producer->second >= consumer->second)
+            STINKY_UNREACHABLE((std::string("GIR frame hazard: the ") + when +
+                                " order inverts a required same-trip edge in " +
+                                orderBlock[hazard.producer]->getLabel())
+                                   .c_str());
     }
-    PASS_DEBUG(std::cerr << "Using Default ReadyQueue for scheduling\n");
-    return std::make_unique<ReadyQueueByDAGid>(passCtx);
 }
 
 class StinkyDAGSchedulerPass : public StinkyInstPass {
@@ -962,6 +1087,15 @@ class StinkyDAGSchedulerPass : public StinkyInstPass {
         }
 
         const auto& loops = AM.getResult<LoopAnalysis>(func);
+        const GirFrameAnalysis::Result girFrames = AM.getResult<GirFrameAnalysis>(func);
+        const GirFrameHazardAnalysis::Result girHazards =
+            AM.getResult<GirFrameHazardAnalysis>(func);
+        // Built once, on the incoming order: that is the order GirFencePlacementPass elected each
+        // fence against, so it names the windows this schedule owes rather than the ones it makes.
+        const GirPlanFenceCoverage girFenceCoverage =
+            girHazards.empty() ? GirPlanFenceCoverage{}
+                               : buildGirPlanFenceCoverage(girFrames, girHazards);
+        validateGirFrameHazardOrder(girHazards, "incoming");
 
         PASS_DEBUG(for (const Loop& loop
                         : loops) {
@@ -997,7 +1131,7 @@ class StinkyDAGSchedulerPass : public StinkyInstPass {
         auto scheduleBlock = [&](BasicBlock* bb, ReadyQueue& rq) {
             AsmIRBuilder builder(*bb, archId);
             collapseExecMaskedRegions(*bb, builder, wavefrontSize);
-            scheduleInDAG(*bb, rq, wmmaIndex);
+            scheduleInDAG(*bb, rq, wmmaIndex, girHazards, girFrames, girFenceCoverage);
             expandExecMaskedGroups(*bb);
             auto candidates = rq.takeLayer2BarrierOverlapCandidates();
             layer2BarrierOverlapCandidates.insert(layer2BarrierOverlapCandidates.end(),
@@ -1024,6 +1158,11 @@ class StinkyDAGSchedulerPass : public StinkyInstPass {
                 scheduleBlock(bb, *rq);
             }
         }
+        validateGirFrameHazardOrder(girHazards, "scheduled");
+        if (!girHazards.empty()) {
+            AM.invalidate(func, preserveCFGAnalyses());
+            (void)AM.getResult<GirFrameHazardAnalysis>(func);
+        }
         AM.getResult<Layer2BarrierOverlapAnalysis>(func) =
             validateLayer2BarrierOverlaps(func, layer2BarrierOverlapCandidates);
         auto preserved = preserveCFGAnalyses();
@@ -1036,6 +1175,24 @@ char StinkyDAGSchedulerPass::ID = 0;
 }  // namespace
 
 namespace stinkytofu {
+namespace dag {
+std::unique_ptr<ReadyQueue> chooseReadyQueue(const PassContext& passCtx) {
+    if (isGfx125(passCtx.getGemmTileConfig().arch[0], passCtx.getGemmTileConfig().arch[1])) {
+        PASS_DEBUG(std::cerr << "Using CDNA5ReadyQueue for scheduling\n");
+        return std::make_unique<CDNA5ReadyQueue>(passCtx);
+    }
+    // The SCC chain lock applyClusterBarrierSccRule sets up is carried in the node fields and
+    // honoured only by CDNA5ReadyQueue's pick loop. ReadyQueueByDAGid pops by id and reads
+    // none of them, so it would issue a handshake barrier straight through an open chain --
+    // the clobber this rule exists to prevent, and silently.
+    if (passCtx.getPassFeatureConfig().dagFeatures.clusterBarrier) {
+        STINKY_UNREACHABLE("ClusterBarrier scheduling requires CDNA5ReadyQueue");
+    }
+    PASS_DEBUG(std::cerr << "Using Default ReadyQueue for scheduling\n");
+    return std::make_unique<ReadyQueueByDAGid>(passCtx);
+}
+}  // namespace dag
+
 std::unique_ptr<Pass> createStinkyDAGSchedulerPass() {
     return std::make_unique<StinkyDAGSchedulerPass>();
 }

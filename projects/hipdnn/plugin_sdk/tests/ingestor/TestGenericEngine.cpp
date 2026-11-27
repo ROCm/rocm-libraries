@@ -5,7 +5,10 @@
 
 #include <algorithm>
 #include <atomic>
+#include <map>
 #include <memory>
+#include <optional>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -15,10 +18,14 @@
 
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
+#include <hipdnn_plugin_sdk/BehaviorNote.h>
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
+#include <hipdnn_plugin_sdk/NumericalNote.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericEngine.hpp>
+#include <hipdnn_plugin_sdk/ingestor/MakeEngine.hpp>
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 
 #include "KernelIngestorTestFixtures.hpp"
 
@@ -123,7 +130,8 @@ TEST(TestIngestorGenericEngine, GetDetailsReportsTheEnginesKnobs)
 {
     const ScopedTestSymbols symbols;
     const StubDeviceResolver resolver;
-    const StubEngine engine(makeEngineWithKnobs({BLOCK_SIZE}), makeStubStateManager(), resolver);
+    const StubEngine engine(
+        makeEngineWithKnobs({BLOCK_SIZE, DTYPE}), makeStubStateManager(), resolver);
 
     StubHandle handle;
     const TestGraph graph(makeGraphId(0x62));
@@ -139,11 +147,54 @@ TEST(TestIngestorGenericEngine, GetDetailsReportsTheEnginesKnobs)
     // The UED name, so a graph-time record identifies its engine the same way the
     // getEngineName entry point does.
     EXPECT_EQ(wrapper.name(), "test:engine");
-    // GenericEngine::getDetails() always prepends the out-of-band benchmarking knob
-    // (Task 1.4), so a UED declaring one knob of its own advertises two; looked up by
-    // name, since the prepend fixes a position Phase 2 must not assume by index either.
-    ASSERT_EQ(wrapper.knobCount(), 2U);
+    // GenericEngine::getDetails() always prepends the out-of-band benchmarking knob (Task 1.4).
+    ASSERT_EQ(wrapper.knobCount(), 3U);
     EXPECT_EQ(wrapper.getKnobByName(BLOCK_SIZE).knobId(), BLOCK_SIZE);
+    const auto& knobs = wrapper.knobWrappers();
+    ASSERT_EQ(knobs.size(), 3U);
+    EXPECT_EQ(knobs[0]->knobId(), "global.benchmarking");
+    EXPECT_EQ(knobs[0]->description(), "Enable benchmarking");
+    EXPECT_EQ(knobs[1]->knobId(), "block_size");
+    EXPECT_EQ(knobs[2]->knobId(), "dtype");
+}
+
+/// Absent numerical_notes stays absent in the buffer (the backend reads that as unknown);
+/// an authored empty list and an authored note are carried through verbatim, alongside the
+/// engine's behavior notes.
+TEST(TestIngestorGenericEngine, GetDetailsCarriesTheEnginesNumericalNotes)
+{
+    const ScopedTestSymbols symbols;
+    const StubDeviceResolver resolver;
+
+    const std::vector<int32_t> behaviorNotes
+        = {HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION, HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE};
+
+    const auto notesFor = [&](const std::optional<std::vector<int32_t>>& authored) {
+        auto descriptor = makeEngineWithKnobs({BLOCK_SIZE});
+        descriptor.behaviorNotes = behaviorNotes;
+        descriptor.numericalNotes = authored;
+        const StubEngine engine(std::move(descriptor), makeStubStateManager(), resolver);
+        StubHandle handle;
+        const TestGraph graph(makeGraphId(0x67));
+        hipdnnPluginConstData_t details{};
+        engine.getDetails(handle, graph, details);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper wrapper(
+            details.ptr, details.size);
+        EXPECT_TRUE(wrapper.isValid());
+        EXPECT_EQ(wrapper.behaviorNotes(), behaviorNotes);
+        return wrapper.numericalNotes();
+    };
+
+    EXPECT_FALSE(notesFor(std::nullopt).has_value());
+
+    const auto empty = notesFor(std::vector<int32_t>{});
+    ASSERT_TRUE(empty.has_value());
+    EXPECT_TRUE(empty->empty());
+
+    const auto nondeterministic
+        = notesFor(std::vector<int32_t>{HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC});
+    ASSERT_TRUE(nondeterministic.has_value());
+    EXPECT_EQ(*nondeterministic, (std::vector<int32_t>{4}));
 }
 
 /// GenericEngine::getDetails() advertises global.benchmarking out-of-band, so a UED
@@ -966,6 +1017,437 @@ TEST(TestIngestorGenericEngine, AConfigurationDescriptionNamesTheL2ModelWithoutR
     ASSERT_EQ(evaluated.status, PredictionStatus::AVAILABLE) << evaluated.reason;
     EXPECT_EQ(evaluated.uhd_id, described.uhd_id);
     EXPECT_GT(scoredKernels.load(), 0);
+}
+
+/// An unslotted descriptor set with one matcher, one dispatch and one kernel, built the
+/// way the fixtures build them, so the hashes pinned below are over a fully known value.
+DescriptorSet makeUnslottedGoldenSet(bool withRanker)
+{
+    DescriptorSet set;
+    set.engine = makeEngineWithKnobs({BLOCK_SIZE});
+    set.engine.heuristicId.reset();
+    set.engine.graphMatchNativeSymbol = GRAPH_MATCH_SYMBOL;
+    set.schema.id = SCHEMA_ID;
+    set.schema.name = "test schema";
+    set.schema.fields = {{BLOCK_SIZE, MetadataType::INT, MetadataValue{int64_t{64}}},
+                         {DTYPE, MetadataType::STRING, std::nullopt}};
+    set.matchers = {{KERNEL_MATCHER_ID, "kernel scoped", MatchScope::KERNEL, KERNEL_MATCH_SYMBOL}};
+    set.dispatches = {{DISPATCH_ID, "test dispatch", "hipdnn.kernel_ingestor.test.dispatch"}};
+
+    KernelDescriptorPack pack;
+    pack.id = PACK_ID;
+    pack.name = "test pack";
+    pack.matcherIds = {KERNEL_MATCHER_ID};
+    pack.engineId = ENGINE_ID;
+    pack.dispatchId = DISPATCH_ID;
+    pack.kernels = {makeTestKernel(testId(0x64), "kernel_64_float", 64, "FLOAT")};
+    set.packs = {pack};
+
+    if(withRanker)
+    {
+        HeuristicDescriptor ranker;
+        ranker.id = HEURISTIC_ID;
+        ranker.name = "native ranker";
+        ranker.adapter = UhdAdapter::NATIVE;
+        ranker.nativeSymbol = SCORE_SYMBOL;
+        set.engine.heuristicId = HEURISTIC_ID;
+        set.heuristic = ranker;
+    }
+    return set;
+}
+
+/// Expected digests were computed independently of the C++ over the set's compact,
+/// key-sorted JSON; any change to what an unslotted engine hashes, or
+/// how, changes them and orphans every trained model's `trained_against`.
+TEST(TestIngestorGenericEngine, UnslottedGoldenSelectorRevisionPinsTheSetWithAndWithoutARanker)
+{
+    EXPECT_EQ(
+        engineSelectorRevision(makeUnslottedGoldenSet(/*withRanker=*/false)),
+        "generic-untuned-v1/a19484e1d5bf56d1e57c4b26c42f5af909e3f26325591a6c0bf925b06fde09f6");
+    EXPECT_EQ(
+        engineSelectorRevision(makeUnslottedGoldenSet(/*withRanker=*/true)),
+        "generic-untuned-v1/08d0a086e080663548bcda1ae0e01b557cd58734e6d8281839e337ae6de179b2");
+}
+
+/// A code object the packager compiled is named by its identity, not its bytes: rebuilding it
+/// with another compiler keeps the selector revision and moves only the codegen revision, for
+/// a kernel's single source and for one launch of a multi-launch kernel alike.
+TEST(TestIngestorGenericEngine, ACodeObjectIdentityStandsInForItsBytesInTheSelectorRevision)
+{
+    for(const bool multiLaunch : {false, true})
+    {
+        SCOPED_TRACE(multiLaunch ? "launch of a multi-launch kernel" : "single source");
+        auto base = makeUnslottedGoldenSet(/*withRanker=*/true);
+        auto& kernel = base.packs.front().kernels.front();
+        if(multiLaunch)
+        {
+            kernel.sources = {{"decode", kernel.source}, {"merge", kernel.source}};
+            kernel.source = {};
+        }
+        auto& source = multiLaunch ? kernel.sources.at("decode") : kernel.source;
+        source.sha256 = std::string(64, '1');
+        source.identity = std::string(64, 'a');
+        const auto edited = [&](auto edit) {
+            auto set = base;
+            auto& target = multiLaunch ? set.packs.front().kernels.front().sources.at("decode")
+                                       : set.packs.front().kernels.front().source;
+            edit(target);
+            return set;
+        };
+
+        const auto rebuilt = edited([](KernelSource& s) { s.sha256 = std::string(64, '2'); });
+        EXPECT_EQ(engineSelectorRevision(rebuilt), engineSelectorRevision(base));
+        EXPECT_NE(engineCodegenRevision(rebuilt), engineCodegenRevision(base));
+
+        const auto recompiled = edited([](KernelSource& s) { s.identity = std::string(64, 'b'); });
+        EXPECT_NE(engineSelectorRevision(recompiled), engineSelectorRevision(base));
+        EXPECT_EQ(engineCodegenRevision(recompiled), engineCodegenRevision(base));
+
+        // Without an identity the bytes are the kernel, so they name it.
+        const auto prebuilt = edited([](KernelSource& s) { s.identity.clear(); });
+        EXPECT_NE(engineSelectorRevision(prebuilt), engineSelectorRevision(base));
+        const auto prebuiltRebuilt = edited([](KernelSource& s) {
+            s.identity.clear();
+            s.sha256 = std::string(64, '2');
+        });
+        EXPECT_NE(engineSelectorRevision(prebuiltRebuilt), engineSelectorRevision(prebuilt));
+    }
+}
+
+/// The golden set with its kernel carrying an identity: the expected digest is the one above
+/// with the kernel's `"sha256":""` replaced by `"identity":"a…a"` in the hashed JSON, computed
+/// independently of the C++. A change to how an identity enters the selector revision changes
+/// it and orphans every rocKE model's `trained_against`.
+TEST(TestIngestorGenericEngine, UnslottedGoldenSelectorRevisionPinsAKernelIdentity)
+{
+    auto set = makeUnslottedGoldenSet(/*withRanker=*/false);
+    set.packs.front().kernels.front().source.identity = std::string(64, 'a');
+    EXPECT_EQ(
+        engineSelectorRevision(set),
+        "generic-untuned-v1/d513df6a84222623789788921c89c37f9f8e70d0069ff8f97a91818090fa9a20");
+}
+
+/// Expected digest computed independently of the C++, over the compact, key-sorted JSON
+/// `{"packs":{"<pack id>/[]":{"<kernel id>":{"sha256":"","sources":{"decode":"1…1",
+/// "merge":"2…2"}}}}}` (the kernel keeps an empty default source). A change to what it hashes
+/// makes every model's recorded codegen_revision warn.
+TEST(TestIngestorGenericEngine, UnslottedGoldenCodegenRevisionPinsEveryCodeObject)
+{
+    auto set = makeUnslottedGoldenSet(/*withRanker=*/false);
+    auto& kernel = set.packs.front().kernels.front();
+    kernel.source = {};
+    KernelSource decode;
+    decode.kind = KernelSourceKind::KPACK;
+    decode.sha256 = std::string(64, '1');
+    decode.identity = std::string(64, 'a');
+    KernelSource merge = decode;
+    merge.sha256 = std::string(64, '2');
+    kernel.sources = {{"decode", decode}, {"merge", merge}};
+    EXPECT_EQ(
+        engineCodegenRevision(set),
+        "generic-codegen-v1/b1c53652e0629c434d7c9f7bb6069d43ed3b402ff9c982528001c1d93b86a14a");
+}
+
+/// No ranker: no UHD id, no model hash, and nothing a cached ranking could be invalidated
+/// by, so the disk cache stays enabled.
+///
+/// With a ranker the model hash is the SHA-256 of the compact JSON `{"<metric>@default":
+/// <ranker identity>}` (here the metric-less ranker, key "@default"), computed
+/// independently of the C++.
+TEST(TestIngestorGenericEngine, UnslottedGoldenEngineIdentity)
+{
+    {
+        const auto set = makeUnslottedGoldenSet(/*withRanker=*/false);
+        const auto identity = engineIdentity(set);
+
+        EXPECT_EQ(identity.name, "test:engine");
+        EXPECT_EQ(identity.version.str(), "1.0.0");
+        EXPECT_EQ(identity.uhdId, "");
+        EXPECT_EQ(identity.modelHash, "");
+        EXPECT_TRUE(identity.contentIdentified);
+        EXPECT_EQ(engineModelHash(set), "");
+        EXPECT_TRUE(engineContentIdentified(set));
+    }
+
+    {
+        const auto set = makeUnslottedGoldenSet(/*withRanker=*/true);
+        const auto identity = engineIdentity(set);
+
+        EXPECT_EQ(identity.name, "test:engine");
+        EXPECT_EQ(identity.version.str(), "1.0.0");
+        EXPECT_EQ(identity.uhdId, "e2e2e2e2-e2e2-e2e2-e2e2-e2e2e2e2e2e2");
+        EXPECT_EQ(identity.modelHash,
+                  "b8da6ea79cf2e67a5ad47173d35c663ab163fba11d23dce8cc193c0d02c164ee");
+        EXPECT_TRUE(identity.contentIdentified);
+    }
+}
+
+TEST(TestIngestorGenericEngine, UnslottedGoldenContentIdentifiedNeedsADigestForANamedArtifact)
+{
+    auto set = makeUnslottedGoldenSet(/*withRanker=*/true);
+    set.heuristic->modelArtifactPath = "model.bin";
+    EXPECT_FALSE(engineContentIdentified(set));
+    EXPECT_FALSE(engineIdentity(set).contentIdentified);
+
+    set.heuristic->modelHash = std::string(64, 'a');
+    EXPECT_TRUE(engineContentIdentified(set));
+    EXPECT_TRUE(engineIdentity(set).contentIdentified);
+
+    auto perMetric = makeUnslottedGoldenSet(/*withRanker=*/false);
+    HeuristicDescriptor modelled;
+    modelled.id = HEURISTIC_ID;
+    modelled.adapter = UhdAdapter::TREE_DATA;
+    modelled.modelArtifactPath = "model.bin";
+    perMetric.heuristicsByMetric["tflops"]["default"] = modelled;
+    EXPECT_FALSE(engineContentIdentified(perMetric));
+}
+
+TEST(TestIngestorGenericEngine, UnslottedGoldenDefaultSelectorRevisionIsTheUedIdAndRevision)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+    constexpr const char* L1_SYMBOL = "hipdnn.kernel_ingestor.test.generic_engine.golden_l1";
+    hipdnn_plugin_sdk::uhd::NativeScorerRegistry::registerSymbol(L1_SYMBOL, firstL1Feature);
+    const ScopedTestSymbols symbols;
+    const StubDeviceResolver resolver;
+    const std::vector<nlohmann::json> signature = {"$device.cu_count"};
+    HeuristicDescriptor model;
+    model.id = testId(0xA6);
+    model.name = "engine throughput";
+    model.adapter = UhdAdapter::NATIVE;
+    model.nativeSymbol = L1_SYMBOL;
+    model.featuresSignature = signature;
+    model.featuresHash = hipdnn_plugin_sdk::uhd::FeatureExtractor::computeHash(signature);
+    model.objective = "max";
+    model.score = {"tflops", true, "identity"};
+    const auto evaluate = [&](const std::string& trainedAgainst) {
+        model.trainedAgainstSelectorRevision = trainedAgainst;
+        model.trainedAgainstJson
+            = {{"ued", {{"id", "20112233-4455-6677-8899-aabbccddeeff"}, {"revision", "1.0"}}},
+               {"kmd", {{"id", "30112233-4455-6677-8899-aabbccddeeff"}, {"revision", "1.0"}}},
+               {"umd", nlohmann::json::array()},
+               {"selector_revision", trainedAgainst}};
+        const StubEngine engine(makeEngineWithKnobs({BLOCK_SIZE}),
+                                makeStubStateManager(),
+                                resolver,
+                                {{"tflops", {{"default", model}}}});
+        StubHandle handle;
+        const TestGraph graph(makeGraphId(0x6F));
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper config(nullptr, 0);
+        return engine.getPrediction(handle, graph, config, HIPDNN_ENGINE_PREDICTION_ENGINE, true);
+    };
+
+    const std::string expected = "generic-untuned-v1/e0e0e0e0-e0e0-e0e0-e0e0-e0e0e0e0e0e0/1.0.0";
+    const auto current = evaluate(expected);
+    EXPECT_EQ(current.status, PredictionStatus::AVAILABLE) << current.reason;
+
+    const auto stale = evaluate("selector-old");
+    EXPECT_EQ(stale.status, PredictionStatus::UNAVAILABLE);
+    EXPECT_NE(stale.reason.find(", engine reports " + expected), std::string::npos) << stale.reason;
+
+    hipdnn_plugin_sdk::uhd::NativeScorerRegistry::unregisterSymbol(L1_SYMBOL);
+}
+
+/// A model measured on other code objects of the same selector still binds: only a compiler
+/// rebuilt them. The engine warns once per process, arch and pair of codegen revisions, not once
+/// per Container, and publishes its codegen_revision in the binding so a collection records it.
+/// A model that records no codegen revision, or an engine that reports none, is not compared.
+TEST(TestIngestorGenericEngine, AnEngineModelMeasuredOnOtherCodeObjectsBindsAndWarnsOnce)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+    constexpr const char* L1_SYMBOL = "hipdnn.kernel_ingestor.test.generic_engine.l1_codegen";
+    constexpr const char* WARNING = "measured on other code objects";
+    hipdnn_plugin_sdk::uhd::NativeScorerRegistry::registerSymbol(L1_SYMBOL, firstL1Feature);
+    const ScopedTestSymbols symbols;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const StubDeviceResolver resolver;
+    const std::vector<nlohmann::json> signature = {"$device.cu_count"};
+    HeuristicDescriptor model;
+    model.id = testId(0xA6);
+    model.name = "engine throughput";
+    model.adapter = UhdAdapter::NATIVE;
+    model.nativeSymbol = L1_SYMBOL;
+    model.featuresSignature = signature;
+    model.featuresHash = hipdnn_plugin_sdk::uhd::FeatureExtractor::computeHash(signature);
+    model.objective = "max";
+    model.score = {"tflops", true, "identity"};
+    model.trainedAgainstSelectorRevision = "selector-new";
+    model.trainedAgainstCodegenRevision = "codegen-old";
+    model.trainedAgainstJson
+        = {{"selector_revision", "selector-new"}, {"codegen_revision", "codegen-old"}};
+    // Unique per run, so the once-per-process warning is this test's own under --gtest_repeat.
+    static int s_run = 0;
+    auto engineDescriptor = makeEngineWithKnobs({BLOCK_SIZE});
+    engineDescriptor.name += ".codegen" + std::to_string(s_run++);
+    auto unrecorded = model;
+    unrecorded.trainedAgainstCodegenRevision.clear();
+    unrecorded.trainedAgainstJson.erase("codegen_revision");
+    const auto makeEngine = [&](const std::string& codegenRevision) {
+        return std::make_unique<StubEngine>(
+            engineDescriptor,
+            makeStubStateManager(),
+            resolver,
+            std::map<std::string, std::map<std::string, HeuristicDescriptor>>{
+                {"tflops", {{"default", model}, {"gfx950", model}, {"gfx90a", unrecorded}}}},
+            std::map<std::string, std::set<std::string>>{},
+            "selector-new",
+            nlohmann::json{{"codegen_revision", codegenRevision}});
+    };
+    const auto countWarnings = [&] {
+        const auto logs = recorder.getRecordedLogs();
+        return std::count_if(logs.begin(), logs.end(), [&](const auto& log) {
+            return log.message.find(WARNING) != std::string::npos
+                   && log.message.find(engineDescriptor.name) != std::string::npos;
+        });
+    };
+    StubHandle handle;
+    const TestGraph graph(makeGraphId(0x6D));
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper config(nullptr, 0);
+
+    // Same code objects, or an engine reporting none: binds silently.
+    for(const auto* codegen : {"codegen-old", ""})
+    {
+        const auto current = makeEngine(codegen);
+        EXPECT_EQ(
+            current->getPrediction(handle, graph, config, HIPDNN_ENGINE_PREDICTION_ENGINE, true)
+                .status,
+            PredictionStatus::AVAILABLE);
+    }
+    // A null provenance, what `{}` constructs, is no provenance: it binds silently too.
+    const auto unprovenanced = std::make_unique<StubEngine>(
+        engineDescriptor,
+        makeStubStateManager(),
+        resolver,
+        std::map<std::string, std::map<std::string, HeuristicDescriptor>>{
+            {"tflops", {{"default", model}}}},
+        std::map<std::string, std::set<std::string>>{},
+        "selector-new",
+        nlohmann::json{});
+    EXPECT_EQ(
+        unprovenanced->getPrediction(handle, graph, config, HIPDNN_ENGINE_PREDICTION_ENGINE, true)
+            .status,
+        PredictionStatus::AVAILABLE);
+    EXPECT_EQ(countWarnings(), 0);
+
+    // Rebuilt code objects: binds, and warns naming both revisions once per arch whose model
+    // records a codegen revision, however many Containers build the engine.
+    const auto first = makeEngine("codegen-new");
+    const auto second = makeEngine("codegen-new");
+    const auto evaluated
+        = second->getPrediction(handle, graph, config, HIPDNN_ENGINE_PREDICTION_ENGINE, true);
+    EXPECT_EQ(evaluated.status, PredictionStatus::AVAILABLE) << evaluated.reason;
+    EXPECT_DOUBLE_EQ(evaluated.value, 304.0);
+    EXPECT_EQ(countWarnings(), 2);
+    EXPECT_FALSE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "model for gfx90a"));
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "codegen-old"));
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "codegen-new"));
+
+    // A different mismatch for the same engine, metric and arch warns again, once per arch.
+    (void)makeEngine("codegen-newer");
+    (void)makeEngine("codegen-newer");
+    EXPECT_EQ(countWarnings(), 4);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "codegen-newer"));
+
+    const auto described
+        = first->getPrediction(handle, graph, config, HIPDNN_ENGINE_PREDICTION_ENGINE, false);
+    EXPECT_EQ(
+        nlohmann::json::parse(described.binding_json).at("trained_against").at("codegen_revision"),
+        "codegen-new");
+
+    hipdnn_plugin_sdk::uhd::NativeScorerRegistry::unregisterSymbol(L1_SYMBOL);
+}
+
+/// makeEngine hands the engine the set's own codegen revision: the binding publishes it, and an
+/// L1 recorded against other code objects binds with a warning naming it.
+TEST(TestIngestorGenericEngine, MakeEngineComparesAModelToTheSetsCodegenRevision)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+    constexpr const char* L1_SYMBOL = "hipdnn.kernel_ingestor.test.generic_engine.l1_make_engine";
+    hipdnn_plugin_sdk::uhd::NativeScorerRegistry::registerSymbol(L1_SYMBOL, firstL1Feature);
+    const ScopedTestSymbols symbols;
+    ensureNoopDispatchRegistered<StubHandle>("hipdnn.kernel_ingestor.test.dispatch");
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const StubDeviceResolver resolver;
+    auto set = makeUnslottedGoldenSet(/*withRanker=*/false);
+    // Unique per run, so the once-per-process warning is this test's own under --gtest_repeat.
+    static int s_run = 0;
+    set.engine.name += ".make_engine" + std::to_string(s_run++);
+    auto& source = set.packs.front().kernels.front().source;
+    source.sha256 = std::string(64, '1');
+    source.identity = std::string(64, 'a');
+    const std::vector<nlohmann::json> signature = {"$device.cu_count"};
+    HeuristicDescriptor model;
+    model.id = testId(0xA7);
+    model.name = "engine throughput";
+    model.adapter = UhdAdapter::NATIVE;
+    model.nativeSymbol = L1_SYMBOL;
+    model.featuresSignature = signature;
+    model.featuresHash = hipdnn_plugin_sdk::uhd::FeatureExtractor::computeHash(signature);
+    model.objective = "max";
+    model.score = {"tflops", true, "identity"};
+    model.trainedAgainstSelectorRevision = engineSelectorRevision(set);
+    model.trainedAgainstCodegenRevision = "codegen-old";
+    model.trainedAgainstJson = {{"selector_revision", model.trainedAgainstSelectorRevision},
+                                {"codegen_revision", "codegen-old"}};
+    set.enginePredictionsByMetric = {{"tflops", {{"default", model}}}};
+
+    StubHandle handle;
+    const TestGraph graph(makeGraphId(0x6E));
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper config(nullptr, 0);
+    // Both overloads: the one that builds the state manager, and the one a provider uses over a
+    // state manager it already built.
+    for(const bool prebuilt : {false, true})
+    {
+        SCOPED_TRACE(prebuilt ? "prebuilt state manager" : "owning");
+        const auto engine = prebuilt
+                                ? makeEngine<StubHandle, StubSettings, StubContext>(
+                                      set, makeStubStateManager(), resolver)
+                                : makeEngine<StubHandle, StubSettings, StubContext>(set, resolver);
+        const auto evaluated
+            = engine->getPrediction(handle, graph, config, HIPDNN_ENGINE_PREDICTION_ENGINE, true);
+        EXPECT_EQ(evaluated.status, PredictionStatus::AVAILABLE) << evaluated.reason;
+        const auto described
+            = engine->getPrediction(handle, graph, config, HIPDNN_ENGINE_PREDICTION_ENGINE, false);
+        const auto binding = nlohmann::json::parse(described.binding_json);
+        EXPECT_EQ(binding.at("trained_against").value("codegen_revision", std::string{}),
+                  engineCodegenRevision(set))
+            << binding.dump();
+    }
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, engineCodegenRevision(set)))
+        << recorder.getRecordedLogsAsString();
+
+    hipdnn_plugin_sdk::uhd::NativeScorerRegistry::unregisterSymbol(L1_SYMBOL);
+}
+
+/// The unslotted golden set with its one kernel spelled as a multi-launch `sources` map
+/// (two KPACK launches, no `source`). `sources` is part of the selector revision, so the
+/// digests differ from the single-source ones above.
+TEST(TestIngestorGenericEngine, UnslottedGoldenSelectorRevisionPinsAKernelSpelledAsSources)
+{
+    const auto withSources = [](bool withRanker) {
+        auto set = makeUnslottedGoldenSet(withRanker);
+        auto& kernel = set.packs.front().kernels.front();
+        kernel.source = {};
+        KernelSource decode;
+        decode.kind = KernelSourceKind::KPACK;
+        decode.library = "kpack/golden.kpack";
+        decode.tocKey = "golden/decode";
+        decode.symbol = "decode_kernel";
+        decode.sha256 = std::string(64, '1');
+        KernelSource merge = decode;
+        merge.tocKey = "golden/merge";
+        merge.symbol = "merge_kernel";
+        merge.sha256 = std::string(64, '2');
+        kernel.sources = {{"decode", decode}, {"merge", merge}};
+        return set;
+    };
+    EXPECT_EQ(
+        engineSelectorRevision(withSources(/*withRanker=*/false)),
+        "generic-untuned-v1/aae4dd24617344167bbc75680a10a7646cb2bda7efd47ecf12a924c3a01c93c4");
+    EXPECT_EQ(
+        engineSelectorRevision(withSources(/*withRanker=*/true)),
+        "generic-untuned-v1/647d7b25549616277009966aed87c0ef50ca1a22979729c5e8daa154cfbb5e72");
 }
 
 } // namespace

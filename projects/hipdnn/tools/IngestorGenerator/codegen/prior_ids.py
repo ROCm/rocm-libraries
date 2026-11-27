@@ -21,7 +21,7 @@ Every failure is a ``ValueError`` naming the offending paths.
 import hashlib
 import json
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
@@ -44,6 +44,7 @@ class PriorKdp:
     arch: list[str] | None  # KDP-level arch, None if absent
     operation_umd_id: str | None  # the graph-scope matcher; multi-pack only
     entries: list[dict]  # kernelDescriptors[] as parsed
+    slot: str | None = None  # the slot the KDP serves (1.1); None when unslotted
 
     def effective_arch(self, entry: dict) -> list[str] | None:
         """The arch ``entry`` is emitted for: its own, else the KDP's."""
@@ -51,14 +52,33 @@ class PriorKdp:
 
 
 @dataclass(frozen=True)
-class EngineDocs:
-    """The engine-level documents, parsed."""
+class SlotDocs:
+    """One slot's documents of a slotted UED (RFC 0021): its KMD, when it ranks
+    its UHD, and the UDD its KDPs name (None for a slot with no KDP)."""
 
-    ued: dict
     kmd: dict
     uhd: dict | None
-    udd: dict
+    udd: dict | None
+
+
+@dataclass(frozen=True)
+class EngineDocs:
+    """The engine-level documents, parsed.
+
+    A slotted UED (1.1) carries ``slots[]`` in place of ``metadata`` and
+    ``sort_kernel_catalog``, and each slot has its own dispatch descriptor:
+    ``kmd``, ``uhd`` and ``udd`` are then None and ``slots`` holds each slot's
+    documents by slot name. ``slots`` is empty for an unslotted UED.
+    """
+
+    ued: dict
+    kmd: dict | None
+    #: The native fallback scorer comes first; a promoted model packet appends
+    #: its own after it. None for a slotted UED (see ``slots``).
+    uhd: tuple[dict, ...] | None
+    udd: dict | None
     kernel_match_umd: dict
+    slots: dict[str, SlotDocs] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -155,13 +175,52 @@ def _umd_kinds(root: _Root, kdp_path: Path, kdp: dict) -> dict[str, dict]:
 
 
 def _check_dispatch(kdps: list[tuple[Path, dict]], engine: str, root: Path) -> None:
-    """Every KDP of one engine names the same UDD."""
+    """Every KDP of one slot names the same UDD.
+
+    A slotted engine gives each slot its own dispatch handler (RFC 0021 §4), and
+    every KDP naming that slot must agree on it.
+    """
     dispatch = {d.get("dispatch") for _, d in kdps}
     if len(dispatch) != 1 or not all(isinstance(d, str) for d in dispatch):
         raise ValueError(
             f"KDPs of engine {engine} under {root} disagree on dispatch: "
             f"{sorted(map(str, dispatch))}"
         )
+
+
+def _check_each_dispatch_resolves(
+    kdps: list[tuple[Path, dict]], engine: str, root: Path, tree: "_Root"
+) -> None:
+    """Every KDP of an unslotted engine resolves its own ``dispatch`` to a UDD
+    under ``root``.
+
+    An unslotted engine's packs may each name their own dispatch (``pack.dispatch``,
+    ``split_c`` for example), each with its own UDD
+    (``config_loader._check_launch_names_agree`` scopes launch-name agreement the
+    same way: by slot when slotted, by ``pack.dispatch`` otherwise), so the KDPs of
+    one such engine need not share one UDD. Each one's reference must still resolve,
+    which still catches a missing, wrong-typed or dangling ``dispatch``.
+    """
+    for path, kdp in kdps:
+        dispatch = kdp.get("dispatch")
+        if not isinstance(dispatch, str) or not dispatch:
+            raise ValueError(f"{path}: 'dispatch' is not a non-empty string")
+        tree.resolve("udd", dispatch, "dispatch", path)
+
+
+def _check_slot_dispatch(
+    kdps: list[tuple[Path, dict]], engine: str, root: Path, tree: "_Root"
+) -> None:
+    """`_check_dispatch` for a slotted engine's KDPs of one slot, or
+    `_check_each_dispatch_resolves` for an unslotted engine's (slot ``None``)."""
+    by_slot: dict = {}
+    for item in kdps:
+        by_slot.setdefault(item[1].get("slot"), []).append(item)
+    for slot, group in by_slot.items():
+        if slot is None:
+            _check_each_dispatch_resolves(group, engine, root, tree)
+        else:
+            _check_dispatch(group, f"{engine} slot {slot!r}", root)
 
 
 def find_engine(root: Path, engine_name: str) -> EngineDocs | None:
@@ -172,6 +231,53 @@ def find_engine(root: Path, engine_name: str) -> EngineDocs | None:
     resolved from the engine's KDPs, so a home root with no KDP is an error.
     """
     return _engine_docs(_Root(root), engine_name)
+
+
+def _resolve_ranker(tree: _Root, path: Path, owner: dict, where: str) -> dict | None:
+    """The UHD ``owner``'s ``sort_kernel_catalog.default`` names, None when it has
+    no catalog. ``owner`` is a UED, or one of its slots (``where`` names which)."""
+    catalog = owner.get("sort_kernel_catalog")
+    if catalog is None:
+        return None
+    if not isinstance(catalog, dict) or "default" not in catalog:
+        raise ValueError(
+            f"{path}: {where}'sort_kernel_catalog' must be an object with a "
+            f"'default' UHD reference"
+        )
+    return tree.resolve(
+        "uhd", catalog["default"], f"{where}sort_kernel_catalog.default", path
+    )
+
+
+def _slot_docs(
+    tree: _Root, ued_path: Path, slots, kdps: list[tuple[Path, dict]]
+) -> dict[str, SlotDocs]:
+    """The KMD, UHD and UDD of each entry of a slotted UED's ``slots[]``, by slot
+    name. A slot's UDD is the one its KDPs (those naming the slot) dispatch to;
+    they must agree."""
+    if not isinstance(slots, list):
+        raise ValueError(f"{ued_path}: 'slots' must be a list")
+    docs: dict[str, SlotDocs] = {}
+    for index, entry in enumerate(slots):
+        name = entry.get("name") if isinstance(entry, dict) else None
+        if not isinstance(name, str) or not name:
+            raise ValueError(f"{ued_path}: slots[{index}] has no string 'name'")
+        if name in docs:
+            raise ValueError(f"{ued_path}: slot {name!r} is declared twice")
+        where = f"slots[{name}]."
+        own = [(p, d) for p, d in kdps if d.get("slot") == name]
+        udd = None
+        if own:
+            _check_dispatch(own, f"slot {name!r}", tree.root)
+            udd = tree.resolve("udd", own[0][1].get("dispatch"), "dispatch", own[0][0])
+        docs[name] = SlotDocs(
+            kmd=tree.resolve(
+                "kmd", entry.get("metadata"), f"{where}metadata", ued_path
+            ),
+            uhd=_resolve_ranker(tree, ued_path, entry, where),
+            udd=udd,
+        )
+    return docs
 
 
 def _engine_docs(tree: _Root, engine_name: str) -> EngineDocs | None:
@@ -185,28 +291,51 @@ def _engine_docs(tree: _Root, engine_name: str) -> EngineDocs | None:
             f"{[str(p) for p, _ in ueds]}"
         )
     ued_path, ued = ueds[0]
-    kmd = tree.resolve("kmd", ued.get("metadata"), "metadata", ued_path)
-    uhd = None
-    catalog = ued.get("sort_kernel_catalog")
-    if catalog is not None:
-        if not isinstance(catalog, dict) or "default" not in catalog:
-            raise ValueError(
-                f"{ued_path}: 'sort_kernel_catalog' must be an object with a "
-                f"'default' UHD reference"
+    slotted = "slots" in ued
+    kmd = uhd = None
+    if not slotted:
+        kmd = tree.resolve("kmd", ued.get("metadata"), "metadata", ued_path)
+        catalog = ued.get("sort_kernel_catalog")
+        if catalog is not None:
+            if not isinstance(catalog, dict) or "default" not in catalog:
+                raise ValueError(
+                    f"{ued_path}: 'sort_kernel_catalog' must be an object with a "
+                    f"'default' UHD reference"
+                )
+            default = catalog["default"]
+            # The native fallback scorer comes first; a promoted model packet appends
+            # its own after it, so "default" is one UHD id or a list of them.
+            default_ids = default if isinstance(default, list) else [default]
+            if not default_ids or not all(isinstance(i, str) for i in default_ids):
+                raise ValueError(
+                    f"{ued_path}: 'sort_kernel_catalog.default' must be a UHD id or "
+                    f"a non-empty list of UHD ids"
+                )
+            uhd = tuple(
+                tree.resolve("uhd", i, "sort_kernel_catalog.default", ued_path)
+                for i in default_ids
             )
-        uhd = tree.resolve(
-            "uhd", catalog["default"], "sort_kernel_catalog.default", ued_path
-        )
     kdps = tree.kdps_of(ued["id"])
     if not kdps:
         raise tree.no_kdp_error(ued["id"])
-    _check_dispatch(kdps, repr(engine_name), root)
     kdp_path, kdp = kdps[0]
-    udd = tree.resolve("udd", kdp.get("dispatch"), "dispatch", kdp_path)
+    udd, slots = None, {}
+    if slotted:
+        slots = _slot_docs(tree, ued_path, ued["slots"], kdps)
+    else:
+        _check_each_dispatch_resolves(kdps, repr(engine_name), root, tree)
+        udd = tree.resolve("udd", kdp.get("dispatch"), "dispatch", kdp_path)
     kernel_match = _umd_kinds(tree, kdp_path, kdp).get("kernel")
     if kernel_match is None:
         raise ValueError(f"{kdp_path}: no kernel-scope matcher among its matchers")
-    return EngineDocs(ued=ued, kmd=kmd, uhd=uhd, udd=udd, kernel_match_umd=kernel_match)
+    return EngineDocs(
+        ued=ued,
+        kmd=kmd,
+        uhd=uhd,
+        udd=udd,
+        kernel_match_umd=kernel_match,
+        slots=slots,
+    )
 
 
 def _is_arch_list(arch) -> bool:
@@ -251,18 +380,28 @@ def _check_entry(path: Path, entry: dict) -> None:
             )
 
 
-def read_prior_bundle(root: Path, engine_id: str, kernel_match_id: str) -> PriorBundle:
+def read_prior_bundle(
+    root: Path,
+    engine_id: str,
+    kernel_match_id: str,
+    *,
+    home_root: Path | None = None,
+) -> PriorBundle:
     """The KDPs under ``root`` that name ``engine_id``, plus the engine-level
     documents when ``root`` holds the engine's UED.
 
     A satellite root holds no UMD files, so its KDP may not carry a graph-scope
-    matcher: sibling mode is single-pack only.
+    matcher: sibling mode is single-pack only. A satellite also holds no UDD: its
+    KDPs' ``dispatch`` names a UDD under the engine's home, so a satellite
+    ``root`` (one not equal to ``home_root``) resolves ``dispatch`` against the
+    home's tree, not its own.
     """
     tree = _Root(root)
     kdps = tree.kdps_of(engine_id)
     if not kdps:
         raise tree.no_kdp_error(engine_id)
-    _check_dispatch(kdps, engine_id, root)
+    dispatch_tree = tree if home_root is None or home_root == root else _Root(home_root)
+    _check_slot_dispatch(kdps, engine_id, root, dispatch_tree)
     prior: list[PriorKdp] = []
     names: dict[str, Path] = {}
     for path, kdp in kdps:
@@ -304,6 +443,7 @@ def read_prior_bundle(root: Path, engine_id: str, kernel_match_id: str) -> Prior
                 arch=list(arch) if arch is not None else None,
                 operation_umd_id=operation,
                 entries=list(kdp.get("kernelDescriptors") or []),
+                slot=kdp.get("slot"),
             )
         )
     engine = None

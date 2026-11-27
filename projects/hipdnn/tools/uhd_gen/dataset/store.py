@@ -38,7 +38,9 @@ from typing import Any, Iterable, Iterator
 import pandas as pd
 
 from .. import addressing
+from ..provenance import hard_provenance, shared_provenance
 from .publish import ValidationError, publish_frame
+from .training_table import SLOT_REFERENCE, WORKSPACE_PREFIX, slot_training_rows
 
 DATASET_SCHEMA = "uhd_gen.dataset/1"
 DATA_FILE = "dataset.parquet"
@@ -51,6 +53,9 @@ COLLECTION_MANIFEST = "collection_manifest.json"
 BOOKKEEPING = ("contribution_id", "collected_at", "source", "purpose", "corpus_id")
 
 #: What every contribution of one dataset must share: a model is trained against one binding.
+#: `trained_against` is compared without its `codegen_revision` (`hard_provenance`): each
+#: contribution keeps its own, and contributions measured with different compilers join one
+#: dataset with a warning (`codegen_warning`).
 SHARED = (
     "role",
     "engine_name",
@@ -253,12 +258,32 @@ def _write_atomically(path: pathlib.Path, write) -> None:
     os.replace(temporary, path)
 
 
+def _shared(entry: dict[str, Any]) -> dict[str, Any]:
+    """`entry`'s SHARED members as a dataset compares and records them."""
+    return {
+        key: (
+            hard_provenance(entry.get(key))
+            if key == "trained_against"
+            else entry.get(key)
+        )
+        for key in SHARED
+    }
+
+
+def codegen_warning(contributions: Iterable[dict[str, Any]]) -> str | None:
+    """Why `contributions` measured with different code objects, or None when they did not
+    or there are none."""
+    snapshots = [c.get("trained_against") for c in contributions]
+    return shared_provenance(snapshots)[1] if snapshots else None
+
+
 def _agree(manifest: dict[str, Any], entry: dict[str, Any]) -> None:
+    shared, joining = _shared(manifest), _shared(entry)
     for key in SHARED:
-        if manifest.get(key) != entry.get(key):
+        if shared[key] != joining[key]:
             raise DatasetError(
                 f"contribution {entry['contribution_id']} disagrees with this dataset on "
-                f"{key}: {manifest.get(key)!r} vs {entry.get(key)!r}; a dataset holds one "
+                f"{key}: {shared[key]!r} vs {joining[key]!r}; a dataset holds one "
                 "binding, as a model is trained against one"
             )
 
@@ -422,7 +447,7 @@ def _write(
             first = prepared[0][0]
             manifest = {
                 "schema": DATASET_SCHEMA,
-                **{key: first.get(key) for key in SHARED},
+                **_shared(first),
                 "contributions": [],
             }
         removed, unknown = select(manifest["contributions"], replace)
@@ -733,6 +758,11 @@ def from_csv(
         resolve_duplicates_by=resolve_duplicates_by,
         best_column=best_column,
     )
+    if SLOT_REFERENCE in frame.columns:
+        # A slotted sweep: workspace tokens describe the engine's buffer, not the problem.
+        frame = frame.drop(
+            columns=[c for c in frame.columns if c.startswith(WORKSPACE_PREFIX)]
+        )
     if "arch" not in frame.columns:
         frame["arch"] = arch
     # A stored measurement is keyed by its graph and its device kind (training_table.py);
@@ -798,12 +828,14 @@ def export_rows(
     contributions: Iterable[str] | None = None,
     purposes: Iterable[str] | None = None,
     source: str | None = None,
+    slot: str | None = None,
 ) -> list[dict[str, Any]]:
     """Rows of the named contributions (ids or labels; or of every contribution with one of
     `purposes`), each as its source wrote it: no bookkeeping, only the keys it carried.
 
     `source` keeps one metric's rows where a contribution measured several; a single-metric
-    contribution answers whatever `source` is.
+    contribution answers whatever `source` is. `slot` turns a slotted engine's sweep into that
+    slot's training rows (`training_table.slot_training_rows`).
     """
     manifest = read_manifest(directory)
     if manifest is None:
@@ -839,6 +871,11 @@ def export_rows(
                 and (key in kept if kept else value is not None)
             }
         )
+    if slot is not None:
+        try:
+            return slot_training_rows(rows, slot)
+        except ValueError as error:
+            raise DatasetError(str(error)) from None
     return rows
 
 
@@ -952,7 +989,19 @@ def main(argv: list[str] | None = None) -> int:
     except (DatasetError, ValidationError, ValueError, OSError) as error:
         print(f"uhd_gen.dataset add: {error}", file=sys.stderr)
         return 1
-    print(json.dumps({"dataset": str(args.into), "contributions": results}))
+    # Over what a model trains on by default, as `load_dataset` decides its codegen_revision.
+    warning = codegen_warning(training_contributions(read_manifest(args.into)))
+    if warning:
+        print(f"uhd_gen.dataset add: warning: {warning}", file=sys.stderr)
+    print(
+        json.dumps(
+            {
+                "dataset": str(args.into),
+                "contributions": results,
+                "warnings": [warning] if warning else [],
+            }
+        )
+    )
     return 0
 
 
@@ -971,6 +1020,11 @@ def export_main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--metric", help="One metric's rows, where a contribution measured several"
     )
+    parser.add_argument(
+        "--slot",
+        help="Export a slotted engine's sweep as this slot's training rows: its reference "
+        "rows, with kernel.<slot>.<field> columns named kernel.<field>",
+    )
     args = parser.parse_args(argv)
     try:
         rows = export_rows(
@@ -978,6 +1032,7 @@ def export_main(argv: list[str] | None = None) -> int:
             contributions=args.contribution,
             purposes=args.purpose,
             source=args.metric,
+            slot=args.slot,
         )
     except DatasetError as error:
         print(f"uhd_gen.dataset export: {error}", file=sys.stderr)

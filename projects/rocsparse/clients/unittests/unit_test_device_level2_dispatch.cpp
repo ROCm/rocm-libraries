@@ -843,12 +843,10 @@ namespace
                                            sizeof(const void*),
                                            nullptr)
                     == rocsparse_status_success;
-#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
         put(rocsparse_sptrsv_input_solve_mode,
             o.diagonal ? rocsparse_solve_mode_diagonal : rocsparse_solve_mode_triangular);
         if(o.diagonal)
             put(rocsparse_sptrsv_input_diagonal_modifier, rocsparse_diagonal_modifier_absolute);
-#endif
         return ok;
     }
 
@@ -926,16 +924,12 @@ namespace
         using F = mat_format;
         std::vector<sptrsv_case> v{{F::coo, lo, nu, reuse, op_c, false, true},
                                    {F::coo, up, un, force, op_t},
-                                   {F::csc, up, un, reuse, op_n}};
-#if defined(ROCSPARSE_WITH_ELL_TRSV)
-        v.push_back({F::ell, lo, nu, force, op_n});
-        v.push_back({F::ell, lo, un, reuse, op_n});
-        v.push_back({F::ell, up, nu, force, op_t, false, true});
-#endif
-#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
-        for(const auto format : {F::csr, F::csc})
-            v.push_back({format, lo, nu, force, op_n, true});
-#endif
+                                   {F::csc, up, un, reuse, op_n},
+                                   {F::ell, lo, nu, force, op_n},
+                                   {F::ell, lo, un, reuse, op_n},
+                                   {F::ell, up, nu, force, op_t, false, true},
+                                   {F::csr, lo, nu, force, op_n, true},
+                                   {F::csc, lo, nu, force, op_n, true}};
         return v;
     }
 
@@ -1025,7 +1019,7 @@ namespace
 
     TEST_F(L2DeviceSptrsvMisc, scalar_type_differs_from_compute_type)
     {
-        // The matrix and the vectors are f64, the scalar is f32.
+        // The matrix and the vectors are f64; the first two solves use an f32 scalar.
         small_matrix<double> m;
         spmat_guard          A;
         dnvec_guard          x, y;
@@ -1033,9 +1027,16 @@ namespace
         ASSERT_EQ(m.create(mat_format::csr, A), rocsparse_status_success);
         ASSERT_EQ(set_triangular(A.d, lo, nu), rocsparse_status_success);
         ASSERT_EQ(m.vectors(x, y), rocsparse_status_success);
+        const std::vector<double> y0      = values<double>(m.n, 200);
+        auto                      reset_y = [&] {
+            EXPECT_EQ(hipMemcpy(m.y.ptr, y0.data(), m.n * sizeof(double), hipMemcpyHostToDevice),
+                      hipSuccess);
+        };
+
         const float           alpha_host = 2.0f;
-        device_vector<double> alpha_device(std::vector<double>(1, 2.0));
-        ASSERT_TRUE(alpha_device.ptr);
+        device_vector<float>  alpha_device_f32(std::vector<float>(1, 5.0f));
+        device_vector<double> alpha_device_f64(std::vector<double>(1, 3.0));
+        ASSERT_TRUE(alpha_device_f32.ptr && alpha_device_f64.ptr);
 
         sptrsv_options o;
         o.scalar  = f32;
@@ -1043,19 +1044,95 @@ namespace
         o.alpha   = &alpha_host;
         {
             scoped_pointer_mode host(handle, false);
+            reset_y();
             if(run_sptrsv(handle, A.d, x.d, y.d, o))
                 expect_near(
                     solve_reference(m.a, {lo, nu, op_n, false}, 2.0, m.x0), to_host(m.y), "sptrsv");
         }
         scoped_pointer_mode device(handle, true);
-        o.scalar = f64;
         o.op     = op_t;
         o.policy = rocsparse_analysis_policy_force;
-        o.alpha  = alpha_device.ptr;
+        // An f32 device scalar is converted to the f64 compute type.
+        o.alpha = alpha_device_f32.ptr;
+        reset_y();
         if(run_sptrsv(handle, A.d, x.d, y.d, o))
-            expect_near(solve_reference(m.a, {lo, nu, op_t, false}, 2.0, m.x0),
+            expect_near(solve_reference(m.a, {lo, nu, op_t, false}, 5.0, m.x0),
                         to_host(m.y),
-                        "sptrsv device alpha");
+                        "sptrsv device f32 alpha");
+        o.scalar = f64;
+        o.alpha  = alpha_device_f64.ptr;
+        reset_y();
+        if(run_sptrsv(handle, A.d, x.d, y.d, o))
+            expect_near(solve_reference(m.a, {lo, nu, op_t, false}, 3.0, m.x0),
+                        to_host(m.y),
+                        "sptrsv device f64 alpha");
+    }
+
+    TEST_F(L2DeviceSptrsvMisc, scalar_type_without_conversion_is_rejected)
+    {
+        // There is no conversion from an f32_c scalar to the f64 compute type.
+        small_matrix<double> m;
+        spmat_guard          A;
+        dnvec_guard          x, y;
+        ASSERT_TRUE(m.ok());
+        ASSERT_EQ(m.create(mat_format::csr, A), rocsparse_status_success);
+        ASSERT_EQ(set_triangular(A.d, lo, nu), rocsparse_status_success);
+        ASSERT_EQ(m.vectors(x, y), rocsparse_status_success);
+        const cfloat          alpha_host(2.0f, 0.0f);
+        device_vector<cfloat> alpha_device(std::vector<cfloat>(1, alpha_host));
+        ASSERT_TRUE(alpha_device.ptr);
+
+        sptrsv_options o;
+        o.scalar  = rocsparse_datatype_f32_c;
+        o.compute = f64;
+        for(const bool device : {false, true})
+        {
+            SCOPED_TRACE(device ? "device pointer mode" : "host pointer mode");
+            scoped_pointer_mode mode(handle, device);
+            o.alpha = device ? static_cast<const void*>(alpha_device.ptr) : &alpha_host;
+            sptrsv_descr_guard descr;
+            ASSERT_NE(descr.d, nullptr);
+            ASSERT_TRUE(configure_sptrsv(handle, descr.d, o));
+            const auto run = [&](rocsparse_sptrsv_stage stage) {
+                size_t bytes = 0;
+                EXPECT_EQ(rocsparse_sptrsv_buffer_size(
+                              handle, descr.d, A.d, x.d, y.d, stage, &bytes, nullptr),
+                          rocsparse_status_success);
+                device_vector<char> buffer(std::max<size_t>(bytes, 1));
+                EXPECT_NE(buffer.ptr, nullptr);
+                const rocsparse_status status = rocsparse_sptrsv(
+                    handle, descr.d, A.d, x.d, y.d, stage, bytes, buffer.ptr, nullptr);
+                EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+                return status;
+            };
+            ASSERT_EQ(run(rocsparse_sptrsv_stage_analysis), rocsparse_status_success);
+            EXPECT_EQ(run(rocsparse_sptrsv_stage_compute), rocsparse_status_invalid_value);
+        }
+    }
+
+    TEST_F(L2DeviceSptrsvMisc, real_device_scalar_with_complex_compute_type)
+    {
+        // An f64 device scalar is converted to the f64_c compute type.
+        using cdouble = rocsparse_double_complex;
+        small_matrix<cdouble> m;
+        spmat_guard           A;
+        dnvec_guard           x, y;
+        ASSERT_TRUE(m.ok());
+        ASSERT_EQ(m.create(mat_format::csr, A), rocsparse_status_success);
+        ASSERT_EQ(set_triangular(A.d, lo, nu), rocsparse_status_success);
+        ASSERT_EQ(m.vectors(x, y), rocsparse_status_success);
+        device_vector<double> alpha_device(std::vector<double>(1, 3.0));
+        ASSERT_TRUE(alpha_device.ptr);
+
+        sptrsv_options o;
+        o.scalar  = f64;
+        o.compute = rocsparse_datatype_f64_c;
+        o.alpha   = alpha_device.ptr;
+        scoped_pointer_mode device(handle, true);
+        if(run_sptrsv(handle, A.d, x.d, y.d, o))
+            expect_near(solve_reference(m.a, {lo, nu, op_n, false}, cdouble(3.0, 0.0), m.x0),
+                        to_host(m.y),
+                        "sptrsv device f64 alpha, f64_c compute");
     }
 
     // ----- SpTRSM ----------------------------------------------------------------------
@@ -1093,12 +1170,10 @@ namespace
                                            sizeof(const void*),
                                            nullptr)
                     == rocsparse_status_success;
-#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
         put(rocsparse_sptrsm_input_solve_mode,
             o.diagonal ? rocsparse_solve_mode_diagonal : rocsparse_solve_mode_triangular);
         if(o.diagonal)
             put(rocsparse_sptrsm_input_diagonal_modifier, rocsparse_diagonal_modifier_none);
-#endif
         return ok;
     }
 
@@ -1164,10 +1239,8 @@ namespace
                                    {F::coo, op_t, op_t, row, row, 3, force},
                                    {F::csc, op_n, op_t, col, col, 2, reuse},
                                    {F::csc, op_c, op_c, row, col, 2, force, false, true},
-                                   {F::csc, op_t, op_n, row, col, 3, reuse}};
-#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
-        v.push_back({F::csr, op_n, op_n, col, col, 2, force, true});
-#endif
+                                   {F::csc, op_t, op_n, row, col, 3, reuse},
+                                   {F::csr, op_n, op_n, col, col, 2, force, true}};
         return v;
     }
 
@@ -1223,7 +1296,7 @@ namespace
         dense_matrix<double> Y(m.n, 2, rocsparse_order_row, -1);
         ASSERT_TRUE(X.ok() && Y.ok());
         const float          alpha_host = 2.0f;
-        device_vector<float> alpha_device(std::vector<float>(1, 2.0f));
+        device_vector<float> alpha_device(std::vector<float>(1, 5.0f));
         ASSERT_TRUE(alpha_device.ptr);
 
         // The conjugate transpose is documented as unsupported.
@@ -1247,9 +1320,9 @@ namespace
         o.alpha       = alpha_device.ptr;
         o.unsupported = false;
         if(run_sptrsm(handle, A.d, X.desc.d, Y.desc.d, o))
-            expect_near(solve_columns(m.a, {lo, un, op_n, false}, 2.0, X, op_n, Y, op_n, 2),
+            expect_near(solve_columns(m.a, {lo, un, op_n, false}, 5.0, X, op_n, Y, op_n, 2),
                         to_host(Y.data),
-                        "sptrsm");
+                        "sptrsm device f32 alpha");
     }
 
 #if defined(ROCSPARSE_WITH_TRSM_REFACTORING)

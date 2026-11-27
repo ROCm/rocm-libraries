@@ -38,9 +38,10 @@ from rocke.core.arch import ArchTarget
 from rocke.core.codegen_policy import (
     CodegenPolicy,
     apply_codegen_policy,
-    normalize_scheduler_strategy,
+    scheduler_strategy_reason,
 )
 from rocke.core.ir import F32, I32, IRBuilder, KernelDef, Value
+from rocke.helpers.spec import align_up, ceil_div
 
 from kernels.common.conv_direct_dgrad_wmma import _tdm_descriptor_3d
 from kernels.common.conv_direct_grouped import (
@@ -49,16 +50,10 @@ from kernels.common.conv_direct_grouped import (
     emit_direct_params,
     one_padding_reason,
 )
+from kernels.common.conv_fwd_wmma_gate import CH_PAD, I32_MAX, WMMA_K, wmma_fwd_op
 
-WMMA_K = 32
-CH_PAD = 8
 SMALLC_WMMA_VGPR_BUDGET = 448
 SMALLC_MAX_C = 4
-_I32_MAX = (1 << 31) - 1
-
-
-def _ceil_div(a: int, b: int) -> int:
-    return -(-a // b)
 
 
 @dataclass(frozen=True)
@@ -175,16 +170,19 @@ class DgradSmallcWmmaSpec:
     def grid(self) -> tuple[int, int, int]:
         p = self.problem
         return (
-            p.N * _ceil_div(p.H, self.out_h) * _ceil_div(p.W, self.out_w),
+            p.N * ceil_div(p.H, self.out_h) * ceil_div(p.W, self.out_w),
             1,
             1,
         )
+
+    def launch_geometry(self) -> tuple[tuple[int, int, int], tuple[int, int, int]]:
+        return self.grid(), (self.threads_per_block, 1, 1)
 
 
 def dgrad_smallc_tile_efficiency(spec: DgradSmallcWmmaSpec) -> float:
     p = spec.problem
     oh, ow = spec.out_h, spec.out_w
-    return (p.H * p.W) / (_ceil_div(p.H, oh) * oh * _ceil_div(p.W, ow) * ow)
+    return (p.H * p.W) / (align_up(p.H, oh) * align_up(p.W, ow))
 
 
 def dgrad_smallc_reason(spec: DgradSmallcWmmaSpec, arch: str = "gfx1250") -> str | None:
@@ -242,16 +240,15 @@ def dgrad_smallc_reason(spec: DgradSmallcWmmaSpec, arch: str = "gfx1250") -> str
     )
     if vgprs > SMALLC_WMMA_VGPR_BUDGET:
         return f"~{vgprs} VGPRs of accumulators and fragments"
-    try:
-        normalize_scheduler_strategy(spec.sched)
-    except ValueError as e:
-        return str(e)
+    why = scheduler_strategy_reason(spec.sched)
+    if why is not None:
+        return why
     tensor_bytes = (
         2 * p.N * p.Ho * p.Wo * p.total_k,
         2 * p.total_k * p.KH * p.KW * p.cpg,
         2 * p.N * p.H * p.W * p.total_c,
     )
-    if max(tensor_bytes) > _I32_MAX:
+    if max(tensor_bytes) > I32_MAX:
         return f"tensors of {max(tensor_bytes)} B exceed the i32 byte offsets"
     return None
 
@@ -274,10 +271,7 @@ def build_dgrad_smallc_wmma(
     KH, KW, S, PAD, C = p.KH, p.KW, p.stride, p.PAD, p.cpg
     NCOL = spec.ncols
     io_type = _io_type(p.dtype)
-    ab = "bf16" if p.dtype == "bf16" else "f16"
-    wmma_op = ArchTarget.from_gfx(arch).mma.op_for_shape(
-        family="wmma", a_dtype=ab, b_dtype=ab, c_dtype="fp32", m=16, n=16, k=WMMA_K
-    )
+    wmma_op = wmma_fwd_op(p.dtype, arch)
 
     WAVE = spec.wave_size
     WC = spec.waves_c
@@ -358,7 +352,7 @@ def build_dgrad_smallc_wmma(
     if max_z:
         zero_v = b.zero_vec(io_type, 8)
         z_vecs = b.div(z_elems, c8)
-        for j in range(0, _ceil_div(max_z, 8), THREADS):
+        for j in range(0, ceil_div(max_z, 8), THREADS):
             v = b.add(tid, b.const_i32(j))
             with b.scf_if(b.cmp_lt(v, z_vecs)):
                 flat = b.mul(v, c8)
@@ -519,7 +513,7 @@ def build_dgrad_smallc_wmma(
             ]
             na, nb = OH // S, OW // S
             E = na * nb  # output pixels of this phase; a thread does all C
-            for it in range(_ceil_div(E, THREADS)):
+            for it in range(ceil_div(E, THREADS)):
                 e = b.add(tid, b.const_i32(it * THREADS))
                 with b.scf_if(b.cmp_lt(e, b.const_i32(E))):
                     bcol = b.mod(e, b.const_i32(nb))

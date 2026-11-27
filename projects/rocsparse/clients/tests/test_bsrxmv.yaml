@@ -74,6 +74,25 @@ Tests:
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   matrix: [rocsparse_matrix_random]
 
+#
+# nb = 0: only the beta scaling of y runs, in both pointer modes.
+#
+- name: bsrxmv
+  category: pre_checkin
+  function: bsrxmv
+  precision: *single_double_precisions_complex_real
+  M: [16, 300]
+  N: [0]
+  block_dim: [2, 5]
+  alpha_beta:
+    - { alpha:   1.0, beta: -1.0, alphai:  1.0, betai: -0.5 }
+    - { alpha:   2.0, beta:  0.0, alphai:  1.5, betai:  0.5 }
+    - { alpha:   0.0, beta:  1.0, alphai:  0.0, betai:  0.0 }
+  direction: [rocsparse_direction_row]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+
 
 #
 # For testing float specializations.

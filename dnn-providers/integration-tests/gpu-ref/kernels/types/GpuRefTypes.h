@@ -8,7 +8,14 @@
 
 #pragma once
 
+#ifdef GPU_REF_USE_HIP_MX
+#include <hip/hip_fp4.h>
+#include <hip/hip_fp6.h>
+#include <hip/hip_fp8.h>
+#endif
+
 #include "GpuRefBatchnormArgs.h"
+#include "GpuRefBlockScaleArgs.h"
 #include "GpuRefCommonArgs.h"
 #include "GpuRefConvArgs.h"
 #include "GpuRefLayernormArgs.h"
@@ -222,6 +229,33 @@ __device__ inline float roundToFp8(float x, int format)
     }
 }
 
+template <typename T>
+__device__ inline T roundScaleUp(double value);
+
+template <>
+__device__ inline float roundScaleUp<float>(double value)
+{
+    float rounded = static_cast<float>(value);
+    if(static_cast<double>(rounded) < value)
+    {
+        rounded = nextafterf(rounded, __builtin_inff());
+    }
+    return rounded;
+}
+
+#ifdef GPU_REF_USE_HIP_MX
+template <>
+__device__ inline __hip_fp8_e8m0 roundScaleUp<__hip_fp8_e8m0>(double value)
+{
+    __hip_fp8_e8m0 rounded(value);
+    if(static_cast<double>(static_cast<float>(rounded)) < value && rounded.__x < 0xFEu)
+    {
+        ++rounded.__x;
+    }
+    return rounded;
+}
+#endif
+
 // --- safeConvert ---
 
 template <typename TargetType, typename SourceType>
@@ -271,6 +305,30 @@ __device__ inline _Float16 fabs(_Float16 x)
 __device__ inline __bf16 fabs(__bf16 x)
 {
     return static_cast<__bf16>(__builtin_fabsf(static_cast<float>(x)));
+}
+
+// --- exp and tanh overloads ---
+// Without these, a call with a _Float16 or __bf16 argument is ambiguous between the float and
+// double overloads, so a pointwise node with fp16 or bf16 compute would fail to compile.
+
+__device__ inline _Float16 exp(_Float16 x)
+{
+    return static_cast<_Float16>(expf(static_cast<float>(x)));
+}
+
+__device__ inline __bf16 exp(__bf16 x)
+{
+    return static_cast<__bf16>(expf(static_cast<float>(x)));
+}
+
+__device__ inline _Float16 tanh(_Float16 x)
+{
+    return static_cast<_Float16>(tanhf(static_cast<float>(x)));
+}
+
+__device__ inline __bf16 tanh(__bf16 x)
+{
+    return static_cast<__bf16>(tanhf(static_cast<float>(x)));
 }
 
 // --- isnan overloads ---

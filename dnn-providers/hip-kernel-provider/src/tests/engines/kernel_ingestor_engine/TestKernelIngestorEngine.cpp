@@ -542,6 +542,27 @@ TEST(TestKernelIngestorEngine, NoNoteWithoutAResolvableDispatch)
         setWithKernels({{KernelSourceKind::KPACK}}, unregistered)));
 }
 
+TEST(TestKernelIngestorEngine, ASlottedSetIsNotSaveableThoughItsSlotsPacksWouldBe)
+{
+    // RFC 0021 §11: a slot program is not serialized (RFC 0009), so a slotted set advertises
+    // no serialization even when every slot's pack holds only saveable kernels.
+    const DescriptorSet unslotted
+        = setWithKernels({{KernelSourceKind::KPACK}, {KernelSourceKind::KPACK}}, CONV_FWD.dispatch);
+    ASSERT_TRUE(supportsExecutionPlanSerialization(unslotted));
+
+    DescriptorSet slotted;
+    slotted.dispatches = unslotted.dispatches;
+    for(const auto& pack : unslotted.packs)
+    {
+        slotted.slots.emplace_back().packs.push_back(pack);
+    }
+    slotted.engine.behaviorNotes = {RUNTIME_COMPILATION_NOTE};
+
+    EXPECT_FALSE(supportsExecutionPlanSerialization(slotted));
+    EXPECT_EQ(withComputedBehaviorNotes(slotted).engine.behaviorNotes,
+              std::vector<int32_t>{RUNTIME_COMPILATION_NOTE});
+}
+
 TEST(TestKernelIngestorEngine, WithComputedBehaviorNotesAddsTheNoteOnce)
 {
     DescriptorSet saveable
@@ -592,14 +613,13 @@ TEST(TestKernelIngestorEngine, ReportsTheSerializationNoteOnlyOnSaveableEngines)
         EXPECT_EQ(std::count(pointwiseNotes.begin(), pointwiseNotes.end(), SERIALIZATION_NOTE), 0);
     };
 
-    // The first Container takes the state managers that discovery built; a later one builds
-    // its own. Both construction paths must report the note.
-    rediscoverStateManagersForTesting();
+    // Every Container reads the shared state discovery built, the first and a later one
+    // alike. Both must report the note.
+    rediscoverSharedStatesForTesting();
     {
         SCOPED_TRACE("first Container");
         Container container;
-        ASSERT_EQ(takeDiscoveredStateManager(loadedSet(CONV_FWD.engineName).engine.id).get(),
-                  nullptr);
+        ASSERT_NE(discoveredSharedState(loadedSet(CONV_FWD.engineName).engine.id), nullptr);
         expectTheNoteOnlyOnConvFwd(container);
     }
     {
@@ -626,10 +646,12 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
 
     const std::vector<std::string_view> packDispatchSymbols{
         "hipkernel.pointwise.dispatch",
+        "hipkernel.standalone_pointwise.dispatch.v1",
         "hipkernel.conv_fwd.dispatch",
-        "hipkernel.gfx950_attention_dense.dispatch",
-        "hipkernel.gfx1151_wmma_attention.dispatch",
-        "hipkernel.gfx1151_wmma_attention_decode.dispatch",
+        "hipkernel.gfx950_conv_dgrad_aot.dispatch",
+        "hipkernel.gfx1250_conv_dgrad_aot.dispatch",
+        "hipkernel.gfx942_attention_unified3d.dispatch",
+
 #ifdef HIPDNN_ENGINE_FLYDSL
         // FlyDSL's packs, compiled in whenever the production root has FlyDSL content.
         "hipkernel.flydsl_rmsnorm.dispatch",
@@ -640,10 +662,32 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
         "hipkernel.flydsl_sdpa_cdna.dispatch",
         "hipkernel.flydsl_sdpa_cdna_dualwave.dispatch",
         "hipkernel.flydsl_sdpa_cdna_decode.dispatch",
+        "hipkernel.flydsl_sdpa_dropout_mask.dispatch",
+        "hipkernel.flydsl_sdpa_head_pad.dispatch",
+        "hipkernel.flydsl_sdpa_bwd_merged.dispatch",
+        // The split engine is one pack with a handler per slot: the first slot stands for
+        // the pack above, the others are probed beside it.
+        "hipkernel.flydsl_sdpa_bwd_split.prep.dispatch",
 #endif
+        "hipkernel.gfx950_attention_dense.dispatch",
+        "hipkernel.gfx950_attention_unified_2d.dispatch",
+        "hipkernel.gfx950_attention_unified_3d.dispatch",
+        "hipkernel.gfx942_attention_unified_2d.dispatch",
+        "hipkernel.gfx950_conv_fwd_aot.dispatch",
+        "hipkernel.gfx942_attention_dense.dispatch",
+        "hipkernel.gfx1151_wmma_attention.dispatch",
+        "hipkernel.gfx1151_wmma_attention_decode.dispatch",
     };
     EXPECT_EQ(packDispatchSymbols.size(), ingestorPacks().size())
         << "add the dispatch symbol of each new pack to this list";
+#ifdef HIPDNN_ENGINE_FLYDSL
+    const std::vector<std::string_view> slotDispatchSymbols{
+        "hipkernel.flydsl_sdpa_bwd_split.dkdv.dispatch",
+        "hipkernel.flydsl_sdpa_bwd_split.dq.dispatch",
+    };
+#else
+    const std::vector<std::string_view> slotDispatchSymbols;
+#endif
 
     // Each handler once, with the first symbol that resolved to it.
     std::map<const IKernelDispatchHandler<Handle>*, std::string> handlers;
@@ -662,11 +706,14 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
         }
     }
     registerNativeIngestorSymbols();
-    for(const auto symbol : packDispatchSymbols)
+    for(const auto& symbols : {packDispatchSymbols, slotDispatchSymbols})
     {
-        const auto* handler = DispatchRegistry<Handle>::tryResolve(std::string(symbol));
-        ASSERT_NE(handler, nullptr) << symbol;
-        handlers.emplace(handler, std::string(symbol));
+        for(const auto symbol : symbols)
+        {
+            const auto* handler = DispatchRegistry<Handle>::tryResolve(std::string(symbol));
+            ASSERT_NE(handler, nullptr) << symbol;
+            handlers.emplace(handler, std::string(symbol));
+        }
     }
 
     size_t saving = 0;

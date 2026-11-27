@@ -11,7 +11,8 @@
 
 /**
  * @file cudnn.h
- * @brief cuDNN C-API subset needed by the cuDNN FE v9 graph API, forwarded to hipDNN.
+ * @brief cuDNN C-API subset forwarded to hipDNN, plus the backend types and
+ * `cudnnBackendExecute` from `cudnn_graph.h`.
  */
 
 #pragma once
@@ -19,9 +20,9 @@
 #include <cstddef>
 #include <memory>
 #include <string>
-#include <type_traits>
 
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_version.h>
+#include <hipdnn_compatibility/cudnn/cudnn_graph.h>
 #include <hipdnn_compatibility/cudnn/cudnn_runtime_version.h>
 #include <hipdnn_compatibility/cudnn/cudnn_status.h>
 #include <hipdnn_compatibility/cudnn/detail/logging_bridge.h>
@@ -32,17 +33,11 @@
 // C-API types
 // ===========================================================================
 
-/// @brief cuDNN handle; alias of the hipDNN handle type.
-using cudnnHandle_t = ::hipdnnHandle_t;
-
-static_assert(std::is_same_v<cudnnHandle_t, ::hipdnnHandle_t>,
-              "cudnnHandle_t must alias the hipDNN handle type");
-
 /// @brief hipDNN placeholder so signatures naming it compile; graph capture is unsupported.
 using cudaGraph_t = void*;
 
-// Other cuDNN C-API enums are omitted: the v9 graph API uses the FE-namespace
-// enums aliased in cudnn_frontend_utils.h.
+// cudnnHandle_t and the backend C types live in detail/c_types.h;
+// cudnnBackendExecute and cudnnGetLastErrorString live in cudnn_graph.h.
 
 // Needs cudnnStatus_t; used by the entry points below.
 #include <hipdnn_compatibility/cudnn/detail/status_translation.h>
@@ -61,9 +56,19 @@ inline cudnnStatus_t cudnnCreate(cudnnHandle_t* handle)
         hipdnn_frontend::detail::hipdnnBackend()->create(handle));
 }
 
-/// @brief Destroys a handle.
+/// @brief Destroys a handle; a null handle is CUDNN_STATUS_BAD_PARAM. During process exit, once
+/// the backend instance may be gone, the handle is left to the operating system and the call
+/// succeeds.
 inline cudnnStatus_t cudnnDestroy(cudnnHandle_t handle)
 {
+    if(handle == nullptr)
+    {
+        return CUDNN_STATUS_BAD_PARAM;
+    }
+    if(hipdnn_frontend::detail::IHipdnnBackend::isShutdown())
+    {
+        return CUDNN_STATUS_SUCCESS;
+    }
     return hipdnn_frontend::compatibility::cudnn_frontend::detail::toCudnnStatus(
         hipdnn_frontend::detail::hipdnnBackend()->destroy(handle));
 }

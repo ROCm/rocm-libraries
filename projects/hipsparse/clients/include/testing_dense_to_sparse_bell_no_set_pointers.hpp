@@ -29,7 +29,9 @@
 #include "flops.hpp"
 #include "gbyte.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_dnmat.hpp"
 #include "hipsparse_local_handle.hpp"
+#include "hipsparse_local_spmat.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -249,8 +251,7 @@ void testing_dense_to_sparse_bell_no_set_pointers(Arguments argus)
         hipMemcpy(ddense, hdense_val.data(), sizeof(T) * nrow * ncol, hipMemcpyHostToDevice));
 
     // Create dense matrix descriptor.
-    hipsparseDnMatDescr_t matA;
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnMat(&matA, m, n, ld, ddense, typeT, order));
+    hipsparseLocalDnMat matA(m, n, ld, ddense, typeT, order);
 
     const int64_t bell_col_ind_size = mb * ellCols / ellBlockSize;
     const int64_t bell_val_size     = int64_t(m) * ellCols;
@@ -267,24 +268,15 @@ void testing_dense_to_sparse_bell_no_set_pointers(Arguments argus)
         dcol, hbell_col_ind_cpu.data(), sizeof(I) * bell_col_ind_size, hipMemcpyHostToDevice));
 
     // Create blocked ELL descriptor with null pointers; ellCols is discovered during analysis.
-    hipsparseSpMatDescr_t matB;
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateBlockedEll(&matB,
-                                                    mb * blockDim,
-                                                    nb * blockDim,
-                                                    ellBlockSize,
-                                                    ellCols,
-                                                    dcol,
-                                                    dval,
-                                                    typeI,
-                                                    idx_base,
-                                                    typeT));
+    hipsparseLocalBlockedEll matB(
+        mb * blockDim, nb * blockDim, ellBlockSize, ellCols, dcol, dval, typeI, idx_base, typeT);
 
     // Query DenseToSparse buffer size.
     size_t bufferSize;
     CHECK_HIPSPARSE_ERROR(hipsparseDenseToSparse_bufferSize(handle, matA, matB, alg, &bufferSize));
 
-    void* buffer;
-    CHECK_HIP_ERROR(hipMalloc(&buffer, bufferSize));
+    auto  buffer_managed = hipsparse_unique_ptr{device_malloc(bufferSize), device_free};
+    void* buffer         = buffer_managed.get();
 
     // Analysis populates the ellCols field of the descriptor.
     CHECK_HIPSPARSE_ERROR(hipsparseDenseToSparse_analysis(handle, matA, matB, alg, buffer));
@@ -305,9 +297,6 @@ void testing_dense_to_sparse_bell_no_set_pointers(Arguments argus)
         unit_check_general(1, bell_val_size, 1, hbell_val_cpu.data(), hbell_val.data());
     }
 
-    CHECK_HIP_ERROR(hipFree(buffer));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(matA));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(matB));
 #endif
 }
 
