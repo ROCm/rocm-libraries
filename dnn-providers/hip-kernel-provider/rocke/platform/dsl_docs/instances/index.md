@@ -66,9 +66,9 @@ lives with them. `pooling.py` is a platform instance documented in `instances/sm
 | `conv_direct_fwd_gstream_wmma.py` | `FwdGstreamWmmaSpec` (gfx1250 small-group forward) | `library/kernels/conv/docs/convolution.md` |
 | `conv_direct_fwd_tapouter_wmma.py` | `DirectFwdTapOuterSpec` (gfx1250 forward of large dilations) | `library/kernels/conv/docs/convolution.md` |
 | `conv_winograd_fwd.py`, `conv_winograd_fwd_rt.py`, `conv_winograd_gemm_wmma.py`, `conv_winograd_gen.py`, `conv_winograd_fused_1d_wmma.py`, `conv_winograd_select.py` | `WinogradFwdSpec`, `WinogradMergedSpec`, `RtFilterSpec` / `RtPrescaleSpec` / `RtInputSpec` / `RtOutputSpec` (shape-generic, AOT), `WinogradGemmWmmaSpec`, `WinogradGemmReduceSpec`, `WinogradGenSpec`, `FusedWino1DSpec`; plan selector `select_winograd` (gfx1250 Winograd forward) | `library/kernels/conv/docs/convolution.md` |
-| `conv_direct_wgrad_tiled.py` | `DirectWgradTiledSpec` (direct wgrad, atomics) | `library/kernels/conv/docs/convolution.md` |
+| `conv_direct_wgrad_tiled.py` | `DirectWgradTiledSpec` (direct wgrad, atomics; 16-bit dW `dw16` / `pk16` / `slab`, `WgradSlabFoldSpec`, `l64`) | `library/kernels/conv/docs/convolution.md` |
 | `conv_direct_dw_wgrad.py` | `DwWgradLdsSpec`, `DwWgradColsSpec`, `DwWgradFoldSpec` (depthwise wgrad) | `library/kernels/conv/docs/convolution.md` |
-| `conv_direct_wgrad_gather.py` | `WgradGatherSpec` (dense small-C wgrad) | `library/kernels/conv/docs/convolution.md` |
+| `conv_direct_wgrad_gather.py` | `WgradGatherSpec` (dense small-C wgrad; `grouped` mode) | `library/kernels/conv/docs/convolution.md` |
 | `conv_direct_dw_wgrad_mfma.py` | `DwWgradMfmaSpec` (depthwise wgrad, 4x4x4 MFMA) | `library/kernels/conv/docs/convolution.md` |
 | `conv_direct_grouped_wgrad_mfma.py` | `GroupedWgradMfmaSpec` (4/8-channel grouped wgrad, 4x4x4 MFMA) | `library/kernels/conv/docs/convolution.md` |
 | `img2col.py` | `Img2ColSpec` | `library/kernels/conv/docs/convolution.md` |

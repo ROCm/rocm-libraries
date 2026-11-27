@@ -1787,10 +1787,10 @@ in fp32.
 
 | Spec | Serves | Output |
 |---|---|---|
-| `DirectWgradTiledSpec` | dense and grouped, stride 1, `cpg`/`kpg` multiples of 8 | `global_atomic_add` into a zeroed fp32 `dW[K, KH, KW, cpg]` |
+| `DirectWgradTiledSpec` | dense and grouped, stride 1, `cpg`/`kpg` multiples of 8 (3x3, 5x5, 1xN / Nx1 filters) | `global_atomic_add` into a zeroed fp32 `dW[K, KH, KW, cpg]`; with `one_split` / `dw16` / `pk16` / `slab` the 16-bit dW directly (see below) |
 | `DwWgradLdsSpec` | depthwise, `C % 8 == 0`, 3x3, stride 1/2 | partial slots `ws[part][tap][c]` |
 | `DwWgradColsSpec` | depthwise, `C <= 8` (stem layers), any filter | partial slots `ws[part][tap][c]` |
-| `WgradGatherSpec` | dense, small `C` (`KW * C <= 96`), any stride | partial slots `ws[part][(r, s, c)][k]` |
+| `WgradGatherSpec` | dense, small `C` (`KW * C <= 96`), any stride; with `grouped=True` grouped layers with `cpg = kpg` in 8 / 16, any stride | partial slots `ws[part][(r, s, c)][k]` |
 | `DwWgradMfmaSpec` | depthwise, `C % 8 == 0`, any filter, stride 1 | partial slots `ws[part][tap][c]` |
 | `GroupedWgradMfmaSpec` | grouped, `cpg = kpg` in (4, 8), stride 1 | partial slots `ws[part][(r, s, c)][k]` |
 | `DwWgradFoldSpec` | the fold after a partial-slot pass | `dW` written whole (no zeroing) |
@@ -1820,6 +1820,28 @@ in fp32.
   barrier skips the LDS wait (each MFMA waits for its own fragment); one extra
   row buffer (`n_buffers = prefetch + 2`) keeps the refill clear of reads still
   in flight. Each segment starts staggered and ends realigned.
+- **16-bit dW and tiled knobs.** The base tiled kernel adds into an fp32 dW
+  that the caller zeroes and casts afterwards. Four epilogue modes remove
+  those passes: `one_split` (one block per channel tile walks every segment, so
+  the epilogue stores instead of adding; for small images with a large
+  `C x K`), `one_split` + `dw16` (the store is in the activation dtype, one
+  launch), `pk16` (atomic tiles add packed 16-bit pairs into the 16-bit dW,
+  after a zero-fill), and `slab` (block `split` stores its fp32 tile into
+  slab `split` of an `[n_splits][dW]` scratch that `WgradSlabFoldSpec`
+  sums into the 16-bit dW, so no zero-fill and no cast). The `dw16` kernarg /
+  output-dtype flag is on the direct wgrad signature
+  (`conv_direct_args_signature(..., direction="wgrad", dw16=...)`, `conv_direct_output_dtype`).
+  Other knobs: `q_groups=4` and `pp_tight` (half ping-pong), `pp_sched`
+  (schedule fences around the ping-pong DMA setup), `row_tail` (auto launch
+  runs whole unrolled blocks plus a tail of row tests instead of rounding `H`
+  up), 16x16 wave tiles for 5x5, `gpack` (small groups: each wave owns a whole
+  group), `unfold_n` above 4 for a 1xN layer run as its Nx1 exchanged view, and
+  `l64` (segments address dY / X through descriptors rebased to their first
+  image, so one launch covers a batch past the 2^31-byte buffer range).
+- **Gather, grouped.** `grouped=True` stages only the X channels of the
+  block's groups (a block owns whole groups of `cpg = kpg` in 8 / 16); the
+  MFMA's cross-group products are computed and dropped by the epilogue.
+  Output is the same partial slots plus `DwWgradFoldSpec`.
 - **Partial slots + fold.** Same-address fp32 atomics serialize, and a
   depthwise `dW` has only a few thousand addresses, so the depthwise and gather
   kernels store one partial slot per partition with plain stores and
@@ -1855,7 +1877,7 @@ in fp32.
 C++ engine twins: `rocke_build_direct_wgrad_tiled` (`library/cpp/instances/common/conv_direct_wgrad_tiled.cpp`,
 also `rocke_direct_wgrad_pick_swizzle`), `rocke_build_dw_wgrad_{fold,cols,lds}`
 (`conv_direct_dw_wgrad.cpp`), `rocke_build_direct_wgrad_gather`
-(`conv_direct_wgrad_gather.cpp`), `rocke_build_dw_wgrad_mfma`
+(`conv_direct_wgrad_gather.cpp`), `rocke_direct_wgrad_slab_fold_*` (the slab fold, in `conv_direct_wgrad_tiled.cpp`), `rocke_build_dw_wgrad_mfma`
 (`conv_direct_dw_wgrad_mfma.cpp`), `rocke_build_grouped_wgrad_mfma`
 (`conv_direct_grouped_wgrad_mfma.cpp`); byte-identity gated by
 `library/tests/parity/conv_direct_grouped_emit.{c,py}` (configs 114+; auto
@@ -1864,7 +1886,12 @@ launch 359+; single-group ping-pong 364+), Python IR golden
 On-GPU numeric coverage: `TestDirectWgradAotKernelsCorrectness` in
 `library/tests/test_direct_conv_correctness.py` (built on the cache probe,
 launched on other shapes); the two-step plans:
-`library/tests/test_direct_kernel_cache.py`.
+`library/tests/test_direct_kernel_cache.py`. The tiled knobs and the grouped
+gather have `library/tests/test_direct_wgrad_tiled_gather.py` (CPU: label
+counts, kept-set tables, job round trip, kernel builds, `dw16` ABI, launch
+plans; GPU, gfx950 runner lane: atomic, `dw16`, `pk16`, slab + fold, `l64`,
+grouped and dense gather against a float64 reference). On gfx950 (fp16 /
+bf16) the direct AOT grid serves these variants per layer cell.
 
 ### gfx1250 WMMA and depthwise VALU direct wgrad
 
