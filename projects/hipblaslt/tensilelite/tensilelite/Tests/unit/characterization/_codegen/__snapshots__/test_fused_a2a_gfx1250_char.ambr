@@ -1,0 +1,13 @@
+# serializer version: 1
+# name: test_fused_a2a_gfx1250_golden
+  list([
+    dict({
+      'basename': 'Cijk_Alik_Bljk_BBS_BH_GemmA2A_UserArgs_MT128x128NPXvAsL6V1_0LxYg8a4_JlSIB9s7CmUIRhr329SNCLo=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Alik_Bljk_BBS_BH_GemmA2A_UserArgs_MT256x256TPu2-cKnQfAaxz3UUktuWk8J2nNH77lJFWTGYem5usM=',
+      'err': 0,
+    }),
+  ])
+# ---

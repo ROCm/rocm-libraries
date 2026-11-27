@@ -3491,7 +3491,7 @@ namespace TensileLite
                 }
             };
 
-            // value is the solution's MacroTile0.
+            // value is {MacroTile0, COPY_SUBWIN pitch bits, rect_x bits}.
             struct GemmA2AShape : public Predicate_CRTP<GemmA2AShape, ContractionProblemGemm>
             {
                 enum
@@ -3499,10 +3499,10 @@ namespace TensileLite
                     HasIndex = false,
                     HasValue = true
                 };
-                int64_t value;
+                std::array<int64_t, 3> value;
 
                 GemmA2AShape() = default;
-                GemmA2AShape(int64_t value)
+                GemmA2AShape(std::array<int64_t, 3> value)
                     : value(value)
                 {
                 }
@@ -3518,7 +3518,8 @@ namespace TensileLite
                         return true;
                     const int64_t world = problem.world();
                     const int64_t am    = problem.fusedA2AExtent();
-                    if(value <= 0 || world == 0 || am <= 0)
+                    const int64_t mt0   = value[0];
+                    if(mt0 <= 0 || world == 0 || am <= 0)
                         return false;
                     for(size_t i = 0; i < problem.batchIndices().size(); i++)
                         if(problem.batchSize(i) != 1)
@@ -3529,9 +3530,9 @@ namespace TensileLite
                         return false;
                     const size_t  mStride = d.strides()[problem.freeIndices()[0].d];
                     const size_t  ldd     = d.strides()[problem.freeIndices()[1].d];
-                    return am % (value * world) == 0 && m % value == 0 && am <= m
-                           && ((am / world) >> 3) < (1 << 14) && mStride == 1 && ldd % 8 == 0
-                           && (ldd >> 3) < (1 << 19);
+                    return am % (mt0 * world) == 0 && m % mt0 == 0 && am <= m
+                           && ((am / world) >> 3) < (int64_t(1) << value[2]) && mStride == 1
+                           && ldd % 8 == 0 && (ldd >> 3) < (size_t(1) << value[1]);
                 }
 
                 bool operator()(ContractionProblemGemm const& problem) const override
@@ -3549,15 +3550,16 @@ namespace TensileLite
                         const auto& d = problem.d();
                         details << "world=" << problem.world() << " am=" << problem.fusedA2AExtent()
                                 << " dBytes=" << d.elementBytes() << " m=" << problem.freeSizeA(0)
-                                << " MT0=" << value
+                                << " MT0=" << value[0]
                                 << " mStride=" << d.strides()[problem.freeIndices()[0].d]
                                 << " ldd=" << d.strides()[problem.freeIndices()[1].d];
                         for(size_t i = 0; i < problem.batchIndices().size(); i++)
                             details << " batch=" << problem.batchSize(i);
                         details
                             << " (need dBytes == 2, am % (MT0*world) == 0, m % MT0 == 0, am <= m,"
-                               " (am/world)>>3 < 2^14, mStride == 1, ldd % 8 == 0,"
-                               " ldd>>3 < 2^19, batch == 1)";
+                               " (am/world)>>3 < 2^"
+                            << value[2] << ", mStride == 1, ldd % 8 == 0, ldd>>3 < 2^" << value[1]
+                            << ", batch == 1)";
                     }
                     PredicateDebugger::printRow(stream, rv, this->type(), details.str());
                     return rv;

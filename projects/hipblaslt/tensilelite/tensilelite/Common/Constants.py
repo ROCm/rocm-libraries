@@ -23,6 +23,10 @@ MAX_FILENAME_LENGTH: int = 64
 # XCC count ClusterAIDMapping != -1 is written for (2 AIDs x 4 XCCs).
 CLUSTER_AID_MAPPING_XCC_COUNT: int = 8
 
+# SDMA COPY_SUBWIN (pitch, rect_x) field widths in bits.
+SDMA_COPY_FIELD_BITS_GFX9: tuple = (19, 14)
+SDMA_COPY_FIELD_BITS_GFX1250: tuple = (16, 16)
+
 # Characters to use for GEMM naming, e.g., C[ij]=Sum[k] A[ik]*B[jk]
 INDEX_CHARS: str = "IJKLMNOPQRSTUVWXYZ"
 

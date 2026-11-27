@@ -26,7 +26,7 @@ from rocisa.container import SMEMModifiers, VOP3PModifiers, MUBUFModifiers, GLOB
   DPPModifiers, SDWAModifiers, replaceHolder, EXEC, VCC, vgpr, sgpr, ContinuousRegister, mgpr, MemTokenData
 from rocisa.enum import CvtType, HighBitSel, RoundType, SaturateCastType, SelectBit, CacheScope
 from rocisa.instruction import BufferAtomicAddF32, BufferAtomicCmpswapB32, \
-  BufferAtomicPkAddBF16, GlobalLoadB32, GlobalStoreB32, SLoadB128, \
+  BufferAtomicPkAddBF16, GlobalAtomicIncU32Saddr, GlobalLoadB32, GlobalStoreB32, SLoadB128, \
   BufferAtomicCmpswapB64, BufferStoreB16, BufferStoreB32, BufferStoreB64, BufferStoreB128, \
   DSBPermuteB32, FlatAtomicCmpswapB32, \
   SAddCU32, SAddU32, SAddU64, SAndB32, \
@@ -3212,8 +3212,9 @@ class GlobalWriteBatchWriter:
     kw        = self.parentWriter
     layout    = fusedA2AKernArgLayout()
     fusedBase = kw.states.fusedA2AKernArgBase
-    pkt       = SdmaPacketEmitter()
-    ring      = SdmaRingEmitter(groupImm=fusedBase + layout["peer_0_flagPtr"])
+    gfx1250   = kw.states.version[:2] == (12, 5)
+    pkt       = SdmaPacketEmitter(gfx1250=gfx1250)
+    ring      = SdmaRingEmitter(groupImm=fusedBase + layout["peer_0_flagPtr"], gfx1250=gfx1250)
 
     module.addComment1("fused-A2A: build + submit the SDMA COPY_SUBWIN packet")
 
@@ -3271,13 +3272,20 @@ class GlobalWriteBatchWriter:
     # SMEM requires SDATA to be a multiple of four for stores wider than two
     # Dwords, so a 4-aligned start is what lets 13 dwords go out as x4/x4/x4/x1
     # instead of degrading into narrower pieces.
-    pktSgpr = kw.sgprPool.checkOutAligned(COPY_PACKET_DWORDS, 4,
-                                          tag="fusedA2A_sdmaPacket", preventOverflow=False)
-    # sliceS deliberately feeds both slice fields; see _fusedA2AComputeCopyFields.
-    pkt.emitBuildCopyPacket(module, pktSgpr,
-                            srcBaseSgpr, srcPitchPkS, sliceS,
-                            recvBaseSgpr, nShardPkS, sliceS,
-                            nShardPkS, rectYS)
+    #
+    # gfx1250: the same block in VGPRs, see emitPlacePacket.
+    if gfx1250:
+      pktBlock = kw.vgprPool.checkOutAligned(COPY_PACKET_DWORDS, 4, tag="fusedA2A_sdmaPacket")
+      self._emitFusedA2ABuildCopyV(module, pkt, pktBlock, srcBaseSgpr, recvBaseSgpr,
+                                   srcPitchPkS, sliceS, nShardPkS, rectYS)
+    else:
+      pktBlock = kw.sgprPool.checkOutAligned(COPY_PACKET_DWORDS, 4,
+                                             tag="fusedA2A_sdmaPacket", preventOverflow=False)
+      # sliceS deliberately feeds both slice fields; see _fusedA2AComputeCopyFields.
+      pkt.emitBuildCopyPacket(module, pktBlock,
+                              srcBaseSgpr, srcPitchPkS, sliceS,
+                              recvBaseSgpr, nShardPkS, sliceS,
+                              nShardPkS, rectYS)
     kw.sgprPool.checkIn(fldSgpr)
     kw.sgprPool.checkIn(srcBaseSgpr)
 
@@ -3288,12 +3296,12 @@ class GlobalWriteBatchWriter:
                                cachedIdxSgpr, COPY_PACKET_DWORDS * 4, curSgpr, offSgpr)
     module.add(SMovB64(dst=sgpr(pendSgpr, 2), src=sgpr(curSgpr, 2),
                        comment="pending = reserved base"))
-    ring.emitPlacePacket(module, kw, "FusedPeerGroupPtr", pktSgpr, COPY_PACKET_DWORDS,
+    ring.emitPlacePacket(module, kw, "FusedPeerGroupPtr", pktBlock, COPY_PACKET_DWORDS,
                          pendSgpr, offSgpr)
     ring.emitSubmitPacket(module, kw, "FusedPeerGroupPtr", "FusedCounterPtr", cursorOffSgpr,
                           curSgpr, pendSgpr)
 
-    kw.sgprPool.checkIn(pktSgpr)
+    (kw.vgprPool if gfx1250 else kw.sgprPool).checkIn(pktBlock)
     kw.sgprPool.checkIn(offSgpr)
     kw.sgprPool.checkIn(pendSgpr)
     kw.sgprPool.checkIn(curSgpr)
@@ -3324,8 +3332,9 @@ class GlobalWriteBatchWriter:
     kw        = self.parentWriter
     layout    = fusedA2AKernArgLayout()
     fusedBase = kw.states.fusedA2AKernArgBase
-    pkt       = SdmaPacketEmitter()
-    ring      = SdmaRingEmitter(groupImm=fusedBase + layout["peer_0_flagPtr"])
+    gfx1250   = kw.states.version[:2] == (12, 5)
+    pkt       = SdmaPacketEmitter(gfx1250=gfx1250)
+    ring      = SdmaRingEmitter(groupImm=fusedBase + layout["peer_0_flagPtr"], gfx1250=gfx1250)
 
     module.addComment1("fused-A2A: build + submit the SDMA queue-tail ATOMICs (peer flag, outbound)")
 
@@ -3351,11 +3360,14 @@ class GlobalWriteBatchWriter:
     cachedIdxSgpr = kw.sgprPool.checkOutAligned(2, 2, tag="fusedA2A_obCachedIdx", preventOverflow=False)
     ring.emitRefreshCache(module, kw, "FusedPeerGroupPtr", cachedIdxSgpr)
 
-    pktSgpr = kw.sgprPool.checkOutAligned(ATOMIC_PACKET_DWORDS, 4,
-                                          tag="fusedA2A_obPacket", preventOverflow=False)
+    if gfx1250:
+      pktBlock = kw.vgprPool.checkOutAligned(ATOMIC_PACKET_DWORDS, 4, tag="fusedA2A_obPacket")
+    else:
+      pktBlock = kw.sgprPool.checkOutAligned(ATOMIC_PACKET_DWORDS, 4,
+                                             tag="fusedA2A_obPacket", preventOverflow=False)
     flagAddrSgpr = kw.sgprPool.checkOutAligned(2, 2, tag="fusedA2A_obFlagAddr", preventOverflow=False)
     self._fusedA2AComputeFlagAddr(module, flagBaseSgpr, myRankSgpr, flagAddrSgpr, tmpSgpr)
-    pkt.emitBuildAtomicPacket(module, pktSgpr, flagAddrSgpr)
+    self._emitFusedA2ABuildAtomic(module, pkt, pktBlock, flagAddrSgpr)
     kw.sgprPool.checkIn(flagAddrSgpr)
 
     curSgpr  = kw.sgprPool.checkOutAligned(2, 2, tag="fusedA2A_obCur", preventOverflow=False)
@@ -3365,32 +3377,95 @@ class GlobalWriteBatchWriter:
                                cachedIdxSgpr, 2 * ATOMIC_PACKET_DWORDS * 4, curSgpr, offSgpr)
     module.add(SMovB64(dst=sgpr(pendSgpr, 2), src=sgpr(curSgpr, 2),
                        comment="pending = reserved base"))
-    ring.emitPlacePacket(module, kw, "FusedPeerGroupPtr", pktSgpr, ATOMIC_PACKET_DWORDS,
+    ring.emitPlacePacket(module, kw, "FusedPeerGroupPtr", pktBlock, ATOMIC_PACKET_DWORDS,
                          pendSgpr, offSgpr)
 
     # Second packet into the same block, below the placement above
     # (emitPlacePacket, BLOCK REUSE); the wrap padding went out with it.
-    module.add(SMovB32(dst=sgpr(offSgpr), src=0, comment="outbound ATOMIC follows the flag ATOMIC: no further padding"))
-    pkt.emitBuildAtomicPacket(module, pktSgpr, selfBaseSgpr)
-    ring.emitPlacePacket(module, kw, "FusedPeerGroupPtr", pktSgpr, ATOMIC_PACKET_DWORDS,
-                         pendSgpr, offSgpr)
+    #
+    # gfx1250: the block of lane 1, built and placed inside one narrow-EXEC span.
+    if gfx1250:
+      module.add(self.getEdgeMovInstType()(EXEC(), 2, "fused-A2A: the outbound ATOMIC lane"))
+    else:
+      module.add(SMovB32(dst=sgpr(offSgpr), src=0, comment="outbound ATOMIC follows the flag ATOMIC: no further padding"))
+    self._emitFusedA2ABuildAtomic(module, pkt, pktBlock, selfBaseSgpr)
+    ring.emitPlacePacket(module, kw, "FusedPeerGroupPtr", pktBlock, ATOMIC_PACKET_DWORDS,
+                         pendSgpr, None if gfx1250 else offSgpr)
+    if gfx1250:
+      module.add(self.getEdgeMovInstType()(EXEC(), -1, "fused-A2A: end of the outbound ATOMIC lane"))
+      module.add(self.getEdgeMovInstType()(EXEC(), 1, "fused-A2A: back to lane 0"))
     ring.emitSubmitPacket(module, kw, "FusedPeerGroupPtr", "FusedCounterPtr", cursorOffSgpr,
                           curSgpr, pendSgpr)
 
     kw.sgprPool.checkIn(offSgpr)
     kw.sgprPool.checkIn(pendSgpr)
     kw.sgprPool.checkIn(curSgpr)
-    kw.sgprPool.checkIn(pktSgpr)
+    (kw.vgprPool if gfx1250 else kw.sgprPool).checkIn(pktBlock)
     kw.sgprPool.checkIn(cachedIdxSgpr)
     kw.sgprPool.checkIn(cursorOffSgpr)
     kw.sgprPool.checkIn(selfBaseSgpr)
+
+  def _emitFusedA2ABuildAtomic(self, module, pkt, pktBlock, dstAddrSgpr):
+    """The ATOMIC packet raising the 2-SGPR target, into pktBlock: SGPRs, or on
+    gfx1250 the VGPRs of the active lanes."""
+    if not pkt.gfx1250:
+      pkt.emitBuildAtomicPacket(module, pktBlock, dstAddrSgpr)
+      return
+    from .SdmaPacketEmitter import SIGNAL_DW_ADDR
+    pkt.emitBuildAtomicPacketUniformV(module, pktBlock)
+    module.add(VMovB32(dst=vgpr(pktBlock + SIGNAL_DW_ADDR), src=sgpr(dstAddrSgpr),
+                       comment="ATOMIC DW1: addr lo"))
+    module.add(VMovB32(dst=vgpr(pktBlock + SIGNAL_DW_ADDR + 1), src=sgpr(dstAddrSgpr + 1),
+                       comment="ATOMIC DW2: addr hi"))
+
+  def _emitFusedA2ABuildCopyV(self, module, pkt, vPkt, srcBaseSgpr, dstBaseSgpr,
+                              srcPitchS, sliceS, dstPitchS, rectYS):
+    """emitBuildCopyPacket's fields as a VGPR packet in the active lanes;
+    dstPitchS is also rect_x."""
+    from .SdmaPacketEmitter import COPY_DW_SRC, COPY_DW_DST
+    kw = self.parentWriter
+    vFld = kw.vgprPool.checkOut(4, tag="fusedA2A_sdmaFields")
+    for i, (s, what) in enumerate(((srcPitchS, "src_pitch"), (sliceS, "slice"),
+                                   (dstPitchS, "dst_pitch, rect_x"), (rectYS, "rect_y"))):
+      module.add(VMovB32(dst=vgpr(vFld + i), src=sgpr(s), comment=what))
+    pkt.emitBuildCopyPacketUniformV(module, vPkt, vFld, vFld + 1, dstPitchV=vFld + 2)
+    pkt.emitBuildCopyRectV(module, vPkt, vFld + 2, vFld + 3)
+    kw.vgprPool.checkIn(vFld)
+    for dw, baseS, what in ((COPY_DW_SRC, srcBaseSgpr, "srcBase"), (COPY_DW_DST, dstBaseSgpr, "dstBase")):
+      module.add(VMovB32(dst=vgpr(vPkt + dw), src=sgpr(baseS), comment="SUBWIN DW%d: %s lo" % (dw, what)))
+      module.add(VMovB32(dst=vgpr(vPkt + dw + 1), src=sgpr(baseS + 1),
+                         comment="SUBWIN DW%d: %s hi" % (dw + 1, what)))
+
+  def _emitFusedA2ACounterInc(self, module, dstSgpr, baseSgpr, offset, what, comment):
+    """dstSgpr = atomic_inc(*(baseSgpr + offset)) with dstSgpr's value as the wrap
+    limit, returning the pre-op value."""
+    kw = self.parentWriter
+    if kw.states.asmCaps["HasSAtomic"]:
+      module.add(SAtomicInc(dst=sgpr(dstSgpr), base=sgpr(baseSgpr, 2), soffset=hex(offset),
+                            smem=SMEMModifiers(glc=True), comment=comment))
+      module.add(SWaitCnt(kmcnt=0, comment="fused-A2A: wait %s atomic return (SMEM -> lgkmcnt)" % what))
+      return
+    vOff  = kw.vgprPool.checkOut(1, tag="fusedA2A_counterOff")
+    vData = kw.vgprPool.checkOut(1, tag="fusedA2A_counterData")
+    vRet  = kw.vgprPool.checkOut(1, tag="fusedA2A_counterRet")
+    module.add(VMovB32(dst=vgpr(vOff), src=0, comment="no lane offset"))
+    module.add(VMovB32(dst=vgpr(vData), src=sgpr(dstSgpr), comment="wrap limit"))
+    module.add(GlobalAtomicIncU32Saddr(dst=vgpr(vRet), vaddr=vgpr(vOff), data=vgpr(vData),
+                                       saddr=sgpr(baseSgpr, 2),
+                                       modifier=GLOBALModifiers(offset=offset, scope=CacheScope.SCOPE_DEV),
+                                       comment=comment))
+    module.add(SWaitCnt(vlcnt=0, comment="fused-A2A: wait %s atomic return" % what))
+    module.add(VReadfirstlaneB32(dst=sgpr(dstSgpr), src=vgpr(vRet), comment="pre-op"))
+    for v in (vRet, vData, vOff):
+      kw.vgprPool.checkIn(v)
 
   def _emitFusedA2AWave0Election(self, module, skipLabelName):
     """Elect wave 0 as the work-group's single writer, then narrow EXEC to lane 0.
 
     EXEC is all-ones on entry (VReadfirstlaneB32(Serial) needs lane 0 active) and
     stays narrowed until the restore after the handshake, covering the DRAIN polls.
-    The counter atomics under it are SMEM and ignore EXEC.
+    On gfx9 the counter atomics under it are SMEM and ignore EXEC; on gfx1250
+    they are VMEM and run in lane 0.
     """
     kw = self.parentWriter
     serialSgpr = kw.sgprPool.checkOut(1, tag="fusedA2A_hsSerial", preventOverflow=False)
@@ -3490,7 +3565,7 @@ class GlobalWriteBatchWriter:
     # Each wave retires its own stores, THEN the barrier joins them. The other order
     # lets the SDMA engine read a band that is not yet in HBM.
     syncModule.add(SWaitCnt(vscnt=0, comment="fused-A2A: my A2A stores (sc1) are in HBM before the counter (spec 2.3 step 2)"))
-    syncModule.add(SBarrier(comment="fused-A2A: all waves done before counter election"))
+    syncModule.add(SBarrier(comment="fused-A2A SDMA handshake sync: all waves done before counter election"))
     self._emitFusedA2AWave0Election(syncModule, afterLabel.getLabelName())
 
     # The local path takes the same election, minus the store wait and the barrier:
@@ -3526,11 +3601,8 @@ class GlobalWriteBatchWriter:
                         comment="counter[dst_rank][j] hi (carry)"))
     module.add(SMovB32(dst=sgpr(tmpSgpr2), src=sgpr(targetSgpr),
                        comment="SDATA in = limit; the atomic overwrites it with the pre-op value"))
-    module.add(SAtomicInc(dst=sgpr(tmpSgpr2), base=sgpr(counterPtrSgpr, 2),
-                          soffset=hex(FUSED_A2A_COUNTER1_OFFSET),
-                          smem=SMEMModifiers(glc=True),
-                          comment="old = atomic_inc(counter[dst_rank][j]), wrap at tilesPerRank-1, return pre-op"))
-    module.add(SWaitCnt(kmcnt=0, comment="fused-A2A: wait counter atomic return (SMEM -> lgkmcnt)"))
+    self._emitFusedA2ACounterInc(module, tmpSgpr2, counterPtrSgpr, FUSED_A2A_COUNTER1_OFFSET, "counter",
+                                 "old = atomic_inc(counter[dst_rank][j]), wrap at tilesPerRank-1, return pre-op")
 
     # (4) last WG for (dst_rank, j) iff the pre-op value is the wrap limit; else skip the release.
     module.add(SCmpEQU32(src0=sgpr(tmpSgpr2), src1=sgpr(targetSgpr),
@@ -3558,11 +3630,8 @@ class GlobalWriteBatchWriter:
                        comment="wrap limit = tokenTiles - 1"))
     module.add(SMovB32(dst=sgpr(tmpSgpr2), src=sgpr(c2Limit),
                        comment="SDATA in = limit; the atomic overwrites it with the pre-op value"))
-    module.add(SAtomicInc(dst=sgpr(tmpSgpr2), base=sgpr(counter2PtrSgpr, 2),
-                          soffset=hex(FUSED_A2A_COUNTER2_OFFSET),
-                          smem=SMEMModifiers(glc=True),
-                          comment="old2 = atomic_inc(counter2[dst_rank]), wrap at tokenTiles-1, return pre-op"))
-    module.add(SWaitCnt(kmcnt=0, comment="fused-A2A: wait counter2 atomic return (SMEM -> lgkmcnt)"))
+    self._emitFusedA2ACounterInc(module, tmpSgpr2, counter2PtrSgpr, FUSED_A2A_COUNTER2_OFFSET, "counter2",
+                                 "old2 = atomic_inc(counter2[dst_rank]), wrap at tokenTiles-1, return pre-op")
     kw.sgprPool.checkIn(counter2PtrSgpr)
     module.add(SCmpEQU32(src0=sgpr(tmpSgpr2), src1=sgpr(c2Limit),
                          comment="pre-op == tokenTiles-1? (this card's last packet to dst_rank)"))
@@ -3605,17 +3674,15 @@ class GlobalWriteBatchWriter:
     # (CDNA4 ISA Table 75); without it this is a fire-and-forget increment whose
     # "pre-op value" is whatever the register already held.
     #
-    # SMEM ignores EXEC, so the wave-0 gate alone is what keeps this once per WG.
+    # SMEM ignores EXEC, so the wave-0 gate alone is what keeps this once per WG;
+    # the gfx1250 VMEM atomic runs in lane 0 only.
     c3Limit = kw.sgprPool.checkOut(1, tag="fusedA2A_c3Limit", preventOverflow=False)
     module.add(SSubU32(dst=sgpr(c3Limit), src0=sgpr("FusedTotalWGs"), src1=1,
                        comment="wrap limit = FusedTotalWGs - 1 (what the last WG reads back)"))
     module.add(SMovB32(dst=sgpr(c3Tmp), src=sgpr(c3Limit),
                        comment="SDATA in = limit; the atomic overwrites it with the pre-op value"))
-    module.add(SAtomicInc(dst=sgpr(c3Tmp), base=sgpr("FusedCounterPtr", 2),
-                          soffset=hex(FUSED_A2A_COUNTER3_OFFSET),
-                          smem=SMEMModifiers(glc=True),
-                          comment="old3 = atomic_inc(counter3), wrap at FusedTotalWGs-1, return pre-op"))
-    module.add(SWaitCnt(kmcnt=0, comment="fused-A2A: wait counter3 atomic return (SMEM -> lgkmcnt)"))
+    self._emitFusedA2ACounterInc(module, c3Tmp, "FusedCounterPtr", FUSED_A2A_COUNTER3_OFFSET, "counter3",
+                                 "old3 = atomic_inc(counter3), wrap at FusedTotalWGs-1, return pre-op")
     module.add(SCmpEQU32(src0=sgpr(c3Tmp), src1=sgpr(c3Limit),
                          comment="pre-op == FusedTotalWGs-1? (globally last WG)"))
     kw.sgprPool.checkIn(c3Limit)
@@ -3718,16 +3785,22 @@ class GlobalWriteBatchWriter:
     # thread id within the WG, so for wave 0 lane j it is exactly j.  The saddr form
     # keeps the per-lane part a single 32-bit offset -- no 64-bit vector add, and VCC
     # stays free for the reduction below.
-    module.add(VLShiftLeftB32(dst=vgpr(vPollOff), shiftHex=2, src=vgpr("Serial"),
-                              comment="lane j -> self flag slot byte offset j*4"))
+    pollOff = VLShiftLeftB32(dst=vgpr(vPollOff), shiftHex=2, src=vgpr("Serial"),
+                             comment="lane j -> self flag slot byte offset j*4")
+    # gfx1250: emitted inside the poll loop.
+    gfx1250 = kw.states.version[:2] == (12, 5)
+    if not gfx1250:
+      module.add(pollOff)
     # spin: system-scope load (sc0 sc1) bypasses this card's stale L2 to read the HBM
     # truth accumulated by the SDMA engines.  v_cmp_ne sets one VCC bit per lane that
     # is NOT yet complete -- inactive lanes contribute 0, so lanes past W-1 cannot
     # hold the barrier -- and vccnz loops while any of the W is short.
     module.add(drainPollLabel)
+    if gfx1250:
+      module.add(pollOff)
     module.add(GlobalLoadB32(
       dst=vgpr(vPollVal), vaddr=vgpr(vPollOff), saddr=sgpr(drainFlagBase, 2),
-      modifier=GLOBALModifiers(glc=True, slc=True, scope=CacheScope.SCOPE_NONE, isStore=False),
+      modifier=SdmaRingEmitter.sysModifier(gfx1250, isStore=False),
       comment="poll self flag[lane] low dword (system scope, sc0 sc1)"))
     module.add(SWaitCnt(vlcnt=0, comment="fused-A2A: wait poll load"))
     module.add(VCmpNeU32(VCC(), 1, vgpr(vPollVal),
@@ -3739,7 +3812,7 @@ class GlobalWriteBatchWriter:
     module.add(VMovB32(dst=vgpr(vPollVal), src=0, comment="fused-A2A: zero for the flag clear"))
     module.add(GlobalStoreB32(
       vaddr=vgpr(vPollOff), src=vgpr(vPollVal), saddr=sgpr(drainFlagBase, 2),
-      modifier=GLOBALModifiers(glc=True, slc=True, scope=CacheScope.SCOPE_NONE, isStore=True),
+      modifier=SdmaRingEmitter.sysModifier(gfx1250, isStore=True),
       comment="clear self flag[lane] (system scope, sc0 sc1)"))
 
     # Back to a single lane so the whole single-writer region has one EXEC width;
@@ -3757,8 +3830,7 @@ class GlobalWriteBatchWriter:
     module.add(sendPollLabel)
     module.add(GlobalLoadB32(
       dst=vgpr(vPollVal), vaddr=vgpr(vPollOff), saddr=sgpr(drainFlagBase, 2),
-      modifier=GLOBALModifiers(offset=FUSED_A2A_OUTBOUND_OFFSET, glc=True, slc=True,
-                               scope=CacheScope.SCOPE_NONE, isStore=False),
+      modifier=SdmaRingEmitter.sysModifier(gfx1250, FUSED_A2A_OUTBOUND_OFFSET, isStore=False),
       comment="poll the outbound counter (system scope, sc0 sc1)"))
     module.add(SWaitCnt(vlcnt=0, comment="fused-A2A: wait outbound poll load"))
     module.add(VCmpNeU32(VCC(), vgpr(vPollVal), sgpr(c3WSgpr),
@@ -3769,8 +3841,7 @@ class GlobalWriteBatchWriter:
     module.add(VMovB32(dst=vgpr(vPollVal), src=0, comment="fused-A2A: zero for the outbound clear"))
     module.add(GlobalStoreB32(
       vaddr=vgpr(vPollOff), src=vgpr(vPollVal), saddr=sgpr(drainFlagBase, 2),
-      modifier=GLOBALModifiers(offset=FUSED_A2A_OUTBOUND_OFFSET, glc=True, slc=True,
-                               scope=CacheScope.SCOPE_NONE, isStore=True),
+      modifier=SdmaRingEmitter.sysModifier(gfx1250, FUSED_A2A_OUTBOUND_OFFSET, isStore=True),
       comment="clear the outbound counter (system scope, sc0 sc1)"))
 
     module.add(skipSendLabel)

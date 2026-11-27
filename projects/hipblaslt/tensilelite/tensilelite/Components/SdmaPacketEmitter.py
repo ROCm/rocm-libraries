@@ -26,8 +26,9 @@
 # in range is the caller's job (for the A2A paths, the GemmA2AShape and
 # A2AGemmShape predicates).
 #
-# This encoding is gfx9xx / gfx95x ONLY -- GFX12+ uses a different layout of
-# the same size.
+# gfx1250 uses the GFX12 layout of the same size: 16-bit pitches at [31:16],
+# and scope fields in COPY DW12 and ATOMIC DW0, set to SCOPE_SYS. The SGPR
+# builders are gfx9 only.
 ################################################################################
 
 from rocisa.container import sgpr, vgpr
@@ -35,6 +36,8 @@ from rocisa.instruction import (
     SMovB32, SMovB64, SSubU32, SOrB32, SLShiftLeftB32,
     VMovB32, VAddU32, VLShiftLeftB32, VLShiftLeftOrB32, VWritelaneB32,
 )
+
+from ..Common.Constants import SDMA_COPY_FIELD_BITS_GFX9, SDMA_COPY_FIELD_BITS_GFX1250
 
 
 SDMA_OP_COPY_SUBWIN         = 1
@@ -60,6 +63,11 @@ VALIDATED_PACKET_ELEMENT_BYTES = (16,)
 _COPY_HEADER_DW0_BASE = ((SDMA_OP_COPY_SUBWIN & 0xFF)
                          | ((SDMA_SUBOP_COPY_LINEAR_RECT & 0xFF) << 8))
 ATOMIC_HEADER_DW0 = ((SDMA_OP_ATOMIC & 0xFF) | ((SDMA_ATOMIC_ADD_RTN_32 & 0x7F) << 25))
+
+SDMA_SCOPE_SYS = 3
+# gfx1250: ATOMIC scope [21:20]; COPY DW12 dst_scope [19:18], src_scope [27:26].
+ATOMIC_HEADER_DW0_GFX1250 = ATOMIC_HEADER_DW0 | (SDMA_SCOPE_SYS << 20)
+COPY_DW12_GFX1250 = (SDMA_SCOPE_SYS << 18) | (SDMA_SCOPE_SYS << 26)
 
 
 class SdmaPacketEmitter:
@@ -88,10 +96,12 @@ class SdmaPacketEmitter:
     have been emitted (see emitPlacePacket's reuse note).
     """
 
-    def __init__(self, packetElementBytes: int = 16):
+    def __init__(self, packetElementBytes: int = 16, gfx1250: bool = False):
         assert packetElementBytes in VALIDATED_PACKET_ELEMENT_BYTES, (
             "packet element size %r is not hardware-validated; only %r is"
             % (packetElementBytes, VALIDATED_PACKET_ELEMENT_BYTES))
+        self.gfx1250 = gfx1250
+        self.pitchShift = 32 - (SDMA_COPY_FIELD_BITS_GFX1250 if gfx1250 else SDMA_COPY_FIELD_BITS_GFX9)[0]
         # Published so the caller can scale its X-direction counts to match.
         self.packetElementLog2 = packetElementBytes.bit_length() - 1
         self.copyHeaderDw0 = (_COPY_HEADER_DW0_BASE
@@ -117,6 +127,7 @@ class SdmaPacketEmitter:
         SReg_64 at all; DW6/DW7 does land 2-aligned there, but pairing it would
         also constrain dstBaseS, which no caller is asked to align.
         """
+        assert not self.gfx1250, "the SGPR builders write the gfx9 layout"
         module.add(SMovB32(dst=sgpr(pktS + 0), src=hex(self.copyHeaderDw0),
                            comment="SUBWIN DW0: op=COPY sub_op=RECT elementsize=log2(%dB)"
                                    % (1 << self.packetElementLog2)))
@@ -170,6 +181,7 @@ class SdmaPacketEmitter:
         The caller may hand this a block whose previous packet has already been
         placed.  See emitPlacePacket's reuse note for why that is safe and what
         ordering it requires."""
+        assert not self.gfx1250, "the SGPR builders write the gfx9 layout"
         assert pktS % 2 == 0, (
             "pktS %r is not 2-aligned, which DW4-DW7's 64-bit zeroing requires"
             % (pktS,))
@@ -192,19 +204,31 @@ class SdmaPacketEmitter:
     # caller writes the bases into COPY_DW_SRC / COPY_DW_DST and the target
     # into SIGNAL_DW_ADDR per placement.
 
-    def emitBuildCopyPacketUniformV(self, module, pktV, pitchV, sliceV):
-        """COPY_SUBWIN's lane-invariant dwords into pktV, one pitch and one slice
-        pitch for both sides."""
+    def emitBuildCopyPacketUniformV(self, module, pktV, pitchV, sliceV, dstPitchV=None):
+        """COPY_SUBWIN's lane-invariant dwords into pktV, one slice pitch for
+        both sides. pitchV is the src pitch, and the dst pitch too unless
+        dstPitchV is given."""
         module.add(VMovB32(dst=vgpr(pktV + 0), src=hex(self.copyHeaderDw0),
                            comment="SUBWIN DW0: op=COPY sub_op=RECT elementsize=log2(%dB)"
                                    % (1 << self.packetElementLog2)))
-        for dw in (3, 8, 12):
+        for dw in (3, 8):
             module.add(VMovB32(dst=vgpr(pktV + dw), src=0, comment="SUBWIN DW%d: 0" % dw))
+        if self.gfx1250:
+            module.add(VMovB32(dst=vgpr(pktV + 12), src=hex(COPY_DW12_GFX1250),
+                               comment="SUBWIN DW12: src_scope=dst_scope=SYS"))
+        else:
+            module.add(VMovB32(dst=vgpr(pktV + 12), src=0, comment="SUBWIN DW12: 0"))
         module.add(VAddU32(dst=vgpr(pktV + 4), src0=-1, src1=vgpr(pitchV),
                            comment="SUBWIN DW4: pitch - 1"))
-        module.add(VLShiftLeftB32(dst=vgpr(pktV + 4), shiftHex=13, src=vgpr(pktV + 4),
-                                  comment="SUBWIN DW4: src_pitch-1 (<< 13)"))
-        module.add(VMovB32(dst=vgpr(pktV + 9), src=vgpr(pktV + 4), comment="SUBWIN DW9: dst_pitch-1"))
+        module.add(VLShiftLeftB32(dst=vgpr(pktV + 4), shiftHex=self.pitchShift, src=vgpr(pktV + 4),
+                                  comment="SUBWIN DW4: src_pitch-1 (<< %d)" % self.pitchShift))
+        if dstPitchV is None:
+            module.add(VMovB32(dst=vgpr(pktV + 9), src=vgpr(pktV + 4), comment="SUBWIN DW9: dst_pitch-1"))
+        else:
+            module.add(VAddU32(dst=vgpr(pktV + 9), src0=-1, src1=vgpr(dstPitchV),
+                               comment="SUBWIN DW9: dst pitch - 1"))
+            module.add(VLShiftLeftB32(dst=vgpr(pktV + 9), shiftHex=self.pitchShift, src=vgpr(pktV + 9),
+                                      comment="SUBWIN DW9: dst_pitch-1 (<< %d)" % self.pitchShift))
         module.add(VAddU32(dst=vgpr(pktV + 5), src0=-1, src1=vgpr(sliceV),
                            comment="SUBWIN DW5: src_slice-1"))
         module.add(VMovB32(dst=vgpr(pktV + 10), src=vgpr(pktV + 5), comment="SUBWIN DW10: dst_slice-1"))
@@ -218,8 +242,12 @@ class SdmaPacketEmitter:
                            comment="SUBWIN DW11: rect_x-1|rect_y-1"))
 
     def emitBuildAtomicPacketUniformV(self, module, pktV):
-        module.add(VMovB32(dst=vgpr(pktV + 0), src=hex(ATOMIC_HEADER_DW0),
-                           comment="ATOMIC DW0: op=ATOMIC operation=ADD_RTN_32"))
+        if self.gfx1250:
+            module.add(VMovB32(dst=vgpr(pktV + 0), src=hex(ATOMIC_HEADER_DW0_GFX1250),
+                               comment="ATOMIC DW0: op=ATOMIC operation=ADD_RTN_32 scope=SYS"))
+        else:
+            module.add(VMovB32(dst=vgpr(pktV + 0), src=hex(ATOMIC_HEADER_DW0),
+                               comment="ATOMIC DW0: op=ATOMIC operation=ADD_RTN_32"))
         module.add(VMovB32(dst=vgpr(pktV + 3), src=1, comment="ATOMIC DW3: src_data lo (addend)"))
         for dw in range(4, ATOMIC_PACKET_DWORDS):
             module.add(VMovB32(dst=vgpr(pktV + dw), src=0, comment="ATOMIC DW%d: 0" % dw))

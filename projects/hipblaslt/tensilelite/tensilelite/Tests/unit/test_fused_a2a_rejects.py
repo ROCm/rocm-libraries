@@ -4,7 +4,7 @@
 
 The fused GEMM + all-to-all store path is only correct inside a narrow window,
 so ``Solution.assignDerivedParameters`` rejects every configuration outside it
-(gfx94x/gfx95x ISA, bf16 D, ``StreamK=0``, ``MacroTile0/1`` in {128, 256},
+(gfx94x/gfx95x ISA, or gfx1250 for GemmA2A, bf16 D, ``StreamK=0``, ``MacroTile0/1`` in {128, 256},
 ``GlobalSplitU=1``). The end-to-end proof of the path itself needs four GPUs and
 cannot run in CI; these tests are the CPU-only unit coverage of the guard block,
 in the same shape as ``test_halfplr_streamk_rejects``.
@@ -173,8 +173,7 @@ def test_fused_a2a_off_leaves_user_gsu_alone(_gp_gfx942, gfx942_iim, assembler, 
 
 
 # ---------------------------------------------------------------------------
-# Guard 1: non-gfx94x/gfx95x ISA -> rejected (SDMA packet layout is gfx9-only
-# and pre-GFX12).
+# Guard 1: an ISA outside gfx94x/gfx95x/gfx1250 -> rejected.
 # ---------------------------------------------------------------------------
 def test_fused_a2a_rejects_unsupported_isa(_gp_gfx942, gfx90a_iim, assembler, capsys):
     # gfx90a is a real MFMA target that is neither gfx94x nor gfx95x, so it
@@ -182,7 +181,24 @@ def test_fused_a2a_rejects_unsupported_isa(_gp_gfx942, gfx90a_iim, assembler, ca
     sol, out = _derive(gfx90a_iim, assembler, capsys, arch="gfx90a",
                        mi=[16, 16, 16, 1, 1, 4, 4, 2, 2])
     assert sol.get("Valid") is False
-    assert "FusedA2A=GemmA2A requires a gfx94x/gfx95x ISA" in out
+    assert "FusedA2A=GemmA2A requires a gfx94x/gfx95x/gfx1250 ISA" in out
+
+
+# The MT 128x128 fork of Tests/common/comm/gfx1250/fused_a2a.yaml.
+_GFX1250 = {"arch": "gfx1250", "WavefrontSize": 32, "DepthU": 64, "PrefetchLocalRead": 1,
+            "ScheduleIterAlg": 4, "TDMInst": 3, "ExpandPointerSwap": False, "1LDSBuffer": 0}
+
+
+def test_fused_a2a_gfx1250_is_accepted(_gp_gfx942, gfx1250_iim, assembler, capsys):
+    sol, out = _derive(gfx1250_iim, assembler, capsys, **_GFX1250)
+    assert sol.get("Valid") is True, f"expected accept, rejected with: {out!r}"
+    assert (sol["MacroTile0"], sol["MacroTile1"]) == (128, 128)
+
+
+def test_a2a_gemm_rejects_gfx1250(_gp_gfx942, gfx1250_iim, assembler, capsys):
+    sol, out = _derive(gfx1250_iim, assembler, capsys, mode="A2AGemm", **_GFX1250)
+    assert sol.get("Valid") is False
+    assert "FusedA2A=A2AGemm requires a gfx94x/gfx95x ISA" in out
 
 
 # ---------------------------------------------------------------------------

@@ -195,3 +195,9 @@ gfx1250-streamk-cluster-gl2-metadata:
     ProblemType.Sparse: 2
     ProblemType.TLUMetadata: true
     ProblemType.MXBlockFreeB: -1
+
+# GemmA2AShape with the gfx1250 COPY_SUBWIN field widths.
+gfx1250-streamk-cluster-gemm-a2a:
+  base: gfx1250-streamk-cluster
+  set:
+    ProblemType.FusedA2A: GemmA2A

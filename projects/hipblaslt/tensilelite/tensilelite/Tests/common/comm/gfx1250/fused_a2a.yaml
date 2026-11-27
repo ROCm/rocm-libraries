@@ -1,0 +1,61 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+# Fused GEMM+A2A (FusedA2A: GemmA2A) config for gfx1250.
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250-strict]
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  SleepPercent: 0
+  NumElementsToValidate: -1
+  NumBenchmarks: 1
+  EnqueuesPerSync: 3
+  RotatingBufferSize: 1024
+  ValidateAfterEnqueues: True
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  Device: 0
+  PrintSolutionRejectionReason: True
+  Architecture: gfx1250
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      FusedA2A: GemmA2A
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 4, 4, 2, 2]   # MT 128x128
+          - [16, 16, 32, 1, 1, 8, 8, 2, 2]   # MT 256x256
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [3]
+        - ExpandPointerSwap: [false]
+        - 1LDSBuffer: [0]
+        - GlobalSplitU: [1]
+        - TileProcessingStrategy: ["None"]
+        - WorkGroupMapping: [1]
+        - StaggerU: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: {sizes: [3072, 512, 1, 2048], world: 2, a2aExtent: 2048}
+          - Exact: {sizes: [3072, 511, 1, 2048], world: 2, a2aExtent: 2048}
+          - Exact: {sizes: [3072, 512, 1, 2048], world: 4, a2aExtent: 2048}
+          - Exact: {sizes: [3072, 511, 1, 2048], world: 4, a2aExtent: 2048}
