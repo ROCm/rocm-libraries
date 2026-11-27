@@ -170,7 +170,9 @@ def toolchain_identity() -> Toolchain:
     of this process tree
     (:func:`kernels.common.attention_bwd_comgr.pin_comgr_cache`), which the
     compiles that follow inherit. The library digest is memoised per file
-    version.
+    version. A process that imported torch first may load torch's comgr
+    (rocKE's discovery follows an imported torch), and then names another
+    library: its entries do not match those of a torch-free process.
     """
     from kernels.common.attention_bwd_comgr import pin_comgr_cache
 

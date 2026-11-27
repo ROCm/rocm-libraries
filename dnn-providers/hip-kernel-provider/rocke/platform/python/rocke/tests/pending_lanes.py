@@ -181,13 +181,20 @@ _BACKWARD_DEVICE_TWINS = (
     "per-lever device twins of the backward kernel, left out of the attention "
     "backward GPU entry; they need a GPU run on gfx942 and gfx950 first"
 )
-# The backward files whose resource-gate cases keep the gate's reference
-# toolchain until AICK-3320 add this to their record's reason.
-_PINNED_RESOURCE_GATE = (
-    "; its resource-gate cases count only on the gate's reference toolchain "
-    "(llvm22 with the 7.2 comgr) and skip on any other compiler until AICK-3320 "
-    "unpins them"
+# Where the backward resource gate names its reference toolchain.
+_RESOURCE_GATE_TOOLCHAIN = (
+    "the resource gate's reference toolchain (GATE_FLAVOR and GATE_COMGR_ROCM, "
+    "library/tests/_attention_bwd_resources.py)"
 )
+
+
+def _with_pinned_resource_gate(reason: str) -> str:
+    """``reason`` of a backward file whose resource-gate cases skip off the
+    gate's reference toolchain until AICK-3320, saying so."""
+    return (
+        f"{reason}; its resource-gate cases count only on {_RESOURCE_GATE_TOOLCHAIN} "
+        "and skip on any other compiler until AICK-3320 unpins them"
+    )
 
 
 def _require_test_path(kind: str, path: str) -> None:
@@ -783,7 +790,7 @@ PENDING: tuple[PendingTest, ...] = (
     ),
     *_waiting(
         _ATTENTION_BWD_ENTRIES,
-        _BACKWARD_NOT_REGISTERED + _PINNED_RESOURCE_GATE,
+        _with_pinned_resource_gate(_BACKWARD_NOT_REGISTERED),
         _LIBRARY,
         "library/tests/test_attention_bwd.py",
         "library/tests/test_attention_bwd_access.py",
@@ -808,7 +815,7 @@ PENDING: tuple[PendingTest, ...] = (
     ),
     *_waiting(
         _ATTENTION_BWD_ENTRIES,
-        _BACKWARD_EXHAUSTIVE + _PINNED_RESOURCE_GATE,
+        _with_pinned_resource_gate(_BACKWARD_EXHAUSTIVE),
         _LIBRARY,
         "library/tests/test_attention_bwd_barrier_fence.py",
         "library/tests/test_attention_bwd_dq.py",
@@ -835,16 +842,15 @@ PENDING: tuple[PendingTest, ...] = (
     ),
     *_waiting(
         _ATTENTION_BWD_ENTRIES,
-        _BACKWARD_DEVICE_TWINS + _PINNED_RESOURCE_GATE,
+        _with_pinned_resource_gate(_BACKWARD_DEVICE_TWINS),
         _LIBRARY,
         "library/tests/test_attention_bwd_tiles_numeric.py",
         whole_file=True,
     ),
     _UNPINNED_RESOURCE_GATE.waiting(
         "library/tests/gates/attention_bwd_counted_compiler_gate.py",
-        "the counted compiler gate keeps the resource gate's reference toolchain "
-        "(llvm22 with the 7.2 comgr): on any other compiler its preflight skips "
-        "every case until AICK-3320 unpins it",
+        f"the counted compiler gate keeps {_RESOURCE_GATE_TOOLCHAIN}: on any other "
+        "compiler its preflight skips every case until AICK-3320 unpins it",
         _LIBRARY,
         whole_file=True,
     ),

@@ -16,6 +16,7 @@ from types import SimpleNamespace
 
 import pytest
 import rocke
+from rocke.core.lower_llvm import LLVM_FLAVORS
 from rocke.tests.lanes import TICKET, skip_until_reason
 from rocke.tests.run_records import fixture_session_environment
 from rocke.tests.subprocess_launcher import (
@@ -31,6 +32,7 @@ from ._attention_bwd_counted_cases import (
     require_explicit_gate_entrypoint,
     selected_isa_arch,
 )
+from ._attention_bwd_resources import GATE_FLAVOR
 from ._child_pytest import pin_child_rootdir
 from ._explicit_gate_policy import (
     configured_selection_is_partial,
@@ -448,6 +450,7 @@ def test_a_broken_toolchain_fails_the_gate(active, targets, match):
             "comgr3.5/rocm10.3",
             "requires ROCm 7.2 comgr, got comgr3.5/rocm10.3",
         ),
+        ("llvm22", None, "requires ROCm 7.2 comgr, got None"),
     ],
 )
 def test_the_reference_toolchain_gap_names_the_pinned_part(requested, comgr, gap):
@@ -460,6 +463,7 @@ def test_a_required_compiler_gate_skips_off_its_reference_toolchain(tmp_path):
     """On a compiler other than the gate's reference toolchain the compiler gate
     skips every case as waiting for AICK-3320, in required mode too, and ends
     the session with 77 (a skip to CTest); its session attestation says so."""
+    other_flavor = next(flavor for flavor in LLVM_FLAVORS if flavor != GATE_FLAVOR)
     pin_child_rootdir(tmp_path)
     gate = tmp_path / _EXPECTED_GATES["counted-compiler"].name
     gate.write_text("def test_one_row():\n    pass\n", encoding="utf-8")
@@ -472,7 +476,7 @@ def test_a_required_compiler_gate_skips_off_its_reference_toolchain(tmp_path):
             "ROCKE_EXPLICIT_GATE_SENTINEL": str(sentinel),
             "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
             "ROCKE_COUNTED_ISA_OPTIONAL": "0",
-            "ROCKE_LLVM_FLAVOR": "llvm24",
+            "ROCKE_LLVM_FLAVOR": other_flavor,
         }
     )
     result = subprocess.run(
@@ -489,8 +493,9 @@ def test_a_required_compiler_gate_skips_off_its_reference_toolchain(tmp_path):
     assert result.returncode == 77, output
     reason = skip_until_reason(
         TICKET,
-        reason="counted ISA gate resource gate requires LLVM flavor llvm22, got "
-        "'llvm24'; the gate keeps its reference toolchain until AICK-3320 unpins it",
+        reason=f"counted ISA gate resource gate requires LLVM flavor {GATE_FLAVOR}, "
+        f"got {other_flavor!r}; the gate keeps its reference toolchain until "
+        "AICK-3320 unpins it",
     )
     assert "1 skipped" in output and reason in output, output
     attestation = json.loads(sentinel.read_text(encoding="utf-8"))

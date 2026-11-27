@@ -149,9 +149,11 @@ def _gate_environment(
         if not partial:
             environment.pop("ROCKE_TEST_SHARD", None)
     if name == "counted-compiler":
-        # The gate keeps its reference toolchain until AICK-3320: on any other
-        # compiler its preflight skips every case and ends the session with 77
-        # (an INCOMPLETE run, never a plain GREEN; a failure when required).
+        # The gate's compiles share one comgr cache directory of this process
+        # tree, so an inherited opt-out of it is dropped. On a compiler other
+        # than the gate's reference toolchain its preflight skips every case
+        # until AICK-3320 and ends the session with 77 (an INCOMPLETE run, never
+        # a plain GREEN; a failure when the gate is required).
         environment.pop("ROCKE_BWD_NO_COMGR_PIN", None)
         environment.pop("ROCKE_BWD_ISA_ARCH", None)
         if gate_arch is not None:
