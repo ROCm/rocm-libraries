@@ -200,26 +200,30 @@ TEST(HostUnitMXIntegerExact, smoke_PartialKBlockKeepsItsColumnScale)
         }
 }
 
-// With a padded leading dimension the reference covers the generator's whole stride * cols
-// buffer, as the other initializations' references do. Each element, at its padded offset,
-// matches the packed data and the scale the generator maps it to: one per block of 32 within
-// each run of rows elements of the buffer.
+// With a padded leading dimension, data and reference values keep their logical dense values at
+// the padded offsets while scales stay compact. Reference and inter-column data padding are zero,
+// and generation does not write beyond either caller buffer.
 TEST(HostUnitMXIntegerExact, smoke_PaddedLeadingDimensionKeepsTheLayout)
 {
     struct Shape
     {
         size_t rows, cols, stride;
     };
-    for(Shape shape : {Shape{64, 4, 96}, Shape{33, 4, 66}})
+    constexpr size_t  guardSize = 64;
+    constexpr uint8_t sentinel  = 0xA5;
+    for(Shape shape : {Shape{64, 4, 96}, Shape{33, 4, 66}, Shape{64, 3, 96}})
         for(hipDataType type : {HIP_R_6F_E2M3, HIP_R_6F_E3M2, HIP_R_8F_E4M3, HIP_R_8F_E5M2})
             for(bool isMatrixA : {true, false})
             {
-                const size_t count        = shape.stride * shape.cols;
-                const size_t blocksPerRun = (shape.rows + 31) / 32;
-                const size_t scaleCount   = count / shape.rows * blocksPerRun;
-                const bool   fp6          = type == HIP_R_6F_E2M3 || type == HIP_R_6F_E3M2;
-                std::vector<uint8_t> data(fp6 ? fp6Bytes(count) : count);
-                std::vector<uint8_t> scale(scaleCount + 64);
+                const size_t referenceCount = shape.stride * shape.cols;
+                const size_t dataElements
+                    = shape.stride * (shape.cols - 1) + shape.rows;
+                const size_t blocksPerCol  = (shape.rows + 31) / 32;
+                const size_t scaleCount    = shape.cols * blocksPerCol;
+                const bool   fp6           = type == HIP_R_6F_E2M3 || type == HIP_R_6F_E3M2;
+                const size_t dataBytes     = fp6 ? fp6Bytes(dataElements) : dataElements;
+                std::vector<uint8_t> data(dataBytes + guardSize, sentinel);
+                std::vector<uint8_t> scale(scaleCount + guardSize, sentinel);
                 // Transposed A and non-transposed B, both K-contiguous.
                 std::vector<float> ref = generateMXInput(type,
                                                          HIP_R_8U,
@@ -234,26 +238,46 @@ TEST(HostUnitMXIntegerExact, smoke_PaddedLeadingDimensionKeepsTheLayout)
                                                          isMatrixA,
                                                          MXScaleLayout::None,
                                                          "integer_exact");
-                ASSERT_EQ(ref.size(), count) << "rows " << shape.rows << " stride " << shape.stride;
-                for(size_t idx = 0; idx < count; idx++)
+                ASSERT_EQ(ref.size(), referenceCount)
+                    << "rows " << shape.rows << " stride " << shape.stride;
+                EXPECT_TRUE(std::all_of(data.begin() + dataBytes,
+                                        data.end(),
+                                        [](uint8_t b) { return b == sentinel; }));
+                EXPECT_TRUE(std::all_of(scale.begin() + scaleCount,
+                                        scale.end(),
+                                        [](uint8_t b) { return b == sentinel; }));
+
+                for(size_t col = 0; col < shape.cols; col++)
                 {
-                    const size_t s = idx / shape.rows * blocksPerRun + idx % shape.rows / 32;
-                    ASSERT_LT(s, scaleCount);
-                    const float element
-                        = fp6 ? decodeFp6(type, fp6At(data, idx)) : decodeFp8(type, data[idx]);
-                    const float expected = element * std::ldexp(1.f, int(scale[s]) - 127);
-                    ASSERT_EQ(ref[idx], expected)
-                        << "offset " << idx << " (k " << idx % shape.stride << ", column "
-                        << idx / shape.stride << ") rows " << shape.rows << " stride "
-                        << shape.stride << " type " << int(type) << " isMatrixA=" << isMatrixA;
+                    for(size_t row = 0; row < shape.rows; row++)
+                    {
+                        const size_t idx = col * shape.stride + row;
+                        const size_t s   = col * blocksPerCol + row / 32;
+                        const float  element
+                            = fp6 ? decodeFp6(type, fp6At(data, idx)) : decodeFp8(type, data[idx]);
+                        const float expected = element * std::ldexp(1.f, int(scale[s]) - 127);
+                        ASSERT_EQ(ref[idx], expected)
+                            << "offset " << idx << " (row " << row << ", column " << col
+                            << ") rows " << shape.rows << " stride " << shape.stride << " type "
+                            << int(type) << " isMatrixA=" << isMatrixA;
+                    }
+                    EXPECT_TRUE(std::all_of(ref.begin() + col * shape.stride + shape.rows,
+                                            ref.begin() + (col + 1) * shape.stride,
+                                            [](float v) { return v == 0.0f; }));
+                    if(col + 1 < shape.cols)
+                        for(size_t row = shape.rows; row < shape.stride; row++)
+                        {
+                            const size_t idx = col * shape.stride + row;
+                            const float element
+                                = fp6 ? decodeFp6(type, fp6At(data, idx)) : decodeFp8(type, data[idx]);
+                            EXPECT_EQ(element, 0.0f) << "padding offset " << idx;
+                        }
                 }
             }
 }
 
-// Zero rows are invalid input. The padded-layout guard divides by the row count, so the
-// positive-size check has to come first: this request used to throw std::invalid_argument, and
-// it must still throw that without writing the caller's buffers. Both K-major layouts
-// (transposed A and non-transposed B). An invalid-input path, not a valid GEMM.
+// Zero rows are invalid input and must throw without writing the caller's buffers in both K-major
+// layouts (transposed A and non-transposed B). An invalid-input path, not a valid GEMM.
 TEST(HostUnitMXIntegerExact, smoke_ZeroRowsAreRefused)
 {
     const uint64_t rows = 0, cols = 4, stride = 1;
@@ -315,36 +339,6 @@ TEST(HostUnitMXIntegerExact, smoke_PartialKAlongColumnsIsRefused)
                                          "integer_exact"),
                          std::runtime_error)
                 << "type " << int(type) << " nonTransposedA=" << nonTransposedA;
-            EXPECT_TRUE(std::all_of(data.begin(), data.end(), [](uint8_t b) { return b == 0xA5; }));
-            EXPECT_TRUE(
-                std::all_of(scale.begin(), scale.end(), [](uint8_t b) { return b == 0xA5; }));
-        }
-}
-
-// When stride * cols is not a multiple of rows, the generator has no scales for the elements
-// past its last whole run of rows, so integer_exact refuses the shape before writing.
-TEST(HostUnitMXIntegerExact, smoke_PaddedLeadingDimensionWithoutWholeRunsIsRefused)
-{
-    const size_t rows = 64, cols = 3, stride = 96;
-    for(hipDataType type : {HIP_R_6F_E2M3, HIP_R_8F_E4M3})
-        for(bool isMatrixA : {true, false})
-        {
-            std::vector<uint8_t> data(stride * cols, 0xA5), scale(stride * cols / 32 + 64, 0xA5);
-            EXPECT_THROW(generateMXInput(type,
-                                         HIP_R_8U,
-                                         data.data(),
-                                         scale.data(),
-                                         rows,
-                                         cols,
-                                         stride,
-                                         /*isTranspose=*/isMatrixA,
-                                         isMatrixA ? 32 : 1,
-                                         isMatrixA ? 1 : 32,
-                                         isMatrixA,
-                                         MXScaleLayout::None,
-                                         "integer_exact"),
-                         std::runtime_error)
-                << "type " << int(type) << " isMatrixA=" << isMatrixA;
             EXPECT_TRUE(std::all_of(data.begin(), data.end(), [](uint8_t b) { return b == 0xA5; }));
             EXPECT_TRUE(
                 std::all_of(scale.begin(), scale.end(), [](uint8_t b) { return b == 0xA5; }));

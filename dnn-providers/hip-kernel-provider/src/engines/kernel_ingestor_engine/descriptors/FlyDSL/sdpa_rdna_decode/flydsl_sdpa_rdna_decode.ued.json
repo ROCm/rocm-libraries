@@ -12,10 +12,10 @@
   "predict_engine": {
     "default": "d9ea0851-b585-536e-8e0f-8ea0d00971c2",
     "gfx1100": [
-      "e319ac01-24d7-45ee-a996-5c06bd8c7d2e"
+      "986f1d35-0ad1-4b9f-a7f6-2dbae25c4990"
     ],
     "gfx1101": [
-      "1e0df36a-269a-4830-b833-893d300db159"
+      "32772ce9-a75c-4974-ac59-a02eb5403135"
     ],
     "gfx1151": [
       "f1107ba4-d764-438d-9ad5-1663b5c4786d"
@@ -32,5 +32,6 @@
   ],
   "behavior_notes": [
     "supports_graph_capture"
-  ]
+  ],
+  "numerical_notes": []
 }

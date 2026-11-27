@@ -6,7 +6,7 @@
 # GTest-filter categories applied to the component's own GTest binaries
 # (hipdnn_integration_tests_unit_tests and hipdnn_golden_data_tests) via
 # apply_test_category_labels(). hipdnn_gpu_ref_tests uses
-# test_categories_gpu_ref.yaml instead (fp32-only quick tier). Each category
+# test_categories_gpu_ref.yaml instead (opt-in quick list). Each category
 # becomes one CTest suite whose --gtest_filter is built from test_patterns/exclude;
 # labels are cumulative so `ctest -L standard` runs quick + standard, etc.
 #
@@ -31,7 +31,7 @@
 # `ctest -L full` selects everything.
 test_categories:
   quick:
-    description: "Quick-tier golden-data bundles plus all framework unit tests (catch-all: everything not Standard/Comprehensive/Full)"
+    description: "Quick-tier golden-data bundles plus the framework unit tests that need no device (catch-all: everything not Standard/Comprehensive/Full or a device test)"
     test_patterns:
       - "*"
     exclude:
@@ -42,6 +42,13 @@ test_categories:
       - "comprehensive_*"
       - "Full*"
       - "full_*"
+      # Tests that need a device (see standard test_patterns)
+      - "*Device.*"
+      - "*Device/*"
+      - "*DeviceFp16.*"
+      - "*DeviceBfp16.*"
+      - "*DeviceFp32.*"
+      - "*DeviceFp64.*"
     labels:
       - "quick"
       - "standard"
@@ -49,10 +56,24 @@ test_categories:
       - "full"
 
   standard:
-    description: "Standard-tier cases (Standard* tests and standard_* golden-data bundles)"
+    description: "Standard-tier cases (Standard* tests, standard_* golden-data bundles and the unit tests that need a device)"
     test_patterns:
       - "Standard*"
       - "standard_*"
+      # Tests that need a device: the suite name carries the marker `Device` (before a
+      # trailing datatype, which the test-name rule requires to be last). Each compiles HipRTC
+      # kernels (~0.4 s per kernel variant), which was most of the unit-test quick tier; the
+      # kernels themselves are covered in quick by hipdnn_gpu_ref_tests (Quick/*). A new
+      # device-test suite has to carry the marker; `check_tier_partition.py --no-device-skips
+      # quick` fails when a quick test skips for lack of a device.
+      # The same list appears three times (quick exclude, standard test_patterns, ffm-quick
+      # exclude): change all three.
+      - "*Device.*"
+      - "*Device/*"
+      - "*DeviceFp16.*"
+      - "*DeviceBfp16.*"
+      - "*DeviceFp32.*"
+      - "*DeviceFp64.*"
     exclude:
       - "*DISABLED*"
     labels:
@@ -83,7 +104,7 @@ test_categories:
       - "slow"
 
   ffm-quick:
-    description: "Fast-feedback mechanism (FFM) quick tier - mirrors the quick tier minus the quick-tier SDPA golden-data GPU-reference cases"
+    description: "Fast-feedback mechanism (FFM) quick tier - mirrors the quick tier (the unit tests that need a device run in standard only, in no FFM tier) minus the quick-tier SDPA golden-data GPU-reference cases"
     test_patterns:
       - "*"
     exclude:
@@ -94,6 +115,13 @@ test_categories:
       - "comprehensive_*"
       - "Full*"
       - "full_*"
+      # Tests that need a device (see standard test_patterns)
+      - "*Device.*"
+      - "*Device/*"
+      - "*DeviceFp16.*"
+      - "*DeviceBfp16.*"
+      - "*DeviceFp32.*"
+      - "*DeviceFp64.*"
       # The GPU SDPA reference recomputes QK^T per output element, so cost tracks
       # B*H*Sq*Skv*D. On the FFM simulator even the smallest quick-tier bundle
       # (1x8x256x128, 36 ms on MI300X) took 329 s, hd192 took 484 s, and the

@@ -52,6 +52,7 @@ from rocisa.enum import RegisterType, DataTypeEnum, HighBitSel
 from .KernelWriterModules import *
 
 from .Component import Component, LraTileProperties
+from .Components.SwizzledTdmLayout import SwizzledTdmGeometry
 from .Components.Signature import UserArgumentsInfo
 from .Components.PersistentLoop import PersistentKernelState
 from .Components.StreamK import StreamKKernelState
@@ -83,6 +84,7 @@ from .SolutionStructs.Naming import getKernelFileBase, getKernelNameMin
 from .SgprHazards import insertSgprHazardWaits
 from .Toolchain.Component import Assembler
 
+import contextlib
 import rocisa
 import math
 import abc
@@ -516,6 +518,8 @@ class StateValues:
   subtileHoistedStoreInit: Optional[list] = None   # split store-init units hoisted into the loop
   subtileHoistedWriteIndices: Optional[dict] = None  # coord VGPRs hoisted from NGLL
   subtileRecomputeCoords: bool           = False   # recompute store coords INTO existing (hoisted) VGPRs (numIter<PGR)
+  subtileKeepHoistedWriteIndices: bool   = False   # planning emit of the fused store: leave the hoisted indices for the real emit
+  subtileHoistedCleanupDeferred: bool    = False   # that emit skipped cleanupGlobalWrite; whoever keeps its module must run it
   subtileFusedLendVgprs: Optional[list]  = None    # [(base,size)] VGPRs lent to the fused store
   subtileStoreStages: int                = 0       # PLSIN staged store: compute partitions to stage across
   subtileStoreStagesM: int               = 1       # of those, how many split M (1 = N-only split)
@@ -4736,8 +4740,19 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     if kernel["PrefetchGL2"]:
       loopCounter = self.loopCounter(kernel, self.states.unrollIdx)
       self.codes.gl2PrefetchIncrement = Module()
-      self.codes.gl2PrefetchIncrement.add(SCmpLeU32(loopCounter, kernel["PrefetchGlobalRead"] + kernel["PrefetchGL2"], \
-        comment="counterL<=PGR+GL2"))
+      # TailFolding: the last k-tile is partial; stop one k-tile earlier so no prefetch passes K.
+      if kernel.get("_TailFolding", False) and self.tailFoldingGL2Clamp(kernel):
+        # TailFolding: PGR+GL2, +1 when K has a tail, recomputed here (no SGPR kept across the loop)
+        with self.allocTmpSgpr(1, tag="gl2FoldThreshold") as tmp:
+          self.codes.gl2PrefetchIncrement.add(SAndB32(dst=sgpr(tmp.idx), src0=sgpr("SizesSum+%u" % self.states.unrollIdx), \
+            src1=kernel["DepthU"] - 1, comment="TailFolding: SCC = (K %% %u != 0)" % kernel["DepthU"]))
+          self.codes.gl2PrefetchIncrement.add(SAddCU32(dst=sgpr(tmp.idx), src0=kernel["PrefetchGlobalRead"] + kernel["PrefetchGL2"], src1=0, \
+            comment="TailFolding: GL2 threshold = PGR+GL2 (+1 if K tail)"))
+          self.codes.gl2PrefetchIncrement.add(SCmpLeU32(loopCounter, sgpr(tmp.idx), \
+            comment="TailFolding: counterL <= PGR+GL2 (+1 if K tail)"))
+      else:
+        self.codes.gl2PrefetchIncrement.add(SCmpLeU32(loopCounter, kernel["PrefetchGlobalRead"] + kernel["PrefetchGL2"], \
+          comment="counterL<=PGR+GL2"))
       self.codes.gl2PrefetchIncrement.add(self.gl2PrefetchClearIncrement(kernel, tensorParametersA, tensorParametersB))
       self.codes.gl2PrefetchIncrement.add(self.gl2PrefetchIncrementAddr(kernel, tensorParametersA, tensorParametersB))
       self.codes.gl2Prefetch = Module()
@@ -6342,17 +6357,33 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     if kernel["PrefetchGL2"]:
       skipGL2Label = Label(self.rapLabel("Skip_GL2"), "")
       loopCounter = self.loopCounter(kernel, self.states.unrollIdx)
-      module.add(SCmpLeU32(src0=loopCounter, src1=hex(kernel["PrefetchGlobalRead"]), \
-        comment="counterL<=PGR"))
-      module.add(SCBranchSCC1(labelName=skipGL2Label.getLabelName(), comment=""))
-      module.add(self.gl2PrefetchSkipPGR(kernel, tensorParametersA, tensorParametersB))
-      module.add(self.gl2PrefetchIssueLoad(kernel, tensorParametersA, tensorParametersB))
-      if kernel["PrefetchGL2"] == 2:
-        module.add(SCmpLeU32(src0=loopCounter, src1=hex(kernel["PrefetchGlobalRead"]+1), comment="counterL<=PGR+1"))
+      pgr = kernel["PrefetchGlobalRead"]
+      gl2 = kernel["PrefetchGL2"]
+      gl2Fold = kernel.get("_TailFolding", False) and self.tailFoldingGL2Clamp(kernel)
+      # TF0: no tmp sgpr, so its allocation and code stay unchanged
+      with (self.allocTmpSgpr(1, tag="gl2FoldPreLoop") if gl2Fold else contextlib.nullcontext()) as tmp:
+        if gl2Fold:
+          # TailFolding: when K has a tail the last k-tile is partial, so every GL2 prefetch threshold
+          # is one higher: PGR (+1) here, PGR+1 (+1) below, PGR+GL2 (+1) recomputed in the loop.
+          module.add(SAndB32(dst=sgpr(tmp.idx), src0=sgpr("SizesSum+%u" % self.states.unrollIdx), \
+            src1=kernel["DepthU"] - 1, comment="TailFolding: SCC = (K %% %u != 0)" % kernel["DepthU"]))
+          module.add(SAddCU32(dst=sgpr(tmp.idx), src0=pgr, src1=0, comment="TailFolding: pre-loop GL2 threshold = PGR (+1 if K tail)"))
+          module.add(SCmpLeU32(src0=loopCounter, src1=sgpr(tmp.idx), comment="TailFolding: counterL <= PGR (+1 if K tail)"))
+        else:
+          module.add(SCmpLeU32(src0=loopCounter, src1=hex(pgr), comment="counterL<=PGR"))
         module.add(SCBranchSCC1(labelName=skipGL2Label.getLabelName(), comment=""))
-        module.add(self.gl2PrefetchIncrementAddr(kernel, tensorParametersA, tensorParametersB))
+        module.add(self.gl2PrefetchSkipPGR(kernel, tensorParametersA, tensorParametersB))
         module.add(self.gl2PrefetchIssueLoad(kernel, tensorParametersA, tensorParametersB))
-      module.add(skipGL2Label)
+        if gl2 == 2:
+          if gl2Fold:
+            module.add(SAddU32(dst=sgpr(tmp.idx), src0=sgpr(tmp.idx), src1=1, comment="TailFolding: pre-loop GL2 threshold = PGR+1 (+1 if K tail)"))
+            module.add(SCmpLeU32(src0=loopCounter, src1=sgpr(tmp.idx), comment="TailFolding: counterL <= PGR+1 (+1 if K tail)"))
+          else:
+            module.add(SCmpLeU32(src0=loopCounter, src1=hex(pgr+1), comment="counterL<=PGR+1"))
+          module.add(SCBranchSCC1(labelName=skipGL2Label.getLabelName(), comment=""))
+          module.add(self.gl2PrefetchIncrementAddr(kernel, tensorParametersA, tensorParametersB))
+          module.add(self.gl2PrefetchIssueLoad(kernel, tensorParametersA, tensorParametersB))
+        module.add(skipGL2Label)
 
     loopCopies = 3 if kernel["HalfPLR"] else 2 if expand else 1
     isDTV = (kernel["DirectToVgprA"] or kernel["DirectToVgprB"])
@@ -6977,6 +7008,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
     self.removeSgprVarFromPool("SrdWS")
 
+    # The L2 prefetch increments are set again for every tile and nothing after the main loop
+    # reads them. Give them back when the 4 temporaries of the tail loop no longer fit.
+    if kernel["PrefetchGL2"] and not self.tmpSgprFits(4):
+      for tc in ("A", "B", "MXSA", "MXSB", "Metadata"):
+        if "GL2PrefetchInc%s" % tc in self.sgprs:
+          module.add(self.undefineSgpr("GL2PrefetchInc%s" % tc))
+
     if not kernel["NoTailLoop"]:
       ########################################
       # Tail Loop
@@ -7491,26 +7529,15 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
 
       # FIXME: Add back.
       if mEnd == 1:
-        #add misc vgpr to vgprPool
-        self.vgprPool.add(self.states.startVgprMisc , \
-          self.states.startVgpr - self.states.startVgprMisc, "misc vgpr") # Add as available
-        module.addComment1("Tail: add MISC Vgpr [%u...%u) to pool" % \
-                          (self.states.startVgprMisc, self.states.startVgpr))
-        if self.states.a.startVgprLocalReadAddr > self.states.startVgpr:
-          # Not in the MISC. Release here.
-          self.vgprPool.add(self.states.a.startVgprLocalReadAddr , \
-            self.states.a.numVgprLocalReadAddr, "LocalReadAddrA vgpr") # Add as available
-          module.addComment1("Tail: add LocalReadAddrA Vgpr [%u...%u) to pool" % \
-                            (self.states.a.startVgprLocalReadAddr, self.states.a.startVgprLocalReadAddr + self.states.a.numVgprLocalReadAddr))
-        if self.states.b.startVgprLocalReadAddr > self.states.startVgpr:
-          # Not in the MISC. Release here.
-          self.vgprPool.add(self.states.b.startVgprLocalReadAddr , \
-            self.states.b.numVgprLocalReadAddr, "LocalReadAddrB vgpr") # Add as available
-          module.addComment1("Tail: add LocalReadAddrB Vgpr [%u...%u) to pool" % \
-                            (self.states.b.startVgprLocalReadAddr, self.states.b.startVgprLocalReadAddr + self.states.b.numVgprLocalReadAddr))
+        module.add(self._releaseMiscAndLocalReadAddrVgprs())
     elif self.states.tailloopInNll:
       # always emit the skip-tail-loop label for NoTailLoop + tailloopInNll
       module.add(self.closeLoop(kernel, tensorParametersA, tensorParametersB, -1, None, emitEndLabelOnly=True))
+    elif kernel.get("_TailFolding", False) and not kernel["ReuseAcrossPersistent"]:
+      # TailFolding: the main loop already ran the K tail, so release the VGPRs the tail
+      # loop would have released (a tail-folding kernel has no DTV/DTL/sparse, so mEnd is 1).
+      # Holding them raises the store's VGPR peak and can cost occupancy.
+      module.add(self._releaseMiscAndLocalReadAddrVgprs())
 
     if self.states.tailloopInNll:
       # generate wait code for early exit
@@ -10325,13 +10352,20 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
         self.states.b.tmpVgprCvtSub = vgprIdx
         vgprIdx += 1
   
+      # The prefetch addresses start on an even register. From an odd index, Serial takes
+      # the slot that alignment would leave empty.
+      serialFirst = bool(kernel["PrefetchGL2"]) and vgprIdx % 2 == 1
+      if serialFirst:
+        self.states.startVgprSerial = vgprIdx
+        vgprIdx += 1
       if kernel["PrefetchGL2"]:
         vgprIdx = self.allocGL2PrefetchAddrVgprs(kernel, tensorParametersA, tensorParametersB, vgprIdx)
 
       # TODO: Serial is always the first/last register in the pool so the store
       # code doesn't have to deal with fragmentation
-      self.states.startVgprSerial = vgprIdx
-      vgprIdx += 1 # for vgpr serial id
+      if not serialFirst:
+        self.states.startVgprSerial = vgprIdx
+        vgprIdx += 1 # for vgpr serial id
 
       self.states.totalVgprs = max(vgprIdx, self.states.c.numVgprValu)
       if self.states.totalVgprs < 0 or self.states.totalVgprs > self.states.regCaps["MaxVgpr"]:
@@ -11549,7 +11583,14 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     tP["localWriteSwapByteOffset"] = 0
     tP["gpr"] = {}
     tP["metadataWriteSwapByteOffset"] = 0
-    tP["isSwizzled"] = (kernel["ProblemType"]["SwizzleTensorB"] and tP["isB"]) or (kernel["ProblemType"]["SwizzleTensorA"] and tP["isA"])
+    swizzleFlag = (kernel["ProblemType"]["SwizzleTensorB"] and tP["isB"]) or (kernel["ProblemType"]["SwizzleTensorA"] and tP["isA"])
+    # gfx1250 TDM swizzle: the operand is pre-swizzled in global memory into WMMA-optimal order,
+    # DMA'd to LDS by TDM (tensor_load_to_lds), then read compactly by ds_load_b128 with no padding.
+    # This does NOT use the DTV swizzle SRD-load / swizzled-LDS-write machinery, so it is tracked
+    # separately and kept out of tP["isSwizzled"] to leave the gfx942 DTV path byte-for-byte intact.
+    tdmForTc = bool((kernel["TDMInst"] & 0x02 and tP["isB"]) or (kernel["TDMInst"] & 0x01 and tP["isA"]))
+    tP["isSwizzledTDM"] = bool(swizzleFlag and tdmForTc and self.states.asmCaps["HasWMMA_V3"])
+    tP["isSwizzled"] = bool(swizzleFlag and not tP["isSwizzledTDM"])
 
     if tP["isSwizzled"]:
       swz = swizzleGeometry(kernel, cM)
@@ -11559,6 +11600,13 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       tP["swizzleLaneSize"]     = swz["laneSize"]
       tP["swizzleLanesUsed"]    = swz["lanesUsed"]
       tP["swizzleLoadsPerLane"] = swz["loadsPerLane"]
+    elif tP["isSwizzledTDM"]:
+      # Compact swizzle block along K, matching the host pre-swizzle (see SwizzledTdmGeometry, the single
+      # source of the swizzled-TDM constants and offsets; its innerK asserts a whole 16-byte ds_load_b128).
+      tP["swizzlePackK"] = 1
+      tP["swzGeom"] = SwizzledTdmGeometry.fromKernel(kernel, cM)
+      tP["swizzleK"] = tP["swzGeom"].swzK
+      tP["swizzlePadK"] = tP["swzGeom"].padK
 
   ##############################################################################
   # Global Read Addresses: Tile Assignment A/B
@@ -12077,6 +12125,29 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       return syncThreads(kernel, self.states.archCaps, self.states.asmCaps, comment, skipForceWaitcnt0=skipForceWaitcnt0, memoryToken=memoryToken)
     return Module("SyncThreads (Empty)")
 
+  def tailFoldGsu(self, kernel):
+    return False
+
+  def _releaseMiscAndLocalReadAddrVgprs(self):
+    """After the last local read: add the misc VGPRs and the LocalReadAddrA/B VGPRs to the pool."""
+    module = Module("releaseMiscAndLocalReadAddrVgprs")
+    self.vgprPool.add(self.states.startVgprMisc , \
+      self.states.startVgpr - self.states.startVgprMisc, "misc vgpr") # Add as available
+    module.addComment1("Tail: add MISC Vgpr [%u...%u) to pool" % \
+                      (self.states.startVgprMisc, self.states.startVgpr))
+    for tc, s in (("A", self.states.a), ("B", self.states.b)):
+      if s.startVgprLocalReadAddr > self.states.startVgpr:
+        # Not in the MISC. Release here.
+        self.vgprPool.add(s.startVgprLocalReadAddr, s.numVgprLocalReadAddr, "LocalReadAddr%s vgpr" % tc) # Add as available
+        module.addComment1("Tail: add LocalReadAddr%s Vgpr [%u...%u) to pool" % \
+                          (tc, s.startVgprLocalReadAddr, s.startVgprLocalReadAddr + s.numVgprLocalReadAddr))
+    return module
+
+  def tailFoldingGL2Clamp(self, kernel):
+    """TailFolding (not RAP): the last k-tile is partial, so the GL2 prefetch stops one k-tile
+    earlier; a prefetch of it would reach up to DepthU - 1 elements past K."""
+    return kernel.get("_TailFolding", False) and not kernel["ReuseAcrossPersistent"]
+
   def _tailLoopBarrierTokens(self, kernel):
     # Explicit tail barriers must list every token; the auto-barrier pass doesn't cover them.
     tokens = [self.states.memTokenLdsBuffer0]
@@ -12165,13 +12236,14 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
           keptItems.append(item)
         elif isinstance(item, SBarrier) \
              and "-3" not in str(item).split("//", 1)[0] \
-             and "PGR bypass sync" not in str(item):
+             and "PGR bypass sync" not in item.comment:
           # Pass-2 rebuilds only workgroup-scope barriers from token-state
           # transitions, so only those are cleared here. Cluster-scope split
           # barriers (s_barrier_signal/wait -3), e.g. the StreamKMulticast
           # prologue arrive, are placed deliberately by other components and
           # carry no LDS token, so preserve them rather than dropping a half of
-          # a cluster handshake.
+          # a cluster handshake. The PGR bypass syncs are matched on the comment
+          # attribute: str() drops comments under --disable-asm-comments.
           removedCount += 1
           continue
         else:

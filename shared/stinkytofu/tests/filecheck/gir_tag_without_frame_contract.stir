@@ -1,0 +1,30 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass=girFrameWaits --print-output
+#
+# A `mod.gir_action` tag is the frontend's intent, not a derivation. In a function with no frame
+# contract the model is empty, so nothing states this instruction's waits -- keying the
+# relaxations on the tag alone turned the generic drain off and put nothing in its place.
+#
+# The ds_load below is tagged; the function carries no contract. Both generic drains must stand,
+# exactly as they would without the tag.
+#
+# CHECK-LABEL: @gir_tag_without_frame_contract
+# CHECK: ^loop:
+# CHECK-NEXT: "st.s_wait_dscnt"(0)
+# CHECK-NEXT: "st.tensor_load_to_lds"
+#
+# THE POINT. Without the contract check this tensorcnt drain disappears and the tagged read runs
+# against a tensor_load still in flight.
+# CHECK-NEXT: "st.s_wait_tensorcnt"(0)
+# CHECK-NEXT: "st.ds_load_b128"(v10)
+
+st.func @gir_tag_without_frame_contract() {
+^entry:
+  "st.s_branch"("loop")
+  Successors: ^loop
+^loop:
+  "st.tensor_load_to_lds"(s[0:3], s[10:17])
+  v[0:3] = "st.ds_load_b128"(v10) { mod.ds = { na = 1, offset = 0, gds = false }, mod.gir_action = { action = 4, anchor = 4, kind = ds, access0_write = 0, access0_operand = 0, access0_ring = 2, access0_gen = 0, access0_cross = 1 } }
+  "st.s_cbranch_scc1"("loop", SCC0)
+  Successors: ^loop, ^exit
+^exit:
+}

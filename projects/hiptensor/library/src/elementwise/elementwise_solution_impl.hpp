@@ -201,6 +201,9 @@ namespace hiptensor
             else if constexpr(Traits::InstanceType
                               == ElementwiseInstanceType_t::ELEMENTWISE_TRINARY_OP)
             {
+                // `operators` is {opABC, opAB, opA, opB, opC}. The combined op applies its first
+                // binary op to (A, B) and its second to that result and C, so opAB goes first to
+                // compute opABC(opAB(alpha * A, beta * B), gamma * C).
                 args.mInvokerArgPtr = std::move(deviceOp->MakeArgumentPointer(
                     deviceInputLengths,
                     deviceInputStrides,
@@ -208,8 +211,8 @@ namespace hiptensor
                     deviceInBuffers,
                     deviceOutBuffers,
                     typename Traits::CombinedOp{
-                        typename Traits::ABCOp{operators[0]},
                         typename Traits::ABOp{operators[1]},
+                        typename Traits::ABCOp{operators[0]},
                         typename Traits::AOp{
                             CkHiptensorUnaryOp{operators[2]},
                             typename Traits::ScaleOp{

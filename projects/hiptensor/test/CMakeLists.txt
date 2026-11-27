@@ -443,6 +443,10 @@ add_subdirectory(01_contraction)
 add_subdirectory(02_elementwise)
 add_subdirectory(03_reduction)
 
+# --help of the shared test main() lists the Google Test flags after the hipTensor options.
+add_test(NAME test_help COMMAND util_test --help)
+set_tests_properties(test_help PROPERTIES PASS_REGULAR_EXPRESSION "--gtest_filter")
+
 # Build-tree ABI export-surface test (host-only). Asserts the just-built shared library exports
 # nothing beyond the public allowlist. $<TARGET_FILE:hiptensor> expands to the versioned .so.
 if(HIPTENSOR_ABI_CHECKER)
@@ -478,10 +482,13 @@ endif()
 # category parser from test_categories.yaml.
 
 set(_HIPTENSOR_HOST_TESTS
+  api_attribute_test
   batched_contraction_test
+  compute_descriptor_test
   concurrency_test
   contraction_mode_test
   elementwise_cpu_test
+  elementwise_instance_selection_test
   elementwise_mode_test
   elementwise_op_test
   hiptensor_options_test
@@ -524,11 +531,15 @@ set(_HIPTENSOR_DEVICE_TESTS
   "plan_cache_test|01_contraction/plan_cache_test_params.yaml"
   "plan_cache_lru_test|NONE"
   "plan_lifetime_test|NONE"
+  "scalar_alignment_test|NONE"
   "trinary_bilinear_contraction_test|NONE"
   "trinary_scale_contraction_test|NONE"
+  "trinary_contraction_workspace_test|NONE"
   "bilinear_contraction_with_unary_ops_test|NONE"
   "scale_contraction_with_unary_ops_test|NONE"
+  "contraction_padded_strides_test|NONE"
   "elementwise_output_strides_test|NONE"
+  "elementwise_trinary_op_order_test|NONE"
   "rank2_elementwise_permute_test|02_elementwise/permutation/rank2_test_params.yaml"
   "rank3_elementwise_permute_test|02_elementwise/permutation/rank3_test_params.yaml"
   "rank4_elementwise_permute_test|02_elementwise/permutation/rank4_test_params.yaml"
@@ -661,6 +672,9 @@ foreach(_hiptensor_family "quick|validation/quick" "standard|validation/standard
         foreach(_hiptensor_host IN LISTS _HIPTENSOR_HOST_TESTS)
             _hiptensor_emit_test("${_hiptensor_host} ${_hiptensor_suffix}" "\"../${_hiptensor_host}\"")
         endforeach()
+        # --help of the shared test main() lists the Google Test flags after the hipTensor options.
+        file(APPEND "${INSTALL_TEST_FILE}" "add_test(\"test_help ${_hiptensor_suffix}\" \"../util_test\" --help)\n")
+        file(APPEND "${INSTALL_TEST_FILE}" "set_tests_properties(\"test_help ${_hiptensor_suffix}\" PROPERTIES PASS_REGULAR_EXPRESSION \"--gtest_filter\")\n")
         if(HIPTENSOR_ABI_CHECKER)
             # Resolve python3/nm from PATH at ctest time: the build-stage interpreter and the
             # build-tree llvm-nm do not exist when the packaged tests run on a separate machine.

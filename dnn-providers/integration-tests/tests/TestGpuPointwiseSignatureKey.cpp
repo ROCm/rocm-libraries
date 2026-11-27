@@ -4,8 +4,8 @@
 // The CPU and GPU pointwise references list their modes and datatype tuples in unrelated places,
 // and the GPU key has no mode. TestPointwiseReferenceParity asks both executors about every
 // (mode, datatype tuple) either registry can express. Each difference has to be listed in
-// knownGaps(), and each listed gap has to still be a difference. TestGpuPointwiseExecutor runs one
-// mode of every tuple the GPU registers and compares it with the CPU reference.
+// knownGaps(), and each listed gap has to still be a difference. TestGpuPointwiseExecutorDevice runs
+// one mode of every tuple the GPU registers and compares it with the CPU reference.
 
 #include <gtest/gtest.h>
 
@@ -68,6 +68,7 @@ constexpr DataType K_FP64 = DataType::DOUBLE;
 constexpr DataType K_INT32 = DataType::INT32;
 constexpr DataType K_FP8_E4M3 = DataType::FP8_E4M3;
 constexpr DataType K_FP8_E5M2 = DataType::FP8_E5M2;
+constexpr DataType K_BOOLEAN = DataType::BOOLEAN;
 constexpr DataType K_NONE = DataType::UNSET;
 
 // datatypeToNativeVariant() holds more types than the GPU kernels take
@@ -114,6 +115,12 @@ PointwiseTuple unarySignature(DataType in, DataType out, DataType compute)
 PointwiseTuple binarySignature(DataType in0, DataType in1, DataType out, DataType compute)
 {
     return {PointwiseMode::UNSET, in0, in1, K_NONE, out, compute};
+}
+
+PointwiseTuple
+    ternarySignature(DataType in0, DataType in1, DataType in2, DataType out, DataType compute)
+{
+    return {PointwiseMode::UNSET, in0, in1, in2, out, compute};
 }
 
 // A mode, a datatype signature or a full tuple, for failure messages.
@@ -231,8 +238,21 @@ std::set<PointwiseTuple> cpuRegistryTuples()
     return tuples;
 }
 
+bool isModeOfArity(PointwiseMode mode, bool unary, bool ternary)
+{
+    if(unary)
+    {
+        return hipdnn_flatbuffers_sdk::utilities::isUnaryPointwiseMode(mode);
+    }
+    if(ternary)
+    {
+        return hipdnn_flatbuffers_sdk::utilities::isTernaryPointwiseMode(mode);
+    }
+    return hipdnn_flatbuffers_sdk::utilities::isBinaryPointwiseMode(mode);
+}
+
 // The GPU key has no mode, so each key is crossed with every mode of its arity; the plan builders
-// then say which of those they take. It has no third operand either, so no ternary mode appears.
+// then say which of those they take.
 std::set<PointwiseTuple> gpuCandidateTuples()
 {
     std::set<PointwiseTuple> tuples;
@@ -240,15 +260,15 @@ std::set<PointwiseTuple> gpuCandidateTuples()
     {
         const auto& key = entry.first;
         const bool unary = key.input1DataType == DataType::UNSET;
+        const bool ternary = key.input2DataType != DataType::UNSET;
         for(const auto mode : EnumValuesPointwiseMode())
         {
-            if(unary ? hipdnn_flatbuffers_sdk::utilities::isUnaryPointwiseMode(mode)
-                     : hipdnn_flatbuffers_sdk::utilities::isBinaryPointwiseMode(mode))
+            if(isModeOfArity(mode, unary, ternary))
             {
                 tuples.insert(PointwiseTuple{mode,
                                              key.input0DataType,
                                              key.input1DataType,
-                                             K_NONE,
+                                             key.input2DataType,
                                              key.outputDataType,
                                              key.computeDataType});
             }
@@ -257,13 +277,16 @@ std::set<PointwiseTuple> gpuCandidateTuples()
     return tuples;
 }
 
-// One mode of each arity stands in for all of them: NEG for unary tuples, SUB for binary ones.
+// One mode of each arity stands in for all of them: NEG for unary tuples, SUB for binary ones. The
+// tuples with a BOOLEAN output belong to CMP_GT, which SUB does not take, and BINARY_SELECT; both run
+// in TestGpuReferenceGraphExecutorDeviceFp32.
 std::vector<PointwiseTuple> executedTuples()
 {
     std::vector<PointwiseTuple> tuples;
     for(const auto& tuple : gpuCandidateTuples())
     {
-        if(tuple.mode == PointwiseMode::NEG || tuple.mode == PointwiseMode::SUB)
+        if((tuple.mode == PointwiseMode::NEG || tuple.mode == PointwiseMode::SUB)
+           && tuple.out != K_BOOLEAN)
         {
             tuples.push_back(tuple);
         }
@@ -329,30 +352,14 @@ bool matches(const Gap& gap, const PointwiseTuple& tuple)
 const std::vector<Gap>& knownGaps()
 {
     static const std::vector<Gap> s_gaps = {
-        // No GPU kernel. The comparison, logical, GEN_INDEX and BINARY_SELECT modes also need a
-        // BOOLEAN or INT32 tensor, and BINARY_SELECT a third operand, which the GPU plans and key
-        // do not have.
-        {Reference::GPU, {PointwiseMode::EXP}},
-        {Reference::GPU, {PointwiseMode::LOG}},
-        {Reference::GPU, {PointwiseMode::SQRT}},
-        {Reference::GPU, {PointwiseMode::RSQRT}},
-        {Reference::GPU, {PointwiseMode::RECIPROCAL}},
-        {Reference::GPU, {PointwiseMode::SIN}},
-        {Reference::GPU, {PointwiseMode::TAN}},
-        {Reference::GPU, {PointwiseMode::ERF}},
-        {Reference::GPU, {PointwiseMode::CEIL}},
-        {Reference::GPU, {PointwiseMode::FLOOR}},
-        {Reference::GPU, {PointwiseMode::ELU_FWD}},
-        {Reference::GPU, {PointwiseMode::SOFTPLUS_FWD}},
+        // No GPU kernel. The comparison, logical and GEN_INDEX modes also need a BOOLEAN or INT32
+        // tensor.
         {Reference::GPU, {PointwiseMode::LOGICAL_NOT}},
         {Reference::GPU, {PointwiseMode::GEN_INDEX}},
         {Reference::GPU, {PointwiseMode::DIV}},
         {Reference::GPU, {PointwiseMode::ADD_SQUARE}},
-        {Reference::GPU, {PointwiseMode::MAX_OP}},
-        {Reference::GPU, {PointwiseMode::MIN_OP}},
         {Reference::GPU, {PointwiseMode::CMP_EQ}},
         {Reference::GPU, {PointwiseMode::CMP_NEQ}},
-        {Reference::GPU, {PointwiseMode::CMP_GT}},
         {Reference::GPU, {PointwiseMode::CMP_GE}},
         {Reference::GPU, {PointwiseMode::CMP_LT}},
         {Reference::GPU, {PointwiseMode::CMP_LE}},
@@ -363,17 +370,10 @@ const std::vector<Gap>& knownGaps()
         {Reference::GPU, {PointwiseMode::SWISH_BWD}},
         {Reference::GPU, {PointwiseMode::ELU_BWD}},
         {Reference::GPU, {PointwiseMode::SOFTPLUS_BWD}},
-        {Reference::GPU, {PointwiseMode::BINARY_SELECT}},
 
-        // CPU only: FP16 or BFP16 compute, and an FP32 operand beside a 16-bit one. The last two
-        // read like compute and output swapped against the tuples before them; pinned as
-        // registered.
-        {Reference::GPU, binarySignature(K_FP16, K_FP16, K_FP16, K_FP16)},
-        {Reference::GPU, binarySignature(K_BFP16, K_BFP16, K_BFP16, K_BFP16)},
-        {Reference::GPU, binarySignature(K_FP16, K_FP32, K_FP32, K_FP32)},
-        {Reference::GPU, binarySignature(K_BFP16, K_FP32, K_FP32, K_FP32)},
-        {Reference::GPU, binarySignature(K_FP32, K_FP16, K_FP32, K_FP32)},
-        {Reference::GPU, binarySignature(K_FP32, K_BFP16, K_FP32, K_FP32)},
+        // CPU only: an FP32 operand beside a 16-bit one, computed in the 16-bit type and written as
+        // FP32. A convolution with a bias add produces it: the convolution output is a virtual FP32
+        // tensor and the bias is FP16 or BFP16.
         {Reference::GPU, binarySignature(K_FP32, K_FP16, K_FP32, K_FP16)},
         {Reference::GPU, binarySignature(K_FP32, K_BFP16, K_FP32, K_BFP16)},
 
@@ -391,6 +391,15 @@ const std::vector<Gap>& knownGaps()
         {Reference::GPU, binarySignature(K_FP8_E5M2, K_FP8_E5M2, K_FP8_E5M2, K_FP32)},
         {Reference::GPU, binarySignature(K_FP8_E5M2, K_FP8_E5M2, K_FP32, K_FP32)},
         {Reference::GPU, binarySignature(K_INT32, K_INT32, K_INT32, K_FP32)},
+        {Reference::GPU, binarySignature(K_FP32, K_FP64, K_BOOLEAN, K_FP64)},
+        {Reference::GPU, binarySignature(K_FP64, K_FP32, K_BOOLEAN, K_FP64)},
+        {Reference::GPU, binarySignature(K_FP64, K_FP64, K_BOOLEAN, K_FP64)},
+        {Reference::GPU, binarySignature(K_FP8_E4M3, K_FP8_E4M3, K_BOOLEAN, K_FP32)},
+        {Reference::GPU, binarySignature(K_FP8_E5M2, K_FP8_E5M2, K_BOOLEAN, K_FP32)},
+        {Reference::GPU, ternarySignature(K_FP64, K_FP64, K_BOOLEAN, K_FP64, K_FP64)},
+        {Reference::GPU, ternarySignature(K_FP8_E4M3, K_FP8_E4M3, K_BOOLEAN, K_FP8_E4M3, K_FP32)},
+        {Reference::GPU, ternarySignature(K_FP8_E5M2, K_FP8_E5M2, K_BOOLEAN, K_FP8_E5M2, K_FP32)},
+        {Reference::GPU, ternarySignature(K_BOOLEAN, K_BOOLEAN, K_BOOLEAN, K_BOOLEAN, K_FP32)},
 
         // GPU only: the CPU narrows an FP32 input but never widens a 16-bit one, and mixes FP16
         // with BFP16 only in CMP_GT.
@@ -623,6 +632,7 @@ TEST(TestPointwiseReferenceParity, FiveDimensionCapDeclinesDeeperGraphsWhileTheC
     const std::vector<PointwiseTuple> tuples = {
         {PointwiseMode::ABS, K_FP32, K_NONE, K_NONE, K_FP32, K_FP32},
         {PointwiseMode::ADD, K_FP32, K_FP32, K_NONE, K_FP32, K_FP32},
+        {PointwiseMode::BINARY_SELECT, K_FP32, K_FP32, K_BOOLEAN, K_FP32, K_FP32},
     };
     const std::vector<int64_t> dimsAtCap = {2, 3, 2, 2, 2};
     const std::vector<int64_t> broadcastAtCap = {1, 3, 1, 1, 1};
@@ -648,11 +658,11 @@ TEST(TestPointwiseReferenceParity, FiveDimensionCapDeclinesDeeperGraphsWhileTheC
 // The parity tests only ask isApplicable(); a plan that passes its datatypes to the kernel in the
 // wrong order is only seen when it runs. The CPU reference is the oracle because the CPU executor
 // declines the GPU-only tuples.
-class TestGpuPointwiseExecutor : public ::testing::TestWithParam<PointwiseTuple>
+class TestGpuPointwiseExecutorDevice : public ::testing::TestWithParam<PointwiseTuple>
 {
 };
 
-TEST_P(TestGpuPointwiseExecutor, MatchesCpuReference)
+TEST_P(TestGpuPointwiseExecutorDevice, MatchesCpuReference)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -710,7 +720,7 @@ TEST_P(TestGpuPointwiseExecutor, MatchesCpuReference)
 
 // The name holds the mode and every datatype, so no two tuples share one.
 INSTANTIATE_TEST_SUITE_P(Registered,
-                         TestGpuPointwiseExecutor,
+                         TestGpuPointwiseExecutorDevice,
                          ::testing::ValuesIn(executedTuples()),
                          [](const ::testing::TestParamInfo<PointwiseTuple>& info) {
                              const auto& tuple = info.param;

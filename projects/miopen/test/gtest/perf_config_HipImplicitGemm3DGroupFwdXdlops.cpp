@@ -81,7 +81,7 @@ protected:
 
         Config cfg;
         cfg.HeuristicInit(ctx, problem);
-        EXPECT_TRUE(cfg.index != 0) << "index is 0:" << test_case.conv;
+        EXPECT_TRUE(cfg.IsValid(problem)) << "invalid default config: " << test_case.conv;
     }
 };
 
@@ -176,6 +176,89 @@ TEST_P(GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlopsGfx950_FP16, Gfx950NoHardco
         miopenHalf, {{1, 1, 96, 96, {6, 642, 354}, {3, 3, 3}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}}});
 }
 
+static std::string
+DefaultKernel(const miopen::ExecutionContext& ctx, const Problem& problem, bool hardcode)
+{
+    ScopedEnvironment<bool> env(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_HARDCODE,
+                                hardcode);
+    Config cfg;
+    cfg.HeuristicInit(ctx, problem);
+    return cfg.kernel_id;
+}
+
+// On gfx942 the only FP16/BF16 hard-coded pick left in HeuristicInit covers ungrouped problems
+// with at most 32 input channels and fewer than 128 output channels. `removed` holds problems in
+// the other channel ranges, where hard-coded rules used to pick ahead of the AI heuristic. Their
+// default kernel must be the same with the HARDCODE env var on and off. `kept` holds problems that
+// must still get the remaining hard-coded pick.
+static void
+CheckGfx942HardcodedPicks(miopenDataType_t data_type,
+                          const std::vector<group_conv::GroupConvTestConfig<3u>>& removed,
+                          const std::vector<group_conv::GroupConvTestConfig<3u>>& kept)
+{
+    auto&& handle = get_handle();
+    miopen::ExecutionContext ctx(&handle);
+    if(ctx.GetStream().GetDeviceName() != "gfx942")
+        GTEST_SKIP() << "gfx942 only";
+
+    using Solver = miopen::solver::conv::ConvHipImplicitGemm3DGroupFwdXdlops;
+    for(const auto& conv : removed)
+    {
+        const auto problem = MakeSearchProblem(conv, data_type, miopenTensorNCDHW);
+        ASSERT_TRUE(group_conv::SolverApplicable<Solver>(problem)) << conv;
+
+        const auto hardcode_on  = DefaultKernel(ctx, problem, true);
+        const auto hardcode_off = DefaultKernel(ctx, problem, false);
+        EXPECT_NE(hardcode_off, "None") << conv;
+        EXPECT_EQ(hardcode_on, hardcode_off) << conv;
+    }
+    for(const auto& conv : kept)
+    {
+        const auto problem = MakeSearchProblem(conv, data_type, miopenTensorNCDHW);
+        ASSERT_TRUE(group_conv::SolverApplicable<Solver>(problem)) << conv;
+
+        EXPECT_EQ(DefaultKernel(ctx, problem, true),
+                  "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle<128, 128, 32, 32, Filter1x1Pad0, "
+                  "32, 32, 2, 1, 8, 8, 8, 1, 1, 1>")
+            << conv;
+    }
+}
+
+using GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlopsGfx942_BFP16 = ::testing::TestWithParam<int>;
+using GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlopsGfx942_FP16  = ::testing::TestWithParam<int>;
+
+TEST_P(GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlopsGfx942_BFP16,
+       Gfx942HardcodedPickOnlyForSmallChannels)
+{
+    CheckGfx942HardcodedPicks(
+        miopenBFloat16,
+        {// C <= 32, K >= 128
+         {1, 1, 16, 384, {3, 60, 104}, {3, 3, 3}, {0, 1, 1}, {1, 1, 1}, {1, 1, 1}},
+         // C > 32, 16 <= K <= 32
+         {1, 1, 512, 32, {3, 64, 112}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}}},
+        {// C <= 32, K < 128, 1x1 filter
+         {1, 1, 32, 32, {2, 60, 104}, {1, 1, 1}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}}});
+}
+
+TEST_P(GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlopsGfx942_FP16,
+       Gfx942HardcodedPickOnlyForSmallChannels)
+{
+    CheckGfx942HardcodedPicks(
+        miopenHalf,
+        {// C > 32, K < 16
+         {1, 4, 512, 6, {1, 16, 16}, {1, 1, 1}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}},
+         // C > 32, 32 < K < 64
+         {1, 8, 832, 48, {4, 7, 7}, {1, 1, 1}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}},
+         // C > 32, 64 <= K < 256
+         {1, 8, 128, 128, {4, 28, 28}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}},
+         // C > 32, K >= 256
+         {1, 8, 512, 512, {1, 7, 7}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}},
+         // C <= 32, K >= 128, 1x1 filter
+         {1, 2, 32, 128, {4, 28, 28}, {1, 1, 1}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}}},
+        {// C <= 32, K < 128, 1x1 filter
+         {1, 8, 8, 32, {32, 56, 56}, {1, 1, 1}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}}});
+}
+
 INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlopsSearch_FP16,
                          ::testing::Values(0));
@@ -186,6 +269,14 @@ INSTANTIATE_TEST_SUITE_P(Standard,
 
 INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlopsGfx950_FP16,
+                         ::testing::Values(0));
+
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlopsGfx942_BFP16,
+                         ::testing::Values(0));
+
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlopsGfx942_FP16,
                          ::testing::Values(0));
 
 INSTANTIATE_TEST_SUITE_P(Standard,

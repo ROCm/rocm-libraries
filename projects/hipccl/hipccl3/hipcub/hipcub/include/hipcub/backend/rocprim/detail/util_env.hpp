@@ -28,11 +28,11 @@
 
 #include "temporary_storage.hpp"
 
-#include _HIPCUB_LIBCXX_INCLUDE(memory_resource)
-#include _HIPCUB_LIBCXX_INCLUDE(stream)
-// Only __query_or is needed; the umbrella <execution> pulls in every PSTL backend
-// (including libhipcxx's __hipcub.h shim), which creates an include cycle with hipcub.hpp.
 #include _HIPCUB_STD_INCLUDE(__execution/env.h)
+#include _HIPCUB_LIBCXX_INCLUDE(__functional/call_or.h)
+#include _HIPCUB_LIBCXX_INCLUDE(__memory_resource/get_memory_resource.h)
+#include _HIPCUB_LIBCXX_INCLUDE(__stream/get_stream.h)
+#include _HIPCUB_LIBCXX_INCLUDE(__stream/stream_ref.h)
 
 BEGIN_HIPCUB_NAMESPACE
 namespace detail

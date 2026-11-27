@@ -9,7 +9,7 @@
   "sort_kernel_catalog": {
     "default": "9a0b0973-0c1c-57e4-bdd5-4fb6f2c5d25e",
     "gfx942": [
-      "dbb681e9-59cf-4acc-9582-778b2e039278"
+      "4af7751a-6a5f-4dda-a141-68a50cc76b78"
     ]
   },
   "predict_engine": {
@@ -18,7 +18,7 @@
       "8b78e9a0-d726-4e50-a656-09ea6432fabd"
     ],
     "gfx942": [
-      "55bb4a27-1d49-4050-9680-c194863fe285"
+      "23ed57a9-eaa6-4b12-b0af-db740c1733fd"
     ],
     "gfx950": [
       "99f042a2-2bf4-4b14-8ad9-56fa0557239d"

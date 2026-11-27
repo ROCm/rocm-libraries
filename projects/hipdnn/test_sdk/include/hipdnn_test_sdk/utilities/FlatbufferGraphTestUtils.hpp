@@ -1949,10 +1949,13 @@ inline flatbuffers::FlatBufferBuilder
                              bool withEpilogue = false,
                              bool swapDequantOrder = false,
                              hipdnn_flatbuffers_sdk::data_objects::DataType xTypeB
-                             = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET)
+                             = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET,
+                             const std::vector<int64_t>& scaleAStridesIn = {},
+                             const std::vector<int64_t>& scaleBStridesIn = {})
 {
     // B's input type defaults to A's (xType); pass xTypeB to build a mixed A/B
-    // graph (e.g. FP8 OCP A + FP4 B), which the MX path supports.
+    // graph (e.g. FP8 OCP A + FP4 B), which the MX path supports. Scale strides
+    // default to row-major; pass scaleAStridesIn/scaleBStridesIn to override.
     const auto effectiveXTypeB
         = (xTypeB == hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET) ? xType : xTypeB;
 
@@ -1961,7 +1964,7 @@ inline flatbuffers::FlatBufferBuilder
         tensorAttributes;
 
     // Row-major contiguous strides for a shape; used for the derived virtual dequant
-    // outputs and the scale tensors, whose strides no test varies.
+    // outputs and, unless overridden, the scale tensors.
     const auto rowMajorStrides = [](const std::vector<int64_t>& dims) {
         std::vector<int64_t> strides(dims.size(), 1);
         for(size_t i = dims.size() - 1; i > 0; --i)
@@ -1979,7 +1982,8 @@ inline flatbuffers::FlatBufferBuilder
         builder, xAUid, "x_a", xType, &xAStrides, &xADims));
 
     // A scale (non-virtual)
-    const std::vector<int64_t> scaleAStrides = rowMajorStrides(scaleADims);
+    const std::vector<int64_t> scaleAStrides
+        = scaleAStridesIn.empty() ? rowMajorStrides(scaleADims) : scaleAStridesIn;
     const int64_t scaleAUid = uid++;
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, scaleAUid, "scale_a", scaleAType, &scaleAStrides, &scaleADims));
@@ -2002,7 +2006,8 @@ inline flatbuffers::FlatBufferBuilder
         builder, xBUid, "x_b", effectiveXTypeB, &xBStrides, &xBDims));
 
     // B scale (non-virtual)
-    const std::vector<int64_t> scaleBStrides = rowMajorStrides(scaleBDims);
+    const std::vector<int64_t> scaleBStrides
+        = scaleBStridesIn.empty() ? rowMajorStrides(scaleBDims) : scaleBStridesIn;
     const int64_t scaleBUid = uid++;
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, scaleBUid, "scale_b", scaleBType, &scaleBStrides, &scaleBDims));
@@ -2747,6 +2752,13 @@ inline flatbuffers::FlatBufferBuilder
 {
     flatbuffers::FlatBufferBuilder builder;
 
+    // A fused intermediate is virtual: the matmul output when a bias or activation follows,
+    // the bias output when an activation follows.
+    const bool hasActivation
+        = activMode != hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::UNSET;
+    const bool matmulOutputVirtual = doBias || hasActivation;
+    const bool biasOutputVirtual = doBias && hasActivation;
+
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
         tensorAttributes;
     int64_t tensorUid = 1;
@@ -2761,7 +2773,7 @@ inline flatbuffers::FlatBufferBuilder
 
     const auto cMatmulTensorUid = tensorUid++;
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, cMatmulTensorUid, "C_matmul", dataType, &cStrides, &cDims));
+        builder, cMatmulTensorUid, "C_matmul", dataType, &cStrides, &cDims, matmulOutputVirtual));
 
     int64_t biasTensorUid;
     int64_t cBiasTensorUid;
@@ -2778,7 +2790,7 @@ inline flatbuffers::FlatBufferBuilder
         cBiasTensorUid = tensorUid++;
         tensorAttributes.push_back(
             hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-                builder, cBiasTensorUid, "C_bias", dataType, &cStrides, &cDims));
+                builder, cBiasTensorUid, "C_bias", dataType, &cStrides, &cDims, biasOutputVirtual));
     }
 
     const auto cTensorUid = tensorUid;

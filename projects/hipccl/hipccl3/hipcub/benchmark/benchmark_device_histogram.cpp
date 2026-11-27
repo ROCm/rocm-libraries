@@ -30,54 +30,6 @@
 
 #include <hipcub/device/device_histogram.hpp>
 
-template<class T>
-std::vector<T>
-    generate(size_t items, int entropy_reduction, int64_t lower_level, int64_t upper_level)
-{
-    if(entropy_reduction >= 5)
-    {
-        return std::vector<T>(items, (lower_level + upper_level) / 2);
-    }
-
-    const size_t max_random_size = 1024 * 1024;
-
-    std::random_device         rd;
-    std::default_random_engine gen(rd());
-    std::vector<T>             data(items);
-    std::generate(data.begin(),
-                  data.begin() + std::min(items, max_random_size),
-                  [&]()
-                  {
-                      // Reduce entropy by applying bitwise AND to random bits
-                      // "An Improved Supercomputer Sorting Benchmark", 1992
-                      // Kurt Thearling & Stephen Smith
-                      auto v = gen();
-                      for(int e = 0; e < entropy_reduction; e++)
-                      {
-                          v &= gen();
-                      }
-                      return T(lower_level + v % (upper_level - lower_level));
-                  });
-    for(size_t i = max_random_size; i < items; i += max_random_size)
-    {
-        std::copy_n(data.begin(), std::min(items - i, max_random_size), data.begin() + i);
-    }
-    return data;
-}
-
-int get_entropy_percents(int entropy_reduction)
-{
-    switch(entropy_reduction)
-    {
-        case 0: return 100;
-        case 1: return 81;
-        case 2: return 54;
-        case 3: return 33;
-        case 4: return 20;
-        default: return 0;
-    }
-}
-
 const int entropy_reductions[] = {0, 2, 4, 6};
 
 template<class T, size_t Bins, size_t Scale>
@@ -95,7 +47,8 @@ private:
             .add("lvl", "device")
             .add("data_type", primbench::name<T>())
             .add("bin_count", Bins)
-            .add("entropy_percent", std::to_string(get_entropy_percents(m_entropy_reduction)));
+            .add("entropy_percent",
+                 std::to_string(benchmark_utils::get_entropy_percents(m_entropy_reduction)));
     }
 
     void run(primbench::state& state) override
@@ -111,7 +64,10 @@ private:
         const auto&  stream = state.stream;
 
         // Generate data
-        std::vector<T> input = generate<T>(items, m_entropy_reduction, lower_level, upper_level);
+        std::vector<T> input = benchmark_utils::generate_histogram_input<T>(items,
+                                                                            m_entropy_reduction,
+                                                                            lower_level,
+                                                                            upper_level);
 
         T*            d_input;
         counter_type* d_histogram;
@@ -170,7 +126,8 @@ private:
             .add("bin_count", Bins)
             .add("channels", Channels)
             .add("active_channels", ActiveChannels)
-            .add("entropy_percent", std::to_string(get_entropy_percents(m_entropy_reduction)));
+            .add("entropy_percent",
+                 std::to_string(benchmark_utils::get_entropy_percents(m_entropy_reduction)));
     }
 
     void run(primbench::state& state) override
@@ -191,8 +148,10 @@ private:
         }
 
         // Generate data
-        std::vector<T> input
-            = generate<T>(items * Channels, m_entropy_reduction, lower_level[0], upper_level[0]);
+        std::vector<T> input = benchmark_utils::generate_histogram_input<T>(items * Channels,
+                                                                            m_entropy_reduction,
+                                                                            lower_level[0],
+                                                                            upper_level[0]);
 
         T*            d_input;
         counter_type* d_histogram[ActiveChannels];

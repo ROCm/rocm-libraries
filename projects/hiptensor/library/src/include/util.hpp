@@ -85,6 +85,31 @@ namespace hiptensor
         return std::accumulate(lengths.begin(), lengths.end(), T{1}, std::multiplies<T>());
     }
 
+    // Get the number of elements a tensor's lengths and strides can address: one past its
+    // largest offset. This is the element count of the buffer that holds the tensor, which
+    // exceeds elementsFromLengths when the strides are not packed. Returns 0 when any length is
+    // 0, and the packed element count when lengths and strides disagree in size.
+    template <typename T>
+    static inline T elementSpaceFromLengthsAndStrides(std::vector<T> const& lengths,
+                                                      std::vector<T> const& strides)
+    {
+        if(strides.size() != lengths.size())
+        {
+            return elementsFromLengths(lengths);
+        }
+
+        T space = 1;
+        for(std::size_t i = 0; i < lengths.size(); i++)
+        {
+            if(lengths[i] == 0)
+            {
+                return 0;
+            }
+            space += (lengths[i] - 1) * strides[i];
+        }
+        return space;
+    }
+
     inline std::vector<std::size_t> getTensorLengths(const hiptensorTensorDescriptor_t desc)
     {
         return desc ? desc->mLengths : std::vector<std::size_t>{};
@@ -186,6 +211,42 @@ namespace hiptensor
         }
 
         return false;
+    }
+
+    // The scaling factors of an operation take the scalar type that its compute descriptor
+    // maps to, so no operation descriptor can be created without one. The integer descriptors
+    // are valid enumerators that have no scalar type yet, so they are not supported;
+    // HIPTENSOR_COMPUTE_DESC_NONE and values that are not enumerators are invalid.
+    inline hiptensorStatus_t checkComputeDescriptor(char const*                  apiFuncName,
+                                                    hiptensorComputeDescriptor_t descCompute)
+    {
+        if(convertToHipTensorDataType(descCompute))
+        {
+            return HIPTENSOR_STATUS_SUCCESS;
+        }
+
+        char msg[256];
+        switch(descCompute)
+        {
+        case HIPTENSOR_COMPUTE_DESC_8U:
+        case HIPTENSOR_COMPUTE_DESC_8I:
+        case HIPTENSOR_COMPUTE_DESC_32U:
+        case HIPTENSOR_COMPUTE_DESC_32I:
+            snprintf(msg,
+                     sizeof(msg),
+                     "Unsupported compute descriptor (0x%X): integer compute types are not "
+                     "supported",
+                     static_cast<unsigned int>(descCompute));
+            Logger::instance()->logError(apiFuncName, msg);
+            return HIPTENSOR_STATUS_NOT_SUPPORTED;
+        default:
+            snprintf(msg,
+                     sizeof(msg),
+                     "Invalid compute descriptor (0x%X): it has no scalar type",
+                     static_cast<unsigned int>(descCompute));
+            Logger::instance()->logError(apiFuncName, msg);
+            return HIPTENSOR_STATUS_INVALID_VALUE;
+        }
     }
 
     /** @name static_for

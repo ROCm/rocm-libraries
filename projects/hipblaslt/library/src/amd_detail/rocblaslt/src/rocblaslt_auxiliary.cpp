@@ -3127,7 +3127,7 @@ rocblaslt_status rocblaslt_matmul_is_algo_supported(rocblaslt_handle        hand
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
         if(auto gate = validate_fused_a2a(handle, prob); gate != rocblaslt_status_success)
             return gate;
-        if(auto gate = rocblaslt_validate_fused_epilogue_dispatch(handle, matmul_descr, matB, matD);
+        if(auto gate = rocblaslt_validate_fusion_dispatch(handle, matmul_descr, matB, matD);
            gate != rocblaslt_status_success)
             return gate;
         if(fused_a2a_lacks_sdma_queues(prob))
@@ -4192,4 +4192,11 @@ extern "C" HIPBLASLT_EXPORT size_t hipblaslt_adaptive_reselections_for_test(void
     return matmulDesc
                ? adaptiveReselectionCount(static_cast<rocblaslt_matmul_desc>(matmulDesc)->m_data)
                : 0;
+}
+
+// Test support: the flag the HIPBLASLT_CHECK_NUMERICS scanner claims with
+// atomicCAS, or null when checking is off for the handle.
+extern "C" HIPBLASLT_EXPORT void* hipblaslt_check_numerics_flag_for_test(void* handle)
+{
+    return handle ? static_cast<rocblaslt_handle>(handle)->check_numerics_flag : nullptr;
 }

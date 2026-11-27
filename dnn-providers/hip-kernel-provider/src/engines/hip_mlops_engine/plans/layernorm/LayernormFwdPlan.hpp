@@ -12,8 +12,10 @@
 #include "compilation/IRunnableKernel.hpp"
 #include "core/Handle.hpp"
 #include "core/Utils.hpp"
+#include "engines/hip_mlops_engine/plans/PlanUtils.hpp"
 
 #include <memory>
+#include <vector>
 
 namespace hip_kernel_provider
 {
@@ -47,6 +49,8 @@ public:
     double epsilonValue(const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                         uint32_t numDeviceBuffers) const;
 
+    static constexpr int64_t LOCAL_SIZE = 1024;
+
 private:
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _x;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _y;
@@ -71,6 +75,8 @@ public:
     void compile(const IKernelCompiler& kernelCompiler, const hipDeviceProp_t& deviceProperties);
 
     size_t getWorkspaceSize(const Handle& handle) const override;
+
+    static std::vector<KernelLaunchShape> launchShapes(int64_t outerSize, int64_t stride);
 
     void execute(const Handle& handle,
                  const hipdnnPluginDeviceBuffer_t* deviceBuffers,

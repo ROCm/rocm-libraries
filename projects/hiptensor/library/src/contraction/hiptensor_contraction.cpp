@@ -257,6 +257,12 @@ hiptensorStatus_t hiptensorCreateContraction(const hiptensorHandle_t            
         return checkResult;
     }
 
+    if(auto status = hiptensor::checkComputeDescriptor("hiptensorCreateContraction", descCompute);
+       status != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return status;
+    }
+
     if(!handle->getDevice().matrixCoreSupport(descCompute))
     {
         return HIPTENSOR_STATUS_ARCH_MISMATCH;
@@ -298,13 +304,13 @@ hiptensorStatus_t hiptensorCreateContraction(const hiptensorHandle_t            
                                       ? hiptensor::ContractionOpId_t::SCALE_COMPLEX
                                       : hiptensor::ContractionOpId_t::SCALE);
 
-    (*desc)->mTag          = 0u;
-    (*desc)->mScalarType   = *hiptensor::convertToHipTensorDataType(descCompute);
-    (*desc)->mFlops        = 0;
-    (*desc)->mMovedBytes   = 0;
-    (*desc)->mPaddingLeft  = 0;
-    (*desc)->mPaddingRighT = 0;
-    (*desc)->mPaddingValue = nullptr;
+    (*desc)->mTag        = 0u;
+    (*desc)->mScalarType = *hiptensor::convertToHipTensorDataType(descCompute);
+    (*desc)->mFlops      = 0;
+    (*desc)->mMovedBytes = 0;
+    (*desc)->mPaddingLeft.assign(descD->mLengths.size(), 0u);
+    (*desc)->mPaddingRight.assign(descD->mLengths.size(), 0u);
+    (*desc)->mPaddingValue.assign(hiptensor::hiptensorDataTypeSize(descD->mType), 0u);
 
     (*desc)->mOperationType   = HIPTENSOR_CONTRACTION;
     (*desc)->mContractionOpId = static_cast<int32_t>(contractionOp);
@@ -1006,6 +1012,13 @@ hiptensorStatus_t hiptensorCreateContractionTrinary(const hiptensorHandle_t     
         return checkResult;
     }
 
+    if(auto status
+       = hiptensor::checkComputeDescriptor("hiptensorCreateContractionTrinary", descCompute);
+       status != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return status;
+    }
+
     if(!handle->getDevice().matrixCoreSupport(descCompute))
     {
         return HIPTENSOR_STATUS_ARCH_MISMATCH;
@@ -1067,13 +1080,13 @@ hiptensorStatus_t hiptensorCreateContractionTrinary(const hiptensorHandle_t     
                                       ? hiptensor::ContractionOpId_t::SCALE_COMPLEX
                                       : hiptensor::ContractionOpId_t::SCALE);
 
-    (*desc)->mTag          = 0u;
-    (*desc)->mScalarType   = *hiptensor::convertToHipTensorDataType(descCompute);
-    (*desc)->mFlops        = 0;
-    (*desc)->mMovedBytes   = 0;
-    (*desc)->mPaddingLeft  = 0;
-    (*desc)->mPaddingRighT = 0;
-    (*desc)->mPaddingValue = nullptr;
+    (*desc)->mTag        = 0u;
+    (*desc)->mScalarType = *hiptensor::convertToHipTensorDataType(descCompute);
+    (*desc)->mFlops      = 0;
+    (*desc)->mMovedBytes = 0;
+    (*desc)->mPaddingLeft.assign(descE->mLengths.size(), 0u);
+    (*desc)->mPaddingRight.assign(descE->mLengths.size(), 0u);
+    (*desc)->mPaddingValue.assign(hiptensor::hiptensorDataTypeSize(descE->mType), 0u);
 
     (*desc)->mOperationType   = HIPTENSOR_CONTRACTION_TRINARY;
     (*desc)->mContractionOpId = static_cast<int32_t>(contractionOp);
@@ -1613,6 +1626,27 @@ hiptensorStatus_t hiptensorContractTrinary(const hiptensorHandle_t handle,
     StreamConfig streamCfg
         = perfTrace ? StreamConfig{stream, true, 0, options->coldRuns(), options->hotRuns()}
                     : StreamConfig{stream, false};
+
+    // With D, the plan's kernel is bilinear and step 1 runs it with T as its own bias
+    // (T = 1 * A * B + 0 * T). The bias is still read, and 0 * NaN = NaN, so whatever the
+    // caller's workspace holds could reach the result. Zero T first.
+    // TODO: run step 1 with a kernel that reads no bias, which avoids this extra write of T.
+    if(plan->mOpDesc->mDescD != nullptr && tBytes > 0)
+    {
+        auto hipStatus = hipMemsetAsync(T, 0, tBytes, stream);
+        if(hipStatus != hipSuccess)
+        {
+            hiptensor::clearHipError();
+            auto errorCode = HIPTENSOR_STATUS_HIP_ERROR;
+            snprintf(msg,
+                     sizeof(msg),
+                     "Clearing the intermediate tensor failed: %s (%s)",
+                     hipGetErrorString(hipStatus),
+                     hiptensorGetErrorString(errorCode));
+            logger->logError("hiptensorContractTrinary", msg);
+            return errorCode;
+        }
+    }
 
     // --- Step 1: T = A * B (alpha=1, no bias) ---
     hiptensor::ScalarData oneScalar;
