@@ -45,7 +45,10 @@
 #include <hip/hip_runtime.h>
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
+#include <mutex>
+#include <optional>
 #include <type_traits>
 #include <utility>
 
@@ -349,6 +352,12 @@ public:
         deallocate();
     }
 
+    /// \brief The result of allocating the constants in the constructor.
+    rocrand_status status() const
+    {
+        return m_status;
+    }
+
     rocrand_status get_direction_vectors(const constant_type** direction_vectors) const
     {
         *direction_vectors = m_direction_vectors;
@@ -544,13 +553,7 @@ public:
                              hipStream_t        stream = 0)
         : base_type(order, offset, stream)
     {
-
-        rocrand_status status = get_constants().get_direction_vectors(&m_direction_vectors);
-        if(status != ROCRAND_STATUS_SUCCESS)
-        {
-            throw status;
-        }
-        status = get_constants().get_scramble_constants(&m_scramble_constants);
+        const rocrand_status status = prime_constants(stream);
         if(status != ROCRAND_STATUS_SUCCESS)
         {
             throw status;
@@ -625,7 +628,12 @@ public:
 
     rocrand_status set_stream(hipStream_t stream)
     {
-        const rocrand_status status = m_poisson.set_stream(stream);
+        rocrand_status status = prime_constants(stream);
+        if(status != ROCRAND_STATUS_SUCCESS)
+        {
+            return status;
+        }
+        status = m_poisson.set_stream(stream);
         if(status != ROCRAND_STATUS_SUCCESS)
         {
             return status;
@@ -701,6 +709,16 @@ public:
         const uint32_t blocks_x = next_power2((blocks + m_dimensions - 1) / m_dimensions);
         const uint32_t blocks_y = m_dimensions;
 
+        // Resolved here rather than cached in the constructor, because the constants are
+        // per device and set_stream() may have moved this generator to another one.
+        const constant_type* direction_vectors  = nullptr;
+        const constant_type* scramble_constants = nullptr;
+        status = get_constants(m_stream, &direction_vectors, &scramble_constants);
+        if(status != ROCRAND_STATUS_SUCCESS)
+        {
+            return status;
+        }
+
         // Bypass the generalized launching mechanism for host and device, as it would introduce a level of
         //   indirection for the device (the __global__ function calls a __device__ function). This causes
         //   a difference in the generated assembly, in turn causing a regression for the scrambled generators
@@ -717,8 +735,8 @@ public:
                 <<<dim3(blocks_x, blocks_y), dim3(threads), shared_mem_bytes, m_stream>>>(
                     data,
                     size,
-                    m_direction_vectors,
-                    m_scramble_constants,
+                    direction_vectors,
+                    scramble_constants,
                     m_current_offset,
                     distribution);
             if(hipGetLastError() != hipSuccess)
@@ -750,8 +768,8 @@ public:
                                                                        m_stream,
                                                                        data,
                                                                        size,
-                                                                       m_direction_vectors,
-                                                                       m_scramble_constants,
+                                                                       direction_vectors,
+                                                                       scramble_constants,
                                                                        m_current_offset,
                                                                        distribution);
             if(status != ROCRAND_STATUS_SUCCESS)
@@ -804,19 +822,115 @@ public:
     }
 
 private:
-    static const constant_accessor& get_constants()
+    /// \brief Returns the constants allocated on \p device_id, allocating them on first
+    /// use for that device.
+    ///
+    /// Every instance of each Sobol variant that runs on the same device shares the
+    /// constants, but they cannot be shared across devices: a kernel may only dereference
+    /// memory belonging to the device it is launched on, unless peer access has been
+    /// enabled, which rocRAND does not do. Keyed by device like the architecture cache in
+    /// config_types.hpp.
+    static rocrand_status get_device_constants(const int                 device_id,
+                                               const constant_accessor** accessor)
     {
-        // Every instance of each Sobol variant shares the constants.
-        // The initialization of accessor happens only at the first invocation of this function.
-        static constant_accessor accessor;
-        return accessor;
+        // Matches device_arch_cache_size in config_types.hpp.
+        constexpr int device_constant_cache_size = 512;
+
+        if(device_id < 0 || device_id >= device_constant_cache_size)
+        {
+            // Device constant cache is too small.
+            return ROCRAND_STATUS_INTERNAL_ERROR;
+        }
+
+        static std::array<std::optional<constant_accessor>, device_constant_cache_size> accessors;
+        static std::array<std::once_flag, device_constant_cache_size>                   flags;
+
+        // std::call_once rather than the relaxed atomics of the architecture cache:
+        // losing that race only recomputes an enum, losing this one would leak the
+        // tables, which are megabytes each. Throwing re-arms the flag, so a failed
+        // allocation is retried on the next call instead of being cached forever.
+        try
+        {
+            std::call_once(flags[device_id],
+                           [device_id]()
+                           {
+                               // hipMalloc places the allocation on the current device,
+                               // not on the device of any particular stream.
+                               const scoped_device guard(device_id);
+                               if(guard.status() != hipSuccess)
+                               {
+                                   throw ROCRAND_STATUS_INTERNAL_ERROR;
+                               }
+
+                               constant_accessor candidate;
+                               if(candidate.status() != ROCRAND_STATUS_SUCCESS)
+                               {
+                                   throw candidate.status();
+                               }
+                               accessors[device_id].emplace(std::move(candidate));
+                           });
+        }
+        catch(const rocrand_status status)
+        {
+            return status;
+        }
+
+        *accessor = &accessors[device_id].value();
+        return ROCRAND_STATUS_SUCCESS;
     }
 
-    bool                 m_initialized        = false;
-    unsigned int         m_dimensions         = 1;
-    unsigned long long   m_current_offset     = 0;
-    const constant_type* m_direction_vectors  = nullptr;
-    const constant_type* m_scramble_constants = nullptr;
+    /// \brief Resolves the constants to use for work submitted to \p stream.
+    static rocrand_status get_constants(const hipStream_t     stream,
+                                        const constant_type** direction_vectors,
+                                        const constant_type** scramble_constants)
+    {
+        const constant_accessor* accessor = nullptr;
+        if constexpr(system_type::is_device())
+        {
+            int              device_id = 0;
+            const hipError_t error     = get_device_from_stream(stream, device_id);
+            if(error != hipSuccess)
+            {
+                return ROCRAND_STATUS_INTERNAL_ERROR;
+            }
+
+            const rocrand_status status = get_device_constants(device_id, &accessor);
+            if(status != ROCRAND_STATUS_SUCCESS)
+            {
+                return status;
+            }
+        }
+        else
+        {
+            // The host constants are static host arrays, so one accessor serves every
+            // generator regardless of device.
+            static constant_accessor host_accessor;
+            accessor = &host_accessor;
+        }
+
+        const rocrand_status status = accessor->get_direction_vectors(direction_vectors);
+        if(status != ROCRAND_STATUS_SUCCESS)
+        {
+            return status;
+        }
+        return accessor->get_scramble_constants(scramble_constants);
+    }
+
+    /// \brief Allocates the constants for a stream's device ahead of time.
+    ///
+    /// Called when the generator is created and whenever its stream changes, so that the
+    /// allocation never has to happen during the first generate(), which may be inside a
+    /// stream capture region.
+    static rocrand_status prime_constants(const hipStream_t stream)
+    {
+        const constant_type* direction_vectors  = nullptr;
+        const constant_type* scramble_constants = nullptr;
+        return get_constants(stream, &direction_vectors, &scramble_constants);
+    }
+
+    bool               m_initialized    = false;
+    unsigned int       m_dimensions     = 1;
+    unsigned long long m_current_offset = 0;
 
     // For caching of Poisson for consecutive generations with the same lambda
     poisson_distribution_manager_t m_poisson;
