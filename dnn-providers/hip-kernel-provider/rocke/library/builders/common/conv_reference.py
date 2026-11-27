@@ -14,6 +14,7 @@ say which operand values and which bound a TF32 kernel is judged with.
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING, NamedTuple
 
 import numpy as np
@@ -31,22 +32,13 @@ if TYPE_CHECKING:
 REFERENCE_SLICE_BYTES = 2**28
 
 
-def _out_extent(i: int, f: int, s: int, pad: int, d: int) -> int:
-    return (i + 2 * pad - d * (f - 1) - 1) // s + 1
-
-
-def _image_elems(p) -> int:
+def _image_elems(problem: ConvProblem) -> int:
     """Elements of one image's input or output activation, whichever is larger."""
-    out = (
-        _out_extent(p.Hi, p.Y, p.sH, p.pH, p.dH)
-        * _out_extent(p.Wi, p.X, p.sW, p.pW, p.dW)
-        * p.K
+    extents = conv_extents(problem)
+    return max(
+        math.prod(extents.out_spatial) * problem.K,
+        math.prod(extents.in_spatial) * problem.C,
     )
-    inp = p.Hi * p.Wi * p.C
-    if p.is_3d:
-        out *= _out_extent(p.Di, p.Z, p.sD, p.pD, p.dD)
-        inp *= p.Di
-    return max(out, inp)
 
 
 def _batch_slices(
