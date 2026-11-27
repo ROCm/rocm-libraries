@@ -35,7 +35,9 @@ two engines must stay byte-identical (see [`dsl_docs/development/engine_parity.m
 
 ## Prerequisites
 
-- **ROCm 10.x** with `libamd_comgr` and `libamdhip64`, which rocKE finds itself
+- **ROCm** (the release the
+  [setup guide](dsl_docs/development/setup_guide.md#1-recommended-stack) names)
+  with `libamd_comgr` and `libamdhip64`, which rocKE finds itself
   ([BUILD.md](BUILD.md#runtime-finding-rocm-libamd_comgr--libamdhip64);
   `ROCKE_COMGR_LIB` / `ROCKE_HIP_LIB` select others). AUTO selects the IR flavor
   from the loaded COMGR compiler’s LLVM version; ROCm release metadata does not
@@ -45,7 +47,8 @@ two engines must stay byte-identical (see [`dsl_docs/development/engine_parity.m
   interpreter too: it generates the engine's intrinsic arch-domain table from the
   committed JSON columns (`tools/gen_arch_domain_cpp.py`), standard library only.
 - Python deps: `pip install -r requirements.txt` (adds `numpy`, plus `pytest` /
-  `pybind11` in the `dev` extra). rocKE does not use torch.
+  `pybind11` in the `dev` extra). rocKE does not depend on torch; its
+  remaining uses are being removed (`TESTING.md`, "No torch").
 - GPU lanes need a HIP-visible device; on a shared box that may require running
   under `sudo -E` (or membership in the `video`/`render` groups).
 

@@ -2311,7 +2311,7 @@ Runtime and aux values:
   not above the planner's total, AGPR copies in every matrix loop within
   `agpr_copy_budget`, and an SGPR watch level whose crossing is treated as a
   failure. Tests use the loaded compiler
-  ([the rule](../reference/env_flags.md#compiler-detection-and-provenance));
+  ([the test compiler rule](../reference/env_flags.md#compiler-detection-and-provenance));
   this gate is the one exception left: its thresholds were calibrated on one
   toolchain (`GATE_FLAVOR`, `GATE_COMGR_ROCM`) and a result counts only there,
   until AICK-3320 unpins it. On any other compiler its cases skip, as their

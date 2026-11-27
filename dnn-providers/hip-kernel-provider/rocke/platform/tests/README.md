@@ -317,7 +317,7 @@ CTests. Legacy violations remain tracked as TESTING.md gap G9.
 | `rocke_library_counted_compiler_gate` | Representative compile/final-ISA/resource subset and canonical full-barrier twins | comprehensive and full; compiler preflight required |
 
 Tests use the loaded compiler
-([the rule](../dsl_docs/reference/env_flags.md#compiler-detection-and-provenance)).
+([the test compiler rule](../dsl_docs/reference/env_flags.md#compiler-detection-and-provenance)).
 The compiler gate's resource thresholds keep the toolchain they were calibrated on
 until AICK-3320 unpins them: on any other LLVM flavor or comgr its preflight skips
 every row, naming the difference, as its `rocke.tests.pending_lanes` record says,

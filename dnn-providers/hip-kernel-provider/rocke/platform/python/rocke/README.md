@@ -136,12 +136,14 @@ runs without per-launch fences inside the timed loop, and returns average
 milliseconds per launch.
 
 ## Requirements
-- **ROCm 10.x** with HIP runtime and `libamd_comgr`, which rocKE finds itself
+- **ROCm** (the release the
+  [setup guide](../../dsl_docs/development/setup_guide.md#1-recommended-stack)
+  names) with HIP runtime and `libamd_comgr`, which rocKE finds itself
   (`ROCKE_COMGR_LIB` selects another comgr). AUTO queries the loaded COMGR
   compiler’s LLVM version. An explicit `ROCKE_LLVM_FLAVOR` supports offline
   emission; it does not select the compiler.
 - **Python 3.12**; plus `numpy` (references) and `ruff` (lint). rocKE does not
-  use torch.
+  depend on torch; its remaining uses are being removed.
 - A supported AMDGPU target for GPU launch tests: CDNA `gfx942`/`gfx950`
   (Linux) or RDNA `gfx1151`/`gfx1201` (Linux + Windows HIP SDK).
 

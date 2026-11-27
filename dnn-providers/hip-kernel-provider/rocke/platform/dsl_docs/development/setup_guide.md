@@ -20,8 +20,8 @@ COMGR runs, which rocKE finds and queries itself (§5,
 | Python | **3.12** (3.10+ works) |
 | OS | Linux (full GPU support); Windows (build/lowering + RDNA execution; see §4) |
 
-rocKE does not use PyTorch: references are numpy (`rocke.numeric`) and device
-data is `DeviceArray`.
+rocKE does not depend on PyTorch: references are numpy (`rocke.numeric`) and
+device data is `DeviceArray`.
 
 **Supported GPUs**
 
@@ -55,7 +55,7 @@ All commands below assume you are in the `rocke/platform/` directory with
 
 ### 3.1 Install ROCm
 
-Install ROCm 10.x from AMD's packages for your distro (see the ROCm install
+Install the ROCm release of §1 from AMD's packages for your distro (see the ROCm install
 guide). Confirm the GPU is visible and note your `gfx` target:
 
 ```bash
@@ -231,7 +231,7 @@ are working on that specific kernel path.
 | `No module named 'rocke'` | `PYTHONPATH` not pointing at `rocke/platform/python`. |
 | `rocminfo` lists no `gfx` agent | Not in GPU device groups (§3.3). |
 | `cpp` backend silently uses Python | no shared `librocke` found; build the `rocke_shared` target and point `ROCKE_ONLINE_LIB` at it, and/or set `ROCKE_CPP_STRICT=1` to surface it. |
-| A persistent-kernel example hangs the compiler | Known on older comgr; use ROCm 10.x. |
+| A persistent-kernel example hangs the compiler | Known on older comgr; use the ROCm release of §1. |
 
 For deeper failure modes (stale artifacts, the differential gate), see
 [`troubleshooting.md`](./troubleshooting.md).

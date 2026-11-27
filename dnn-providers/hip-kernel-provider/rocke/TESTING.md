@@ -705,7 +705,7 @@ work to quick/standard pre-merge and post-merge runs;
 comprehensive and full today. Fast
 counted/resource files remain source-runner coverage rather than expanding the
 existing attention CTest. Tests use the loaded compiler
-([the rule](platform/dsl_docs/reference/env_flags.md#compiler-detection-and-provenance)).
+([the test compiler rule](platform/dsl_docs/reference/env_flags.md#compiler-detection-and-provenance)).
 The backward resource gate is the one exception left: its thresholds keep the
 toolchain they were calibrated on until AICK-3320 unpins it, so on any other
 compiler the compiler gate's preflight skips every row, as its
