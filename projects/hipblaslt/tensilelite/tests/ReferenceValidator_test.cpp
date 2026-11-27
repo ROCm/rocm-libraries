@@ -252,6 +252,8 @@ TEST_F(ReferenceValidatorTest, HostWriteWithEpochAdvanceRecomputesBeforeReuse)
 
 TEST(ReferenceValidatorSplit, RecomputeAndVerificationUseEachDevicesProblem)
 {
+    // ReferenceInputWriter's DataInitialization calls hipGetDevice in its constructor.
+    SKIP_IF_NO_DEVICE();
     auto args = makeValidatorArgs();
     setOption(args, "split-devices", 2);
     setOption(args, "split-dim", std::string("N"));
