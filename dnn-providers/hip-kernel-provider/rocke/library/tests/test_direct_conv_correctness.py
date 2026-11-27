@@ -290,6 +290,55 @@ _SPATIAL_SHAPES: List[_Shape] = [
     ),
 ]
 
+# Spatial kernel in row blocks (block_h > 0, grid y): (shape, block_h). Each
+# pins one branch: a ragged last block, stride 2 (block rows start on an even
+# streaming row), a block shorter than the filter, and an 11x11 filter whose
+# prefetch window rotates across block-local row groups.
+_SPATIAL_ROW_BLOCK_CASES: List[Tuple[_Shape, int]] = [
+    (
+        _Shape(
+            "sp_bh_k5_N2H37W23_g3", N=2, H=37, W=23, groups=3, cpg=1, KH=5, KW=5, PAD=2
+        ),
+        8,
+    ),
+    (_Shape("sp_bh_k3s2_N2H29W17_g3", N=2, H=29, W=17, groups=3, cpg=1, stride=2), 4),
+    (
+        _Shape(
+            "sp_bh_k7s2_N1H31W13_g5",
+            N=1,
+            H=31,
+            W=13,
+            groups=5,
+            cpg=1,
+            KH=7,
+            KW=7,
+            PAD=3,
+            stride=2,
+        ),
+        3,
+    ),
+    (
+        _Shape(
+            "sp_bh_k5_N1H20W40_g3", N=1, H=20, W=40, groups=3, cpg=1, KH=5, KW=5, PAD=2
+        ),
+        1,
+    ),
+    (
+        _Shape(
+            "sp_bh_k11_N1H70W33_g3",
+            N=1,
+            H=70,
+            W=33,
+            groups=3,
+            cpg=1,
+            KH=11,
+            KW=11,
+            PAD=5,
+        ),
+        16,
+    ),
+]
+
 
 # Shapes for DirectDepthwiseColSpec (cpg=kpg=1).  Geometry sweep, fp16 only --
 # the dtype axis is swept separately by _COL_DTYPE_SHAPES so a dtype failure
@@ -570,6 +619,7 @@ def _run_depthwise_one(
     spatial: bool = False,
     tiled: "dict | None" = None,
     wave_size: "int | None" = None,
+    spatial_knobs: "dict | None" = None,
 ) -> Tuple[bool, str]:
     """Build, compile, launch, and verify one depthwise forward kernel.
 
@@ -629,7 +679,10 @@ def _run_depthwise_one(
         build = build_direct_depthwise_tiled
     elif spatial:
         spec = DirectDepthwiseSpatialSpec(
-            problem=p, name=f"test_direct_sp_dw_{shape.id}", wave_size=wave_size
+            problem=p,
+            name=f"test_direct_sp_dw_{shape.id}",
+            wave_size=wave_size,
+            **(spatial_knobs or {}),
         )
         ok, reason = is_valid_depthwise_spatial_spec(spec, arch=arch)
         if not ok:
@@ -921,6 +974,21 @@ class TestDirectConvCorrectness(unittest.TestCase):
             with self.subTest(shape=s.id):
                 self._run_depthwise_spatial(s)
 
+    def test_depthwise_spatial_row_blocks(self):
+        for s, bh in _SPATIAL_ROW_BLOCK_CASES:
+            for dtype in ("fp16", "bf16"):
+                with self.subTest(shape=s.id, dtype=dtype):
+                    passed, reason = _run_depthwise_one(
+                        GPU_ARCH,
+                        s,
+                        dtype=dtype,
+                        spatial=True,
+                        spatial_knobs=dict(block_h=bh, block_waves=2),
+                    )
+                    if reason.startswith("skip"):
+                        self.skipTest(reason)
+                    self.assertTrue(passed, f"FAIL {s.id} block_h {bh}: {reason}")
+
     def test_depthwise_tiled(self):
         for s, knobs in _TILED_CASES:
             with self.subTest(shape=s.id):
@@ -1007,6 +1075,9 @@ class TestDirectDepthwiseFwdWave32(unittest.TestCase):
 
     test_depthwise = TestDirectConvCorrectness.test_depthwise
     test_depthwise_spatial = TestDirectConvCorrectness.test_depthwise_spatial
+    test_depthwise_spatial_row_blocks = (
+        TestDirectConvCorrectness.test_depthwise_spatial_row_blocks
+    )
     test_depthwise_tiled = TestDirectConvCorrectness.test_depthwise_tiled
     test_depthwise_col = TestDirectConvCorrectness.test_depthwise_col
     test_depthwise_col_dtypes = TestDirectConvCorrectness.test_depthwise_col_dtypes

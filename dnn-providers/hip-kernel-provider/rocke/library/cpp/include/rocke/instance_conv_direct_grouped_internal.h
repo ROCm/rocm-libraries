@@ -108,6 +108,13 @@ void rocke_dconv_emit_params(rocke_ir_builder_t* b,
                              const char* direction,
                              const rocke_type_t* io_type);
 
+/* The dgrad block bound for a dgrad run as a forward pass (Python:
+ * _emit_dgrad_as_forward_params): the forward roles of the extents swap
+ * (Hi/Ho, Wi/Wo); the dgrad block already binds the dY strides to the A slot. */
+void rocke_dconv_emit_dgrad_as_forward_params(rocke_ir_builder_t* b,
+                                              rocke_dconv_params_t* params,
+                                              const rocke_type_t* io_type);
+
 /* A[N,H,W,total_c] with runtime extents + the two conv-spatial embeds.
  * w_upper_0 / w_upper_1 name the column pair ("q_pos"/"W_lds_pos" for the
  * LDS-staged variants, "wo"/"s" for the DRAM-direct 4c one). */

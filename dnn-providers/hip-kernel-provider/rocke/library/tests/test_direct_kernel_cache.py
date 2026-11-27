@@ -448,13 +448,17 @@ def test_windowed_depthwise_dgrad_is_stride_1_only(cache):
 def test_windowed_depthwise_dgrad_cached_scope(jobs):
     """The cache holds the knob image of the tile policy, not a product: dot2
     exactly where it pairs taps, channel pairs only for 3x3, the MFMA form
-    only for "same"-padded 5x5..9x9, and every tile within the unroll budget."""
+    only for "same"-padded 3x3..9x9, and every tile within the unroll budget."""
     win = [j for j in jobs if j.identity.algorithm == _WIN]
     assert win
     mfma = [j for j in win if j.spec_kwargs.get("mfma")]
     valu = [j for j in win if not j.spec_kwargs.get("mfma")]
+    # 3x3 is the wave32 WMMA form's: the wave64 MFMA targets cache 5x5..9x9.
+    from rocke.core.arch import ArchTarget
+
+    wave32 = ArchTarget.from_gfx(_ARCH).wave_size == 32
     assert {(j.identity.filter_h, j.identity.pad_h) for j in mfma} == {
-        (k, (k - 1) // 2) for k in dks.DW_WIN_MFMA_FILTERS
+        (k, (k - 1) // 2) for k in dks.DW_WIN_MFMA_FILTERS if k != 3 or wave32
     }
     for j in valu:
         kw, knobs = j.identity.filter_w, j.spec_kwargs
@@ -499,8 +503,8 @@ def test_windowed_depthwise_dgrad_binary_is_found_by_identity():
 
 
 def test_windowed_depthwise_dgrad_wmma_cached_scope(jobs):
-    """gfx1250 caches the Toeplitz form on the wave32 WMMA: 'same'-padded 5x5
-    and 7x7 (9x9 exceeds the wave32 fragment budget), with the taller 28- and
+    """gfx1250 caches the Toeplitz form on the wave32 WMMA: 'same'-padded 3x3,
+    5x5 and 7x7 (9x9 exceeds the wave32 fragment budget), with the taller 28- and
     32-row tiles on top of the MFMA grid's; the gfx950 MFMA grid keeps its
     own row tiles. Every WMMA binary is built at wave size 32."""
     from kernels.conv.direct_aot_jobs import DW_WIN_MFMA_BLOCK_H, DW_WIN_WMMA_BLOCK_H
@@ -514,7 +518,11 @@ def test_windowed_depthwise_dgrad_wmma_cached_scope(jobs):
         )
         if j.identity.algorithm == _WIN and j.spec_kwargs.get("mfma")
     ]
-    assert {(j.identity.filter_h, j.identity.pad_h) for j in wmma} == {(5, 2), (7, 3)}
+    assert {(j.identity.filter_h, j.identity.pad_h) for j in wmma} == {
+        (3, 1),
+        (5, 2),
+        (7, 3),
+    }
     assert {j.spec_kwargs["block_h"] for j in wmma} == set(
         DW_WIN_MFMA_BLOCK_H + DW_WIN_WMMA_BLOCK_H
     )

@@ -79,6 +79,7 @@ static void sp_load_row(rocke_ir_builder_t* bld,
                         rocke_value_t* oob_sentinel,
                         rocke_value_t* c0,
                         const char* dtype,
+                        rocke_value_t* y0,
                         rocke_value_t** out)
 {
     rocke_value_t* hi;
@@ -86,6 +87,9 @@ static void sp_load_row(rocke_ir_builder_t* bld,
     rocke_value_t* row_off;
     int s_const;
 
+    /* Row block: the block-local row y is image streaming row y0 + y. */
+    if(y0 != NULL)
+        y = rocke_b_add(bld, y0, y);
     {
         rocke_value_t* c_pad = rocke_b_const_i32(bld, -PAD);
         hi = rocke_b_add(bld, y, c_pad);
@@ -216,7 +220,16 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
     /* ---- parameters ---- */
     {
         /* The AOT kernarg block, in conv_abi order. */
-        rocke_dconv_emit_params(bld, &params, "fwd", rocke_dconv_io_type(bld, dtype));
+        if(spec->dgrad)
+        {
+            /* Read dY, write dX: the forward roles of the extents swap. The
+             * dgrad block already binds the dY strides to the A slot. */
+            rocke_dconv_emit_dgrad_as_forward_params(bld, &params, rocke_dconv_io_type(bld, dtype));
+        }
+        else
+        {
+            rocke_dconv_emit_params(bld, &params, "fwd", rocke_dconv_io_type(bld, dtype));
+        }
         A = params.A;
         Bp = params.Bp;
         D = params.D;
@@ -283,6 +296,8 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
         b_desc_v = rocke_tensor_descriptor_naive(bld, "B", b_lengths, 4, NULL, b_coords, 4);
     }
 
+    d_desc = NULL;
+    if(!spec->dgrad)
     {
         /* d_desc = D[N, Ho, Wo, total_k] with runtime extents. */
         rocke_dynamic_tensor_descriptor_t* d_dyn = rocke_dconv_d_descriptor_dynamic(bld, &params);
@@ -305,9 +320,11 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
                 const char* bn[4] = {"k", "r", "s", "c"};
                 rocke_value_t* bv[4];
 
+                /* The dgrad mode reads tap (r, s) from the rotated position
+                 * (KH-1-r, KW-1-s). */
                 bv[0] = ch;
-                bv[1] = rocke_b_const_i32(bld, r_const);
-                bv[2] = rocke_b_const_i32(bld, s_const);
+                bv[1] = rocke_b_const_i32(bld, spec->dgrad ? p->KH - 1 - r_const : r_const);
+                bv[2] = rocke_b_const_i32(bld, spec->dgrad ? p->KW - 1 - s_const : s_const);
                 bv[3] = c0;
                 rocke_transforms_descriptor_offset(bld, b_desc_v, bn, bv, 4, &w_off, &w_valid_desc);
 
@@ -346,6 +363,8 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
         rocke_value_t* c_stride_rv;
         rocke_value_t* n_iters_v;
         rocke_value_t* n_groups_v;
+        rocke_value_t* y0 = NULL;
+        const int BH = spec->block_h;
         int j;
 
         window = (rocke_value_t**)alloca((size_t)(PF + 1) * KW * sizeof(rocke_value_t*));
@@ -355,6 +374,20 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
         c_stride_rv = rocke_b_const_i32(bld, c_stride_dw);
         /* n_iters = Hi + KH - 1 rows; the loop walks them KH at a time. */
         n_iters_v = rocke_b_add(bld, params.p_Hi, rocke_b_const_i32(bld, KH - 1));
+        if(BH)
+        {
+            /* Row block by: output rows [by * BH, by * BH + BH) are the streaming
+             * rows [y0, y0 + (BH - 1) * stride + KH), clipped to the image. The
+             * loop counts block-local rows from 0 (Python: y0, y_end). */
+            rocke_value_t* by = rocke_b_block_id_y(bld);
+            rocke_value_t* c_bh = rocke_b_const_i32(bld, BH);
+            rocke_value_t* y_end;
+            rocke_value_t* c_span;
+            y0 = rocke_b_mul(bld, rocke_b_mul(bld, by, c_bh), c_stride_rv);
+            c_span = rocke_b_const_i32(bld, (BH - 1) * c_stride_dw + KH);
+            y_end = rocke_b_smin(bld, n_iters_v, rocke_b_add(bld, y0, c_span));
+            n_iters_v = rocke_b_sub(bld, y_end, y0);
+        }
         n_groups_v
             = rocke_b_div(bld, rocke_b_add(bld, n_iters_v, rocke_b_const_i32(bld, KH - 1)), c_KH);
 
@@ -413,6 +446,7 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
                             oob_sentinel,
                             c0,
                             dtype,
+                            y0,
                             window + k * KW);
                 for(s_const = 0; s_const < KW; ++s_const)
                 {
@@ -486,6 +520,7 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
                             oob_sentinel,
                             c0,
                             dtype,
+                            y0,
                             window + PF * KW);
             }
             for(s_const = 0; s_const < KW; ++s_const)
@@ -506,6 +541,8 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
 
             /* Flush / store */
             p_flush_rv = rocke_b_add(bld, y_j, rocke_b_const_i32(bld, -(KH - 1)));
+            if(BH)
+                p_flush_rv = rocke_b_add(bld, y0, p_flush_rv);
 
             if(j >= KH - 1)
             {
@@ -533,15 +570,28 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
 
             d_off = NULL;
             d_valid = NULL;
-            dn[0] = "n";
-            dv[0] = n;
-            dn[1] = "h";
-            dv[1] = ho_row_j;
-            dn[2] = "w";
-            dv[2] = q_out;
-            dn[3] = "k";
-            dv[3] = ch;
-            rocke_transforms_descriptor_offset(bld, d_desc, dn, dv, 4, &d_off, &d_valid);
+            if(spec->dgrad)
+            {
+                /* dX[n, ho, wo, ch] through the dgrad block's dX strides. */
+                rocke_value_t* m_n = rocke_b_mul(bld, n, params.p_D_stride_n);
+                rocke_value_t* m_h = rocke_b_mul(bld, ho_row_j, params.p_D_stride_ho);
+                rocke_value_t* nh = rocke_b_add(bld, m_n, m_h);
+                rocke_value_t* m_w = rocke_b_mul(bld, q_out, params.p_D_stride_wo);
+                rocke_value_t* wc = rocke_b_add(bld, m_w, ch);
+                d_off = rocke_b_add(bld, nh, wc);
+            }
+            else
+            {
+                dn[0] = "n";
+                dv[0] = n;
+                dn[1] = "h";
+                dv[1] = ho_row_j;
+                dn[2] = "w";
+                dv[2] = q_out;
+                dn[3] = "k";
+                dv[3] = ch;
+                rocke_transforms_descriptor_offset(bld, d_desc, dn, dv, 4, &d_off, &d_valid);
+            }
 
             safe_d = rocke_b_select(
                 bld, store_ok, rocke_b_mul(bld, d_off, c_half_bytes), oob_sentinel);

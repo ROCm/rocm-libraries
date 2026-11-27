@@ -28,6 +28,7 @@ from kernels.conv.direct_variants import (
     DIRECT_DGRAD_SMALLC_WMMA as _DGRAD_SMALLC,
     DIRECT_DGRAD_WMMA as _DGRAD_WMMA,
     DIRECT_DEPTHWISE_TILED_DGRAD as _DW_TILED_DGRAD,
+    DIRECT_DEPTHWISE_SPATIAL_DGRAD as _DW_SPATIAL_DGRAD,
     DIRECT_DW_FWD_WMMA as _DW_FWD_WMMA,
     DIRECT_FWD_GSTREAM_WMMA as _FWD_GSTREAM,
     DIRECT_FWD_TAPOUTER_WMMA as _FWD_TAPOUTER,
@@ -177,6 +178,11 @@ DW_TILED_DGRAD_BLOCK_W = (4, 8, 16, 32)
 DW_TILED_DGRAD_BLOCK_H = (1, 2, 3, 4, 7)
 DW_TILED_DGRAD_BLOCK_WAVES = (1,)
 DW_BLOCK_WAVES = (1, 2, 4)
+# Row blocks of the small-group spatial kernel (block_h output rows per block,
+# grid y): a few-image launch of whole-image blocks leaves most SIMDs idle
+# (C=3 640-wide, N7: 112 blocks); the KH - stride halo rows each block
+# re-reads cost ~(KH - 1) / block_h more input traffic.
+DW_SPATIAL_BLOCK_H = (128, 160)
 # Output-stationary depthwise forward. Widths and heights of 7 and 14 tile the
 # 7/14/28/56-wide feature maps of the common CNN stages without a ragged edge;
 # the spec validator drops the tiles that overflow the register budget and the
@@ -196,6 +202,17 @@ DW_FWD_CPL_GRID = (
     (4, (4,), (1, 2)),
 )
 DW_TILED_CPL = 2
+# Packed row-streaming forward with stride_skip (stride > 1 only): output-row
+# accumulators only, so the wider tiles that cut the column halo re-read fit.
+DW_FWD_SS_GRID = (
+    (2, (2, 4, 7), (1, 2, 4)),
+    (4, (4,), (1, 2)),
+)
+# Packed row-streaming forward in row blocks (cpl 2; stride_skip at stride >
+# 1): (block_h values, block_w values, block_waves values). Few-image or
+# short-map launches of whole-image blocks hide too little of the row
+# stream's latency.
+DW_FWD_ROWBLOCK_GRID = ((14,), (4,), (1,))
 
 # Column-streamed depthwise forward. It keeps only ``block_h*block_w + KH`` f32
 # live per lane instead of ``KH*KW + KH*block_w``, so its sweet spot sits at far
@@ -238,8 +255,9 @@ DW_WIN_PAIR_WAVES = (2,)
 DW_WIN_UNROLL_BUDGET = 1 << 14
 # Toeplitz MFMA form: "same"-padded filters, images folded 1/2/4 per tile,
 # 4- and 8-wave blocks, and row tiles that keep up to 16-row maps whole or
-# chunk taller ones.
-DW_WIN_MFMA_FILTERS = (5, 7, 9)
+# chunk taller ones. 3x3 serves the narrow (16-channel) and 30x30 depthwise
+# dgrad layers where the scalar windowed form loses to the WMMA one.
+DW_WIN_MFMA_FILTERS = (3, 5, 7, 9)
 DW_WIN_MFMA_FOLDS = (1, 2, 4)
 DW_WIN_MFMA_WAVES = (4, 8)
 DW_WIN_MFMA_BLOCK_H = (4, 7, 8, 12, 14, 16)
@@ -433,6 +451,7 @@ DGRAD_WMMA_KNOBS = (
     (1, 4, 1, 4, 32, 1, 32, 3, True),
     (1, 4, 1, 8, 16, 2, 32, 2, False),
     (1, 4, 1, 8, 16, 2, 32, 2, True),
+    (1, 4, 2, 2, 8, 2, 32, 2, True),
     (1, 4, 2, 4, 16, 1, 32, 2, False),
     (1, 4, 2, 8, 16, 2, 32, 2, False),
     (1, 4, 2, 8, 16, 2, 32, 2, True),
@@ -453,12 +472,14 @@ DGRAD_WMMA_KNOBS = (
     (1, 4, 8, 4, 16, 1, 32, 2, True),
     (1, 4, 8, 4, 32, 1, 32, 2, True),
     (1, 4, 8, 4, 64, 1, 32, 2, True),
+    (1, 7, 2, 7, 28, 1, 32, 2, False),
     (1, 8, 1, 2, 8, 4, 32, 2, False),
     (1, 8, 1, 2, 8, 4, 32, 2, True),
     (1, 8, 1, 2, 8, 4, 32, 3, False),
     (1, 8, 1, 2, 8, 4, 32, 3, True),
     (1, 8, 1, 4, 16, 2, 32, 2, False),
     (1, 8, 1, 4, 16, 2, 32, 2, True),
+    (1, 8, 2, 2, 8, 4, 32, 2, True),
     (1, 8, 2, 4, 16, 2, 32, 2, False),
     (1, 8, 2, 4, 16, 2, 32, 2, True),
     (2, 2, 2, 4, 16, 1, 64, 2, True),
@@ -596,6 +617,8 @@ DGRAD_WMMA_STRIDED_KNOBS = (
     (2, 2, 2, 6, 16, 2, 64, 2, False),
     (2, 4, 2, 6, 16, 2, 64, 2, False),
     (4, 2, 2, 6, 16, 1, 32, 2, False),
+    (1, 4, 2, 2, 8, 2, 32, 2, False),
+    (1, 4, 2, 2, 8, 2, 32, 2, True),
 )
 # 2x2 stride 2 (patch merge): every phase is a 1x1, all four share one B
 # fragment, so wider channel blocks pay off.
@@ -645,6 +668,8 @@ FWD_WMMA_KNOBS = (
     (1, 2, 1, 4, 32, 1, 32, 3, True, False, False, False, False),
     (1, 4, 1, 4, 16, 1, 32, 2, True, False, False, False, False),
     (1, 4, 1, 4, 32, 1, 32, 3, True, False, False, False, False),
+    (1, 4, 2, 2, 8, 2, 32, 2, False, False, False, False, False),
+    (1, 4, 2, 2, 8, 2, 32, 2, True, False, False, False, False),
     (1, 4, 2, 4, 16, 1, 32, 2, True, False, False, False, False),
     (1, 4, 4, 4, 16, 1, 32, 2, True, False, False, False, False),
     (1, 4, 4, 4, 16, 1, 64, 2, True, True, False, False, False),
@@ -657,6 +682,8 @@ FWD_WMMA_KNOBS = (
     (1, 4, 4, 6, 32, 1, 32, 2, True, True, False, False, False),
     (1, 4, 4, 6, 32, 1, 32, 2, True, True, True, False, False),
     (1, 5, 4, 5, 40, 1, 32, 2, True, True, True, False, False),
+    (1, 7, 2, 7, 28, 1, 32, 2, True, False, False, False, False),
+    (1, 8, 2, 2, 8, 4, 32, 2, True, False, False, False, False),
     (1, 8, 4, 6, 24, 4, 32, 2, True, True, True, False, False),
     (1, 8, 4, 6, 32, 1, 32, 2, True, True, True, False, False),
     (1, 8, 4, 8, 16, 1, 32, 2, True, True, True, False, False),
@@ -1601,6 +1628,16 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
             for pad in _all_pads(k)
         ),
     ),
+    # Small-group stride-1 depthwise dgrad as a rotated-filter forward pass on
+    # the spatial kernel (lanes over channels x columns, groups <= wave size):
+    # the few-channel layers the one-channel-per-lane kernels leave idle.
+    _DW_SPATIAL_DGRAD: (
+        "dgrad",
+        tuple(
+            DirectCaps(KH=k, PAD=_same_pad(k), stride=1, cpg=1, kpg=1)
+            for k in _DEPTHWISE_FILTERS
+        ),
+    ),
     # Large-filter stride-1 depthwise dgrad as a rotated-filter forward pass
     # (13x13 .. 31x31, "same" padding); the row-streaming kernel
     # (direct_depthwise_dgrad) preloads every tap and stops at 11x11.
@@ -2167,9 +2204,27 @@ def _knob_grid(
             for cpl, bws, waves_list in DW_FWD_CPL_GRID:
                 for bw, waves in itertools.product(bws, waves_list):
                     yield dict(block_w=bw, block_waves=waves, cpl=cpl)
-    elif variant == "direct_depthwise_spatial":
+            if caps is None or caps.stride > 1:
+                for cpl, bws, waves_list in DW_FWD_SS_GRID:
+                    for bw, waves in itertools.product(bws, waves_list):
+                        yield dict(
+                            block_w=bw, block_waves=waves, cpl=cpl, stride_skip=True
+                        )
+            ss = {} if caps is not None and caps.stride == 1 else {"stride_skip": True}
+            for bh, bw, waves in itertools.product(*DW_FWD_ROWBLOCK_GRID):
+                yield dict(block_w=bw, block_waves=waves, cpl=2, block_h=bh, **ss)
+    elif variant in ("direct_depthwise_spatial", _DW_SPATIAL_DGRAD):
+        # The spatial dgrad and the row blocks are measured on the wave32
+        # (gfx1250-class) targets only; the packaged forward spatial variant
+        # takes no block_h knob on the wave64 ones.
+        wave32 = _dw_fwd_cpl_arch(arch)
+        if variant == _DW_SPATIAL_DGRAD and not wave32:
+            return
         for waves in DW_BLOCK_WAVES:
             yield dict(block_waves=waves)
+        if wave32:
+            for bh, waves in itertools.product(DW_SPATIAL_BLOCK_H, DW_BLOCK_WAVES):
+                yield dict(block_waves=waves, block_h=bh)
     elif variant == "direct_depthwise_tiled":
         for bw, bh, waves, unroll in itertools.product(
             DW_TILED_BLOCK_W, DW_TILED_BLOCK_H, DW_TILED_BLOCK_WAVES, DW_TILED_UNROLL
@@ -2753,7 +2808,9 @@ def _dw_win_policy_reason(caps: DirectCaps, knobs: dict, arch: str) -> Optional[
 
     if knobs.get("mfma"):
         if caps.KH not in DW_WIN_MFMA_FILTERS or caps.PAD != _same_pad(caps.KH):
-            return "the MFMA form is cached for 'same'-padded 5x5..9x9 only"
+            return "the MFMA form is cached for 'same'-padded 3x3..9x9 only"
+        if caps.KH == 3 and not _dw_fwd_cpl_arch(arch):
+            return "the 3x3 Toeplitz form is cached for the wave32 WMMA targets only"
         return None
     want_dot2 = caps.KW >= 5 and arch in DW_DGRAD_WIN_DOT2_ARCHES
     if knobs["dot2"] != want_dot2:
@@ -3280,7 +3337,7 @@ def probe_problem(
             pad_w=caps.pad_w,
         )
     n_images = 1
-    if variant == "direct_depthwise_spatial":
+    if variant in ("direct_depthwise_spatial", _DW_SPATIAL_DGRAD):
         groups = 8
     elif variant == "direct_grouped_dgrad_fused":
         # Its rows share channel counts with the dense MFMA dgrad rows but

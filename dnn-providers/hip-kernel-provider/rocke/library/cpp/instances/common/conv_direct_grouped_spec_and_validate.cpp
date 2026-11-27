@@ -1465,15 +1465,25 @@ int rocke_direct_depthwise_block_ch(const rocke_direct_depthwise_spec_t* spec)
     return spec->block_waves * spec->wave_size * spec->cpl;
 }
 
+int rocke_direct_depthwise_acc_rows(const rocke_direct_depthwise_spec_t* spec)
+{
+    /* @property acc_rows -> ceil(KH / stride) if stride_skip else KH */
+    const rocke_direct_conv_problem_t* p = &spec->problem;
+    if(spec->stride_skip)
+        return (p->KH + p->stride - 1) / p->stride;
+    return p->KH;
+}
+
 rocke_status_t rocke_direct_depthwise_kernel_name(const rocke_direct_depthwise_spec_t* spec,
                                                   char* out,
                                                   size_t out_cap)
 {
     char prob_short[128];
-    const char* parts[4];
+    const char* parts[7];
     char bw_buf[24];
     char bwv_buf[24];
     char cpl_buf[24];
+    char bh_buf[24];
     int n_parts = 3;
 
     if(spec == NULL || out == NULL || out_cap == 0)
@@ -1485,7 +1495,8 @@ rocke_status_t rocke_direct_depthwise_kernel_name(const rocke_direct_depthwise_s
         return ROCKE_ERR_VALUE;
     }
     /* kernel_name_join(name, p.short(), f"bw{block_w}", f"bw{block_waves}wv",
-     *                  flags={"bf16": dtype=="bf16"}) */
+     *                  [f"cpl{cpl}"], ["ss"], [f"bh{block_h}"],
+     *                  flags=_scalar_name_flags(dtype)) */
     snprintf(bw_buf, sizeof(bw_buf), "bw%d", spec->block_w);
     snprintf(bwv_buf, sizeof(bwv_buf), "bw%dwv", spec->block_waves);
     parts[0] = prob_short;
@@ -1495,6 +1506,13 @@ rocke_status_t rocke_direct_depthwise_kernel_name(const rocke_direct_depthwise_s
     {
         snprintf(cpl_buf, sizeof(cpl_buf), "cpl%d", spec->cpl);
         parts[n_parts++] = cpl_buf;
+    }
+    if(spec->stride_skip)
+        parts[n_parts++] = "ss";
+    if(spec->block_h)
+    {
+        snprintf(bh_buf, sizeof(bh_buf), "bh%d", spec->block_h);
+        parts[n_parts++] = bh_buf;
     }
     {
         /* flags=_scalar_name_flags(dtype) */
@@ -1664,24 +1682,38 @@ bool rocke_direct_depthwise_is_valid_spec(const rocke_direct_depthwise_spec_t* s
     }
     if(rocke_dconv_depthwise_cpl_reason(spec->cpl, p->groups, p->dtype, reason, reason_cap))
         return false;
-    if(spec->cpl > 1
-       && (spec->cpl * taps > ROCKE_DCONV_DW_MAX_PRELOAD_TAPS
-           || spec->cpl * spec->block_w * p->KH > ROCKE_DCONV_DW_CPL_MAX_ACC))
+    if(spec->stride_skip && (spec->cpl == 1 || p->stride == 1))
     {
-        /* Past these the packed weights or accumulator slots spill. */
-        if(reason && reason_cap > 0)
-        {
-            snprintf(reason,
-                     reason_cap,
-                     "cpl=%d holds %d weights and %d accumulator-rows per lane "
-                     "(max %d / %d)",
-                     spec->cpl,
-                     spec->cpl * taps,
-                     spec->cpl * spec->block_w * p->KH,
-                     ROCKE_DCONV_DW_MAX_PRELOAD_TAPS,
-                     ROCKE_DCONV_DW_CPL_MAX_ACC);
-        }
+        rocke_spec_set_reason(reason, reason_cap, "stride_skip needs cpl > 1 and stride > 1");
         return false;
+    }
+    if(spec->block_h < 0 || (spec->block_h && spec->cpl == 1))
+    {
+        if(reason && reason_cap > 0)
+            snprintf(reason, reason_cap, "block_h %d needs cpl > 1 (and >= 0)", spec->block_h);
+        return false;
+    }
+    {
+        const int acc = rocke_direct_depthwise_acc_rows(spec);
+        if(spec->cpl > 1
+           && (spec->cpl * taps > ROCKE_DCONV_DW_MAX_PRELOAD_TAPS
+               || spec->cpl * spec->block_w * acc > ROCKE_DCONV_DW_CPL_MAX_ACC))
+        {
+            /* Past these the packed weights or accumulator slots spill. */
+            if(reason && reason_cap > 0)
+            {
+                snprintf(reason,
+                         reason_cap,
+                         "cpl=%d holds %d weights and %d accumulator-rows per lane "
+                         "(max %d / %d)",
+                         spec->cpl,
+                         spec->cpl * taps,
+                         spec->cpl * spec->block_w * acc,
+                         ROCKE_DCONV_DW_MAX_PRELOAD_TAPS,
+                         ROCKE_DCONV_DW_CPL_MAX_ACC);
+            }
+            return false;
+        }
     }
     block_ch = rocke_direct_depthwise_block_ch(spec);
     (void)block_ch;
@@ -1701,6 +1733,7 @@ rocke_direct_depthwise_spatial_spec_t rocke_direct_depthwise_spatial_spec_defaul
     spec.name = "direct_depthwise_spatial";
     spec.block_waves = 1;
     spec.wave_size = 64;
+    spec.block_h = 0;
     return spec;
 }
 
@@ -1729,8 +1762,10 @@ rocke_status_t rocke_direct_depthwise_spatial_kernel_name(
     const rocke_direct_depthwise_spatial_spec_t* spec, char* out, size_t out_cap)
 {
     char prob_short[128];
-    const char* parts[2];
+    const char* parts[3];
+    int n_parts = 2;
     char bwv_buf[32];
+    char bh_buf[32];
 
     if(spec == NULL || out == NULL || out_cap == 0)
     {
@@ -1740,19 +1775,26 @@ rocke_status_t rocke_direct_depthwise_spatial_kernel_name(
     {
         return ROCKE_ERR_VALUE;
     }
-    /* kernel_name_join(name, p.short(), f"bwv{block_waves}", flags={"bf16": dtype=="bf16"}) */
+    /* kernel_name_join(name, p.short(), f"bwv{block_waves}",
+     *                  f"bh{block_h}" if block_h else "",
+     *                  flags={"dg": dgrad, **_scalar_name_flags(dtype)}) */
     snprintf(bwv_buf, sizeof(bwv_buf), "bwv%d", spec->block_waves);
     parts[0] = prob_short;
     parts[1] = bwv_buf;
+    if(spec->block_h)
     {
-        /* flags=_scalar_name_flags(dtype) */
-        const char* flag_names[2] = {"bf16", "f32"};
-        int flag_on[2];
+        snprintf(bh_buf, sizeof(bh_buf), "bh%d", spec->block_h);
+        parts[n_parts++] = bh_buf;
+    }
+    {
+        const char* flag_names[3] = {"dg", "bf16", "f32"};
+        int flag_on[3];
         const char* dt = spec->problem.dtype ? spec->problem.dtype : "fp16";
-        flag_on[0] = (strcmp(dt, "bf16") == 0) ? 1 : 0;
-        flag_on[1] = rocke_dconv_scalar_f32_flag(dt);
+        flag_on[0] = spec->dgrad ? 1 : 0;
+        flag_on[1] = (strcmp(dt, "bf16") == 0) ? 1 : 0;
+        flag_on[2] = rocke_dconv_scalar_f32_flag(dt);
         return rocke_kernel_name_join(
-            spec->name, parts, 2, flag_names, flag_on, 2, out, out_cap, NULL);
+            spec->name, parts, n_parts, flag_names, flag_on, 3, out, out_cap, NULL);
     }
 }
 
@@ -1793,6 +1835,9 @@ bool rocke_direct_depthwise_spatial_is_valid_spec(const rocke_direct_depthwise_s
             return false;
         }
     }
+    /* The row stream offsets columns by PAD alone. */
+    if(rocke_direct_conv_one_padding_reason(p, "", reason, reason_cap))
+        return false;
     if(p->cpg != 1 || p->kpg != 1)
     {
         if(reason && reason_cap > 0)
@@ -1842,6 +1887,34 @@ bool rocke_direct_depthwise_spatial_is_valid_spec(const rocke_direct_depthwise_s
         }
         return false;
     }
+    if(spec->dgrad && p->stride != 1)
+    {
+        if(reason && reason_cap > 0)
+        {
+            snprintf(reason, reason_cap, "the dgrad mode needs stride 1 (got %d)", p->stride);
+        }
+        return false;
+    }
+    if(spec->dgrad && p->KH != p->KW)
+    {
+        if(reason && reason_cap > 0)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "the dgrad mode needs a square filter (got %dx%d)",
+                     p->KH,
+                     p->KW);
+        }
+        return false;
+    }
+    if(spec->block_h < 0)
+    {
+        if(reason && reason_cap > 0)
+        {
+            snprintf(reason, reason_cap, "block_h must be >= 0 (got %d)", spec->block_h);
+        }
+        return false;
+    }
     rocke_spec_set_reason(reason, reason_cap, "ok");
     return true;
 }
@@ -1867,6 +1940,31 @@ rocke_status_t rocke_direct_depthwise_spatial_validate(
                      "DirectDepthwiseSpatialSpec requires cpg=kpg=1 (got cpg=%d, kpg=%d)",
                      p->cpg,
                      p->kpg);
+        return ROCKE_ERR_VALUE;
+    }
+    if(spec->dgrad && p->stride != 1)
+    {
+        if(reason && reason_cap > 0)
+            snprintf(reason,
+                     reason_cap,
+                     "DirectDepthwiseSpatialSpec(dgrad=True) needs stride 1 (got %d)",
+                     p->stride);
+        return ROCKE_ERR_VALUE;
+    }
+    if(spec->dgrad && p->KH != p->KW)
+    {
+        if(reason && reason_cap > 0)
+            snprintf(reason,
+                     reason_cap,
+                     "DirectDepthwiseSpatialSpec(dgrad=True) needs a square filter (got %dx%d)",
+                     p->KH,
+                     p->KW);
+        return ROCKE_ERR_VALUE;
+    }
+    if(spec->block_h < 0)
+    {
+        if(reason && reason_cap > 0)
+            snprintf(reason, reason_cap, "block_h must be >= 0 (got %d)", spec->block_h);
         return ROCKE_ERR_VALUE;
     }
     rocke_spec_set_reason(reason, reason_cap, "ok");
