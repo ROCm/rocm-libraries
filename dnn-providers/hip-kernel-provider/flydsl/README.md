@@ -310,8 +310,9 @@ family folder, which the packer excludes with the option OFF
 (`HKP_DESCRIPTOR_FAMILIES`). No other integration's flag changes
 anything FlyDSL compiles, registers or asserts, and no FlyDSL suite names another
 engine. That isolation is a property to preserve, not an accident. No build or CI
-job checks it; to check it by hand, build with `ENABLE_HIP_MLOPS_ENGINE=OFF` and diff
-the FlyDSL case list, which must come out empty.
+job checks it; to check it by hand, build once as is and once with
+`-DHIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR=OFF` (the hand-written HIP MLops engine in place
+of the ingestor's) and diff the FlyDSL case lists: the diff must come out empty.
 
 ## File map
 

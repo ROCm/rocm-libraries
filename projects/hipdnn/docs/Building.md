@@ -12,6 +12,7 @@
 - [Build Configurations](#build-configurations)
   - [Address Sanitizer Build](#address-sanitizer-build)
   - [Disabling JSON Support](#disabling-json-support)
+  - [Kernel ingestor](#kernel-ingestor)
   - [Kernel packing (rocm_kpack)](#kernel-packing-rocm_kpack)
   - [comgr compilation cache (build speed)](#comgr-compilation-cache-build-speed)
   - [ROCM_PATH, ROCM_CMAKE_PATH, and CMAKE_INSTALL_PREFIX](#rocm_path-rocm_cmake_path-and-cmake_install_prefix)
@@ -349,6 +350,24 @@ cmake --preset release -DHIPDNN_FRONTEND_SKIP_JSON_LIB=ON
 ```
 This disables JSON-based graph serialization and deserialization. Binary serialization remains available. It also leaves the engine-query helpers `hipdnn_frontend/EngineQueryTypes.hpp` and `hipdnn_frontend/detail/EngineQueries.hpp` empty. In builds that keep them, `detail/EngineQueries.hpp` decodes FlatBuffers pages, so its consumers link `hipdnn_flatbuffers_sdk` themselves.
 
+The umbrella `HIPDNN_SKIP_JSON_LIB` also sets `HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB`, which the [kernel ingestor](#kernel-ingestor) cannot build without, so it needs `-DHIPDNN_ENABLE_KERNEL_INGESTOR=OFF` as well.
+
+### Kernel ingestor
+
+The generic kernel ingestor ([RFC 0017](rfcs/0017_UniversalKernelDescriptor.md), `HIPDNN_ENABLE_KERNEL_INGESTOR`) is built by default. In hipDNN it adds the ingestor and UHD headers to the plugin SDK, their tests and the descriptor tools. In the hip-kernel-provider it packs the provider's kernel descriptors at build time, and its per-operation engines (`hipkernel:ResampleFwd`, `hipkernel:LayernormFwd`, ...) serve the HIP MLops operations in place of the hand-written `HIP_MLOPS_ENGINE`.
+
+A build that includes the hip-kernel-provider, standalone or through a superbuild preset such as `hip-kernel-provider` or `hipdnn-dev-all`, therefore needs at configure time:
+
+- At least one concrete gfx architecture in `GPU_TARGETS`. `find_package(hip)` sets it from the local GPU when it detects one; on a build machine without an AMD GPU, and on Windows, pass `-DGPU_TARGETS=<arch>`, for example `-DGPU_TARGETS=gfx942`.
+- The `rocm-kpack` CMake package, which ROCm ships.
+- The `rocm_kpack` Python packer and a `Python3_EXECUTABLE` that can import `msgpack` and `zstandard`; see [Kernel packing](#kernel-packing-rocm_kpack).
+- A HIP compiler, `CMAKE_HIP_COMPILER` or `CMAKE_CXX_COMPILER`.
+- For a standalone provider build, a hipDNN SDK built with the ingestor, as hipDNN is by default.
+
+Configure fails naming the prerequisite that is missing and how to supply it. To build without the ingestor, configure with `-DHIPDNN_ENABLE_KERNEL_INGESTOR=OFF`; the hip-kernel-provider then builds the hand-written HIP MLops engine instead, until that engine is removed. The rocKE and FlyDSL kernel sets stay off by default, so the default build needs no DVC content.
+
+A build directory keeps the options it has cached. One configured before the ingestor became the default keeps `HIPDNN_ENABLE_KERNEL_INGESTOR=OFF` and the hand-written engine; use a fresh build directory, or configure it with `-DHIPDNN_ENABLE_KERNEL_INGESTOR=ON -DENABLE_HIP_MLOPS_ENGINE=OFF`, to get the new default.
+
 ### Kernel packing (rocm_kpack)
 
 The hip-kernel-provider packs GPU kernels into `.kpack` archives at build time using the `rocm_kpack`
@@ -380,7 +399,7 @@ An explicit `HIPKERNELPROVIDER_KPACK_ALLOW_FETCH=ON` takes precedence over `ALLO
 
 If nothing resolves, the ASM SDPA engine logs `skipping .kpack packing` and the build proceeds;
 the runtime loads loose `.co` files, so this is not fatal. Descriptor packaging
-(`HIPDNN_ENABLE_KERNEL_INGESTOR=ON`, off by default) hard-fails instead — both when kpack is
+(`HIPDNN_ENABLE_KERNEL_INGESTOR`, on by default) hard-fails instead — both when kpack is
 missing entirely and when a resolved tree exists but `Python3_EXECUTABLE` cannot import it.
 
 #### Building without the dev container
@@ -417,7 +436,7 @@ Configure prints `kpack: using rocm_kpack from <dir>` on success. Two failures r
 
 #### Descriptor packaging Python environment
 
-With `HIPDNN_ENABLE_KERNEL_INGESTOR=ON`, supply an existing `Python3_EXECUTABLE` that can import `msgpack` and `zstandard`. With `HIPKERNELPROVIDER_ENABLE_ROCKE=ON` it must also be able to run `-m pip`. Configuration fails with a remedy if those prerequisites are absent; packaging does not bootstrap pip or acquire runtime dependencies.
+With `HIPDNN_ENABLE_KERNEL_INGESTOR` ON, the default, supply an existing `Python3_EXECUTABLE` that can import `msgpack` and `zstandard`. With `HIPKERNELPROVIDER_ENABLE_ROCKE=ON` it must also be able to run `-m pip`. Configuration fails with a remedy if those prerequisites are absent; packaging does not bootstrap pip or acquire runtime dependencies.
 
 With `HIPKERNELPROVIDER_ENABLE_ROCKE=OFF`, the hip producer packs alone under the supplied interpreter: no wheel is installed, pip is not needed, and no private import directory is added to `PYTHONPATH`. Every root is packed with its `rocKE/` folder excluded and `rocke` descriptors anywhere else pruned, as architecture pruning prunes. A root left with nothing to pack is skipped rather than failed: the production root goes dormant at configure (for example the in-tree gfx950 `attention_dense` bundle on a gfx950 build), and the census and integration tests of engines it does not ship are not registered. The rest of this section applies only with `HIPKERNELPROVIDER_ENABLE_ROCKE=ON`.
 
@@ -551,6 +570,8 @@ cmake --build build
 # Run tests (--output-on-failure is optional; it prints logs for failing tests)
 ctest --test-dir build --output-on-failure
 ```
+
+The presets that include the hip-kernel-provider build the [kernel ingestor](#kernel-ingestor), which needs a `GPU_TARGETS` architecture to pack for: add `-DGPU_TARGETS=<arch>` on a machine without an AMD GPU, or `-DHIPDNN_ENABLE_KERNEL_INGESTOR=OFF` to build without the ingestor.
 
 Root-level `ctest` (i.e. `ctest --test-dir build` from the repository root) only sees the aggregated tests when `ROCM_LIBS_ENABLE_ROOT_CTEST` is `ON`. Set it with `-D` at configure time (as above) or via the environment before a first or fresh configure. Per-component category targets do not require it. See [Build Targets](#build-targets) for target names and [Test Tiers](./TESTING.md#test-tiers) for current category behavior.
 

@@ -62,9 +62,12 @@ else()
     message(STATUS "hipDNN: SDPA support disabled")
 endif()
 
-# Gates the generic kernel ingestor (RFC 0017: Universal Kernel Descriptors), set by
-# TheRock's THEROCK_FLAG_HIPDNN_ENABLE_KERNEL_INGESTOR.
-option(HIPDNN_ENABLE_KERNEL_INGESTOR "Enable the generic kernel ingestor (RFC 0017)" OFF)
+# Gates the generic kernel ingestor (RFC 0017: Universal Kernel Descriptors). ON by default
+# (ALMIOPEN-3077): hip-kernel-provider serves its HIP MLOps engines from it. Configure with
+# -DHIPDNN_ENABLE_KERNEL_INGESTOR=OFF to build without it. TheRock's
+# THEROCK_FLAG_HIPDNN_ENABLE_KERNEL_INGESTOR can only turn the option ON, so with this
+# default it no longer changes a TheRock build.
+option(HIPDNN_ENABLE_KERNEL_INGESTOR "Enable the generic kernel ingestor (RFC 0017)" ON)
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     message(STATUS "hipDNN: kernel ingestor enabled")
     add_compile_definitions(HIPDNN_ENABLE_KERNEL_INGESTOR)

@@ -557,6 +557,11 @@ jobs:
         run: |
           "$VENV_PYTHON" -m pip install --upgrade -r .github/requirements-hipdnn-superbuild-ci.txt
 
+      # The production source root below is the example descriptor tree, which ships no
+      # HipMlops bundle, so the kernel ingestor's HIP MLOps engines, the default, would load
+      # no descriptors here and their suites would fail. This lane keeps the hand-written
+      # engine until ALMIOPEN-3078 removes it; hipdnn-linux-mlops-ingestor runs the
+      # ingestor's engines on this architecture.
       - name: Configure superbuild
         run: |
           cmake --preset hipdnn-dev-all -GNinja \
@@ -569,6 +574,7 @@ jobs:
             -DHIPKERNELPROVIDER_ENABLE_FLYDSL=ON \
             -DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON \
             -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON \
+            -DHIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR=OFF \
             -DHIPDNN_ENABLE_TOOLING_TESTS=ON \
             -DHIPDNN_REQUIRE_UHD_GEN_TESTS=ON \
             -DHIPKERNELPROVIDER_GENERATE_SERIALIZE_HEADERS=ON \
@@ -685,12 +691,14 @@ jobs:
             "$VENV_PYTHON" -m pytest -q projects/hipdnn/python/frontend_wheel_package/tests
 
   # ALMIOPEN-3066: the HIP MLOps operations served by the kernel ingestor, one engine per
-  # operation, in place of HIP_MLOPS_ENGINE. The two options are exclusive and the lanes
-  # above keep the default (the hand-written engine), so without this job nothing in CI
-  # compiles HipMlopsNative.cpp, packs the HipMlops bundle or runs its engines. Only
-  # hipDNN, the integration harness and hip-kernel-provider are built, from the default
-  # production root (rocKE and FlyDSL off, so no DVC content is needed) and with the ASM
-  # SDPA engine off, which this path does not touch.
+  # operation, in place of HIP_MLOPS_ENGINE. That is the default build since ALMIOPEN-3077,
+  # so this job leaves the ingestor options at their defaults. The Windows lane runs these
+  # engines on its own architecture, but the Linux lane packs the example descriptor tree,
+  # which ships no HipMlops bundle, and keeps the hand-written engine. This job is the only
+  # one that runs the ingestor's engines on gfx942, and the only one that checks every
+  # engine has a lane. Only hipDNN, the integration harness and hip-kernel-provider are
+  # built, from the default production root (rocKE and FlyDSL off, so no DVC content is
+  # needed) and with the ASM SDPA engine off, which this path does not touch.
   hipdnn-linux-mlops-ingestor:
     name: HipDNN Linux HIP MLOps Ingestor
     needs: changes
@@ -775,9 +783,6 @@ jobs:
             -DROCM_LIBS_ENABLE_ROOT_CTEST=ON \
             -DENABLE_CLANG_FORMAT=OFF \
             -DENABLE_CLANG_TIDY=OFF \
-            -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON \
-            -DENABLE_HIP_MLOPS_ENGINE=OFF \
-            -DHIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR=ON \
             -DENABLE_ASM_SDPA_ENGINE=OFF \
             -DHIPKERNELPROVIDER_KPACK_PYTHON_DIR="$KPACK_PYTHON_DIR" \
             -DPython_EXECUTABLE="$VENV_PYTHON" \

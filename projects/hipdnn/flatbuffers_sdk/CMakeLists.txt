@@ -72,7 +72,10 @@ if(HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB AND HIPDNN_ENABLE_KERNEL_INGESTOR)
         "be enabled: the kernel ingestor's winner cache (WinnerCacheFile.hpp) calls "
         "GraphContentKey::toJson()/fromJson() unconditionally, and SKIP_JSON_LIB compiles "
         "those out of GraphContentKey.hpp. This combination fails to compile for any "
-        "consumer that installs this hipDNN build and links the ingestor."
+        "consumer that installs this hipDNN build and links the ingestor. "
+        "HIPDNN_ENABLE_KERNEL_INGESTOR is ON by default: configure with "
+        "-DHIPDNN_ENABLE_KERNEL_INGESTOR=OFF to skip the JSON library, or leave "
+        "HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB (and HIPDNN_SKIP_JSON_LIB, its default) OFF."
     )
 endif()
 

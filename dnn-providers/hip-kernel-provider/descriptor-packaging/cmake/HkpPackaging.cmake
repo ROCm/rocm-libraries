@@ -51,7 +51,9 @@ function(hkp_resolve_kpack out_var python_exe)
     if("${_python_dir}" STREQUAL "")
         kpack_unset_reason(_reason)
         message(FATAL_ERROR "hkp: ${_reason}. rocm_kpack is required to pack "
-            "descriptors; there is no skip path.")
+            "descriptors; there is no skip path. HIPDNN_ENABLE_KERNEL_INGESTOR, which "
+            "packs them, is ON by default: configure with "
+            "-DHIPDNN_ENABLE_KERNEL_INGESTOR=OFF to build without it.")
     endif()
     kpack_check_python_deps("${python_exe}" "${_python_dir}" _missing)
     if(_missing)
@@ -61,7 +63,8 @@ function(hkp_resolve_kpack out_var python_exe)
             "needs zstandard>=0.20.0 and msgpack). If the resolved tree was "
             "staged for a different Python, install the dependencies for this "
             "interpreter or point -DPython3_EXECUTABLE at the one they were "
-            "built for.")
+            "built for, or configure with -DHIPDNN_ENABLE_KERNEL_INGESTOR=OFF "
+            "(ON by default) to build without descriptor packaging.")
     endif()
     set(${out_var} "${_python_dir}" PARENT_SCOPE)
 endfunction()
@@ -1080,7 +1083,8 @@ function(hkp_require_kpack_runtime interp what)
             "dependencies it declares -- install them into the interpreter at "
             "${interp}:\n"
             "    ${interp} -m pip install 'msgpack>=1.0.0' 'zstandard>=0.20.0'\n"
-            "Python said: ${_err}")
+            "or configure with -DHIPDNN_ENABLE_KERNEL_INGESTOR=OFF (ON by default) "
+            "to build without descriptor packaging. Python said: ${_err}")
     endif()
 endfunction()
 
@@ -1187,11 +1191,11 @@ function(hkp_require_ingestor_toolchain out_arches)
         set(HKP_HIP_COMPILER "${CMAKE_CXX_COMPILER}")
     else()
         message(FATAL_ERROR
-            "hkp: HIPDNN_ENABLE_KERNEL_INGESTOR is ON and requires a HIP "
-            "compiler to compile the kernels it packs, but neither "
+            "hkp: HIPDNN_ENABLE_KERNEL_INGESTOR is ON (the default) and requires "
+            "a HIP compiler to compile the kernels it packs, but neither "
             "CMAKE_HIP_COMPILER nor CMAKE_CXX_COMPILER is set. Set one of "
-            "them to clang++/amdclang++, or set "
-            "HIPDNN_ENABLE_KERNEL_INGESTOR=OFF.")
+            "them to clang++/amdclang++, or configure with "
+            "-DHIPDNN_ENABLE_KERNEL_INGESTOR=OFF.")
     endif()
 
     # Derive --hip-path from find_package(hip)'s hip_DIR.
@@ -1254,16 +1258,21 @@ function(hkp_require_ingestor_toolchain out_arches)
     endif()
     if(_arch_source)
         message(FATAL_ERROR
-            "hkp: HIPDNN_ENABLE_KERNEL_INGESTOR is ON and requires at least one "
-            "concrete gfx architecture to pack for, but ${_arch_source} "
-            "(${${_arch_source}}) resolves to an empty architecture list. Name "
-            "concrete gfx architectures in ${_arch_source}.")
+            "hkp: HIPDNN_ENABLE_KERNEL_INGESTOR is ON (the default) and requires "
+            "at least one concrete gfx architecture to pack for, but "
+            "${_arch_source} (${${_arch_source}}) resolves to an empty "
+            "architecture list. Name concrete gfx architectures in "
+            "${_arch_source} (for example -D${_arch_source}=gfx942), or configure "
+            "with -DHIPDNN_ENABLE_KERNEL_INGESTOR=OFF.")
     endif()
     message(FATAL_ERROR
-        "hkp: HIPDNN_ENABLE_KERNEL_INGESTOR is ON and requires at least one "
-        "concrete gfx architecture to pack for, but neither GPU_TARGETS nor "
-        "AMDGPU_TARGETS is set, so the architecture list is empty. Set "
-        "GPU_TARGETS to the gfx architectures to pack for.")
+        "hkp: HIPDNN_ENABLE_KERNEL_INGESTOR is ON (the default) and requires "
+        "at least one concrete gfx architecture to pack for, but neither "
+        "GPU_TARGETS nor AMDGPU_TARGETS is set (find_package(hip) sets "
+        "GPU_TARGETS only when it detects a GPU on this machine), so the "
+        "architecture list is empty. Configure with -DGPU_TARGETS=<arch> "
+        "naming the gfx architectures to pack for (for example "
+        "-DGPU_TARGETS=gfx942), or with -DHIPDNN_ENABLE_KERNEL_INGESTOR=OFF.")
 endfunction()
 
 # ---------------------------------------------------------------------------

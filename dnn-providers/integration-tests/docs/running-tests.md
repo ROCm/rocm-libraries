@@ -94,8 +94,8 @@ Use it to see the full picture of an engine. Do not use it to reproduce a tier.
 |---|---|---|---|
 | miopen-provider | `miopen-provider-external-integration-check` | `MIOPEN_ENGINE` | |
 | hipblaslt-provider | `hipblaslt-provider-external-integration-check` | `HIPBLASLT_ENGINE` | runs with `--gtest_filter=*Matmul*` |
-| hip-kernel-provider | `hip-kernel-provider-external-integration-check` | `HIP_MLOPS_ENGINE` | default build only |
-| hip-kernel-provider | `hip-kernel-provider-mlops-<operation>-external-integration-check` | `hipkernel:ResampleFwd`, `hipkernel:LayernormBwd`, … (one per HIP MLOps operation) | in place of the row above under `HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR=ON`; each runs only its operation's bundle folders |
+| hip-kernel-provider | `hip-kernel-provider-external-integration-check` | `HIP_MLOPS_ENGINE` | only with the hand-written engine built (`-DHIPDNN_ENABLE_KERNEL_INGESTOR=OFF` or `-DENABLE_HIP_MLOPS_ENGINE=ON`) |
+| hip-kernel-provider | `hip-kernel-provider-mlops-<operation>-external-integration-check` | `hipkernel:ResampleFwd`, `hipkernel:LayernormBwd`, … (one per HIP MLOps operation) | in place of the row above under `HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR=ON`, the default; each runs only its operation's bundle folders |
 | hip-kernel-provider | `hip-kernel-provider-asm-sdpa-external-integration-check` | `ASM_SDPA_ENGINE` | |
 | hipblaslt-provider, hip-kernel-provider | `<lane stem>-graph-capture-external-integration-check` | each engine that reports `SUPPORTS_GRAPH_CAPTURE` | runs a few quick suites with `--graph-capture`; see [Check stream capture](#5-check-stream-capture---graph-capture) |
 | hip-kernel-provider | `hip_kernel_provider_asm_sdpa_gpu_ref_integration_tests` | `ASM_SDPA_ENGINE` | GPU reference, C++ SDPA tests only, no tiers |

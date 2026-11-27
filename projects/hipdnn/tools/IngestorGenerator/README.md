@@ -635,7 +635,7 @@ namespace, declares it in `IngestorPacks.hpp` and names it in the spliced row.
 ## The generate -> validate round trip
 
 `hipdnn_validate_descriptors` requires a build configured with
-`-DHIPDNN_ENABLE_KERNEL_INGESTOR=ON` (default **OFF**) and the validator target built; a
+`-DHIPDNN_ENABLE_KERNEL_INGESTOR=ON` (default **ON**) and the validator target built; a
 missing binary means an unbuilt target, disabled capability or wrong build/install path.
 Feed it runtime descriptors -- authored direct-load output or packed per-architecture
 output, never unlowered rocKE authoring input.

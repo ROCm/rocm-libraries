@@ -59,9 +59,13 @@ option(HIPKERNELPROVIDER_GENERATE_SERIALIZE_HEADERS
        ${_hkp_generate_serialize_default}
 )
 
-# Gates the generic kernel ingestor. It compiles embedded-source kernels through the
-# shared compilation::HiprtcKernelCompiler, so it does not need ENABLE_HIP_MLOPS_ENGINE.
-option(HIPDNN_ENABLE_KERNEL_INGESTOR "Enable the generic kernel ingestor" OFF)
+# Gates the generic kernel ingestor. ON by default, as in hipDNN (ALMIOPEN-3077). It compiles
+# embedded-source kernels through the shared compilation::HiprtcKernelCompiler, so it does
+# not need ENABLE_HIP_MLOPS_ENGINE. With it ON, configure needs a concrete gfx architecture to
+# pack for in GPU_TARGETS (find_package(hip) sets it when it detects a local GPU), the
+# rocm-kpack package, and rocm_kpack's Python packer with msgpack and zstandard
+# (cmake/KpackPython.cmake). -DHIPDNN_ENABLE_KERNEL_INGESTOR=OFF builds without all three.
+option(HIPDNN_ENABLE_KERNEL_INGESTOR "Enable the generic kernel ingestor" ON)
 
 # A second kernel set for the ingestor, independent of rocKE: prebuilt FlyDSL
 # AOT objects, fetched with `dvc pull` (flydsl/README.md), packed and staged by
@@ -72,26 +76,95 @@ option(HIPDNN_ENABLE_KERNEL_INGESTOR "Enable the generic kernel ingestor" OFF)
 option(HIPKERNELPROVIDER_ENABLE_FLYDSL
        "Pack the prebuilt FlyDSL kernels for the kernel ingestor" OFF)
 option(ENABLE_ASM_SDPA_ENGINE "Build the ASM SDPA engine" ON)
-option(ENABLE_HIP_MLOPS_ENGINE "Build the HIP kernel engine" ON)
 
-# ALMIOPEN-3066: serve the HIP MLOps families migrated so far from the kernel ingestor's
-# HipMlops descriptors (descriptors/HipMlops/, packed only when this is ON) instead of the
-# hand-written engine: one descriptor engine per primary operation, each under its own name
-# and id. Both would accept the same graphs from the same kernel sources, so the two cannot
-# both be built. Families not yet migrated are not served in this mode. Removed, with the
-# hand-written engine, at cutover.
-option(HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR
-       "Serve the migrated HIP MLOps families from the kernel ingestor" OFF)
+# The HIP MLOps families are served either by the kernel ingestor, from its HipMlops
+# descriptors (descriptors/HipMlops/, packed only when HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR
+# is ON) with one descriptor engine per primary operation, each under its own name and id, or
+# by the hand-written HIP_MLOPS_ENGINE (ENABLE_HIP_MLOPS_ENGINE). Both would accept the same
+# graphs from the same kernel sources, so the two cannot both be built.
+#
+# The ingestor's engines are the default wherever the ingestor is built:
+# HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR defaults to HIPDNN_ENABLE_KERNEL_INGESTOR, or to OFF
+# when ENABLE_HIP_MLOPS_ENGINE is set ON, and ENABLE_HIP_MLOPS_ENGINE to the opposite of
+# HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR. So -DHIPDNN_ENABLE_KERNEL_INGESTOR=OFF, or
+# -DENABLE_HIP_MLOPS_ENGINE=ON alone, builds the hand-written engine, until ALMIOPEN-3078
+# removes it.
+#
+# A plain option() would cache each default once, so switching HIPDNN_ENABLE_KERNEL_INGESTOR
+# in an existing build directory would leave both options behind and fail the checks below.
+# _hkp_mlops_option() records each value it caches and derives again an entry that still
+# holds it. An entry holding anything else, or cached before the record existed (a build
+# directory configured before ALMIOPEN-3077), counts as set and is kept; one set to the value
+# recorded reads as not set.
+
+# _hkp_mlops_option_is_set(<out_var> <option>)
+#   TRUE when <option> is cached with a value _hkp_mlops_option() did not record.
+function(_hkp_mlops_option_is_set out_var option)
+    set(_set FALSE)
+    if(DEFINED CACHE{${option}})
+        set(_set TRUE)
+        if(DEFINED CACHE{_HKP_MLOPS_DEFAULT_${option}}
+           AND "$CACHE{${option}}" STREQUAL "$CACHE{_HKP_MLOPS_DEFAULT_${option}}")
+            set(_set FALSE)
+        endif()
+    endif()
+    set(${out_var} ${_set} PARENT_SCOPE)
+endfunction()
+
+# _hkp_mlops_option(<option> <doc> <ON|OFF>)
+#   option(<option> <doc> <default>), except that a value it cached follows <default>.
+function(_hkp_mlops_option option doc default)
+    _hkp_mlops_option_is_set(_set ${option})
+    if(_set)
+        option(${option} "${doc}" ${default})
+    else()
+        set(${option} ${default} CACHE BOOL "${doc}" FORCE)
+        set(_HKP_MLOPS_DEFAULT_${option} ${default} CACHE INTERNAL
+            "The default this build last cached for ${option}")
+    endif()
+endfunction()
+
+_hkp_mlops_option_is_set(_hkp_hip_mlops_engine_set ENABLE_HIP_MLOPS_ENGINE)
+if(_hkp_hip_mlops_engine_set AND ENABLE_HIP_MLOPS_ENGINE)
+    set(_hkp_mlops_ingestor_default OFF)
+elseif(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    set(_hkp_mlops_ingestor_default ON)
+else()
+    set(_hkp_mlops_ingestor_default OFF)
+endif()
+_hkp_mlops_option(HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR
+                  "Serve the HIP MLOps families from the kernel ingestor's engines"
+                  ${_hkp_mlops_ingestor_default})
+if(HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR)
+    set(_hkp_hip_mlops_engine_default OFF)
+else()
+    set(_hkp_hip_mlops_engine_default ON)
+endif()
+_hkp_mlops_option(ENABLE_HIP_MLOPS_ENGINE "Build the hand-written HIP MLOps engine"
+                  ${_hkp_hip_mlops_engine_default})
+
+# Only explicit settings reach these: each option defaults to agree with the others.
 if(HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR)
     if(ENABLE_HIP_MLOPS_ENGINE)
         message(FATAL_ERROR
-                "HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR and ENABLE_HIP_MLOPS_ENGINE both serve "
-                "the migrated HIP MLOps families; turn ENABLE_HIP_MLOPS_ENGINE OFF.")
+                "HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR and ENABLE_HIP_MLOPS_ENGINE are both ON, "
+                "and both serve the HIP MLOps families. Configure with "
+                "-DENABLE_HIP_MLOPS_ENGINE=OFF for the kernel ingestor's engines (the default), "
+                "or with -DHIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR=OFF for the hand-written "
+                "engine.")
     endif()
     if(NOT HIPDNN_ENABLE_KERNEL_INGESTOR)
         message(FATAL_ERROR
-                "HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR needs HIPDNN_ENABLE_KERNEL_INGESTOR=ON.")
+                "HIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR is ON but HIPDNN_ENABLE_KERNEL_INGESTOR "
+                "is OFF, and the engines it selects run on the kernel ingestor. Configure with "
+                "-DHIPKERNELPROVIDER_MLOPS_ENABLE_INGESTOR=OFF for the hand-written engine, or "
+                "with -DHIPDNN_ENABLE_KERNEL_INGESTOR=ON.")
     endif()
+    message(STATUS "HIP MLOps families served by the kernel ingestor's engines")
+elseif(ENABLE_HIP_MLOPS_ENGINE)
+    message(STATUS "HIP MLOps families served by the hand-written HIP_MLOPS_ENGINE")
+else()
+    message(STATUS "HIP MLOps families not built")
 endif()
 
 option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
@@ -312,6 +385,18 @@ if(NOT TARGET hipdnn_plugin_sdk)
     # Drop a stale cached table path so an older SDK Config cannot be answered by it.
     unset(HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON CACHE)
     find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
+    # The ingestor's SDK headers are installed only by a hipDNN built with it, so a hipDNN
+    # installed before the ingestor became the default fails here rather than mid-build.
+    if(HIPDNN_ENABLE_KERNEL_INGESTOR
+       AND DEFINED HIPDNN_PLUGIN_SDK_ENABLE_KERNEL_INGESTOR
+       AND NOT HIPDNN_PLUGIN_SDK_ENABLE_KERNEL_INGESTOR)
+        message(FATAL_ERROR
+                "HIPDNN_ENABLE_KERNEL_INGESTOR is ON (the default), but the hipdnn_plugin_sdk "
+                "in ${hipdnn_plugin_sdk_DIR} was built without the kernel ingestor and installs "
+                "none of its headers. Build against a hipDNN configured with "
+                "HIPDNN_ENABLE_KERNEL_INGESTOR=ON (its default), or configure with "
+                "-DHIPDNN_ENABLE_KERNEL_INGESTOR=OFF.")
+    endif()
 endif()
 
 include(CheckToolVersion)
@@ -755,8 +840,16 @@ set(HIPKERNELPROVIDER_FLYDSL_ACTIVE FALSE CACHE INTERNAL
     "The FlyDSL engines and tests are compiled (the production root has FlyDSL content)")
 
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    # Not REQUIRED: a build that gets the ingestor by default is told how to do without it.
     if(NOT TARGET rocm::rocm_kpack)
-        find_package(rocm-kpack CONFIG REQUIRED)
+        find_package(rocm-kpack CONFIG)
+        if(NOT rocm-kpack_FOUND)
+            message(FATAL_ERROR
+                    "HIPDNN_ENABLE_KERNEL_INGESTOR is ON (the default) and needs the rocm-kpack "
+                    "package (rocm::rocm_kpack), but find_package(rocm-kpack) found none. Add "
+                    "the ROCm install that ships it to CMAKE_PREFIX_PATH or set rocm-kpack_DIR, "
+                    "or configure with -DHIPDNN_ENABLE_KERNEL_INGESTOR=OFF.")
+        endif()
     endif()
 
     # The descriptor packer rides the ingestor gate, not the rocKE gate: it packs
