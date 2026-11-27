@@ -2,8 +2,8 @@
 
 - Contributors: Brian Harrison
 - **Status**: In progress
-- **Status notes**: Phase 1 shipped as plumbing only: frontend `execute` overloads, variant-pack attributes 704–707, the optional `hipdnnEnginePluginExecuteOpGraphWithOverrides` entry, and the `1.1.0` plugin version floor (#7279, #8881). No provider exports the override entry yet. Phase 2 (`is_dynamic`, wildcard dims, stride-as-order) is not built.
-- **Last verified**: 2026-10-15 against `develop` (2501d0b28cc)
+- **Status notes**: Phase 1 shipped as plumbing only: frontend `execute` overloads, variant-pack attributes 704–707, the optional `hipdnnEnginePluginExecuteOpGraphWithOverrides` entry, and the `1.1.0` plugin version floor (#7279, #8881). The MIOpen provider exports the override entry as a stub that rejects every call; no provider serves override graphs yet. Phase 2 (`is_dynamic`, wildcard dims, stride-as-order) is not built.
+- **Last verified**: 2026-11-27 against `develop` (c8ffdc11e88)
 
 ## Table of Contents
 1. [Executive Summary](#1-executive-summary)
@@ -377,10 +377,11 @@ Plugins that do not export `hipdnnPluginGetApiVersion` fall back to
 eligible for non-override graphs but are treated as not implementing
 any of the override-feature contracts. A plugin exports the symbol only
 when it includes `hipdnn_plugin_sdk/EnginePluginImpl.inl` and defines
-`HIPDNN_PLUGIN_API_VERSION`. The MIOpen and hip-kernel providers do
-this and report `1.2.0`. The hipBLASLt provider does not export the
-symbol, so it reads as `1.0.0`. No in-tree provider exports the
-override execute symbol, so no in-tree engine serves an override graph.
+`HIPDNN_PLUGIN_API_VERSION`. The MIOpen and hip-kernel providers do this and
+report `1.2.0` and `1.6.0`, respectively. The hipBLASLt provider does not export
+the symbol, so it reads as `1.0.0`. The MIOpen provider also exports the override
+execute symbol, as a stub that rejects every call: its plan builders decline
+override graphs during applicability. No in-tree engine serves an override graph.
 
 | State | `apiVersion()` | Graphs eligible to be served |
 |-------|----------------|------------------------------|

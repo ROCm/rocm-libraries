@@ -39,6 +39,8 @@ const std::vector<MiopenContainer::EngineDefinition>& MiopenContainer::getEngine
 {
     using namespace hipdnn_data_sdk::utilities;
 
+    // Every plan builder must decline override-shape graphs (see MiopenPluginPublic.cpp).
+    // Cover the decline in each builder's applicability tests.
     static const std::vector<EngineDefinition> s_engineDefinitions = {
         // MIOPEN_ENGINE (non-deterministic, default)
         {MIOPEN_ENGINE_ID,
