@@ -22,11 +22,14 @@ from pathlib import Path
 
 import pytest
 from rocke.assets import platform_root
+from rocke.tests.source_allowlist import (
+    AllowlistEntry,
+    file_kinds,
+    format_allowlist_entry,
+)
 from rocke.tests.torch_uses import (
     TorchUseKind,
     allowlist_breaches,
-    file_kinds,
-    format_allowlist_entry,
     read_allowlist,
     tree_files,
     tree_torch_uses,
@@ -53,8 +56,8 @@ def test_the_allowlist_is_sorted_one_canonical_line_per_file():
         if line and not line.startswith("#")
     ]
     canonical = [
-        format_allowlist_entry(path, kinds)
-        for path, kinds in sorted(read_allowlist(ALLOWLIST).items())
+        format_allowlist_entry(path, entry.kinds)
+        for path, entry in sorted(read_allowlist(ALLOWLIST).items())
     ]
     assert listed == canonical
 
@@ -80,7 +83,7 @@ def repository(tmp_path: Path) -> Path:
     return tmp_path
 
 
-LISTED = {"listed.py": frozenset({TorchUseKind.IMPORT})}
+LISTED = {"listed.py": AllowlistEntry(frozenset({TorchUseKind.IMPORT}))}
 
 
 def test_the_tree_is_what_git_tracks_or_would_track(repository):
@@ -142,9 +145,9 @@ def test_a_listed_file_whose_torch_use_was_removed_fails_the_gate(repository):
 def test_the_planted_files_pass_once_listed(repository):
     (repository / "requirements.txt").write_text("torch\n", encoding="utf-8")
     found = tree_torch_uses(repository)
-    allowed = {path: file_kinds(uses) for path, uses in found.items()}
+    allowed = {path: AllowlistEntry(file_kinds(uses)) for path, uses in found.items()}
     assert allowed == {
-        "listed.py": frozenset({TorchUseKind.IMPORT}),
-        "requirements.txt": frozenset({TorchUseKind.CONFIG}),
+        "listed.py": AllowlistEntry(frozenset({TorchUseKind.IMPORT})),
+        "requirements.txt": AllowlistEntry(frozenset({TorchUseKind.CONFIG})),
     }
     assert allowlist_breaches(found, allowed) == []

@@ -16,6 +16,7 @@ from rocke.tests.source_allowlist import (
     allowlist_breaches,
     format_allowlist_entry,
     read_allowlist,
+    tracked_files,
 )
 
 
@@ -128,3 +129,11 @@ def test_every_breach_is_named_and_a_shortened_line_keeps_its_issue():
             "'shrunk.py: first  # AICK-2'"
         ),
     ]
+
+
+def test_listing_a_tree_without_git_on_the_path_is_refused(tmp_path, monkeypatch):
+    monkeypatch.setenv("PATH", str(tmp_path))
+    with pytest.raises(
+        RuntimeError, match=r"tracked_files failed - root=.*, expected git on PATH"
+    ):
+        tracked_files(tmp_path, lambda path: True)

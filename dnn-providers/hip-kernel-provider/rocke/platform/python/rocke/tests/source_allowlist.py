@@ -10,12 +10,14 @@ check's own ``enum.Enum``) and the ``detail`` of the code it found. Its gate
 compares the tree's findings with an allowlist file, one line per file::
 
     library/tests/example.py: kind_a kind_b
-    library/tests/pinned.py: kind_a  # AICK-1234
 
 The list only shrinks: a file not on it, or a kind its line does not name, fails
 the gate, and so does a line or kind the tree no longer needs (the stale line
-goes). A check whose lines must each name the issue that removes them reads its
-list with ``require_issue=True``; the issue follows the kinds after ``  # ``.
+goes). A list read with ``require_issue=True`` names, on every line, the issue
+that removes it, after the kinds; a list read without it names none::
+
+    library/tests/pinned.py: kind_a  # AICK-1234
+
 ``#`` lines and blank lines are comments.
 """
 

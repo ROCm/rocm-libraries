@@ -45,14 +45,13 @@ from pathlib import Path
 
 from ..assets import platform_root
 from . import source_allowlist
-from .source_allowlist import tracked_files
+from .source_allowlist import AllowlistEntry
+from .source_ast import dotted_name, string_constant
 
 __all__ = [
     "TorchUse",
     "TorchUseKind",
     "allowlist_breaches",
-    "file_kinds",
-    "format_allowlist_entry",
     "is_config_file",
     "read_allowlist",
     "torch_named_identifiers",
@@ -130,16 +129,6 @@ def _module_kinds(module: str) -> list[TorchUseKind]:
     return kinds
 
 
-def _dotted(node: ast.AST) -> str:
-    parts: list[str] = []
-    while isinstance(node, ast.Attribute):
-        parts.append(node.attr)
-        node = node.value
-    if isinstance(node, ast.Name):
-        parts.append(node.id)
-    return ".".join(reversed(parts))
-
-
 def _torch_bindings(tree: ast.AST) -> dict[str, str]:
     """Each name the module binds to a torch module or member, with what it is
     (``{"nn": "torch.nn"}``). ``torch`` itself always counts, so a torch module
@@ -200,31 +189,30 @@ def _import_uses(node: ast.Import | ast.ImportFrom) -> list[TorchUse]:
 
 
 def _call_uses(node: ast.Call) -> list[TorchUse]:
-    function = _dotted(node.func).split(".")[-1]
-    argument = node.args[0] if node.args else None
-    if not (isinstance(argument, ast.Constant) and isinstance(argument.value, str)):
+    called = dotted_name(node.func)
+    function = called.split(".")[-1]
+    module = string_constant(node.args[0]) if node.args else None
+    if module is None:
         return []
-    module = argument.value
-    detail = f"{_dotted(node.func)}({module!r})"
+    detail = f"{called}({module!r})"
     if function in _SKIP_IMPORTS and _is_torch_module(module):
         return [TorchUse(node.lineno, TorchUseKind.IMPORTORSKIP, detail)]
-    if function in _DYNAMIC_IMPORTS or _dotted(node.func) == f"{_MODULE_TABLE}.get":
+    if function in _DYNAMIC_IMPORTS or called == f"{_MODULE_TABLE}.get":
         return [TorchUse(node.lineno, kind, detail) for kind in _module_kinds(module)]
     return []
 
 
 def _module_table_uses(node: ast.Subscript) -> list[TorchUse]:
     """``sys.modules["torch"]`` read (not assigned or deleted): the module itself."""
-    key = node.slice
+    module = string_constant(node.slice)
     if not (
         isinstance(node.ctx, ast.Load)
-        and _dotted(node.value) == _MODULE_TABLE
-        and isinstance(key, ast.Constant)
-        and isinstance(key.value, str)
+        and dotted_name(node.value) == _MODULE_TABLE
+        and module is not None
     ):
         return []
-    detail = f"{_MODULE_TABLE}[{key.value!r}]"
-    return [TorchUse(node.lineno, kind, detail) for kind in _module_kinds(key.value)]
+    detail = f"{_MODULE_TABLE}[{module!r}]"
+    return [TorchUse(node.lineno, kind, detail) for kind in _module_kinds(module)]
 
 
 def torch_uses_in_python(source: str, filename: str) -> list[TorchUse]:
@@ -249,14 +237,14 @@ def torch_uses_in_python(source: str, filename: str) -> list[TorchUse]:
         elif isinstance(node, ast.Attribute):
             if node.attr == _INTEROP:
                 uses.append(
-                    TorchUse(node.lineno, TorchUseKind.TORCH_INTEROP, _dotted(node))
+                    TorchUse(node.lineno, TorchUseKind.TORCH_INTEROP, dotted_name(node))
                 )
             root = node.value
             if isinstance(root, ast.Name) and root.id in bindings:
                 chained.add(id(root))
                 expanded = f"{bindings[root.id]}.{node.attr}"
                 uses.append(
-                    TorchUse(node.lineno, _object_kind(expanded), _dotted(node))
+                    TorchUse(node.lineno, _object_kind(expanded), dotted_name(node))
                 )
     for node in ast.walk(tree):
         if (
@@ -334,7 +322,7 @@ def tree_files(root: Path) -> list[str]:
     """The files under ``root`` that the gate reads, relative POSIX paths, sorted:
     Python files and config files (:func:`is_config_file`) that git tracks or
     would track (:func:`rocke.tests.source_allowlist.tracked_files`)."""
-    return tracked_files(
+    return source_allowlist.tracked_files(
         root, lambda path: path.endswith(".py") or is_config_file(Path(path))
     )
 
@@ -349,52 +337,31 @@ def tree_torch_uses(root: Path) -> dict[str, list[TorchUse]]:
     return found
 
 
-def file_kinds(uses: Sequence[TorchUse]) -> frozenset[TorchUseKind]:
-    """The distinct kinds of ``uses``."""
-    return source_allowlist.file_kinds(uses)
-
-
-def format_allowlist_entry(path: str, kinds: frozenset[TorchUseKind]) -> str:
-    """One allowlist line: ``path: kind kind``, kinds sorted."""
-    return source_allowlist.format_allowlist_entry(path, kinds)
-
-
-def read_allowlist(path: Path) -> dict[str, frozenset[TorchUseKind]]:
-    """The allowlist at ``path``: one ``file: kind kind`` line per file, ``#``
-    comments and blank lines ignored. A malformed line, an unknown kind or a file
-    listed twice is a ``ValueError`` naming the line."""
-    return {
-        listed: entry.kinds
-        for listed, entry in source_allowlist.read_allowlist(path, TorchUseKind).items()
-    }
+def read_allowlist(path: Path) -> dict[str, AllowlistEntry]:
+    """The allowlist at ``path``: one ``file: kind kind`` line per file
+    (:func:`rocke.tests.source_allowlist.read_allowlist`)."""
+    return source_allowlist.read_allowlist(path, TorchUseKind)
 
 
 def allowlist_breaches(
     found: Mapping[str, Sequence[TorchUse]],
-    allowed: Mapping[str, frozenset[TorchUseKind]],
+    allowed: Mapping[str, AllowlistEntry],
 ) -> list[str]:
     """What breaks the allowlist, one line per file, sorted by file
-    (:func:`rocke.tests.source_allowlist.allowlist_breaches`).
-
-    A file not on the list uses torch; a listed file uses a kind its entry does
-    not list; a listed file no longer uses a kind its entry lists, or torch at
-    all (the entry is stale: the list only shrinks, so its lines go when the
-    uses go).
-    """
-    return source_allowlist.allowlist_breaches(
-        found,
-        {
-            listed: source_allowlist.AllowlistEntry(kinds)
-            for listed, kinds in allowed.items()
-        },
-        subject="torch use",
-    )
+    (:func:`rocke.tests.source_allowlist.allowlist_breaches`): a file that
+    uses torch and is not listed, a kind of use its line does not list, and a
+    line or kind the tree no longer uses."""
+    return source_allowlist.allowlist_breaches(found, allowed, subject="torch use")
 
 
 def _print_inventory(root: Path, *, names: bool) -> None:
     if not names:
         for path, uses in tree_torch_uses(root).items():
-            print(format_allowlist_entry(path, file_kinds(uses)))
+            print(
+                source_allowlist.format_allowlist_entry(
+                    path, source_allowlist.file_kinds(uses)
+                )
+            )
         return
     for path in tree_files(root):
         if not path.endswith(".py"):
