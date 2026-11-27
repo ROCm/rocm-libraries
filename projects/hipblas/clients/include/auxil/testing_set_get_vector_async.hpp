@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2023 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -118,7 +118,10 @@ void testing_set_get_vector_async(const Arguments& arg)
         for(int iter = 0; iter < runs; iter++)
         {
             if(iter == arg.cold_iters)
+            {
+                getFrequencyMonitor().start(stream);
                 gpu_time_used = get_time_us_sync(stream);
+            }
 
             CHECK_HIPBLAS_ERROR(
                 hipblasSetVectorAsyncFn(M, sizeof(T), (void*)hx, incx, (void*)db, incd, stream));
@@ -126,6 +129,7 @@ void testing_set_get_vector_async(const Arguments& arg)
                 hipblasGetVectorAsyncFn(M, sizeof(T), (void*)db, incd, (void*)hy, incy, stream));
         }
         gpu_time_used = get_time_us_sync(stream) - gpu_time_used;
+        getFrequencyMonitor().stop();
 
         hipblasSetGetVectorAsyncModel{}.log_args<T>(std::cout,
                                                     arg,

@@ -87,6 +87,22 @@ both read and written, such as ``y`` in ``axpy`` and ``gemv`` or ``C`` in ``gemm
 storage, the stored triangle for symmetric, Hermitian, and triangular matrices (including packed storage), and the
 stored band for banded matrices. The column is reported only for functions with a byte count.
 
+GPU clocks vary with power and thermal limits, which affects the measured performance.
+When hipblas-bench is built with AMD SMI, set ``HIPBLAS_BENCH_FREQ=1`` to sample the clocks
+every 50 ms while the timed iterations run and report them with each result, in MHz.
+The first sample is taken 5 ms after the timed iterations start, so a result whose timed iterations
+take less than that reports 0:
+
+*  ``lowest-avg-freq`` and ``lowest-median-freq``: the average and median engine clock of the slowest XCD.
+*  ``avg-MCLK`` and ``median-MCLK``: the average and median memory clock.
+
+Set ``HIPBLAS_BENCH_FREQ_ALL=1`` instead to report the engine clock of each XCD
+in the ``avg-freq_<i>`` and ``median-freq_<i>`` columns.
+
+.. code-block:: bash
+
+   HIPBLAS_BENCH_FREQ=1 ./hipblas-bench -f gemm -r f32_r -m 4096 -n 4096 -k 4096
+
 hipblas-test
 ============
 

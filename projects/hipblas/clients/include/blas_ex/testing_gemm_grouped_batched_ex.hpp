@@ -809,11 +809,15 @@ void testing_gemm_grouped_batched_ex(const Arguments& arg)
         for(int iter = 0; iter < runs; ++iter)
         {
             if(iter == arg.cold_iters)
+            {
+                getFrequencyMonitor().start(stream);
                 gpu_time_used = get_time_us_sync(stream);
+            }
             run_grouped_gemm_ex(cfg.alpha_array.data(), cfg.beta_array.data());
         }
 
         gpu_time_used = get_time_us_sync(stream) - gpu_time_used;
+        getFrequencyMonitor().stop();
 
         double gflop_count = 0.0;
         for(int g = 0; g < group_count; ++g)

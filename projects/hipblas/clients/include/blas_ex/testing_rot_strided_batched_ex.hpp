@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -362,7 +362,10 @@ void testing_rot_strided_batched_ex(const Arguments& arg)
         for(int iter = 0; iter < runs; iter++)
         {
             if(iter == arg.cold_iters)
+            {
+                getFrequencyMonitor().start(stream);
                 gpu_time_used = get_time_us_sync(stream);
+            }
 
             DAPI_DISPATCH(hipblasRotStridedBatchedExFn,
                           (handle,
@@ -382,6 +385,7 @@ void testing_rot_strided_batched_ex(const Arguments& arg)
                            executionType));
         }
         gpu_time_used = get_time_us_sync(stream) - gpu_time_used;
+        getFrequencyMonitor().stop();
 
         hipblasRotStridedBatchedExModel{}.log_args<Tx>(std::cout,
                                                        arg,

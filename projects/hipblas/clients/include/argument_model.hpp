@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -40,6 +40,9 @@ bool ArgumentModel_get_log_function_name();
 
 void ArgumentModel_set_log_datatype(bool d);
 bool ArgumentModel_get_log_datatype();
+
+// Appends the clocks sampled during the timing loop when HIPBLAS_BENCH_FREQ is set
+void ArgumentModel_log_frequencies(std::stringstream& name_line, std::stringstream& val_line);
 
 // ArgumentModel template has a variadic list of argument enums
 template <hipblas_argument... Args>
@@ -93,6 +96,8 @@ public:
                 val_line << norm1 << ", " << norm2 << ", ";
             }
         }
+
+        ArgumentModel_log_frequencies(name_line, val_line);
     }
 
     template <typename T>

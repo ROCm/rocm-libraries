@@ -167,6 +167,14 @@ if( BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS )
   endif()
 
   add_subdirectory( clients )
+
+  # Package dependencies the client directories record (see clients/benchmarks). Declared here,
+  # because rocm_create_package reads them from this directory scope.
+  get_property( HIPBLAS_BENCHMARKS_DEPENDS GLOBAL PROPERTY HIPBLAS_BENCHMARKS_PACKAGE_DEPENDS )
+  if( HIPBLAS_BENCHMARKS_DEPENDS )
+    rocm_package_add_rpm_dependencies(COMPONENT benchmarks DEPENDS ${HIPBLAS_BENCHMARKS_DEPENDS})
+    rocm_package_add_deb_dependencies(COMPONENT benchmarks DEPENDS ${HIPBLAS_BENCHMARKS_DEPENDS})
+  endif()
 endif( )
 
 # Build docs
