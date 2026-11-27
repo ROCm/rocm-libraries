@@ -45,8 +45,10 @@ from . import (
     peer_carry,
     prcode,
     registry,
+    reviewer_name,
     scaler,
     slots,
+    snapshot,
 )
 from .clashes import SECTION as CLASH_SECTION
 from .overlaps import SECTION as OVERLAP_SECTION
@@ -2051,8 +2053,9 @@ def ready_done(st: dict, n: int) -> bool:
 
 
 def review_finished(st: dict, n: int, ours: dict | None = None) -> None:
-    """PR n's review is finished: posted (post.post), kept unposted while posting is off (post.save_draft), or written
-    to the mirror's folder (mirror.divert). Its pipe and its entry awaiting verification end, and with them what they
+    """PR n's review is finished: posted (post.post), kept unposted while posting is off (post.save_draft), written
+    to the mirror's folder (mirror.divert), or closed without a post because a review of our account covers its head
+    (close_posted). Its pipe and its entry awaiting verification end, and with them what they
     hold: its trees and its share of the RAM disk (cleanup.in_use), and its place among the work in flight, which
     the scaler, the shadow drafter, the driver's picks and the dashboards count. `ours`, when given, is our last review
     on the PR from now on (rec["ours"]), as the round logic reads it: the PR is not reviewed again at that head, and a
@@ -2079,8 +2082,9 @@ def waiting_on_verifier(st: dict) -> list[dict]:
 
 def close_review(st: dict, store, n: int, head: str, why: str) -> list[str]:
     """Close PR n's review of `head` without a post, once our last review covers that head (`rk classify N --record` on
-    a merge- or rebase-only head): a draft awaiting verification leaves the list, and a review in flight (its pipe)
-    stops its jobs and frees its heavy slot. Journalled; the lines say what was closed.
+    a merge- or rebase-only head), or a review of our account that stands for ours does (`rk review-close N`:
+    close_posted): a draft awaiting verification leaves the list, and a review in flight (its pipe) stops its jobs and
+    frees its heavy slot. Journalled; the lines say what was closed.
     """
     out = []
     if any(
@@ -2105,6 +2109,169 @@ def close_review(st: dict, store, n: int, head: str, why: str) -> list[str]:
             f"#{n}: the review in flight at {head[:10]} is stopped and closed without a post ({why})"
         )
     return out
+
+
+def covering_review(
+    cfg: dict, store, rec: dict, reviews: list[dict], head: str
+) -> dict | None:
+    """The latest of REVIEWS (snapshot.account_reviews of PR rec) that stands for ours (reviewer_name.stands_for_ours:
+    its line 1 gives no name, or one of this deployment's) and covers HEAD (covers), as our review's record
+    (snapshot.as_ours; its count is the caller's); None when none does. Another deployment's review is never one.
+    """
+    return _covering(
+        cfg,
+        store,
+        rec,
+        [p for p in reviews if reviewer_name.stands_for_ours(cfg, p["body"])],
+        head,
+    )
+
+
+def _covering(
+    cfg: dict, store, rec: dict, reviews: list[dict], head: str
+) -> dict | None:
+    """The latest of REVIEWS that covers HEAD, as covering_review returns it, whatever name it gives. Its head: for our
+    last review itself, rec["ours"]'s head and the heads recorded as equivalent to it; for a post of this
+    deployment's (its URL in the ledger), as our posts' heads are found (snapshot.resolve_reviewed_head); for any
+    other, from GitHub alone (snapshot.account_review_head)."""
+    old = rec.get("ours") or {}
+    held = {
+        r.get("ref")
+        for r in store.ledger()
+        if r.get("kind") == "post" and r.get("pr") == rec["n"]
+    }
+    for p in reversed(reviews):
+        r = snapshot.as_ours(p, 0)
+        if old.get("head") and old.get("url") == r["url"]:
+            r.update(
+                {
+                    k: old[k]
+                    for k in ("head", "head_src", "equivalent_heads")
+                    if old.get(k)
+                }
+            )
+        elif r["url"] in held:
+            r = snapshot.resolve_reviewed_head(cfg, store, rec["n"], r)
+        else:
+            r = snapshot.account_review_head(cfg, rec["n"], r)
+        if covers(r, head):
+            return r
+    return None
+
+
+def _close_heads(cfg: dict, st: dict, n: int) -> tuple[list[str], str]:
+    """The heads `rk review-close N` closes PR n's reviews at, its review's awaiting verification and in flight; or,
+    with none, the one line that says why it closes nothing: in a mirror (mirror.NO_CLOSE), or for a PR not tracked or
+    with no such review."""
+    from . import mirror
+
+    if mirror.on(cfg):
+        return [], mirror.NO_CLOSE
+    if str(n) not in st["prs"]:
+        return [], f"#{n} is not tracked: nothing to close"
+    ready = next((r for r in st.get("review_ready") or [] if r["pr"] == n), None)
+    heads = [x["head"] for x in (ready, pipe_of(st, n)) if x and x.get("head")]
+    if not heads:
+        return [], (
+            f"#{n} has no review awaiting verification or in flight: nothing to close"
+        )
+    return list(dict.fromkeys(heads)), ""
+
+
+def close_reads(cfg: dict, st: dict, store, n: int) -> tuple[dict[str, dict], str]:
+    """`rk review-close N`'s reads of GitHub (the read login), made before it takes the state lock so that a tick never
+    waits on them: for each head of PR n's reviews it would close (_close_heads, in ST as read without the lock), the
+    review of our account that covers it (covering_review). Else the one line that says why nothing is closed: our
+    account has no review of that head, or only another deployment's, which is not ours to take. gh.GhError when
+    GitHub is not read."""
+    heads, why = _close_heads(cfg, st, n)
+    if why:
+        return {}, why
+    rec = st["prs"][str(n)]
+    reviews = snapshot.account_reviews(cfg, n)
+    found = {}
+    for head in heads:
+        r = covering_review(cfg, store, rec, reviews, head)
+        if r is None:
+            return {}, _uncovered(cfg, store, rec, reviews, head)
+        found[head] = r
+    return found, ""
+
+
+def _uncovered(cfg: dict, store, rec: dict, reviews: list[dict], head: str) -> str:
+    """Why no review of our account takes the place of PR rec's review at HEAD (close_reads), in one line."""
+    n = rec["n"]
+    others = [p for p in reviews if not reviewer_name.stands_for_ours(cfg, p["body"])]
+    other = _covering(cfg, store, rec, others, head)
+    if other is not None:
+        body = next(p["body"] for p in others if p["url"] == other["url"])
+        name = reviewer_name.given(reviewer_name.first_line(body))
+        return (
+            f"our account's review of #{n} at {head[:10]} on GitHub is another deployment's ({name}), not ours to "
+            "take: nothing closed"
+        )
+    return (
+        f"our account has no review of #{n} at {head[:10]} on GitHub (`rk facts {n}` lists the ones this "
+        "deployment did not post): nothing closed"
+    )
+
+
+def close_posted(
+    cfg: dict, st: dict, store, n: int, found: dict[str, dict]
+) -> tuple[bool, list[str]]:
+    """`rk review-close N` under the state lock, after close_reads read GitHub: PR n's review awaiting verification or
+    in flight is closed without a post, because a review our account posted covers the head it was made for and
+    stands for ours: an older monitor's under the same account, or one posted by hand (FOUND: close_reads' review for
+    each head). (Whether it was closed, and the lines that say what was done, or the one line that says why not.) The
+    heads are read again in ST: a review that moved on to another head while GitHub was read is not closed. It
+    closes as close_review closes, journalled, and finishes the review as a post does (review_finished): that review
+    is our last review of the PR (rec["ours"], marked taken: post.TAKEN, with the count a post gives:
+    post.next_count), so the PR is not reviewed again at that head, and a new head gets a follow-up. It writes nothing
+    to GitHub. A review awaiting verification gets its line of state/review_cost.jsonl (review_cost.record_close), so
+    that `rk spend` prices it as a review of its own, closed, and the verifier runs it had are not booked on the PR's
+    next review; a review in flight had none. Refused, nothing changed, as _close_heads says, or when a head is not
+    one GitHub was read for.
+    """
+    from . import (  # call-time imports: post, and prep, which review_cost reads, import this module
+        post,
+        prep,
+        review_cost,
+    )
+
+    heads, why = _close_heads(cfg, st, n)
+    if why:
+        return False, [why]
+    moved = [h for h in heads if h not in found]
+    if moved:
+        return False, [
+            f"#{n}'s review moved on to {moved[0][:10]} while GitHub was read: nothing closed; run "
+            f"rk review-close {n} again"
+        ]
+    rec = st["prs"][str(n)]
+    ours = dict(max((found[h] for h in heads), key=lambda r: r["at"]))
+    old = rec.get("ours") or {}
+    same = old.get("url") == ours["url"] and old.get("count")
+    ours.update(count=old["count"] if same else post.next_count(rec))
+    ours[post.TAKEN] = now()
+    ready = next((r for r in st.get("review_ready") or [] if r["pr"] == n), None)
+    rnd = prep.default_round(st, n)
+    lines = []
+    for head in heads:
+        lines += close_review(
+            st, store, n, head, f"a review our account posted covers it: {ours['url']}"
+        )
+    if ready:
+        review_cost.record_close(cfg, st, store, n, rnd, ready["head"], ours["url"])
+    review_finished(st, n, ours)
+    at = (ours.get("head") or "")[:10]
+    store.journal(
+        "review",
+        f"#{n} review-close: our last review is our account's review at {at}, posted {ours['at']}: "
+        f"{ours['url']}",
+    )
+    return True, lines + [
+        f"#{n}: that review is our last review of the PR, at {at}: a new head gets a follow-up"
+    ]
 
 
 def settled(cfg: dict, st: dict, rec: dict) -> bool:

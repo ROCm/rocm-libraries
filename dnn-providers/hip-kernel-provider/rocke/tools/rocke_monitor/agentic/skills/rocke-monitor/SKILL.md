@@ -246,9 +246,15 @@ the like) wake the loop once; the heartbeat repeats them.
      through `review_procedure.md`. The driver keeps as many drafts running as the parallel reviews in effect (the
      scaler's setting, within its range, starting at `features.review_automation.parallel_reviews`; `rk status` shows
      the range); verify each REVIEW_READY as it comes, in parallel. While jobs run, only check on them.
-   - **Review automation:** `!! VERIFY_STALE #N: handed to verification … ago, nothing posted`: PR N's review has
-     waited longer than its verification should take (a split review gets longer), and nothing posted it. Check its
-     verifier; a split review's are its part verifiers and its cross pass. Still running, its notes still changing
+   - **Review automation:** `!! VERIFY_STALE #N: handed to verification … ago, nothing posted (head …)`: PR N's
+     review has waited longer than its verification should take (a split review gets longer), and nothing posted it.
+     When our account posted a review at that head already that stands for ours (an older monitor's under the same
+     account, or one a person posted by hand; `rk facts N` lists our account's reviews this deployment did not post,
+     each that stands for ours with its head, and marks another deployment's "not ours to take"), and its content
+     confirms that head (the verifier's team file, Close, no post), run `rk review-close N`, as the line says: it
+     closes the review without a post, and that review becomes our last one. Then stop the review's agents that still
+     run (`TaskStop`), and you are done. A mirror's line names no `rk review-close`. Otherwise check its verifier;
+     a split review's are its part verifiers and its cross pass. Still running, its notes still changing
      (`notes.md`; a part verifier's `part<k>_notes.md`): nothing to do. Handed back with its post: check and post it
      (`review_procedure.md`, On REVIEW_READY, steps 3–5). Gone or stuck: stop it if it runs (`TaskStop`), start that
      one again as below, and tell <user_login> in one plain line.

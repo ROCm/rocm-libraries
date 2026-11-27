@@ -24,8 +24,8 @@ prototype, and in standby, those commands keep it as an unsent item, and you rep
   `BREAKAGE_OPEN`).
 - The culprit PR's author hears about it through the issue (cc) and one notice on the PR.
 - After `revert_offer_after_min`, the revert decision stays with the develop-green team. We offer them evidence (a
-  verified local revert) on the issue, with <user_login>'s OK. We never push a revert or open a revert PR unless
-  <user_login> asks.
+  verified local revert) on the issue, with <user_login>'s OK. We never push a revert or open a revert PR: the
+  session's guard refuses both.
 
 ## What the tick does by itself (`rkmon_lib/guard.py`)
 
@@ -101,8 +101,7 @@ prototype, and in standby, those commands keep it as an unsent item, and you rep
    - Prepare a local revert of the culprit merge in a scratch worktree (`git revert -m 1` on the merge's SHA, on a
      branch from develop). Check that it builds and that the failing section passes.
    - Ask <user_login> whether to post that evidence on the develop issue (`rk issue-comment N FILE --key ID-revert`).
-     Then run `rk incident-note ID revert_offered yes`. Push a revert branch or open a revert PR only if <user_login>
-     asks.
+     Then run `rk incident-note ID revert_offered yes`. The revert itself is the develop-green team's to push.
 5. **On a fix PR.** Record it with `rk incident-note ID fixed_by N`.
    - The toolkit then treats it as a develop fix: review P0 with the shorter settle (`settle_develop_fix_min`), merge
      tier 0, analysis first.

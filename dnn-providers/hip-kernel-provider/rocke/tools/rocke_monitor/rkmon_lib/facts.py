@@ -5,7 +5,9 @@ L-536).
 
 Facts an orchestrator writes into briefs from memory go wrong (a stale develop SHA, a missed force-push, a wrong post
 time, ABI history lines that do not exist), so they are read here, under test. GitHub is read through gh.py (GETs only);
-our posts come from the ledger (in a mirror, the live monitor's, up to the feed line: rkmon_lib/mirror.py), our
+our posts come from the ledger (in a mirror, the live monitor's, up to the feed line: rkmon_lib/mirror.py), and our
+account's reviews the ledger does not hold, an older monitor's, another deployment's or posted by hand (in a mirror,
+none after the feed line), from GitHub; our
 reviews kept unposted from the outputs folder, and our last review's text, posted or kept, from where
 post.our_last_review reads it; the time of our last review, posted or kept, after which the force-pushes are marked and
 other people's comments listed, by the follow-up gap's rule (plan.last_review_time; in a mirror, the live monitor's
@@ -23,7 +25,7 @@ import json
 import pathlib
 import re
 
-from . import abi, breakage, gh, guard, reviewer_name
+from . import abi, breakage, gh, guard, reviewer_name, snapshot
 from . import config
 from .plan import last_review_posts, last_review_time
 from .snapshot import worker_meta_head
@@ -133,6 +135,44 @@ def _ours(cfg: dict, st: dict, store, n: int, ctx: dict) -> list[str]:
             f"{'kept unposted' if post.is_kept_file(p) else 'copy'}: {p} ({_mtime(p)})"
             for p in post.copies(cfg, n)
         ]
+    return lines or ["none"]
+
+
+# Where the head of a review this deployment did not post comes from (snapshot.account_review_head), in plain words.
+HEAD_FROM = {
+    "review-commit": "(the commit the review names)",
+    "timeline": "(the PR's head when it was posted, an estimate)",
+}
+
+
+def _account(cfg: dict, st: dict, store, n: int, ctx: dict) -> list[str]:
+    """Our account's reviews of PR n (snapshot.account_reviews) that the ledger `our reviews` lists does not hold (by
+    their URL): posted under the same account by an older monitor or another deployment, or by hand; in a mirror, none
+    posted after the feed line (ctx["until"]: mirror.posts_until), the live review's own. Each with when it was
+    posted, its light and its link. One that stands for ours (reviewer_name.stands_for_ours: its line 1 gives one of
+    this deployment's names, or none) gives the head it reviewed too, read from GitHub alone
+    (snapshot.account_review_head) and said in plain words (HEAD_FROM); a verifier that finds one at its review's head,
+    and confirms that head from the review's content, hands back "close, no post" (`rk review-close N`). One that
+    gives another name is another deployment's, not ours to take.
+    """
+    held = {r.get("ref") for r in ctx["posts"] if r.get("kind") == "post"}
+    until = ctx.get("until") or ""
+    lines = []
+    for p in snapshot.account_reviews(cfg, n):
+        if p["url"] in held or (until and p["at"] > until):
+            continue
+        r = snapshot.as_ours(p, 0)
+        if not reviewer_name.stands_for_ours(cfg, p["body"]):
+            name = reviewer_name.given(reviewer_name.first_line(p["body"]))
+            lines.append(
+                f"{p['at']} {p['kind']} {r['verdict']} {p['url']}: another deployment's ({name}), not ours to take"
+            )
+            continue
+        r = snapshot.account_review_head(cfg, n, r)
+        lines.append(
+            f"{p['at']} {p['kind']} at {_short(r['head'])} {HEAD_FROM[r['head_src']]} {r['verdict']} {p['url']}: "
+            "not posted by this deployment"
+        )
     return lines or ["none"]
 
 
@@ -338,6 +378,11 @@ SECTIONS = (
         _ours,
     ),
     (
+        "our account's reviews this deployment did not post (an older monitor's or another deployment's under the same "
+        "account, or by hand)",
+        _account,
+    ),
+    (
         "our last review: header, flagged rows, findings (copy them into the brief; never recall them)",
         _last_findings,
     ),
@@ -370,7 +415,7 @@ def render(cfg: dict, st: dict, store, n: int) -> tuple[list[str], int]:
         posts = [r for r in store.ledger() if r.get("pr") == n]
         ours = ((st.get("prs") or {}).get(str(n)) or {}).get("ours")
         last = last_review_time(n, ours, last_review_posts(posts))
-    ctx = {"posts": posts, "last_review": last}
+    ctx = {"posts": posts, "last_review": last, "until": mirror.posts_until(cfg, st, n)}
     out, failed = [f"# Facts for #{n}, read {now()}"], 0
     for title, section in SECTIONS:
         out.append("== " + title.format(me=config.operator_login(cfg)))

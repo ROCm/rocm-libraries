@@ -114,7 +114,7 @@ A quiet tick costs one command and one line, and no Claude turn.
 - **Pick.** In plan order: the review queue first, then develop fixes and the operator's priorities (P0), final
   reviews of PRs close to merge (P1), other near-ready follow-ups (P2), first rounds (P3) and other follow-ups (P4).
   A head must have settled: `features.review_automation.schedule.push_cooldown_minutes` (30) after the push, 45
-  minutes after the last of a burst, 10 for a develop fix or a priority. A follow-up waits
+  minutes after the last of a burst, at most 10 for a develop fix or a priority, a burst's too. A follow-up waits
   `features.review_automation.schedule.follow_up_cooldown_minutes` (60) after our last review of the PR, posted or
   kept unposted, except a merge-only push and the PRs in `followup_gap_exempt` (develop fixes and priorities by
   default). The review driver never starts a PR over
@@ -182,7 +182,10 @@ A quiet tick costs one command and one line, and no Claude turn.
 
 ## Merge gates
 
-Each gate result is recorded per (PR head, develop SHA) and goes stale when either moves.
+Every tick works the gates out again, at the PR's head on today's develop. G5–G7 reuse the results of the latest
+checks run on the PR merged with develop, by a gate job or by the review's own checks, recorded with the head, the
+develop SHA and develop's rocKE tree: they stay fresh while the head is the same and develop's rocKE tree is unchanged
+(a develop move outside rocKE cannot change them), and are pending otherwise.
 
 | Gate | Passes when |
 |---|---|
@@ -256,7 +259,7 @@ on a commit from before an incident's merged fix, failing only in jobs the incid
 | The break opens | The queue freezes, a PR the monitor armed is disarmed (`!! DISARM_NEEDED`), and the operator is told at once |
 | The culprit is known | Develop breakages are GitHub issues, one source of truth. Once develop alone reproduces the break, Claude files one while the merge queue is live with its develop guard (or links an existing one), with the develop guard's `ci_red_label` when CI is red, or with its `stability_label`, assigned to the breaking PR's author, when no CI lane sees it. One develop-health notice goes on the culprit PR. A CI-red break with no fix planned also alerts the team chat |
 | A fix PR opens | It is linked to the issue, gets review P0 and merge tier 0, and leads the merge plan |
-| After `revert_offer_after_min` (two hours) | While the merge queue is live, the tick offers revert evidence for the operator. A revert is pushed only on the operator's word, never by the monitor; once the fix has merged, the offer is replaced by `INCIDENT_FIX_MERGED` |
+| After `revert_offer_after_min` (two hours) | While the merge queue is live, the tick offers revert evidence for the operator. A revert is the develop-green team's to push, never the monitor's; once the fix has merged, the offer is replaced by `INCIDENT_FIX_MERGED` |
 | develop is green again | The incident closes, the queue unfreezes, the journal records it |
 
 Problems found along the way that are neither a develop break nor a PR's own finding get a proposed JIRA ticket, filed
@@ -349,9 +352,10 @@ Each guardrail, with what it refuses, and what the monitor may do on its own, on
 - **Scaled to the PR.** A carried merge-only head costs nothing; a micro round is the verifier alone; a giant PR's cost
   grows with its parts, and its later rounds are light.
 - **Review spend.** With the prices in `features.review_automation.spend`, `rk spend`, the admin dashboard's Review
-  spend card and the weekly report price each review, posted or kept unposted, by part (verifier, second verifier,
-  code quality pass, orchestration), per UTC day and ISO week, from the Claude Code session transcripts and the post
-  ledger.
+  spend card and the weekly report price each review, posted, kept unposted or closed without a post
+  (`rk review-close`: a review of its own, whose verifier runs are never booked on the PR's next review), by part
+  (verifier, second verifier, code quality pass, orchestration), per UTC day and ISO week, from the Claude Code
+  session transcripts and the post ledger.
   `state/spend_history.json` carries the runs and turns of a monitor this one took over from, whose transcripts this
   machine cannot read. `rk usage` counts tokens either way.
 

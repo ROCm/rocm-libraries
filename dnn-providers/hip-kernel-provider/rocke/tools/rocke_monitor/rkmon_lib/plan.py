@@ -20,7 +20,7 @@ import datetime as dt
 
 from . import idle
 from . import config, registry
-from .post import kept_unposted
+from .post import kept_unposted, taken
 from .queue import PASS, USER_PRIORITY, approvals, fixes_develop
 from .snapshot import covers
 from .store import parse_ts, settle_left
@@ -55,10 +55,13 @@ def last_review_time(n: int, ours: dict | None, last_posts: dict) -> str | None:
     """When our last review of PR n, posted or kept unposted, was made: one rule for the follow-up gap (gap_until) and
     `rk facts`. It is the time of our last review post on it in `last_posts` (last_review_posts), or our review's own
     (`ours`, its record rec["ours"]) for a PR the ledger never saw and for a review kept unposted (post.save_draft),
-    which no ledger entry dates; None when neither gives one."""
+    which no ledger entry dates; the later of the two for a review of our account that `rk review-close` took
+    (post.taken), which no ledger entry dates either. None when neither gives one."""
     ours = ours or {}
     if n not in last_posts or kept_unposted(ours):
         return ours.get("at")
+    if taken(ours):
+        return max(last_posts[n] or "", ours.get("at") or "") or None
     return last_posts[n]
 
 

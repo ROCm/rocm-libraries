@@ -73,13 +73,16 @@ line is checked like code) and L-576 (the code quality pass's claims are leads).
   shadow draft's (its binding's name); and the live drafter's model and where it runs, for the footer. With no drafter:
   that there is none, and line 1 is the verifier's.
 - Facts: print `facts.txt` in the review directory (the output of `rk facts N`) whole as your first read: head, every
-  force-push, our posts, `rk abi`, `rk breakages`, reviews, open threads, <user_login>'s comments in full. If a fact you
-  check disagrees, trust what you read and name it on the `brief:` line of block 2.
+  force-push, our posts, our account's reviews this deployment did not post, `rk abi`, `rk breakages`, reviews, open
+  threads, <user_login>'s comments in full. If a fact you check disagrees, trust what you read and name it on the
+  `brief:` line of block 2. When one of our account's reviews this deployment did not post is at the head you verify
+  and is not marked "not ours to take", stop there: Output Format, Close, no post.
 - **Read the facts once.** After `facts.txt`, do not fetch the head, threads, reviews or commits again (no `rk heads`,
-  no `refs/pull` fetch, no thread listing): `rk post --premises` re-checks the head, the threads, the stop time and
-  the merge's conflict set right before the post. Read live CI once, near the end, with `rk ci-fails N`, for the
-  premises' FAILOK and RUNOK; for everything else use checks.md's "CI at head" (per failing job: its first error line,
-  failing tests, develop's latest run of the job, a known-infrastructure label, re-runs marked).
+  no `refs/pull` fetch, no thread listing; the one review Close, no post reads apart): `rk post --premises` re-checks
+  the head, the threads, the stop time and the merge's conflict set right before the post. Read live CI once, near the
+  end, with `rk ci-fails N`, for the premises' FAILOK and RUNOK; for everything else use checks.md's "CI at head" (per
+  failing job: its first error line, failing tests, develop's latest run of the job, a known-infrastructure label,
+  re-runs marked).
 - **Trust a checks section that names this head and ran cleanly** (a `result: PASS` with its skipped tests listed, a
   probe line with its tree commit, "Since our last review", the sweep's carried items, the test map): its lines are
   evidence (ran). Re-run a check only when its section is missing, errored, skipped or NOT RUN (a
@@ -440,6 +443,17 @@ Write exactly two blocks, each to its file in your scratch directory: block 1, t
 names (`pr101_fu2.md` for PR 101's second follow-up); block 2, the notes, to `notes.md`. The coordinator reads both
 files. Your final message is short, at most 1.5k characters: the header line, the light, the premises line, the counts
 and the two paths. Don't paste the blocks into it.
+
+**Close, no post.** When the facts' section on our account's reviews this deployment did not post lists one at the head
+you verify that stands for ours (an older monitor's under the same account, or one posted by hand; never one marked
+"not ours to take", another deployment's, which posts its own review beside ours), confirm that head from the review
+itself: read it once by its link with your read `gh`. The facts give a formal review's head as the commit it names,
+and a comment's as the PR's head when it was posted, an estimate. The review stands for this head only when its
+content fits it: the commits it names are this head's or older, and what it says of the code (the lines its findings
+cite, what it calls fixed or open) is true at this head, the last push included. Then write no post, and hand back one
+line, `close, no post: <its link> at <head, 10 characters>`; the coordinator closes the review (`rk review-close N`).
+When its content does not fit this head, or you cannot tell, verify as usual. A part verifier and the cross pass of a
+split review do the same.
 
 **Block 1** is the post, ready to publish:
 

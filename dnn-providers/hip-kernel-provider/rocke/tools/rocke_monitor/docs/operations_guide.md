@@ -51,7 +51,7 @@ SPDX-License-Identifier: MIT
 | Up to date with develop | No | Gates the pull request merged with today's develop (G4–G7), and runs its own tests again each time develop's rocKE code moves (the drift check, part of G6) |
 | Goldens | Only in the pull request's own CI run, against develop as it was when that run started | G5, on the merge with today's develop |
 | Byte identity between the two engines; ABI numbering across pull requests | No | G6, G9 |
-| Arch coverage | A lane that did not run is invisible | G7 asks for compile and execution evidence per arch |
+| Arch coverage | A lane that did not run is invisible | G7 asks for a compile per target of every touched parity family. Run evidence for a numerics change is judged in the review: a gap is a 🟠 finding, which fails G1 |
 | Review findings | Only a change request blocks | An open Needed-to-merge 🔴/🟠 fails G1. The auto-merge guard turns someone else's auto-merge off, or alerts |
 | Merge order across open pull requests | No | The merge plan: textual conflicts and two claims on one ABI counter order the waves |
 | The same code added by two open pull requests | No | Overlap leads in every review; one owner per shared piece |
@@ -77,7 +77,7 @@ The files it writes for the operator are in the outputs folder, `/work` in the c
 | **Merge proposals and approvals** | `PROPOSE #A → #B`: merge this validated batch, in this order. `READY_FOR_APPROVAL #N`: only the operator's approval is missing. One "ready for approval" box per code-owner team: our review is current and clean, every thread is resolved, and that team's approval is what is missing. `rk approvals`: what is left on each pull request close to merge, and who acts, in merge-plan order | Tick lines, the board and the dashboards |
 | **Priority requests** | A "Request PR priority" box at the top of the merge plan. On the admin dashboard, the operator's request takes effect at once, and the operator approves or declines other teams' requests there. On the team dashboard, anyone can ask, with their name and a reason, and the request waits for the operator ([section 4.9](#priorities)) | The admin and team dashboards; the board's Needs you list; `rk priority-requests` |
 | **Insights** | Merge-conflict hot files, CI time per pull request, our findings by cause, and where the time goes per pull request: rebases, conflicts, review and fix rounds, CI runner waits | `rk insights`, `rk conflict-files`, `rk ci-times`, the dashboards, the weekly report |
-| **Review spend and usage** | What each review cost, posted or kept, by part, per day and week, with outliers; the tokens every model used | `rk spend` and the admin dashboard's Review spend card, with review spend on (`features.review_automation.spend`); `rk usage`, in tokens, always |
+| **Review spend and usage** | What each review cost, posted, kept or closed, by part, per day and week, with outliers; the tokens every model used | `rk spend` and the admin dashboard's Review spend card, with review spend on (`features.review_automation.spend`); `rk usage`, in tokens, always |
 | **Scoreboard** | Per pull request author: pull requests merged, rework caused for others (rebases forced, re-reviews), develop breaks, pull requests landed ahead of the plan, merges with open review items | `rk scoreboard`; the admin dashboard only |
 
 **The status board**, row by row:
@@ -136,11 +136,11 @@ Once its head has settled, each picked pull request is staged, drafted by a firs
 
 ### 4.4 The merge queue and gates
 
-The merge queue gates every candidate on today's develop, with the gates G1–G9 recorded per pull request head and develop commit; the gates, and the drift check that runs a waiting pull request's own tests again when develop moves, are in [design.md, "Merge gates"](design.md#merge-gates). Ready pull requests that the merge plan lets land now are batched and proposed to the operator; with the merge queue live and auto-merge on, the pull requests the operator cleared are armed for auto-merge, one at a time. What each feature does in prototype and live: [design.md, "Features and modes"](design.md#features-and-modes); the procedure: [merge_procedure.md](../agentic/skills/rocke-monitor/merge_procedure.md).
+The merge queue gates every candidate at its head on today's develop with the gates G1–G9; the gates, how long their results stay fresh, and the drift check that runs a waiting pull request's own tests again when develop's rocKE code moves, are in [design.md, "Merge gates"](design.md#merge-gates). Ready pull requests that the merge plan lets land now are batched and proposed to the operator; with the merge queue live and auto-merge on, the pull requests the operator cleared are armed for auto-merge, one at a time. What each feature does in prototype and live: [design.md, "Features and modes"](design.md#features-and-modes); the procedure: [merge_procedure.md](../agentic/skills/rocke-monitor/merge_procedure.md).
 
 ### 4.5 The develop guard and incidents
 
-With the develop guard on, in prototype too, every develop move that brings rocKE commits gets a sanity run. A red run, or develop's CI red in a rocKE job, opens an incident and freezes the queue. The monitor finds the culprit, and, while the merge queue is live, files one develop issue and links the fix; reverts are the develop-green team's call, and the monitor pushes none unless the operator asks. In full: [design.md, "The develop guard"](design.md#the-develop-guard) and ["Incidents"](design.md#incidents); the procedure: [incident_procedure.md](../agentic/skills/rocke-monitor/incident_procedure.md).
+With the develop guard on, in prototype too, every develop move that brings rocKE commits gets a sanity run. A red run, or develop's CI red in a rocKE job, opens an incident and freezes the queue. The monitor finds the culprit, and, while the merge queue is live, files one develop issue and links the fix; reverts are the develop-green team's call, and the monitor pushes none. In full: [design.md, "The develop guard"](design.md#the-develop-guard) and ["Incidents"](design.md#incidents); the procedure: [incident_procedure.md](../agentic/skills/rocke-monitor/incident_procedure.md).
 
 ### 4.6 The auto-merge guard and holds
 
@@ -169,7 +169,7 @@ When open pull requests add the same code, under one name or several, one of the
 <a id="token-efficiency"></a>
 ### 4.11 Token efficiency and review spend
 
-Scripts do the polling, ordering, gates, builds and tests, so an idle tick costs no Claude turn, and Claude's tokens go to judgement and verification, which run in agents of their own. What keeps the cost down: [review_pipeline.md, 2](review_pipeline.md#2-why-it-is-built-this-way), item 11, and [design.md, "Token economy and review spend"](design.md#token-economy-and-review-spend). `rk usage` counts every model's tokens; with review spend on (`features.review_automation.spend.enabled`), `rk spend` and the admin dashboard's Review spend card price each review, posted or kept, by part ([review_pipeline.md, 3.12](review_pipeline.md#312-the-orchestrators-steps-large-reviews-drift-and-review-spend)).
+Scripts do the polling, ordering, gates, builds and tests, so an idle tick costs no Claude turn, and Claude's tokens go to judgement and verification, which run in agents of their own. What keeps the cost down: [review_pipeline.md, 2](review_pipeline.md#2-why-it-is-built-this-way), item 11, and [design.md, "Token economy and review spend"](design.md#token-economy-and-review-spend). `rk usage` counts every model's tokens; with review spend on (`features.review_automation.spend.enabled`), `rk spend` and the admin dashboard's Review spend card price each review, posted, kept or closed, by part ([review_pipeline.md, 3.12](review_pipeline.md#312-the-orchestrators-steps-large-reviews-drift-and-review-spend)).
 
 ---
 
@@ -192,7 +192,7 @@ Scripts do the polling, ordering, gates, builds and tests, so an idle tick costs
 |---|---|---|
 | Post review comments and CI updates | Clear a pull request for auto-merge; prioritize; pin a merge group | Approve, or dismiss a review |
 | Request changes on a confirmed hold | Change a feature or its mode; end standby; request changes outside a hold | Merge by itself (it only arms auto-merge, for cleared pull requests) |
-| File, comment on and relabel develop issues once a break is proven; assign a stability issue to the breaking pull request's author | Assign issues to anyone else; create labels; post revert evidence; push a revert | Bypass branch protection or use admin merges |
+| File, comment on and relabel develop issues once a break is proven; assign a stability issue to the breaking pull request's author | Assign issues to anyone else; create labels; post revert evidence | Bypass branch protection or use admin merges |
 | Link a verified fix pull request to its issue | Send a test card to the team channel | Edit or delete other people's comments |
 | Turn auto-merge off on a pull request that fails a gate, when someone other than the operator turned it on (the operator's own auto-merge only gets an alert) | Turn someone's auto-merge off to land other pull requests first (`--user`) | Change the operator's own review states |
 | Tell the team channel about a CI-red break with no fix; send the Needs-you decisions | File a proposed ticket (the operator's Approve on the admin dashboard) | Write to JIRA outside its ticket features |
@@ -210,7 +210,7 @@ Scripts do the polling, ordering, gates, builds and tests, so an idle tick costs
 - **Reviews are consistent and evidence-based,** scope first: the author sees every blocker at once, and nothing out of scope blocks. The operator's attention goes to a short Needs-you list instead of every open pull request.
 - **Knowledge survives a handover:** it lives where the agents read it, and the package sets up a new deployment from an image and a deploy settings file.
 
-**Where to read the numbers.** The monitor measures its own effect from its records; no individual is named.
+**Where to read the numbers.** The monitor measures its own effect from its records. Only the Scoreboard names people, per pull request author: `rk scoreboard` prints it, and of the dashboards only the admin dashboard shows it.
 
 | Measure | Where |
 |---|---|
@@ -274,13 +274,13 @@ The README's [Documentation](../README.md#documentation) lists every doc, who re
 | `snapshot.py`, `events.py`, `idle.py` | One poll of the open in-scope pull requests and develop; events from the difference with the stored state; the idle tick's change fingerprint |
 | `plan.py` | What the tick should do next, in priority order P0–P4 |
 | `queue.py`, `mergeplan.py`, `batch.py`, `abi.py`, `merge.py` | The gates; the merge plan; merge batches; ABI lanes and G9; the merge queue: gate jobs, holds, proposals, arming, the auto-merge guard |
-| `review.py`, `draft_stage.py`, `bindings.py` | The review pipeline: pick, classify, stage, draft (or none), checks, `REVIEW_READY`; the draft stage; the passes' model bindings |
+| `review.py`, `draft_stage.py`, `bindings.py` | The review pipeline: pick, classify, stage, draft (or none), checks, `REVIEW_READY`, and a review closed without a post (`rk classify N --record`, `rk review-close N`); the draft stage; the passes' model bindings |
 | `scaler.py`, `ramdisk.py`, `review_keep.py` | The parallel reviews and parallel builds by load; the RAM disk and its learned footprints; the review folders kept on the disk |
 | `peer_carry.py`, `known_infra.py` | A merge-only head's flags against what our review saw (carry, or a micro round); known CI infrastructure failures |
 | `split.py` | `rk review-split`: an in-depth review cut into parts and a cross pass |
 | `prep.py`, `dispatch.py`, `facts.py` | The review folder; `rk dispatch-pack` and `rk wait-quality`; `rk facts` |
 | `spec.py`, `premises.py`, `fixline.py`, `abipremise.py`, `post.py` | The post's spec; posting only while the premises hold; the fix-line and ABI premises; every write, guarded and ledgered, and the reviews kept unposted |
-| `verify_stale.py` | `!! VERIFY_STALE`: a review handed to verification with nothing posted or kept |
+| `verify_stale.py` | `!! VERIFY_STALE`: a review handed to verification with nothing posted or kept, naming `rk review-close N` for a head our account posted at already (a mirror's line names none) |
 | `drift.py`, `guard.py`, `breakage.py` | The drift check; develop sanity runs, incidents and bisects; develop issues and the fix sweep |
 | `overlaps.py`, `clashes.py`, `peer_checks.py` | Overlapping work across pull requests; clashes with other open pull requests; the peer-review checks |
 | `orchestrator.py`, `triage.py`, `tickfilter.py`, `workguard.py` | The container's Claude session and its Bash guard; the tick triage; the tick lines the session answers; the Bash guard's shared-state half |
@@ -420,12 +420,12 @@ These are the standing rules, in general form. They always hold.
 16. **Develop fixes first.** A pull request that fixes a develop break, or that the operator prioritizes, gets review P0 with a shorter settle, merge tier 0, its merge analysis first, and first place in the merge plan: the pull requests it conflicts with wait for it, and its auto-merge is expected.
 17. **Fix sweep.** Match open pull requests against open develop issues every full tick. Verify each candidate before linking it.
 18. **Auto-merge guard.** A pull request with someone else's auto-merge on that fails a gate GitHub does not enforce gets a plain-words comment, and auto-merge goes off (an alert only, in prototype). Auto-merge the operator turned on is never turned off: it gets an alert, and the operator decides; for a pull request in the merge plan's wave 1 whose only open gate is our 🟠, there is no alert either. Turning someone's auto-merge off for any other reason needs the operator's instruction (`--user`, with the reason).
-19. **Do-not-merge labels** (do not merge, on hold, WIP, not ready) take a pull request out of merge candidacy until they are removed.
+19. **Do-not-merge labels** ([README.md, "Glossary and placeholders"](../README.md#glossary-and-placeholders) lists them) take a pull request out of merge candidacy until they are removed.
 20. **Who merges.**
     - Arm only pull requests the operator cleared, one at a time, while every condition holds.
-    - Only pull requests the merge plan lets land now (in wave 1, with nothing ahead of them conflicting) are batched and proposed.
+    - Only pull requests the merge plan lets land now (in wave 1, merging clean with develop, with nothing ahead of them conflicting) are batched and proposed.
     - Clearing, prioritizing, grouping and feature changes happen only on the operator's instruction.
-    - Queue notices stay off until the team has been told.
+    - Queue notices go out only while the merge queue is live, which the operator sets once the team has been told.
 21. **Never block the loop on a question.** Ask in plain text and keep ticking.
 22. **Lessons are written the day they are learned,** in `lessons.md`, not in chat memory. A lesson that recurs becomes a toolkit guard with a test.
 23. **Overlapping work has one owner.** When open pull requests add the same code, the posted review proposes one owner, it is recorded, and every other copy gets one overlap notice with the landing order and the rebase that removes it.
@@ -457,7 +457,7 @@ The terms the other docs share are in the README's [Glossary and placeholders](.
 | **Dashboard file; Markdown dashboard** | `rocke_monitor.html` in the outputs folder, for reading offline; `rocke_merge_queue.md`, the board and the queue as text |
 | **First round** | Our first review of a pull request; every later one is a [follow-up review](../README.md#glossary-and-placeholders) |
 | **Flavor** | The LLVM IR dialect rocKE emits for a toolchain generation |
-| **G1–G9** | The merge gates, recorded per (pull request head, develop SHA) |
+| **G1–G9** | The merge gates, worked out at a pull request's head on today's develop ([design.md, "Merge gates"](design.md#merge-gates)) |
 | **Golden; differential golden** | Committed hashes of emitted IR, per case and flavor; the anchors CI compares IR against |
 | **Hot spot** | A file many pull requests edit (a golden, the ABI header, the platform CMake); a change to it forces other pull requests to rebase |
 | **Hub** | A pull request with 5 or more textual conflicts with other planned pull requests, planned last |
@@ -486,5 +486,5 @@ The terms the other docs share are in the README's [Glossary and placeholders](.
 | **Tick triage** | What reads each tick before the session: the rule filter (`rk tick-filter`) |
 | **Traffic lights** | 🔴 blocking · 🟠 should-fix · 🟡 minor · 🟢 info or good · ⚪ retracted |
 | **Triage; release** | Checking whose fault a gate failure is, on develop alone; clearing a hold that was not the pull request's fault |
-| **Wave** | A set of pull requests with no conflict between them, which land in its order with no rebase among them; wave 1 is what can go in now |
+| **Wave** | A set of pull requests with no conflict between them, which land in its order with no rebase among them; a pull request of wave 1 may land now when it merges clean with develop and no pull request ahead of it conflicts |
 | **Write broker** | The root-owned command that runs the guarded writes as the writer |

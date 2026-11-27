@@ -395,6 +395,14 @@ after the post).
    any other comes back with the plan. Brief the next round's agents to start from those files and keep what is still
    true at the new head (L-104). A first round reuses its review directory; a follow-up's next round gets the next one,
    so name the stopped round's files.
+
+   **Our account posted at this head already** (the verifier hands back `close, no post`: its team file's Output
+   Format): an older monitor under the same account, or a person by hand, posted a review of this head that stands
+   for ours, and the verifier confirmed its head from its content. Another deployment's review never stands for ours:
+   the facts mark it "not ours to take". Run `rk review-close N`: it closes the review without a post, and that review
+   becomes our last one, so a new head gets a follow-up. Stop the code quality reviewer if it still runs
+   (`TaskStop`). Refused, it says why in one line: tell <user_login> in one plain line, with the link the verifier
+   gave.
 3. **Check the verified post yourself:**
    - every "(ran)" has a matching section in `checks.md`;
    - the post starts from the PR's stated scope and has its two parts: **Needed to merge** (wrong results; a build, CI
@@ -605,6 +613,10 @@ conflicts, CI and new threads, and carries every other row.
 **Head moved mid-review** (`REVIEW_DROP #N`): stop every agent of the review. Run `rk review-split N` at the new head,
 and brief a part whose files and lines are unchanged to start from its `part<k>_notes.md`.
 
+**Our account posted at this head already** (a part verifier or the cross pass hands back `close, no post`): run
+`rk review-close N` as On REVIEW_READY says, and stop every other agent of the review (`TaskStop`): its part verifiers,
+the parts of later waves not yet dispatched, and its cross pass.
+
 **Cost scales with the PR's size**: one verifier per part plus the cross pass, so a PR of k parts takes k + 1 agents,
 each about one review's cost. The plan's `cost:` line counts them and, with review spend on, gives about what they
 cost at the mean review of the spend card's last 7 days. A part of at most 8000 changed lines fits one verifier's window: its diff is about 11 tokens a changed line, it
@@ -633,4 +645,5 @@ Nothing from an earlier review of the same PR can leak into a result.
 | `rk draft-lint N [--dir DIR]` | The draft's flags against its own inputs, in `checks/lint.md`; the draft is unchanged (`commands.md`) |
 | `rk review-skip N` / `rk review-unskip N` | Keep PR N out of the autopilot picks, or put it back. A skip also stops its review in flight, keeps an interrupted one from starting again, withdraws one awaiting verification and ends the approval of an in-depth review (it declines one: Split review); stop the agents you started for it yourself (`TaskStop`) |
 | `rk classify N [--record]` | Classify a follow-up; with `--record`, it reads the PR's live head and refuses (exit 4, nothing recorded) while that is not the head the tick saw: run `rk tick`, then again. A merge-only or rebase-only result at the live head records the equivalence, with review automation on or off, and a review of that head awaiting verification or in flight is closed without a post |
+| `rk review-close N` | Close PR N's review awaiting verification or in flight without a post, when a review our account posted covers its head and stands for ours (an older monitor's, or one posted by hand; never another deployment's); that review becomes our last one (`commands.md`). Stop the agents you started for it yourself (`TaskStop`) |
 | `rk jobs [ID]` | Recent jobs, or one job's log |

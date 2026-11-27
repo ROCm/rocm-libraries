@@ -11,7 +11,7 @@
   ],
   "x-profiles": {
     "full": {
-      "what": "reviews, the merge queue and the dashboards"
+      "what": "reviews, the merge queue and the admin dashboard"
     },
     "review-only": {
       "what": "reviews and the admin dashboard",
@@ -477,7 +477,7 @@
               "additionalProperties": false,
               "properties": {
                 "push_cooldown_minutes": {
-                  "description": "How long to wait after a pull request's latest push before reviewing it, in minutes, so that a burst of pushes gets one review. After the last push of a burst, the review starts within {package:settle_burst_min} minutes, or within {package:settle_develop_fix_min} for your priorities and for pull requests that fix develop, which wait at most that long after any push. Set above {package:settle_burst_min}, it applies to bursts too. 0: a single push doesn't wait. Default: 30.",
+                  "description": "How long to wait after a pull request's latest push before reviewing it, in minutes, so that a burst of pushes gets one review. A burst waits {package:settle_burst_min} minutes after its last push, and your priorities and the pull requests that fix develop wait at most {package:settle_develop_fix_min} minutes after any push, a burst's too. Set above {package:settle_burst_min}, it applies to bursts too. 0: a single push doesn't wait. Default: 30.",
                   "type": "integer",
                   "minimum": 0,
                   "default": 30,
@@ -1684,7 +1684,7 @@
             },
             "needs_you": {
               "title": "Needs you",
-              "description": "a message for each decision that waits for you on the admin dashboard (a merge to approve, a hold that has waited too long, a priority request, a pull request ready for your approval, an in-depth review to approve). Each is sent once, addressed to your GitHub username, with a link to the team dashboard.",
+              "description": "a message for each decision that waits for you on the admin dashboard (a merge to approve, a hold that has waited too long, a priority request, a pull request ready for your approval, an in-depth review to approve). Each is sent once, addressed to your GitHub username, with a link to the team dashboard when its public_url is set.",
               "type": "object",
               "x-class": "public",
               "additionalProperties": false,

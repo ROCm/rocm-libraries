@@ -1,16 +1,20 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Review spend: what each review posted or kept unposted cost, by part, per UTC day and per ISO week, with the average
-and median per review, the spread and the outliers (`rk spend`, the daily files, the dashboards' card and the
-weekly report's section). Scripts only: no model call.
+"""Review spend: what each review posted, kept unposted or closed without a post cost, by part, per UTC day and per ISO
+week, with the average and median per review, the spread and the outliers (`rk spend`, the daily files, the
+dashboards' card and the weekly report's section). Scripts only: no model call.
 
 Sources:
-- The paid reviews (`paid_reviews`), each posted or kept unposted:
+- The paid reviews (`paid_reviews`), each posted, kept unposted or closed without a post:
   - the post ledger (state/actions.jsonl, kind "post"): a review posted, at the time it was posted. Its note gives
     the kind: first round, follow-up, CI update. state/review_cost.jsonl gives the round where it holds the post's
     head.
   - the reviews kept unposted while review posting is off (their lines of state/review_cost.jsonl, `unposted`; they
     have no ledger entry): a review kept, at the time it was kept, its round giving the kind.
+  - the reviews awaiting verification that `rk review-close` closed without a post, because a review our account
+    posted stands for them (their lines of state/review_cost.jsonl, `closed`; no ledger entry either): a review
+    closed, at the time it was closed, its round giving the kind. So the verifier runs it had are its own, never
+    booked on the PR's next review.
 - Claude Code's transcripts (spend_scan.py, from config `paths.claude_projects`, else $CLAUDE_CONFIG_DIR/projects):
   - verifier and code quality pass runs, matched to the first review of the PR their description names, at most
     RUN_WINDOW_H hours after the run started. A review's first verifier run, a deep review's included, is its
@@ -47,8 +51,8 @@ Sources:
 - Experiment spend (the experiment ledgers `<scratch>/*/spend.jsonl`, experiment runs in the transcripts) and other
   tasks' runs are never review spend: `rk spend --experiments` shows them on their own.
 
-A review's cost is booked on the day it was posted or kept; overhead on the day it was spent. Days and weeks are UTC;
-data starts on the first review.
+A review's cost is booked on the day it was posted, kept or closed; overhead on the day it was spent. Days and weeks
+are UTC; data starts on the first review.
 """
 
 from __future__ import annotations
@@ -267,15 +271,16 @@ def driver(p: dict) -> str:
 
 def paid_reviews(store) -> list[dict]:
     """Every paid review, oldest first: each post in the ledger (its note gives the kind), and each review kept
-    unposted while review posting is off (its line of state/review_cost.jsonl, `unposted`: it has no ledger entry; its
-    round gives the kind). {pr, head, ts, day, week, kind, round, unposted, old (the head of our review it follows up
-    on: a post our previous post, a kept review our previous review of either kind), parts, total, runs}.
+    unposted while review posting is off or closed without a post by `rk review-close` (its line of
+    state/review_cost.jsonl, `unposted` or `closed`: it has no ledger entry; its round gives the kind). {pr, head, ts,
+    day, week, kind, round, unposted, closed, old (the head of our review it follows up on: a post our previous post,
+    a kept or closed review our previous review of any kind), parts, total, runs}.
     """
     costs = store.read_jsonl("review_cost.jsonl", lenient=True)
     rounds = {
         (r.get("pr"), r.get("head")): r.get("round")
         for r in costs
-        if not r.get("unposted")
+        if not r.get("unposted") and not r.get("closed")
     }
     found = []
     for r in store.ledger():
@@ -288,15 +293,18 @@ def paid_reviews(store) -> list[dict]:
             else "first_round" if note.startswith("first") else "followup"
         )
         rnd = rounds.get((r["pr"], r.get("head"))) or ""
-        found.append((r["ts"], r["pr"], r.get("head") or "", kind, rnd, False))
+        found.append((r["ts"], r["pr"], r.get("head") or "", kind, rnd, False, False))
     for r in costs:
-        if r.get("unposted") and r.get("pr") and r.get("at"):
+        kept, closed = bool(r.get("unposted")), bool(r.get("closed"))
+        if (kept or closed) and r.get("pr") and r.get("at"):
             rnd = r.get("round") or ""
             kind = "first_round" if rnd.startswith("fr") else "followup"
-            found.append((r["at"], r["pr"], r.get("head") or "", kind, rnd, True))
+            found.append(
+                (r["at"], r["pr"], r.get("head") or "", kind, rnd, kept, closed)
+            )
     out, posted, reviewed = [], {}, {}
-    for ts, pr, head, kind, rnd, kept in sorted(found, key=lambda f: f[0]):
-        prev = reviewed if kept else posted
+    for ts, pr, head, kind, rnd, kept, closed in sorted(found, key=lambda f: f[0]):
+        prev = reviewed if kept or closed else posted
         out.append(
             {
                 "pr": pr,
@@ -307,6 +315,7 @@ def paid_reviews(store) -> list[dict]:
                 "kind": kind,
                 "round": rnd,
                 "unposted": kept,
+                "closed": closed,
                 "old": "" if kind == "first_round" else prev.get(pr, ""),
                 "parts": {k: 0.0 for k in PARTS},
                 "total": 0.0,
@@ -316,7 +325,7 @@ def paid_reviews(store) -> list[dict]:
             }
         )
         reviewed[pr] = head
-        if not kept:
+        if not kept and not closed:
             posted[pr] = head
     return out
 
@@ -901,13 +910,19 @@ def breakdown(f: dict, by: str) -> list[str]:
 def reviews_table(f: dict) -> list[str]:
     parts = " | ".join(PART_LABEL[k].capitalize() for k in PARTS)
     out = [
-        f"| Posted or kept | PR | Round | Kind | Size tier | {parts} | Total $ |",
+        f"| Posted, kept or closed | PR | Round | Kind | Size tier | {parts} | Total $ |",
         "|---|---|---|---|---|" + "---:|" * (len(PARTS) + 1),
     ]
     for p in sorted(f["reviews"], key=lambda p: p["ts"]):
-        # A review kept unposted (review posting off) shows the time it was kept.
+        # A review kept unposted (review posting off) shows the time it was kept; one closed without a post
+        # (`rk review-close`), the time it was closed.
+        how = (
+            " (kept unposted)"
+            if p.get("unposted")
+            else " (closed, not posted)" if p.get("closed") else ""
+        )
         out.append(
-            f"| {p['ts'][11:16]}Z{' (kept unposted)' if p.get('unposted') else ''} | #{p['pr']} | {p['round']} | "
+            f"| {p['ts'][11:16]}Z{how} | #{p['pr']} | {p['round']} | "
             f"{KIND_LABEL[p['kind']]} | "
             f"{(p['size'] or {}).get('tier', '?')} | "
             + " | ".join(money(p["parts"][k]) for k in PARTS)
@@ -933,8 +948,9 @@ def experiments_table(data: dict, days: list[str]) -> list[str]:
 
 def legend(data: dict) -> list[str]:
     out = [
-        f"_Reviews: each review posted, or kept while review posting is off, on the day it was posted or kept. $: "
-        f"config prices; transcript figures use estimated output (cost_fp.py's method). Covered heads cost no Claude "
+        f"_Reviews: each review posted, kept while review posting is off, or closed without a post (rk review-close), "
+        f"on the day it was posted, kept or closed. $: config prices; transcript figures use estimated output "
+        f"(cost_fp.py's method). Covered heads cost no Claude "
         f"spend and are not in the averages. Overhead: unattributed orchestration, verifier and code quality pass "
         f"runs no review followed, overlap notices. Outliers: above Q3 + 1.5 × IQR. Data from "
         f"{data.get('first') or '—'} (UTC); refreshed {data['at']}._"
@@ -1202,9 +1218,9 @@ def outliers_text(card: dict) -> str:
 def card_note(card: dict) -> str:
     unknown = unpriced_text(card.get("unpriced") or [])
     return (
-        f"Reviews: posted, or kept while review posting is off. Total $: reviews plus overhead (unattributed "
-        f"orchestration, runs no review followed, overlap notices); output estimated; refreshed {card['at']}."
-        + (f" {unknown}" if unknown else "")
+        f"Reviews: posted, kept while review posting is off, or closed without a post. Total $: reviews plus overhead "
+        f"(unattributed orchestration, runs no review followed, overlap notices); output estimated; refreshed "
+        f"{card['at']}." + (f" {unknown}" if unknown else "")
     )
 
 

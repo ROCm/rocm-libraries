@@ -20,9 +20,18 @@ reviews among the reviews of the account it posts under.
   line 1. The account's other posts are the hand-written ones.
 - `names(cfg)`: every name this deployment's reviews give: today's, and each one it has posted under
   (reviews.automated_reviewer_names_used), so its earlier reviews stay its own after the name changes.
+- `is_review(body)`: whether the post BODY is a review, of any monitor (REVIEWISH): a line of it starts "Automated
+  review" (line 1, with a name or, an older monitor's, without), or an early review's header, or it holds a legend.
+  Among the account's posts these are its reviews, whichever deployment posted them, or a person by hand
+  (snapshot.account_reviews).
+- `stands_for_ours(cfg, body)`: whether the post BODY, a review of this deployment's account, can stand for one of its
+  own: a review (`is_review`) whose line 1 (`first_line`) gives one of `names`, or gives none (an older monitor's
+  review, or one a person posted by hand), whenever it was posted. One that gives another name, another deployment's,
+  never does. `own_review` asks it first, and `rk review-close` takes no other review in place of its own
+  (review.covering_review).
 - `own_review(cfg, body, at)`: whether BODY, a post of this deployment's account posted at AT (GitHub's created_at
-  for a comment, submitted_at for a review), is one of its own reviews: a review (REVIEWISH) whose line 1
-  (`first_line`) gives one of `names`, or gives none and was posted before reviews.unnamed_are_ours_until, an ISO 8601
+  for a comment, submitted_at for a review), is one of its own reviews: one that stands for ours (`stands_for_ours`)
+  whose line 1 gives one of `names`, or gives none and was posted before reviews.unnamed_are_ours_until, an ISO 8601
   time in UTC in store.now()'s form (the reviews an older monitor posted, for the deployment that moved from it: the
   one-time move sets the time, and `rkmon standby off` sets it again). Outside a mirror, while that time is
   blank, or is no such time, no review that gives no name is its own, and neither is one whose time is unknown. In
@@ -107,15 +116,28 @@ def names(cfg: dict) -> list[str]:
     return out
 
 
+def is_review(body: str) -> bool:
+    """Whether the post BODY is a review, of any monitor: see the module's docstring."""
+    return bool(REVIEWISH.search(str(body or "")))
+
+
+def stands_for_ours(cfg: dict, body: str) -> bool:
+    """Whether the post BODY, a review of this deployment's account, can stand for one of its own: see the module's
+    docstring."""
+    body = str(body or "")
+    if not is_review(body):
+        return False
+    got = given(first_line(body))
+    return not got or got in names(cfg)
+
+
 def own_review(cfg: dict, body: str, at: str) -> bool:
     """Whether BODY, a post of this deployment's account posted at AT, is one of its own reviews: see the module's
     docstring."""
-    body = str(body or "")
-    if not REVIEWISH.search(body):
+    if not stands_for_ours(cfg, body):
         return False
-    got = given(first_line(body))
-    if got:
-        return got in names(cfg)
+    if given(first_line(body)):
+        return True
     from . import mirror
 
     return mirror.on(cfg) or _before(at, registry.value(cfg, UNNAMED_ARE_OURS_UNTIL))

@@ -1021,7 +1021,8 @@ class TestNames(unittest.TestCase):
                 ),
                 (
                     "features.review_automation.schedule.push_cooldown_minutes",
-                    "the review starts within 50 minutes, or within 7 for your priorities",
+                    "A burst waits 50 minutes after its last push, and your priorities and the pull requests that fix "
+                    "develop wait at most 7 minutes after any push",
                 ),
             ):
                 with self.subTest(key=key):

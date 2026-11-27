@@ -163,7 +163,7 @@ class TestFaq(unittest.TestCase):
             "model_bindings",
             "provider",
             "install its key",
-            "features.review_automation.passes.ci_triage_pass: { model: glm-flash, effort: default }",
+            "features.review_automation.passes.ci_triage_pass: { model: local-llama, effort: default }",
             "first_review_pass",
             "ci_triage_pass",
             "first_code_quality_pass",

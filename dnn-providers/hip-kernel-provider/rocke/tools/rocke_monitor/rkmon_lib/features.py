@@ -713,8 +713,8 @@ CAPABILITIES = {
         Capability(
             "incident-issues",
             "Incidents",
-            "A CI-red develop break is filed as a GitHub issue, and its incident runs: culprit, revert offer, fix "
-            "tracking.",
+            "A red develop sanity run, or develop's CI red in a rocKE job, opens an incident: culprit, revert "
+            "offer, fix tracking. A CI-red develop break is filed as a GitHub issue.",
             "gh rights to open issues and comment",
             _guard,
             "features.merge_queue is enabled and its develop_guard.enabled is true",

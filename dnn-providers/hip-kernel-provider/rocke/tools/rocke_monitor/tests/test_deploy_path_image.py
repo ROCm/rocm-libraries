@@ -529,6 +529,22 @@ class TestImage(DeployPathCase):
             ),
             out,
         )
+        # Under --dry-run the pull names the registry's address, with the key that sets it, as the push does; nothing
+        # pulled.
+        self.log.unlink()
+        rc, out, err = self.rkmon("--dry-run", "image", "pull")
+        self.assertEqual((rc, err), (0, ""), out)
+        self.assertTrue(
+            out.endswith(
+                "\n"
+                + finished(
+                    "PASSED: rocke-monitor:rkmon-test can be pulled from registry.example.com/team (image.registry)",
+                    f"next: {self.w} image pull",
+                )
+            ),
+            out,
+        )
+        self.assertFalse(any(c.startswith("pull") for c in self.calls()), self.calls())
 
     def test_the_image_s_own_code_is_read_with_no_network_and_no_mount(self):
         """The image row reads the image's own code from a one-off container of it with no network, under

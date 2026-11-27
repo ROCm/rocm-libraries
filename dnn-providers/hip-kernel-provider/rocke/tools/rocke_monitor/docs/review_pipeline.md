@@ -71,6 +71,12 @@ model binding's tool loop (`worker/drafter.py`, section 3.9).
   one-time move takes over; while it is blank, none is). A mirror of a live monitor (`mirror.enabled`, section 3.10)
   takes every review whose line 1 gives no name for its own. A review that gives another name, such as another
   deployment's under the same account, is never its own: the monitor follows up, gates on and counts only its own.
+  One exception: when a review of the account that stands for the monitor's own (its line 1 gives one of the
+  monitor's names, or none: an older monitor's posted after the move, or one posted by hand) covers the head of the
+  monitor's review in hand, `rk review-close N` closes that review without a post and takes the account's review as
+  the monitor's last review of the pull request (section 3.6). Its follow-ups answer that review and G1 reads it,
+  until a review of the monitor's own is posted after it. Another deployment's review never stands for the monitor's,
+  and a mirror closes none.
 - **What it never does.** It never approves, merges directly, resolves threads, edits or deletes anyone's comments,
   dismisses reviews, or pushes code. Its only review state is a change request on a confirmed hold, and only with the
   merge queue live and its holds on (`features.merge_queue.auto_hold.enabled`).
@@ -412,10 +418,17 @@ the starting setting.
    Quality Reviewer) beside it. A follow-up whose new commits are only develop merges, docs, or test files and docs that
    answer our own open findings gets no code quality pass; nor does a micro round. The verification pass reviews blind,
    then reproduces or downgrades every draft claim, waits for the code quality pass's `quality.md` (`rk wait-quality`),
-   folds its findings in, and writes the post and its notes. A review that three hours after its hand-off is neither
-   posted nor kept unposted prints `!! VERIFY_STALE #N: handed to verification <age> ago, nothing posted`, at most once
-   an hour per PR and head, until it is posted or dropped; a split review gets three hours for each wave of part
-   verifications and three more for the cross pass (`rkmon_lib/verify_stale.py`).
+   folds its findings in, and writes the post and its notes. When the facts list a review of our account at that head
+   that this deployment did not post and that stands for ours (an older monitor's under the same account, or one
+   posted by hand; the facts mark another deployment's "not ours to take"), and the review's content confirms that
+   head, the verification pass writes no post and hands back `close, no post`, and the orchestrator runs
+   `rk review-close N`: the review closes without a post, and the account's review is our last review of the pull
+   request (section 1, Its own reviews), so the pull request is not reviewed again at that head and its next head gets
+   a follow-up. A review that three hours after its hand-off is neither posted nor kept unposted prints
+   `` !! VERIFY_STALE #N: handed to verification <age> ago, nothing posted (head <head>); if our account posted at that head already, run `rk review-close N` ``,
+   at most once an hour per PR and head, until it is posted or dropped (a mirror's line ends at the head: it closes
+   none); a split review gets three hours for each wave of part verifications and three more for the cross pass
+   (`rkmon_lib/verify_stale.py`).
 6. **Post.** `rk spec-post N --round R` writes the post's spec from the verification notes and live reads, and posts
    only when nothing differs (no `CHECK:` line). The premises stop the post if the head, the base branch's changes to
    the PR's own files, the conflict set, CI or the threads changed since the verification, and a fix line fails its
@@ -868,17 +881,17 @@ verdict; only a post changes it.
   `rk drift-dismiss N D --reason TEXT` records a harness false positive, and G6 and the merge blockers stop counting
   that run. One drift job runs at a time, with up to `drift_batch` PRs in merge-plan order, also while the queue is
   frozen.
-- **Review spend** (`rkmon_lib/spend.py`, `rk spend`): what each review cost, posted or kept unposted, by part (the
-  verification pass, a second verification, the code quality pass, orchestration), from the Claude transcripts
-  (`paths.claude_projects`, else this machine's), the post ledger and, for a review kept unposted, its line in
-  `state/review_cost.jsonl`, priced with config `prices`; unattributed runs and turns are overhead, and heads carried as
-  covered cost nothing. Per UTC day and ISO week it shows the reviews, the covered heads, the reviews' cost, the
-  overhead and the total, and the mean, median, p90, minimum and maximum per review; for the selection (`--day`,
-  `--week` or `--since`), its outliers (above Q3 + 1.5 x IQR) and a breakdown by part, kind, size or pull request
-  (`--by`, by part by default). `--experiments` adds the experiments' and other tasks' spend, apart; `--write` also
-  writes `spend_<day>.md` for each complete day of the selection and `spend_<week>.md` for its weeks in
-  `paths.spend_dir`. Each run refreshes the dashboards' spend card. Without a price table it is off; `rk usage` stays in
-  tokens either way.
+- **Review spend** (`rkmon_lib/spend.py`, `rk spend`): what each review cost, posted, kept unposted or closed without
+  a post (`rk review-close`), by part (the verification pass, a second verification, the code quality pass,
+  orchestration), from the Claude transcripts (`paths.claude_projects`, else this machine's), the post ledger and,
+  for a review kept unposted or closed, its line in `state/review_cost.jsonl`, priced with config `prices`;
+  unattributed runs and turns are overhead, and heads carried as covered cost nothing. Per UTC day and ISO week it
+  shows the reviews, the covered heads, the reviews' cost, the overhead and the total, and the mean, median, p90,
+  minimum and maximum per review; for the selection (`--day`, `--week` or `--since`), its outliers (above Q3 + 1.5 x
+  IQR) and a breakdown by part, kind, size or pull request (`--by`, by part by default). `--experiments` adds the
+  experiments' and other tasks' spend, apart; `--write` also writes `spend_<day>.md` for each complete day of the
+  selection and `spend_<week>.md` for its weeks in `paths.spend_dir`. Each run refreshes the dashboards' spend card.
+  Without a price table it is off; `rk usage` stays in tokens either way.
 
 **`rk status` and `rk doctor`.** `rk status` says how the monitor operates right now, from local files only: on or off,
 stopped or draining, the pieces running (the review driver, the tick loop and the last tick, the admin dashboard's
@@ -1211,17 +1224,17 @@ ticket for the PR's author (with `features.ticket_creation.follow_up_tickets.ena
 
 | # | Guardrail | How it is enforced |
 |---|---|---|
-| G1 | **Comment only.** Never approve, dismiss a review, merge directly, resolve threads, edit or delete other people's comments, or push. The only review state is a change request on a confirmed hold, with the merge queue live and `features.merge_queue.auto_hold.enabled` | The guarded `rk` commands are the only write path; reads go through a GitHub module that refuses write methods and GraphQL mutations; the standing rules (`rules.md`) |
-| G2 | Never touch the operator's existing review states | They are reported to the operator, who manages them |
-| G3 | Line 1 of every post gives the automated reviewer name and the model that drafted it (`review_first_line`), or, with no first review pass, the verifier (`review_first_line_no_draft`) | `rk post` checks line 1; `rk post --premises` also stops a footer that credits a first pass when none drafted |
-| G4 | Every post ends with a footer that names the verification and says the post is not an approval or a rejection | The post format in the verifier's team member file |
-| G5 | GitHub credentials serve only GET requests and the guarded writes | Each write is one `rk` call under the write lock, checked against the ledger first, recorded in it, and held to hourly limits (`max_posts_per_hour` for reviews) |
-| G6 | A first review pass has no GitHub access | No GitHub tool; `GH_TOKEN` and `GITHUB_TOKEN` dropped from its tools' environment; in the container the PR code its tools run runs as a PR runner, which reads no login (section 7.2) |
-| G7 | Every outward action belongs to a feature, and writes to GitHub only once the operator sets it live | `features` in the deploy settings (review automation and the merge queue start in prototype); a command whose capability is off says `OFF` and does nothing |
-| G8 | Verification, gate decisions, overlap owner decisions and posts stay with Claude | The verification pass, the code quality pass and the orchestrator take Claude models only; no setting hands them to another model |
-| G9 | Overlap notices only after an owner decision is recorded: one per PR and group, naming both copies, the owner, the landing order and the rebase | `rk notice --kind overlap` refuses a key already posted (the ledger); `rk overlap-decide` refuses an owner that is not a member |
-| G10 | Follow-up tickets only for significant follow-up items the author agreed to or left unanswered, and for non-trivial items still open on develop after a merge; deduplicated, assigned to the PR's author and linked to the PR and our comment; never for nits or items the author declined with a reason; never for CI runner infrastructure, which another team owns | The standing rules. Follow-up tickets are filed by the orchestrator, through the atlassian CLI; a found issue's proposed ticket waits on the admin dashboard for the operator's Approve. Never a first review pass, the review passes (read tools only) or the toolkit on its own |
-| G11 | Auto-merge is turned off only by the auto-merge guard or on the operator's explicit instruction, and armed only for PRs the operator cleared; never a direct merge, admin rights or a force | `rk automerge-off` (once per head, ledgered) and `rk arm`, which re-checks every condition; the merge queue's Auto-merge and Auto-merge guard (live) |
+| 1 | **Comment only.** Never approve, dismiss a review, merge directly, resolve threads, edit or delete other people's comments, or push. The only review state is a change request on a confirmed hold, with the merge queue live and `features.merge_queue.auto_hold.enabled` | The guarded `rk` commands are the only write path; reads go through a GitHub module that refuses write methods and GraphQL mutations; the standing rules (`rules.md`) |
+| 2 | Never touch the operator's existing review states | They are reported to the operator, who manages them |
+| 3 | Line 1 of every post gives the automated reviewer name and the model that drafted it (`review_first_line`), or, with no first review pass, the verifier (`review_first_line_no_draft`) | `rk post` checks line 1; `rk post --premises` also stops a footer that credits a first pass when none drafted |
+| 4 | Every post ends with a footer that names the verification and says the post is not an approval or a rejection | The post format in the verifier's team member file |
+| 5 | GitHub credentials serve only GET requests and the guarded writes | Each write is one `rk` call under the write lock, checked against the ledger first, recorded in it, and held to hourly limits (`max_posts_per_hour` for reviews) |
+| 6 | A first review pass has no GitHub access | No GitHub tool; `GH_TOKEN` and `GITHUB_TOKEN` dropped from its tools' environment; in the container the PR code its tools run runs as a PR runner, which reads no login (section 7.2) |
+| 7 | Every outward action belongs to a feature, and writes to GitHub only once the operator sets it live | `features` in the deploy settings (review automation and the merge queue start in prototype); a command whose capability is off says `OFF` and does nothing |
+| 8 | Verification, gate decisions, overlap owner decisions and posts stay with Claude | The verification pass, the code quality pass and the orchestrator take Claude models only; no setting hands them to another model |
+| 9 | Overlap notices only after an owner decision is recorded: one per PR and group, naming both copies, the owner, the landing order and the rebase | `rk notice --kind overlap` refuses a key already posted (the ledger); `rk overlap-decide` refuses an owner that is not a member |
+| 10 | Follow-up tickets only for significant follow-up items the author agreed to or left unanswered, and for non-trivial items still open on develop after a merge; deduplicated, assigned to the PR's author and linked to the PR and our comment; never for nits or items the author declined with a reason; never for CI runner infrastructure, which another team owns | The standing rules. Follow-up tickets are filed by the orchestrator, through the atlassian CLI; a found issue's proposed ticket waits on the admin dashboard for the operator's Approve. Never a first review pass, the review passes (read tools only) or the toolkit on its own |
+| 11 | Auto-merge is turned off only by the auto-merge guard or on the operator's explicit instruction, and armed only for PRs the operator cleared; never a direct merge, admin rights or a force | `rk automerge-off` (once per head, ledgered) and `rk arm`, which re-checks every condition; the merge queue's Auto-merge and Auto-merge guard (live) |
 
 ### 7.2 Containment of PR code and the first review pass
 

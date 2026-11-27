@@ -73,7 +73,7 @@ REVIEW_REF = re.compile(
     rf"[/\\]pr({PR_NUMBER})(?:_|\.md)|\b(?:post|spec|facts|in|prep|spot)({PR_NUMBER})(?!\d)|"
     rf"workers/pr({PR_NUMBER})/|PR_(?:FOLLOWUP|FIRST_ROUND)_({PR_NUMBER})|"
     r"\brk\s+(?:post|review-prep|dispatch-pack|spec-post|review-start|review-recheck|facts|ci-fails|stage-ours|"
-    r"classify|spec|premises|"
+    r"classify|review-close|spec|premises|"
     r"draft-lint|evidence-check|clash|mutants|ctest-labels|moved-refs|import-probe)\s+(?:-\S+\s+)*"
     rf"({PR_NUMBER})\b|"
     rf"\b(?:post_pr|post_dry|post_real|go_agent_n|cinow|failjobs)\.sh\s+({PR_NUMBER})"

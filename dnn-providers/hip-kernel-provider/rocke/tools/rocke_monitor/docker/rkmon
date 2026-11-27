@@ -4545,11 +4545,11 @@ class Wrapper:
                     )
         if self.dry == 1:
             return self.dry_run_outcome(
-                f"{ref} can be pushed to the registry image.registry names"
+                f"{ref} can be pushed to {reg} (image.registry)"
             )
         return out.finish(
             "PUSHED",
-            f"{ref} to the registry image.registry names",
+            f"{ref} to {reg} (image.registry)",
             next=self.ship_done(ref),
         )
 
@@ -4607,9 +4607,7 @@ class Wrapper:
                     )
         if self.dry == 1:
             key = d.N("deployment.pull_registry")
-            return self.dry_run_outcome(
-                f"{ref} can be pulled from the registry {key} names"
-            )
+            return self.dry_run_outcome(f"{ref} can be pulled from {reg} ({key})")
         return self.image_check(ref, "PULLED")
 
     def cmd_image_test(self, ns) -> int:

@@ -187,18 +187,25 @@ role, name, context and domain). Change the front matter, then run the refresh.
 
 ## Publishing the package
 
+The package lives in its home repository, ROCm/rocm-libraries, as rocKE's `tools/rocke_monitor/` folder
+(`dnn-providers/hip-kernel-provider/rocke/tools/rocke_monitor/`); a repository of its own may hold it too, at its top.
+No tool of the package names that folder: a package update finds the package in the commit it fetches
+([README.md, "Updating"](../README.md#updating)), and `tools/make_package.py --install-into` finds it the same way in
+a sandbox checkout ([Building the package and its tarball](#building-the-package-and-its-tarball)).
+
 Make every change in the package. A change made in a monitor's own checkout of the toolkit (a live toolkit) comes in
-by hand, one commit at a time. The package has a repository of its own, with a history of its own, which is published
-from the package and never from a live toolkit:
+by hand, one commit at a time. A package repository, a repository of its own with the package at its top and a
+history of its own, is published from a checkout with the package at its top, and never from a live toolkit:
 
 ```sh
 PACKAGE_CHECKOUT/tools/publish_package.py PACKAGE_REPO -- --deny DENY_LIST
 ```
 
 `tools/publish_package.py` publishes the committed HEAD of the checkout it lives in. It refuses a work tree with
-changes, and a HEAD whose `config.json` is not the blank configuration (a live toolkit's tree has a machine's settings
-there). Then it runs the sync's steps below in the package repository, and commits "rocKE monitor package:
-publish COMMIT" as `rkmon <rkmon@localhost>`. It exits 0 when it published or found nothing to publish, 1 on a
+changes, and a HEAD whose `config.json` at the top is not the blank configuration: a live toolkit's tree has a
+machine's settings there, and a checkout of the home repository has none there, its package being in a folder below
+the top. Then it runs the sync's steps below in the package repository, and commits "rocKE monitor package: publish
+COMMIT" as `rkmon <rkmon@localhost>`. It exits 0 when it published or found nothing to publish, 1 on a
 refusal or a failed step, and 2 on a usage error.
 
 ## Syncing from a live toolkit

@@ -485,6 +485,26 @@ class Report(unittest.TestCase):
             lost[2]["why"],
         )
 
+    def test_a_review_closed_without_a_post_is_no_live_post(self):
+        """The live monitor's line of a review `rk review-close` closed without a post (`closed`) is no post of its
+        own: the live side leaves it out, so it pairs with no mirrored review and counts in no rate.
+        """
+        closed = {
+            "pr": 12,
+            "round": "fu1",
+            "head": "c" * 40,
+            "post": "https://example.com/o/r/review-1",
+            "closed": True,
+            "at": "2026-11-07T11:00:00Z",
+        }
+        with open(self.live / "review_cost.jsonl", "a", encoding="utf-8") as f:
+            f.write(json.dumps(closed) + "\n")
+        self.assertEqual(
+            sorted(mr.live_side(self.live)), [(7, H), (8, "8" * 40), (10, H10)]
+        )
+        rep = mr.build(self.live, self.out, self.claude)
+        self.assertEqual(rep["rate"], {"per_day": 3.8, "posts": 4, "days": 1.06})
+
     def test_the_rendered_report_and_the_command(self):
         text = "\n".join(mr.render(mr.build(self.live, self.out, self.claude)))
         self.assertTrue(

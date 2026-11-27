@@ -397,15 +397,15 @@ def _list_label(cfg: dict, q: str) -> list[dict]:
     return prs
 
 
-def our_latest_review(cfg: dict, n: int) -> dict | None:
-    """Our latest review post on PR n: an issue comment or a formal PR review (older batches used those), of this
-    deployment's own: posted by its account, with a line 1 that gives one of its automated reviewer names, or
-    gives none and was posted (a comment's created_at, a review's submitted_at) before reviews.unnamed_are_ours_until,
-    or gives none in a mirror (reviewer_name.own_review). A review that gives another deployment's name under the
-    same account is not ours.
-
-    A formal review carries its commit, so its reviewed head is exact. Comments get theirs from
-    resolve_reviewed_head().
+def account_reviews(cfg: dict, n: int) -> list[dict]:
+    """Every review on PR n posted under this deployment's account (config.operator_login), oldest first, whoever
+    posted it: this deployment, an older monitor or another deployment under the same account, or a person by hand. A
+    review is a post of the account's that reviewer_name.is_review knows for one: an issue comment, or a formal PR
+    review (older batches posted those). Each: {"kind": "comment" or "review", "id", "at" (a comment's created_at, a
+    review's submitted_at), "url", "body" (its first 1500 characters), "commit" (the head a formal review names; None
+    for a comment), "state" (a formal review's)}. our_latest_review keeps this deployment's own among them; `rk facts`
+    lists the ones its ledger does not hold (facts.py), and `rk review-close` takes one that stands for ours
+    (review.covering_review).
     """
     me = config.operator_login(cfg)
     rows = gh.rest(
@@ -414,37 +414,56 @@ def our_latest_review(cfg: dict, n: int) -> dict | None:
         jq=f'[.[] | select(.user.login=="{me}") | {{id, at: .created_at, url: .html_url, '
         f"body: (.body[0:1500])}}]",
     )
-    posts = [
-        dict(r, kind="comment", commit=None)
-        for r in rows
-        if reviewer_name.own_review(cfg, r.get("body"), r.get("at"))
-    ]
     revs = gh.rest(
         f"repos/{cfg['repo']}/pulls/{n}/reviews?per_page=100",
         paginate=True,
         jq=f'[.[] | select(.user.login=="{me}" and .submitted_at != null) | {{id, at: .submitted_at, '
         f'url: .html_url, state, commit: .commit_id, body: ((.body // "")[0:1500])}}]',
     )
-    posts += [
-        dict(r, kind="review")
-        for r in revs
-        if reviewer_name.own_review(cfg, r.get("body"), r.get("at"))
+    posts = [dict(r, kind="comment", commit=None) for r in rows]
+    posts += [dict(r, kind="review") for r in revs]
+    return sorted(
+        (p for p in posts if reviewer_name.is_review(p.get("body"))),
+        key=lambda p: p.get("at") or "",
+    )
+
+
+def as_ours(post: dict, count: int) -> dict:
+    """The review POST, one of account_reviews, as our review's record (rec["ours"]), COUNT numbering our reviews of
+    the PR. A formal review's head is the commit it names, exact; a comment's is None until resolve_reviewed_head
+    fills it."""
+    return {
+        "kind": post["kind"],
+        "id": post["id"],
+        "at": post["at"],
+        "url": post["url"],
+        "verdict": parse_verdict(post["body"]),
+        "line1": post["body"].splitlines()[0][:120],
+        "count": count,
+        "state": post.get("state"),
+        "head": post.get("commit"),
+        "head_src": "review-commit" if post.get("commit") else None,
+    }
+
+
+def our_latest_review(cfg: dict, n: int) -> dict | None:
+    """Our latest review post on PR n, as our review's record (as_ours): the latest of the account's reviews
+    (account_reviews) of this deployment's own: with a line 1 that gives one of its automated reviewer names, or
+    gives none and was posted (a comment's created_at, a review's submitted_at) before reviews.unnamed_are_ours_until,
+    or gives none in a mirror (reviewer_name.own_review). A review that gives another deployment's name under the
+    same account is not ours.
+
+    A formal review carries its commit, so its reviewed head is exact. Comments get theirs from
+    resolve_reviewed_head().
+    """
+    posts = [
+        p
+        for p in account_reviews(cfg, n)
+        if reviewer_name.own_review(cfg, p.get("body"), p.get("at"))
     ]
     if not posts:
         return None
-    last = max(posts, key=lambda r: r["at"])
-    return {
-        "kind": last["kind"],
-        "id": last["id"],
-        "at": last["at"],
-        "url": last["url"],
-        "verdict": parse_verdict(last["body"]),
-        "line1": last["body"].splitlines()[0][:120],
-        "count": len(posts),
-        "state": last.get("state"),
-        "head": last.get("commit"),
-        "head_src": "review-commit" if last.get("commit") else None,
-    }
+    return as_ours(max(posts, key=lambda r: r["at"]), len(posts))
 
 
 def head_at(cfg: dict, n: int, when: str) -> str | None:
@@ -510,6 +529,17 @@ def resolve_reviewed_head(cfg: dict, store, n: int, ours: dict) -> dict:
         return ours
     ours["head"], ours["head_src"] = head_at(cfg, n, ours["at"]), "timeline"
     return ours
+
+
+def account_review_head(cfg: dict, n: int, review: dict) -> dict:
+    """Fill the head of REVIEW (one of account_reviews, as_ours), a review of our account this deployment did not post,
+    from GitHub alone: a formal review's commit (head_src "review-commit"), exact, else PR n's head when it was posted
+    (head_at: head_src "timeline"), an estimate. Never from this deployment's ledger or worker files, as
+    resolve_reviewed_head reads them for its own posts: another's review posted near a post of ours, or after our
+    worker fetched the PR, is no review of that head."""
+    if review.get("head_src") != "review-commit":
+        review["head"], review["head_src"] = head_at(cfg, n, review["at"]), "timeline"
+    return review
 
 
 def required_contexts(cfg: dict) -> list[str]:

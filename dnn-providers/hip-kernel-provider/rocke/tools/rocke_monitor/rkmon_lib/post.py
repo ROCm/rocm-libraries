@@ -114,16 +114,39 @@ def our_review(
         "url": url,
         "verdict": parse_verdict(body),
         "line1": body.splitlines()[0] if body.strip() else "",
-        "count": ((rec.get("ours") or {}).get("count") or 0) + 1,
+        "count": next_count(rec),
         "head": head,
         "head_src": "ledger" if posted else UNPOSTED,
         **({} if posted else {"file": file}),
     }
 
 
+def next_count(rec: dict) -> int:
+    """The `count` of our next review of PR rec: one more than our last review's (rec["ours"])."""
+    return ((rec.get("ours") or {}).get("count") or 0) + 1
+
+
 def kept_unposted(ours: dict | None) -> bool:
     """Whether our last review of a PR (rec["ours"]) is one save_draft kept unposted."""
     return (ours or {}).get("kind") == UNPOSTED
+
+
+# The field of our last review of a PR (rec["ours"]) that marks a review of our account `rk review-close` took as our
+# last review (review.close_posted): when it was taken.
+TAKEN = "taken"
+
+
+def taken(ours: dict | None) -> bool:
+    """Whether our last review of a PR (rec["ours"]) is a review of our account that `rk review-close` took (TAKEN)."""
+    return bool((ours or {}).get(TAKEN))
+
+
+def taken_stands(old: dict | None, latest: dict | None) -> bool:
+    """Whether OLD, our last review of a PR (rec["ours"]), is one `rk review-close` took that stays our last review
+    over LATEST, this deployment's own latest review as GitHub shows it (snapshot.our_latest_review): until GitHub shows
+    a review of its own posted after it was taken (`rk post` makes its post our last review itself). The poll's
+    refresh asks it (rkmon.refresh_ours)."""
+    return taken(old) and (latest is None or latest["at"] < old[TAKEN])
 
 
 def kept_file(cfg: dict, ours: dict | None) -> pathlib.Path | None:
@@ -1853,17 +1876,35 @@ def fix_link(
     return "\n".join(["; ".join(out), *held])
 
 
+# A formal review's URL on GitHub: its PR, then its id.
+_REVIEW_URL = re.compile(r"/pull/(\d+)#pullrequestreview-(\d+)")
+
+
 def our_post_body(cfg: dict, ours: dict | None) -> str:
-    """Our latest review comment's body, read from GitHub ("" when there is none, for a formal review, which the older
-    batches posted, and for a comment someone deleted: it carries no open rows). Raises gh.GhError otherwise.
+    """Our latest review comment's body, read from GitHub by the id its URL gives ("" when there is none, for a formal
+    review, which the older batches posted, and for a comment someone deleted: it carries no open rows). A review of
+    our account that `rk review-close` took (taken) is read by its id, a comment or a formal review (on the PR its URL
+    names). Raises gh.GhError otherwise.
     """
     from . import gh
 
-    m = re.search(r"issuecomment-(\d+)", (ours or {}).get("url") or "")
-    if not m:
-        return ""
+    ours = ours or {}
+    url = ours.get("url") or ""
+    if taken(ours) and ours.get("id"):
+        review = _REVIEW_URL.search(url)
+        if ours.get("kind") != "review":
+            path = f"repos/{cfg['repo']}/issues/comments/{ours['id']}"
+        elif review:
+            path = f"repos/{cfg['repo']}/pulls/{review.group(1)}/reviews/{ours['id']}"
+        else:
+            return ""
+    else:
+        comment = re.search(r"issuecomment-(\d+)", url)
+        if not comment:
+            return ""
+        path = f"repos/{cfg['repo']}/issues/comments/{comment.group(1)}"
     try:
-        body = gh.rest(f"repos/{cfg['repo']}/issues/comments/{m.group(1)}", jq=".body")
+        body = gh.rest(path, jq=".body")
     except gh.GhError as exc:
         if "HTTP 404" in str(exc):
             return ""
@@ -1875,8 +1916,9 @@ def our_last_review(cfg: dict, n: int, ours: dict | None) -> tuple[str, str]:
     """Our last review of PR n (`ours`, its record rec["ours"]): its body and where it was read, ("", "") when none is
     read. A review kept unposted is read from its file (kept_file). A posted one is read from GitHub, the comment as it
     stands (our_post_body), else from the newest copy of our posts on the PR in the outputs folder; in a mirror
-    our last post is the live monitor's, of which the folder holds no copy. Raises gh.GhError when GitHub cannot be
-    read and no copy stands in for it.
+    our last post is the live monitor's, and a review `rk review-close` took (taken) is not this deployment's post:
+    the folder holds no copy of either, so GitHub alone gives them. Raises gh.GhError when GitHub cannot be read and
+    no copy stands in for it.
     """
     from . import gh, mirror
 
@@ -1893,7 +1935,9 @@ def our_last_review(cfg: dict, n: int, ours: dict | None) -> tuple[str, str]:
     if body:
         return body, "GitHub"
     posted = [
-        p for p in ([] if mirror.on(cfg) else copies(cfg, n)) if not is_kept_file(p)
+        p
+        for p in ([] if mirror.on(cfg) or taken(ours) else copies(cfg, n))
+        if not is_kept_file(p)
     ]
     if posted:
         return posted[-1].read_text(encoding="utf-8"), posted[-1].name

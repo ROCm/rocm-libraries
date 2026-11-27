@@ -1171,6 +1171,48 @@ class TestTickNow(_Monitor):
         self.assertEqual(code, 0, out)
         self.assertIn(f"TICK_NOW={self.store.dir / control.TICK_NOW}", out.splitlines())
 
+    def test_rk_status_names_the_tick_loop_that_runs_here(self):
+        """rk status's tick loop line names the loops that run here as rk tick-now finds them (control.tick_loops): the
+        container's shell tick loop while no orchestrator runs, the orchestrator, a host install's tools/tick_loop.py.
+        The restart guide needs no word on the line: in the container too it names the loop that ticks.
+        """
+        self.assertNotIn(
+            "tick loop: not running",
+            (ROOT / "docs" / "restart.md").read_text(encoding="utf-8"),
+        )
+        import fcntl
+
+        from rkmon_lib import idle
+
+        def tick_loop() -> str:
+            lines = control.status_lines(
+                self.cfg, self.store.load(), self.store, web_running=False
+            )
+            return next(x for x in lines if x.startswith("  tick loop: "))
+
+        last = "; last tick never; last full tick never"
+        self.assertEqual(tick_loop(), "  tick loop: not running" + last)
+        pid = self.a_loop()
+        self.assertEqual(
+            tick_loop(),
+            "  tick loop: running: the tick loop that runs without the orchestrator (docker/entrypoint.sh, pid "
+            f"{pid})" + last,
+        )
+        session = self.spawn(register=control.ORCHESTRATOR)
+        self.assertEqual(
+            tick_loop(),
+            f"  tick loop: running: the orchestrator (rk orchestrate, pid {session.pid})"
+            + last,
+        )
+        (self.store.dir / idle.LOOP_FILES["LOOP_PID"]).write_text("4321\n")
+        with open(self.store.dir / idle.LOOP_FILES["LOOP_LOCK"], "wb") as lock:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)  # a loop runs
+            self.assertEqual(
+                tick_loop(),
+                f"  tick loop: running: the orchestrator (rk orchestrate, pid {session.pid}) and tools/tick_loop.py "
+                "(pid 4321)" + last,
+            )
+
     def test_refused_while_the_monitor_is_stopped(self):
         st = self.store.load()
         control.mark_stopped(st, "stop")

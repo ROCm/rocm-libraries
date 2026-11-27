@@ -123,6 +123,47 @@ def rkmon_commands(text: str) -> list:
     return out
 
 
+def rk_parsers() -> dict:
+    """rk's commands, each with its parser (argparse's), as rkmon.main builds them."""
+    import argparse
+
+    import rkmon
+
+    built = []
+
+    def parse(parser, *args, **kwargs):
+        built.append(parser)
+        raise SystemExit(0)
+
+    with mock.patch.object(argparse.ArgumentParser, "parse_args", parse):
+        try:
+            rkmon.main(["status"])
+        except SystemExit:
+            pass
+    return next(
+        a for a in built[0]._actions if isinstance(a, argparse._SubParsersAction)
+    ).choices
+
+
+def rk_help_entries() -> dict[str, str]:
+    """rk --help's entry of each command (rkmon.py's docstring): the line that names it, its name first after two
+    spaces or after the " | " of a line that names two (review-skip N | review-unskip N), and the lines indented under
+    that line."""
+    import rkmon
+
+    entries, names = {}, []
+    for line in rkmon.__doc__.splitlines():
+        if re.match(r"  \S", line):
+            names = [
+                part.split()[0] for part in line[2:].split("   ", 1)[0].split(" | ")
+            ]
+        elif not line.startswith("   "):
+            names = []
+        for name in names:
+            entries[name] = entries.get(name, "") + line + "\n"
+    return entries
+
+
 def container_values() -> dict:
     """The derived keys' values in the package's container, with no value given: each function of
     rkmon_lib/derived.py's FUNCTIONS, in their order, after the keys it reads."""
@@ -399,30 +440,30 @@ class TestDocs(unittest.TestCase):
         """rk --help (rkmon.py's docstring) has a line for each command of rk's parser: the command's name first, after
         two spaces, or after the " | " of a line that names two (review-skip N | review-unskip N).
         """
+        commands = rk_parsers()
+        self.assertGreater(len(commands), 100)
+        self.assertEqual(sorted(set(commands) - set(rk_help_entries())), [])
+
+    def test_rk_help_names_each_option_of_each_command(self):
+        """rk --help's entry of each command (rk_help_entries) names each option of the command's parser, by one of
+        its spellings: an option the entry leaves out is one an operator never learns of from the help.
+        """
         import argparse
 
-        import rkmon
-
-        built = []
-
-        def parse(parser, *args, **kwargs):
-            built.append(parser)
-            raise SystemExit(0)
-
-        with mock.patch.object(argparse.ArgumentParser, "parse_args", parse):
-            with self.assertRaises(SystemExit):
-                rkmon.main(["status"])
-        commands = next(
-            a for a in built[0]._actions if isinstance(a, argparse._SubParsersAction)
-        ).choices
-        named = {
-            part.split()[0]
-            for line in rkmon.__doc__.splitlines()
-            if re.match(r"  \S", line)
-            for part in line[2:].split("   ", 1)[0].split(" | ")
-        }
-        self.assertGreater(len(commands), 100)
-        self.assertEqual(sorted(set(commands) - named), [])
+        entries, missing = rk_help_entries(), {}
+        for name, parser in sorted(rk_parsers().items()):
+            for action in parser._actions:
+                if isinstance(action, argparse._HelpAction):
+                    continue
+                spellings = action.option_strings
+                if spellings and not any(
+                    re.search(
+                        rf"(?<![\w-]){re.escape(o)}(?![\w-])", entries.get(name, "")
+                    )
+                    for o in spellings
+                ):
+                    missing.setdefault(name, []).append("/".join(spellings))
+        self.assertEqual(missing, {})
 
     def test_rk_help_names_each_key_by_its_name(self):
         """rk's help (its usage and its options' help) names a settings file's key (features.…) as the file names it,

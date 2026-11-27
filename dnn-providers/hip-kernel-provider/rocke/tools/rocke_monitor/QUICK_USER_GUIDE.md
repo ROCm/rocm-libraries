@@ -23,7 +23,7 @@ machine until you set a feature's `mode` to "live" ("Go live"). Spend a day or t
    sending, and Today's log what the monitor did.
 2. Reviews (profiles `full` and `review-only`). The first ticks queue every open pull request in scope
    (`repository.scope_labels`), however old, that is not a draft and has no review yet from this deployment: develop
-   fixes and the pull requests you float to the top (`./rkmon rk prioritize N`, with the merge queue on) come first,
+   fixes and the pull requests you float to the top (`./rkmon rk prioritize N`) come first,
    then the others by number, lowest first. This deployment's reviews are those from your GitHub account
    (`integrations.github_cli.username`) whose first line gives its automated reviewer name
    (`features.review_automation.automated_reviewer_name`). Up to `features.review_automation.parallel_reviews` run at
@@ -47,7 +47,7 @@ machine until you set a feature's `mode` to "live" ("Go live"). Spend a day or t
 | `./rkmon next` | Where the deployment is on the deploy path, and the command to run next |
 | `./rkmon rk features` | Each feature: on or off, prototype or live, and what it still lacks |
 | `./rkmon rk roles` | Each pass's model, provider and effort |
-| `./rkmon rk usage` | The tokens the reviews spent so far, and their cost while `features.review_automation.spend.enabled` is true |
+| `./rkmon rk usage` | The tokens the models used, per day; `./rkmon rk spend` gives what the reviews cost, while `features.review_automation.spend.enabled` is true |
 | `./rkmon logs -f` | The container's log as it grows: each tick's summary, and what you should know |
 
 The admin dashboard shows the same at a glance. With alerts on (`features.alerts`), your Teams channel gets develop

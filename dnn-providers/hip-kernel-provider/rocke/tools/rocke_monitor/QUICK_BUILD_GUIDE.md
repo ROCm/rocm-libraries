@@ -180,8 +180,8 @@ or push it to the registry FILE names in `image.registry`, once you are logged i
 `image save` compresses the image with gzip, or pigz when this machine has it. `image push` tags the image for the
 registry, pushes it, then removes that extra tag here.
 
-Success: `SAVED NAME:TAG to IMAGE_FILE (N GiB)` or `PUSHED NAME:TAG to the registry image.registry names`, then the
-done line, one line on the terminal:
+Success: `SAVED NAME:TAG to IMAGE_FILE (N GiB)` or `PUSHED NAME:TAG to REGISTRY (image.registry)`, REGISTRY being
+your registry's address, then the done line, one line on the terminal:
 
 ```text
 done: NAME:TAG is ready (in IMAGE_FILE). On the deploy machine, follow QUICK_DEPLOY_GUIDE.md from step 1, with the

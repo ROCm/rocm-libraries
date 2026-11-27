@@ -1,9 +1,11 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 """The stuck-verification alarm (rkmon_lib/verify_stale.py): a review handed to verification that nothing posts gets
-its VERIFY_STALE line past its limit, at most once an hour per PR and head; a split review's limit grows with its
-waves; the idle tick's timer falls due with the next line; the tick's review step adds the alarm after the advance;
-a review kept unposted, skipped, posted or dropped waits for nothing. The states and times are made up.
+its VERIFY_STALE line past its limit, at most once an hour per PR and head; the line names the review's head and
+`rk review-close N`, for a head our account posted a review at already that stands for ours, which a mirror's line
+leaves out; a split review's limit grows with its waves; the idle tick's timer falls due with the next line; the tick's
+review step adds the alarm after the advance; a review kept unposted, skipped, posted or dropped waits for nothing. The
+states and times are made up.
 """
 
 import json
@@ -36,8 +38,11 @@ def ready(pr: int = 12, head: str = HEAD, when: str = T0) -> dict:
     return {"pr": pr, "kind": "first-round", "head": head, "at": when, "jobs": {}}
 
 
-def stale(pr: int, age: str) -> str:
-    return f"!! VERIFY_STALE #{pr}: handed to verification {age} ago, nothing posted"
+def stale(pr: int, age: str, head: str = HEAD) -> str:
+    return (
+        f"!! VERIFY_STALE #{pr}: handed to verification {age} ago, nothing posted (head {head[:10]}); if our account "
+        f"posted at that head already, run `rk review-close {pr}`"
+    )
 
 
 class Base(unittest.TestCase):
@@ -59,6 +64,28 @@ class TestLine(Base):
     def test_the_line_comes_once_the_limit_has_passed_and_says_how_long_ago(self):
         self.assertEqual(self.lines(179), [])
         self.assertEqual(self.lines(180), [stale(12, "3.0 h")])
+
+    def test_the_line_names_the_review_s_head_and_the_command_that_closes_it(self):
+        """When our account posted a review at that head already that stands for ours (an older monitor's, or one
+        posted by hand; never another deployment's), `rk review-close N` closes the review without a post.
+        """
+        self.assertEqual(
+            self.lines(180),
+            [
+                "!! VERIFY_STALE #12: handed to verification 3.0 h ago, nothing posted (head aaaaaaaaaa); if our "
+                "account posted at that head already, run `rk review-close 12`"
+            ],
+        )
+
+    def test_a_mirror_s_line_names_no_rk_review_close(self):
+        """In a mirror `rk review-close` closes nothing (mirror.NO_CLOSE): the line names the review's head alone."""
+        self.cfg["mirror"] = {"enabled": True}
+        self.assertEqual(
+            self.lines(180),
+            [
+                "!! VERIFY_STALE #12: handed to verification 3.0 h ago, nothing posted (head aaaaaaaaaa)"
+            ],
+        )
 
     def test_at_most_once_an_hour_for_each_pr(self):
         self.st["review_ready"].append(ready(13, "c" * 40, at(30)))
@@ -93,12 +120,12 @@ class TestLine(Base):
         self.assertEqual(self.lines(210), [])
         self.assertNotIn(verify_stale.KEY, self.st)
         self.assertEqual(self.lines(379), [])
-        self.assertEqual(self.lines(380), [stale(12, "3.0 h")])
+        self.assertEqual(self.lines(380), [stale(12, "3.0 h", NEW_HEAD)])
         self.assertEqual(self.lines(430), [])
         self.assertEqual(
             self.st[verify_stale.KEY], {"12": {"head": NEW_HEAD, "said": at(380)}}
         )
-        self.assertEqual(self.lines(440), [stale(12, "4.0 h")])
+        self.assertEqual(self.lines(440), [stale(12, "4.0 h", NEW_HEAD)])
 
     def test_a_review_posted_dropped_or_skipped_gets_none_and_its_record_goes(self):
         self.assertEqual(len(self.lines(180)), 1)
@@ -199,7 +226,8 @@ class TestTick(Base):
         self.assertTrue(out[0].startswith("REVIEW_DROP #13: "))
         self.assertRegex(
             out[1],
-            r"^!! VERIFY_STALE #12: handed to verification 3\.\d h ago, nothing posted$",
+            r"^!! VERIFY_STALE #12: handed to verification 3\.\d h ago, nothing posted \(head aaaaaaaaaa\); if our "
+            r"account posted at that head already, run `rk review-close 12`$",
         )
 
     def test_a_failure_of_the_alarm_is_a_line_and_the_advance_stands(self):
@@ -215,11 +243,14 @@ class TestTick(Base):
 class TestCard(unittest.TestCase):
     """The session's card for the line, in the skill's tick procedure."""
 
-    def test_a_stuck_verification_starts_again_in_its_own_round_and_part(self):
+    def card(self) -> str:
         skill = (ROOT / "agentic" / "skills" / "rocke-monitor" / "SKILL.md").read_text(
             encoding="utf-8"
         )
-        card = skill.split("`!! VERIFY_STALE #N", 1)[1].split("\n   - **", 1)[0]
+        return skill.split("`!! VERIFY_STALE #N", 1)[1].split("\n   - **", 1)[0]
+
+    def test_a_stuck_verification_starts_again_in_its_own_round_and_part(self):
+        card = self.card()
         # Its own review directory: once the stuck verifier has written notes.md, a follow-up's default round is the
         # next one (prep.default_round).
         self.assertIn("`rk dispatch-pack N --round <round>`", card)
@@ -232,6 +263,13 @@ class TestCard(unittest.TestCase):
             card,
         )
         self.assertIn("Its cross pass: a new one (step 4 there)", card)
+
+    def test_a_review_our_account_posted_already_is_closed_without_a_post(self):
+        card = self.card()
+        self.assertIn("our account posted a review at that head already", card)
+        self.assertIn("`rk review-close N`", card)
+        self.assertIn("`rk facts N`", card)
+        self.assertIn("A mirror's line names no `rk review-close`.", card)
 
 
 if __name__ == "__main__":

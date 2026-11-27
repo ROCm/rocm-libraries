@@ -271,7 +271,8 @@ after every compaction, and before an outward action you have not taken since th
   - on GitHub the PR is still open, not a draft, and at the validated head.
 - Uncleared PRs that reach the head of the queue are proposed to <user_login>, who merges them; so is every PR
   while auto-merge is off (`features.merge_queue.auto_merge.enabled` false). Only PRs the merge plan lets
-  land now (wave 1 with nothing ahead conflicting) are batched and proposed (`merge_procedure.md`, Merge plan).
+  land now (wave 1, merging clean with develop, with nothing ahead conflicting) are batched and proposed
+  (`merge_procedure.md`, Merge plan).
 - `clear` and `unclear` run only on <user_login>'s explicit instruction.
 - Queue notices on PRs go out only while the merge queue is live (`features.merge_queue.mode`): <user_login> sets
   it live only once they have told the team.

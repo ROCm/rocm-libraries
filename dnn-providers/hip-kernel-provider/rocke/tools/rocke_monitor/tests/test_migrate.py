@@ -877,9 +877,9 @@ class TestProfiles(Migrate):
             (
                 "",
                 "full",
-                'the title line names the profile "full" (reviews, the merge queue and the dashboards), which starts '
-                "with features.review_automation.enabled true and features.merge_queue.enabled true, as your file "
-                "has them",
+                'the title line names the profile "full" (reviews, the merge queue and the admin dashboard), which '
+                "starts with features.review_automation.enabled true and features.merge_queue.enabled true, as your "
+                "file has them",
             ),
             (
                 "features:\n  merge_queue:\n    enabled: false\n",

@@ -175,9 +175,7 @@ shows the state's row, then `rk doctor`'s report; `docker/rkmon logs -f` follows
 own lines and the orchestrator's lean per-tick output. Each part logs to `/work/logs`: `start.log`, `stop.log`,
 `web.log` (the loop that restarts the admin dashboard), `orchestrator.log` (the orchestrator's output), `tick.log` (the
 tick loop that runs without the orchestrator) and `rk-write.log` (each request to the write broker); `restarts`
-records each restart of a kept part, which the health check counts. In the container `rk status` shows
-`tick loop: not running`: that line is about a host install's `tools/tick_loop.py`, which the container does not use,
-as the orchestrator and the entry point tick instead; its last tick is the time to watch.
+records each restart of a kept part, which the health check counts.
 
 **What a container restart keeps.** Everything on the five volumes: `/work` (the monitor's home `/work/monitor` with
 `state/`, the clone, the workers' folders, the saved probes, the posts, the caches, the logs, and Claude Code's own

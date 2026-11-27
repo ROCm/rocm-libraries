@@ -81,7 +81,7 @@ features run.
 A profile is the template step 1 writes, for one type of deployment: it decides which features start on.
 `./rkmon template deploy --profile PROFILE FILE` writes the profile PROFILE's template; `full` is the default.
 
-- `full`: reviews, the merge queue and the dashboards.
+- `full`: reviews, the merge queue and the admin dashboard.
 - `review-only`: reviews and the admin dashboard.
 - `merge-queue`: the merge queue and the admin dashboard, without Claude.
 
@@ -537,10 +537,9 @@ another machine.
    step 6 above says. Watch it for a day.
 5. Move over. Drain and stop the old monitor, with its own package's commands, from its package folder's `docker/`
    folder: `./rkmon rk stop --drain`, then `./rkmon stop`. Here, `./rkmon stop --drain`; copy its `/work` again, and
-   run `./rkmon adopt --from DIR` once more, so that this deployment starts from its latest state; `./rkmon start`;
-   then `./rkmon standby off`, which ends the move as step 7 above says. Without the adopt, this deployment takes none
-   of the old monitor's reviews for its own, and reviews each pull request again. DIR contains the monitor's state:
-   delete each copy once the move is done.
+   run `./rkmon adopt --from DIR` once more, so that this deployment starts from the old monitor's state as it
+   stopped, not as the first copy left it; `./rkmon start`; then `./rkmon standby off`, which ends the move as step
+   7 above says. DIR contains the monitor's state: delete each copy once the move is done.
 
 ## Removing a deployment
 

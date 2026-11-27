@@ -1,9 +1,13 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 """The stuck-verification alarm. A review handed to verification (the review driver's REVIEW_READY: state
-review_ready) waits there until `rk post` posts it. One still waiting past its limit gets, from the full tick,
-`!! VERIFY_STALE #N: handed to verification <age> ago, nothing posted`, at most once an hour per PR and head
-(EVERY_MIN), until it is posted or dropped. The session then checks the PR's verifier (the skill's tick procedure).
+review_ready) waits there until `rk post` posts it. One still waiting past its limit gets, from the full tick, its
+VERIFY_STALE line (`lines`: how long ago it was handed to verification, and its head), at most once an hour per PR and
+head (EVERY_MIN), until it is posted or dropped. The session then checks the PR's verifier (the skill's tick
+procedure); when our account posted a review at that head already that stands for ours (an older monitor's under the
+same account, or one a person posted by hand: reviewer_name.stands_for_ours), the line's `rk review-close N` closes
+the review without a post. A mirror's line leaves that pointer out: `rk review-close` closes nothing there
+(mirror.NO_CLOSE).
 The orchestrator's hourly re-hand of a review no verifier holds (orchestrator.rehand) only hands it again, which a
 session that believes its verifier is still running sets aside.
 
@@ -20,7 +24,7 @@ longer waits, or waits at another head, goes at the next full tick.
 
 import json
 
-from . import features, idle, prep, report, review, split
+from . import features, idle, mirror, prep, report, review, split
 from .snapshot import same_commit
 from .store import minutes_since, now, parse_ts
 
@@ -89,7 +93,15 @@ def lines(cfg: dict, st: dict, at: str | None = None) -> list[str]:
             kept[str(n)] = rec
         if _next(cfg, said, r) <= t:
             age = report._ago_min(minutes_since(r["at"], t))
-            out.append(f"{LINE} #{n}: handed to verification {age} ago, nothing posted")
+            close = (
+                ""
+                if mirror.on(cfg)
+                else f"; if our account posted at that head already, run `rk review-close {n}`"
+            )
+            out.append(
+                f"{LINE} #{n}: handed to verification {age} ago, nothing posted (head {(r.get('head') or '-')[:10]})"
+                + close
+            )
             kept[str(n)] = {"head": r.get("head"), "said": t}
     if kept:
         st[KEY] = kept

@@ -28,8 +28,10 @@ review pipelines (`rk mirror-report`).
   is not taken as our last post (`hold_ours`, at the tick's refresh), the post's premises leave our own comments out of
   the "new comments" count, and REVIEW_READY tells the verifier not to read them. The facts and the review directory
   name our posts as the live monitor's ledger has them up to the feed line (`live_posts`: the feed's folder holds it),
-  and our last post's text is the one GitHub holds under our login (the live monitor's), the post the live review
-  follows up on.
+  and the facts list no review of our account posted after it (`posts_until`); our last post's text is the one GitHub
+  holds under our login (the live monitor's), the post the live review follows up on. No review of the live monitor's
+  stands in for one of the mirror's: `rk review-close` closes none (NO_CLOSE), and the VERIFY_STALE line leaves out
+  its pointer to it.
 - Posts. `rk post N FILE [--premises SPEC]` runs its premises and rk post's guards as always (a refusal is a refusal: it
   leaves nothing in the folder), and only for a review a feed line started at that very head (a re-verification at a
   head the live monitor did not review here is refused), then writes the would-be post (post.md), the verifier's notes,
@@ -72,6 +74,12 @@ TRY_NEXT = (
     "MIRROR_WAIT #",
 )  # a feed line that starts nothing: the driver tries the next
 REFUSAL = "this monitor is a mirror (config mirror.enabled): rk {cmd} writes outward, and a mirror sends nothing"
+# `rk review-close`'s refusal in a mirror (review.close_reads): there every review of our account that gives no name is
+# the live monitor's, the other side of the comparison, which never stands in for a review of the mirror's.
+NO_CLOSE = (
+    "this monitor is a mirror (config mirror.enabled): its reviews are compared with the live monitor's, so "
+    "rk review-close closes none"
+)
 DEFAULTS = registry.package_section("mirror")
 CHECKS_DONE = "## Auto-merge"  # the checks report's last section: the live checks job wrote it whole
 DRAFT_FILES = (
@@ -501,12 +509,14 @@ def not_ours(cfg: dict) -> str:
     )
 
 
-def live_posts(cfg: dict, st: dict, n: int) -> list[dict] | None:
-    """Our posts on PR n as the live monitor's ledger has them (beside its feed), up to the feed line of PR n's mirrored
-    review (the ones the live review knew); None outside a mirror."""
+def posts_until(cfg: dict, st: dict, n: int) -> str:
+    """The time up to which a mirror shows our posts on PR n, the live monitor's under our login: the feed line of PR
+    n's mirrored review (the posts the live review knew; now while none is started). The live monitor's later posts on
+    the PR are the live review's own, which the mirror's review is compared with blind. "" outside a mirror.
+    """
     if not on(cfg):
-        return None
-    until = (
+        return ""
+    return (
         max(
             (
                 s.get("feed_at") or ""
@@ -517,6 +527,14 @@ def live_posts(cfg: dict, st: dict, n: int) -> list[dict] | None:
         )
         or now()
     )
+
+
+def live_posts(cfg: dict, st: dict, n: int) -> list[dict] | None:
+    """Our posts on PR n as the live monitor's ledger has them (beside its feed), up to posts_until; None outside a
+    mirror."""
+    if not on(cfg):
+        return None
+    until = posts_until(cfg, st, n)
     ledger = (
         pathlib.Path(settings(cfg)["feed"]).with_name(LEDGER)
         if settings(cfg)["feed"]

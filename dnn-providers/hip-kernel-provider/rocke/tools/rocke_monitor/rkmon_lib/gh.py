@@ -626,6 +626,12 @@ CALLS = (
         (("Pull requests", "read"),),
     ),
     (
+        BOTH,
+        "GET repos/{repo}/pulls/{n}/reviews/{id}",
+        "one of a PR's reviews: our account's review that rk review-close took",
+        (("Pull requests", "read"),),
+    ),
+    (
         (READ,),
         "GET repos/{repo}/pulls/{n}/comments",
         "a PR's review comments",

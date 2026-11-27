@@ -87,6 +87,7 @@ CANNED = [
         "2026-11-04T10:00:00Z post at aaaaaaaaaa u1 (followup)",
         "copy: /dl/PR_FOLLOWUP_7.md (2026-11-04T10:00:01Z)",
     ],
+    ["none"],
     [
         "from PR_FOLLOWUP_7.md",
         f"## PR #7 — t (dev, {TK}-1) — 🟠 Follow-up: x",

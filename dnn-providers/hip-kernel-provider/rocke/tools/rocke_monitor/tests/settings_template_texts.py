@@ -98,7 +98,7 @@ python_packages:
 """
 
 DEPLOY_FULL = """\
-# rocKE monitor: deploy settings (profile "full": reviews, the merge queue and the dashboards).
+# rocKE monitor: deploy settings (profile "full": reviews, the merge queue and the admin dashboard).
 # These settings decide what one monitor on this host does. QUICK_DEPLOY_GUIDE.md walks you through them, and
 # README.md explains each one.
 # This file is yours: keep it out of git and out of the package folder. Never put a password, token or key in it:
@@ -214,9 +214,9 @@ features:
     # Schedule: when reviews start.
     schedule:
       # How long to wait after a pull request's latest push before reviewing it, in minutes, so that a burst of pushes
-      # gets one review. After the last push of a burst, the review starts within 45 minutes, or within 10 for your
-      # priorities and for pull requests that fix develop, which wait at most that long after any push. Set above 45,
-      # it applies to bursts too. 0: a single push doesn't wait. Default: 30.
+      # gets one review. A burst waits 45 minutes after its last push, and your priorities and the pull requests that
+      # fix develop wait at most 10 minutes after any push, a burst's too. Set above 45, it applies to bursts too. 0:
+      # a single push doesn't wait. Default: 30.
       push_cooldown_minutes: 30
       # The shortest time between two follow-up reviews of the same pull request, in minutes. Your priorities, pull
       # requests that fix develop, and pushes that only merge develop in don't wait. 0: don't wait. Default: 60.
@@ -385,7 +385,8 @@ features:
       enabled: false
     # Needs you: a message for each decision that waits for you on the admin dashboard (a merge to approve, a hold
     # that has waited too long, a priority request, a pull request ready for your approval, an in-depth review to
-    # approve). Each is sent once, addressed to your GitHub username, with a link to the team dashboard.
+    # approve). Each is sent once, addressed to your GitHub username, with a link to the team dashboard when its
+    # public_url is set.
     needs_you:
       # true: send this alert. false: decisions only show on the dashboards. Required.
       enabled: false
@@ -572,9 +573,9 @@ features:
     # Schedule: when reviews start.
     schedule:
       # How long to wait after a pull request's latest push before reviewing it, in minutes, so that a burst of pushes
-      # gets one review. After the last push of a burst, the review starts within 45 minutes, or within 10 for your
-      # priorities and for pull requests that fix develop, which wait at most that long after any push. Set above 45,
-      # it applies to bursts too. 0: a single push doesn't wait. Default: 30.
+      # gets one review. A burst waits 45 minutes after its last push, and your priorities and the pull requests that
+      # fix develop wait at most 10 minutes after any push, a burst's too. Set above 45, it applies to bursts too. 0:
+      # a single push doesn't wait. Default: 30.
       push_cooldown_minutes: 30
       # The shortest time between two follow-up reviews of the same pull request, in minutes. Your priorities, pull
       # requests that fix develop, and pushes that only merge develop in don't wait. 0: don't wait. Default: 60.
@@ -693,7 +694,8 @@ features:
       enabled: false
     # Needs you: a message for each decision that waits for you on the admin dashboard (a merge to approve, a hold
     # that has waited too long, a priority request, a pull request ready for your approval, an in-depth review to
-    # approve). Each is sent once, addressed to your GitHub username, with a link to the team dashboard.
+    # approve). Each is sent once, addressed to your GitHub username, with a link to the team dashboard when its
+    # public_url is set.
     needs_you:
       # true: send this alert. false: decisions only show on the dashboards. Required.
       enabled: false
@@ -941,7 +943,8 @@ features:
       enabled: false
     # Needs you: a message for each decision that waits for you on the admin dashboard (a merge to approve, a hold
     # that has waited too long, a priority request, a pull request ready for your approval, an in-depth review to
-    # approve). Each is sent once, addressed to your GitHub username, with a link to the team dashboard.
+    # approve). Each is sent once, addressed to your GitHub username, with a link to the team dashboard when its
+    # public_url is set.
     needs_you:
       # true: send this alert. false: decisions only show on the dashboards. Required.
       enabled: false
@@ -994,7 +997,7 @@ model_bindings: {}
 """
 
 DEPLOY_EVERY_KEY = """\
-# rocKE monitor: deploy settings (profile "full": reviews, the merge queue and the dashboards).
+# rocKE monitor: deploy settings (profile "full": reviews, the merge queue and the admin dashboard).
 # These settings decide what one monitor on this host does. QUICK_DEPLOY_GUIDE.md walks you through them, and
 # README.md explains each one.
 # This file is yours: keep it out of git and out of the package folder. Never put a password, token or key in it:
@@ -1118,9 +1121,9 @@ features:
     # Schedule: when reviews start.
     schedule:
       # How long to wait after a pull request's latest push before reviewing it, in minutes, so that a burst of pushes
-      # gets one review. After the last push of a burst, the review starts within 45 minutes, or within 10 for your
-      # priorities and for pull requests that fix develop, which wait at most that long after any push. Set above 45,
-      # it applies to bursts too. 0: a single push doesn't wait. Default: 30.
+      # gets one review. A burst waits 45 minutes after its last push, and your priorities and the pull requests that
+      # fix develop wait at most 10 minutes after any push, a burst's too. Set above 45, it applies to bursts too. 0:
+      # a single push doesn't wait. Default: 30.
       push_cooldown_minutes: 30
       # The shortest time between two follow-up reviews of the same pull request, in minutes. Your priorities, pull
       # requests that fix develop, and pushes that only merge develop in don't wait. 0: don't wait. Default: 60.
@@ -1420,7 +1423,8 @@ features:
       enabled: false
     # Needs you: a message for each decision that waits for you on the admin dashboard (a merge to approve, a hold
     # that has waited too long, a priority request, a pull request ready for your approval, an in-depth review to
-    # approve). Each is sent once, addressed to your GitHub username, with a link to the team dashboard.
+    # approve). Each is sent once, addressed to your GitHub username, with a link to the team dashboard when its
+    # public_url is set.
     needs_you:
       # true: send this alert. false: decisions only show on the dashboards. Required.
       enabled: false

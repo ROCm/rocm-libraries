@@ -5,10 +5,11 @@
 notices, issues, arm and the rest: rkmon_lib/post.py) alone write, under the write login (rkmon_lib/gh.py). In the
 container those run as the write user, through the broker (docker/rk_write.py).
 
-  init [--if-new] [--on]   create state/ and seed it from GitHub without emitting events; --if-new: only when there is
-                       no state yet, else it says so and exits 0 (the container's `docker/rkmon start` runs it each
-                       time); --on: the state it seeds starts ON, and kept state is never switched (a paused monitor
-                       stays paused, and it says how to resume)
+  init [--if-new] [--on] [--force]   create state/ and seed it from GitHub without emitting events; --if-new: only
+                       when there is no state yet, else it says so and exits 0 (the container's `docker/rkmon start`
+                       runs it each time); --on: the state it seeds starts ON, and kept state is never switched (a
+                       paused monitor stays paused, and it says how to resume); --force: seed a new state in place of
+                       one that exists, which it replaces (without it, a state that exists is kept)
   tick [--force] [--full] [--dry-run]   one monitor iteration (no-op while OFF, unless --force, or STOPPED). Idle when
                        nothing changed since the last full tick and no timer ran out (rkmon_lib/idle.py): one line, the
                        dashboards' "checked" stamps. Otherwise full: poll, events, queue, plan, journal, dashboards.
@@ -26,10 +27,12 @@ container those run as the write user, through the broker (docker/rk_write.py).
                        takes rk tick-now's request for it while PID runs and no orchestrator session does (that one
                        takes it itself). TAKEN, exit 0: the loop starts a tick at once; exit 1 once SECONDS went by
                        with none taken
-  tick-filter [--rc N] [--seen FILE]   the lines of a tick's output (stdin) that need the orchestrator
+  tick-filter [--rc N] [--seen FILE] [--driver]   the lines of a tick's output (stdin) that need the orchestrator
                        (rkmon_lib/tickfilter.py): exit 0 when there are any, 1 when there are none. --rc: the tick's
                        exit code. --seen: a standing line (one the tick repeats while its condition is true) that FILE
-                       has already stays quiet; a full tick's standing lines replace FILE
+                       has already stays quiet; a full tick's standing lines replace FILE. --driver: the input is the
+                       review driver's (its last rk review-advance): its lines that need the orchestrator, then a
+                       summary line, the REVIEW_READY lines last
   rules-tick [--clear]   a tick run by fixed rules, for a deployment with no Claude session (the merge queue on and
                        review automation off; rkmon_lib/rules_tick.py): rk tick, then, for each of its lines a fixed
                        rule covers (arm a cleared batch, disarm a PR the queue let go of, turn off a risky auto-merge,
@@ -78,13 +81,15 @@ container those run as the write user, through the broker (docker/rk_write.py).
   loop-status          whether a tick loop runs, the last tick and full tick, the next deadlines, the day's tick counts
                        (exit 0 when a loop runs, 1 when none does)
   poll | queue         the individual steps, for debugging
-  status               how the monitor operates right now, from local files only (no remote call): on or off, stopped or
-                       draining; the pieces running (the review driver, the tick loop and the last tick, the admin
-                       dashboard's service, the orchestrator, the gate, develop sanity); the parallel reviews and the
-                       parallel builds, each current setting against its range with why the monitor set it so and its
-                       last changes; the review queue and the work in flight; the RAM disk's use; then the summary
-                       from stored state, and the GitHub logins' last check. Whether it is configured right and reaches
-                       everything: doctor
+  status [--queue]     how the monitor operates right now, from local files only (no remote call): on or off, stopped
+                       or draining; the pieces running (the review driver, the tick loop that runs here as rk tick-now
+                       finds it: the orchestrator, tools/tick_loop.py or the container's tick loop, and the last tick,
+                       the admin dashboard's service, the orchestrator, the gate, develop sanity); the parallel reviews
+                       and the parallel builds, each current setting against its range with why the monitor set it so
+                       and its last changes; the review queue and the work in flight; the RAM disk's use; then the
+                       summary from stored state, and the GitHub logins' last check. --queue: the summary's queue
+                       computed again (git work), and the dashboard written with it. Whether it is configured right
+                       and reaches everything: doctor
   gh-logins [--side read|write|session] [--json]   which GitHub login each side uses and whether the split is right,
                        probed now (a comment with no body and a branch with no name, each refused either way: 422
                        may, 403 may not; rkmon_lib/ghlogins.py): exit 1 when the read or the session login can write,
@@ -115,12 +120,16 @@ container those run as the write user, through the broker (docker/rk_write.py).
   clear N | unclear N  pre-clear a PR for auto-merge (the user's call only)
   prioritize N [WHY...] | unprioritize N   float PR N to the top of the review and merge queues, as a develop fix
                        is (the user's call only)
-  serve [--port P]     the admin dashboard's service (tools/rkweb.py starts it and stops it): the dashboard, its
-                       "Request PR priority" box and the Approve / Decline of other teams' requests, of the proposed
-                       tickets and of the in-depth reviews. Every request carries the access token, and it does not
-                       start without one (where it listens and who can reach it: README.md, "The admin dashboard").
-                       With features.dashboards.team.delivery serve it serves the team dashboard too, read-only but
-                       for its request box (features.dashboards.team.priority_requests.enabled)
+  serve [--port P] [--bind ADDR] [--public-port P]   the admin dashboard's service (tools/rkweb.py starts it and
+                       stops it): the dashboard, its "Request PR priority" box and the Approve / Decline of other
+                       teams' requests, of the proposed tickets and of the in-depth reviews. Every request carries the
+                       access token, and it does not start without one (where it listens and who can reach it:
+                       README.md, "The admin dashboard"). With features.dashboards.team.delivery serve it serves the
+                       team dashboard too, read-only but for its request box
+                       (features.dashboards.team.priority_requests.enabled). --port: the port it listens on; --bind:
+                       the address it listens on (default: loopback on a host, every address in the container);
+                       --public-port: the host port a container's dashboard is published on (default:
+                       features.dashboards.admin.port)
   orchestrate [--check | --running]   the container's orchestrator: one long-lived Claude session that runs the
                        skill's resume; then rk tick every monitor.tick_interval_minutes minutes, read first by the tick
                        triage (the rule filter, rk tick-filter), so the session gets a turn only for the lines that
@@ -197,13 +206,13 @@ container those run as the write user, through the broker (docker/rk_write.py).
   group N [N ...]      pin a user group: validated together as one batch and landed in this order
   stats [--week YYYY-Www]   write the weekly statistics report (default: the last complete week) and print it
   spend [--day YYYY-MM-DD | --week YYYY-Www | --since YYYY-MM-DD] [--by part|kind|size|pr] [--experiments] [--write]
-                       review spend (rkmon_lib/spend.py): per UTC day and ISO week the reviews posted or kept unposted,
-                       covered heads (merge-only / rebase, no Claude spend), reviews $, overhead $ and total $, and
-                       the mean, median, p90, min and max per review; the selection's outliers (above Q3 + 1.5 x IQR)
-                       and its breakdown (--by, default part). --experiments adds experiment and other tasks' spend,
-                       apart. --write also writes spend_YYYY-MM-DD.md for each complete day of the selection and
-                       spend_YYYY-Www.md for its weeks (paths.spend_dir). Refreshes the dashboards' card (local: no
-                       GitHub; reads the transcripts and git only)
+                       review spend (rkmon_lib/spend.py): per UTC day and ISO week the reviews posted, kept unposted
+                       or closed without a post, covered heads (merge-only / rebase, no Claude spend), reviews $,
+                       overhead $ and total $, and the mean, median, p90, min and max per review; the selection's
+                       outliers (above Q3 + 1.5 x IQR) and its breakdown (--by, default part). --experiments adds
+                       experiment and other tasks' spend, apart. --write also writes spend_YYYY-MM-DD.md for each
+                       complete day of the selection and spend_YYYY-Www.md for its weeks (paths.spend_dir).
+                       Refreshes the dashboards' card (local: no GitHub; reads the transcripts and git only)
   scoreboard [--days N] [--state DIR]   per PR author, the last N days (default 30): PRs merged, rework for others
                        (rebases forced + re-reviews caused), develop breaks, landed ahead of plan, merged with open
                        review items, follow-ups, sorted by rework, with the team's totals and the trend; read from
@@ -242,6 +251,14 @@ container those run as the write user, through the broker (docker/rk_write.py).
                        on, and reviews started up to the parallel reviews; nothing while the monitor is stopped or the
                        last tick is too old (TICK_STALE)
   review-skip N | review-unskip N   keep PR N out of (or back in) the autopilot picks
+  review-close N       close PR N's review awaiting verification or in flight without a post, when a review our account
+                       posted on GitHub covers its head and stands for ours: its first line gives one of this
+                       deployment's names, or none (an older monitor's, or one posted by hand), never another's. That
+                       review is our last review of the PR, as a post would be, so the PR is not reviewed again at
+                       that head and a new head gets a follow-up. Refused, nothing changed, in a mirror, when no such
+                       review covers it, when nothing awaits verification or is in flight, or when the review moved on
+                       to another head while GitHub was read. Reads GitHub before it takes the state lock; writes
+                       nothing to GitHub
   review-approve N     approve PR N's in-depth review, a first round of a PR over
                        features.review_automation.large_prs.in_depth_review_over_lines: its first review, which starts
                        at its turn, or one forced once it is reviewed, which review-start N --kind first-round starts.
@@ -309,8 +326,9 @@ container those run as the write user, through the broker (docker/rk_write.py).
                        writes the post, each agent with the description and brief to dispatch it with, which name the
                        PR and the round (rkmon_lib/split.py; read-only but parts/)
   facts N              the facts for a verifier brief, read now: head and state, every force-push, the last commits,
-                       our reviews, the ABI lanes, develop issues, the latest review per reviewer, unresolved threads,
-                       the user's hand-written comments in full, the worker's inputs (read-only)
+                       our reviews, our account's reviews this deployment did not post, the ABI lanes, develop issues,
+                       the latest review per reviewer, unresolved threads, the user's hand-written comments in full,
+                       the worker's inputs (read-only)
   heads N [N ...]      each PR's head, state, merged, mergeable state and last update, read live (read-only)
   ci-fails N           PR N's live head, then its check runs' latest attempts that failed (FAIL) or still run (RUN),
                        each with its url, and the counts: what a post spec's FAILOK and RUNOK name (read-only)
@@ -330,10 +348,11 @@ container those run as the write user, through the broker (docker/rk_write.py).
                        the checks' flags and shared build, CI's FAIL and RUN lines, the overlap decisions naming N, a
                        micro round's items, and the lane line, whether the review needs the code quality pass and why
                        (`lane: needed (...)` or `lane: exempt (...)`)
-  spec-post N --round R [spec's options] [--again] [--dry-run] [--devbase-recheck]   rk spec, then, when it made the
-                       spec with no CHECK line, post N with it (--premises); CHECK lines stop it (exit 3). With
-                       --devbase-recheck, a stop only on develop's change to the PR's files prints develop's diff stat
-                       for them and posts nothing
+  spec-post N --round R [--dir DIR] [--light TEXT] [--save TEXT] [--cost-verifier T] [--cost-quality T] [--out FILE]
+        [--again] [--dry-run] [--devbase-recheck]   rk spec with its options, then, when it made the spec with no
+                       CHECK line, post N with it (--premises; --again and --dry-run as rk post's); CHECK lines stop it
+                       (exit 3). With --devbase-recheck, a stop only on develop's change to the PR's files prints
+                       develop's diff stat for them and posts nothing
   wait-quality DIR [--max-min M] [--slice-min S]   block until the code quality pass's quality.md in DIR is final:
                        ready, waiting (after S min, default 4.5: call again) or timeout (M min, default 20, since the
                        first call)
@@ -360,8 +379,8 @@ container those run as the write user, through the broker (docker/rk_write.py).
   overlaps [N] [--section]   work an open PR adds that another open PR also adds (same name, same logic) and copies of
                        a develop pattern, with the land order and recorded owners: every group, or PR N's; --section
                        prints checks.md's section for N (read-only)
-  clash N [--head SHA] [--heads N=SHA,..] [--develop REV] [--others N,N] [--budget S] [--cache DIR] [--new]
-        [--build]   PR N against
+  clash N [--head SHA] [--heads N=SHA,..] [--develop REV] [--others N,N] [--budget S] [--max-fetch N] [--cache DIR]
+        [--new] [--build]   PR N against
                        every other open PR (rkmon_lib/clashes.py): both land orders on develop (conflicting files,
                        modify/delete pairs), the silent clashes that merge clean (a name one removes that the other's
                        new lines use, a file one moves or deletes that the other includes or imports), leads (logic
@@ -369,12 +388,13 @@ container those run as the write user, through the broker (docker/rk_write.py).
                        claiming the same abi.h counter (ABI NUMBER CLASH: whichever lands second renumbers); the
                        checks' "Clashes with other open PRs" section; also a name one removes that the other's new
                        Python lines spell as a string (a CTest name its CMake lines drop, an attribute patched by
-                       name). --heads: snapshot heads. --new: only the open PRs the checks' scan did not compare
-                       (opened since; `rk post --premises` names them). --build: each pair merge (this PR first)
-                       extracted to a scratch folder, the C/C++ files both change compiled -fsyntax-only with the
-                       shared build's flags and both PRs' changed tests collected, as PR code in a slot of its own
-                       (BUILD pass|fail|skip). Read-only but temporary merge objects (no ref), the scratch folder and
-                       the cache (default cache/clash, paths.cache)
+                       name). --heads: snapshot heads. --max-fetch: the most PRs whose changed files it fetches when
+                       they are not local, one request each (default clashes.max_fetch: 4); a PR past it is NOT RUN.
+                       --new: only the open PRs the checks' scan did not compare (opened since; `rk post --premises`
+                       names them). --build: each pair merge (this PR first) extracted to a scratch folder, the C/C++
+                       files both change compiled -fsyntax-only with the shared build's flags and both PRs' changed
+                       tests collected, as PR code in a slot of its own (BUILD pass|fail|skip). Read-only but temporary
+                       merge objects (no ref), the scratch folder and the cache (default cache/clash, paths.cache)
   mutants N [--head SHA] [--since SHA] [--budget S] [--cap K] [--per-mutant S] [--out DIR]   the checks' mutation
                        sweep for PR N (tools/mutation_sweep.py): each check its Python lines add or change (--since:
                        only those the push since SHA adds or changes, as a follow-up's checks do), disabled once,
@@ -459,7 +479,9 @@ container those run as the write user, through the broker (docker/rk_write.py).
                        from the transcripts (the live ones in --live-claude, its Claude projects folder), the drafting
                        models' tokens, minutes, the totals per arm, the judge's worklist and every lost review (reads
                        only; no configuration needed)
-  sanity [SHA]         start a develop sanity run now (default: the develop head)
+  sanity [SHA] [--base SHA] [--rehearsal] [--now]   start a develop sanity run now on SHA (default: the develop head),
+                       for the families the commits landed since --base touched (default: the last green sanity run);
+                       --rehearsal: a drill on an old SHA, with no outward action ever taken; --now: as for bisect
   sanity-status        the last green develop sanity run, the develop heads waiting for one, and the run in progress
                        with the last lines of its log (read-only)
   guard-advance        process finished sanity/bisect runs and start pending ones (what each tick does while the
@@ -521,11 +543,12 @@ container those run as the write user, through the broker (docker/rk_write.py).
                        or GPU-test notice (guarded, ledgered)
   queue-advance        what each tick does while the merge queue is on: gate the head batch, report PROPOSE /
                        ARM_READY / DISARM_NEEDED
-  gate N               start a gate job for PR N against today's develop
+  gate N [--now]       start a gate job for PR N against today's develop; --now: as for bisect
   arm N | disarm N [REASON]   enable auto-merge for a cleared, validated PR (guarded) / disable it
   queue-notice N       create or update our in-place merge-queue status comment on PR N (posted while
                        features.merge_queue.mode is live and features.merge_queue.queue_notices.enabled is true)
-  incident-add START END CULPRIT FIXED_BY SUMMARY...   record a develop break (use - for unknown; END - if ongoing)
+  incident-add START END CULPRIT FIXED_BY SUMMARY... [--contributing N,N]   record a develop break (use - for
+                       unknown; END - if ongoing); --contributing: the other PRs that contributed to it
   ungroup N            remove the user group that contains PR N
   selftest [--jobs N] [TEST...]   run the unit tests, or the tests named (a module, class or test, as unittest
                        names it: tests.test_selftest), in a home folder of their own; a test that leaves anything
@@ -804,7 +827,9 @@ def refresh_ours(cfg: dict, store: Store, st: dict, keys: set[str]) -> int:
     review posting is off, a review kept unposted (post.save_draft) stays our last review until GitHub shows a post of
     ours made since. Once posting is on, our last review is the one GitHub shows, or none: every PR whose last review
     is a kept one is read again, so its next post is a first round when GitHub shows no post of ours, and a follow-up
-    to the one GitHub shows (another monitor's, under the same login) when it does.
+    to the one GitHub shows (another monitor's, under the same login) when it does. A review of our account that
+    `rk review-close` took as our last review stays it until GitHub shows a review of this deployment's own posted
+    after it was taken (post.taken_stands).
     """
     posting = features.active(cfg, "review-posting")
     if posting:
@@ -828,6 +853,8 @@ def refresh_ours(cfg: dict, store: Store, st: dict, keys: set[str]) -> int:
             and post_mod.kept_unposted(old)
             and (ours is None or ours["at"] < old["at"])
         ):
+            continue
+        if post_mod.taken_stands(old, ours):
             continue
         if ours and (not old or old.get("id") != ours["id"] or not old.get("head")):
             ours = snapshot.resolve_reviewed_head(cfg, store, rec["n"], ours)
@@ -3368,7 +3395,13 @@ def main(argv=None) -> int:
     p.add_argument("dir")
     p.add_argument("--write", action="store_true")
     p.add_argument("--root", action="append", default=[])
-    for name in ("review-skip", "review-unskip", "review-recheck", "review-approve"):
+    for name in (
+        "review-skip",
+        "review-unskip",
+        "review-recheck",
+        "review-approve",
+        "review-close",
+    ):
         p = sub.add_parser(name)
         p.add_argument("n", type=int)
     p = sub.add_parser("classify")
@@ -4862,6 +4895,25 @@ def _run_command(args, cfg: dict, store) -> int:
                 ok, msg = review.approve(cfg, st, store, args.n)
                 store.save(st)
             print(msg if ok else f"REFUSED: {msg}")
+            return 0 if ok else 4
+        if (
+            args.cmd == "review-close"
+        ):  # reads GitHub before the state lock, then checks again and writes under it
+            try:
+                found, why = review.close_reads(cfg, store.load(), store, args.n)
+            except gh.GhError as exc:
+                found, why = {}, (
+                    f"our account's reviews on #{args.n} were not read ({str(exc)[:120]}): nothing closed"
+                )
+            ok, lines = False, [why]
+            if not why:
+                with store.locked(wait=True):
+                    st = store.load()
+                    ok, lines = review.close_posted(cfg, st, store, args.n, found)
+                    if ok:
+                        store.save(st)
+            for line in lines:
+                print(line if ok else f"REFUSED: {line}")
             return 0 if ok else 4
         if args.cmd in (
             "review-start",

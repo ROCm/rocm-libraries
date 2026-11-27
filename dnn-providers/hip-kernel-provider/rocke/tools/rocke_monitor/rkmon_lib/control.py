@@ -295,9 +295,26 @@ def shell_loop(cfg: dict, store) -> int | None:
     return pid
 
 
+def tick_loops(cfg: dict, store, table=None) -> list[str]:
+    """The tick loops that run here now, each named as rk tick-now and rk status name it: the orchestrator (rk
+    orchestrate), each session that runs; a host install's tools/tick_loop.py (idle.loop_pid); the container's shell
+    tick loop, while no orchestrator runs (shell_loop). [] when none runs."""
+    from . import idle  # a call-time import, as status_lines makes it
+
+    sessions = session_pids(cfg, table)
+    out = [f"the orchestrator (rk orchestrate, pid {pid})" for pid in sessions]
+    loop = idle.loop_pid(store)
+    if loop is not None:
+        out.append("tools/tick_loop.py" + (f" (pid {loop})" if loop else ""))
+    shell = None if sessions else shell_loop(cfg, store)
+    if shell:
+        out.append(shell_loop_name(shell))
+    return out
+
+
 def ask_tick(cfg: dict, store) -> int:
-    """`rk tick-now`: the request written, and who takes it, in outcome words. ASKED, exit 0: the
-    orchestrator, tools/tick_loop.py or the shell tick loop (shell_loop) runs here and takes it within seconds;
+    """`rk tick-now`: the request written, and who takes it, in outcome words. ASKED, exit 0: a tick loop runs here
+    (tick_loops: the orchestrator, tools/tick_loop.py or the shell tick loop) and takes it within seconds;
     WAITING, exit 3: none of them runs now, and the next of them to start takes it at once; REFUSED, exit 4: the
     monitor is stopped (rk start resumes it), and nothing is asked; ERROR, exit 1: the request could not be written.
     """
@@ -319,17 +336,7 @@ def ask_tick(cfg: dict, store) -> int:
     except OSError as exc:
         print(f"ERROR: {path} could not be written ({exc}); no tick asked")
         return 1
-    from . import idle  # a call-time import, as status_lines makes it
-
-    loop = idle.loop_pid(store)
-    takers = [
-        f"the orchestrator (rk orchestrate, pid {pid})" for pid in session_pids(cfg)
-    ]
-    if loop is not None:
-        takers.append("tools/tick_loop.py" + (f" (pid {loop})" if loop else ""))
-    shell = shell_loop(cfg, store)
-    if shell:
-        takers.append(shell_loop_name(shell))
+    takers = tick_loops(cfg, store)
     asked = f"a tick at once ({at}" + (
         f"; the request of {earlier} was not taken yet)" if earlier else ")"
     )
@@ -659,9 +666,10 @@ def status_lines(
     web_running=None,
 ) -> list[str]:
     """`rk status`: how the monitor operates right now, from local files only (no remote call): its state; the pieces
-    running (the review driver, the tick loop and the last tick, the admin dashboard's service, the orchestrator, the
-    gate, develop sanity); each current setting against its range with the scaler's reason and its last changes; the
-    review queue and the work in flight; the RAM disk's use."""
+    running (the review driver, the tick loop that runs here as rk tick-now finds it (tick_loops) and the last tick,
+    the admin dashboard's service, the orchestrator, the gate, develop sanity); each current setting against its range
+    with the scaler's reason and its last changes; the review queue and the work in flight; the RAM disk's use.
+    """
     from . import doctor, features, gpu, idle, ramdisk, scaler
     from .review import FIRST, pipes
 
@@ -703,11 +711,11 @@ def status_lines(
     out.append(
         f"  review driver: {'running (' + pids('driver') + ')' if kinds.get('driver') else 'not running'}"
     )
-    loop = idle.loop_pid(store)
+    loops = tick_loops(cfg, store, table)
     full = (st.get(idle.KEY) or {}).get("full_at")
     out.append(
         "  tick loop: "
-        + ("not running" if loop is None else f"running (pid {loop or '?'})")
+        + (f"running: {' and '.join(loops)}" if loops else "not running")
         + (f"; a tick runs now ({pids('tick')})" if kinds.get("tick") else "")
         + f"; last tick {_ago(st.get('last_tick'))}; last full tick {_ago(full)}"
     )

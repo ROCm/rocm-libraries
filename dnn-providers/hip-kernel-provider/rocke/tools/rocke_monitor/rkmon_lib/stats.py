@@ -3,7 +3,8 @@
 """Weekly statistics for the user, presented every week.
 
 Sources:
-- GitHub, read-only: PRs opened, merged and closed unmerged in the week, and our review comments.
+- GitHub, read-only: PRs opened, merged and closed unmerged in the week, and our reviews among our account's
+  (snapshot.account_reviews).
 - `state/events.jsonl`: every event the monitor saw.
 - `state/metrics.jsonl`: one snapshot per tick.
 - Incidents (`state/incidents.json`).
@@ -22,7 +23,7 @@ import re
 import statistics
 
 from . import gh
-from . import config, registry, reviewer_name
+from . import config, registry, reviewer_name, snapshot
 from .snapshot import parse_verdict
 
 UTC = dt.timezone.utc
@@ -127,31 +128,18 @@ def _summ(xs: list[float]) -> str:
 
 
 def our_reviews(cfg: dict, prs: list[int], end: dt.datetime) -> dict[int, list[dict]]:
-    """Every review-style comment or formal review we posted on each PR, up to `end`: this deployment's own, by its
-    line 1 and the time it was posted (reviewer_name.own_review), never another deployment's under the same account.
+    """Every review we posted on each PR, up to `end`: of our account's reviews (snapshot.account_reviews, comments and
+    formal reviews), this deployment's own, by its line 1 and the time it was posted (reviewer_name.own_review), never
+    another deployment's under the same account.
     """
-    me, out = config.operator_login(cfg), {}
+    out = {}
     for n in prs:
-        rows = gh.rest(
-            f"repos/{cfg['repo']}/issues/{n}/comments?per_page=100",
-            paginate=True,
-            jq=f'[.[] | select(.user.login=="{me}") | {{at: .created_at, body: (.body[0:600])}}]',
-        )
-        rows += gh.rest(
-            f"repos/{cfg['repo']}/pulls/{n}/reviews?per_page=100",
-            paginate=True,
-            jq=f'[.[] | select(.user.login=="{me}" and .submitted_at != null) | '
-            f'{{at: .submitted_at, body: ((.body // "")[0:600])}}]',
-        )
-        posts = sorted(
-            (
-                r
-                for r in rows
-                if reviewer_name.own_review(cfg, r.get("body"), r.get("at"))
-                and _ts(r["at"]) < end
-            ),
-            key=lambda r: r["at"],
-        )
+        posts = [
+            r
+            for r in snapshot.account_reviews(cfg, n)
+            if reviewer_name.own_review(cfg, r.get("body"), r.get("at"))
+            and _ts(r["at"]) < end
+        ]
         out[n] = [
             {
                 "at": r["at"],

@@ -1544,8 +1544,9 @@ class TestBuildCommand(unittest.TestCase):
 
     def test_a_push_names_the_registry_key(self):
         """A push with no registry is REFUSED, exit 4, its fix naming the key and the save, and your file as every
-        line does (~/… in your home folder); then your command again, as you typed it. With one, PUSHED, then the
-        done line for an image in the registry."""
+        line does (~/… in your home folder); then your command again, as you typed it. With one, --dry-run's PASSED
+        and PUSHED name the registry's address, then the done line for an image in the registry.
+        """
         rc, out = self.run_("image", "push", "--settings", self.settings)
         self.assertEqual(rc, 4, out)
         self.assertIn(
@@ -1563,10 +1564,16 @@ class TestBuildCommand(unittest.TestCase):
                 "image:\n", "image:\n  registry: registry.example.com/team\n"
             )
         )
+        rc, out = self.run_("--dry-run", "image", "push", "--settings", self.settings)
+        self.assertEqual(rc, 0, out)
+        self.assertIn(
+            "PASSED: rocke-monitor:t1 can be pushed to registry.example.com/team (image.registry)\n",
+            out,
+        )
         rc, out = self.run_("image", "push", "--settings", self.settings)
         self.assertEqual(rc, 0, out)
         self.assertIn(
-            "PUSHED rocke-monitor:t1 to the registry image.registry names\n",
+            "PUSHED rocke-monitor:t1 to registry.example.com/team (image.registry)\n",
             out,
         )
         self.assertIn(

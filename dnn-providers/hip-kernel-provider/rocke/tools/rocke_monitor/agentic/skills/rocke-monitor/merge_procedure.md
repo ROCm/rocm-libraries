@@ -271,9 +271,9 @@ possible, so it is never left behind; priorities that conflict with each other s
 A ready priority may wait behind a blocked one it shares files with (a rebase, a 🔴): <user_login> merges such PRs at
 their discretion, and the next tick plans again.
 
-**What may land now:** a PR in wave 1 with nothing ahead of it conflicting (✓ on the dashboards), never one "after its
-rebase". Only those feed the batches. A PR in a later wave waits, and its advice says for whom: "wait: #A lands first
-(conflicts in F), then rebase".
+**What may land now:** a PR in wave 1 that merges clean with develop, with nothing ahead of it conflicting (✓ on the
+dashboards), never one "after its rebase". Only those feed the batches. A PR in a later wave waits, and its advice
+says for whom: "wait: #A lands first (conflicts in F), then rebase".
 
 **Ready early.** A top priority in wave k > 1 that is at the Ready stage (G1–G4, G8, G9), while a PR in an earlier wave
 is not, gets `!! PRIORITY_READY_EARLY` once per PR, head and wave, and a Needs-you item while that stays true. A top

@@ -12,7 +12,9 @@ that sends nothing and reviews the same PRs at the same heads: rkmon_lib/mirror.
   worker's minutes from its stats_agent.json: it counts no tokens); the shadow draft's, when one drafted that head; the
   verifier's and the code quality pass's tokens, from the spec's optional COST ({"verifier": N, "quality": N}: the
   totals the subagents' task notifications report); and the minutes from the review's start (its feed line) to the
-  post.
+  post. A review awaiting verification that `rk review-close` closed without a post has a line too (`closed`: true,
+  its post the URL of our account's review that stands for it; record_close), so that `rk spend` prices it as a
+  review of its own.
 Neither ever holds a review or a post: a line that cannot be written is said in the journal or the post's output.
 """
 
@@ -155,9 +157,11 @@ def _write(
     post: str,
     kept: bool,
     cost: dict,
+    closed: bool = False,
 ) -> dict:
-    """PR n's review at `head`, round RND, posted (its copy POST) or `kept` unposted (POST the kept file): its line,
-    added to state/review_cost.jsonl, with COST's tokens of the verifier and the code quality pass.
+    """PR n's review at `head`, round RND, posted (its copy POST), `kept` unposted (POST the kept file) or `closed`
+    without a post (POST the URL of the review that stands for it): its line, added to state/review_cost.jsonl, with
+    COST's tokens of the verifier and the code quality pass.
     """
     draft, shadow = drafts(cfg, st, n, head)
     t0, t1 = started(store, n, head), now()
@@ -168,6 +172,7 @@ def _write(
         "at": t1,
         "post": post,
         **({"unposted": True} if kept else {}),
+        **({"closed": True} if closed else {}),
         "draft": draft,
         "shadow": shadow,
         "verifier": cost.get("verifier"),
@@ -190,6 +195,22 @@ def record_keep(
     except (OSError, ValueError, KeyError, TypeError) as exc:
         store.journal(
             "post",
+            f"#{n} review cost line not written: {type(exc).__name__}: {str(exc)[:120]}",
+        )
+
+
+def record_close(
+    cfg: dict, st: dict, store, n: int, rnd: str, head: str, url: str
+) -> None:
+    """A review of PR n awaiting verification at `head`, round RND, that `rk review-close` closed without a post
+    (review.close_posted), our account's review at URL standing for it: its line (`closed`), with no tokens of the
+    verifier or the code quality pass (no spec gives them). A line that cannot be written is said in the journal.
+    """
+    try:
+        _write(cfg, st, store, n, rnd, head, url, False, {}, closed=True)
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        store.journal(
+            "review",
             f"#{n} review cost line not written: {type(exc).__name__}: {str(exc)[:120]}",
         )
 

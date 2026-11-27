@@ -450,6 +450,7 @@ class TestScan(Case):
             ),
             {"10101", "10102", "10103"},
         )
+        self.assertEqual(refs("rk review-close 10104"), {"10104"})
         self.assertEqual(
             refs("gh api repos/o/r/pulls/11111 --jq .head; git -C ~/x/wt11111m log"),
             set(),
@@ -1197,7 +1198,8 @@ class Booking(Case):
 
     def costs(self, rows):
         """state/review_cost.jsonl: a line per review through `rk post --premises`, `unposted` for one kept unposted
-        while review posting is off (it has no ledger entry)."""
+        while review posting is off, `closed` for one `rk review-close` closed without a post (neither has a ledger
+        entry). A row: (at, pr, head, round, kept), then True for one closed."""
         write_jsonl(
             self.store.dir / "review_cost.jsonl",
             [
@@ -1208,8 +1210,9 @@ class Booking(Case):
                     "at": at,
                     "post": f"pr{pr}_{rnd}.md",
                     **({"unposted": True} if kept else {}),
+                    **({"closed": True} if any(closed) else {}),
                 }
-                for at, pr, head, rnd, kept in rows
+                for at, pr, head, rnd, kept, *closed in rows
             ],
         )
 
@@ -1404,22 +1407,101 @@ class TestAttribution(Booking):
         self.assertIn("runs no review followed", md)
         self.assertEqual(md.count("unposted"), md.count("(kept unposted)"))
         self.assertNotIn("unposted", spend.card_note({"at": "2026-11-10T12:00:00Z"}))
-        # Its own lines say what a review is: posted, or kept.
+        # Its own lines say what a review is: posted, kept, or closed without a post.
         self.assertIn(
-            "_Reviews: each review posted, or kept while review posting is off, on the day it was posted or "
-            "kept.",
+            "_Reviews: each review posted, kept while review posting is off, or closed without a post (rk "
+            "review-close), on the day it was posted, kept or closed.",
             md,
         )
         self.assertTrue(
             spend.card_note({"at": "2026-11-10T12:00:00Z"}).startswith(
-                "Reviews: posted, or kept while review posting is off. Total $: "
+                "Reviews: posted, kept while review posting is off, or closed without a post. Total $: "
             )
         )
         self.assertIn(
-            "\n| Posted or kept | PR | Round | Kind | Size tier | Verifier | Second verifier | Code quality pass "
-            "| Orchestration | Total $ |\n|---|---|---|---|---|---:|---:|---:|---:|---:|\n",
+            "\n| Posted, kept or closed | PR | Round | Kind | Size tier | Verifier | Second verifier | Code quality "
+            "pass | Orchestration | Total $ |\n|---|---|---|---|---|---:|---:|---:|---:|---:|\n",
             md,
         )
+
+    def test_a_review_closed_without_a_post_is_a_review_of_its_own(self):
+        """`rk review-close` closes a review awaiting verification without a post when a review our account posted
+        stands for it: a line of review_cost.jsonl (`closed`) and no ledger entry. It is a paid review of its own,
+        shown as closed, not posted: the verifier runs it had are its own, never booked on the PR's next review.
+        """
+        self.ledger(
+            [
+                ("2026-11-09T09:00:00Z", 10101, "h0", "first_round"),
+                ("2026-11-09T14:00:00Z", 10101, "h2", "followup"),
+            ]
+        )
+        self.costs(
+            [
+                ("2026-11-09T09:00:00Z", 10101, "h0", "fr", False),
+                ("2026-11-09T11:00:00Z", 10101, "h1", "fu1", False, True),
+                ("2026-11-09T14:00:00Z", 10101, "h2", "fu2", False),
+            ]
+        )
+        runs = [
+            run("v0", "verifier", 10101, "fr", "2026-11-09T08:00:00", 6.0),
+            run("v1", "verifier", 10101, "fu1", "2026-11-09T10:00:00", 5.0),
+            run("v2", "verifier", 10101, "fu2", "2026-11-09T13:00:00", 5.0),
+        ]
+        d = self.data(runs, [])
+        self.assertEqual(
+            [
+                (
+                    p["round"],
+                    p["kind"],
+                    p["unposted"],
+                    p["closed"],
+                    p["parts"]["verifier"],
+                    p["parts"]["verifier2"],
+                    p["total"],
+                )
+                for p in d["reviews"]
+            ],
+            [
+                ("fr", "first_round", False, False, 6.0, 0.0, 6.0),
+                ("fu1", "followup", False, True, 5.0, 0.0, 5.0),
+                ("fu2", "followup", False, False, 5.0, 0.0, 5.0),
+            ],
+        )
+        # The post at h2 follows up on our previous post, at h0: the closed review is no post of ours.
+        self.assertEqual([p["old"] for p in d["reviews"]], ["", "h0", "h0"])
+        md = spend.report_md(self.cfg, d, day="2026-11-09")
+        self.assertIn(
+            "| 11:00Z (closed, not posted) | #" "10101 | fu1 | follow-up |", md
+        )
+        self.assertEqual(md.count("(closed, not posted)"), 1)
+
+    def test_the_docs_price_a_closed_review_as_a_review_of_its_own(self):
+        """The FAQ, the design and the skill's Review spend section, where they say which reviews are priced, count
+        one closed without a post."""
+        root = pathlib.Path(__file__).resolve().parent.parent
+        faq, design, skill = (
+            " ".join((root / rel).read_text(encoding="utf-8").split())
+            for rel in (
+                "docs/FAQ.md",
+                "docs/design.md",
+                "agentic/skills/rocke-monitor/commands.md",
+            )
+        )
+        self.assertIn(
+            "A review is one posted, kept unposted, or closed without a post (`rk review-close`), priced as a review "
+            "of its own.",
+            faq,
+        )
+        self.assertIn(
+            "price each review, posted, kept unposted or closed without a post (`rk review-close`: a review of its "
+            "own, whose verifier runs are never booked on the PR's next review)",
+            design,
+        )
+        self.assertIn(
+            "**One review = one post, one review kept unposted, or one review closed without a post.**",
+            skill,
+        )
+        self.assertIn("a review counts on the day it was posted, kept or closed", skill)
 
     def test_the_review_a_follow_up_follows_up_on(self):
         """A post follows up on our previous post, whatever was kept unposted between them: our last review is the

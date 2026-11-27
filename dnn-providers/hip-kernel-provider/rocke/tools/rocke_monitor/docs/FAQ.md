@@ -88,7 +88,7 @@ you name a model: the pass they help does their work. Each pass, its key and wha
 ### How do I use my own model for a specific pass?
 
 Add a `model_bindings` entry for your model's `provider`, install its key if it has one, and name it at the pass:
-`features.review_automation.passes.ci_triage_pass: { model: glm-flash, effort: default }`. Only Claude runs
+`features.review_automation.passes.ci_triage_pass: { model: local-llama, effort: default }`. Only Claude runs
 `verification_pass` and `code_quality_pass`; any model may take `first_review_pass`, `ci_triage_pass`,
 `first_code_quality_pass` or `notice_draft_pass`, and Claude checks its leads. The binding, its key and the change:
 [QUICK_USER_GUIDE.md: Use another model for a pass](../QUICK_USER_GUIDE.md#use-another-model-for-a-pass).
@@ -174,9 +174,9 @@ row, our checks and the code quality pass. Unresolved review threads also block 
 ### Why does the review flag pull-request references, timings or internal links in my PR?
 
 The repository is public. Pull-request references (`#NNNN`, `PR #N`, `/pull/N` links) and dated stories of particular
-runs that a PR adds to committed files are a 🟡 Needed-to-merge item, with every file:line listed: the committed text
-states the standing fact, not the history of one case. So are absolute performance numbers and internal links, which
-the repository's `platform/AGENTS.md` keeps out. See
+runs that a PR adds to committed files are a 🟡 Needed-to-merge item, every file:line listed: the committed text states
+the standing fact. So are internal links, which the repository's `platform/AGENTS.md` keeps out. Absolute performance
+numbers are 🔴, blocking: git keeps them in the public history even after a later commit removes them. See
 [docs/review_pipeline.md: 7.3 Public-repository hygiene (every post)](review_pipeline.md#73-public-repository-hygiene-every-post).
 
 ### What is an overlap notice, and who lands first?
@@ -203,10 +203,10 @@ operator's re-approval lifts. See [README.md: What it can and cannot do](../READ
 ### Why did the monitor turn off my auto-merge?
 
 Your PR's auto-merge was on while it failed a gate GitHub does not check: an open 🔴 or 🟠 in our review at its head,
-a confirmed hold, or a hold label (do not merge, on hold, WIP). The operator's auto-merge guard turned it off and
-commented what fails and how to fix it: fix that, then turn auto-merge on again yourself. After you edit the PR's
-title or description, turn auto-merge off and on again, so the merge takes the new text. See
-[docs/review_pipeline.md: 7.6 Auto-merge rules](review_pipeline.md#76-auto-merge-rules).
+a confirmed hold, or a hold label ([README.md: Glossary and placeholders](../README.md#glossary-and-placeholders)).
+The operator's auto-merge guard turned it off and commented what fails and how to fix it: fix that, then turn
+auto-merge on again yourself. After you edit the PR's title or description, turn auto-merge off and on again, so the
+merge takes the new text. See [docs/review_pipeline.md: 7.6 Auto-merge rules](review_pipeline.md#76-auto-merge-rules).
 
 ### I force-pushed and GitHub shows new commits. Why no follow-up review?
 
@@ -243,9 +243,10 @@ a light follow-up that checks the open findings and what changed, and needs no a
 ### How do I ask for priority?
 
 Use the "Request PR priority" box on the team dashboard when your operator publishes one, or ask the operator. Each
-request waits for the operator's Approve or Decline. A priority PR is reviewed first, settles in 10 minutes, skips
-the follow-up cooldown and leads the merge plan. A PR that fixes a develop break gets that priority by itself. See
-[docs/design.md: The pipeline](design.md#the-pipeline) and [docs/design.md: The merge plan](design.md#the-merge-plan).
+request waits for the operator's Approve or Decline. A priority PR is reviewed first, settles in at most 10 minutes,
+skips the follow-up cooldown and leads the merge plan. A PR that fixes a develop break gets that priority by itself.
+See [docs/design.md: The pipeline](design.md#the-pipeline) and [docs/design.md: The merge
+plan](design.md#the-merge-plan).
 
 ### Why did the monitor request changes on my PR?
 
@@ -275,9 +276,10 @@ settings give (`ci_red_label` or `stability_label`); a fix PR goes first. It nev
 ### What does a review cost, and where do I see the spend?
 
 The monitor counts every model's tokens (`rk usage`). With the prices in `features.review_automation.spend`, it prices
-each posted review by part (verifier, code quality pass, orchestration) per day and week: `rk spend`, the admin
-dashboard's Review spend card and the weekly report. A carried rebase-only or merge-only head costs nothing, and a large
-PR costs more. See [docs/design.md: Token economy and review spend](design.md#token-economy-and-review-spend).
+each review by part (verifier, second verifier, code quality pass, orchestration) per day and week: `rk spend`, the
+admin dashboard's Review spend card and the weekly report. A review is one posted, kept unposted, or closed without
+a post (`rk review-close`), priced as a review of its own. A carried rebase-only or merge-only head costs nothing, and
+a large PR costs more. See [docs/design.md: Token economy and review spend](design.md#token-economy-and-review-spend).
 
 ### Can my team run its own monitor?
 

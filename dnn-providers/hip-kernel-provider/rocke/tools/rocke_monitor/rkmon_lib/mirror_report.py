@@ -241,10 +241,11 @@ def _time(s: str) -> dt.datetime | None:
 
 
 def live_side(state: pathlib.Path) -> dict[tuple, list[dict]]:
-    """The live monitor's posts with their costs, by (PR, head), in the order posted."""
+    """The live monitor's posts with their costs, by (PR, head), in the order posted; a review closed without a post
+    (`closed`: rk review-close) is none."""
     out: dict[tuple, list[dict]] = {}
     for r in _jsonl(state / "review_cost.jsonl"):
-        if r.get("pr") and r.get("head"):
+        if r.get("pr") and r.get("head") and not r.get("closed"):
             out.setdefault((int(r["pr"]), r["head"]), []).append(r)
     return out
 

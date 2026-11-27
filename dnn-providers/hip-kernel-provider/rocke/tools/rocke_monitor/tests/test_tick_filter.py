@@ -51,7 +51,10 @@ SAMPLES = {  # one line of each kind the tick prints, and its class
     "!! AUTOMERGE_RISK #5 (auto-merge enabled by x): our latest review found problems. run `rk automerge-off 5`": ACT,
     "!! PRIORITY_READY_EARLY #5 (wave 2, …)": ACT,
     "!! FOLLOWUP_SCAN #5 failed 3 times (x): run `rk followup-scan 5` by hand": ACT,
-    "!! VERIFY_STALE #5: handed to verification 3.2 h ago, nothing posted": ACT,
+    (
+        "!! VERIFY_STALE #5: handed to verification 3.2 h ago, nothing posted (head abcdef0123); if our account posted "
+        "at that head already, run `rk review-close 5`"
+    ): ACT,
     "!! CRITICAL TOOL failure: gh api graphql: HTTP 502": ACT,
     "(priority requests not read: Broken pipe)": ROUTINE,
     "(followup scan #5 failed, try 1 of 3: x)": ROUTINE,

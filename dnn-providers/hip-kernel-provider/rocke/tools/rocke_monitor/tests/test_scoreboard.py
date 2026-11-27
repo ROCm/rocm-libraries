@@ -766,7 +766,8 @@ WORDS = ("disruptive", "offender", "blame", " bad ")
 
 
 class TestAdminOnly(unittest.TestCase):
-    """The scoreboard, review spend and today's log are on the admin page (the LOCAL file) only, today's log last."""
+    """The scoreboard, review spend and today's log are on the admin page (the LOCAL file) only, today's log last; the
+    operations guide says so of the scoreboard."""
 
     def page(self, variant: str) -> str:
         with tempfile.TemporaryDirectory() as d:
@@ -892,6 +893,20 @@ class TestAdminOnly(unittest.TestCase):
                 page.index(f"<section id='{s}'")
                 for s in ("needs", "develop", "insights")
             ),
+        )
+
+    def test_the_operations_guide_says_where_the_scoreboard_is(self):
+        """The operations guide's "Where to read the numbers": `rk scoreboard` prints the Scoreboard, and of the
+        dashboards only the admin dashboard shows it."""
+        guide = (
+            pathlib.Path(__file__).resolve().parent.parent
+            / "docs"
+            / "operations_guide.md"
+        )
+        self.assertIn(
+            "Only the Scoreboard names people, per pull request author: `rk scoreboard` prints it, and of the "
+            "dashboards only the admin dashboard shows it.",
+            " ".join(guide.read_text(encoding="utf-8").split()),
         )
 
     def test_the_neutral_words(self):
