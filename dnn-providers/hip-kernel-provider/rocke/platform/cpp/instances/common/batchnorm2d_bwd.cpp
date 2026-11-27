@@ -24,6 +24,7 @@
 #include "rocke/helper_rocke.helpers.spec.h"
 #include "rocke/helper_rocke.helpers.sweep.h"
 #include "rocke/helper_rocke.helpers.tensor_view.h"
+#include "rocke/instance_batchnorm2d.h"
 #include "rocke/instance_batchnorm2d_bwd_internal.h"
 #include "rocke/ir.h"
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
@@ -801,54 +802,20 @@ bool rocke_batchnorm2d_is_valid_bwd_split_spec(const rocke_batchnorm2d_bwd_split
                                                char* reason,
                                                size_t reason_cap)
 {
-    static const int kVecsF32[2] = {2, 4};
-    static const int kVecs16[2] = {4, 8};
-    const rocke_archtarget_t* target;
-    bool f32;
-
-    if(reason != NULL && reason_cap > 0)
-    {
-        reason[0] = '\0';
-    }
+    /* Python applies is_valid_split_dyn_spec to the backward split spec. */
+    rocke_batchnorm2d_split_dyn_spec_t fwd;
     if(spec == NULL)
     {
         bwd_set_reason(reason, reason_cap, "null spec");
         return false;
     }
-    target = rocke_archtarget_from_gfx(arch != NULL ? arch : "gfx950");
-    if(target == NULL)
-    {
-        bwd_set_reason(reason, reason_cap, "unknown arch");
-        return false;
-    }
-    if(spec->fast_reduce && spec->block_size % spec->wave_size != 0)
-    {
-        bwd_set_reason(
-            reason, reason_cap, "fast_reduce requires block_size divisible by wave_size");
-        return false;
-    }
-    f32 = spec->dtype != NULL && strcmp(spec->dtype, "f32") == 0;
-    if(!bwd_validate_io(spec->dtype,
-                        spec->block_size,
-                        spec->vec,
-                        f32 ? kVecsF32 : kVecs16,
-                        2,
-                        reason,
-                        reason_cap))
-    {
-        return false;
-    }
-    if(spec->block_size > rocke_archtarget_max_threads_per_block(target))
-    {
-        bwd_set_reason(reason, reason_cap, "block_size exceeds max_threads_per_block");
-        return false;
-    }
-    if(!rocke_archtarget_fits_lds(target, (long)3 * spec->block_size * 4))
-    {
-        bwd_set_reason(reason, reason_cap, "LDS budget exceeded");
-        return false;
-    }
-    return true;
+    fwd = rocke_batchnorm2d_split_dyn_spec_default();
+    fwd.block_size = spec->block_size;
+    fwd.vec = spec->vec;
+    fwd.dtype = spec->dtype;
+    fwd.fast_reduce = spec->fast_reduce;
+    fwd.wave_size = spec->wave_size;
+    return rocke_batchnorm2d_is_valid_split_dyn_spec(&fwd, arch, reason, reason_cap);
 }
 
 int rocke_batchnorm2d_bwd_split_workspace_floats(int c, int splits)
@@ -856,41 +823,11 @@ int rocke_batchnorm2d_bwd_split_workspace_floats(int c, int splits)
     return c * splits * 2;
 }
 
-/* _split_dyn_geometry: per-CTA ranges from the grid ids. */
-typedef struct bwd_split_geom
-{
-    rocke_value_t *sh_id, *sn_id, *hw_lo, *seg_len, *n_lo, *n_hi, *n_cnt;
-} bwd_split_geom_t;
-
-static void bwd_split_geometry(rocke_ir_builder_t* b,
-                               rocke_value_t* p_n,
-                               rocke_value_t* p_nch,
-                               rocke_value_t* p_hwch,
-                               rocke_value_t* HW,
-                               bwd_split_geom_t* g)
-{
-    rocke_value_t *hw_lo, *t, *c;
-    g->sh_id = rocke_b_block_id_y(b);
-    g->sn_id = rocke_b_block_id_z(b);
-    hw_lo = rocke_b_mul(b, g->sh_id, p_hwch);
-    c = rocke_b_const_i32(b, 1);
-    t = rocke_b_sub(b, HW, c);
-    g->hw_lo = rocke_b_smin(b, hw_lo, t);
-    t = rocke_b_smin(b, rocke_b_sub(b, HW, hw_lo), p_hwch);
-    c = rocke_b_const_i32(b, 0);
-    g->seg_len = rocke_b_smax(b, t, c);
-    g->n_lo = rocke_b_mul(b, g->sn_id, p_nch);
-    g->n_hi = rocke_b_smin(b, p_n, rocke_b_add(b, g->n_lo, p_nch));
-    t = rocke_b_sub(b, g->n_hi, g->n_lo);
-    c = rocke_b_const_i32(b, 0);
-    g->n_cnt = rocke_b_smax(b, t, c);
-}
-
 /* Common prologue of both split kernels after the params. */
 typedef struct bwd_split_common
 {
     rocke_value_t *HW, *tid, *channel;
-    bwd_split_geom_t g;
+    rocke_bn_split_geom_t g;
     rocke_tensor_view_t x_view, dy_view, dx_view;
     rocke_value_t *lds_a, *lds_c;
 } bwd_split_common_t;
@@ -913,7 +850,7 @@ static void bwd_split_prologue(rocke_ir_builder_t* b,
     cm->HW = rocke_b_mul(b, p_h, p_w);
     cm->tid = rocke_b_thread_id_x(b);
     cm->channel = rocke_b_block_id_x(b);
-    bwd_split_geometry(b, p_n, p_nch, p_hwch, cm->HW, &cm->g);
+    rocke_bn_split_dyn_geometry(b, p_n, p_nch, p_hwch, cm->HW, &cm->g);
     row_stride[0] = rocke_stride_value(cm->HW);
     row_stride[1] = rocke_stride_imm(1);
     rocke_make_global_view(&cm->x_view, X, shape2, 2, io_ty, row_stride);

@@ -22,6 +22,7 @@
 #include "rocke/helper_rocke.helpers.spec.h"
 #include "rocke/helper_rocke.helpers.sweep.h"
 #include "rocke/helper_rocke.helpers.tensor_view.h"
+#include "rocke/instance_batchnorm2d_bwd_internal.h"
 #include "rocke/ir.h"
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
 #include "rocke/lower_llvm.h"
@@ -769,8 +770,8 @@ static rocke_kernel_def_t* rocke_build_batchnorm2d_dynamic(rocke_ir_builder_t* b
                         rocke_value_t* mean_term1 = rocke_b_fmul(b, one_minus_mom, old_mean);
                         rocke_value_t* mean_term2 = rocke_b_fmul(b, momentum, mean);
                         rocke_value_t* new_running_mean = rocke_b_fadd(b, mean_term1, mean_term2);
-                        /* Running variance is unbiased (M / (M - 1)), as in MIOpen and
-                 * torch; Y and InvStd use the biased one. */
+                        /* Running variance is Bessel-corrected (M / (M - 1));
+ * Y and InvStd use the biased one. */
                         rocke_value_t* m_total = rocke_b_sitofp_f32(b, rocke_b_mul(b, p_n, HW));
                         rocke_value_t* m_minus_1
                             = rocke_b_fsub(b, m_total, rocke_b_const_f32(b, 1.0));
@@ -1035,8 +1036,8 @@ static rocke_kernel_def_t* rocke_build_batchnorm2d_dynamic(rocke_ir_builder_t* b
                         rocke_value_t* mean_term1 = rocke_b_fmul(b, one_minus_mom, old_mean);
                         rocke_value_t* mean_term2 = rocke_b_fmul(b, momentum, mean);
                         rocke_value_t* new_running_mean = rocke_b_fadd(b, mean_term1, mean_term2);
-                        /* Running variance is unbiased (M / (M - 1)), as in MIOpen and
-                     * torch; Y and InvStd use the biased one. */
+                        /* Running variance is Bessel-corrected (M / (M - 1));
+ * Y and InvStd use the biased one. */
                         rocke_value_t* m_total = rocke_b_sitofp_f32(b, rocke_b_mul(b, p_n, HW));
                         rocke_value_t* m_minus_1
                             = rocke_b_fsub(b, m_total, rocke_b_const_f32(b, 1.0));
@@ -3637,25 +3638,15 @@ static void bn_split_dyn_block_reduce(rocke_ir_builder_t* b,
     }
 }
 
-typedef struct bn_split_dyn_geom
+/* _split_dyn_geometry (shared with the backward split builders). */
+void rocke_bn_split_dyn_geometry(rocke_ir_builder_t* b,
+                                 rocke_value_t* p_n,
+                                 rocke_value_t* p_nch,
+                                 rocke_value_t* p_hwch,
+                                 rocke_value_t* HW,
+                                 rocke_bn_split_geom_t* out)
 {
-    rocke_value_t* sh_id;
-    rocke_value_t* sn_id;
-    rocke_value_t* hw_lo; /* hw_lo_safe */
-    rocke_value_t* seg_len;
-    rocke_value_t* n_lo;
-    rocke_value_t* n_hi;
-    rocke_value_t* n_cnt;
-} bn_split_dyn_geom_t;
-
-/* _split_dyn_geometry */
-static bn_split_dyn_geom_t bn_split_dyn_geometry(rocke_ir_builder_t* b,
-                                                 rocke_value_t* p_n,
-                                                 rocke_value_t* p_nch,
-                                                 rocke_value_t* p_hwch,
-                                                 rocke_value_t* HW)
-{
-    bn_split_dyn_geom_t g;
+    rocke_bn_split_geom_t g;
     rocke_value_t *hw_lo, *hw_m1, *rem, *seg_min, *n_end;
     g.sh_id = rocke_b_block_id_y(b);
     g.sn_id = rocke_b_block_id_z(b);
@@ -3670,7 +3661,7 @@ static bn_split_dyn_geom_t bn_split_dyn_geometry(rocke_ir_builder_t* b,
     g.n_hi = rocke_b_smin(b, p_n, n_end);
     n_end = rocke_b_sub(b, g.n_hi, g.n_lo);
     g.n_cnt = rocke_b_smax(b, n_end, rocke_b_const_i32(b, 0));
-    return g;
+    *out = g;
 }
 
 static void bn_split_dyn_lds(rocke_ir_builder_t* b, int BS, rocke_value_t** lds)
@@ -3702,7 +3693,7 @@ rocke_kernel_def_t*
     int shape2[2];
     int lengths2[2];
     rocke_value_t* origin[2];
-    bn_split_dyn_geom_t g;
+    rocke_bn_split_geom_t g;
     rocke_iter_arg_t outer_iter_args[3];
     rocke_for_t outer_for;
     rocke_value_t *sum_p, *sumsq_p, *tail_count_p;
@@ -3747,7 +3738,7 @@ rocke_kernel_def_t*
     HW = rocke_b_mul(b, p_h, p_w);
     tid = rocke_b_thread_id_x(b);
     channel = rocke_b_block_id_x(b);
-    g = bn_split_dyn_geometry(b, p_n, p_nch, p_hwch, HW);
+    rocke_bn_split_dyn_geometry(b, p_n, p_nch, p_hwch, HW, &g);
 
     shape2[0] = 1;
     shape2[1] = 1;
@@ -3918,7 +3909,7 @@ rocke_kernel_def_t*
     int shape2[2];
     int lengths2[2];
     rocke_value_t* origin[2];
-    bn_split_dyn_geom_t g;
+    rocke_bn_split_geom_t g;
     rocke_value_t *splits, *has_slot, *slot_tid, *slot;
     rocke_value_t *mean_raw, *m2_raw, *count_raw, *mean_p, *m2_p, *count_p;
     rocke_value_t *mean = NULL, *var = NULL;
@@ -3977,7 +3968,7 @@ rocke_kernel_def_t*
     HW = rocke_b_mul(b, p_h, p_w);
     tid = rocke_b_thread_id_x(b);
     channel = rocke_b_block_id_x(b);
-    g = bn_split_dyn_geometry(b, p_n, p_nch, p_hwch, HW);
+    rocke_bn_split_dyn_geometry(b, p_n, p_nch, p_hwch, HW, &g);
 
     shape2[0] = 1;
     shape2[1] = 1;

@@ -23,6 +23,7 @@
 #include "rocke/helper_rocke.helpers.reduction.h"
 #include "rocke/helper_rocke.helpers.spec.h"
 #include "rocke/helper_rocke.helpers.tensor_view.h"
+#include "rocke/instance_batchnorm2d_bwd_internal.h"
 #include "rocke/ir.h"
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
 
@@ -436,29 +437,6 @@ static rocke_value_t*
     return v.base;
 }
 
-/* Python _bwd_coefs: dx = a * dy - k2 * (x - mean) - k3; returns (a, k2, k3). */
-static void mcw_bwd_coefs(rocke_ir_builder_t* b,
-                          rocke_value_t* s1,
-                          rocke_value_t* s2,
-                          rocke_value_t* scale,
-                          rocke_value_t* mean,
-                          rocke_value_t* invstd,
-                          rocke_value_t* m_f,
-                          rocke_value_t** a,
-                          rocke_value_t** k2,
-                          rocke_value_t** k3)
-{
-    (void)mean;
-    rocke_value_t* one = rocke_b_const_f32(b, 1.0);
-    rocke_value_t* inv_m = rocke_b_fdiv(b, one, m_f);
-    *a = rocke_b_fmul(b, scale, invstd);
-    rocke_value_t* t1 = rocke_b_fmul(b, *a, invstd);
-    rocke_value_t* t2 = rocke_b_fmul(b, s2, inv_m);
-    *k2 = rocke_b_fmul(b, t1, t2);
-    rocke_value_t* t3 = rocke_b_fmul(b, s1, inv_m);
-    *k3 = rocke_b_fmul(b, *a, t3);
-}
-
 static bool
     mcw_check(rocke_ir_builder_t* b, const rocke_batchnorm2d_mcw_spec_t* spec, const char* mode)
 {
@@ -672,8 +650,11 @@ rocke_kernel_def_t* rocke_build_batchnorm2d_mcw_bwd(rocke_ir_builder_t* b,
     }
     rocke_value_t* nhw = rocke_b_mul(b, p_n, ctx.hw);
     rocke_value_t* m_f = rocke_b_sitofp_f32(b, nhw);
-    rocke_value_t *a, *k2, *k3;
-    mcw_bwd_coefs(b, tot[0], tot[1], scale, mean, invstd, m_f, &a, &k2, &k3);
+    rocke_value_t *a, *k2, *k3, *coefs[3];
+    rocke_bn_bwd_coefs(b, tot[0], tot[1], scale, mean, invstd, m_f, coefs);
+    a = coefs[0];
+    k2 = coefs[1];
+    k3 = coefs[2];
     for(int e = 0; e < NE; ++e)
     {
         rocke_if_t iff = rocke_b_scf_if(b, ok[e]);

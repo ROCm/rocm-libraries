@@ -36,6 +36,21 @@ void rocke_bn_bwd_coefs(rocke_ir_builder_t* b,
                         rocke_value_t* m_f,
                         rocke_value_t* out[3]);
 
+/* Per-CTA ranges of the dynamic split kernels (Python _split_dyn_geometry);
+ * shared by the forward split (batchnorm2d.cpp) and backward split
+ * (batchnorm2d_bwd.cpp) builders. */
+typedef struct rocke_bn_split_geom
+{
+    rocke_value_t *sh_id, *sn_id, *hw_lo, *seg_len, *n_lo, *n_hi, *n_cnt;
+} rocke_bn_split_geom_t;
+
+void rocke_bn_split_dyn_geometry(rocke_ir_builder_t* b,
+                                 rocke_value_t* p_n,
+                                 rocke_value_t* p_nch,
+                                 rocke_value_t* p_hwch,
+                                 rocke_value_t* HW,
+                                 rocke_bn_split_geom_t* g);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

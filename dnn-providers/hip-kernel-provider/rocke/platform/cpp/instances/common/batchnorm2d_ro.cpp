@@ -20,6 +20,7 @@
 #include "rocke/helper_rocke.helpers.reduction.h"
 #include "rocke/helper_rocke.helpers.spec.h"
 #include "rocke/helper_rocke.helpers.tensor_view.h"
+#include "rocke/instance_batchnorm2d_bwd_internal.h"
 #include "rocke/ir.h"
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
 
@@ -383,27 +384,6 @@ static void ro_exchange(rocke_ir_builder_t* b,
     *s1 = rocke_b_vec_extract(b, v, 0);
     v = rocke_b_smem_load_vN_f32(b, lds_bc, &one, 1, 1);
     *s2 = rocke_b_vec_extract(b, v, 0);
-}
-
-/* Python _bwd_coefs (batchnorm2d.py): dx = a * dy - k2 * (x - mean) - k3. */
-static void ro_bwd_coefs(rocke_ir_builder_t* b,
-                         rocke_value_t* s1,
-                         rocke_value_t* s2,
-                         rocke_value_t* scale,
-                         rocke_value_t* invstd,
-                         rocke_value_t* m_f,
-                         rocke_value_t** a,
-                         rocke_value_t** k2,
-                         rocke_value_t** k3)
-{
-    rocke_value_t* one = rocke_b_const_f32(b, 1.0);
-    rocke_value_t* inv_m = rocke_b_fdiv(b, one, m_f);
-    *a = rocke_b_fmul(b, scale, invstd);
-    rocke_value_t* t1 = rocke_b_fmul(b, *a, invstd);
-    rocke_value_t* t2 = rocke_b_fmul(b, s2, inv_m);
-    *k2 = rocke_b_fmul(b, t1, t2);
-    rocke_value_t* t3 = rocke_b_fmul(b, s1, inv_m);
-    *k3 = rocke_b_fmul(b, *a, t3);
 }
 
 /* Shared geometry params / prologue of both kernels. */
@@ -774,8 +754,11 @@ rocke_kernel_def_t* rocke_build_batchnorm2d_ro_bwd(rocke_ir_builder_t* b,
             rocke_b_global_store(b, dBias, it.ch, a1, 1);
             rocke_b_region_leave(b);
         }
-        rocke_value_t *a, *k2, *k3;
-        ro_bwd_coefs(b, a1, a2, scale_c, invstd_c, L.m_f, &a, &k2, &k3);
+        rocke_value_t *a, *k2, *k3, *coefs[3];
+        rocke_bn_bwd_coefs(b, a1, a2, scale_c, NULL, invstd_c, L.m_f, coefs);
+        a = coefs[0];
+        k2 = coefs[1];
+        k3 = coefs[2];
         for(int j = 0; j < R; ++j)
         {
             rocke_value_t* xs[RO_MAX_VEC];

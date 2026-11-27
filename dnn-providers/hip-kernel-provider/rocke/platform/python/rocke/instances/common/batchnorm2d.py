@@ -1161,8 +1161,8 @@ def _build_batchnorm2d_dynamic(spec: BatchNorm2DSpec) -> KernelDef:
                     new_running_mean = b.fadd(
                         b.fmul(one_minus_mom, old_mean), b.fmul(momentum, mean)
                     )
-                    # Running variance is unbiased (M / (M - 1)), as in
-                    # MIOpen and torch; Y and InvStd use the biased one.
+                    # Running variance is Bessel-corrected (M / (M - 1));
+                    # Y and InvStd use the biased one.
                     m_total = b.sitofp_f32(b.mul(p_n, HW))
                     unbias = b.fdiv(m_total, b.fmax(b.fsub(m_total, b.const_f32(1.0)), b.const_f32(1.0)))
                     new_running_var = b.fadd(
@@ -1341,8 +1341,8 @@ def _build_batchnorm2d_dynamic(spec: BatchNorm2DSpec) -> KernelDef:
                     new_running_mean = b.fadd(
                         b.fmul(one_minus_mom, old_mean), b.fmul(momentum, mean)
                     )
-                    # Running variance is unbiased (M / (M - 1)), as in
-                    # MIOpen and torch; Y and InvStd use the biased one.
+                    # Running variance is Bessel-corrected (M / (M - 1));
+                    # Y and InvStd use the biased one.
                     m_total = b.sitofp_f32(b.mul(p_n, HW))
                     unbias = b.fdiv(m_total, b.fmax(b.fsub(m_total, b.const_f32(1.0)), b.const_f32(1.0)))
                     new_running_var = b.fadd(
