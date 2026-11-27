@@ -310,11 +310,12 @@ namespace
 
     // The dynamic StreamK split the GEMM kernel of this launch is passed, read
     // from the kernel arguments solve() packs: SKTiles with the Hybrid slot bits
-    // masked off, and SKSplit.
+    // masked off, SKSplit, and the parallel-reduction bit.
     struct LaunchedSplit
     {
-        uint32_t tiles = 0;
-        uint32_t split = 0;
+        uint32_t tiles    = 0;
+        uint32_t split    = 0;
+        bool     parallel = false;
     };
 
     bool launchedDynamicSplit(TensileLite::ContractionSolution&          solution,
@@ -374,14 +375,16 @@ namespace
             std::memcpy(&value, it->first, sizeof(value));
             return true;
         };
-        uint32_t packed = 0;
-        if(!(word("SKTiles|ModeBit", packed) || word("SKTiles", packed))
-           || !word("SKSplit", out.split))
+        uint32_t   packed = 0;
+        const bool hybrid = word("SKTiles|ModeBit", packed);
+        if(!(hybrid || word("SKTiles", packed)) || !word("SKSplit", out.split))
         {
             reason = "the launch carries no dynamic StreamK split arguments";
             return false;
         }
-        out.tiles = packed & ~TensileLite::StreamK::Slot2Bits::TileReservedMask;
+        using Bits   = TensileLite::StreamK::Slot2Bits;
+        out.tiles    = packed & ~Bits::TileReservedMask;
+        out.parallel = hybrid && (packed & Bits::DynamicParallelReductionBit) != 0;
         return true;
     }
 
@@ -1443,13 +1446,14 @@ namespace
             }
         }
 
-        // Whether the launch of candidate split its tiles; adds a failure saying
-        // how it did not.
+        // Whether the launch of candidate split its tiles and reduced them as
+        // asked; adds a failure saying how it did not.
         bool launchSplit(const hipblasLtMatmulHeuristicResult_t&    candidate,
                          const std::string&                         name,
                          const TensileLite::ContractionProblemGemm& tensile,
                          const TensileLite::Hardware&               hardware,
-                         size_t                                     queriedWorkspace)
+                         size_t                                     queriedWorkspace,
+                         bool                                       parallel)
         {
             std::string   reason;
             LaunchedSplit launched;
@@ -1460,10 +1464,12 @@ namespace
                 return false;
             }
             const size_t parts = size_t{launched.tiles} * launched.split;
-            if(launched.tiles == 0 || launched.split < 2)
+            if(launched.tiles == 0 || launched.split < 2 || launched.parallel != parallel)
             {
                 ADD_FAILURE() << name << " launched " << launched.tiles << " tiles in "
-                              << launched.split << " parts, not the split predicted for it";
+                              << launched.split << " parts reduced "
+                              << (launched.parallel ? "in parallel" : "by the arrival fixup")
+                              << ", not the split predicted for it";
                 return false;
             }
             if(queriedWorkspace != solution->partialTileSize(parts))
@@ -1478,14 +1484,15 @@ namespace
 
         // Runs, with the mode on, the enumerated solutions whose dynamic StreamK
         // decomposition (StreamK::Dynamic::computeSplit, as the library resolves
-        // it for this problem) splits tiles, and requires D uniform along the
+        // it for this problem) splits tiles and reduces them in parallel or by
+        // the arrival fixup, as asked, and requires D uniform along the
         // problem's line. Each runs with the whole workspace, so the launch
         // resolves the split predicted here; a run counts as honored only once
-        // its kernel arguments carry a split and the workspace hipBLASLt asked
-        // for holds exactly its parts. A clean refusal is allowed, but on a
-        // 256-CU gfx950 at least one split solution must be honored; elsewhere
-        // none is a skip.
-        void checkDynamicSplitUniform(const Problem& problem)
+        // its kernel arguments carry a split with that reduction and the
+        // workspace hipBLASLt asked for holds exactly its parts. A clean refusal
+        // is allowed, but on a 256-CU gfx950 at least one split solution must be
+        // honored; elsewhere none is a skip.
+        void checkDynamicSplitUniform(const Problem& problem, bool parallel)
         {
             RowUniformityHarness harness(problem);
             prepare(harness);
@@ -1516,7 +1523,8 @@ namespace
                 if(!dynamicQueue)
                     return false;
                 const size_t tiles = tensile.getNumTiles(sizeMapping, 1);
-                return solution->streamKDynamicDecomposition(tensile, *hardware, tiles).tiles > 0;
+                const auto   split = solution->streamKDynamicDecomposition(tensile, *hardware, tiles);
+                return split.tiles > 0 && split.parallel == parallel;
             };
             const auto candidates
                 = harness.enumeratedAlgos(splitsTiles, kMaxDynamicSplitCandidates);
@@ -1541,7 +1549,8 @@ namespace
                                    << "0 for " << name
                                    << ", a split dynamic StreamK launch, with uniform "
                                       "summation order enabled";
-                if(bad < 0 && launchSplit(candidate, name, tensile, *hardware, queriedWorkspace))
+                if(bad < 0
+                   && launchSplit(candidate, name, tensile, *hardware, queriedWorkspace, parallel))
                     ++honored;
             }
 
@@ -1552,8 +1561,10 @@ namespace
             {
                 const bool gfx950 = gpuArchName().rfind("gfx950", 0) == 0;
                 if(gfx950 && currentCUCount() == 256)
-                    ADD_FAILURE() << "No split dynamic StreamK solution was honored for "
-                                  << problem.m << "x" << problem.n << "x" << problem.k
+                    ADD_FAILURE() << "No split dynamic StreamK solution reduced "
+                                  << (parallel ? "in parallel" : "by the arrival fixup")
+                                  << " was honored for " << problem.m << "x" << problem.n << "x"
+                                  << problem.k
                                   << " (split_candidates=" << candidates.size()
                                   << "), so this case no longer covers the split";
                 else
@@ -1581,13 +1592,28 @@ namespace
     TEST_F(RowUniformity_pre_checkin, HybridDynamicSplit_1152x1152x16384)
     {
         checkDynamicSplitUniform(
-            {1152, 1152, 16384, HIP_R_32F, 0, false, HIPBLAS_OP_N, HIP_R_32F, 1});
+            {1152, 1152, 16384, HIP_R_32F, 0, false, HIPBLAS_OP_N, HIP_R_32F, 1}, false);
     }
 
     TEST_F(RowUniformity_pre_checkin, HybridDynamicSplitColumns_1152x1152x16384)
     {
         checkDynamicSplitUniform(
-            {1152, 1152, 16384, HIP_R_32F, 0, false, HIPBLAS_OP_N, HIP_R_32F, 1, true});
+            {1152, 1152, 16384, HIP_R_32F, 0, false, HIPBLAS_OP_N, HIP_R_32F, 1, true}, false);
+    }
+
+    // At most a quarter as many tiles as CUs: the parts are summed in part
+    // order by the parallel (PostGSU) reduction. gfx950: MT128x128 kernels give
+    // 16 tiles in 16 parts.
+    TEST_F(RowUniformity_pre_checkin, HybridDynamicParallel_512x512x32768)
+    {
+        checkDynamicSplitUniform(
+            {512, 512, 32768, HIP_R_32F, 0, false, HIPBLAS_OP_N, HIP_R_32F, 1}, true);
+    }
+
+    TEST_F(RowUniformity_pre_checkin, HybridDynamicParallelColumns_512x512x32768)
+    {
+        checkDynamicSplitUniform(
+            {512, 512, 32768, HIP_R_32F, 0, false, HIPBLAS_OP_N, HIP_R_32F, 1, true}, true);
     }
 
     // The gfx950 skinny TN custom kernels declare uniformSummationOrder in their
