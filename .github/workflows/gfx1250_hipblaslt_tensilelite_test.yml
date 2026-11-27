@@ -332,6 +332,10 @@ jobs:
           SYSTEM_LABEL: ${{ secrets.GFX1250_BLAS_SYSTEM_LABEL }}
           GH_TOKEN: ${{ github.token }}
           TEST_RUNNER_NAME: ${{ runner.name }}
+          # The suites this run selected (the gate's outputs): a manual run with
+          # run_tensilelite=false must not report TensileLite as "not run".
+          RUN_HIPBLASLT: ${{ needs.gate.outputs.run_hipblaslt }}
+          RUN_TENSILELITE: ${{ needs.gate.outputs.run_tensilelite }}
           # The steps' own outcomes; the job status covers anything not listed.
           STEPS: >-
             Test job=${{ job.status }},
@@ -343,13 +347,21 @@ jobs:
             Run hipBLASLt tests=${{ steps.hipblaslt.outcome }},
             Run TensileLite common tests=${{ steps.tensilelite.outcome }},
             Upload test results=${{ steps.upload.outcome }}
+        # The report expects every --suite it is given, so pass only the selected ones.
         # The TensileLite log holds two pytest sessions: rocisa, then the common tests.
         run: |
+          set -euo pipefail
+          suites=()
+          if [ "$RUN_HIPBLASLT" = "true" ]; then
+            suites+=(--suite "hipBLASLt=gtest:test_results/hipblaslt_test_shard*.log")
+          fi
+          if [ "$RUN_TENSILELITE" = "true" ]; then
+            suites+=(--suite "TensileLite Common=pytest:tensilelite_test_results/common_test.log#2")
+            suites+=(--suite "Rocisa=pytest:tensilelite_test_results/common_test.log#1")
+          fi
           python3 .github/scripts/blas_nightly_report.py --results . --title gfx1250-strict \
             --artifact gfx1250-strict-test-results --steps "$STEPS" \
-            --suite "hipBLASLt=gtest:test_results/hipblaslt_test_shard*.log" \
-            --suite "TensileLite Common=pytest:tensilelite_test_results/common_test.log#2" \
-            --suite "Rocisa=pytest:tensilelite_test_results/common_test.log#1" \
+            "${suites[@]}" \
             --meta "Architecture=gfx1250-strict" --meta "ROCm SDK=$ROCM_SDK_VERSION" \
             --strip "_/matmul_test.matmul/" --strip "tensilelite/Tests/common/"
 
