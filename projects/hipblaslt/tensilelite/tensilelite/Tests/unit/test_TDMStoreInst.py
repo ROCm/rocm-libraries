@@ -324,7 +324,8 @@ def test_dynamic_gsu_stages_at_the_uncapped_width(gp_gfx1250, gfx1250_iim, assem
 
 def test_the_switch_matches_the_valid_values_and_on_covers_every_path():
   """TDMStoreInst is False or True only, and True sends every store path of a final-D store through
-  the TDM block, so the epilogue keeps one store path and splits only on beta / non-beta."""
+  the TDM block. Without per-element outputs beyond C and D the epilogue is one store path per beta;
+  with them the edge cascade stays."""
   assert validParameters["TDMStoreInst"] == [False, True]
   # bool == int in python, so the list comparison alone passes against [0, 1] too. The validator
   # keys on type() rather than isinstance, so the type is the thing that has to be pinned.
@@ -423,12 +424,15 @@ def test_lds_bytes_of_the_staged_tile(tdm, dest, bpe):
 
 
 def test_lds_bytes_cover_the_columns_of_every_wave():
-  """With MacroTile1 not a multiple of the waves, the staged tile holds MacroTile1 rounded up to a multiple of the
-  waves: 128 columns over three waves are 3 x 43."""
+  """With MacroTile1 not a multiple of the waves, the staged tile holds MacroTile1 rounded up to a multiple of a
+  wave's columns: 128 columns over three waves of 43 are 129, and 80 columns over 32 waves of 3 are 81, where
+  MacroTile1 rounded up to a multiple of the waves would be 96."""
   tdm = 1
   state = {"TDMStoreInst": tdm, "MacroTile0": 256, "MacroTile1": 128, "NumThreads": 96, "WavefrontSize": 32,
            "ProblemType": {"DestDataType": DataType("h")}}
   assert tdmStoreLdsBytes(state) == 256 * 129 * 2
+  state.update({"MacroTile0": 128, "MacroTile1": 80, "NumThreads": 1024})
+  assert tdmStoreLdsBytes(state) == 128 * 81 * 2
 
 
 def test_store_modifiers_follow_the_hints_of_d():

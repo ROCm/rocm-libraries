@@ -1329,8 +1329,9 @@ validParameters = { # we need to make sure this matches develop
     # Store D through LDS with tensor_store_from_lds in place of buffer_store in the epilogue
     # store paths (Components/TDMStoreInst.py). gfx1250 only.
     # Off keeps the buffer_store epilogue. On stores every tile of a final-D store through
-    # the TDM block, bounded by tensor_dim, so the epilogue keeps one store path, without edge
-    # checks, and splits only on beta / non-beta. Off by default.
+    # the TDM block, bounded by tensor_dim. Without per-element outputs beyond C and D that is
+    # one store path per beta, with no edge checks. With those outputs the edge cascade stays.
+    # Off by default.
     "TDMStoreInst": [False, True],
     # StinkyTofu module-option overrides, e.g. {WmmaBatchSize: 2}. Tuning-only:
     # Solution moves it to the internal _StinkyTofuParameters, which tags the kernel name

@@ -14,11 +14,11 @@ tensor_load_to_lds, bounded the same way.
   True           on: every tile of a final-D store, the OptNLL store included
   =============  =================================================================
 
-TDMStoreInst on stores every tile through the TDM block, whatever the alignment of its columns, and
-tensor_dim bounds the edge tiles, so the epilogue keeps one store path and splits only on beta / non-beta:
-each beta of a final-D store is one TDM block, generated like the NonEdge path at the store vector width,
-with no edge check and no EdgeN or EdgeM block (tdmStoreSinglePath). The choice is whether to enable
-TDMStoreInst for a kernel, not which paths it covers.
+TDMStoreInst on stores every tile through the TDM block, whatever the alignment of its columns. Without
+per-element outputs beyond C and D, tensor_dim bounds the edge tiles, so each beta of a final-D store is one
+TDM block, generated like the NonEdge path at the store vector width, with no edge check and no EdgeN or EdgeM
+block (tdmStoreSinglePath). With those outputs the cascade stays. The choice is whether to enable TDMStoreInst
+for a kernel, not which paths it covers.
 
 Without TDMStoreInst a final-D store is the store-width cascade generateBetaModules builds, one block per
 vector width: the NonEdge block and the masked EdgeN block of the store vector width and the narrower
@@ -104,10 +104,10 @@ def tdmStoreRejectReason(state):
   reuses.
   SuppressNoLoadLoop runs the last PrefetchGlobalRead iterations in the main loop and disarms their loads in place.
   HalfPLR and ReuseAcrossPersistent, which set it, zero the enable words of their TDM descriptors. A
-  SuppressNoLoadLoop set otherwise, which Solution keeps only with buffer loads, PrefetchGlobalRead 1 and
+  SuppressNoLoadLoop set otherwise, which Solution keeps only with BufferLoad, PrefetchGlobalRead 1 and
   GlobalSplitU 1 or -1, zeroes only the buffer SRD limits, so its tensor_load_to_lds still run, past K. The block
-  drains them before it stages D, but TDMStoreInst does not take that load configuration: it is rejected with TDM
-  loads (TDMInst > 0) outside HalfPLR and ReuseAcrossPersistent, and accepted with buffer loads.
+  drains them before it stages D, but TDMStoreInst does not take that load configuration: it is rejected with
+  TDMInst > 0 outside HalfPLR and ReuseAcrossPersistent, and accepted with TDMInst 0.
   The block also computes the elements outside D and bounds only the C loads and the D store, so
   besides C and D the epilogue may only read the epilogue vectors, bias, ScaleAlphaVec and ScaleAB along
   M or N, which the staged tile follows in LDS, and scalars such as ScaleC and ScaleD. With per-element
@@ -320,12 +320,11 @@ def tdmStoreModifiers(asmCaps, kernel, tc="D"):
 
 
 def emitTDMStoreSetup(gwb) -> Module:
-  """Fence the main-loop LDS when the staged tile lies over it, and compute this thread's byte address
-  in the staged D tile.
+  """Fence the main-loop LDS and compute this thread's byte address in the staged D tile.
 
   The tile is staged M-contiguous from LDS offset _TDMStoreLdsOffset, after the epilogue vectors. It lies
-  over the main-loop buffers, so every wave must be done with them, including in-flight tensor_load_to_lds,
-  before the staged tile is written.
+  over the main-loop buffers, so every wave is fenced here before the staged tile is written; in-flight
+  tensor_load_to_lds are drained first when A or B is loaded with them.
   """
   module = Module("TDMStoreSetup")
   kw = gwb.parentWriter
@@ -353,9 +352,7 @@ def tdmStoreLdsSplit(offset, span=0):
 
   span is how far ABOVE the returned offset the caller will still address. An element wider than one DS
   instruction is written piece by piece as offset + piece * width, so the piece that has to fit the 16-bit
-  field is the LAST one, not the first. Checking only the element's own offset lets a vector that starts
-  just under 64 KiB emit offset:65536 for its second piece, which the assembler rejects with
-  "expected a 16-bit unsigned offset".
+  offset field is the last one, not the first.
 
   Folding a whole multiple of 64 KiB keeps the fold cheap, but only while the remainder still leaves room
   for the span; otherwise the element's whole offset is folded, which puts its pieces in [0, span].
@@ -441,18 +438,15 @@ def emitTDMStoreLoadCElement(gwb, addrCalc, data, vc0) -> Module:
   """Read this element's C vector from the staged tile, where its D is staged later.
 
   An odd 2-byte fp16 element goes to the high half of its own VGPR, where readInput loads it, with
-  ds_load_u16_d16_hi. tdmStoreRejectReason admits fp16 D only from fp32 accumulators, so readInput's low-half
-  rule for HHH_WMMA kernels never applies here. A 1-byte element, fp8, bf8 or int8 C at vector width 1, goes to the low byte of its VGPR with
-  ds_load_u8, which zero-fills the rest as readInput's byte load does on gfx1250. Only that half is read afterwards -- the beta
-  multiply selects it with op_sel -- so it does not matter whether the other half of the VGPR keeps its old value or
-  is zeroed. On gfx1250 it is zeroed: ECC is always on, so a VGPR is written a whole DWORD at a time. A DS load reads
-  at most 16 bytes, so a wider vector, such as bf16 at store vector width 16, is read 16 bytes at a time.
+  ds_load_u16_d16_hi. Only that half is read afterwards: the beta multiply selects it with op_sel.
+  tdmStoreRejectReason admits fp16 D only from fp32 accumulators, so readInput's low-half rule for HHH_WMMA kernels
+  never applies here. A 1-byte element, fp8, bf8 or int8 C at vector width 1, goes to the low byte of its VGPR with
+  ds_load_u8, which zero-fills the rest as readInput's byte load does on gfx1250. A DS load reads at most 16 bytes,
+  so a wider vector, such as bf16 at store vector width 16, is read 16 bytes at a time.
   """
   module = Module("TDMStoreLoadCElement")
   kw = gwb.parentWriter
   bpl = kw.states.bpeCexternalGSU1 * gwb.gwvw
-  # A DS load reads at most 16 bytes, so the vector is read in pieces at offset + piece * width and the LAST
-  # piece is the one that has to fit the 16-bit field.
   # The read-back of each element is emitted between other code of the element loop, which may write tmpVgpr.
   addr, offset, _ = _tdmStoreLdsAddress(gwb, module, addrCalc.coordOffset0, addrCalc.coordOffset1,
                                         span=max(0, bpl - min(bpl, 16)))
@@ -495,9 +489,7 @@ def emitTDMStoreStaging(gwb, stagedElements) -> Module:
   # tmpVgpr for one element still holds for the next.
   folded, foldRead = None, False
   for sumIdx, coordOffset0, coordOffset1 in stagedElements:
-    # dsStore writes at most 32 bytes, so a wider vector is staged at offset + piece * width; the last piece
-    # is what has to fit the 16-bit field. A 32-byte piece is itself two 16-byte stores, the second of them
-    # at a further 16, so the span is measured in the 16 bytes one DS instruction really writes.
+    # A 32-byte piece is two 16-byte DS stores, so the span counts the 16 bytes one DS instruction writes.
     addr, offset, fold = _tdmStoreLdsAddress(gwb, module, coordOffset0, coordOffset1,
                                              span=max(0, bps - min(width, 16)), folded=folded, foldRead=foldRead)
     foldRead = (foldRead and fold == folded) or addr == gwb.tmpVgpr
