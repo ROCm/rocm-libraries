@@ -663,10 +663,12 @@ FindCoreResult FindCore(const AnyInvokeParams& invoke_ctx,
 
     // With the run-time bound on, naive solvers are left out of the precompile list when another
     // solver is available. A naive solver that EvaluateInvokers() decides to run is built then, by
-    // PrepareInvoker(). The ones it skips are never built. Runs that build every kernel and do
-    // not evaluate them (MIOPEN_DEBUG_COMPILE_ONLY, MIOPEN_DEVICE_ARCH) keep naive in the list.
-    // MIOPEN_NAIVE_BOUND_SKIP=0 precompiles everything, as before the bound existed.
-    const bool precompile_naive = !bound_skip || !has_non_naive ||
+    // PrepareInvoker(). The ones it skips are never built. The bound skips only with a positive
+    // floor, so naive stays in the list when naive_floor_ms is 0 (no tap reads inside the input,
+    // the device clock is unavailable, or the problem is not a convolution). Runs that build every
+    // kernel and do not evaluate them (MIOPEN_DEBUG_COMPILE_ONLY, MIOPEN_DEVICE_ARCH) keep naive in
+    // the list. MIOPEN_NAIVE_BOUND_SKIP=0 precompiles everything, as before the bound existed.
+    const bool precompile_naive = !bound_skip || !has_non_naive || naive_floor_ms <= 0.0f ||
                                   env::enabled(MIOPEN_DEBUG_COMPILE_ONLY) ||
                                   !env::value(MIOPEN_DEVICE_ARCH).empty();
 

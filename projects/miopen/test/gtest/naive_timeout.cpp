@@ -71,14 +71,29 @@ namespace {
 
 using miopen::ScopedFindDb;
 
-template <class T = float>
-std::vector<std::string> RunFind(miopenHandle_t handle, size_t max_solutions = 8)
+// The forward convolution RunFind looks for has N=1 and C=K=64, with a square image and a square
+// filter. The defaults give a 14x14 image, a 3x3 filter, pad 1 and stride 1.
+struct FindShape
 {
-    tensor<T> x{1, 64, 14, 14};
-    tensor<T> w{64, 64, 3, 3};
+    std::size_t image  = 14;
+    std::size_t filter = 3;
+    int pad            = 1;
+    int stride         = 1;
+};
 
-    miopen::ConvolutionDescriptor conv{
-        2, miopenConvolution, miopenPaddingDefault, {1, 1}, {1, 1}, {1, 1}};
+template <class T = float>
+std::vector<std::string>
+RunFind(miopenHandle_t handle, size_t max_solutions = 8, const FindShape& shape = {})
+{
+    tensor<T> x{1, 64, shape.image, shape.image};
+    tensor<T> w{64, 64, shape.filter, shape.filter};
+
+    miopen::ConvolutionDescriptor conv{2,
+                                       miopenConvolution,
+                                       miopenPaddingDefault,
+                                       {shape.pad, shape.pad},
+                                       {shape.stride, shape.stride},
+                                       {1, 1}};
     tensor<T> y{conv.GetForwardOutputTensor(x.desc, w.desc)};
 
     miopenProblem_t problem = nullptr;
@@ -113,7 +128,7 @@ std::vector<std::string> RunFind(miopenHandle_t handle, size_t max_solutions = 8
 
 bool IsNaive(const std::string& name) { return name.find("Naive") != std::string::npos; }
 
-// RunFind's convolution (3x3, pad 1, stride 1, fp32, K=64) is exactly what
+// RunFind's default convolution (3x3, pad 1, stride 1, fp32, K=64) is exactly what
 // ConvBinWinograd3x3U accepts, and that solver is applicable only on these
 // archs.  There IsWinograd3x3SupportedAndFast() sets use_winograd_only, which
 // disables the Direct finder outright, so ConvDirectNaive is never a candidate
@@ -141,13 +156,15 @@ struct FoundSolvers
 // RunFind with the library's Info log captured: it records which naive solvers are evaluated and
 // why one is skipped.
 template <class T = float>
-FoundSolvers
-RunFindLogged(miopenHandle_t handle, int log_level_value = 5, size_t max_solutions = 64)
+FoundSolvers RunFindLogged(miopenHandle_t handle,
+                           int log_level_value    = 5,
+                           size_t max_solutions   = 64,
+                           const FindShape& shape = {})
 {
     FoundSolvers found;
     ScopedEnvironment<int> log_level(MIOPEN_LOG_LEVEL, log_level_value);
     testing::internal::CaptureStderr();
-    found.solvers = RunFind<T>(handle, max_solutions);
+    found.solvers = RunFind<T>(handle, max_solutions, shape);
     found.log     = testing::internal::GetCapturedStderr();
     return found;
 }
@@ -210,7 +227,7 @@ struct LegacyFind
 
 // The legacy Find entry point takes the caller's workspace, and here it is null. A solver that
 // needs a workspace is rejected for lack of one. (miopenFindSolutions provides its own workspace
-// and cannot reach this.) The convolution is the one RunFind uses, in the default layout.
+// and cannot reach this.) The convolution is RunFind's default one, in the default layout.
 template <class T>
 void RunLegacyFindWithoutWorkspace(miopenHandle_t handle, LegacyFind& found)
 {
@@ -794,6 +811,35 @@ TEST_P(GPU_NaiveTimeout_FP32, NaiveTimeFloorIsTheSameInEveryDirection)
         EXPECT_EQ(bwd, fwd) << "backward data";
         EXPECT_EQ(wrw, fwd) << "backward weights";
     }
+}
+
+// The bound skips naive only when its floor is above 0, so with a floor of 0 naive stays in the
+// precompile. Every tap of this convolution reads padding: a 1x1 filter with stride 2 on a 1x1
+// image padded by 1 reads at -1 and 1 only, so the floor is 0. Like the precompile tests above, it
+// reads the precompiled kernels in the Info2 log of a new handle.
+TEST_P(GPU_NaiveTimeout_FP32, NaivePrecompiledWhenBoundCannotSkipIt)
+{
+    miopen::Handle handle_ref;
+    miopenHandle_t handle = &handle_ref;
+
+    ScopedFindDb no_cache;
+    ScopedEnvironment<bool> guard_naive(MIOPEN_NAIVE_TIMEOUT, true);
+    ScopedEnvironment<bool> guard_bound(MIOPEN_NAIVE_BOUND_SKIP, true);
+
+    // N=1 and C=K=64 as in RunFind, with a 1x1 image, a 1x1 filter, pad 1 and stride 2.
+    const FloorCase fc{"all taps read padding", 1, 64, 64, 1, 1, 1, 1, 1, 2, 1, 1, false};
+    ASSERT_EQ(FloorMs(fc, miopen::conv::Direction::Forward), 0.0f)
+        << "a tap of this convolution reads inside the input";
+
+    const auto found = RunFindLogged(handle, 6, 64, FindShape{fc.h, fc.y, fc.pad, fc.stride});
+
+    const bool any_non_naive = std::any_of(
+        found.solvers.begin(), found.solvers.end(), [](const auto& s) { return !IsNaive(s); });
+    if(!any_non_naive)
+        GTEST_SKIP() << "no non-naive solver for this problem on " << handle_ref.GetDeviceName();
+
+    EXPECT_TRUE(LogShowsNaiveKernelBeforeFirstEvaluation(found.log))
+        << "naive was left out of the precompile although the bound cannot skip it";
 }
 
 INSTANTIATE_TEST_SUITE_P(Standard, GPU_NaiveTimeout_FP32, ::testing::Values(0));
