@@ -70,6 +70,10 @@ add_hiptensor_unit_test(reduction_mode_test
     ${HIPTENSOR_COMMON_TEST_SOURCES}
     ${CMAKE_CURRENT_SOURCE_DIR}/reduction_mode_test.cpp
     )
+add_hiptensor_unit_test(compute_descriptor_test
+    ${HIPTENSOR_COMMON_TEST_SOURCES}
+    ${CMAKE_CURRENT_SOURCE_DIR}/compute_descriptor_test.cpp
+    )
 add_hiptensor_unit_test(device_init_test
     ${CMAKE_CURRENT_SOURCE_DIR}/device_init_test.cpp
     )

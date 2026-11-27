@@ -644,6 +644,12 @@ hiptensorStatus_t hiptensorCreatePermutation(const hiptensorHandle_t            
         return status;
     }
 
+    if(auto status = hiptensor::checkComputeDescriptor("hiptensorCreatePermutation", descCompute);
+       status != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return status;
+    }
+
     *desc = new hiptensorOperationDescriptor();
 
     (*desc)->mTag        = 0u;
@@ -731,6 +737,13 @@ hiptensorStatus_t hiptensorCreateElementwiseBinary(const hiptensorHandle_t      
         {
             return status;
         }
+    }
+
+    if(auto status
+       = hiptensor::checkComputeDescriptor("hiptensorCreateElementwiseBinary", descCompute);
+       status != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return status;
     }
 
     *desc                = new hiptensorOperationDescriptor();
@@ -829,6 +842,13 @@ hiptensorStatus_t hiptensorCreateElementwiseTrinary(const hiptensorHandle_t     
         }
     }
 
+    if(auto status
+       = hiptensor::checkComputeDescriptor("hiptensorCreateElementwiseTrinary", descCompute);
+       status != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return status;
+    }
+
     *desc                = new hiptensorOperationDescriptor();
     (*desc)->mTag        = 0u;
     (*desc)->mScalarType = *hiptensor::convertToHipTensorDataType(descCompute);
@@ -895,6 +915,12 @@ hiptensorStatus_t hiptensorCreateReduction(const hiptensorHandle_t            ha
     if(checkResult != HIPTENSOR_STATUS_SUCCESS)
     {
         return checkResult;
+    }
+
+    if(auto status = hiptensor::checkComputeDescriptor("hiptensorCreateReduction", descCompute);
+       status != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return status;
     }
 
     *desc                = new hiptensorOperationDescriptor();
