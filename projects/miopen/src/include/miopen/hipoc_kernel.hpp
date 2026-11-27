@@ -79,10 +79,10 @@ MIOPEN_INTERNALS_EXPORT void ValidateGlobalWorkSize(const std::array<size_t, 3>&
 /// architecture named by \p gcn_arch_name (the gcnArchName device property, a feature suffix such
 /// as "-strict" or ":xnack-" is allowed). Larger launches are accepted by the module launch APIs
 /// and silently return wrong results:
-///   - gfx1200, gfx1201: 65536. The workgroup ID is 16 bits wide, so blockIdx.y/z wrap and some
-///     workgroups run twice while others never run.
-///   - gfx1250: 65535. The workgroup count is truncated to 16 bits, so 65536 workgroups run
-///     nothing and 70000 run only the first 4464.
+///   - gfx120X (gfx1200, gfx1201, ...): 65536. The workgroup ID is 16 bits wide, so blockIdx.y/z
+///     wrap and some workgroups run twice while others never run.
+///   - gfx125X (gfx1250, ...): 65535. The workgroup count is truncated to 16 bits, so 65536
+///     workgroups run nothing and 70000 run only the first 4464.
 /// Returns std::numeric_limits<size_t>::max() for architectures without such a limit.
 MIOPEN_INTERNALS_EXPORT size_t GetMaxWorkgroupsYZ(const std::string& gcn_arch_name);
 

@@ -84,9 +84,10 @@ void ValidateGlobalWorkSize(const std::array<size_t, 3>& gdims, const std::strin
 size_t GetMaxWorkgroupsYZ(const std::string& gcn_arch_name)
 {
     // gcnArchName may carry a feature suffix, for example "gfx1250-strict" or "gfx1201:xnack-".
-    if(StartsWith(gcn_arch_name, "gfx1200") || StartsWith(gcn_arch_name, "gfx1201"))
+    // The limits are those of the gfx120X and gfx125X families, so later members are covered.
+    if(StartsWith(gcn_arch_name, "gfx120"))
         return size_t{1} << 16;
-    if(StartsWith(gcn_arch_name, "gfx1250"))
+    if(StartsWith(gcn_arch_name, "gfx125"))
         return (size_t{1} << 16) - 1;
     return std::numeric_limits<size_t>::max();
 }

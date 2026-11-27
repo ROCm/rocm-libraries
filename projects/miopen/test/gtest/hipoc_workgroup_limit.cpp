@@ -47,6 +47,9 @@ TEST_P(CPU_hipoc_workgroup_limit_NONE, arch_limits)
     EXPECT_EQ(GetMaxWorkgroupsYZ("gfx1201"), 65536u);
     EXPECT_EQ(GetMaxWorkgroupsYZ("gfx1200"), 65536u);
     EXPECT_EQ(GetMaxWorkgroupsYZ("gfx1250"), 65535u);
+    // Later members of the gfx120X and gfx125X families.
+    EXPECT_EQ(GetMaxWorkgroupsYZ("gfx1202"), 65536u);
+    EXPECT_EQ(GetMaxWorkgroupsYZ("gfx1251"), 65535u);
     // Feature suffixes reported by gcnArchName.
     EXPECT_EQ(GetMaxWorkgroupsYZ("gfx1250-strict"), 65535u);
     EXPECT_EQ(GetMaxWorkgroupsYZ("gfx1201:sramecc+:xnack-"), 65536u);
