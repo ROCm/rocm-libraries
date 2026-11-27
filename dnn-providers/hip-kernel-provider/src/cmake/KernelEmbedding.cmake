@@ -196,6 +196,43 @@ function(_write_kernel_key_manifest KEY_MANIFEST_FILE)
     endif()
 endfunction()
 
+# _get_registered_kernels(<target> <files_variable> <keys_variable>)
+#   Set <files_variable> and <keys_variable> in the caller to the kernel files and keys
+#   add_kernels_for_embedding() registered on <target>, index for index.
+#
+#   A target nothing registered kernels on (the plugin built without the HIP MLOps engine)
+#   still gets the generated files, with empty tables: both lists come back empty instead
+#   of holding the property's -NOTFOUND value, which would be read as a file name.
+function(_get_registered_kernels REGISTERED_TARGET REGISTERED_FILES_VAR REGISTERED_KEYS_VAR)
+    get_target_property(_registered_files ${REGISTERED_TARGET} KERNELEMBEDDING_KERNEL_FILES)
+    get_target_property(_registered_keys ${REGISTERED_TARGET} KERNELEMBEDDING_KERNEL_KEYS)
+    if(NOT _registered_files)
+        set(_registered_files "")
+        set(_registered_keys "")
+    endif()
+    set(${REGISTERED_FILES_VAR} "${_registered_files}" PARENT_SCOPE)
+    set(${REGISTERED_KEYS_VAR} "${_registered_keys}" PARENT_SCOPE)
+endfunction()
+
+# _register_kernel_configure_depend(<file>)
+#   Make a change to <file> rerun the configure, so the kernel is re-inlined.
+#
+#   Setting this property ensures that the kernels will get properly re-inlined as they are modified.
+#   The drawback is that CMake is going to reconfigure every time a kernel is modified.
+#   Yet, that will improve developer experience, because it will lead to shorter build times -- only
+#   the build of kernel_sources and kernel_includes will be affected.
+#   Once per build, not per target: a file two targets embed (the plugin's and the
+#   test binary's HipMlops sources) listed by two directories is two Ninja rules for
+#   one output. Any one registration reconfigures. The directory property is set in the
+#   calling directory, as it was when this ran inline in embed_kernel_sources().
+function(_register_kernel_configure_depend CONFIGURE_DEPEND_FILE)
+    get_property(_embedded_configure_depends GLOBAL PROPERTY KERNELEMBEDDING_CONFIGURE_DEPENDS)
+    if(NOT CONFIGURE_DEPEND_FILE IN_LIST _embedded_configure_depends)
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${CONFIGURE_DEPEND_FILE})
+        set_property(GLOBAL APPEND PROPERTY KERNELEMBEDDING_CONFIGURE_DEPENDS ${CONFIGURE_DEPEND_FILE})
+    endif()
+endfunction()
+
 # Function to embed kernel sources as C++ strings at configure time
 function(embed_kernel_sources)
     set(options "")
@@ -215,14 +252,7 @@ function(embed_kernel_sources)
         message(FATAL_ERROR "embed_kernel_sources called without all output file arguments specified.")
     endif()
 
-    get_target_property(KERNEL_FILES ${EMBED_KERNELS_TARGET} KERNELEMBEDDING_KERNEL_FILES)
-    get_target_property(KERNEL_KEYS ${EMBED_KERNELS_TARGET} KERNELEMBEDDING_KERNEL_KEYS)
-    # A target nothing registered kernels on (the plugin built without the HIP MLOps engine)
-    # still gets the generated files, with empty tables.
-    if(NOT KERNEL_FILES)
-        set(KERNEL_FILES "")
-        set(KERNEL_KEYS "")
-    endif()
+    _get_registered_kernels(${EMBED_KERNELS_TARGET} KERNEL_FILES KERNEL_KEYS)
     set(KERNEL_DECLARATIONS "")
     set(KERNEL_DEFINITIONS "")
     set(KERNEL_MAP_ENTRIES "")
@@ -241,18 +271,7 @@ function(embed_kernel_sources)
         list(GET KERNEL_KEYS ${_embed_index} KERNEL_KEY)
         math(EXPR _embed_index "${_embed_index} + 1")
         file(READ ${KERNEL_FILE} KERNEL_CONTENT)
-        # Setting this property ensures that the kernels will get properly re-inlined as they are modified.
-        # The drawback is that CMake is going to reconfigure every time a kernel is modified.
-        # Yet, that will improve developer experience, because it will lead to shorter build times -- only
-        # the build of kernel_sources and kernel_includes will be affected.
-        # Once per build, not per target: a file two targets embed (the plugin's and the
-        # test binary's HipMlops sources) listed by two directories is two Ninja rules for
-        # one output. Any one registration reconfigures.
-        get_property(_embedded_configure_depends GLOBAL PROPERTY KERNELEMBEDDING_CONFIGURE_DEPENDS)
-        if(NOT KERNEL_FILE IN_LIST _embedded_configure_depends)
-            set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${KERNEL_FILE})
-            set_property(GLOBAL APPEND PROPERTY KERNELEMBEDDING_CONFIGURE_DEPENDS ${KERNEL_FILE})
-        endif()
+        _register_kernel_configure_depend("${KERNEL_FILE}")
         get_filename_component(KERNEL_NAME ${KERNEL_FILE} NAME_WE)
         get_filename_component(KERNEL_FILENAME ${KERNEL_FILE} NAME)
         get_filename_component(KERNEL_EXT ${KERNEL_FILE} EXT)
