@@ -58,7 +58,10 @@
 #include <mutex>
 #include <numeric>
 #include <random>
+#include <set>
 #include <stdexcept>
+#include <string_view>
+#include <tuple>
 #include <unordered_map>
 
 #include <sstream>
@@ -1857,9 +1860,9 @@ namespace TensileLite
         if(pAMDGPU->fixedStaggerUStrideShift != std::numeric_limits<size_t>::max())
             defaultStaggerUStrideShift = pAMDGPU->fixedStaggerUStrideShift;
 
-        // Uniform summation order can keep mapping 1 only when the kernel can
-        // apply row-uniform staggering. Persistent kernels also require the
-        // per-tile iteration capability; otherwise disable staggering.
+        // Uniform summation order runs only with StaggerU off: mapping,
+        // stagger and stride shift are all forced to 0 (this includes
+        // StaggerUMapping=1, which previously was allowed).
         //
         // The placement of this clamp is load-bearing. It must sit AFTER the
         // TENSILE_FIXED_STAGGERU* overrides directly above, or an env override
@@ -1868,15 +1871,9 @@ namespace TensileLite
         // this mode's zeros for concurrent callers who did not request it.
         if(problem.getParams().uniformSummationOrder() != 0)
         {
-            const bool rowUniformStaggerCapable
-                = internalArgsSupport.staggerU
-                  && (!sizeMapping.isPersistent() || internalArgsSupport.perTileExtraIters);
-            if(!(rowUniformStaggerCapable && defaultStaggerUMapping == 1))
-            {
-                defaultStaggerUMapping     = 0;
-                defaultStaggerU            = 0;
-                defaultStaggerUStrideShift = 0;
-            }
+            defaultStaggerUMapping     = 0;
+            defaultStaggerU            = 0;
+            defaultStaggerUStrideShift = 0;
         }
 
         // Mapping should be in this range: [0, 1, 2, 3, 4]
@@ -1887,6 +1884,16 @@ namespace TensileLite
         assert(defaultStaggerUStrideShift <= 31);
 
         return std::make_tuple(defaultStaggerUMapping, defaultStaggerU, defaultStaggerUStrideShift);
+    }
+
+    std::tuple<size_t, size_t, size_t> ContractionSolution::calculateGroupedAutoStaggerU(
+        std::vector<Problem> const& problems, Hardware const* hardware, int32_t autoWGM) const
+    {
+        const auto uso = std::find_if(problems.begin(), problems.end(), [](Problem const& p) {
+            return p.getParams().uniformSummationOrder() != 0;
+        });
+        return calculateAutoStaggerU(
+            uso != problems.end() ? *uso : problems[0], hardware, 0, autoWGM);
     }
 
     uint32_t ContractionSolution::calculateAutoGSU(Problem const&  problem,
@@ -2232,12 +2239,12 @@ namespace TensileLite
             // an out-of-range value spills into neighbouring bits.
             size_t           sum          = (staggerUMapping & 0x7) << 13;
             size_t           sus          = staggerMask1 & (staggerUStrideShift << 8);
-            size_t           su           = mask8 & staggerU;
+            size_t           su           = kInternalArg0StaggerUMask & staggerU;
             if(Debug::Instance().disableStaggerU())
                 su = 0;
             su           = su | sus;
             su           = su | sum;
-            internalArg0 = internalArg0 | (su << 16);
+            internalArg0 = internalArg0 | (su << kInternalArg0StaggerUShift);
         }
         else if(T_Debug && Debug::Instance().disableStaggerU())
             std::cout << "solution doesn't support configurable staggerU" << std::endl;
@@ -3820,7 +3827,7 @@ namespace TensileLite
             auto [autoWGM, autoWGMXCC, autoWGMXCCCHUNK, autoWGMXCCSPLITK]
                 = calculateAutoWGM(problems[0], &hardware, 0);
             auto [autoStaggerUMapping, autoStaggerU, autoStaggerUStrideShift]
-                = calculateAutoStaggerU(problems[0], &hardware, 0, autoWGM);
+                = calculateGroupedAutoStaggerU(problems, &hardware, autoWGM);
             AdaptiveGemmNTAB ntab = calculateAdaptiveGemmNTAB(problems[0], &hardware);
 
             if(internalArgsSupport.useUniversalArgs)
@@ -4177,8 +4184,28 @@ namespace TensileLite
 
         if(!problemType.useScaleAB.empty()) // GSU dep
         {
-            args.template append<void const*>("scaleA", inputs.scaleA);
-            args.template append<void const*>("scaleB", inputs.scaleB);
+            auto scaleA = inputs.scaleA;
+            auto scaleB = inputs.scaleB;
+            if(problemType.useScaleAB == "Scalar")
+            {
+                // Only Half-to-Float8 narrowing consumes the Scalar scale in
+                // the main kernel. Null selects unit scale in conversion;
+                // other conversions still need their original scales here.
+                auto preScaledBeforeNarrowing
+                    = [](rocisa::DataType storage, rocisa::DataType compute) {
+                          return storage == rocisa::DataType::Half
+                                 && (compute == rocisa::DataType::Float8
+                                     || compute == rocisa::DataType::BFloat8
+                                     || compute == rocisa::DataType::Float8_fnuz
+                                     || compute == rocisa::DataType::BFloat8_fnuz);
+                      };
+                if(preScaledBeforeNarrowing(problem.a().dataType(), problem.computeInputTypeA()))
+                    scaleA = nullptr;
+                if(preScaledBeforeNarrowing(problem.b().dataType(), problem.computeInputTypeB()))
+                    scaleB = nullptr;
+            }
+            args.template append<void const*>("scaleA", scaleA);
+            args.template append<void const*>("scaleB", scaleB);
         }
         if(problemType.useScaleCD) // GSU dep
         {
@@ -5102,6 +5129,9 @@ namespace TensileLite
                                    ContractionSolution::Inputs const&  inputs,
                                    Hardware const&                     hardware) const
     {
+        if(problemType.fusedA2A != problem.fusedA2A())
+            throw std::runtime_error("[fused-a2a] solution is " + ToString(problemType.fusedA2A)
+                                     + ", problem is " + ToString(problem.fusedA2A()));
         calculateAutoGSU(problem, &hardware);
         if(Debug::Instance().printWinningKernelName())
             std::cout << "Running kernel: " << this->KernelName()
@@ -6631,6 +6661,27 @@ namespace TensileLite
             ++tally.distinct;
         }
 
+        // HIPBLASLT_USO_BYPASS_REFUSALS: names each bypassed refusal once per kernel and clause.
+        // token may be null (an untagged refusal).
+        void reportBypassedUniformSummationOrderRefusal(std::string const& kernel,
+                                                        char const*        token,
+                                                        std::string_view   where)
+        {
+            const std::string_view tag = token != nullptr ? token : "Untagged";
+            std::string            key;
+            key.append(where).append(1, '|').append(tag).append(1, '|').append(kernel);
+
+            static std::mutex            mutex;
+            static std::set<std::string> reported;
+            std::lock_guard<std::mutex>  lock(mutex);
+            if(!reported.insert(std::move(key)).second)
+                return;
+            std::cerr << "hipBLASLt warning: HIPBLASLT_USO_BYPASS_REFUSALS bypassed the "
+                         "uniform summation order "
+                      << where << " refusal " << tag << " for kernel " << kernel
+                      << " (the first refusal found; later checks were not evaluated)" << std::endl;
+        }
+
         // Statically-knowable reasons a StreamK launch cannot be shown
         // row-uniform: no resolved grid, reduction strategy or Synchronizer
         // pointer is consulted, so the launch-obstacle helper (used by both
@@ -6814,11 +6865,20 @@ namespace TensileLite
         const std::string obstacle      = uniformSummationOrderLaunchObstacle(
             problem, hardware, launch, resolvedGA, gsu, nullptr, false, &obstacleToken);
 
+        // A refusal HIPBLASLT_USO_BYPASS_REFUSALS bypasses is tallied as admitted.
+        const bool bypassed
+            = !obstacle.empty() && Debug::Instance().bypassUniformSummationOrderRefusals();
         if(Debug::Instance().printNoSolutionUniformSummationOrder())
         {
             ++uniformSummationOrderTally().examined;
-            if(!obstacle.empty())
+            if(!obstacle.empty() && !bypassed)
                 uniformSummationOrderTallyRecord(obstacleToken);
+        }
+
+        if(bypassed)
+        {
+            reportBypassedUniformSummationOrderRefusal(kernelName, obstacleToken, "selection");
+            return true;
         }
 
         return obstacle.empty();
@@ -7048,14 +7108,14 @@ namespace TensileLite
                               + " with GSU=" + std::to_string(gsu) + " is not row-uniform");
 
         // Recomputes exactly what generateSingleCall() packs. The clamp in
-        // calculateAutoStaggerU() permits nonzero staggering only with mapping
-        // 1 and the required kernel capabilities. Check the resolved result too.
+        // calculateAutoStaggerU() forces StaggerU off under uniform summation
+        // order. Check the resolved result too.
         const int32_t autoWGM = std::get<0>(calculateAutoWGM(problem, &hardware, launch.grid));
         const auto   resolvedStaggerUParams
             = calculateAutoStaggerU(problem, &hardware, launch.grid, autoWGM);
         const size_t resolvedStaggerUMapping = std::get<0>(resolvedStaggerUParams);
         const size_t resolvedStaggerU        = std::get<1>(resolvedStaggerUParams);
-        if(resolvedStaggerU != 0 && resolvedStaggerUMapping != 1)
+        if(resolvedStaggerU != 0)
             return refuse("ResolvedStaggerU",
                           "the resolved StaggerU is " + std::to_string(resolvedStaggerU)
                               + " with mapping " + std::to_string(resolvedStaggerUMapping));
@@ -7101,8 +7161,20 @@ namespace TensileLite
         if(launch.effectiveWorkAssignment == WorkAssignment::DynamicWorkQueue)
             return;
 
-        const std::string reason = uniformSummationOrderLaunchObstacle(
-            problem, hardware, launch, resolvedGlobalAccumulation, gsu, synchronizer, true);
+        char const*       obstacleToken = nullptr;
+        const std::string reason        = uniformSummationOrderLaunchObstacle(problem,
+                                                                       hardware,
+                                                                       launch,
+                                                                       resolvedGlobalAccumulation,
+                                                                       gsu,
+                                                                       synchronizer,
+                                                                       true,
+                                                                       &obstacleToken);
+        if(!reason.empty() && Debug::Instance().bypassUniformSummationOrderRefusals())
+        {
+            reportBypassedUniformSummationOrderRefusal(kernelName, obstacleToken, "launch");
+            return;
+        }
         if(!reason.empty())
         {
             throw UniformSummationOrderError(

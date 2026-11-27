@@ -225,6 +225,16 @@ def load_config(path: Path) -> IngestorConfig:
         behavior_notes=_require_sequence(
             engine_raw.get("behavior_notes"), "engine.behavior_notes"
         ),
+        numerical_notes=(
+            _require_sequence(
+                engine_raw["numerical_notes"],
+                "engine.numerical_notes",
+                "numerical note names",
+                allow_null=False,
+            )
+            if "numerical_notes" in engine_raw
+            else None
+        ),
         knobs=_require_sequence(engine_raw.get("knobs"), "engine.knobs"),
         heuristic="none" if slotted else engine_raw.get("heuristic", "native"),
         census_name_symbol=engine_raw.get("census_name_symbol"),
@@ -760,10 +770,14 @@ def _expand_axis_kernels(pack_raw: dict, kmd_field_names: set) -> list:
     return expanded
 
 
-def _require_sequence(value, scope: str, what: str = "field names") -> list:
+def _require_sequence(
+    value, scope: str, what: str = "field names", allow_null: bool = True
+) -> list:
     """Require a list of names: a bare string is valid YAML and iterates as
-    characters, so ``policy_knobs: use_exp2_fast`` is never recognised."""
-    if value is None:
+    characters, so ``policy_knobs: use_exp2_fast`` is never recognised. A null is an
+    empty list unless ``allow_null`` is False, for a key where only absence means
+    "no list"."""
+    if value is None and allow_null:
         return []
     if isinstance(value, str) or not isinstance(value, (list, tuple)):
         raise ConfigError(
@@ -1477,6 +1491,7 @@ _KNOWN_ENGINE = frozenset(
         "name",
         "sdk_version",
         "behavior_notes",
+        "numerical_notes",
         "knobs",
         "heuristic",
         "native_symbols_from",
@@ -1892,15 +1907,24 @@ def _check_engine_name_scoped(config: IngestorConfig) -> None:
 
 
 #: What ``hipdnn_data_sdk::utilities::Version``'s constructor accepts: three
-#: separate integers parsed with ``istringstream >>``, which skips surrounding
-#: whitespace and stops at the first character that cannot continue the number,
-#: so a sign is legal and trailing text ignored. Matched exactly rather than
-#: tightened: a stricter check would reject a config the runtime loads.
-_SDK_VERSION_PATTERN = re.compile(r"\s*([+-]?\d+)\s*\.\s*([+-]?\d+)\s*\.\s*([+-]?\d+)")
-#: The range each component is read into (``int``), and the range a descriptor's
-#: ``priority`` is read into (``int64_t``, via ``requireInt64``).
-_INT_MIN, _INT_MAX = -(2**31), 2**31 - 1
+#: unsigned decimal integers separated by '.', with no sign or whitespace,
+#: optionally followed by '.' and an alphanumeric tweak that it ignores. Matched
+#: with ``fullmatch`` so trailing text fails here as it fails in the loader.
+_SDK_VERSION_PATTERN = re.compile(
+    r"([0-9]+)\.([0-9]+)\.([0-9]+)(?:\.[A-Za-z0-9]+)?", re.ASCII
+)
+#: The largest value a version component is read into (``int``), and the range a
+#: descriptor's ``priority`` is read into (``int64_t``, via ``requireInt64``).
+_INT_MAX = 2**31 - 1
 _INT64_MIN, _INT64_MAX = -(2**63), 2**63 - 1
+
+
+def _version_component_fits(part: str) -> bool:
+    """Whether a run of decimal digits fits ``int`` as ``std::from_chars`` reads it:
+    any number of leading zeros, a value of at most ``_INT_MAX``. The length bound
+    comes before ``int()``, which refuses strings longer than 4300 digits."""
+    digits = part.lstrip("0") or "0"
+    return len(digits) <= len(str(_INT_MAX)) and int(digits) <= _INT_MAX
 
 
 def _reject_repeats(values: list, what: str, where: str) -> None:
@@ -1924,8 +1948,9 @@ def _reject_repeats(values: list, what: str, where: str) -> None:
 def _check_engine_declaration(config: IngestorConfig) -> None:
     """Check the engine block as ``parseEngineDescriptor`` reads it:
     ``sdk_version`` through ``requireString`` (260-266) and the ``Version``
-    constructor (770-781), ``knobs`` and ``behavior_notes`` for repeats (750,
-    753). Arch lists are exempt; `_unique_arch` collapses their repeats."""
+    constructor (770-781), ``knobs``, ``behavior_notes`` and ``numerical_notes``
+    for repeats (750, 753). Arch lists are exempt; `_unique_arch` collapses their repeats.
+    """
     version = config.engine.sdk_version
     if not isinstance(version, str):
         raise ConfigError(
@@ -1934,19 +1959,23 @@ def _check_engine_declaration(config: IngestorConfig) -> None:
             f"float, and the loader's requireString refuses a number outright. "
             f"Quote it, with all three components: '1.0.0'."
         )
-    match = _SDK_VERSION_PATTERN.match(version)
-    if not match or not all(
-        _INT_MIN <= int(part) <= _INT_MAX for part in match.groups()
-    ):
+    match = _SDK_VERSION_PATTERN.fullmatch(version)
+    if not match or not all(_version_component_fits(part) for part in match.groups()):
         raise ConfigError(
             f"engine.sdk_version '{version}' is not a version the loader can "
-            f"parse. hipdnn_data_sdk::utilities::Version reads three integers "
-            f"'<major>.<minor>.<patch>' and throws on anything else, which fails "
-            f"the engine descriptor and loads none of its packs. Use e.g. '1.0.0'."
+            f"parse. hipdnn_data_sdk::utilities::Version reads three unsigned "
+            f"integers '<major>.<minor>.<patch>' with no sign or whitespace and "
+            f"throws on anything else, which fails the engine descriptor and "
+            f"loads none of its packs. Use e.g. '1.0.0'."
         )
     _reject_repeats(config.engine.knobs, "knob", "engine.knobs")
     _reject_repeats(
         config.engine.behavior_notes, "behavior note", "engine.behavior_notes"
+    )
+    _reject_repeats(
+        config.engine.numerical_notes or [],
+        "numerical note",
+        "engine.numerical_notes",
     )
 
 
@@ -3002,6 +3031,16 @@ def _validate_config(config: IngestorConfig) -> list[str]:
                 f"engine.behavior_notes names '{note}', which is not in the "
                 f"closed vocabulary {BEHAVIOR_NOTES}. The loader hard-rejects "
                 f"anything else."
+            )
+
+    for note in config.engine.numerical_notes or []:
+        from .models import NUMERICAL_NOTES
+
+        if note not in NUMERICAL_NOTES:
+            raise ConfigError(
+                f"engine.numerical_notes names '{note}', which is not in the "
+                f"closed vocabulary {NUMERICAL_NOTES}. The loader hard-rejects "
+                f"anything else, including a name in the wrong case."
             )
 
     return warnings_out

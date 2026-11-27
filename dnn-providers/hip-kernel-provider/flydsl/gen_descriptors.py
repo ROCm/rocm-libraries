@@ -158,6 +158,20 @@ GRAPH_CAPTURE_OPS: tuple[str, ...] = (
     "sdpa_bwd_merged",
     "sdpa_bwd_split",
 )
+# Ops whose engines author `numerical_notes: []`, the claim that the engine's results are
+# bit-for-bit repeatable (no NONDETERMINISTIC note). The claim is per engine and holds for
+# every plan, knob setting and target the engine ships; membership needs a launch-structure
+# proof from the kernel source (no atomics, fixed reduction order, no data-dependent split)
+# and a passing repeat-bitwise device test on each shipped arch family. An op outside the
+# set authors no `numerical_notes` key at all: an absent key is not a claim and reads as
+# NONDETERMINISTIC.
+DETERMINISTIC_OPS: tuple[str, ...] = (
+    "sdpa_cdna_dualwave",
+    "sdpa_cdna_decode",
+    "sdpa_rdna_decode",
+    "sdpa_bwd_merged",
+    "sdpa_bwd_split",
+)
 
 # The slotted descriptor formats (RFC 0021 section 9): UED and KDP are 1.1 only when
 # slotted; every other document stays at DESCRIPTOR_VERSION.
@@ -1027,6 +1041,8 @@ class OpDescriptors:
         engine["knobs"] = knob_fields(self.op, self.fields)
         if self.op in GRAPH_CAPTURE_OPS:
             engine["behavior_notes"] = ["supports_graph_capture"]
+        if self.op in DETERMINISTIC_OPS:
+            engine["numerical_notes"] = []
 
         return {
             **extra_udd,
@@ -1421,6 +1437,8 @@ class SplitEngine:
         }
         if SPLIT_ENGINE in GRAPH_CAPTURE_OPS:
             ued["behavior_notes"] = ["supports_graph_capture"]
+        if SPLIT_ENGINE in DETERMINISTIC_OPS:
+            ued["numerical_notes"] = []
         return {
             f"{self.stem}.ued.json": ued,
             f"{self.stem}_engine_estimate.uhd.json": estimate_document(

@@ -639,7 +639,9 @@ TEST(TestPointwiseSignatureKey, PlanBuildersRegisteredForImplementedBinaryModes)
            {DataType::HALF, DataType::HALF, DataType::FLOAT, DataType::HALF},
            {DataType::BFLOAT16, DataType::BFLOAT16, DataType::FLOAT, DataType::BFLOAT16},
            {DataType::HALF, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT},
-           {DataType::FLOAT, DataType::BFLOAT16, DataType::FLOAT, DataType::FLOAT}};
+           {DataType::FLOAT, DataType::BFLOAT16, DataType::FLOAT, DataType::FLOAT},
+           {DataType::FLOAT, DataType::HALF, DataType::FLOAT, DataType::HALF},
+           {DataType::FLOAT, DataType::BFLOAT16, DataType::FLOAT, DataType::BFLOAT16}};
     // input0 / input1 / compute combinations registered for comparison modes (BOOLEAN output)
     const std::vector<std::array<DataType, 3>> comparisonCombinations
         = {{DataType::FLOAT, DataType::FLOAT, DataType::FLOAT},
@@ -677,6 +679,23 @@ TEST(TestPointwiseSignatureKey, PlanBuildersRegisteredForImplementedBinaryModes)
         for(const auto& [input0, input1, compute, output] : typeCombinations)
         {
             const PointwiseSignatureKey key{mode, input0, compute, output, input1};
+            EXPECT_EQ(planBuilders.count(key), 1u) << key;
+        }
+    }
+}
+
+TEST(TestPointwiseSignatureKeyFp32, PlanBuildersRegisteredForFusedBiasWithHalfOperand)
+{
+    const auto planBuilders = PointwiseSignatureKey::getPlanBuilders();
+
+    // A convolution with a bias add: the convolution output is a virtual fp32 tensor, the bias is
+    // fp16 or bf16 and the add computes in the bias type. The key order is mode, input0, compute,
+    // output, input1.
+    for(auto mode : {PointwiseMode::ADD, PointwiseMode::SUB, PointwiseMode::MUL})
+    {
+        for(auto narrow : {DataType::HALF, DataType::BFLOAT16})
+        {
+            const PointwiseSignatureKey key{mode, DataType::FLOAT, narrow, DataType::FLOAT, narrow};
             EXPECT_EQ(planBuilders.count(key), 1u) << key;
         }
     }

@@ -86,6 +86,39 @@ inline void validateResampleSpatialParameters(const std::vector<int64_t>& prePad
     validateSpatialVector(postPadding, spatialDims, operationName, "post_padding", true);
     validateSpatialVector(stride, spatialDims, operationName, "stride", false);
     validateSpatialVector(window, spatialDims, operationName, "window", false);
+
+    // The kernels form the window product in int64_t.
+    int64_t windowProduct = 1;
+    for(const auto value : window)
+    {
+        if(__builtin_mul_overflow(windowProduct, value, &windowProduct))
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                operationName + " window product does not fit in int64_t.");
+        }
+    }
+}
+
+// The output extent along one spatial dimension. The padded input extent must fit in int64_t:
+// the kernels evaluate out * stride + k - pre_padding and in + pre_padding - k, both bounded by
+// it, in int64_t.
+inline int64_t resampleOutputExtent(int64_t input,
+                                    int64_t prePadding,
+                                    int64_t postPadding,
+                                    int64_t stride,
+                                    int64_t window,
+                                    const std::string& operationName)
+{
+    int64_t padded = 0;
+    if(__builtin_add_overflow(input, prePadding, &padded)
+       || __builtin_add_overflow(padded, postPadding, &padded))
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            operationName + " padded spatial extent does not fit in int64_t.");
+    }
+    return (padded - window) / stride + 1;
 }
 
 inline void validateResampleTensorRanks(const std::vector<int64_t>& inputDims,
@@ -128,8 +161,8 @@ inline void validateResampleOutputShape(const std::vector<int64_t>& xDims,
 
     for(size_t i = 0; i < spatialDims; ++i)
     {
-        const auto expected
-            = (xDims[i + 2] + prePadding[i] + postPadding[i] - window[i]) / stride[i] + 1;
+        const auto expected = resampleOutputExtent(
+            xDims[i + 2], prePadding[i], postPadding[i], stride[i], window[i], "ResampleFwd");
         if(expected <= 0 || yDims[i + 2] != expected)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -161,8 +194,8 @@ inline void validateResampleBwdOutputShape(const std::vector<int64_t>& dyDims,
 
     for(size_t i = 0; i < spatialDims; ++i)
     {
-        const auto expectedDy
-            = (dxDims[i + 2] + prePadding[i] + postPadding[i] - window[i]) / stride[i] + 1;
+        const auto expectedDy = resampleOutputExtent(
+            dxDims[i + 2], prePadding[i], postPadding[i], stride[i], window[i], "ResampleBwd");
         if(expectedDy <= 0 || dyDims[i + 2] != expectedDy)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
