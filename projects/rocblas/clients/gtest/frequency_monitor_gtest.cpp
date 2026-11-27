@@ -1,6 +1,10 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+// The clock monitor samples with AMD SMI on Linux only; on Windows it is a stub that is never
+// enabled, and setenv/unsetenv do not exist
+#ifndef _WIN32
+
 #include "testing_common.hpp"
 
 #include <chrono>
@@ -92,3 +96,5 @@ namespace
         });
     }
 }
+
+#endif // _WIN32
