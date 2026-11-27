@@ -3010,7 +3010,8 @@ TEST_F(StreamKDynamicSplitSolveTest, FitMatchesTheReservation)
 
 // Uniform summation order: the dynamic split gives every tile the same parts
 // (skTiles == tiles), so it splits as with the mode off, except where partials
-// are summed in arrival order or widened by the fixup.
+// are widened by the fixup. Atomic kernels, which have no dynamic fixup, never
+// split.
 TEST_F(StreamKDynamicSplitSolveTest, UniformSummationOrderSplitsEveryTile)
 {
     for(int streamK : {4, 5})
@@ -3040,7 +3041,7 @@ TEST_F(StreamKDynamicSplitSolveTest, UniformSummationOrderSplitsEveryTile)
 
     auto atomic                       = dynamicSplitSolution();
     atomic->sizeMapping.streamKAtomic = 1;
-    EXPECT_GT(atomic->streamKDynamicDecomposition(off, device, tiles).tiles, 0u);
+    EXPECT_EQ(atomic->streamKDynamicDecomposition(off, device, tiles).tiles, 0u);
     EXPECT_EQ(atomic->streamKDynamicDecomposition(uso, device, tiles).tiles, 0u);
 
     auto widened                                 = dynamicSplitSolution();

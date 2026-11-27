@@ -7774,15 +7774,17 @@ namespace TensileLite
             }
         }
         // Split only arrival-fixup kernels (see InternalArgsSupport::arrivalFixup)
-        // with a dynamic path; this decomposition runs only on that path.
-        // Grouped GEMM keeps every tile whole.
+        // with a dynamic path; this decomposition runs only on that path. Atomic
+        // kernels have no dynamic fixup to sum the parts with, and grouped GEMM
+        // keeps every tile whole.
         in.uniformSummationOrder = problem.getParams().uniformSummationOrder() != 0;
         const bool dynamicPath
             = sizeMapping.hasDynamicAssignment() || sizeMapping.hasHybridAssignment();
         const bool summationOrderKept
             = !in.uniformSummationOrder || StreamK::Dynamic::keepsSummationOrder(*this);
-        in.allowSplit = internalArgsSupport.arrivalFixup && !handwritten && dynamicPath
-                        && summationOrderKept && !problem.groupedGemm();
+        in.allowSplit = internalArgsSupport.arrivalFixup && sizeMapping.streamKAtomic == 0
+                        && !handwritten && dynamicPath && summationOrderKept
+                        && !problem.groupedGemm();
         in.unevenParts = internalArgsSupport.dynamicUnevenParts;
         // Arrival counters (and per-part flags) start after the queue counters.
         const size_t prefixEntries = StreamK::Dynamic::queueRegionBytes(hardware) / sizeof(int);
