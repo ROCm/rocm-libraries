@@ -50,16 +50,16 @@ lives with them. `pooling.py` is a platform instance documented in `instances/sm
 | `conv_implicit_gemm.py` | `ConvProblem`, `ImplicitGemmConvSpec` (incl. split-K forward: `split_k`, `split_k_cluster`) | `library/kernels/conv/docs/convolution.md` |
 | `conv_fwd_split_k_reduce.py` | `FwdSplitKReduceSpec` (split-K forward Stage 2) | `library/kernels/conv/docs/convolution.md` |
 | `conv_implicit_gemm_dgrad.py` | `DgradConvSpec` (backward data; tilde and stride-1 binaries, `tap_outer_k`, `dy_halo`) | `library/kernels/conv/docs/convolution.md`, [`README_conv_implicit_gemm_dgrad.md`](../../../library/kernels/common/README_conv_implicit_gemm_dgrad.md) |
-| `conv_direct_grouped.py` | `DirectConvProblem`, `DirectConv16cSpec`, `DirectConv4cSpec` (incl. 4c dgrad), `DirectConvSpec` (incl. fused-weight dgrad), `DirectDepthwiseDgradWindowedSpec`, `DirectDepthwiseDgradStreamSpec` (incl. channel-packed `cpl`), `DirectDepthwiseTiledSpec` (incl. the rotated-filter `dgrad` mode), `DirectConvWgradSpec` (incl. the gfx1250 image-per-block and small-C wgrad), `DirectDepthwiseWgradSpec` (VALU depthwise wgrad, cached for the wave32 targets) | `library/kernels/conv/docs/convolution.md`, [`README_conv_direct_grouped.md`](../../../library/kernels/common/README_conv_direct_grouped.md) |
+| `conv_direct_grouped.py` | `DirectConvProblem`, `DirectConv16cSpec`, `DirectConv4cSpec` (incl. 4c dgrad), `DirectConvSpec` (incl. fused-weight dgrad), `DirectDepthwiseDgradWindowedSpec`, `DirectDepthwiseDgradStreamSpec` (incl. channel-packed `cpl`), `DirectDepthwiseTiledSpec` (incl. the rotated-filter `dgrad` mode), `DirectConvWgradSpec` (incl. the gfx1250 image-per-block and small-C wgrad), `DirectDepthwiseWgradSpec` (VALU depthwise wgrad, cached for the wave32 targets); the gfx950 windowed-Toeplitz knobs (`dense`, `lds_swz`, `xcd_tiles`, `dma`, `wdma`) on `DirectDepthwiseDgradWindowedSpec` and `block_h` on `DirectDepthwiseSpatialSpec` | `library/kernels/conv/docs/convolution.md`, [`README_conv_direct_grouped.md`](../../../library/kernels/common/README_conv_direct_grouped.md) |
 | `conv_direct_nongrouped.py` | `DirectNongroupedConvSpec` (`groups == 1`) | `library/kernels/conv/docs/convolution.md` |
 | `conv_dgrad_patch_wmma.py` | `DgradPatchWmmaSpec` (gfx1250 patch-embedding dgrad) | `library/kernels/conv/docs/convolution.md` |
 | `conv_dgrad_smallc_wmma.py` | `DgradSmallcWmmaSpec` (gfx1250 small-C stem dgrad) | `library/kernels/conv/docs/convolution.md` |
 | `conv_direct_dgrad_wmma.py` | `DirectDgradWmmaSpec` (gfx1250 dgrad) | `library/kernels/conv/docs/convolution.md` |
-| `conv_direct_dgrad_pp_mfma.py` | `DgradPpMfmaSpec` (gfx950 LDS-DMA ping-pong dgrad) | `library/kernels/conv/docs/convolution.md` |
+| `conv_direct_dgrad_pp_mfma.py` | `DgradPpMfmaSpec` (gfx950 LDS-DMA ping-pong dgrad, dense and grouped) | `library/kernels/conv/docs/convolution.md` |
 | `conv_direct_fwd_wmma.py` | `DirectFwdWmmaSpec` (gfx1250 forward) | `library/kernels/conv/docs/convolution.md` |
 | `conv_fwd_small_wmma.py` | `FwdSmallcWmmaSpec`, `FwdSmallkWmmaSpec` (gfx1250 forward, tiny C / K) | `library/kernels/conv/docs/convolution.md` |
 | `conv_fwd_small_mfma.py` | `FwdSmallcMfmaSpec`, `FwdSmallkMfmaSpec` (gfx950 forward, tiny C / K) | `library/kernels/conv/docs/convolution.md` |
-| `conv_direct_fwd_pp_mfma.py` | `FwdPpMfmaSpec` (gfx950 LDS-DMA ping-pong forward) | `library/kernels/conv/docs/convolution.md` |
+| `conv_direct_fwd_pp_mfma.py` | `FwdPpMfmaSpec` (gfx950 LDS-DMA ping-pong forward, "same" or valid padding) | `library/kernels/conv/docs/convolution.md` |
 | `conv_direct_pp_mfma.py` | `PpMfmaSpec` (the ping-pong pipeline the two specs above share) | `library/kernels/conv/docs/convolution.md` |
 | `conv_direct_fwd_flex_mfma.py` | `FwdFlexMfmaSpec` (gfx950 flattened-pixel implicit-GEMM forward, any filter/stride/dilation/padding) | `library/kernels/conv/docs/convolution.md` |
 | `conv_direct_dw_fwd_wmma.py` | `DwFwdWmmaSpec` (gfx1250 Toeplitz WMMA depthwise forward) | `library/kernels/conv/docs/convolution.md` |
@@ -67,9 +67,9 @@ lives with them. `pooling.py` is a platform instance documented in `instances/sm
 | `conv_direct_fwd_tapouter_wmma.py` | `DirectFwdTapOuterSpec` (gfx1250 forward of large dilations) | `library/kernels/conv/docs/convolution.md` |
 | `conv_winograd_fwd.py`, `conv_winograd_fwd_rt.py`, `conv_winograd_gemm_wmma.py`, `conv_winograd_gen.py`, `conv_winograd_fused_1d_wmma.py`, `conv_winograd_select.py` | `WinogradFwdSpec`, `WinogradMergedSpec`, `RtFilterSpec` / `RtPrescaleSpec` / `RtInputSpec` / `RtOutputSpec` (shape-generic, AOT), `WinogradGemmWmmaSpec`, `WinogradGemmReduceSpec`, `WinogradGenSpec`, `FusedWino1DSpec`; plan selector `select_winograd` (gfx1250 Winograd forward) | `library/kernels/conv/docs/convolution.md` |
 | `conv_direct_wgrad_tiled.py` | `DirectWgradTiledSpec` (direct wgrad, atomics) | `library/kernels/conv/docs/convolution.md` |
-| `conv_direct_dw_wgrad.py` | `DwWgradLdsSpec`, `DwWgradColsSpec`, `DwWgradFoldSpec` (depthwise wgrad) | `library/kernels/conv/docs/convolution.md` |
+| `conv_direct_dw_wgrad.py` | `DwWgradLdsSpec` (incl. `lane_ch`, `xcd_pair`), `DwWgradColsSpec`, `DwWgradFoldSpec` (depthwise wgrad) | `library/kernels/conv/docs/convolution.md` |
 | `conv_direct_wgrad_gather.py` | `WgradGatherSpec` (dense small-C wgrad) | `library/kernels/conv/docs/convolution.md` |
-| `conv_direct_dw_wgrad_mfma.py` | `DwWgradMfmaSpec` (depthwise wgrad, 4x4x4 MFMA) | `library/kernels/conv/docs/convolution.md` |
+| `conv_direct_dw_wgrad_mfma.py` | `DwWgradMfmaSpec` (depthwise wgrad, 4x4x4 MFMA; stride 2, `xcd_pair`, `swz`, `adir`) | `library/kernels/conv/docs/convolution.md` |
 | `conv_direct_grouped_wgrad_mfma.py` | `GroupedWgradMfmaSpec` (4/8-channel grouped wgrad, 4x4x4 MFMA) | `library/kernels/conv/docs/convolution.md` |
 | `img2col.py` | `Img2ColSpec` | `library/kernels/conv/docs/convolution.md` |
 | `pooling.py` | `PoolingProblem`, `Pooling2DSpec`, `PoolOp` | `instances/small_ops.md` |
