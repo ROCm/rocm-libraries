@@ -153,4 +153,18 @@ namespace rocalution_unit
         return host && accel ? "no backend"
                              : backend_name(accel ? Backend::Accelerator : Backend::Host);
     }
+
+    // An object that has lost both backend objects ends the program in its destructor, so
+    // it is leaked instead
+    template <typename Object>
+    bool expect_location(std::unique_ptr<Object>& x, Backend b)
+    {
+        const std::string where = backend_of(*x);
+        EXPECT_EQ(where, backend_name(b));
+        if(where != backend_name(Backend::Host) && where != backend_name(Backend::Accelerator))
+        {
+            static_cast<void>(x.release());
+        }
+        return where == backend_name(b);
+    }
 }

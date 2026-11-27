@@ -24,6 +24,10 @@
 // Conversions between the formats of the accelerator, checked through the
 // host conversion back to CSR
 
+#include <string>
+#include <tuple>
+#include <vector>
+
 #include "unit_test_common.hpp"
 #include "unit_test_types.hpp"
 
@@ -233,6 +237,29 @@ namespace
         }
     }
 
+    // The accelerator converts back to CSR natively also when the matrix is not square
+    template <typename T>
+    void test_rectangular_to_csr(Format f)
+    {
+        SCOPED_TRACE(type_name<T>());
+        const std::vector<std::pair<std::string, Csr<T>>> cases
+            = {{"wide", rectangular<T>(6, 12)}, {"tall", rectangular<T>(12, 6)}};
+        for(const auto& matrix : cases)
+        {
+            SCOPED_TRACE(matrix.first);
+            const Csr<T>& ref = matrix.second;
+
+            auto X = make_matrix(Backend::Accelerator, f, *ref.host_csr());
+            ASSERT_IN_LOOP(X != nullptr);
+
+            auto A = accelerator_matrix<T>(Format{rocalution::CSR, 1});
+            ASSERT_IN_LOOP(A->ConvertFrom(*X));
+            EXPECT_EQ(A->GetM(), ref.n);
+            EXPECT_EQ(A->GetN(), ref.m);
+            expect_csr_eq(*host_csr_of(*A), ref, zero_fill(f));
+        }
+    }
+
     template <typename T>
     void test_from_an_empty_csr_matrix(Format f)
     {
@@ -272,6 +299,15 @@ TEST_P(hip_conversion, rectangular_matrices_from_csr)
 
     test_rectangular_from_csr<float>(format());
     test_rectangular_from_csr<double>(format());
+}
+
+// The 12 x 6 one has an empty last row
+TEST_P(hip_conversion, rectangular_matrices_to_csr)
+{
+    REQUIRE_NATIVE(Backend::Accelerator, format().id, "ConvertToCSR");
+
+    test_rectangular_to_csr<float>(format());
+    test_rectangular_to_csr<double>(format());
 }
 
 // A conversion that the accelerator does not implement returns false and leaves
@@ -399,6 +435,57 @@ TEST(hip_conversion_hyb, csr_to_hyb_keeps_a_given_ell_width)
     }
     std::sort(entries.begin(), entries.end());
     EXPECT_EQ(entries, expected);
+}
+
+// The conversion kernels on matrices larger than one workgroup, from CSR and, where the
+// accelerator implements it, back. The 441 x 441 grid has its DIA diagonals at indices
+// 420 to 462 of the nrow + ncol offset map. For BCSR, rocSPARSE takes other kernels than for
+// block dimensions 2 and 3: for 4 only back to CSR, for 7 (up to 8) and 10 (up to 16) in
+// both directions.
+TEST(hip_conversion_large, converts_matrices_spanning_several_workgroups)
+{
+    REQUIRE_BACKEND(Backend::Accelerator);
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
+
+        using rocalution::BCSR;
+        using rocalution::COO;
+        using rocalution::DENSE;
+        using rocalution::DIA;
+        using rocalution::ELL;
+        using rocalution::HYB;
+        const std::vector<std::tuple<std::string, Csr<T>, std::vector<Format>>> cases = {
+            {"1000 x 500 with empty rows",
+             scattered<T>(),
+             {{COO, 1}, {ELL, 1}, {HYB, 1}, {DENSE, 1}, {BCSR, 4}, {BCSR, 10}}},
+            {"21 x 21 grid",
+             grid_pattern<T>(21),
+             {{COO, 1}, {ELL, 1}, {DIA, 1}, {HYB, 1}, {DENSE, 1}, {BCSR, 7}}},
+        };
+        for(const auto& c : cases)
+        {
+            SCOPED_TRACE(std::get<0>(c));
+            const Csr<T>& ref = std::get<1>(c);
+
+            auto A = make_matrix(Backend::Accelerator, Format{rocalution::CSR, 1}, *ref.host_csr());
+            ASSERT_NE(A, nullptr);
+            for(Format f : std::get<2>(c))
+            {
+                SCOPED_TRACE(format_name(f) + std::to_string(f.blockdim));
+                auto X = accelerator_matrix<T>(f);
+                ASSERT_IN_LOOP(X->ConvertFrom(*A));
+                EXPECT_EQ(X->GetMatFormat(), f.id);
+                expect_csr_eq(*host_csr_of(*X), ref, zero_fill(f));
+
+                if(implements(Backend::Accelerator, f.id, "ConvertToCSR"))
+                {
+                    auto B = accelerator_matrix<T>(Format{rocalution::CSR, 1});
+                    ASSERT_IN_LOOP(B->ConvertFrom(*X));
+                    expect_csr_eq(*host_csr_of(*B), ref, zero_fill(f));
+                }
+            }
+        }
+    });
 }
 
 namespace

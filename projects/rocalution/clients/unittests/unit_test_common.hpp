@@ -35,6 +35,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -655,6 +656,54 @@ namespace rocalution_unit
                 if(i == 0 || i == n - 1 || i == j)
                 {
                     A.add(j, static_cast<T>(i + j + 1));
+                }
+            }
+            A.end_row();
+        }
+        return A;
+    }
+
+    // 1000 x 500, larger than one workgroup: every 7th row is empty, the others have 1 to
+    // 6 entries, so that HYB stores the longer rows in its COO part
+    template <typename T>
+    Csr<T> scattered()
+    {
+        Csr<T> A(1000, 500);
+        for(int i = 0; i < A.n; ++i)
+        {
+            if(i % 7 != 3)
+            {
+                std::set<int> cols;
+                for(int k = 0; k <= i % 6; ++k)
+                {
+                    cols.insert((37 * i + 101 * k) % A.m);
+                }
+                for(int j : cols)
+                {
+                    A.add(j, static_cast<T>(i % 97 + 1) + static_cast<T>(j % 4) / 4);
+                }
+            }
+            A.end_row();
+        }
+        return A;
+    }
+
+    // The 5-point Laplacian pattern of a k x k grid: diagonals 0, +-1 and +-k
+    template <typename T>
+    Csr<T> grid_pattern(int k)
+    {
+        Csr<T> A(k * k);
+        for(int i = 0; i < A.n; ++i)
+        {
+            const int r = i / k;
+            const int c = i % k;
+            for(int j : {i - k, i - 1, i, i + 1, i + k})
+            {
+                const bool neighbour = (j == i - k && r > 0) || (j == i - 1 && c > 0) || j == i
+                                       || (j == i + 1 && c < k - 1) || (j == i + k && r < k - 1);
+                if(neighbour)
+                {
+                    A.add(j, static_cast<T>(j == i ? 4 + i % 5 : -(1 + (i + j) % 13)));
                 }
             }
             A.end_row();

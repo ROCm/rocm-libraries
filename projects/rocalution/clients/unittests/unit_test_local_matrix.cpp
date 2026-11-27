@@ -28,11 +28,13 @@
 #include <cmath>
 #include <complex>
 #include <cstdio>
+#include <fstream>
 #include <functional>
 #include <limits>
 #include <memory>
 #include <numeric>
 #include <set>
+#include <sstream>
 #include <string>
 #include <tuple>
 #include <type_traits>
@@ -220,6 +222,13 @@ namespace
         return {rectangular<T>(8, 10), rectangular<T>(12, 8)};
     }
 
+    // The tall one with rows 3 and 9 empty
+    template <typename T>
+    Csr<T> tall_with_empty_rows()
+    {
+        return filtered(rectangular<T>(12, 8), [](int i, int, T) { return i != 3 && i != 9; });
+    }
+
     // Entries (i, i - 2) and (i, i), so that the union with banded has more diagonals
     template <typename T = double>
     Csr<T> two_diagonals(int n = 12)
@@ -402,6 +411,20 @@ namespace
         return perm;
     }
 
+    // Entry (i, i + 1 mod n) of value 1 or -1 in every row: a signed permutation without
+    // diagonal entries
+    template <typename T>
+    Csr<T> cyclic_shift(int n)
+    {
+        Csr<T> A(n);
+        for(int i = 0; i < n; ++i)
+        {
+            A.add((i + 1) % n, static_cast<T>(i % 2 == 0 ? 1 : -1));
+            A.end_row();
+        }
+        return A;
+    }
+
     template <typename P>
     class local_matrix : public TypedBackendTest<P>
     {
@@ -506,14 +529,10 @@ namespace
     {
     };
 
-    const auto all_formats = testing::Values(Format{CSR, 1},
-                                             Format{MCSR, 1},
-                                             Format{BCSR, 2},
-                                             Format{COO, 1},
-                                             Format{ELL, 1},
-                                             Format{DIA, 1},
-                                             Format{HYB, 1},
-                                             Format{DENSE, 1});
+    const std::vector<Format> every_format
+        = {{CSR, 1}, {MCSR, 1}, {BCSR, 2}, {COO, 1}, {ELL, 1}, {DIA, 1}, {HYB, 1}, {DENSE, 1}};
+
+    const auto all_formats = testing::ValuesIn(every_format);
 }
 
 TYPED_TEST_SUITE(local_matrix, WithBackends<RealTypes>, TypedName);
@@ -896,6 +915,30 @@ TYPED_TEST(local_matrix, copies_from_and_to_csr_and_coo_arrays)
     EXPECT_NE(info.find("Imported from COO matrix"), std::string::npos) << info;
 }
 
+// CopyToCOO returns the entries in the order CopyFromCOO took them, also unsorted
+TEST(local_matrix_coo, copy_to_coo_keeps_the_order_of_copy_from_coo)
+{
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
+
+        const std::vector<int> row = {0, 1, 2, 2};
+        const std::vector<int> col = {0, 1, 2, 0};
+        const std::vector<T>   val = {1, 2, 3, 4};
+
+        LocalMatrix<T> A;
+        A.AllocateCOO("A", 4, 3, 3);
+        A.CopyFromCOO(row.data(), col.data(), val.data());
+
+        std::vector<int> r(4, -1);
+        std::vector<int> c(4, -1);
+        std::vector<T>   v(4, -1);
+        A.CopyToCOO(r.data(), c.data(), v.data());
+        EXPECT_EQ(r, row);
+        EXPECT_EQ(c, col);
+        EXPECT_EQ(v, val);
+    });
+}
+
 TYPED_TEST(local_matrix, copy_from_host_csr_keeps_the_backend)
 {
     using T = typename TypeParam::value_type;
@@ -926,6 +969,62 @@ TYPED_TEST(local_matrix, copy_from_host_csr_keeps_the_backend)
     expect_vector(*y, std::vector<T>(4, 0.0), this->backend(), 0);
     A->ApplyAdd(*x, 2.0, y.get());
     expect_vector(*y, std::vector<T>(4, 0.0), this->backend(), 0);
+}
+
+TYPED_TEST(local_matrix, set_data_ptr_csr_replaces_a_matrix_with_entries)
+{
+    using T = typename TypeParam::value_type;
+
+    const Csr<T> ref        = rectangular<T>(8, 12);
+    PtrType*     row_offset = nullptr;
+    int*         col        = nullptr;
+    T*           val        = nullptr;
+    make_local_matrix(this->backend(), ref)->LeaveDataPtrCSR(&row_offset, &col, &val);
+
+    auto A = make_local_matrix(this->backend(), spd<T>(4));
+    A->SetDataPtrCSR(&row_offset, &col, &val, "A", ref.nnz(), ref.n, ref.m);
+    EXPECT_EQ(row_offset, nullptr);
+    EXPECT_EQ(col, nullptr);
+    EXPECT_EQ(val, nullptr);
+    EXPECT_EQ(A->GetM(), ref.n);
+    EXPECT_EQ(A->GetN(), ref.m);
+    EXPECT_EQ(A->GetNnz(), ref.nnz());
+    expect_matrix(*A, ref, csr_format, this->backend());
+}
+
+// Diagonal 1 has no entry in the last row, so the value 12 is stored in its padding
+TEST(local_matrix_dia, leave_data_ptr_dia_returns_the_arrays_with_their_padding)
+{
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
+
+        const std::vector<int> offsets = {0, 1};
+        std::vector<T>         values(12);
+        std::iota(values.begin(), values.end(), T(1));
+
+        int* offset = nullptr;
+        T*   val    = nullptr;
+        rocalution::allocate_host(2, &offset);
+        rocalution::allocate_host(12, &val);
+        std::copy(offsets.begin(), offsets.end(), offset);
+        std::copy(values.begin(), values.end(), val);
+
+        LocalMatrix<T> A;
+        A.SetDataPtrDIA(&offset, &val, "A", 12, 6, 6, 2);
+        ASSERT_EQ(A.GetFormat(), DIA);
+
+        int num_diag = 0;
+        A.LeaveDataPtrDIA(&offset, &val, num_diag);
+        ASSERT_EQ(num_diag, 2);
+        EXPECT_EQ(std::vector<int>(offset, offset + 2), offsets);
+        EXPECT_EQ(std::vector<T>(val, val + 12), values);
+        EXPECT_EQ(A.GetM(), 0);
+        EXPECT_EQ(A.GetN(), 0);
+        EXPECT_EQ(A.GetNnz(), 0);
+
+        rocalution::free_host(&offset);
+        rocalution::free_host(&val);
+    });
 }
 
 TEST_P(local_matrix_formats, clone_and_copy_between_backends)
@@ -1068,6 +1167,101 @@ TYPED_TEST(local_matrix, conversion_falls_back_to_csr_for_unsuitable_matrices)
         << log;
 }
 
+// A cyclic shift has no diagonal entries, which MCSR needs. The tall matrix has empty rows
+// and 9 diagonals for 20 entries, more than DIA takes. Block dimension 5 divides neither.
+TYPED_TEST(local_matrix, converts_matrices_without_diagonal_entries_and_with_empty_rows)
+{
+    using T = typename TypeParam::value_type;
+
+    Csr<T> shift(12);
+    for(int i = 0; i < shift.n; ++i)
+    {
+        shift.add((i + 1) % shift.n, static_cast<T>(i + 1));
+        shift.end_row();
+    }
+
+    Csr<T> tall(12, 6);
+    for(int i = 0; i < tall.n; ++i)
+    {
+        if(i != 4 && i != 8)
+        {
+            for(int j : std::set<int>{i % 6, (5 * i + 1) % 6})
+            {
+                tall.add(j, static_cast<T>(i + 2 * j + 1));
+            }
+        }
+        tall.end_row();
+    }
+
+    struct Step
+    {
+        Format to;
+        bool   shift_kept;
+        bool   tall_kept;
+    };
+    const std::vector<Step> chain = {{{COO, 1}, true, true},
+                                     {{DIA, 1}, true, false},
+                                     {{ELL, 1}, true, true},
+                                     {{HYB, 1}, true, true},
+                                     {{DENSE, 1}, true, true},
+                                     {{MCSR, 1}, false, false},
+                                     {{BCSR, 5}, false, false},
+                                     {{BCSR, 2}, true, true},
+                                     {csr_format, true, true}};
+
+    for(const bool is_shift : {true, false})
+    {
+        SCOPED_TRACE(is_shift ? "cyclic shift" : "tall with empty rows");
+        const Csr<T>& ref = is_shift ? shift : tall;
+        auto          A   = make_local_matrix(this->backend(), ref);
+        for(const Step& step : chain)
+        {
+            SCOPED_TRACE("to " + format_name(step.to) + std::to_string(step.to.blockdim));
+            const std::string log = logged([&] { A->ConvertTo(step.to.id, step.to.blockdim); });
+            if(is_shift ? step.shift_kept : step.tall_kept)
+            {
+                expect_matrix(*A, ref, step.to, this->backend());
+            }
+            else
+            {
+                expect_matrix(*A, ref, csr_format, this->backend());
+                EXPECT_NE(log.find("Matrix conversion to " + format_name(step.to)
+                                   + " failed, falling back to CSR format"),
+                          std::string::npos)
+                    << log;
+            }
+            EXPECT_EQ(A->GetM(), ref.n);
+            EXPECT_EQ(A->GetN(), ref.m);
+            EXPECT_TRUE(A->Check());
+        }
+    }
+}
+
+// Block dimensions from 4 on, which the smaller conversion tests do not use, on matrices with
+// many block rows
+TYPED_TEST(local_matrix, converts_large_matrices_to_bcsr_with_large_blocks)
+{
+    using T = typename TypeParam::value_type;
+
+    const std::vector<std::pair<Csr<T>, int>> cases
+        = {{scattered<T>(), 4}, {grid_pattern<T>(21), 7}};
+    for(const auto& c : cases)
+    {
+        const Csr<T>& ref = c.first;
+        const Format  bcsr{BCSR, c.second};
+        SCOPED_TRACE(std::to_string(ref.n) + " x " + std::to_string(ref.m) + " in "
+                     + format_name(bcsr));
+
+        auto A = make_local_matrix(this->backend(), ref);
+        A->ConvertTo(BCSR, bcsr.blockdim);
+        expect_matrix(*A, ref, bcsr, this->backend());
+        EXPECT_TRUE(A->Check());
+
+        A->ConvertToCSR();
+        expect_matrix(*A, ref, csr_format, this->backend());
+    }
+}
+
 TEST_P(local_matrix_formats, moves_keep_the_format_and_the_values)
 {
     for_each_type<RealTypes>([&](auto type) {
@@ -1127,6 +1321,252 @@ TYPED_TEST(local_matrix, async_moves_complete_on_sync)
         D->Sync();
         expect_matrix(*D, ref, csr_format, Backend::Host);
     }
+}
+
+namespace
+{
+    // The backend objects (HostMatrixCSR, HIPAcceleratorMatrixELL, ...) constructed and not
+    // yet destructed while the counter exists, read from the debug trace, which logs every
+    // backend constructor and destructor with the object address. Tests also expect a
+    // positive count, which drops to 0 if the trace changes.
+    class BackendObjectCounter
+    {
+    public:
+        BackendObjectCounter()
+            : saved_(rocalution::_get_backend_descriptor()->log_file)
+        {
+            static_cast<std::ostream&>(log_).rdbuf(&buffer_);
+            rocalution::_get_backend_descriptor()->log_file = &log_;
+        }
+
+        ~BackendObjectCounter()
+        {
+            rocalution::_get_backend_descriptor()->log_file = saved_;
+        }
+
+        BackendObjectCounter(const BackendObjectCounter&)            = delete;
+        BackendObjectCounter& operator=(const BackendObjectCounter&) = delete;
+
+        // The live objects whose class name starts with prefix
+        int live(const std::string& prefix) const
+        {
+            const std::string address = "Obj addr: ";
+            const std::string object  = "; fct: " + prefix;
+
+            std::set<std::string> objects;
+            std::istringstream    trace(buffer_.str());
+            std::string           line;
+            while(std::getline(trace, line))
+            {
+                const size_t a = line.find(address);
+                const size_t f = line.find(object);
+                if(a == std::string::npos || f == std::string::npos || f < a)
+                {
+                    continue;
+                }
+                const std::string obj = line.substr(a + address.size(), f - a - address.size());
+                if(ends_with(line, ", constructor with local_backend"))
+                {
+                    objects.insert(obj);
+                }
+                else if(ends_with(line, ", destructor"))
+                {
+                    objects.erase(obj);
+                }
+            }
+            return static_cast<int>(objects.size());
+        }
+
+    private:
+        static bool ends_with(const std::string& s, const std::string& suffix)
+        {
+            return s.size() >= suffix.size()
+                   && s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
+        }
+
+        std::ofstream* saved_;
+        std::stringbuf buffer_;
+        std::ofstream  log_;
+    };
+}
+
+// The matrix changes its backend in Sync(), not before, and keeps its stored entries
+TEST(local_matrix_moves, async_moves_switch_the_backend_on_sync)
+{
+    REQUIRE_BACKEND(Backend::Accelerator);
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
+
+        const Csr<T> ref = banded<T>();
+        for(const Format& f : every_format)
+        {
+            SCOPED_TRACE(format_name(f));
+            for(const Backend from : {Backend::Host, Backend::Accelerator})
+            {
+                const Backend to = from == Backend::Host ? Backend::Accelerator : Backend::Host;
+                SCOPED_TRACE("to the " + backend_name(to));
+
+                auto          A   = make_local_matrix(from, ref, f);
+                const int64_t nnz = A->GetNnz();
+                if(to == Backend::Accelerator)
+                {
+                    A->MoveToAcceleratorAsync();
+                }
+                else
+                {
+                    A->MoveToHostAsync();
+                }
+                EXPECT_EQ(backend_of(*A), backend_name(from));
+                A->Sync();
+                if(!expect_location(A, to))
+                {
+                    continue;
+                }
+                EXPECT_EQ(A->GetNnz(), nnz);
+                EXPECT_TRUE(A->Check());
+                expect_matrix(*A, ref, f, to);
+            }
+        }
+    });
+}
+
+// Until Sync(), further async moves do nothing (local_matrix.hpp), so the first one decides
+// the backend and no other copy is made
+TEST(local_matrix_moves, repeated_async_moves_before_sync_do_nothing)
+{
+    REQUIRE_BACKEND(Backend::Accelerator);
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
+
+        const Csr<T> ref = banded<T>();
+        for(const Format& f : every_format)
+        {
+            SCOPED_TRACE(format_name(f));
+            BackendObjectCounter objects;
+            {
+                auto A = make_local_matrix(Backend::Host, ref, f);
+                EXPECT_EQ(objects.live("HostMatrix"), 1);
+
+                A->MoveToAcceleratorAsync();
+                A->MoveToAcceleratorAsync();
+                A->MoveToAcceleratorAsync();
+                A->Sync();
+                EXPECT_EQ(objects.live("HIPAcceleratorMatrix"), 1);
+                EXPECT_EQ(objects.live("HostMatrix"), 0);
+                if(!expect_location(A, Backend::Accelerator))
+                {
+                    continue;
+                }
+                EXPECT_TRUE(A->Check());
+                expect_matrix(*A, ref, f, Backend::Accelerator);
+
+                A->MoveToHostAsync();
+                A->MoveToHostAsync();
+                A->MoveToHostAsync();
+                A->Sync();
+                EXPECT_EQ(objects.live("HostMatrix"), 1);
+                EXPECT_EQ(objects.live("HIPAcceleratorMatrix"), 0);
+                if(!expect_location(A, Backend::Host))
+                {
+                    continue;
+                }
+                EXPECT_TRUE(A->Check());
+                expect_matrix(*A, ref, f, Backend::Host);
+
+                A->MoveToAcceleratorAsync();
+                A->MoveToHostAsync();
+                A->MoveToAcceleratorAsync();
+                A->Sync();
+                EXPECT_EQ(objects.live("HIPAcceleratorMatrix"), 1);
+                EXPECT_EQ(objects.live("HostMatrix"), 0);
+                if(!expect_location(A, Backend::Accelerator))
+                {
+                    continue;
+                }
+                expect_matrix(*A, ref, f, Backend::Accelerator);
+            }
+            EXPECT_EQ(objects.live("HIPAcceleratorMatrix"), 0);
+            EXPECT_EQ(objects.live("HostMatrix"), 0);
+        }
+    });
+}
+
+// A pending CopyFromAsync() does not turn the async move that follows into a no-op
+TEST(local_matrix_moves, an_async_move_after_a_pending_copy_from_async_is_not_skipped)
+{
+    REQUIRE_BACKEND(Backend::Accelerator);
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
+
+        const Csr<T> ref = banded<T>();
+        for(const Backend from : {Backend::Host, Backend::Accelerator})
+        {
+            const Backend to = from == Backend::Host ? Backend::Accelerator : Backend::Host;
+            SCOPED_TRACE("to the " + backend_name(to));
+            const std::string from_objects
+                = from == Backend::Host ? "HostMatrix" : "HIPAcceleratorMatrix";
+            const std::string to_objects
+                = to == Backend::Host ? "HostMatrix" : "HIPAcceleratorMatrix";
+            auto src = make_local_matrix(from, ref);
+
+            BackendObjectCounter objects;
+            {
+                auto A = empty_local_matrix<T>(from);
+                A->CopyFromAsync(*src);
+                EXPECT_EQ(objects.live(from_objects), 1);
+                if(to == Backend::Accelerator)
+                {
+                    A->MoveToAcceleratorAsync();
+                }
+                else
+                {
+                    A->MoveToHostAsync();
+                }
+                A->Sync();
+                EXPECT_EQ(objects.live(to_objects), 1);
+                EXPECT_EQ(objects.live(from_objects), 0);
+                if(!expect_location(A, to))
+                {
+                    continue;
+                }
+                EXPECT_TRUE(A->Check());
+                expect_matrix(*A, ref, csr_format, to);
+            }
+            EXPECT_EQ(objects.live("HIPAcceleratorMatrix"), 0);
+            EXPECT_EQ(objects.live("HostMatrix"), 0);
+        }
+    });
+}
+
+TEST(local_matrix_moves, async_move_of_a_host_matrix_to_the_host_changes_nothing)
+{
+    REQUIRE_BACKEND(Backend::Accelerator);
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
+
+        const Csr<T> ref = banded<T>();
+        auto         A   = make_local_matrix(Backend::Host, ref);
+        A->MoveToHostAsync();
+        A->Sync();
+        if(expect_location(A, Backend::Host))
+        {
+            expect_matrix(*A, ref, csr_format, Backend::Host);
+        }
+    });
+}
+
+// CopyFromAsync() completes with Sync() on the destination
+TYPED_TEST(local_matrix, copy_from_async_between_matrices_of_the_same_backend)
+{
+    using T = typename TypeParam::value_type;
+
+    const Csr<T> ref = banded<T>();
+    auto         src = make_local_matrix(this->backend(), ref);
+    auto         A   = empty_local_matrix<T>(this->backend());
+    A->CopyFromAsync(*src);
+    A->Sync();
+    expect_matrix(*A, ref, csr_format, this->backend());
+    expect_matrix(*src, ref, csr_format, this->backend());
 }
 
 // Apply
@@ -1445,6 +1885,16 @@ TEST_P(local_matrix_formats, extracts_and_replaces_rows_and_columns)
 
         A->ReplaceColumnVector(9, *vector_of(full_column));
         expect_kept(*A, column_inserted);
+
+        // A row with new entries
+        std::vector<T> full_row(ref.m);
+        for(int j = 0; j < ref.m; ++j)
+        {
+            full_row[j] = static_cast<T>(j + 1);
+        }
+        std::copy(full_row.begin(), full_row.end(), D.begin() + 3 * ref.m);
+        std::string log = logged([&] { A->ReplaceRowVector(3, *vector_of(full_row)); });
+        expect_kept_or_csr(*A, from_dense(ref.n, ref.m, D), log);
     });
 }
 
@@ -1532,6 +1982,142 @@ TYPED_TEST(local_matrix, extracts_and_replaces_rows_and_columns_of_a_wide_matrix
     std::copy(new_row.begin(), new_row.end(), D.begin() + 2 * ref.m);
     A->ReplaceRowVector(2, *make_local_vector(this->backend(), new_row));
     expect_matrix(*A, from_dense(ref.n, ref.m, D), csr_format, this->backend());
+}
+
+// Row vectors have one entry per column and column vectors one per row, also for rows
+// without entries
+TYPED_TEST(local_matrix, csr_operations_of_wide_and_tall_matrices)
+{
+    using T         = typename TypeParam::value_type;
+    const Backend b = this->backend();
+
+    const std::vector<Csr<T>> inputs
+        = {rectangular<T>(8, 10), rectangular<T>(12, 8), tall_with_empty_rows<T>()};
+
+    for(const Csr<T>& ref : inputs)
+    {
+        SCOPED_TRACE(std::to_string(ref.n) + " x " + std::to_string(ref.m) + " with "
+                     + std::to_string(ref.nnz()) + " entries");
+        const int n    = ref.n;
+        const int m    = ref.m;
+        auto      make = [&](const Csr<T>& x) { return make_local_matrix(b, x); };
+
+        auto A = make(ref);
+        A->ScaleOffDiagonal(-2.0);
+        expect_matrix(*A,
+                      transformed(ref, [](int i, int j, T v) { return i == j ? v : -2 * v; }),
+                      csr_format,
+                      b);
+
+        A = make(ref);
+        A->AddScalarOffDiagonal(-0.5);
+        expect_matrix(
+            *A,
+            transformed(ref,
+                        [](int i, int j, T v) { return i == j ? v : v - static_cast<T>(0.5); }),
+            csr_format,
+            b);
+
+        std::vector<T> diagonal(std::min(n, m));
+        for(int i = 0; i < static_cast<int>(diagonal.size()); ++i)
+        {
+            diagonal[i] = dense(ref)[static_cast<size_t>(i) * m + i];
+        }
+        LocalVector<T> d;
+        if(b == Backend::Accelerator)
+        {
+            d.MoveToAccelerator();
+        }
+        make(ref)->ExtractDiagonal(&d);
+        expect_vector(d, diagonal, b, 0);
+
+        for(bool with_diagonal : {true, false})
+        {
+            SCOPED_TRACE(with_diagonal ? "with the diagonal" : "without the diagonal");
+            auto L = empty_local_matrix<T>(b);
+            auto U = empty_local_matrix<T>(b);
+            A      = make(ref);
+            A->ExtractL(L.get(), with_diagonal);
+            A->ExtractU(U.get(), with_diagonal);
+            expect_matrix(*L, lower(ref, with_diagonal), csr_format, b);
+            expect_matrix(*U, upper(ref, with_diagonal), csr_format, b);
+        }
+
+        A      = make(ref);
+        auto r = make_local_vector(b, std::vector<T>(m, 7));
+        auto c = make_local_vector(b, std::vector<T>(n, 7));
+        A->ExtractRowVector(n - 1, r.get());
+        A->ExtractColumnVector(m - 1, c.get());
+        expect_vector(*r, row(ref, n - 1), b, 0);
+        expect_vector(*c, column(ref, m - 1), b, 0);
+
+        // A full row into row 3, then the last column doubled, which keeps its pattern
+        std::vector<T> D = dense(ref);
+        std::vector<T> full_row(m);
+        for(int j = 0; j < m; ++j)
+        {
+            full_row[j] = static_cast<T>(-(j + 1));
+        }
+        std::copy(full_row.begin(), full_row.end(), D.begin() + 3 * m);
+        A->ReplaceRowVector(3, *make_local_vector(b, full_row));
+        expect_matrix(*A, from_dense(n, m, D), csr_format, b);
+
+        std::vector<T> doubled = column(from_dense(n, m, D), m - 1);
+        for(int i = 0; i < n; ++i)
+        {
+            doubled[i] *= 2;
+            D[static_cast<size_t>(i) * m + m - 1] = doubled[i];
+        }
+        A->ReplaceColumnVector(m - 1, *make_local_vector(b, doubled));
+        expect_matrix(*A, from_dense(n, m, D), csr_format, b);
+
+        // A full first column, which also fills the rows without entries
+        std::vector<T> first(n);
+        for(int i = 0; i < n; ++i)
+        {
+            first[i]                      = static_cast<T>(i + 1);
+            D[static_cast<size_t>(i) * m] = first[i];
+        }
+        A->ReplaceColumnVector(0, *make_local_vector(b, first));
+        expect_matrix(*A, from_dense(n, m, D), csr_format, b);
+
+        std::vector<T> left(n);
+        std::vector<T> right(m);
+        for(int i = 0; i < n; ++i)
+        {
+            left[i] = static_cast<T>(i + 1);
+        }
+        for(int j = 0; j < m; ++j)
+        {
+            right[j] = static_cast<T>(j + 2);
+        }
+        const Csr<T> rows_scaled = transformed(ref, [&](int i, int, T v) { return left[i] * v; });
+        const Csr<T> columns_scaled
+            = transformed(ref, [&](int, int j, T v) { return v * right[j]; });
+
+        A = make(ref);
+        A->DiagonalMatrixMultL(*make_local_vector(b, left));
+        expect_matrix(*A, rows_scaled, csr_format, b);
+
+        A = make(ref);
+        A->DiagonalMatrixMultR(*make_local_vector(b, right));
+        expect_matrix(*A, columns_scaled, csr_format, b);
+
+        A = make(ref);
+        A->DiagonalMatrixMult(*make_local_vector(b, right));
+        expect_matrix(*A, columns_scaled, csr_format, b);
+
+        auto summand = [](int i, int j) { return static_cast<T>((i + 2 * j) % 5) - 1.5; };
+        A            = make(ref);
+        A->MatrixAdd(*make(transformed(ref, [&](int i, int j, T) { return summand(i, j); })),
+                     2.0,
+                     -1.0,
+                     false);
+        expect_matrix(*A,
+                      transformed(ref, [&](int i, int j, T v) { return 2 * v - summand(i, j); }),
+                      csr_format,
+                      b);
+    }
 }
 
 // Factorizations and triangular solves
@@ -1947,6 +2533,20 @@ TEST_P(local_matrix_formats, qr_decomposition_solves_and_inverts)
         expect_close(dense_product(dense(csr_of(*Inv)), dense(ref), ref.n, ref.n, ref.n),
                      identity,
                      tol<T>());
+
+        // Without diagonal entries: the inverse of a signed permutation is its transpose
+        const Csr<T> shift = cyclic_shift<T>(6);
+        auto         S     = make(shift);
+        S->Invert();
+        EXPECT_EQ(backend_of(*S), backend_name(backend()));
+        const std::vector<T> inverse = dense(csr_of(*S));
+        expect_close(inverse, dense(transposed(shift)), tol<T>());
+        identity.assign(36, 0);
+        for(int i = 0; i < 6; ++i)
+        {
+            identity[i * 6 + i] = 1;
+        }
+        expect_close(dense_product(inverse, dense(shift), 6, 6, 6), identity, tol<T>());
     });
 }
 
@@ -2103,6 +2703,74 @@ TEST_P(local_matrix_formats, connectivity_order_sorts_the_rows_by_their_non_zero
             EXPECT_LE(ordered.row_offset[i] - ordered.row_offset[i - 1],
                       ordered.row_offset[i + 1] - ordered.row_offset[i])
                 << "at row " << i;
+        }
+    });
+}
+
+// Also for a tall matrix and for a matrix without diagonal entries, the orderings are
+// permutations of the rows, RCMK reverses CMK, and ConnectivityOrder sorts the rows
+TEST_P(local_matrix_formats, orderings_of_a_tall_matrix_and_of_a_cyclic_shift_permute_the_rows)
+{
+    if(is(MCSR))
+    {
+        GTEST_SKIP() << "MCSR holds neither a tall matrix nor one without diagonal entries";
+    }
+
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
+
+        for(const Csr<T>& ref :
+            {rectangular<T>(12, 8), tall_with_empty_rows<T>(), cyclic_shift<T>(12)})
+        {
+            SCOPED_TRACE(std::to_string(ref.n) + " x " + std::to_string(ref.m) + " with "
+                         + std::to_string(ref.nnz()) + " entries");
+            auto             A = make(ref);
+            LocalVector<int> cmk;
+            LocalVector<int> rcmk;
+            LocalVector<int> connectivity;
+            if(backend() == Backend::Accelerator)
+            {
+                cmk.MoveToAccelerator();
+                rcmk.MoveToAccelerator();
+                connectivity.MoveToAccelerator();
+            }
+
+            std::string log = logged([&] { A->CMK(&cmk); });
+            expect_fallback_warning(log, "CMK", native(*A, "CMK"));
+            log = logged([&] { A->RCMK(&rcmk); });
+            expect_fallback_warning(log, "RCMK", native(*A, "RCMK"));
+            log = logged([&] { A->ConnectivityOrder(&connectivity); });
+            expect_fallback_warning(log, "ConnectivityOrder", native(*A, "ConnectivityOrder"));
+            expect_kept(*A, ref);
+
+            const std::vector<int> c = values_of(cmk);
+            const std::vector<int> r = values_of(rcmk);
+            const std::vector<int> p = values_of(connectivity);
+            expect_permutation(c, ref.n);
+            expect_permutation(r, ref.n);
+            expect_permutation(p, ref.n);
+            ASSERT_EQ(c.size(), static_cast<size_t>(ref.n));
+            ASSERT_EQ(r.size(), c.size());
+            ASSERT_EQ(p.size(), c.size());
+            for(int i = 0; i < ref.n; ++i)
+            {
+                EXPECT_EQ(r[i], ref.n - 1 - c[i]) << "at index " << i;
+            }
+
+            // Row i goes to position p[i]. The ordering follows the stored entries, which for
+            // BCSR include the zeros of the blocks, so that the empty rows are not empty there.
+            const Csr<T> stored = csr_of(*A);
+            auto length = [&](int i) { return stored.row_offset[i + 1] - stored.row_offset[i]; };
+            for(int i = 0; i < ref.n; ++i)
+            {
+                for(int j = 0; j < ref.n; ++j)
+                {
+                    if(p[i] < p[j])
+                    {
+                        EXPECT_LE(length(i), length(j)) << "rows " << i << " and " << j;
+                    }
+                }
+            }
         }
     });
 }
@@ -2293,6 +2961,36 @@ TEST_P(local_matrix_formats, matrix_add_scales_and_adds)
     });
 }
 
+// Without the structure, the sum keeps the pattern of the matrix. The summand's entries
+// outside it, also before the first and after the last column of a row, are dropped.
+TYPED_TEST(local_matrix, matrix_add_drops_summand_entries_outside_the_pattern)
+{
+    using T = typename TypeParam::value_type;
+
+    const Csr<T>   a = banded<T>();
+    std::vector<T> summand(static_cast<size_t>(a.n) * a.m, 0);
+    for(int i = 0; i < a.n; ++i)
+    {
+        for(int j = 0; j < a.m; ++j)
+        {
+            if((i + j) % 4 != 0)
+            {
+                summand[static_cast<size_t>(i) * a.m + j] = static_cast<T>(1 + (i + 2 * j) % 5);
+            }
+        }
+    }
+
+    auto A = make_local_matrix(this->backend(), a);
+    A->MatrixAdd(
+        *make_local_matrix(this->backend(), from_dense(a.n, a.m, summand)), 1.0, 1.0, false);
+    expect_matrix(
+        *A,
+        transformed(
+            a, [&](int i, int j, T v) { return v + summand[static_cast<size_t>(i) * a.m + j]; }),
+        csr_format,
+        this->backend());
+}
+
 TEST_P(local_matrix_formats, triple_matrix_product_in_csr)
 {
     for_each_type<RealTypes>([&](auto type) {
@@ -2356,6 +3054,169 @@ TYPED_TEST(local_matrix, triple_matrix_product_converts_each_factor_to_csr)
         EXPECT_NE(log.find("TripleMatrixProduct() is performed in CSR format"), std::string::npos)
             << log;
     }
+}
+
+// The rows of R A hold more than 256 entries, for which rocSPARSE takes other kernels. The
+// entries are integers that float holds exactly.
+TYPED_TEST(local_matrix, triple_matrix_product_with_long_rows)
+{
+    using T     = typename TypeParam::value_type;
+    const int n = 1024;
+
+    Csr<T> r(8, n);
+    for(int i = 0; i < r.n; ++i)
+    {
+        for(int j = i % 2; j < n; j += 2)
+        {
+            r.add(j, static_cast<T>((i + j) % 5 + 1));
+        }
+        r.end_row();
+    }
+    const Csr<T> a = transformed(
+        spd<T>(n), [](int i, int j, T) { return static_cast<T>(i == j ? 4 : -(1 + (i + j) % 3)); });
+    Csr<T> p(n, 16);
+    for(int i = 0; i < n; ++i)
+    {
+        p.add(i % 16, static_cast<T>(i % 3 + 1));
+        p.end_row();
+    }
+    const Csr<T> ra = product(r, a);
+    ASSERT_GT(ra.row_offset[1] - ra.row_offset[0], 256);
+
+    auto C = empty_local_matrix<T>(this->backend());
+    C->TripleMatrixProduct(*make_local_matrix(this->backend(), r),
+                           *make_local_matrix(this->backend(), a),
+                           *make_local_matrix(this->backend(), p));
+    expect_matrix(*C, product(ra, p), csr_format, this->backend());
+}
+
+// The CSR kernels of the accelerator on matrices with more rows than one workgroup, with
+// values that float holds exactly
+TEST(local_matrix_large, accelerator_csr_operations_span_several_workgroups)
+{
+    REQUIRE_BACKEND(Backend::Accelerator);
+    const Backend acc = Backend::Accelerator;
+
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
+
+        const std::vector<std::pair<std::string, Csr<T>>> inputs
+            = {{"21 x 21 grid", grid_pattern<T>(21)}, {"scattered", scattered<T>()}};
+        for(const auto& input : inputs)
+        {
+            SCOPED_TRACE(input.first);
+            const Csr<T>& ref  = input.second;
+            const int     n    = ref.n;
+            const int     m    = ref.m;
+            auto          make = [&](const Csr<T>& x) { return make_local_matrix(acc, x); };
+            // A result the host computes after a failed kernel is right too, so the
+            // operations must not fall back to it
+            auto without_fallback = [](const std::string& operation, auto&& f) {
+                expect_fallback_warning(logged(f), operation, true);
+            };
+
+            auto summand = [](int i, int j) { return static_cast<T>((i + 2 * j) % 5 + 1); };
+            auto A       = make(ref);
+            without_fallback("MatrixAdd", [&] {
+                A->MatrixAdd(
+                    *make(transformed(ref, [&](int i, int j, T) { return summand(i, j); })),
+                    2.0,
+                    -1.0,
+                    false);
+            });
+            expect_matrix(
+                *A,
+                transformed(ref, [&](int i, int j, T v) { return 2 * v - summand(i, j); }),
+                csr_format,
+                acc);
+
+            // A summand with one entry per row, mostly outside the pattern
+            Csr<T> other(n, m);
+            for(int i = 0; i < n; ++i)
+            {
+                other.add((7 * i + 3) % m, static_cast<T>(i % 5 + 1));
+                other.end_row();
+            }
+            std::vector<T>       sum = dense(ref);
+            const std::vector<T> Do  = dense(other);
+            for(size_t k = 0; k < sum.size(); ++k)
+            {
+                sum[k] = static_cast<T>(0.5) * sum[k] + 3 * Do[k];
+            }
+            A = make(ref);
+            without_fallback("MatrixAdd", [&] { A->MatrixAdd(*make(other), 0.5, 3.0, true); });
+            expect_matrix(*A, from_dense(n, m, sum), csr_format, acc);
+
+            std::vector<T> left(n);
+            std::vector<T> right(m);
+            for(int i = 0; i < n; ++i)
+            {
+                left[i] = static_cast<T>(i % 7 + 1);
+            }
+            for(int j = 0; j < m; ++j)
+            {
+                right[j] = static_cast<T>(j % 5 + 2);
+            }
+            A = make(ref);
+            without_fallback("DiagonalMatrixMultL",
+                             [&] { A->DiagonalMatrixMultL(*make_local_vector(acc, left)); });
+            expect_matrix(*A,
+                          transformed(ref, [&](int i, int, T v) { return left[i] * v; }),
+                          csr_format,
+                          acc);
+            A = make(ref);
+            without_fallback("DiagonalMatrixMultR",
+                             [&] { A->DiagonalMatrixMultR(*make_local_vector(acc, right)); });
+            expect_matrix(*A,
+                          transformed(ref, [&](int, int j, T v) { return v * right[j]; }),
+                          csr_format,
+                          acc);
+
+            for(bool with_diagonal : {true, false})
+            {
+                SCOPED_TRACE(with_diagonal ? "with the diagonal" : "without the diagonal");
+                auto L = empty_local_matrix<T>(acc);
+                auto U = empty_local_matrix<T>(acc);
+                A      = make(ref);
+                without_fallback("ExtractL", [&] { A->ExtractL(L.get(), with_diagonal); });
+                without_fallback("ExtractU", [&] { A->ExtractU(U.get(), with_diagonal); });
+                expect_matrix(*L, lower(ref, with_diagonal), csr_format, acc);
+                expect_matrix(*U, upper(ref, with_diagonal), csr_format, acc);
+            }
+
+            // Rows without a diagonal entry give 0
+            std::vector<T> diagonal(std::min(n, m), 0);
+            for(int i = 0; i < static_cast<int>(diagonal.size()); ++i)
+            {
+                for(PtrType k = ref.row_offset[i]; k < ref.row_offset[i + 1]; ++k)
+                {
+                    if(ref.col[k] == i)
+                    {
+                        diagonal[i] = ref.val[k];
+                    }
+                }
+            }
+            LocalVector<T> d;
+            d.MoveToAccelerator();
+            without_fallback("ExtractDiagonal", [&] { make(ref)->ExtractDiagonal(&d); });
+            expect_vector(d, diagonal, acc, 0);
+
+            A = make(ref);
+            without_fallback("AddScalar", [&] { A->AddScalar(1.5); });
+            expect_matrix(*A,
+                          transformed(ref, [](int, int, T v) { return v + static_cast<T>(1.5); }),
+                          csr_format,
+                          acc);
+            A = make(ref);
+            without_fallback("AddScalarOffDiagonal", [&] { A->AddScalarOffDiagonal(-0.5); });
+            expect_matrix(
+                *A,
+                transformed(ref,
+                            [](int i, int j, T v) { return i == j ? v : v - static_cast<T>(0.5); }),
+                csr_format,
+                acc);
+        }
+    });
 }
 
 // Row map[i] of the restriction holds a one in column i
@@ -2438,14 +3299,19 @@ TEST_P(local_matrix_formats, transposes)
         make_local_matrix(backend(), ref)->Transpose(from_csr.get());
         expect_matrix(*from_csr, transposed(ref), csr_format, backend());
 
+        // MCSR holds neither the rectangles nor the cyclic shift, which has no diagonal entries
         if(!is(MCSR))
         {
-            for(const Csr<T>& rect : wide_and_tall<T>())
+            std::vector<Csr<T>> others = wide_and_tall<T>();
+            others.push_back(tall_with_empty_rows<T>());
+            others.push_back(cyclic_shift<T>(12));
+            for(const Csr<T>& other : others)
             {
-                SCOPED_TRACE(std::to_string(rect.n) + " x " + std::to_string(rect.m));
-                auto R = make(rect);
+                SCOPED_TRACE(std::to_string(other.n) + " x " + std::to_string(other.m) + " with "
+                             + std::to_string(other.nnz()) + " entries");
+                auto R = make(other);
                 R->Transpose();
-                expect_kept(*R, transposed(rect));
+                expect_kept(*R, transposed(other));
             }
         }
     });
@@ -2509,6 +3375,26 @@ TEST_P(local_matrix_formats, gershgorin_bounds_the_spectrum)
         expect_fallback_warning(log, "Gershgorin", native("Gershgorin"));
         EXPECT_EQ(lambda_min, -7.0);
         EXPECT_EQ(lambda_max, 9.0);
+
+        // A row without a stored diagonal entry has its disc around 0
+        make(cyclic_shift<T>(12))->Gershgorin(lambda_min, lambda_max);
+        EXPECT_EQ(lambda_min, -1.0);
+        EXPECT_EQ(lambda_max, 1.0);
+
+        // Rows 0 to 5 give [2, 4], rows 6 to 11 without a diagonal entry [-2, 2]
+        Csr<T> mixed(12);
+        for(int i = 0; i < mixed.n; ++i)
+        {
+            if(i < 6)
+            {
+                mixed.add(i, static_cast<T>(3));
+            }
+            mixed.add((i + 1) % mixed.n, static_cast<T>((i % 2 == 0 ? 1 : -1) * (i < 6 ? 1 : 2)));
+            mixed.end_row();
+        }
+        make(mixed)->Gershgorin(lambda_min, lambda_max);
+        EXPECT_EQ(lambda_min, -2.0);
+        EXPECT_EQ(lambda_max, 4.0);
     });
 }
 
@@ -2533,6 +3419,25 @@ TEST_P(local_matrix_formats, symbolic_power_gives_the_pattern_with_zero_values)
         if(is(CSR) || is(COO))
         {
             EXPECT_EQ(pattern_of(result), pattern_of(squared_pattern(ref)));
+        }
+
+        // Without diagonal entries the pattern of A is not part of the pattern of A^2: the
+        // square of a cyclic shift is the shift by two
+        auto S = make(cyclic_shift<T>(12));
+        S->SymbolicPower(2);
+        const Csr<T> squared = csr_of(*S);
+        for(T v : squared.val)
+        {
+            EXPECT_EQ(v, 0.0);
+        }
+        if(S->GetFormat() == CSR || S->GetFormat() == COO)
+        {
+            std::vector<std::set<int>> shifted_by_two(12);
+            for(int i = 0; i < 12; ++i)
+            {
+                shifted_by_two[i] = {(i + 2) % 12};
+            }
+            EXPECT_EQ(pattern_of(squared), shifted_by_two);
         }
     });
 }
@@ -2763,6 +3668,128 @@ TEST_P(local_matrix_formats, writes_and_reads_rocsparseio_files)
         EXPECT_EQ(log.find("conversion from CSR to") != std::string::npos, !is(CSR)) << log;
         expect_kept(*B, ref);
     });
+}
+
+// The readers convert the values of a file written in the other precision
+TEST_P(local_matrix_formats, reads_rocsparseio_files_of_the_other_precision)
+{
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
+        using U = typename std::conditional<std::is_same<T, float>::value, double, float>::type;
+
+        const Csr<T>      ref  = banded<T>();
+        const Csr<U>      refu = banded<U>();
+        const std::string file = temp_file("rsio");
+        make(ref)->WriteFileRSIO(file);
+
+        auto B = empty_local_matrix<U>(backend());
+        B->ReadFileRSIO(file);
+        std::remove(file.c_str());
+        EXPECT_EQ(B->GetM(), ref.n);
+        EXPECT_EQ(B->GetN(), ref.m);
+        expect_entries(csr_of(*B), refu);
+        EXPECT_EQ(backend_of(*B), backend_name(backend()));
+
+        if(backend() == Backend::Accelerator && !is(CSR))
+        {
+            KNOWN_BUG("WriteFileRSIO of an accelerator matrix rewrites the file in CSR");
+        }
+        expect_matrix(*B, refu, format(), backend());
+    });
+}
+
+TEST(local_matrix_DeathTest, write_file_rsio_failure_ends_the_program)
+{
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
+
+        auto A = make_local_matrix(Backend::Host, banded<T>(4));
+#ifdef __linux__
+        // Writes to /dev/full are buffered and fail only when the file is closed
+        EXPECT_LOGGED_EXIT(A->WriteFileRSIO("/dev/full"),
+                           "cannot close file /dev/full.*Fatal error - the program will be "
+                           "terminated.*File: [^;]*local_matrix\\.cpp;");
+#endif
+        EXPECT_FATAL_ERROR(A->WriteFileRSIO(temp_file("missing") + "/directory/A.rsio"),
+                           "local_matrix\\.cpp");
+    });
+}
+
+// Written in CSR order with 1-based indices. WriteFileMTX does not document how many
+// digits it writes, so 1/3 is read back and checked to a relative 1e-11.
+TYPED_TEST(local_matrix, write_file_mtx_writes_the_matrix_market_text)
+{
+    using T = typename TypeParam::value_type;
+
+    Csr<T> ref(3);
+    ref.add(0, 1);
+    ref.add(2, static_cast<T>(1) / 3);
+    ref.end_row();
+    ref.add(1, 3);
+    ref.end_row();
+    ref.add(0, -4);
+    ref.add(2, 5);
+    ref.end_row();
+
+    const std::string file = temp_file("mtx");
+    make_local_matrix(this->backend(), ref)->WriteFileMTX(file);
+    std::ifstream     in(file);
+    std::stringstream text;
+    text << in.rdbuf();
+    in.close();
+    std::remove(file.c_str());
+
+    const std::string s    = text.str();
+    const std::string head = "%%MatrixMarket matrix coordinate real general\n"
+                             "3 3 5\n"
+                             "1 1 1\n"
+                             "1 3 ";
+    const std::string tail = "\n"
+                             "2 2 3\n"
+                             "3 1 -4\n"
+                             "3 3 5\n";
+    ASSERT_GT(s.size(), head.size() + tail.size()) << s;
+    EXPECT_EQ(s.substr(0, head.size()), head);
+    EXPECT_EQ(s.substr(s.size() - tail.size()), tail);
+
+    std::istringstream entry(s.substr(head.size(), s.size() - head.size() - tail.size()));
+    T                  third = 0;
+    entry >> third;
+    EXPECT_FALSE(entry.fail()) << entry.str();
+    EXPECT_TRUE(entry.eof()) << entry.str();
+    EXPECT_NEAR(third, static_cast<T>(1) / 3, 1e-11 / 3) << entry.str();
+}
+
+TYPED_TEST(local_matrix, read_file_mtx_reads_a_hand_written_file)
+{
+    using T = typename TypeParam::value_type;
+
+    const std::string file = temp_file("mtx");
+    {
+        std::ofstream out(file);
+        out << "%%MatrixMarket matrix coordinate real general\n"
+               "% a comment\n"
+               "3 3 4\n"
+               "1 1 1.0\n"
+               "1 2 2.0\n"
+               "2 3 3.0\n"
+               "3 1 4.0\n";
+    }
+
+    auto A = empty_local_matrix<T>(this->backend());
+    A->ReadFileMTX(file);
+    std::remove(file.c_str());
+
+    Csr<T> ref(3);
+    ref.add(0, 1);
+    ref.add(1, 2);
+    ref.end_row();
+    ref.add(2, 3);
+    ref.end_row();
+    ref.add(0, 4);
+    ref.end_row();
+    expect_matrix(*A, ref, csr_format, this->backend());
+    EXPECT_EQ(A->GetNnz(), 4);
 }
 
 // The AMG setup of a matrix in another format runs on a CSR copy, with a warning,
@@ -3387,6 +4414,246 @@ TEST(local_matrix_preconditions, violations_end_the_program)
     EXPECT_ASSERT_DEATH(A->ExtractSubMatrix(5, 0, 1, 1, &S), "row_offset");
     EXPECT_ASSERT_DEATH(S.MatrixMult(*A, *make_local_matrix(Backend::Host, rectangular(3, 4))),
                         "B.GetM");
+}
+
+// The receivers are empty, except where an allocated matrix gets past an earlier
+// assert. The host backend asserts some of the same expressions, and several
+// LocalMatrix functions assert both p != NULL and *p != NULL, so the patterns name
+// the file, the function and the whole expression.
+TEST(local_matrix_preconditions, null_pointer_arguments_end_the_program)
+{
+    // One precision, as for LocalVector: the asserts are in code that both precisions share
+    using T = double;
+
+    const int64_t n = 100;
+
+    LocalMatrix<T>       E;
+    LocalMatrix<T>       F;
+    LocalVector<T>       v;
+    LocalVector<bool>    connections;
+    LocalVector<int>     ints;
+    LocalVector<int64_t> aggregates;
+    LocalMatrix<T>*      no_matrix  = nullptr;
+    LocalMatrix<T>**     no_matrix2 = nullptr;
+    LocalVector<T>*      no_vector  = nullptr;
+    LocalVector<int>*    no_ints    = nullptr;
+
+    std::vector<int>     int_array(n, 0);
+    std::vector<PtrType> ptr_array(n + 1, 0);
+    std::vector<T>       val_array(n, 0.0);
+    int*                 p     = int_array.data();
+    PtrType*             o     = ptr_array.data();
+    T*                   d     = val_array.data();
+    int*                 null  = nullptr;
+    PtrType*             nullo = nullptr;
+    T*                   nulld = nullptr;
+    int                  k     = 0;
+    T                    beta  = 0;
+
+    LocalMatrix<T> A;
+    A.AllocateCSR("A", n, n, n);
+
+    auto at = [](const std::string& function) {
+        return "local_matrix\\.cpp:[0-9]+: .*::" + function + "\\(.*";
+    };
+
+    // Extractions
+    LocalMatrix<T>   sub;
+    LocalMatrix<T>*  row_of_subs[1] = {&sub};
+    LocalMatrix<T>** subs[1]        = {row_of_subs};
+    EXPECT_ASSERT_DEATH(E.ExtractSubMatrix(0, 0, n, n, no_matrix),
+                        at("ExtractSubMatrix") + "[^*]mat != NULL");
+    EXPECT_ASSERT_DEATH(E.ExtractSubMatrices(n, n, null, p, subs),
+                        at("ExtractSubMatrices") + "row_offset != NULL");
+    EXPECT_ASSERT_DEATH(E.ExtractSubMatrices(n, n, p, null, subs),
+                        at("ExtractSubMatrices") + "col_offset != NULL");
+    EXPECT_ASSERT_DEATH(E.ExtractSubMatrices(n, n, p, p, nullptr),
+                        at("ExtractSubMatrices") + "[^*]mat != NULL");
+    EXPECT_ASSERT_DEATH(E.ExtractSubMatrices(n, n, p, p, &no_matrix2),
+                        at("ExtractSubMatrices") + "\\*mat != NULL");
+    EXPECT_ASSERT_DEATH(E.ExtractDiagonal(no_vector), at("ExtractDiagonal") + "vec_diag != NULL");
+    EXPECT_ASSERT_DEATH(E.ExtractInverseDiagonal(no_vector),
+                        at("ExtractInverseDiagonal") + "vec_inv_diag != NULL");
+    EXPECT_ASSERT_DEATH(E.ExtractL(no_matrix, true), at("ExtractL") + "L != NULL");
+    EXPECT_ASSERT_DEATH(E.ExtractU(no_matrix, true), at("ExtractU") + "U != NULL");
+    EXPECT_ASSERT_DEATH(E.ExtractColumnVector(0, no_vector),
+                        at("ExtractColumnVector") + "vec != NULL");
+    EXPECT_ASSERT_DEATH(E.ExtractRowVector(0, no_vector), at("ExtractRowVector") + "vec != NULL");
+
+    // Orderings
+    EXPECT_ASSERT_DEATH(E.CMK(no_ints), at("CMK") + "permutation != NULL");
+    EXPECT_ASSERT_DEATH(E.RCMK(no_ints), at("RCMK") + "permutation != NULL");
+    EXPECT_ASSERT_DEATH(E.ConnectivityOrder(no_ints),
+                        at("ConnectivityOrder") + "permutation != NULL");
+    EXPECT_ASSERT_DEATH(E.MultiColoring(k, &p, &ints),
+                        at("MultiColoring") + "\\*size_colors == NULL");
+    EXPECT_ASSERT_DEATH(E.MultiColoring(k, &null, no_ints),
+                        at("MultiColoring") + "permutation != NULL");
+    EXPECT_ASSERT_DEATH(E.MaximalIndependentSet(k, no_ints),
+                        at("MaximalIndependentSet") + "permutation != NULL");
+    EXPECT_ASSERT_DEATH(E.ZeroBlockPermutation(k, no_ints),
+                        at("ZeroBlockPermutation") + "permutation != NULL");
+
+    // Solves, factorizations and products
+    EXPECT_ASSERT_DEATH(E.LSolve(v, no_vector), at("LSolve") + "out != NULL");
+    EXPECT_ASSERT_DEATH(E.USolve(v, no_vector), at("USolve") + "out != NULL");
+    EXPECT_ASSERT_DEATH(E.LLSolve(v, no_vector), at("LLSolve") + "out != NULL");
+    EXPECT_ASSERT_DEATH(E.LLSolve(v, v, no_vector), at("LLSolve") + "out != NULL");
+    EXPECT_ASSERT_DEATH(E.LUSolve(v, no_vector), at("LUSolve") + "out != NULL");
+    EXPECT_ASSERT_DEATH(E.QRSolve(v, no_vector), at("QRSolve") + "out != NULL");
+    EXPECT_ASSERT_DEATH(E.ItLSolve(1, 0, true, v, no_vector), at("ItLSolve") + "out != NULL");
+    EXPECT_ASSERT_DEATH(E.ItUSolve(1, 0, true, v, no_vector), at("ItUSolve") + "out != NULL");
+    EXPECT_ASSERT_DEATH(E.ItLLSolve(1, 0, true, v, no_vector), at("ItLLSolve") + "out != NULL");
+    EXPECT_ASSERT_DEATH(E.ItLLSolve(1, 0, true, v, v, no_vector), at("ItLLSolve") + "out != NULL");
+    EXPECT_ASSERT_DEATH(E.ItLUSolve(1, 0, true, v, no_vector), at("ItLUSolve") + "out != NULL");
+    EXPECT_ASSERT_DEATH(E.ICFactorize(no_vector), at("ICFactorize") + "inv_diag != NULL");
+    EXPECT_ASSERT_DEATH(E.Householder(0, beta, no_vector), at("Householder") + "vec != NULL");
+    EXPECT_ASSERT_DEATH(E.Apply(v, no_vector), at("Apply") + "out != NULL");
+    EXPECT_ASSERT_DEATH(E.ApplyAdd(v, 1.0, no_vector), at("ApplyAdd") + "out != NULL");
+    EXPECT_ASSERT_DEATH(E.CreateFromMap(ints, n, n, no_matrix),
+                        at("CreateFromMap") + "pro != NULL");
+
+    // Copies of the arrays
+    EXPECT_ASSERT_DEATH(E.UpdateValuesCSR(nulld), at("UpdateValuesCSR") + "val != NULL");
+    EXPECT_ASSERT_DEATH(E.CopyFromCSR(nullo, p, d), at("CopyFromCSR") + "row_offsets != NULL");
+    EXPECT_ASSERT_DEATH(A.CopyFromCSR(o, null, d), at("CopyFromCSR") + "col != NULL");
+    EXPECT_ASSERT_DEATH(A.CopyFromCSR(o, p, nulld), at("CopyFromCSR") + "val != NULL");
+    EXPECT_ASSERT_DEATH(E.CopyToCSR(nullo, p, d), at("CopyToCSR") + "row_offsets != NULL");
+    EXPECT_ASSERT_DEATH(A.CopyToCSR(o, null, d), at("CopyToCSR") + "col != NULL");
+    EXPECT_ASSERT_DEATH(A.CopyToCSR(o, p, nulld), at("CopyToCSR") + "val != NULL");
+    EXPECT_ASSERT_DEATH(E.CopyFromCOO(null, p, d), at("CopyFromCOO") + "row != NULL");
+    EXPECT_ASSERT_DEATH(E.CopyFromCOO(p, null, d), at("CopyFromCOO") + "col != NULL");
+    EXPECT_ASSERT_DEATH(E.CopyFromCOO(p, p, nulld), at("CopyFromCOO") + "val != NULL");
+    EXPECT_ASSERT_DEATH(E.CopyToCOO(null, p, d), at("CopyToCOO") + "row != NULL");
+    EXPECT_ASSERT_DEATH(E.CopyToCOO(p, null, d), at("CopyToCOO") + "col != NULL");
+    EXPECT_ASSERT_DEATH(E.CopyToCOO(p, p, nulld), at("CopyToCOO") + "val != NULL");
+    EXPECT_ASSERT_DEATH(E.CopyFromHostCSR(nullo, p, d, "E", n, n, n),
+                        at("CopyFromHostCSR") + "row_offset != NULL");
+    EXPECT_ASSERT_DEATH(E.CopyFromHostCSR(o, null, d, "E", n, n, n),
+                        at("CopyFromHostCSR") + "col != NULL");
+    EXPECT_ASSERT_DEATH(E.CopyFromHostCSR(o, p, nulld, "E", n, n, n),
+                        at("CopyFromHostCSR") + "val != NULL");
+
+    // AMG
+    EXPECT_ASSERT_DEATH(E.AMGGreedyAggregate(0.1, nullptr, &aggregates, &aggregates),
+                        at("AMGGreedyAggregate") + "connections != NULL");
+    EXPECT_ASSERT_DEATH(E.AMGGreedyAggregate(0.1, &connections, nullptr, &aggregates),
+                        at("AMGGreedyAggregate") + "aggregates != NULL");
+    EXPECT_ASSERT_DEATH(E.AMGGreedyAggregate(0.1, &connections, &aggregates, nullptr),
+                        at("AMGGreedyAggregate") + "aggregate_root_nodes != NULL");
+    EXPECT_ASSERT_DEATH(
+        E.AMGSmoothedAggregation(0.1, connections, aggregates, aggregates, no_matrix),
+        at("AMGSmoothedAggregation") + "prolong != NULL");
+    EXPECT_ASSERT_DEATH(E.AMGUnsmoothedAggregation(aggregates, aggregates, no_matrix),
+                        at("AMGUnsmoothedAggregation") + "prolong != NULL");
+    EXPECT_ASSERT_DEATH(E.InitialPairwiseAggregation(0.1, k, no_ints, k, &null, k, 0),
+                        at("InitialPairwiseAggregation") + "[^*r]G != NULL");
+    EXPECT_ASSERT_DEATH(E.InitialPairwiseAggregation(0.1, k, &ints, k, &p, k, 0),
+                        at("InitialPairwiseAggregation") + "\\*rG == NULL");
+    EXPECT_ASSERT_DEATH(E.InitialPairwiseAggregation(F, 0.1, k, no_ints, k, &null, k, 0),
+                        at("InitialPairwiseAggregation") + "[^*r]G != NULL");
+    EXPECT_ASSERT_DEATH(E.InitialPairwiseAggregation(F, 0.1, k, &ints, k, &p, k, 0),
+                        at("InitialPairwiseAggregation") + "\\*rG == NULL");
+    EXPECT_ASSERT_DEATH(E.FurtherPairwiseAggregation(0.1, k, no_ints, k, &p, k, 0),
+                        at("FurtherPairwiseAggregation") + "[^*r]G != NULL");
+    EXPECT_ASSERT_DEATH(E.FurtherPairwiseAggregation(0.1, k, &ints, k, &null, k, 0),
+                        at("FurtherPairwiseAggregation") + "\\*rG != NULL");
+    EXPECT_ASSERT_DEATH(E.FurtherPairwiseAggregation(F, 0.1, k, no_ints, k, &p, k, 0),
+                        at("FurtherPairwiseAggregation") + "[^*r]G != NULL");
+    EXPECT_ASSERT_DEATH(E.FurtherPairwiseAggregation(F, 0.1, k, &ints, k, &null, k, 0),
+                        at("FurtherPairwiseAggregation") + "\\*rG != NULL");
+    EXPECT_ASSERT_DEATH(E.CoarsenOperator(no_matrix, n, n, ints, n, p, n),
+                        at("CoarsenOperator") + "Ac != NULL");
+    EXPECT_ASSERT_DEATH(E.CoarsenOperator(&F, n, n, ints, n, null, n),
+                        at("CoarsenOperator") + "[^*]rG != NULL");
+
+    // SetDataPtr*: the array pointer and the array
+    EXPECT_ASSERT_DEATH(E.SetDataPtrCOO(nullptr, &p, &d, "E", n, n, n),
+                        at("SetDataPtrCOO") + "[^*]row != NULL");
+    EXPECT_ASSERT_DEATH(E.SetDataPtrCOO(&p, nullptr, &d, "E", n, n, n),
+                        at("SetDataPtrCOO") + "[^*]col != NULL");
+    EXPECT_ASSERT_DEATH(E.SetDataPtrCOO(&p, &p, nullptr, "E", n, n, n),
+                        at("SetDataPtrCOO") + "[^*]val != NULL");
+    EXPECT_ASSERT_DEATH(E.SetDataPtrCOO(&null, &p, &d, "E", n, n, n),
+                        at("SetDataPtrCOO") + "\\*row != NULL");
+    EXPECT_ASSERT_DEATH(E.SetDataPtrCOO(&p, &null, &d, "E", n, n, n),
+                        at("SetDataPtrCOO") + "\\*col != NULL");
+    EXPECT_ASSERT_DEATH(E.SetDataPtrCOO(&p, &p, &nulld, "E", n, n, n),
+                        at("SetDataPtrCOO") + "\\*val != NULL");
+    // CSR row offsets are PtrType, MCSR ones int
+    auto expect_set_offsets_death = [&](const std::string& f, auto set, auto offsets) {
+        SCOPED_TRACE(f);
+        decltype(offsets) none = nullptr;
+        EXPECT_ASSERT_DEATH(set(nullptr, &p, &d), at(f) + "[^*]row_offset != NULL");
+        EXPECT_ASSERT_DEATH(set(&offsets, nullptr, &d), at(f) + "[^*]col != NULL");
+        EXPECT_ASSERT_DEATH(set(&offsets, &p, nullptr), at(f) + "[^*]val != NULL");
+        EXPECT_ASSERT_DEATH(set(&none, &p, &d), at(f) + "\\*row_offset != NULL");
+        EXPECT_ASSERT_DEATH(set(&offsets, &null, &d), at(f) + "\\*col != NULL");
+        EXPECT_ASSERT_DEATH(set(&offsets, &p, &nulld), at(f) + "\\*val != NULL");
+    };
+    expect_set_offsets_death(
+        "SetDataPtrCSR",
+        [&](PtrType** row_offset, int** col, T** val) {
+            E.SetDataPtrCSR(row_offset, col, val, "E", n, n, n);
+        },
+        o);
+    expect_set_offsets_death(
+        "SetDataPtrMCSR",
+        [&](int** row_offset, int** col, T** val) {
+            E.SetDataPtrMCSR(row_offset, col, val, "E", n, n, n);
+        },
+        p);
+    EXPECT_ASSERT_DEATH(E.SetDataPtrELL(nullptr, &d, "E", n, n, n, n),
+                        at("SetDataPtrELL") + "[^*]col != NULL");
+    EXPECT_ASSERT_DEATH(E.SetDataPtrELL(&p, nullptr, "E", n, n, n, n),
+                        at("SetDataPtrELL") + "[^*]val != NULL");
+    EXPECT_ASSERT_DEATH(E.SetDataPtrELL(&null, &d, "E", n, n, n, n),
+                        at("SetDataPtrELL") + "\\*col != NULL");
+    EXPECT_ASSERT_DEATH(E.SetDataPtrELL(&p, &nulld, "E", n, n, n, n),
+                        at("SetDataPtrELL") + "\\*val != NULL");
+    EXPECT_ASSERT_DEATH(E.SetDataPtrDIA(nullptr, &d, "E", n, n, n, n),
+                        at("SetDataPtrDIA") + "[^*_]offset != NULL");
+    EXPECT_ASSERT_DEATH(E.SetDataPtrDIA(&p, nullptr, "E", n, n, n, n),
+                        at("SetDataPtrDIA") + "[^*]val != NULL");
+    EXPECT_ASSERT_DEATH(E.SetDataPtrDIA(&null, &d, "E", n, n, n, n),
+                        at("SetDataPtrDIA") + "\\*offset != NULL");
+    EXPECT_ASSERT_DEATH(E.SetDataPtrDIA(&p, &nulld, "E", n, n, n, n),
+                        at("SetDataPtrDIA") + "\\*val != NULL");
+    EXPECT_ASSERT_DEATH(E.SetDataPtrDENSE(nullptr, "E", n, n),
+                        at("SetDataPtrDENSE") + "[^*]val != NULL");
+    EXPECT_ASSERT_DEATH(E.SetDataPtrDENSE(&nulld, "E", n, n),
+                        at("SetDataPtrDENSE") + "\\*val != NULL");
+
+    // LeaveDataPtr*: every output array must be NULL on entry
+    auto expect_leave_death
+        = [&](const std::string& f, const std::string& first, auto leave, auto rows) {
+              SCOPED_TRACE(f);
+              decltype(rows) none = nullptr;
+              EXPECT_ASSERT_DEATH(leave(&rows, &null, &nulld), at(f) + "\\*" + first + " == NULL");
+              EXPECT_ASSERT_DEATH(leave(&none, &p, &nulld), at(f) + "\\*col == NULL");
+              EXPECT_ASSERT_DEATH(leave(&none, &null, &d), at(f) + "\\*val == NULL");
+          };
+    expect_leave_death(
+        "LeaveDataPtrCOO",
+        "row",
+        [&](int** row, int** col, T** val) { E.LeaveDataPtrCOO(row, col, val); },
+        p);
+    expect_leave_death(
+        "LeaveDataPtrCSR",
+        "row_offset",
+        [&](PtrType** row_offset, int** col, T** val) { E.LeaveDataPtrCSR(row_offset, col, val); },
+        o);
+    expect_leave_death(
+        "LeaveDataPtrMCSR",
+        "row_offset",
+        [&](int** row_offset, int** col, T** val) { E.LeaveDataPtrMCSR(row_offset, col, val); },
+        p);
+    EXPECT_ASSERT_DEATH(E.LeaveDataPtrELL(&p, &nulld, k), at("LeaveDataPtrELL") + "\\*col == NULL");
+    EXPECT_ASSERT_DEATH(E.LeaveDataPtrELL(&null, &d, k), at("LeaveDataPtrELL") + "\\*val == NULL");
+    EXPECT_ASSERT_DEATH(E.LeaveDataPtrDIA(&p, &nulld, k),
+                        at("LeaveDataPtrDIA") + "\\*offset == NULL");
+    EXPECT_ASSERT_DEATH(E.LeaveDataPtrDIA(&null, &d, k), at("LeaveDataPtrDIA") + "\\*val == NULL");
+    EXPECT_ASSERT_DEATH(E.LeaveDataPtrDENSE(&d), at("LeaveDataPtrDENSE") + "\\*val == NULL");
 }
 
 // As on the host (host_matrix_csr_DeathTest), IC(0) of a row without a diagonal
