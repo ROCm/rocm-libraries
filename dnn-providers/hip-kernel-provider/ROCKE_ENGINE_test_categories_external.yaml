@@ -350,3 +350,6 @@ test_categories:
       - "rocke_library_attention_biased_mixes_gpu_pytest"
       # GPU; the fp32/tf32 direct-conv sweep sampler (its fixed cases run in standard).
       - "rocke_library_conv_sweep_gpu_pytest"
+      # GPU; the conv dgrad sweep's full sample (the first candidates of each
+      # pipeline and epilogue class run in standard).
+      - "rocke_library_conv_dgrad_sweep_gpu_pytest"

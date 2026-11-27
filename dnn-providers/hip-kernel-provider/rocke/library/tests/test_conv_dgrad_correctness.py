@@ -5,9 +5,12 @@
 Builds dgrad kernels on the running GPU and compares each output against a
 float64 data-gradient reference of the stored inputs
 (``builders.common.conv_reference.conv_dgrad_reference``).
-``TestConvDgradCorrectness`` checks, per problem, every candidate of a pinned
-sample of the dgrad sweep (``_conv_dgrad_sweep_sample``) against the sweep's
-``--verify`` bound; the other classes build the kernels they name.  Covers:
+``TestConvDgradCorrectness`` checks, per problem, the first sweep candidates of
+each pipeline and epilogue class of a pinned sample of the dgrad sweep
+(``_conv_dgrad_sweep_sample``) against the sweep's ``--verify`` bound, and
+``TestConvDgradCorrectnessFullSample`` (exhaustive, scheduled CI) every
+candidate of the sample; the other classes build the kernels they name.
+Covers:
 
   - stride=1 (direct-store epilogue, no atomics)
   - stride=2 (tilde-decomposition, atomic epilogue)
@@ -28,8 +31,13 @@ from __future__ import annotations
 
 import multiprocessing
 import re
+import time
 import unittest
-from concurrent.futures import BrokenExecutor, ProcessPoolExecutor
+from concurrent.futures import (
+    BrokenExecutor,
+    ProcessPoolExecutor,
+    ThreadPoolExecutor,
+)
 
 import numpy as np
 import pytest
@@ -55,9 +63,13 @@ from kernels.common.conv_implicit_gemm import ConvProblem
 from kernels.common.conv_implicit_gemm_dgrad import build_implicit_gemm_conv_dgrad
 
 from ._conv_dgrad_sweep_sample import (
+    CLASS_SAMPLE_SIZE,
     SWEEP_SAMPLE_FRACTION,
     SWEEP_SAMPLE_SEED,
     SWEEP_SAMPLE_TILINGS,
+    ClassSample,
+    every_candidate,
+    first_candidates_per_class,
     sweep_sample,
 )
 
@@ -82,22 +94,33 @@ _MAX_SAMPLE_COMPILE_WORKERS = 32
 #: (counted with ``build_dgrad_sweep_kernel``, no compile). A floor below all of
 #: them still fails a change that silently drops most of the sample.
 _MIN_CANDIDATE_SHARE = 0.1
+#: The fewest (pipeline, epilogue) classes the class sample must check for a
+#: problem. Over this class's problems the sample has candidates in 8 of the 10
+#: classes on gfx90a, gfx942 and gfx950, and in 4 on gfx1151, gfx1201 and
+#: gfx1250 (counted with ``build_dgrad_sweep_kernel``, no compile). A floor below
+#: all of them still fails a change that silently drops most classes.
+_MIN_CHECKED_CLASSES = 3
 
 
-# Each test below declares its rough gfx942 CI seconds, so the CI shards and
-# their workers share these heavy keys (rocke.tests.ctest_shard).
+# Each test below declares its rough gfx942 CI seconds for the class sample, so
+# the CI shards and their workers share these heavy keys
+# (rocke.tests.ctest_shard).
 @unittest.skipUnless(ARCH in _SUPPORTED_ARCHES, _SKIP_REASON)
 class TestConvDgradCorrectness(unittest.TestCase):
-    """Every candidate of the sampled dgrad sweep computes the right dX.
+    """The first sweep candidates of each pipeline and epilogue class compute
+    the right dX.
 
-    For each problem, every tile configuration of ``SWEEP_SAMPLE_TILINGS``
-    that is a sweep candidate with the test's split-K mode is built and
-    compiled in worker processes (:func:`compile_dgrad_sweep_candidate`),
-    launched here, and must pass the sweep's ``--verify``
-    (:func:`verify_verdict`). A kernel that stores its output is launched on
-    poisoned output, an atomic (split-K) one on zeroed output. A build or
-    compile that raises fails the test, and so does a problem for which fewer
-    than ``_MIN_CANDIDATE_SHARE`` of the sample are candidates.
+    For each problem, the first ``CLASS_SAMPLE_SIZE`` tile configurations of
+    each (pipeline, epilogue) class of ``SWEEP_SAMPLE_TILINGS``, in its draw
+    order, that are sweep candidates with the test's split-K mode
+    (:func:`first_candidates_per_class`) are built and compiled in worker
+    processes (:func:`compile_dgrad_sweep_candidate`), launched here, and must
+    pass the sweep's ``--verify`` (:func:`verify_verdict`). A kernel that
+    stores its output is launched on poisoned output, an atomic (split-K) one
+    on zeroed output. A build or compile that raises fails the test, and so
+    does a problem for which fewer than ``_MIN_CHECKED_CLASSES`` classes have a
+    candidate. ``TestConvDgradCorrectnessFullSample`` checks every candidate of
+    the sample.
     """
 
     @classmethod
@@ -116,82 +139,93 @@ class TestConvDgradCorrectness(unittest.TestCase):
     def tearDownClass(cls):
         cls._compile_pool.shutdown(cancel_futures=True)
 
-    def _verify(self, dtype: str, problem: ConvProblem, *, split_k: int) -> None:
-        """Check the sample's candidates for ``problem`` in ``dtype``;
-        ``split_k`` is 1, or -1 for the split-K resolver's pick."""
-        combos = sweep_sample(split_k)
-        futures = [
-            self._compile_pool.submit(
+    def _submitter(self, problem: ConvProblem, dtype: str):
+        """``submit(combo)``: start compiling ``combo``'s sweep candidate for
+        ``problem`` in ``dtype`` in the pool."""
+
+        def submit(combo):
+            return self._compile_pool.submit(
                 compile_dgrad_sweep_candidate,
                 combo,
                 problem=problem,
                 dtype=dtype,
                 arch=ARCH,
             )
-            for combo in combos
-        ]
+
+        return submit
+
+    def _compile_sample(
+        self, combos: list, problem: ConvProblem, dtype: str
+    ) -> ClassSample:
+        """Build and compile what this class checks of ``combos`` for
+        ``problem`` in ``dtype``: the first candidates of each class."""
+        return first_candidates_per_class(
+            combos, CLASS_SAMPLE_SIZE, self._submitter(problem, dtype)
+        )
+
+    def _assert_enough_checked(
+        self, checked: list, combos: list, case: str, counts: str
+    ) -> None:
+        """Fail when ``checked``, the (combo, candidate) pairs checked of
+        ``combos``, cover fewer classes than ``_MIN_CHECKED_CLASSES``."""
+        classes = {(combo.pipeline, combo.epilogue) for combo, _ in checked}
+        self.assertGreaterEqual(
+            len(classes),
+            _MIN_CHECKED_CLASSES,
+            f"too few sampled dgrad classes for {case}: {counts}, "
+            f"{len(classes)} classes",
+        )
+
+    def _verify(self, dtype: str, problem: ConvProblem, *, split_k: int) -> None:
+        """Check the sample's candidates for ``problem`` in ``dtype``;
+        ``split_k`` is 1, or -1 for the split-K resolver's pick."""
+        combos = sweep_sample(split_k)
         grad_output, weights = _dgrad_inputs(problem, dtype)
         ref = _dgrad_reference(problem, dtype)
-        checked, not_candidates, failures = 0, 0, []
         try:
-            for combo, future in zip(combos, futures):
-                try:
-                    compiled = future.result()
-                except BrokenExecutor as error:
-                    # A worker died (a crash, out of memory): every pending
-                    # candidate would report it, so stop here, and give the
-                    # next test a working pool.
-                    self._compile_pool.shutdown(wait=False, cancel_futures=True)
-                    type(self)._start_compile_pool()
-                    self.fail(f"the compile pool died at {combo}: {error!r}")
-                except Exception as error:  # noqa: BLE001 - reported per candidate
-                    failures.append(f"{combo}: build/compile raised {error!r}")
-                    continue
-                if compiled is None:
-                    not_candidates += 1
-                    continue
-                spec, artifact = compiled
-                got = _dgrad_launch(
-                    spec,
-                    dtype,
-                    grad_output,
-                    weights,
-                    hsaco=artifact.hsaco,
-                    kernel_name=artifact.kernel_name,
-                    poison=True,
-                )
-                checked += 1
-                passed, error = verify_verdict(
-                    got,
-                    ref,
-                    compute_dtype=dtype,
-                    arch=ARCH,
-                    ref_floor=conv_fill.ref_floor("dgrad"),
-                )
-                if not passed:
-                    failures.append(f"{artifact.kernel_name}: rel_err={error:.2e}")
-        finally:
-            for future in futures:
-                future.cancel()
+            sample = self._compile_sample(combos, problem, dtype)
+        except BrokenExecutor as error:
+            # A worker died (a crash, out of memory): give the next test a
+            # working pool.
+            self._compile_pool.shutdown(wait=False, cancel_futures=True)
+            type(self)._start_compile_pool()
+            self.fail(f"the compile pool died: {error!r}")
+        failures = list(sample.failures)
+        for _, (spec, artifact) in sample.checked:
+            got = _dgrad_launch(
+                spec,
+                dtype,
+                grad_output,
+                weights,
+                hsaco=artifact.hsaco,
+                kernel_name=artifact.kernel_name,
+                poison=True,
+            )
+            passed, error = verify_verdict(
+                got,
+                ref,
+                compute_dtype=dtype,
+                arch=ARCH,
+                ref_floor=conv_fill.ref_floor("dgrad"),
+            )
+            if not passed:
+                failures.append(f"{artifact.kernel_name}: rel_err={error:.2e}")
         case = f"{dtype} {problem.short()} split_k={split_k} on {ARCH}"
         counts = (
-            f"of {len(combos)} sampled, {checked} checked, {not_candidates} not "
-            f"sweep candidates, {len(failures)} failed"
+            f"of {len(combos)} sampled, {len(sample.checked)} checked, "
+            f"{sample.not_candidates} tried that are not sweep candidates, "
+            f"{len(failures)} failed"
         )
         if failures:
             self.fail(
                 f"{len(failures)} sampled dgrad candidates failed for {case} "
                 f"({counts}):\n" + "\n".join(failures)
             )
-        self.assertGreaterEqual(
-            checked,
-            _MIN_CANDIDATE_SHARE * len(combos),
-            f"too few sampled dgrad candidates for {case}: {counts}",
-        )
+        self._assert_enough_checked(sample.checked, combos, case, counts)
 
     # ---- stride=1 (direct store, no atomics) ---------------------------------
 
-    @pytest.mark.rocke_shard_cost(11)
+    @pytest.mark.rocke_shard_cost(1)
     def test_fp16_stride1(self):
         """fp16 dgrad, stride=1 — single sub-GEMM, direct-store epilogue."""
         self._verify(
@@ -200,7 +234,7 @@ class TestConvDgradCorrectness(unittest.TestCase):
             split_k=1,
         )
 
-    @pytest.mark.rocke_shard_cost(11)
+    @pytest.mark.rocke_shard_cost(1)
     def test_bf16_stride1(self):
         """bf16 dgrad, stride=1."""
         self._verify(
@@ -209,7 +243,7 @@ class TestConvDgradCorrectness(unittest.TestCase):
             split_k=1,
         )
 
-    @pytest.mark.rocke_shard_cost(10)
+    @pytest.mark.rocke_shard_cost(1)
     def test_fp32_stride1(self):
         """fp32 dgrad, stride=1."""
         if ARCH not in _MFMA_ARCHES:
@@ -222,7 +256,7 @@ class TestConvDgradCorrectness(unittest.TestCase):
 
     # ---- pointwise 1x1 (flat-offset fast path) -------------------------------
 
-    @pytest.mark.rocke_shard_cost(13)
+    @pytest.mark.rocke_shard_cost(1)
     def test_fp16_pointwise_1x1(self):
         """fp16 dgrad, 1x1/stride1/pad0 ungrouped — the flat-offset fast path.
 
@@ -252,7 +286,7 @@ class TestConvDgradCorrectness(unittest.TestCase):
 
     # ---- stride=2 (tilde decomposition, atomic epilogue) ---------------------
 
-    @pytest.mark.rocke_shard_cost(19)
+    @pytest.mark.rocke_shard_cost(2)
     def test_fp16_stride2(self):
         """fp16 dgrad, stride=2 — tilde decomposition with atomic epilogue."""
         if ARCH not in _MFMA_ARCHES + _WMMA_WAVELET_ARCHES:
@@ -267,7 +301,7 @@ class TestConvDgradCorrectness(unittest.TestCase):
             split_k=1,
         )
 
-    @pytest.mark.rocke_shard_cost(16)
+    @pytest.mark.rocke_shard_cost(2)
     def test_bf16_stride2(self):
         """bf16 dgrad, stride=2."""
         if ARCH not in _MFMA_ARCHES + _WMMA_WAVELET_ARCHES:
@@ -282,7 +316,7 @@ class TestConvDgradCorrectness(unittest.TestCase):
             split_k=1,
         )
 
-    @pytest.mark.rocke_shard_cost(25)
+    @pytest.mark.rocke_shard_cost(2)
     def test_bf16_patch_embedding_stride16(self):
         """bf16 dgrad of a 16x16 / stride-16 patch embedding.
 
@@ -304,7 +338,7 @@ class TestConvDgradCorrectness(unittest.TestCase):
 
     # ---- split_k > 1 (atomic epilogue) ---------------------------------------
 
-    @pytest.mark.rocke_shard_cost(31)
+    @pytest.mark.rocke_shard_cost(5)
     def test_fp16_split_k(self):
         """fp16 dgrad, split_k auto-selected — exercises atomic reduction path."""
         if ARCH not in _MFMA_ARCHES + _WMMA_WAVELET_ARCHES:
@@ -319,7 +353,7 @@ class TestConvDgradCorrectness(unittest.TestCase):
 
     # ---- larger realistic shape ----------------------------------------------
 
-    @pytest.mark.rocke_shard_cost(28)
+    @pytest.mark.rocke_shard_cost(6)
     def test_fp16_resnet_shape(self):
         """fp16 dgrad, ResNet-style shape N8 H56 W56 C64 K64 R3 S3."""
         self._verify(
@@ -330,7 +364,7 @@ class TestConvDgradCorrectness(unittest.TestCase):
 
     # ---- grouped (grid-per-group on blockIdx.y) ------------------------------
 
-    @pytest.mark.rocke_shard_cost(12)
+    @pytest.mark.rocke_shard_cost(1)
     def test_fp16_grouped_stride1(self):
         """fp16 grouped dgrad, groups=4 (cpg=kpg=16), stride=1 direct store."""
         self._verify(
@@ -339,7 +373,7 @@ class TestConvDgradCorrectness(unittest.TestCase):
             split_k=1,
         )
 
-    @pytest.mark.rocke_shard_cost(16)
+    @pytest.mark.rocke_shard_cost(1)
     def test_bf16_grouped_stride1(self):
         """bf16 grouped dgrad, groups=4, stride=1."""
         self._verify(
@@ -348,7 +382,7 @@ class TestConvDgradCorrectness(unittest.TestCase):
             split_k=1,
         )
 
-    @pytest.mark.rocke_shard_cost(15)
+    @pytest.mark.rocke_shard_cost(3)
     def test_fp16_grouped_stride2(self):
         """fp16 grouped dgrad, groups=4, stride=2 — tilde decomposition path."""
         if ARCH not in _MFMA_ARCHES:
@@ -372,7 +406,7 @@ class TestConvDgradCorrectness(unittest.TestCase):
             split_k=1,
         )
 
-    @pytest.mark.rocke_shard_cost(22)
+    @pytest.mark.rocke_shard_cost(2)
     def test_fp16_grouped_odd_kpg(self):
         """Non-power-of-two kpg (C=K=48, groups=8 -> cpg=kpg=6): guards against
         the k_sub decode-divisor trap (must divide by kpg, not total K)."""
@@ -382,7 +416,7 @@ class TestConvDgradCorrectness(unittest.TestCase):
             split_k=1,
         )
 
-    @pytest.mark.rocke_shard_cost(35)
+    @pytest.mark.rocke_shard_cost(5)
     def test_fp16_grouped_split_k(self):
         """fp16 grouped dgrad with split_k>1 — group on y, split_k on z compose;
         even cpg (=16) keeps the packed <2 x f16> atomic pairs in-group."""
@@ -394,7 +428,7 @@ class TestConvDgradCorrectness(unittest.TestCase):
             split_k=-1,
         )
 
-    @pytest.mark.rocke_shard_cost(33)
+    @pytest.mark.rocke_shard_cost(8)
     def test_bf16_depthwise_large_filter(self):
         """Depthwise (cpg=kpg=1) dgrad: a one-column GEMM per group, every
         operand scalar. A tall, asymmetric filter with per-axis "same"
@@ -407,7 +441,7 @@ class TestConvDgradCorrectness(unittest.TestCase):
             split_k=1,
         )
 
-    @pytest.mark.rocke_shard_cost(39)
+    @pytest.mark.rocke_shard_cost(5)
     def test_fp16_depthwise_stride2(self):
         """Depthwise dgrad on the stride-2 tilde decomposition path."""
         if ARCH not in _MFMA_ARCHES:
@@ -429,6 +463,32 @@ class TestConvDgradCorrectness(unittest.TestCase):
                 groups=64,
             ),
             split_k=1,
+        )
+
+
+@pytest.mark.exhaustive
+class TestConvDgradCorrectnessFullSample(TestConvDgradCorrectness):
+    """Every candidate of the sampled dgrad sweep computes the right dX.
+
+    The problems and checks of ``TestConvDgradCorrectness``, for every tile
+    configuration of ``SWEEP_SAMPLE_TILINGS`` that is a sweep candidate
+    (:func:`every_candidate`); a problem fails when fewer than
+    ``_MIN_CANDIDATE_SHARE`` of the sample are candidates. Scheduled CI only:
+    its tests inherit the class sample's shard costs, an underestimate here.
+    """
+
+    def _compile_sample(
+        self, combos: list, problem: ConvProblem, dtype: str
+    ) -> ClassSample:
+        return every_candidate(combos, self._submitter(problem, dtype))
+
+    def _assert_enough_checked(
+        self, checked: list, combos: list, case: str, counts: str
+    ) -> None:
+        self.assertGreaterEqual(
+            len(checked),
+            _MIN_CANDIDATE_SHARE * len(combos),
+            f"too few sampled dgrad candidates for {case}: {counts}",
         )
 
 
@@ -1946,8 +2006,88 @@ def test_the_pinned_sample_is_the_sweeps_draw():
     """``SWEEP_SAMPLE_TILINGS`` is what the dgrad sweep's ``--sample`` draws
     from its grid today, in order, so a change to the sweep's axes or its
     sampling rule fails here instead of silently changing what
-    ``TestConvDgradCorrectness`` covers."""
+    ``TestConvDgradCorrectness`` and ``TestConvDgradCorrectnessFullSample``
+    cover."""
     drawn = sample_combos(
         dgrad_sweep_grid((1,)), SWEEP_SAMPLE_FRACTION, SWEEP_SAMPLE_SEED
     )
     assert [tuple(combo)[:-1] for combo in drawn] == list(SWEEP_SAMPLE_TILINGS)
+
+
+def _tile_k_rule(combo):
+    """A stand-in sweep-candidate rule for the class-sample tests: a combo is a
+    candidate unless its tile_k is 16. Earlier combos take longer, so their
+    builds finish out of order."""
+    time.sleep(0.002 * (combo.tile_m % 7))
+    return None if combo.tile_k == 16 else ("built", combo)
+
+
+def _expected_first_candidates(combos, per_class):
+    """The first ``per_class`` combos of each class that ``_tile_k_rule`` takes,
+    classes in their first appearance, and how many non-candidates come before
+    the last of them in their class."""
+    groups: dict = {}
+    for combo in combos:
+        groups.setdefault((combo.pipeline, combo.epilogue), []).append(combo)
+    expected, not_candidates = [], 0
+    for members in groups.values():
+        taken = 0
+        for combo in members:
+            if taken == per_class:
+                break
+            if combo.tile_k == 16:
+                not_candidates += 1
+            else:
+                expected.append(combo)
+                taken += 1
+    return expected, not_candidates
+
+
+@pytest.mark.parametrize("per_class", [1, 2, 5])
+def test_the_class_sample_takes_the_first_candidates_of_each_class(per_class):
+    combos = sweep_sample(1)[:80]
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        sample = first_candidates_per_class(
+            combos, per_class, lambda combo: pool.submit(_tile_k_rule, combo)
+        )
+    expected, not_candidates = _expected_first_candidates(combos, per_class)
+    assert [combo for combo, _ in sample.checked] == expected
+    assert [built for _, built in sample.checked] == [("built", c) for c in expected]
+    assert sample.not_candidates == not_candidates
+    assert sample.failures == []
+
+
+def test_a_class_sample_build_that_raises_is_a_failure_and_is_not_replaced():
+    combos = sweep_sample(1)[:80]
+    broken = combos[0]
+
+    def build(combo):
+        if combo == broken:
+            raise RuntimeError("compile failed")
+        return _tile_k_rule(combo)
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        sample = first_candidates_per_class(
+            combos, 2, lambda combo: pool.submit(build, combo)
+        )
+    assert sample.failures == [
+        f"{broken}: build/compile raised RuntimeError('compile failed')"
+    ]
+    group = (broken.pipeline, broken.epilogue)
+    in_group = [c for c, _ in sample.checked if (c.pipeline, c.epilogue) == group]
+    assert len(in_group) == 1
+
+
+def test_a_class_sample_of_no_combo_per_class_is_refused():
+    with pytest.raises(ValueError, match="per_class=0, expected at least 1"):
+        first_candidates_per_class(sweep_sample(1)[:4], 0, lambda combo: None)
+
+
+def test_the_full_sample_takes_every_candidate_in_order():
+    combos = sweep_sample(1)[:40]
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        sample = every_candidate(combos, lambda combo: pool.submit(_tile_k_rule, combo))
+    assert [combo for combo, _ in sample.checked] == [
+        c for c in combos if c.tile_k != 16
+    ]
+    assert sample.not_candidates == sum(c.tile_k == 16 for c in combos)

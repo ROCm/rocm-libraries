@@ -816,10 +816,22 @@ set(_ROCKE_LIBRARY_GPU_TESTS
     "test_wmma_fp8_decode_numeric.py"
     "dispatch/attention/test_gfx1151_attention_dispatch_numeric.py"
     "test_dsa_indexer_numeric.py")
+# The exhaustive items of these files (the conv dgrad sweep's full sample) run
+# in rocke_library_conv_dgrad_sweep_gpu_pytest below instead.
 rocke_library_pytest_entry(rocke_library_gpu_pytest WORKERS GPU
   TESTS ${_ROCKE_LIBRARY_GPU_TESTS}
-  ARGUMENTS -v -rs
+  ARGUMENTS -m "not exhaustive" -v -rs
   LABELS ckc python gpu
+  TIMEOUT ${ROCKE_TEST_TIMEOUT_GPU})
+
+# Every candidate of the conv dgrad sweep's pinned sample (the exhaustive class
+# of test_conv_dgrad_correctness.py): a few thousand compiles. Scheduled CI only
+# (the comprehensive tier); the entry above checks the first candidates of each
+# pipeline and epilogue class of the same sample.
+rocke_library_pytest_entry(rocke_library_conv_dgrad_sweep_gpu_pytest WORKERS GPU
+  TESTS test_conv_dgrad_correctness.py
+  ARGUMENTS -m exhaustive -v -rs
+  LABELS ckc python conv gpu comprehensive full
   TIMEOUT ${ROCKE_TEST_TIMEOUT_GPU})
 
 # The fp32/tf32 non-grouped direct-conv sweep sampler (the exhaustive item of
