@@ -140,6 +140,22 @@ def test_validation_only_variants_share_one_compile_group(
     assert groups[0].aliases == tuple(kernels)
 
 
+def test_stamped_compact_loop_store_splits_compile_groups():
+    # A generated stamp freezes the symbol. CompactLoopStore still changes the
+    # store loops, so two stamps that differ only there are two kernels.
+    kernels = [_kernel(), _kernel()]
+    stamp = "Cijk_example_CLS0_tail"
+    for kernel, value in zip(kernels, (False, True)):
+        kernel["CompactLoopStore"] = value
+        kernel["CustomKernel"] = {"name": stamp, "generated": True}
+
+    assert getKernelNameMin(kernels[0], False) != getKernelNameMin(kernels[1], False)
+    assert "CLS1" in getKernelNameMin(kernels[1], False)
+    groups = groupKernelRecords(kernels, False)
+    assert len(groups) == 2
+    assert groups[0].baseName != groups[1].baseName
+
+
 def test_wgmxcc_names_follow_codegen_categories():
     ordinary = [_kernel(), _kernel()]
     ordinary[0]["WorkGroupMappingXCC"] = 1
