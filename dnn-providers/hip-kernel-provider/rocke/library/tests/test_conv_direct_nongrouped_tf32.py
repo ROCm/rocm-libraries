@@ -35,7 +35,9 @@ import pytest
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.numeric import storage
 from rocke.numeric.compare import peak_relative_error
+from rocke.runtime import comgr
 from rocke.runtime.hip_module import get_device_arch
+from rocke.tests.comgr import require_comgr_target
 from rocke.tests.lanes import BUILD_VARIANT, skip_until
 from rocke.tests.llc import find_llvm_tool
 
@@ -395,18 +397,8 @@ class TestNongroupedF32Build(unittest.TestCase):
 
 
 def _compile(ir: str, arch: str) -> bytes:
-    try:
-        from rocke.runtime import comgr
-    except ImportError as exc:  # pragma: no cover - environment-dependent
-        raise unittest.SkipTest(f"comgr unavailable: {exc}") from exc
-    isa = f"amdgcn-amd-amdhsa--{arch}"
-    try:
-        isas = comgr.supported_isas()
-    except comgr.ComgrError as exc:  # pragma: no cover - environment-dependent
-        raise unittest.SkipTest(f"comgr unavailable: {exc}") from exc
-    if isa not in isas:  # pragma: no cover - environment-dependent
-        raise unittest.SkipTest(f"the loaded comgr cannot target {arch}")
-    hsaco, _ = comgr.build_hsaco_from_llvm_ir(ir, isa=isa)
+    require_comgr_target(arch)
+    hsaco, _ = comgr.build_hsaco_from_llvm_ir(ir, isa=f"amdgcn-amd-amdhsa--{arch}")
     return hsaco
 
 

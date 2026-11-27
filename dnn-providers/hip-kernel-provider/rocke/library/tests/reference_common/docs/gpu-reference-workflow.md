@@ -570,8 +570,10 @@ selects both by pattern for a lowercase operation name and a `gfx` processor, so
 it needs no edit; verify that the real provider selector includes the new
 entries. An architecture's entry runs every variant installed for it, with test
 ids `<arch>-<variant>-<case>` and the CTest limit of the `gpu` resource class
-(`platform/tests/cmake/TestTimeouts.cmake`), which covers two variants at the
-worker's five-minute request timeout, so adding cases to a published
+(`platform/tests/cmake/TestTimeouts.cmake`), which covers two variants. Each
+request of a case stops at the worker's 100 s request timeout
+(`PINNED_REQUEST_TIMEOUT_SECONDS` in `pinned_tests.py`), below the 120 s
+per-test limit of the GPU pytest entries, so adding cases to a published
 architecture uses its existing entry.
 
 One entry per architecture is a trade-off. It keeps the CTest names, and the
@@ -580,7 +582,7 @@ variants existed, and pytest still reports each result under its
 `<arch>-<variant>-<case>` id. With one variant per architecture it costs
 nothing. With two or more, it gives up isolation at the CTest level: one
 variant's failure fails the whole entry; a variant whose kernel hangs reaches
-the worker's five-minute request timeout case after case, so it can use the
+the worker's 100 s request timeout case after case, so it can use the
 entry's whole timeout and leave the other variants unrun; and a CTest exclusion
 or category can select only the whole architecture. So an architecture's
 entry runs at most two variants of an operation. Before an

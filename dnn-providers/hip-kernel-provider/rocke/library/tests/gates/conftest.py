@@ -10,8 +10,9 @@ from pathlib import Path
 from typing import NoReturn
 
 import pytest
-from rocke.core.llvm_profile import _flavor_for_llvm
+from rocke.core.llvm_profile import measured_flavor_for_llvm
 from rocke.runtime.comgr import loaded_compiler_info
+from rocke.tests.lanes import TICKET, skip_until_reason
 
 from tests._attention_bwd_counted_cases import MFMA_ARCHS, selected_isa_arch
 from tests._attention_bwd_resources import (
@@ -37,18 +38,6 @@ def _stop(message: str) -> NoReturn:
     pytest.exit(message + suffix, returncode=77 if optional else 1)
 
 
-def _skip_off_reference(message: str) -> NoReturn:
-    """End the session as skipped (exit 77, which the CTest entry's
-    SKIP_RETURN_CODE reports as a skip): the toolchain is not the gate's
-    reference toolchain, a fact about the host, so the gate has nothing to
-    judge there. A run that requires the gate (``run_all.py
-    --require-compiler-gate``) counts the 77 as a failure."""
-    pytest.exit(
-        f"{message}; the gate runs only on its reference toolchain (skipped)",
-        returncode=77,
-    )
-
-
 def _unanswered_query(
     active_flavor: str | None, targets: frozenset[str] | None
 ) -> str | None:
@@ -61,20 +50,23 @@ def _unanswered_query(
     return None
 
 
-def _qualification_gap(
+def _reference_toolchain_gap(
     requested_flavor: str, active_flavor: str, comgr: str | None
 ) -> str | None:
-    """How the toolchain differs from the gate's reference toolchain (its LLVM
-    flavor and comgr), or ``None`` when it is the reference toolchain."""
+    """Why the toolchain is not the one the gate's thresholds were calibrated on
+    (``GATE_FLAVOR`` requested and run by the loaded compiler, with the
+    ``GATE_COMGR_ROCM`` comgr), or ``None`` when it is. Tests use the compiler
+    rocKE's discovery loads, so on any other one the gate skips; the pin stays
+    here until AICK-3320 unpins it."""
     if requested_flavor != GATE_FLAVOR:
         return (
             f"resource gate requires LLVM flavor {GATE_FLAVOR}, "
             f"got {requested_flavor!r}"
         )
-    if requested_flavor != active_flavor:
+    if active_flavor != GATE_FLAVOR:
         return (
-            f"requested flavor {requested_flavor} does not match active comgr "
-            f"flavor {active_flavor}"
+            f"resource gate requires a loaded compiler of LLVM flavor "
+            f"{GATE_FLAVOR}, got {active_flavor!r}"
         )
     if not comgr_is_production(comgr):
         return f"resource gate requires ROCm {GATE_COMGR_ROCM} comgr, got {comgr}"
@@ -98,12 +90,28 @@ def _preflight_outcome(
     that is not the reference one, or ``None`` for the reference toolchain."""
     if failed := _unanswered_query(active_flavor, targets):
         return _STOP, failed
-    if gap := _qualification_gap(requested_flavor, active_flavor, comgr):
+    if gap := _reference_toolchain_gap(requested_flavor, active_flavor, comgr):
         return _SKIP, gap
     missing = [arch for arch in arches if arch not in targets]
     if missing:
         return _STOP, f"comgr {comgr} does not support {', '.join(missing)}"
     return None
+
+
+def _skip_for_reference_toolchain(session, gap: str) -> None:
+    """Skip every gate case, as waiting for AICK-3320, on a compiler that is not
+    the gate's reference toolchain. The session then ends with exit 77, which
+    the CTest entry's SKIP_RETURN_CODE reports as a skip and a run that requires
+    the gate (``run_all.py --require-compiler-gate``) counts as a failure; the
+    session attestation carries the reason."""
+    reason = skip_until_reason(
+        TICKET,
+        reason=f"counted ISA gate {gap}; the gate keeps its reference toolchain "
+        "until AICK-3320 unpins it",
+    )
+    for item in session.items:
+        item.add_marker(pytest.mark.skip(reason=reason))
+    session.config._rocke_gate_skipped_for = reason
 
 
 def pytest_configure(config) -> None:
@@ -180,7 +188,12 @@ def pytest_deselected(items) -> None:
 
 
 def pytest_sessionfinish(session, exitstatus) -> None:
-    """Attest that pytest created a real gate session for the parent runner."""
+    """End a session whose cases all skipped off the reference toolchain with
+    exit 77, and attest that pytest created a real gate session for the parent
+    runner."""
+    skipped_for = getattr(session.config, "_rocke_gate_skipped_for", None)
+    if skipped_for is not None and exitstatus == pytest.ExitCode.OK:
+        session.exitstatus = exitstatus = 77
     output = os.environ.get(_SENTINEL_ENV, "").strip()
     if output and _gate_invoked(session):
         Path(output).write_text(
@@ -188,6 +201,7 @@ def pytest_sessionfinish(session, exitstatus) -> None:
                 {
                     "collected": session.testscollected,
                     "exitstatus": int(exitstatus),
+                    "skipped_for": skipped_for,
                 }
             ),
             encoding="utf-8",
@@ -235,7 +249,7 @@ def pytest_collection_finish(session) -> None:
         flavor = current_flavor()
         info = loaded_compiler_info()
         active_flavor = (
-            _flavor_for_llvm(info.llvm_version[0])
+            measured_flavor_for_llvm(info.llvm_version[0])
             if info is not None and info.llvm_version is not None
             else None
         )
@@ -247,7 +261,8 @@ def pytest_collection_finish(session) -> None:
     if outcome is not None:
         action, why = outcome
         if action == _SKIP:
-            _skip_off_reference(f"counted ISA gate {why}")
+            _skip_for_reference_toolchain(session, why)
+            return
         _stop(f"counted ISA gate {why}")
     reporter = session.config.pluginmanager.get_plugin("terminalreporter")
     if reporter is not None:

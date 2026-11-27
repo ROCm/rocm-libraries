@@ -54,7 +54,11 @@ if _SOURCE_PACKAGE_ROOT.is_dir() and str(_SOURCE_PACKAGE_ROOT) not in sys.path:
     sys.path.insert(0, str(_SOURCE_PACKAGE_ROOT))
 
 from rocke.core.arch.target import known_arches
-from rocke.tests.pending_lanes import TEST_FILE_ROOTS, waiting_entry
+from rocke.tests.pending_lanes import (
+    TEST_FILE_ROOTS,
+    python_files_under_test_roots,
+    waiting_entry,
+)
 from rocke.tests.run_records import OTHER_SHARD, RunRecord, read_run_records
 
 __all__ = [
@@ -64,7 +68,6 @@ __all__ = [
     "audit",
     "lane_run",
     "main",
-    "python_files",
     "universe_of",
 ]
 
@@ -107,18 +110,6 @@ class SourcePaths:
                 None,
             )
         return self._mapped[path]
-
-
-def python_files(rocke_dir: Path) -> list[str]:
-    """Every Python file under the test file roots of ``rocke_dir``, relative to
-    it: the files a run may collect tests from (an entry may name a test module
-    that is not ``test_*.py``)."""
-    return [
-        file.relative_to(rocke_dir).as_posix()
-        for root in TEST_FILE_ROOTS
-        for file in (rocke_dir / root).rglob("*.py")
-        if "__pycache__" not in file.parts
-    ]
 
 
 TestId = tuple[str, str]  # (source test file, pytest node name)
@@ -377,7 +368,16 @@ def main(argv: list[str] | None = None) -> int:
         help="the rocke source directory the records ran (default: this checkout)",
     )
     args = parser.parse_args(argv)
-    source_paths = SourcePaths(python_files(args.tree))
+    try:
+        tree_files = python_files_under_test_roots(args.tree)
+    except RuntimeError as error:
+        parser.error(str(error))
+    if not tree_files:
+        parser.error(
+            f"limbo_audit failed - tree={str(args.tree)!r}, expected a rocke "
+            f"source checkout with Python files under {', '.join(TEST_FILE_ROOTS)}"
+        )
+    source_paths = SourcePaths(tree_files)
     lanes = [
         lane_run(name, read_run_records(directory), source_paths)
         for name, directory in args.lane

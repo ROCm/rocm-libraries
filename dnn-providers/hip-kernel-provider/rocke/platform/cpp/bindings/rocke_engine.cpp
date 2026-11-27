@@ -3098,9 +3098,9 @@ PYBIND11_MODULE(rocke_engine, m)
 
     m.def(
         "f64_mma_probe_serialize_ir",
-        [](int m, int k) {
+        [](int m, int k, const std::string& arch) {
             rocke_ir_builder_t b;
-            rocke_kernel_def_t* kernel = rocke_build_f64_mma_probe(&b, m, k);
+            rocke_kernel_def_t* kernel = rocke_build_f64_mma_probe(&b, m, k, require_arch(arch));
             char* text = nullptr;
             rocke_status_t status
                 = kernel ? rocke_ir_serialize(kernel, &text) : rocke_ir_builder_status(&b);
@@ -3112,8 +3112,9 @@ PYBIND11_MODULE(rocke_engine, m)
                 throw std::runtime_error(error);
             return result;
         },
-        py::arg("m") = 16,
-        py::arg("k") = 4);
+        py::arg("m"),
+        py::arg("k"),
+        py::arg("arch"));
 
     m.def(
         "tf32_mma_probe_serialize_ir",

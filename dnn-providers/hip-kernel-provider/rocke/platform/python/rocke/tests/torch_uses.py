@@ -15,6 +15,8 @@ strings, comments and docstrings is not code::
 
     import torch                         # IMPORT, TORCH_OBJECT where torch.x is used
     importlib.util.find_spec("torch")    # IMPORT
+    sys.modules.get("torch")             # IMPORT: takes torch another module imported
+    "torch" in sys.modules               # nothing: asks, does not take the module
     pytest.importorskip("torch")         # IMPORTORSKIP
     from rocke.runtime import torch_interop  # TORCH_INTEROP
     torch.cuda.synchronize()             # TORCH_API
@@ -37,20 +39,20 @@ import argparse
 import ast
 import enum
 import re
-import shutil
-import subprocess
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 from ..assets import platform_root
+from . import source_allowlist
+from .source_allowlist import AllowlistEntry
+from .source_ast import dotted_name, string_constant
+from .source_tree import source_files
 
 __all__ = [
     "TorchUse",
     "TorchUseKind",
     "allowlist_breaches",
-    "file_kinds",
-    "format_allowlist_entry",
     "is_config_file",
     "read_allowlist",
     "torch_named_identifiers",
@@ -66,8 +68,10 @@ class TorchUseKind(enum.Enum):
     """What a torch use does; the gate allowlists kinds per file."""
 
     IMPORT = "import"
-    """An ``import`` of torch or a torch submodule, or a call of ``__import__``,
-    ``import_module`` or ``find_spec`` with a torch module name."""
+    """An ``import`` of torch or a torch submodule, a call of ``__import__``,
+    ``import_module`` or ``find_spec`` with a torch module name, or a read of
+    one from ``sys.modules`` (``sys.modules.get("torch")``,
+    ``sys.modules["torch"]``)."""
     IMPORTORSKIP = "importorskip"
     """``importorskip`` or ``import_or_skip_until`` with a torch module name."""
     TORCH_INTEROP = "torch_interop"
@@ -96,6 +100,7 @@ _INTEROP = "torch_interop"
 _API_SUBMODULES = frozenset({"ops", "fx", "compile", "cuda"})
 _DYNAMIC_IMPORTS = frozenset({"__import__", "import_module", "find_spec"})
 _SKIP_IMPORTS = frozenset({"importorskip", "import_or_skip_until"})
+_MODULE_TABLE = "sys.modules"
 _CONFIG_MENTION = re.compile(rf"\b{_TORCH}\b", re.IGNORECASE)
 _IDENTIFIER_WORD = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|\d+")
 
@@ -123,16 +128,6 @@ def _module_kinds(module: str) -> list[TorchUseKind]:
     if _names_interop(module):
         kinds.append(TorchUseKind.TORCH_INTEROP)
     return kinds
-
-
-def _dotted(node: ast.AST) -> str:
-    parts: list[str] = []
-    while isinstance(node, ast.Attribute):
-        parts.append(node.attr)
-        node = node.value
-    if isinstance(node, ast.Name):
-        parts.append(node.id)
-    return ".".join(reversed(parts))
 
 
 def _torch_bindings(tree: ast.AST) -> dict[str, str]:
@@ -195,17 +190,30 @@ def _import_uses(node: ast.Import | ast.ImportFrom) -> list[TorchUse]:
 
 
 def _call_uses(node: ast.Call) -> list[TorchUse]:
-    function = _dotted(node.func).split(".")[-1]
-    argument = node.args[0] if node.args else None
-    if not (isinstance(argument, ast.Constant) and isinstance(argument.value, str)):
+    called = dotted_name(node.func)
+    function = called.split(".")[-1]
+    module = string_constant(node.args[0]) if node.args else None
+    if module is None:
         return []
-    module = argument.value
-    detail = f"{_dotted(node.func)}({module!r})"
+    detail = f"{called}({module!r})"
     if function in _SKIP_IMPORTS and _is_torch_module(module):
         return [TorchUse(node.lineno, TorchUseKind.IMPORTORSKIP, detail)]
-    if function in _DYNAMIC_IMPORTS:
+    if function in _DYNAMIC_IMPORTS or called == f"{_MODULE_TABLE}.get":
         return [TorchUse(node.lineno, kind, detail) for kind in _module_kinds(module)]
     return []
+
+
+def _module_table_uses(node: ast.Subscript) -> list[TorchUse]:
+    """``sys.modules["torch"]`` read (not assigned or deleted): the module itself."""
+    module = string_constant(node.slice)
+    if not (
+        isinstance(node.ctx, ast.Load)
+        and dotted_name(node.value) == _MODULE_TABLE
+        and module is not None
+    ):
+        return []
+    detail = f"{_MODULE_TABLE}[{module!r}]"
+    return [TorchUse(node.lineno, kind, detail) for kind in _module_kinds(module)]
 
 
 def torch_uses_in_python(source: str, filename: str) -> list[TorchUse]:
@@ -225,17 +233,19 @@ def torch_uses_in_python(source: str, filename: str) -> list[TorchUse]:
             uses.extend(_import_uses(node))
         elif isinstance(node, ast.Call):
             uses.extend(_call_uses(node))
+        elif isinstance(node, ast.Subscript):
+            uses.extend(_module_table_uses(node))
         elif isinstance(node, ast.Attribute):
             if node.attr == _INTEROP:
                 uses.append(
-                    TorchUse(node.lineno, TorchUseKind.TORCH_INTEROP, _dotted(node))
+                    TorchUse(node.lineno, TorchUseKind.TORCH_INTEROP, dotted_name(node))
                 )
             root = node.value
             if isinstance(root, ast.Name) and root.id in bindings:
                 chained.add(id(root))
                 expanded = f"{bindings[root.id]}.{node.attr}"
                 uses.append(
-                    TorchUse(node.lineno, _object_kind(expanded), _dotted(node))
+                    TorchUse(node.lineno, _object_kind(expanded), dotted_name(node))
                 )
     for node in ast.walk(tree):
         if (
@@ -311,37 +321,18 @@ def torch_named_identifiers(source: str, filename: str) -> list[tuple[int, str]]
 
 def tree_files(root: Path) -> list[str]:
     """The files under ``root`` that the gate reads, relative POSIX paths, sorted:
-    Python files and config files (:func:`is_config_file`) that git tracks or
-    would track (untracked but not ignored), so build trees, virtual environments
-    and ignored scratch directories are never read.
+    the Python files and config files (:func:`is_config_file`) of
+    :func:`~rocke.tests.source_tree.source_files`, so build trees, virtual
+    environments and ignored scratch directories are never read.
 
     Raises ``RuntimeError`` when git is missing or ``root`` is not in a git
     work tree: the gate checks a source checkout.
     """
-    git = shutil.which("git")
-    if git is None:
-        raise RuntimeError(
-            f"tree_files failed - root={str(root)!r}, expected git on PATH to list "
-            "the source tree"
-        )
-    listing = subprocess.run(
-        [git, "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
-        cwd=root,
-        capture_output=True,
-        check=False,
-    )
-    if listing.returncode != 0:
-        raise RuntimeError(
-            f"tree_files failed - root={str(root)!r}, expected a git work tree: "
-            f"{listing.stderr.decode(errors='replace').strip()}"
-        )
-    paths = {item for item in listing.stdout.decode().split("\0") if item}
-    return sorted(
+    return [
         path
-        for path in paths
-        if (path.endswith(".py") or is_config_file(Path(path)))
-        and (root / path).is_file()
-    )
+        for path in source_files(root)
+        if path.endswith(".py") or is_config_file(Path(path))
+    ]
 
 
 def tree_torch_uses(root: Path) -> dict[str, list[TorchUse]]:
@@ -354,94 +345,31 @@ def tree_torch_uses(root: Path) -> dict[str, list[TorchUse]]:
     return found
 
 
-def file_kinds(uses: Sequence[TorchUse]) -> frozenset[TorchUseKind]:
-    """The distinct kinds of ``uses``."""
-    return frozenset(use.kind for use in uses)
-
-
-def format_allowlist_entry(path: str, kinds: frozenset[TorchUseKind]) -> str:
-    """One allowlist line: ``path: kind kind``, kinds sorted."""
-    return f"{path}: {' '.join(sorted(kind.value for kind in kinds))}"
-
-
-def read_allowlist(path: Path) -> dict[str, frozenset[TorchUseKind]]:
-    """The allowlist at ``path``: one ``file: kind kind`` line per file, ``#``
-    comments and blank lines ignored. A malformed line, an unknown kind or a file
-    listed twice is a ``ValueError`` naming the line."""
-    known = {kind.value: kind for kind in TorchUseKind}
-    allowed: dict[str, frozenset[TorchUseKind]] = {}
-    for number, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        listed, separator, kinds_text = line.partition(": ")
-        kinds = kinds_text.split()
-        where = f"{path.name}:{number}"
-        if not separator or not kinds:
-            raise ValueError(
-                f"read_allowlist failed - {where}={line!r}, expected 'file: kind ...'"
-            )
-        unknown = [kind for kind in kinds if kind not in known]
-        if unknown:
-            raise ValueError(
-                f"read_allowlist failed - {where} kind={unknown[0]!r}, expected one "
-                f"of {sorted(known)}"
-            )
-        if listed in allowed:
-            raise ValueError(
-                f"read_allowlist failed - {where} file={listed!r}, expected each file "
-                "listed once"
-            )
-        allowed[listed] = frozenset(known[kind] for kind in kinds)
-    return allowed
-
-
-def _lines_of(uses: Sequence[TorchUse], kinds: frozenset[TorchUseKind]) -> str:
-    return "; ".join(
-        f"line {use.line} {use.kind.value}: {use.detail}"
-        for use in uses
-        if use.kind in kinds
-    )
+def read_allowlist(path: Path) -> dict[str, AllowlistEntry]:
+    """The allowlist at ``path``: one ``file: kind kind`` line per file
+    (:func:`rocke.tests.source_allowlist.read_allowlist`)."""
+    return source_allowlist.read_allowlist(path, TorchUseKind)
 
 
 def allowlist_breaches(
     found: Mapping[str, Sequence[TorchUse]],
-    allowed: Mapping[str, frozenset[TorchUseKind]],
+    allowed: Mapping[str, AllowlistEntry],
 ) -> list[str]:
-    """What breaks the allowlist, one line per file, sorted by file.
-
-    A file not on the list uses torch; a listed file uses a kind its entry does
-    not list; a listed file no longer uses a kind its entry lists, or torch at
-    all (the entry is stale: the list only shrinks, so its lines go when the
-    uses go).
-    """
-    breaches = []
-    for path in sorted(set(found) | set(allowed)):
-        uses = found.get(path, ())
-        kinds = file_kinds(uses)
-        listed = allowed.get(path)
-        if listed is None:
-            breaches.append(f"{path}: new torch use: {_lines_of(uses, kinds)}")
-            continue
-        if added := kinds - listed:
-            breaches.append(
-                f"{path}: new kind of torch use: {_lines_of(uses, frozenset(added))}"
-            )
-        if not kinds:
-            breaches.append(f"{path}: stale entry, no torch use left: delete its line")
-        elif gone := listed - kinds:
-            kept = format_allowlist_entry(path, listed - gone)
-            breaches.append(
-                f"{path}: stale kinds, no longer used: "
-                f"{' '.join(sorted(kind.value for kind in gone))}; make the line {kept!r}"
-            )
-    return breaches
+    """What breaks the allowlist, one line per file, sorted by file
+    (:func:`rocke.tests.source_allowlist.allowlist_breaches`): a file that
+    uses torch and is not listed, a kind of use its line does not list, and a
+    line or kind the tree no longer uses."""
+    return source_allowlist.allowlist_breaches(found, allowed, subject="torch use")
 
 
 def _print_inventory(root: Path, *, names: bool) -> None:
     if not names:
         for path, uses in tree_torch_uses(root).items():
-            print(format_allowlist_entry(path, file_kinds(uses)))
+            print(
+                source_allowlist.format_allowlist_entry(
+                    path, source_allowlist.file_kinds(uses)
+                )
+            )
         return
     for path in tree_files(root):
         if not path.endswith(".py"):

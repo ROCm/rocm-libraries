@@ -20,6 +20,7 @@ from rocke.portable_ir.src import online
 from rocke.tests import item_time_limit, require_gpu
 from rocke.tests.ci_shard import ACTIVATION_FLAG
 from rocke.tests.ctest_listing import (
+    GPU_LABEL,
     GPU_RESOURCE_LOCK,
     PROVIDER_CTEST_SUBDIR,
     configure_installed_ctest,
@@ -31,6 +32,7 @@ from rocke.tests.engine_modules import EngineModulesMarker, read_engine_modules_
 from rocke.tests.lanes import SOURCE_TREE, skip_until
 from rocke.tests.platform_build import cmake_cache_entries
 from rocke.tests.provider_categories import provider_category_labels
+from rocke.tests.source_modules import load_entry_time_check
 
 PLATFORM = Path(__file__).resolve().parents[1]
 
@@ -395,15 +397,19 @@ def gpu_test_limit() -> float:
 
 def test_the_gpu_per_test_limit_is_at_most_half_the_smallest_shard_budget():
     """A stalled GPU test runs to its per-test limit before it fails. The limit
-    is at most half the smallest rocKE share of a CI shard
-    (tools/check_entry_times.py, CI_TIERS), so one stall leaves the shard time
-    for the rest of its tests; a slower test raises only its own limit, with
-    the rocke_measured_seconds mark."""
-    script = PLATFORM.parent / "tools" / "check_entry_times.py"
-    if not script.is_file():
-        skip_until(SOURCE_TREE, reason="tools/ is absent from the installed tree")
-    entry_times = load_driver("rocke_check_entry_times", script)
-    smallest_budget = min(tier.budget_seconds for tier in entry_times.CI_TIERS)
+    is at most half the smallest rocKE share of a CI shard of a tier that runs
+    GPU entries (tools/check_entry_times.py, CI_TIERS), so one stall leaves the
+    shard time for the rest of its tests; a slower test raises only its own
+    limit, with the rocke_measured_seconds mark. A tier that runs no GPU entry
+    (quick) bounds it only once its GPU allowlist names an entry."""
+    entry_times = load_entry_time_check(PLATFORM / "tests" / "tools")
+    if entry_times is None:
+        skip_until(SOURCE_TREE, reason="tools/check_entry_times.py is absent here")
+    smallest_budget = min(
+        tier.budget_seconds
+        for tier in entry_times.CI_TIERS
+        if tier.runs_gpu_entries or entry_times.GPU_ENTRY_ALLOWLIST
+    )
     assert gpu_test_limit() <= smallest_budget / 2
 
 
@@ -455,7 +461,7 @@ def test_every_gpu_pytest_entry_limits_each_test(
     gpu_entries = {
         test["name"]: test
         for test in list_installed_ctest_entries(ctest_dir, tmp_path)
-        if runs_pytest(test) and "gpu" in (entry_property(test, "LABELS") or [])
+        if runs_pytest(test) and GPU_LABEL in (entry_property(test, "LABELS") or [])
     }
     assert "rocke_tiling_gpu_pytest" in gpu_entries, sorted(gpu_entries)
     if (PLATFORM.parent / "library" / "tests" / "ctest_lists.cmake").is_file():
@@ -1103,8 +1109,8 @@ def test_installed_platform_pytest_parts_keep_the_suite_tier_labels(tmp_path):
     tier the parts by their name prefix, so every part, and a part a new CMake
     group would add, gets the same labels, among them the standard and
     ffm-quick tiers that the single entry ran in. They are not in the quick
-    tier: CI runs quick as one shard, where a pytest suite runs whole, so quick
-    keeps only entries that cost seconds. The tiling package's entries run
+    tier, which holds only unit tests and basic enablement checks (TESTING.md
+    section 5.0.3). The tiling package's entries run
     tests outside tests/, so they are not parts and do not take their prefix;
     the categories tier each by its own name: rocke_tiling_pytest like the
     parts, rocke_tiling_gpu_pytest like the library's GPU entry, and

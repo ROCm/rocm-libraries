@@ -16,6 +16,7 @@ be refused rather than silently miscompiled or quietly slow.
 from __future__ import annotations
 
 import pytest
+from rocke.tests.comgr import compile_kernel_or_skip
 
 from kernels.gfx950.kda_chunkwise import (
     KdaChunkFusedSpec,
@@ -53,22 +54,6 @@ def test_gdn_fused_l2norm_requires_head_k_128():
     good = dc.replace(bad, head_k=128, tile=KdaTileSpec(chunk=32, block_size=256))
     ok2, why2 = is_valid_spec(good, arch=ARCH)
     assert ok2, why2
-
-
-def _compile_or_skip(kernel, *, arch: str = ARCH):
-    """Compile through comgr, skipping only when the toolchain is missing.
-
-    A failed compile is a real defect and propagates; an absent toolchain is an
-    environment fact and skips.
-    """
-    try:
-        from rocke.helpers.compile import compile_kernel
-    except Exception as e:  # noqa: BLE001  # pragma: no cover - env-dependent
-        pytest.skip(f"comgr toolchain unavailable: {e}")
-    try:
-        return compile_kernel(kernel, arch=arch, capture_ir_text=False)
-    except ImportError as e:  # pragma: no cover - env-dependent
-        pytest.skip(f"comgr toolchain unavailable: {e}")
 
 
 def _tile(**kw) -> KdaTileSpec:
@@ -135,7 +120,7 @@ class TestPrepSpec:
 
     def test_builds_and_fits(self):
         spec = KdaChunkPrepSpec()
-        art = _compile_or_skip(build_kda_chunk_prep(spec))
+        art = compile_kernel_or_skip(build_kda_chunk_prep(spec), arch=ARCH)
         assert art.hsaco_bytes > 0
 
     def test_invalid_spec_raises(self):
@@ -221,7 +206,9 @@ class TestFusedSpec:
         )
 
     def test_builds_and_fits(self):
-        art = _compile_or_skip(build_kda_chunk_fused(KdaChunkFusedSpec()))
+        art = compile_kernel_or_skip(
+            build_kda_chunk_fused(KdaChunkFusedSpec()), arch=ARCH
+        )
         assert art.hsaco_bytes > 0
 
 
@@ -314,7 +301,9 @@ class TestScanSpec:
             assert "8" in why
 
     def test_builds_and_fits(self):
-        art = _compile_or_skip(build_kda_chunk_scan(KdaChunkScanSpec()))
+        art = compile_kernel_or_skip(
+            build_kda_chunk_scan(KdaChunkScanSpec()), arch=ARCH
+        )
         assert art.hsaco_bytes > 0
 
 

@@ -833,7 +833,7 @@ def test_reference_ctests_keep_the_shared_reference_labels(tmp_path):
     Every rocke_<operation>_reference_unit_pytest and published
     rocke_<operation>_gpu_<arch>_pytest needs each category label that the
     shared rocke_reference_common_pytest gets. A name that no longer matches
-    the patterns keeps only the quick label baked into the installed tests.
+    the patterns keeps only the standard label baked into the installed tests.
     """
     published = _published(tmp_path)
     names = _reference_ctests(published)

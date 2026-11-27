@@ -24,6 +24,7 @@ from pathlib import Path
 from .platform_build import configure_platform
 
 __all__ = [
+    "GPU_LABEL",
     "GPU_RESOURCE_LOCK",
     "PROVIDER_CTEST_SUBDIR",
     "configure_installed_ctest",
@@ -38,6 +39,9 @@ PROVIDER_CTEST_SUBDIR = "hip_kernel_provider"
 # The CTest resource lock of every entry whose tests launch GPU work
 # (_ROCKE_INSTALLED_GPU_RESOURCE_LOCK in platform/CMakeLists.txt).
 GPU_RESOURCE_LOCK = "rocke_gpu"
+# The CTest label of the entries registered to launch GPU work; each also takes
+# GPU_RESOURCE_LOCK.
+GPU_LABEL = "gpu"
 
 
 def list_ctest_entries(

@@ -27,8 +27,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# torch must be the ROCm build for your system (install from the ROCm wheel
-# index, not here); see requirements.txt / BUILD.md.
+# torch is not a dependency; a remaining use takes the ROCm build matching the
+# system ROCm, installed separately (see AGENTS.md).
 dev = [
     # pytest 9 runs subtests itself; rocke.tests.sweep_guard needs its
     # subtest reports.

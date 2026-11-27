@@ -97,8 +97,9 @@ rocke-attention-combo-sweep --list-only --arch gfx950
 pytest rocke/library/tests
 ```
 
-ROCm PyTorch must come from the ROCm wheel index for your system (see
-`platform/requirements.txt` / `platform/BUILD.md`); it is not installed here.
+rocKE does not depend on PyTorch, and it is not installed here. A remaining use
+that needs it takes a ROCm torch wheel matching the system ROCm
+(`platform/AGENTS.md`, "Virtualenv for GPU and numeric lanes").
 
 ## Daily loop
 
@@ -121,8 +122,9 @@ pip install --config-settings editable_mode=compat -e "rocke/platform[dev]"
 pip install --config-settings editable_mode=compat --no-deps -e rocke/library
 # the heuristics scripts' and tests' packages; without them those tests skip:
 pip install -r rocke/platform/python/rocke/heuristics/tests/requirements.txt
-# torch: ROCm build for your system (see platform/requirements.txt). A CPU
-# torch lets the non-GPU suite import/run; GPU tests then skip without a device.
+# torch: not needed; a remaining use takes a ROCm build matching the system
+# ROCm (platform/AGENTS.md). A CPU torch lets the non-GPU suite import/run;
+# GPU tests then skip without a device.
 
 pytest rocke/platform/tests rocke/library/tests
 ```

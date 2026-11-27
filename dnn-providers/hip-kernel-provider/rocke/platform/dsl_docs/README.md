@@ -10,12 +10,12 @@ changes.
 
 > **Getting started / prerequisites.** New to the DSL? Start with
 > [`development/setup_guide.md`](./development/setup_guide.md) — recommended stack
-> (**ROCm 7.2 + PyTorch 2.12, Python 3.12**), virtual-environment setup, building
+> (its §1), virtual-environment setup, building
 > the optional C++ engine, the environment-variable reference (`ROCKE_BACKEND`,
 > `ROCKE_LLVM_FLAVOR`, …), and step-by-step setup for **Linux and Windows**.
 > Then follow [`development/onboarding.md`](./development/onboarding.md) to learn
-> to author kernels. To reproduce the example READMEs' numbers, use the ROCm 7.2
-> stack. AUTO queries the loaded COMGR compiler’s LLVM version; select an
+> to author kernels. To reproduce an example README's numbers, use the stack it
+> records with them. AUTO queries the loaded COMGR compiler’s LLVM version; select an
 > explicit flavor for offline emission, not from the ROCm release label.
 
 > **Numerics.** How each data type treats NaN, infinity, rounding, saturation
@@ -94,7 +94,7 @@ New to the DSL? Read in this order:
 26. [`autotune/overview.md`](./autotune/overview.md)
 27. [`development/testing.md`](./development/testing.md)
 28. [`development/extending.md`](./development/extending.md)
-29. [`development/setup_guide.md`](./development/setup_guide.md) — prerequisites (ROCm 7.2 / PyTorch 2.12), venv setup, building the C++ engine, env-variable reference; Linux & Windows
+29. [`development/setup_guide.md`](./development/setup_guide.md) — prerequisites (the recommended stack), venv setup, building the C++ engine, env-variable reference; Linux & Windows
 30. [`development/onboarding.md`](./development/onboarding.md) — guided learning path for kernel authors
 31. [`development/engine_contributing.md`](./development/engine_contributing.md) — the dual-backend contract; required reading before editing engine internals
 32. [`development/engine_parity.md`](./development/engine_parity.md) — the Python⇄C++ parity rule: every optimization needs both engines (for humans and AI agents)

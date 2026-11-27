@@ -68,7 +68,7 @@ for what is actually exercised vs. manual/diagnostic/demo.
 |---|---|---|
 | `core/` | `test_ir_serialize.py`, `dsl_optimization/` (constant-fold, unroll, barrier) | `ir_serialize_roundtrip.cpp` (**CTest**); `test_gemm_spec_dict_binding_parity.py` (source-only: the GEMM spec dicts against the binding's key reads, run from the source tree as the `rocke_gemm_spec_dict_binding_parity` **CTest**); `smoke.cpp` (optional build-only target, **not** registered); `ir_lower_cli.cpp` (built as `rocke_ir_lower_cli`, not a test: the C++ HIP lowerer of the both-engine HIP checks where the binding is absent) |
 | `helpers/` | (covered today via `test_rocke.py` TestHelpers; dedicated split is a follow-up) | - |
-| `instances/` | `test_rocke_multiarch.py`, `test_gfx1250_*`, `test_moe_*`, `test_wmma_schedule.py`, `test_rocke_gfx950_smoke.py` | `tiled_attention_2d_reentrancy.cpp` (**CTest**); `parity/` 47 `*_emit.py`/`*_emit.c` pairs + `run_parity.py` (driven by the byte-identity gate, **not** pytest); `differential/` drivers `run_diff.py`, `fuzz_diff.py`, `ir_artifact_diff.py`, `numeric.py`; `jit_demo.cpp`, `gemm_jit_demo.cpp` (manual demos, **not** built/registered) |
+| `instances/` | `test_rocke_multiarch.py`, `test_gfx1250_*`, `test_moe_*`, `test_wmma_schedule.py` | `tiled_attention_2d_reentrancy.cpp` (**CTest**); `parity/` `*_emit.py`/`*_emit.c` pairs + `run_parity.py` (driven by the byte-identity gate, **not** pytest); `differential/` drivers `run_diff.py`, `fuzz_diff.py`, `ir_artifact_diff.py`, `numeric.py`; `jit_demo.cpp`, `gemm_jit_demo.cpp` (manual demos, **not** built/registered) |
 | `runtime/` | (covered via `test_rocke.py`; dedicated split is a follow-up) | - |
 | `dispatch/` | `dispatch_tests/{gemm,attention,conv,moe,norm}` | - |
 | `analysis/` | (covered via `test_rocke.py`) | - |
@@ -314,21 +314,21 @@ CTests. Legacy violations remain tracked as TESTING.md gap G9.
 | `rocke_library_runner_contract_pytest` | Affordable-lane selection, resource defaults, and gate verdict policy | comprehensive and full; excluded from quick/standard pre-merge and post-merge runs |
 | `rocke_library_worker_integration_pytest` | Real file-worker subprocess, timeout, signal, package-identity, and process-ownership lifecycle | comprehensive and full; excluded from quick/standard pre-merge and post-merge runs |
 | `rocke_library_counted_structural_gate` | Exhaustive counted-wait IR model, LDS hazards, step equivalence, lowering and mirror-edge refusal coverage | comprehensive and full; host-only structural gate |
-| `rocke_library_counted_compiler_gate` | Pinned representative compile/final-ISA/resource subset and canonical full-barrier twins on the LLVM 22/reference-comgr toolchain | comprehensive and full; compiler preflight required |
+| `rocke_library_counted_compiler_gate` | Representative compile/final-ISA/resource subset and canonical full-barrier twins | comprehensive and full; compiler preflight required |
 
-The compiler gate preserves the resource table's existing qualification contract:
-LLVM 22 with the reference ROCm 7.2 comgr. LLVM 23 and LLVM 24 are emission/parity
-profiles, not qualified code-object resource lanes; their scheduling and register
-allocation cannot be judged against thresholds calibrated on the reference compiler.
-The two counted gates share the `rocke_counted_sync_gate` CTest resource
-lock. On a toolchain that is not its reference toolchain (another LLVM flavor
-or comgr) the gate ends at preflight with exit 77, which the installed entry
-reports as a skip that names the difference. The installed gate forces required
-mode for the rest: a toolchain query that fails, a reference comgr without a
-gate arch, or a missing `llvm-objdump` fails once at preflight. The source runner treats
-that gate as optional unless passed `--require-compiler-gate`, which counts the
-skip as a failure; an accepted optional skip reports `INCOMPLETE`, never plain
-`GREEN`.
+Tests use the loaded compiler
+([the test compiler rule](../dsl_docs/reference/env_flags.md#compiler-detection-and-provenance)).
+The compiler gate's resource thresholds keep the toolchain they were calibrated on
+until AICK-3320 unpins them: on any other LLVM flavor (requested or run by the
+loaded compiler) or comgr its preflight skips
+every row, naming the difference, as its `rocke.tests.pending_lanes` record says,
+and the session ends with exit 77, which the installed entry reports as a skip; the
+source runner reports `INCOMPLETE`, never plain `GREEN`, or a failure when passed
+`--require-compiler-gate`. The two counted gates share the
+`rocke_counted_sync_gate` CTest resource lock. The installed compiler gate forces
+required mode for the rest: a toolchain query that fails, a reference comgr without
+a gate arch, or a missing `llvm-objdump` fails once at preflight. The source runner
+treats those as an optional skip unless passed `--require-compiler-gate`.
 See [TESTING.md §5.0.1](../../TESTING.md#501-unit-discovery-versus-explicit-resource-gates)
 for the reusable placement contract.
 
