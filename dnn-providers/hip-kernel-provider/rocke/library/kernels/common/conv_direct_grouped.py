@@ -298,16 +298,19 @@ def _buf_store_vN(
     soff: Value,
     val: Value,
     dwords: int,
+    *,
+    cachepolicy: int = 0,
 ) -> None:
     """Dtype-dispatch for vectorised buffer store.
 
     ``dwords`` matches the ``dwords`` parameter of ``buffer_store_vN_f16`` /
     ``buffer_store_vN_bf16``: each dword holds two 16-bit elements.
+    ``cachepolicy`` is passed through (the intrinsic's aux immediate).
     """
     if dtype == "bf16":
-        b.buffer_store_vN_bf16(rsrc, voff, soff, val, dwords)
+        b.buffer_store_vN_bf16(rsrc, voff, soff, val, dwords, cachepolicy=cachepolicy)
     else:
-        b.buffer_store_vN_f16(rsrc, voff, soff, val, dwords)
+        b.buffer_store_vN_f16(rsrc, voff, soff, val, dwords, cachepolicy=cachepolicy)
 
 
 def _trunc_f32(b: IRBuilder, dtype: str, val: Value) -> Value:

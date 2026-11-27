@@ -43,6 +43,9 @@ __all__ = [
     "DIRECT_MFMA_DGRAD",
     "DIRECT_MFMA_HELPERS",
     "DIRECT_SPLIT_REDUCE",
+    "DIRECT_FWD_RR_MFMA",
+    "DIRECT_FWD_RR_WFMT",
+    "DIRECT_FWD_TAP1D_MFMA",
     "DIRECT_WGRAD_REDUCE",
     "DIRECT_WGRAD_TWO_STAGE",
     "PER_AXIS_PAD_VARIANTS",
@@ -152,6 +155,17 @@ DIRECT_SPLIT_REDUCE = "direct_split_reduce"
 # of any filter / stride / dilation / padding (conv_direct_fwd_flex_mfma);
 # split_c > 1 writes the direct_split_reduce workspace.
 DIRECT_FWD_FLEX_MFMA = "direct_fwd_flex_mfma"
+# Wave64 MFMA (gfx950) dense 3x3 stride-1 forward that keeps input rows in
+# registers across the filter rows and reads pre-formatted weights straight
+# into VGPRs (conv_direct_fwd_rr_mfma) ...
+DIRECT_FWD_RR_MFMA = "direct_fwd_rr_mfma"
+# ... and its weight-format pass (KRSC -> MFMA operand tiles), a forward
+# helper like the split-C reduction: shape-independent (C and K are
+# kernargs), one binary per dtype, found by exact identity.
+DIRECT_FWD_RR_WFMT = "direct_fwd_rr_wfmt"
+# Wave64 MFMA (gfx950) 1-D tap-reuse forward for dense 1 x S filters, stride 1,
+# any width dilation and padding (conv_direct_fwd_tap1d_mfma); workspace always 0.
+DIRECT_FWD_TAP1D_MFMA = "direct_fwd_tap1d_mfma"
 # Stride-1 depthwise dgrad through the output-stationary forward kernel with
 # the filter rotated by 180 degrees (DirectDepthwiseTiledSpec(dgrad=True)).
 DIRECT_DEPTHWISE_TILED_DGRAD = "direct_depthwise_tiled_dgrad"
@@ -164,6 +178,8 @@ DIRECT_DEPTHWISE_TILED_DGRAD = "direct_depthwise_tiled_dgrad"
 PER_AXIS_PAD_VARIANTS = (
     DIRECT_DEPTHWISE_TILED_DGRAD,
     DIRECT_FWD_FLEX_MFMA,
+    DIRECT_FWD_RR_MFMA,
+    DIRECT_FWD_TAP1D_MFMA,
     DIRECT_FWD_SMALLK_WMMA,
     DIRECT_FWD_SMALLK_MFMA,
     DIRECT_FWD_WMMA,
@@ -497,6 +513,18 @@ def make_direct_spec(variant: str, problem, knobs: dict, wave_size: int = 64):
         from kernels.common.conv_direct_fwd_flex_mfma import FwdFlexMfmaSpec
 
         return FwdFlexMfmaSpec(problem=problem, name="rocke_fwd_flex_mfma", **knobs)
+    if variant == DIRECT_FWD_RR_MFMA:
+        from kernels.common.conv_direct_fwd_rr_mfma import FwdRrMfmaSpec
+
+        return FwdRrMfmaSpec(problem=problem, name="rocke_fwd_rr_mfma", **knobs)
+    if variant == DIRECT_FWD_RR_WFMT:
+        from kernels.common.conv_direct_fwd_rr_mfma import FwdRrWfmtSpec
+
+        return FwdRrWfmtSpec(problem=problem, name="rocke_fwd_rr_wfmt", **knobs)
+    if variant == DIRECT_FWD_TAP1D_MFMA:
+        from kernels.common.conv_direct_fwd_tap1d_mfma import FwdTap1dMfmaSpec
+
+        return FwdTap1dMfmaSpec(problem=problem, name="rocke_fwd_tap1d_mfma", **knobs)
     if variant == "direct_wgrad_small_c":
         # Bakes its channel counts: the im2col decode walks the (s, c) run.
         return dc.DirectConvWgradSpec(
@@ -891,6 +919,18 @@ def validate_direct_spec(variant: str, spec, arch: str) -> tuple[bool, str]:
 
             why = fwd_flex_mfma_reason(spec, arch)
             return why is None, why or "ok"
+        if variant == DIRECT_FWD_RR_MFMA:
+            from kernels.common.conv_direct_fwd_rr_mfma import fwd_rr_mfma_reason
+
+            why = fwd_rr_mfma_reason(spec, arch)
+            return why is None, why or "ok"
+        if variant == DIRECT_FWD_RR_WFMT:
+            return True, "ok"
+        if variant == DIRECT_FWD_TAP1D_MFMA:
+            from kernels.common.conv_direct_fwd_tap1d_mfma import fwd_tap1d_mfma_reason
+
+            why = fwd_tap1d_mfma_reason(spec, arch)
+            return why is None, why or "ok"
     except ValueError as e:
         return False, str(e)
     raise ValueError(f"unknown direct conv variant {variant!r}")
@@ -911,8 +951,10 @@ def select_direct_kernel_builder(variant: str, spec, arch: str):
     from kernels.common import conv_direct_dgrad_wmma as dwm
     from kernels.common import conv_direct_dw_fwd_wmma as dfw
     from kernels.common import conv_direct_fwd_flex_mfma as ffx
+    from kernels.common import conv_direct_fwd_tap1d_mfma as ft1d
     from kernels.common import conv_direct_fwd_gstream_wmma as fgs
     from kernels.common import conv_direct_fwd_pp_mfma as fpp
+    from kernels.common import conv_direct_fwd_rr_mfma as frr
     from kernels.common import conv_direct_fwd_tapouter_wmma as ft
     from kernels.common import conv_direct_dw_wgrad as dw
     from kernels.common import conv_direct_dw_wgrad_mfma as dwmf
@@ -975,6 +1017,9 @@ def select_direct_kernel_builder(variant: str, spec, arch: str):
         DIRECT_DGRAD_REORGANIZE_RTC: dc.build_direct_reorganize_weights,
         DIRECT_SPLIT_REDUCE: dn.build_direct_conv_split_reduce,
         DIRECT_FWD_FLEX_MFMA: ffx.build_fwd_flex_mfma,
+        DIRECT_FWD_RR_MFMA: frr.build_fwd_rr_mfma,
+        DIRECT_FWD_RR_WFMT: frr.build_fwd_rr_wfmt,
+        DIRECT_FWD_TAP1D_MFMA: ft1d.build_fwd_tap1d_mfma,
     }
     return builders[variant](spec, arch=arch)
 

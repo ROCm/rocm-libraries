@@ -766,16 +766,22 @@ _DIRECT_COUNTS = {
     "direct_depthwise_win": 759,
 }
 #: Forward direct identities per dtype the packaged launch refuses as an instance: the
-#: split-C fold (the second launch of each split-C instance), and the four gfx950
-#: MFMA direct families (small-channel, small-K, ping-pong and flattened-pixel), not
-#: yet in AOT_DIRECT_ALGORITHMS.
+#: split-C fold (the second launch of each split-C instance), and the gfx950 MFMA
+#: direct families (small-channel, small-K, ping-pong, flattened-pixel,
+#: rows-in-registers with its weight-format helper, and 1-D tap-reuse), not yet in
+#: AOT_DIRECT_ALGORITHMS.
 _REFUSED_DIRECT_COUNTS = {
     "direct_split_reduce": 4,
     "direct_fwd_smallc_mfma": 222,
     "direct_fwd_smallk_mfma": 44,
     "direct_fwd_pp_mfma": 3,
     "direct_fwd_flex_mfma": 102,
+    "direct_fwd_tap1d_mfma": 88,
+    "direct_fwd_rr_wfmt": 8,
 }
+#: The rows-in-registers forward's cells differ by dtype (XCD-walk and chunked
+#: column cells are offered for some dtypes only).
+_REFUSED_DIRECT_COUNTS_BY_DTYPE = {"direct_fwd_rr_mfma": {"fp16": 63, "bf16": 54}}
 #: Identities per (dtype, algorithm) the IR and serving tests sample, spread evenly
 #: over the sweep's order (capabilities outermost, then knobs). std and spatial are
 #: checked whole. ``check_direct_ir.py``-style runs of every identity are out of tree.
@@ -804,12 +810,18 @@ def test_unmodeled_direct_identities_are_refused(all_direct_jobs):
         assert spec is None, job.identity.label()
         if key == "direct_split_reduce":
             assert reason == AOT_REFUSED_SPLIT_REDUCE
+        elif key == "direct_fwd_rr_wfmt":
+            assert reason == f"forward helper {key!r} is not packaged"
         else:
             assert reason.startswith(f"direct algorithm {key!r} has no packaged launch")
     assert refused == {
         (dtype, algorithm): count
         for dtype in ("fp16", "bf16")
         for algorithm, count in _REFUSED_DIRECT_COUNTS.items()
+    } | {
+        (dtype, algorithm): counts[dtype]
+        for dtype in ("fp16", "bf16")
+        for algorithm, counts in _REFUSED_DIRECT_COUNTS_BY_DTYPE.items()
     }
 
 

@@ -37,6 +37,7 @@ from __future__ import annotations
 import collections
 import hashlib
 import json
+import os
 import struct
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -98,6 +99,8 @@ from kernels.conv.direct_aot_jobs import (  # noqa: F401 (the grid and builder, 
     _dgrad_fused_rule_block_groups,
     _helper_identity,
     _split_reduce_identity,
+    _rr_wfmt_knobs,
+    rr_wfmt_identity,
     count_direct_jobs,
     dgrad_rtc_k_atoms,
     dgrad_rtc_spills,
@@ -121,6 +124,8 @@ from kernels.conv.direct_variants import (  # noqa: F401 (make_spec, validate_sp
     DIRECT_HALO_VARIANTS as _HALO_VARIANTS,
     DIRECT_MFMA_DGRAD as _MFMA_DGRAD,
     DIRECT_SPLIT_REDUCE as _SPLIT_REDUCE,
+    DIRECT_FWD_RR_MFMA as _FWD_RR_MFMA,
+    DIRECT_FWD_RR_WFMT as _RR_WFMT,
     DIRECT_WGRAD_FOLD as _WGRAD_FOLD,
     DIRECT_WGRAD_FOLDED as _WGRAD_FOLDED,
     direct_dgrad_kernarg_direction,
@@ -594,6 +599,36 @@ def plan_for(
             DirectPlan(identity, (conv, fold), {"ws_split": spec.workspace_bytes}),
             "ok",
         )
+    if variant == _FWD_RR_MFMA:
+        # The weight-format pass (KRSC -> MFMA operand tiles in ws_wf), then
+        # the conv reading ws_wf as its weights.
+        kw16 = spec.kw16
+        fw = problem.KW
+        nwk = spec.nwk
+        wfmt_id = rr_wfmt_identity(
+            identity.arch, identity.wave_size, identity.dtype_a, kw16, fw, nwk
+        )
+        entry = cache.entry_meta(wfmt_id)
+        if entry is None:
+            return None, f"missing cached {_RR_WFMT} helper (rebuild the cache)"
+        wfmt_knobs = _rr_wfmt_knobs(kw16, fw, nwk)
+        grid, block = make_spec(_RR_WFMT, problem, wfmt_knobs).launch_geometry()
+        fmt = DirectStep(
+            kernel_name=entry["kernel_name"],
+            hsaco_path=cache.hsaco_path(wfmt_id),
+            signature=conv_direct_transform_signature(identity.dtype_a, True),
+            grid=grid,
+            block=block,
+            buffers=("w", None, "ws_wf"),
+            scalars=(("p_cpg", problem.cpg), ("p_kpg", problem.kpg)),
+        )
+        conv = _conv_step(
+            identity, hsaco_path, meta, spec, problem, "fwd", ("x", "ws_wf", "y")
+        )
+        return (
+            DirectPlan(identity, (fmt, conv), {"ws_wf": spec.workspace_bytes()}),
+            "ok",
+        )
     if identity.direction == "direct_fwd":
         step = _conv_step(
             identity, hsaco_path, meta, spec, problem, "fwd", ("x", "w", "y")
@@ -807,7 +842,40 @@ def direct_plans(
             rejected.append((identity, why))
         else:
             plans.append(plan)
+    if direction == "fwd" and FOLD_1D:
+        fp = folded_1d_problem(problem)
+        if fp is not None:
+            fplans, _ = direct_plans(cache, fp, "fwd", arch)
+            plans += [p for p in fplans if p.identity.algorithm in FOLD_1D_FAMILIES]
     return plans, rejected
+
+
+#: Run a 1xS stride-1 forward with no row padding as the Sx1 forward over
+#: [N*H, W, 1, C] (the same bytes), on the width-1 (unfolded) tiles
+#: (ROCKE_FOLD_1D=0 turns it off).
+FOLD_1D = os.environ.get("ROCKE_FOLD_1D", "1") != "0"
+FOLD_1D_FAMILIES = ("direct_fwd_rr_mfma",)
+
+
+def folded_1d_problem(problem):
+    """The Sx1 layer over ``[N*H, W, 1, C]`` equal to the 1xS ``problem``, or None."""
+    p = problem
+    if (
+        p.KH != 1
+        or p.KW < 2
+        or p.PAD != 0
+        or p.stride != 1
+        or p.dil_h != 1
+        or p.dil_w != 1
+        or p.groups != 1
+        or getattr(p, "is_3d", False)
+        or p.N * p.H > 2**31 - 64
+    ):
+        return None
+    pw = p.PAD_W
+    return replace(
+        p, N=p.N * p.H, H=p.W, W=1, KH=p.KW, KW=1, PAD=pw, pad_w=-1 if pw == 0 else 0
+    )
 
 
 def launch_values(

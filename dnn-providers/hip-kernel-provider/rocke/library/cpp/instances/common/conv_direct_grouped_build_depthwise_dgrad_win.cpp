@@ -501,10 +501,22 @@ V* rocke_dconv_buf_load_vN(rocke_ir_builder_t* b, bool bf16, V* rsrc, V* voff, V
 void rocke_dconv_buf_store_vN(
     rocke_ir_builder_t* b, bool bf16, V* rsrc, V* voff, V* soff, V* val, int dwords)
 {
+    rocke_dconv_buf_store_vN_ex(b, bf16, rsrc, voff, soff, val, dwords, 0);
+}
+
+void rocke_dconv_buf_store_vN_ex(rocke_ir_builder_t* b,
+                                 bool bf16,
+                                 V* rsrc,
+                                 V* voff,
+                                 V* soff,
+                                 V* val,
+                                 int dwords,
+                                 int cachepolicy)
+{
     if(bf16)
-        rocke_b_buffer_store_vN_bf16(b, rsrc, voff, soff, val, dwords);
+        rocke_b_buffer_store_vN_bf16_ex(b, rsrc, voff, soff, val, dwords, cachepolicy);
     else
-        rocke_b_buffer_store_vN_f16(b, rsrc, voff, soff, val, dwords);
+        rocke_b_buffer_store_vN_f16_ex(b, rsrc, voff, soff, val, dwords, cachepolicy);
 }
 
 V* rocke_dconv_trunc_f32(rocke_ir_builder_t* b, bool bf16, V* val)

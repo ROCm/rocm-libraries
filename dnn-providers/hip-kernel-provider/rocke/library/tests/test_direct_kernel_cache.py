@@ -84,9 +84,13 @@ def _problem(**kw) -> DirectConvProblem:
 # 1x7 with column padding).
 # The flattened-pixel MFMA forward (gfx950) indexes its im2col by output pixel
 # and takes any padding, stride and dilation.
+# The rows-in-registers forward (gfx950) takes padding 0..2 on its 3x3 and 3x1
+# rows, the tap-reuse forward its 1 x S rows' own column padding and dilation.
 _PADDING_GENERIC_FWD = {
     "direct_depthwise_col",
     "direct_fwd_flex_mfma",
+    "direct_fwd_rr_mfma",
+    "direct_fwd_tap1d_mfma",
     "direct_fwd_smallc_mfma",
     "direct_fwd_smallk_mfma",
 }
@@ -119,7 +123,11 @@ def test_only_the_nongrouped_kernel_is_dilated(jobs):
         j.identity for j in jobs if j.identity.dilation_h * j.identity.dilation_w > 1
     ]
     assert dilated
-    assert {i.algorithm for i in dilated} == {"direct_nongrouped", DIRECT_FWD_FLEX_MFMA}
+    assert {i.algorithm for i in dilated} == {
+        "direct_nongrouped",
+        DIRECT_FWD_FLEX_MFMA,
+        "direct_fwd_tap1d_mfma",
+    }
 
 
 @pytest.mark.parametrize(
@@ -326,7 +334,13 @@ def test_group_count_is_runtime(cache, groups):
         "block_groups" in why
         for ident, why in rejected
         if ident.algorithm
-        not in (*dks._HALO_VARIANTS, DIRECT_FWD_PP_MFMA, DIRECT_FWD_FLEX_MFMA)
+        not in (
+            *dks._HALO_VARIANTS,
+            DIRECT_FWD_PP_MFMA,
+            DIRECT_FWD_FLEX_MFMA,
+            "direct_fwd_rr_mfma",
+            "direct_fwd_tap1d_mfma",
+        )
     )
 
 
@@ -1454,7 +1468,7 @@ def test_dgrad_rtc_grid_skips_wide_q_heavy_preloads(jobs):
 def test_plans_pack_against_their_signatures(cache, direction, problem):
     plans, _ = dks.direct_plans(cache, problem, direction, _ARCH)
     assert plans
-    names = ("x", "w", "y", "dy", "dx", "dw", "ws_t", "ws_coa", "ws_split")
+    names = ("x", "w", "y", "dy", "dx", "dw", "ws_t", "ws_coa", "ws_split", "ws_wf")
     ptrs = {n: 0x1000 * (i + 1) for i, n in enumerate(names)}
     sizes = {n: 1 << 20 for n in names}
     for plan in plans:
@@ -1845,7 +1859,17 @@ def test_run_from_cache_batch_chunks_are_balanced():
             assert s_i[name] == n * per_image < _TENSOR_LIMIT
         assert (p_i["w"], s_i["w"]) == (ptrs["w"], sizes["w"])
         n0 += n
+    # One launch over the whole batch (a plan that rebases its activations
+    # per image): the i32 size kernargs take a clamped value.
+    assert _chunk_buffers(ptrs, sizes, inputs, "y", [31], 0, clamp=True) == (
+        ptrs,
+        {k: min(v, _TENSOR_LIMIT - 1) for k, v in sizes.items()},
+    )
+    # Any other plan keeps its true sizes, so the kernarg packer still refuses
+    # an oversized buffer instead of launching on truncated bounds.
     assert _chunk_buffers(ptrs, sizes, inputs, "y", [31], 0) == (ptrs, sizes)
+    small = {k: min(v, 4096) for k, v in sizes.items()}
+    assert _chunk_buffers(ptrs, small, inputs, "y", [31], 0) == (ptrs, small)
 
 
 def test_run_from_cache_wgrad_chunks_accumulate_into_one_dw():
@@ -1938,7 +1962,12 @@ def test_measure_plans_skips_a_plan_whose_kernargs_do_not_fit(monkeypatch, capsy
             hsaco_path=None, kernel_name=kernel_name, signature=None, grid=(1, 1, 1)
         )
         step.block = (64, 1, 1)
-        return SimpleNamespace(label=label, steps=(step,), zeroed=())
+        return SimpleNamespace(
+            label=label,
+            steps=(step,),
+            zeroed=(),
+            identity=SimpleNamespace(algorithm="direct_nongrouped"),
+        )
 
     plans = [plan("big", "too_big"), plan("fits", "fits")]
     results, rc = bdc._measure_plans(
@@ -1963,6 +1992,80 @@ def test_measure_plans_skips_a_plan_whose_kernargs_do_not_fit(monkeypatch, capsy
     assert (results, rc) == ([], 0)
     assert len(measured) == 1
     assert "[skip] big: kernarg does not fit" in capsys.readouterr().out
+
+
+def test_measure_plans_clamps_sizes_for_one_launch_plans_only(monkeypatch, capsys):
+    """Past the i32 byte range, an rr plan (one launch, per-image rebased)
+    launches with clamped sizes; any other plan keeps its true sizes, so the
+    kernarg packer refuses it and the sweep skips it."""
+    import struct
+    from types import SimpleNamespace
+
+    from benchmarks.common import benchmark_direct_conv as bdc
+
+    seen = {}
+    current = []
+
+    def launch_values(st, ptrs, sizes):
+        seen[st.kernel_name] = dict(sizes)
+        return sizes
+
+    monkeypatch.setattr(dks, "launch_values", launch_values)
+
+    class Launcher:
+        def bind(self, values, config):
+            if any(v > 2**31 - 1 for v in values.values()):
+                raise struct.error("'i' format requires -2147483648 <= number")
+            return lambda: None
+
+    class Modules:
+        def launcher(self, *, hsaco_path, kernel_name, signature):
+            return Launcher()
+
+    class Stop:
+        def measure(self, run, **kw):
+            current.append(run)
+            return None
+
+        def report(self, label):
+            pass
+
+    def plan(label, algorithm):
+        step = SimpleNamespace(
+            hsaco_path=None, kernel_name=label, signature=None, grid=(1, 1, 1)
+        )
+        step.block = (64, 1, 1)
+        return SimpleNamespace(
+            label=label,
+            steps=(step,),
+            zeroed=(),
+            identity=SimpleNamespace(algorithm=algorithm),
+        )
+
+    plans = [plan("other", "direct_nongrouped"), plan("rr", "direct_fwd_rr_mfma")]
+    bdc._measure_plans(
+        args=SimpleNamespace(fast_rank=False, warmup=1, iters=1),
+        plans=plans,
+        modules=Modules(),
+        rt=None,
+        ptrs={},
+        sizes={"x": 2**31 + 4096},
+        inputs={},
+        out_name="y",
+        out_like=None,
+        out_dtype="fp32",
+        ref_out=None,
+        flop=1.0,
+        bytes_xfer=1.0,
+        stop=Stop(),
+        chunks=[1],
+        per_chunk={pl.label: [pl] for pl in plans},
+        tol=dks.direct_verify_tol("fp16", "gfx942"),
+    )
+    assert seen["other"] == {"x": 2**31 + 4096}
+    assert seen["rr"] == {"x": 2**31 - 1}
+    assert len(current) == 1
+    assert "[skip] other: kernarg does not fit" in capsys.readouterr().out
 
 
 def test_run_from_cache_plans_each_chunk_size():
@@ -2418,3 +2521,43 @@ def test_per_axis_pad_variants_drive_both_gates():
         assert one_padding == (variant not in dv.PER_AXIS_PAD_VARIANTS), (variant, why)
         checked += 1
     assert checked > len(dv.PER_AXIS_PAD_VARIANTS)
+
+
+def _rr_plans(plans):
+    return [p for p in plans if p.identity.algorithm == "direct_fwd_rr_mfma"]
+
+
+def test_rr_forward_plan_formats_the_weights_then_convolves(cache):
+    """The shipped rr route: step one writes the MFMA weight format into
+    ``ws_wf``, step two reads it as the conv's weights; the plan's workspace is
+    the spec's own ``workspace_bytes``."""
+    problem = _problem(N=8, H=56, W=56, groups=1, cpg=64, kpg=64)
+    plans, _ = dks.direct_plans(cache, problem, "fwd", _ARCH)
+    rr = _rr_plans(plans)
+    assert rr
+    for plan in rr:
+        fmt, conv = plan.steps
+        assert fmt.buffers == ("w", None, "ws_wf")
+        assert conv.buffers == ("x", "ws_wf", "y")
+        assert list(plan.workspaces) == ["ws_wf"]
+        assert plan.workspaces["ws_wf"] > 0
+        assert plan.identity.algorithm == "direct_fwd_rr_mfma"
+
+
+def test_one_by_s_forward_folds_to_an_unfolded_rr_plan(cache, monkeypatch):
+    """A 1x3 pad-0 problem is served by the rr kernel on its Sx1 fold
+    ([N*H, W, 1, C]); ROCKE_FOLD_1D=0 turns the route off."""
+    problem = _problem(
+        N=4, H=64, W=128, groups=1, cpg=128, kpg=256, KH=1, KW=3, PAD=0, pad_w=0
+    )
+    fold = dks.folded_1d_problem(problem)
+    assert (fold.N, fold.H, fold.W, fold.KH, fold.KW) == (256, 128, 1, 3, 1)
+    plans, _ = dks.direct_plans(cache, problem, "fwd", _ARCH)
+    folded = _rr_plans(plans)
+    assert folded
+    for plan in folded:
+        geom = plan.steps[-1].conv_args.geom
+        assert (geom.Ho, geom.Wo) == (fold.Ho, 1)
+    monkeypatch.setattr(dks, "FOLD_1D", False)
+    plans, _ = dks.direct_plans(cache, problem, "fwd", _ARCH)
+    assert _rr_plans(plans) == []

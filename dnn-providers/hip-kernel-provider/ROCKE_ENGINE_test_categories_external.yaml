@@ -188,6 +188,8 @@ test_categories:
       - "rocke_spec_refusal_guards"
       - "rocke_conv_direct_fwd_pp_mfma_host"
       - "rocke_conv_direct_fwd_flex_mfma_host"
+      - "rocke_conv_direct_fwd_rr_mfma_host"
+      - "rocke_conv_direct_fwd_tap1d_mfma_host"
       - "rocke_conv_direct_wgrad_refusals_host"
       - "rocke_mx_gemm_host"
       - "rocke_wmma_fmha_decode_host"

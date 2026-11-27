@@ -14,6 +14,8 @@ This page covers:
 - `library/kernels/common/conv_direct_fwd_pp_mfma.py` (gfx950 ping-pong direct forward)
 - `library/kernels/common/conv_direct_pp_mfma.py` (the ping-pong pipeline the gfx950 direct dgrad and forward share)
 - `library/kernels/common/conv_direct_fwd_flex_mfma.py` (gfx950 flattened-pixel direct forward)
+- `library/kernels/common/conv_direct_fwd_rr_mfma.py` (gfx950 rows-in-registers direct forward, with its weight-format helper)
+- `library/kernels/common/conv_direct_fwd_tap1d_mfma.py` (gfx950 1-D tap-reuse direct forward)
 - `library/kernels/common/img2col.py`
 
 Pooling (`platform/python/rocke/instances/common/pooling.py`) is a platform
@@ -1676,6 +1678,91 @@ least 1, the input image, output image, weight tensor and workspace slab
 variant `direct_fwd_flex_mfma`). The C++ twin covers every knob; the
 byte-identity gate is `library/tests/parity/conv_direct_fwd_flex_mfma_emit.{c,py}`,
 the GPU numeric test `library/tests/test_direct_fwd_flex_mfma.py`.
+
+## Direct Forward on MFMA with Rows in Registers (gfx950)
+
+`library/kernels/common/conv_direct_fwd_rr_mfma.py`, spec `FwdRrMfmaSpec`,
+builder `build_fwd_rr_mfma` (C++ twin `instance_conv_direct_fwd_rr_mfma.h`),
+plus the weight-format helper spec `FwdRrWfmtSpec`, builder
+`build_fwd_rr_wfmt` (same C++ header). A forward for gfx950 (wave64,
+`mfma_f32_16x16x32`) of dense 3x3 and 3x1 filters at stride 1 and no
+dilation. The arch gate reads `ArchTarget` capabilities (wave64, 16-byte
+`buffer_load ... lds`, `mfma_f32_16x16x32`), which of the known targets only
+gfx950 has.
+
+A workgroup of 8 waves owns a 16x32 output pixel tile (8 rows when `k4w`) and
+a block of output channels; each wave owns 8 output rows:
+
+- the 8 + 2 input rows a wave needs are read from LDS once per step and kept
+  in registers across the three filter rows; LDS holds only the
+  double-buffered input halo tile, filled with `buffer_load ... lds`;
+- the weights never touch LDS: the helper kernel re-lays the KRSC filter into
+  MFMA A-operand tiles (into the launch workspace, `workspace_bytes`), and a
+  step loads its tiles straight into VGPRs;
+- the waves of channel half 1 run one barrier behind those of half 0, so one
+  half's loads overlap the other half's MFMAs; the grid is persistent
+  (`PERSIST` blocks walk the tiles) and the last chunk of a tile already
+  stages the next tile's first chunk;
+- the epilogue runs in registers (a `permlane32_swap` plus a DPP row shift
+  make every store 16 bytes of consecutive channels) and overlaps the last
+  step's MFMAs.
+
+Knobs (the spec fields): `kw16` (block K of 128, 96 or 64 output channels),
+`k4w` (four waves along K, block K up to 256), `odd_c` (odd number of
+64-channel chunks), `c_tail` (C a multiple of 8, not of 64), `one_c` (one
+chunk per tile), `c64` (one step per filter column), `grp` (grouped rows, a
+whole number of K blocks per group), `unfold` (width-1 layers with a 3x1
+filter: 32 images per tile, which runs a folded 1x3 layer), `chunk`
+(`k4w` tiles of 8-column chunks, any width) and `xcd` (XCD-local tile walk).
+Runtime (kernargs, the direct-conv block): batch, extents and both channel
+counts. Build-time: the filter, padding, dtype and the knobs. Constraints:
+fp16 / bf16, 3x3 or 3x1, stride 1, dilation 1, row padding 0..2, column
+padding 0..KW-1, C a multiple of 64 (8 with `c_tail` / `one_c`), K a
+multiple of the block K, and the input image, output image and formatted
+weights each at most `INT32_MAX` bytes. The AOT grid is `FWD_RR_KNOBS`
+per (filter, padding) cell of the `direct_fwd_rr_mfma` variant
+(`kernels/conv/direct_aot_jobs.py`, gfx950 only, fp16 and bf16), which pulls
+in the matching weight-format helper job. The C++ twin covers every knob; the
+byte-identity gate is `library/tests/parity/conv_direct_fwd_rr_mfma_emit.{c,py}`,
+the GPU numeric test `library/tests/test_direct_fwd_rr_tap1d.py` (lane
+`gfx950-runner`), and the C++ host test `rocke_conv_direct_fwd_rr_mfma_host`.
+
+## Direct Forward on MFMA with 1-D Tap Reuse (gfx950)
+
+`library/kernels/common/conv_direct_fwd_tap1d_mfma.py`, spec
+`FwdTap1dMfmaSpec`, builder `build_fwd_tap1d_mfma` (C++ twin
+`instance_conv_direct_fwd_tap1d_mfma.h`). A dense (`groups == 1`) forward for
+gfx950 (wave64, `mfma_f32_16x16x32`) of `1 x S` filters at stride 1, any
+width dilation and any width padding up to `dilation * (S - 1)`. The arch
+gate is the same capability check as the rows-in-registers family.
+
+A workgroup owns `bx` consecutive output pixels of one row and `bk` output
+channels, and reduces over `ck`-channel chunks and the S taps:
+
+- a polyphase lane map gives each MFMA column `seg` output pixels such that
+  tap `s` of pixel `u` reads input fragment `u + s`: the `seg + S - 1`
+  fragments of a chunk are read from LDS once and reused by every tap from
+  registers, for any dilation;
+- the chunk's input window (`bx + dilation * (S - 1)` pixels, zero-filled
+  outside the row) is staged with `buffer_load ... lds` during the previous
+  chunk, in two window buffers (one when `C == ck`); the weights of a tap are
+  staged one step ahead in two stages, granule-swizzled on the global side.
+
+Knobs: `bk` (32, 64 or 128), `nwv` (4 or 8 waves), `seg`, `ck` (64, or 32
+for C not a multiple of 64) and `one` (single chunk, exactly when `C == ck`).
+Runtime (kernargs, the direct-conv block): batch, extents and both channel
+counts. Build-time: the filter width, padding, dilation and the knobs.
+Constraints: fp16 / bf16, `KH == 1`, no height padding, stride 1,
+`C % ck == 0`, `K % bk == 0`, the dilation at most 16 times the waves along
+X, the LDS tiles within the arch capacity, and the input, output and weight
+tensors each at most `INT32_MAX` bytes. The AOT grid is
+`FWD_TAP1D_LAYERS` ((S, pad, dilation) rows for S 3 / 7 / 11, dilation 1 / 3
+/ 5) times `FWD_TAP1D_KNOBS` (`kernels/conv/direct_aot_jobs.py`, variant
+`direct_fwd_tap1d_mfma`, gfx950 only, fp16 and bf16, `seg` fixed at 9). The
+C++ twin covers every knob; the byte-identity gate is
+`library/tests/parity/conv_direct_fwd_tap1d_mfma_emit.{c,py}`, the GPU numeric
+test `library/tests/test_direct_fwd_rr_tap1d.py` (lane `gfx950-runner`), and
+the C++ host test `rocke_conv_direct_fwd_tap1d_mfma_host`.
 
 ## Winograd Forward (gfx1250)
 
