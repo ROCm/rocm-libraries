@@ -54,8 +54,7 @@ def test_rank_configs(hardware):
     problem.mi_dtype = problem.a_dtype
 
     ranked_configs = origami.rank_configs(problem, hardware, configs, origami.model_t.gemm)
-    assert len(ranked_configs) > 0
-    assert len(ranked_configs) <= len(configs)
+    assert len(ranked_configs) == len(configs)
 
     # Check that results are sorted by latency (best first)
     for i in range(len(ranked_configs) - 1):

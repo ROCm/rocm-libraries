@@ -3270,7 +3270,7 @@ double compute_total_latency(const problem_t& problem,
 
   // Heuristic-driven kernel rejection (e.g. subtile kernels with small K).
   // When a matching heuristic marks the config as rejected, report the maximum
-  // latency so rank_configs() drops the kernel from selection entirely.
+  // latency so rank_configs() places the kernel after non-rejected candidates.
   if (get_heuristic_params(problem, hardware, config).reject) {
     return std::numeric_limits<double>::max();
   }

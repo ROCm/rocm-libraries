@@ -418,8 +418,7 @@ def test_att_rank_configs(hardware):
     problem = create_attention_problem(4096, 4096, 128, q_heads=32, batch=1, dtype="f16")
 
     ranked_configs = origami.rank_configs(problem, hardware, configs, origami.model_t.attention)
-    assert len(ranked_configs) > 0
-    assert len(ranked_configs) <= len(configs)
+    assert len(ranked_configs) == len(configs)
 
     # Check that results are sorted by latency (best first)
     for i in range(len(ranked_configs) - 1):
