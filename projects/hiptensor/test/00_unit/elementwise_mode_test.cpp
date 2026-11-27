@@ -29,7 +29,6 @@
 // mode that the output does not carry, since that would have to be reduced away.
 
 #include <gtest/gtest.h>
-#include <hip/hip_runtime.h>
 #include <hiptensor/hiptensor.h>
 
 constexpr int32_t mMode = 'm';

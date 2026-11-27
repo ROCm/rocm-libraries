@@ -34,11 +34,11 @@
 #include "elementwise_type_support.hpp"
 #include "logger.hpp"
 
-// Checks, when an elementwise plan (permutation, binary, or trinary) is created, that a kernel
-// instance can run the operation, so that an unsupported problem is reported by
-// hiptensorCreatePlan rather than when the plan is executed. Data types are checked with the same
-// rule as the execute functions, and the registry is queried for the operation's output rank and
-// data types.
+// Checks, when an elementwise plan (permutation, binary, trinary, or a reduction that keeps the
+// rank) is created, that a kernel instance can run the operation, so that an unsupported problem
+// is reported by hiptensorCreatePlan rather than when the plan is executed. Data types are checked
+// with the same rule as the execute functions, and the registry is queried for the operation's
+// output rank and data types.
 hiptensorStatus_t elementwiseCheckPlan(const hiptensorOperationDescriptor_t desc)
 {
     using hiptensor::Logger;
@@ -82,6 +82,22 @@ hiptensorStatus_t elementwiseCheckPlan(const hiptensorOperationDescriptor_t desc
             {desc->mDescA->mType, desc->mDescB->mType, desc->mDescC->mType, desc->mDescD->mType},
             desc->mScalarType);
         break;
+    case HIPTENSOR_REDUCTION:
+        // Only a reduction that keeps the rank runs on the elementwise kernels: hiptensorReduce
+        // executes it as the elementwise binary operation D = alpha * A + beta * C, with the
+        // operation hiptensorCreatePlan sets to HIPTENSOR_OP_ADD.
+        if(desc->mDescA->mLengths.size() != desc->mDescD->mLengths.size())
+        {
+            return HIPTENSOR_STATUS_SUCCESS;
+        }
+        inputs         = {desc->mDescA, desc->mDescC};
+        inModes        = {desc->mModeA, desc->mModeC};
+        output         = desc->mDescD;
+        outModes       = desc->mModeD;
+        operators      = {HIPTENSOR_OP_ADD, desc->mOpA, desc->mOpC};
+        typesSupported = hiptensor::isSupportedElementwiseTypeCombination(
+            {desc->mDescA->mType, desc->mDescC->mType, desc->mDescD->mType}, desc->mScalarType);
+        break;
     default:
         return HIPTENSOR_STATUS_SUCCESS;
     }
@@ -111,6 +127,7 @@ hiptensorStatus_t elementwiseCheckPlan(const hiptensorOperationDescriptor_t desc
 
     // Scalars other than one select the scaling kernels, which can run every execution of the
     // plan whatever scalars it is given.
+    // This relies on the pass-through (noop) instance set mirroring the scaling set.
     auto& instances = hiptensor::ElementwiseSolutionInstances::instance();
     auto  solutions = instances->query(std::vector<double>(inputs.size(), 2.0),
                                       inputs[0]->mLengths,

@@ -24,11 +24,11 @@
  *
  *******************************************************************************/
 
-// hiptensorCreatePlan checks that an elementwise operation (permutation, binary, trinary) has a
-// kernel that can run it. The elementwise kernels serve outputs of rank 2 to 6, so a plan for an
-// output of another rank is rejected with HIPTENSOR_STATUS_NOT_SUPPORTED when it is created
-// instead of failing when it is executed, and the plan handle is left unchanged. No kernel is
-// launched.
+// hiptensorCreatePlan checks that an elementwise operation (permutation, binary, trinary, or a
+// reduction that keeps the rank, which runs on the elementwise binary kernels) has a kernel that
+// can run it. The elementwise kernels serve outputs of rank 2 to 6, so a plan for an output of
+// another rank is rejected with HIPTENSOR_STATUS_NOT_SUPPORTED when it is created instead of
+// failing when it is executed, and the plan handle is left unchanged. No kernel is launched.
 
 #include <gtest/gtest.h>
 #include <hiptensor/hiptensor.h>
@@ -80,16 +80,13 @@ namespace
         }
 
         // A packed FP32 tensor with `rank` modes of extent 2, named 'a', 'b', ...
-        hiptensorTensorDescriptor_t makeTensor(uint32_t rank)
+        void makeTensor(uint32_t rank, hiptensorTensorDescriptor_t* desc)
         {
-            std::vector<int64_t>        lengths(rank, 2);
-            hiptensorTensorDescriptor_t desc{};
-            EXPECT_EQ(
-                hiptensorCreateTensorDescriptor(
-                    mHandle, &desc, rank, lengths.data(), nullptr, HIPTENSOR_R_32F, alignment),
-                HIPTENSOR_STATUS_SUCCESS);
-            mTensors.push_back(desc);
-            return desc;
+            std::vector<int64_t> lengths(rank, 2);
+            ASSERT_EQ(hiptensorCreateTensorDescriptor(
+                          mHandle, desc, rank, lengths.data(), nullptr, HIPTENSOR_R_32F, alignment),
+                      HIPTENSOR_STATUS_SUCCESS);
+            mTensors.push_back(*desc);
         }
 
         static std::vector<int32_t> modes(uint32_t rank)
@@ -102,11 +99,14 @@ namespace
             return result;
         }
 
-        hiptensorStatus_t createPermutation(uint32_t rank)
+        // The create helpers build the operation descriptor in mOpDesc; call them through
+        // ASSERT_NO_FATAL_FAILURE so that a test stops before createPlan if one fails.
+        void createPermutation(uint32_t rank)
         {
-            auto desc = makeTensor(rank);
+            hiptensorTensorDescriptor_t desc{};
+            ASSERT_NO_FATAL_FAILURE(makeTensor(rank, &desc));
             auto mode = modes(rank);
-            EXPECT_EQ(hiptensorCreatePermutation(mHandle,
+            ASSERT_EQ(hiptensorCreatePermutation(mHandle,
                                                  &mOpDesc,
                                                  desc,
                                                  mode.data(),
@@ -115,14 +115,14 @@ namespace
                                                  mode.data(),
                                                  HIPTENSOR_COMPUTE_DESC_32F),
                       HIPTENSOR_STATUS_SUCCESS);
-            return hiptensorCreatePlan(mHandle, &mPlan, mOpDesc, mPref, 0);
         }
 
-        hiptensorStatus_t createBinary(uint32_t rank)
+        void createBinary(uint32_t rank)
         {
-            auto desc = makeTensor(rank);
+            hiptensorTensorDescriptor_t desc{};
+            ASSERT_NO_FATAL_FAILURE(makeTensor(rank, &desc));
             auto mode = modes(rank);
-            EXPECT_EQ(hiptensorCreateElementwiseBinary(mHandle,
+            ASSERT_EQ(hiptensorCreateElementwiseBinary(mHandle,
                                                        &mOpDesc,
                                                        desc,
                                                        mode.data(),
@@ -135,14 +135,14 @@ namespace
                                                        HIPTENSOR_OP_ADD,
                                                        HIPTENSOR_COMPUTE_DESC_32F),
                       HIPTENSOR_STATUS_SUCCESS);
-            return hiptensorCreatePlan(mHandle, &mPlan, mOpDesc, mPref, 0);
         }
 
-        hiptensorStatus_t createTrinary(uint32_t rank)
+        void createTrinary(uint32_t rank)
         {
-            auto desc = makeTensor(rank);
+            hiptensorTensorDescriptor_t desc{};
+            ASSERT_NO_FATAL_FAILURE(makeTensor(rank, &desc));
             auto mode = modes(rank);
-            EXPECT_EQ(hiptensorCreateElementwiseTrinary(mHandle,
+            ASSERT_EQ(hiptensorCreateElementwiseTrinary(mHandle,
                                                         &mOpDesc,
                                                         desc,
                                                         mode.data(),
@@ -159,6 +159,32 @@ namespace
                                                         HIPTENSOR_OP_ADD,
                                                         HIPTENSOR_COMPUTE_DESC_32F),
                       HIPTENSOR_STATUS_SUCCESS);
+        }
+
+        // A reduction whose input A and output D have the same rank, which hiptensorReduce runs
+        // on the elementwise binary kernels.
+        void createSameRankReduction(uint32_t rank)
+        {
+            hiptensorTensorDescriptor_t desc{};
+            ASSERT_NO_FATAL_FAILURE(makeTensor(rank, &desc));
+            auto mode = modes(rank);
+            ASSERT_EQ(hiptensorCreateReduction(mHandle,
+                                               &mOpDesc,
+                                               desc,
+                                               mode.data(),
+                                               HIPTENSOR_OP_IDENTITY,
+                                               desc,
+                                               mode.data(),
+                                               HIPTENSOR_OP_IDENTITY,
+                                               desc,
+                                               mode.data(),
+                                               HIPTENSOR_OP_ADD,
+                                               HIPTENSOR_COMPUTE_DESC_32F),
+                      HIPTENSOR_STATUS_SUCCESS);
+        }
+
+        hiptensorStatus_t createPlan()
+        {
             return hiptensorCreatePlan(mHandle, &mPlan, mOpDesc, mPref, 0);
         }
 
@@ -172,45 +198,67 @@ namespace
 
 TEST_F(ElementwisePlanCheckTest, PermutationRank2IsSupported)
 {
-    EXPECT_EQ(createPermutation(2), HIPTENSOR_STATUS_SUCCESS);
+    ASSERT_NO_FATAL_FAILURE(createPermutation(2));
+    EXPECT_EQ(createPlan(), HIPTENSOR_STATUS_SUCCESS);
     EXPECT_NE(mPlan, kUnsetPlan);
     EXPECT_NE(mPlan, nullptr);
 }
 
 TEST_F(ElementwisePlanCheckTest, PermutationRank1ReturnsNotSupported)
 {
-    EXPECT_EQ(createPermutation(1), HIPTENSOR_STATUS_NOT_SUPPORTED);
+    ASSERT_NO_FATAL_FAILURE(createPermutation(1));
+    EXPECT_EQ(createPlan(), HIPTENSOR_STATUS_NOT_SUPPORTED);
     EXPECT_EQ(mPlan, kUnsetPlan);
 }
 
 TEST_F(ElementwisePlanCheckTest, PermutationRank7ReturnsNotSupported)
 {
-    EXPECT_EQ(createPermutation(7), HIPTENSOR_STATUS_NOT_SUPPORTED);
+    ASSERT_NO_FATAL_FAILURE(createPermutation(7));
+    EXPECT_EQ(createPlan(), HIPTENSOR_STATUS_NOT_SUPPORTED);
     EXPECT_EQ(mPlan, kUnsetPlan);
 }
 
 TEST_F(ElementwisePlanCheckTest, BinaryRank6IsSupported)
 {
-    EXPECT_EQ(createBinary(6), HIPTENSOR_STATUS_SUCCESS);
+    ASSERT_NO_FATAL_FAILURE(createBinary(6));
+    EXPECT_EQ(createPlan(), HIPTENSOR_STATUS_SUCCESS);
     EXPECT_NE(mPlan, kUnsetPlan);
     EXPECT_NE(mPlan, nullptr);
 }
 
 TEST_F(ElementwisePlanCheckTest, BinaryRank7ReturnsNotSupported)
 {
-    EXPECT_EQ(createBinary(7), HIPTENSOR_STATUS_NOT_SUPPORTED);
+    ASSERT_NO_FATAL_FAILURE(createBinary(7));
+    EXPECT_EQ(createPlan(), HIPTENSOR_STATUS_NOT_SUPPORTED);
     EXPECT_EQ(mPlan, kUnsetPlan);
 }
 
 TEST_F(ElementwisePlanCheckTest, TrinaryRank2IsSupported)
 {
-    EXPECT_EQ(createTrinary(2), HIPTENSOR_STATUS_SUCCESS);
+    ASSERT_NO_FATAL_FAILURE(createTrinary(2));
+    EXPECT_EQ(createPlan(), HIPTENSOR_STATUS_SUCCESS);
     EXPECT_NE(mPlan, kUnsetPlan);
     EXPECT_NE(mPlan, nullptr);
 }
 
 TEST_F(ElementwisePlanCheckTest, TrinaryRank7ReturnsNotSupported)
 {
-    EXPECT_EQ(createTrinary(7), HIPTENSOR_STATUS_NOT_SUPPORTED);
+    ASSERT_NO_FATAL_FAILURE(createTrinary(7));
+    EXPECT_EQ(createPlan(), HIPTENSOR_STATUS_NOT_SUPPORTED);
+    EXPECT_EQ(mPlan, kUnsetPlan);
+}
+
+TEST_F(ElementwisePlanCheckTest, SameRankReductionRank2IsSupported)
+{
+    ASSERT_NO_FATAL_FAILURE(createSameRankReduction(2));
+    EXPECT_EQ(createPlan(), HIPTENSOR_STATUS_SUCCESS);
+    EXPECT_NE(mPlan, kUnsetPlan);
+    EXPECT_NE(mPlan, nullptr);
+}
+
+TEST_F(ElementwisePlanCheckTest, SameRankReductionRank7ReturnsNotSupported)
+{
+    ASSERT_NO_FATAL_FAILURE(createSameRankReduction(7));
+    EXPECT_EQ(createPlan(), HIPTENSOR_STATUS_NOT_SUPPORTED);
     EXPECT_EQ(mPlan, kUnsetPlan);
 }
