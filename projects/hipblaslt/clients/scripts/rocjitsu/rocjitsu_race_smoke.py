@@ -13,8 +13,9 @@ if the detector reports a race, or if it never reaches a matrix instruction
 This script is installed with the hipBLASLt clients in
 <prefix>/share/hipblaslt/rocjitsu and by default tests the ROCm installation at
 <prefix>, which must also contain the rocjitsu launcher, its race and logging
-plugins and its device configs. TensileLite's test requirements must be
-installed in the Python environment.
+plugins and its device configs. The Python environment must have the
+TensileLite wheel from <prefix>/share/hipblaslt/tensilelite/wheels installed,
+together with TensileLite's test requirements.
 """
 
 import argparse
@@ -154,9 +155,6 @@ def main():
         rocm_path / "share" / "rocjitsu" / "configs" / config_name, "rocjitsu config"
     )
     bench = require(bin_dir / "hipblaslt-bench", "hipblaslt-bench")
-    tensilelite_root = require(
-        rocm_path / "share" / "hipblaslt" / "tensilelite", "TensileLite test tree"
-    )
     # tensilelite finds this client under ROCM_PATH; check it is installed.
     require(
         rocm_path / "libexec" / "hipblaslt" / "tensilelite" / "tensilelite-client",
@@ -180,9 +178,6 @@ def main():
                 env.get("LD_LIBRARY_PATH", ""),
             ],
         )
-    )
-    env["PYTHONPATH"] = os.pathsep.join(
-        filter(None, [str(tensilelite_root), env.get("PYTHONPATH", "")])
     )
     env["HSA_ENABLE_SDMA"] = "1"
 

@@ -72,14 +72,14 @@ function(hipblaslt_install_tensilelite_test_wheel source_root destination)
     else()
         message(FATAL_ERROR "No TensileLite wheel is available for the test artifact")
     endif()
-    # TheRock runs pytest with this artifact root on PYTHONPATH. Extract the
-    # validated pure-Python wheel so its packages are importable there while
-    # retaining the wheel file for installation tests.
+    # The artifact contains the selected wheel and tests. Keep the package
+    # unextracted so the artifact root cannot shadow the installed wheel.
     install(CODE "
         execute_process(
             COMMAND \"${Python3_EXECUTABLE}\"
                 \"${source_root}/scripts/install_release_wheels.py\"
                 --destination \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${destination}\"
+                --copy-only
                 ${_selection}
                 --copy-wheels \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${destination}/wheels\"
             RESULT_VARIABLE _tensilelite_wheel_install_result
