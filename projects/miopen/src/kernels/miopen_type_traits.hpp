@@ -37,8 +37,7 @@
 //    different header that defines the same names without the umbrella guard is not: with the MSVC
 //    STL, <cstddef> or <limits> pull in <xtr1common>; libc++ 15 and later define traits in
 //    <__type_traits/*.h> sub-headers. Pre-including only such a header, without the umbrella
-//    header, redefines the std names. The libc++ guards below only cover releases that predate
-//    those sub-headers; no supported toolchain pre-includes a libc++ header.
+//    header, redefines the std names. That case is not supported.
 #if defined(MIOPEN_HIP_RUNTIME_COMPILE) && !defined(_GLIBCXX_TYPE_TRAITS) && \
     !defined(_LIBCPP_TYPE_TRAITS) && !defined(_TYPE_TRAITS_)
 

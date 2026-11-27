@@ -4,11 +4,11 @@
 // Regression test: runtime-compiled MIOpen kernels must stay self-contained
 // when the host C++ standard library is unusable by the runtime compiler:
 // either unreachable (the AMD Windows ROCm wheels compile HIPRTC without
-// one; kernels then failed with "'type_traits' file not found", see
-// miopen_type_traits.hpp) or reachable but unparseable by the device
-// compiler (libstdc++ 12 headers mixed with GCC 13's bits/c++config.h). An
-// inline kernel using the STL-like parts added for that case must compile,
-// launch and produce correct values without the host STL.
+// one; kernels then failed with "'type_traits' file not found") or
+// reachable but unparseable by the device compiler (libstdc++ 12 headers
+// mixed with GCC 13's bits/c++config.h). An inline kernel using the
+// STL-like parts added for that case must compile, launch and produce
+// correct values without the host STL.
 // A unique per-run option keeps the options-keyed kernel binary cache from
 // satisfying any compile below.
 
@@ -39,8 +39,8 @@ const char* kTrivialKernel = "#ifndef MIOPEN_HIP_RUNTIME_COMPILE\n"
                              "#endif\n"
                              "extern \"C\" __global__ void gtest_rtc_trivial() {}\n";
 
-// Fails to compile (via #error) exactly when any host standard-library
-// header is reachable.
+// Fails to compile (via #error) when any of <type_traits>, <utility>,
+// <limits> or <initializer_list> is reachable.
 const char* kStlProbeKernel = "#ifndef MIOPEN_HIP_RUNTIME_COMPILE\n"
                               "#include <hip/hip_runtime.h>\n"
                               "#endif\n"
