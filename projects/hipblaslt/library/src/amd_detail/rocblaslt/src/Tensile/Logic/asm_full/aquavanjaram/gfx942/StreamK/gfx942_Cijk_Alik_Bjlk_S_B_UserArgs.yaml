@@ -369,7 +369,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 4
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -530,7 +530,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 4
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -691,7 +691,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 4
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -852,7 +852,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 4
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -1013,7 +1013,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 4
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -1175,7 +1175,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 4
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -1336,7 +1336,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 4
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -1497,7 +1497,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 4
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -1657,7 +1657,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -1818,7 +1818,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -1979,7 +1979,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -2140,7 +2140,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -2301,7 +2301,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -2463,7 +2463,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -2624,7 +2624,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -2785,7 +2785,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -2945,7 +2945,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 2
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -3106,7 +3106,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 2
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -3267,7 +3267,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 2
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -3429,7 +3429,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 2
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -3590,7 +3590,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 2
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -3752,7 +3752,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 2
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -3913,7 +3913,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 2
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -4073,7 +4073,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 2
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -4233,7 +4233,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -4394,7 +4394,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -4556,7 +4556,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -4718,7 +4718,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -4879,7 +4879,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -5041,7 +5041,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -5201,7 +5201,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -5361,7 +5361,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -5522,7 +5522,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 4
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -5684,7 +5684,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 4
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -5846,7 +5846,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 4
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -6008,7 +6008,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 4
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -6169,7 +6169,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 4
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -6330,7 +6330,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 4
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -6490,7 +6490,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 4
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -6650,7 +6650,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 4
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -6811,7 +6811,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -6973,7 +6973,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -7135,7 +7135,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -7297,7 +7297,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -7457,7 +7457,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -7618,7 +7618,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -7778,7 +7778,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -7938,7 +7938,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -8099,7 +8099,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 2
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -8261,7 +8261,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 2
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -8423,7 +8423,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 2
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -8584,7 +8584,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 2
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -8744,7 +8744,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 2
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -8905,7 +8905,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 2
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -9065,7 +9065,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 2
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -9225,7 +9225,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 2
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -9386,7 +9386,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -9548,7 +9548,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -9709,7 +9709,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -9870,7 +9870,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -10030,7 +10030,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -10191,7 +10191,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -10351,7 +10351,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -10511,7 +10511,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -10672,7 +10672,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 4
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 16
   SubGroup1: 16
   SubGroupA: 16
@@ -10833,7 +10833,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 4
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 16
   SubGroup1: 16
   SubGroupA: 16
@@ -10994,7 +10994,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 4
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 16
   SubGroup1: 16
   SubGroupA: 16
@@ -11155,7 +11155,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 4
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 16
   SubGroup1: 16
   SubGroupA: 16
@@ -11317,7 +11317,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 4
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 16
   SubGroup1: 16
   SubGroupA: 16
@@ -11479,7 +11479,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 4
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 16
   SubGroup1: 16
   SubGroupA: 16
@@ -11641,7 +11641,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 4
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 16
   SubGroup1: 16
   SubGroupA: 16
@@ -11802,7 +11802,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 4
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 16
   SubGroup1: 16
   SubGroupA: 16
@@ -11962,7 +11962,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 4
   SubGroup1: 64
   SubGroupA: 4
@@ -12121,7 +12121,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 4
   SubGroup1: 64
   SubGroupA: 4
@@ -12280,7 +12280,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 4
   SubGroup1: 64
   SubGroupA: 4
@@ -12439,7 +12439,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 4
   SubGroup1: 64
   SubGroupA: 4
@@ -12599,7 +12599,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 4
   SubGroup1: 64
   SubGroupA: 4
@@ -12759,7 +12759,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 4
   SubGroup1: 64
   SubGroupA: 4
@@ -12919,7 +12919,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 4
   SubGroup1: 64
   SubGroupA: 4
@@ -13079,7 +13079,7 @@ Solutions:
   StaggerUStride: 64
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 4
   SubGroup1: 64
   SubGroupA: 4
@@ -13240,7 +13240,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 4
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -13402,7 +13402,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 4
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -13564,7 +13564,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 4
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -13725,7 +13725,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 4
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -13887,7 +13887,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 4
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -14048,7 +14048,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 4
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -14209,7 +14209,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 4
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -14370,7 +14370,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -14532,7 +14532,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -14694,7 +14694,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -14856,7 +14856,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -15017,7 +15017,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -15179,7 +15179,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -15340,7 +15340,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -15501,7 +15501,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -15662,7 +15662,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 2
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -15824,7 +15824,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 2
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -15986,7 +15986,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 2
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -16148,7 +16148,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 2
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -16309,7 +16309,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 2
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -16471,7 +16471,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 2
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -16632,7 +16632,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 2
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -16793,7 +16793,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 2
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -16954,7 +16954,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -17116,7 +17116,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -17278,7 +17278,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -17440,7 +17440,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -17601,7 +17601,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -17763,7 +17763,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -17924,7 +17924,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -18085,7 +18085,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -18246,7 +18246,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 4
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -18408,7 +18408,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 4
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -18570,7 +18570,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 4
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -18732,7 +18732,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 4
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -18893,7 +18893,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 4
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -19055,7 +19055,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 4
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -19216,7 +19216,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 4
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -19377,7 +19377,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 4
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -19538,7 +19538,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -19700,7 +19700,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -19862,7 +19862,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -20024,7 +20024,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -20185,7 +20185,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -20347,7 +20347,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -20508,7 +20508,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -20669,7 +20669,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -20830,7 +20830,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 2
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -20992,7 +20992,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 2
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -21154,7 +21154,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 2
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -21316,7 +21316,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 2
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -21477,7 +21477,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 2
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -21639,7 +21639,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 2
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -21800,7 +21800,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 2
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -21960,7 +21960,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 2
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -22121,7 +22121,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -22283,7 +22283,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -22445,7 +22445,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -22607,7 +22607,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -22768,7 +22768,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -22930,7 +22930,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -23090,7 +23090,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -23250,7 +23250,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -23412,7 +23412,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 4
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 16
   SubGroup1: 16
   SubGroupA: 16
@@ -23574,7 +23574,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 4
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 16
   SubGroup1: 16
   SubGroupA: 16
@@ -23736,7 +23736,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 4
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 16
   SubGroup1: 16
   SubGroupA: 16
@@ -23898,7 +23898,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 4
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 16
   SubGroup1: 16
   SubGroupA: 16
@@ -24060,7 +24060,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 4
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 16
   SubGroup1: 16
   SubGroupA: 16
@@ -24222,7 +24222,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 4
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 16
   SubGroup1: 16
   SubGroupA: 16
@@ -24384,7 +24384,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 4
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 16
   SubGroup1: 16
   SubGroupA: 16
@@ -24545,7 +24545,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 4
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 16
   SubGroup1: 16
   SubGroupA: 16
@@ -24706,7 +24706,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 4
   SubGroup1: 64
   SubGroupA: 4
@@ -24866,7 +24866,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 4
   SubGroup1: 64
   SubGroupA: 4
@@ -25026,7 +25026,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 4
   SubGroup1: 64
   SubGroupA: 4
@@ -25186,7 +25186,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 4
   SubGroup1: 64
   SubGroupA: 4
@@ -25346,7 +25346,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 4
   SubGroup1: 64
   SubGroupA: 4
@@ -25506,7 +25506,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 4
   SubGroup1: 64
   SubGroupA: 4
@@ -25666,7 +25666,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 4
   SubGroup1: 64
   SubGroupA: 4
@@ -25826,7 +25826,7 @@ Solutions:
   StaggerUStride: 128
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 4
   SubGroup1: 64
   SubGroupA: 4
@@ -25985,7 +25985,7 @@ Solutions:
   StaggerUMapping: 1
   StoreSwapAddr: false
   StoreVectorWidth: 2
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -26145,7 +26145,7 @@ Solutions:
   StaggerUMapping: 1
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -26305,7 +26305,7 @@ Solutions:
   StaggerUMapping: 1
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -26466,7 +26466,7 @@ Solutions:
   StaggerUMapping: 1
   StoreSwapAddr: false
   StoreVectorWidth: 4
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -26626,7 +26626,7 @@ Solutions:
   StaggerUMapping: 1
   StoreSwapAddr: false
   StoreVectorWidth: 4
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -26786,7 +26786,7 @@ Solutions:
   StaggerUMapping: 1
   StoreSwapAddr: false
   StoreVectorWidth: 4
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -26946,7 +26946,7 @@ Solutions:
   StaggerUMapping: 1
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -27107,7 +27107,7 @@ Solutions:
   StaggerUMapping: 1
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -27267,7 +27267,7 @@ Solutions:
   StaggerUMapping: 1
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -27427,7 +27427,7 @@ Solutions:
   StaggerUMapping: 1
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -27588,7 +27588,7 @@ Solutions:
   StaggerUMapping: 1
   StoreSwapAddr: false
   StoreVectorWidth: 2
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -27748,7 +27748,7 @@ Solutions:
   StaggerUMapping: 1
   StoreSwapAddr: false
   StoreVectorWidth: 2
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -27909,7 +27909,7 @@ Solutions:
   StaggerUMapping: 1
   StoreSwapAddr: false
   StoreVectorWidth: 2
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -28069,7 +28069,7 @@ Solutions:
   StaggerUMapping: 1
   StoreSwapAddr: false
   StoreVectorWidth: 2
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -28229,7 +28229,7 @@ Solutions:
   StaggerUMapping: 1
   StoreSwapAddr: false
   StoreVectorWidth: 2
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -28390,7 +28390,7 @@ Solutions:
   StaggerUMapping: 1
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -28551,7 +28551,7 @@ Solutions:
   StaggerUMapping: 1
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -28711,7 +28711,7 @@ Solutions:
   StaggerUMapping: 1
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -28872,7 +28872,7 @@ Solutions:
   StaggerUMapping: 1
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -29032,7 +29032,7 @@ Solutions:
   StaggerUMapping: 1
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -29192,7 +29192,7 @@ Solutions:
   StaggerUMapping: 1
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -29353,7 +29353,7 @@ Solutions:
   StaggerUStride: 512
   StoreSwapAddr: false
   StoreVectorWidth: 2
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -29514,7 +29514,7 @@ Solutions:
   StaggerUStride: 512
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -29675,7 +29675,7 @@ Solutions:
   StaggerUStride: 512
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 8
   SubGroup1: 32
   SubGroupA: 8
@@ -29834,7 +29834,7 @@ Solutions:
   StaggerUMapping: 1
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 4
   SubGroup1: 16
   SubGroupA: 4
@@ -29993,7 +29993,7 @@ Solutions:
   StaggerUMapping: 1
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 4
   SubGroup1: 16
   SubGroupA: 4
@@ -30153,7 +30153,7 @@ Solutions:
   StaggerUMapping: 1
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 4
   SubGroup1: 16
   SubGroupA: 4
@@ -30312,7 +30312,7 @@ Solutions:
   StaggerUMapping: 1
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 4
   SubGroup1: 16
   SubGroupA: 4
@@ -30472,7 +30472,7 @@ Solutions:
   StaggerUMapping: 1
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 4
   SubGroup1: 16
   SubGroupA: 4
@@ -30633,7 +30633,7 @@ Solutions:
   StaggerUStride: 512
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 4
   SubGroup1: 16
   SubGroupA: 4
@@ -30794,7 +30794,7 @@ Solutions:
   StaggerUStride: 512
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 4
   SubGroup1: 16
   SubGroupA: 4
@@ -30955,7 +30955,7 @@ Solutions:
   StaggerUStride: 512
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 4
   SubGroup1: 16
   SubGroupA: 4
@@ -31116,7 +31116,7 @@ Solutions:
   StaggerUStride: 512
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 4
   SubGroup1: 16
   SubGroupA: 4
@@ -31277,7 +31277,7 @@ Solutions:
   StaggerUStride: 512
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 4
   SubGroup1: 16
   SubGroupA: 4
@@ -31438,7 +31438,7 @@ Solutions:
   StaggerUStride: 1024
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 4
   SubGroup1: 16
   SubGroupA: 4
@@ -31599,7 +31599,7 @@ Solutions:
   StaggerUStride: 1024
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 4
   SubGroup1: 16
   SubGroupA: 4
@@ -31760,7 +31760,7 @@ Solutions:
   StaggerUStride: 1024
   StoreSwapAddr: false
   StoreVectorWidth: 1
-  StreamK: 3
+  StreamK: 5
   SubGroup0: 4
   SubGroup1: 16
   SubGroupA: 4
