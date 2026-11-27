@@ -496,6 +496,12 @@ TEST_F(TestGfx1151WmmaAttentionDecodePacks, DeclaresItsConfiguredBehaviorNotes)
               notes.end());
 }
 
+TEST_F(TestGfx1151WmmaAttentionDecodePacks, DeclaresItsNumericalNotes)
+{
+    ASSERT_TRUE(_set->engine.numericalNotes.has_value());
+    EXPECT_TRUE(_set->engine.numericalNotes->empty());
+}
+
 } // namespace
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

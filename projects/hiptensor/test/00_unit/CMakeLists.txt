@@ -38,6 +38,10 @@
      ${HIPTENSOR_COMMON_TEST_SOURCES}
      ${CMAKE_CURRENT_SOURCE_DIR}/hiptensor_options_test.cpp
      )
+ add_hiptensor_unit_test(api_attribute_test
+     ${HIPTENSOR_COMMON_TEST_SOURCES}
+     ${CMAKE_CURRENT_SOURCE_DIR}/api_attribute_test.cpp
+     )
  add_hiptensor_unit_test(plan_lifetime_test
      ${HIPTENSOR_COMMON_TEST_SOURCES}
      ${CMAKE_CURRENT_SOURCE_DIR}/plan_lifetime_test.cpp

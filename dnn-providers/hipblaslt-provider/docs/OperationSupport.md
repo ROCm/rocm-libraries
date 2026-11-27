@@ -8,6 +8,12 @@ For general information about hipDNN's operation support, please see the [hipDNN
 
 hipBLASLt is **column-major**; hipDNN's output is **row-major**. To produce `C = A × B` row-major, every plan computes `Cᵀ = Bᵀ × Aᵀ`: `B` and `A` are passed to hipBLASLt swapped (first operand `B`, second `A`), with `transA = getTrans(B)`, `transB = getTrans(A)`. `getTrans` reads each operand's strides (`OP_N` if row-major, `OP_T` if column-major), so both input layouts work.
 
+A matrix (the last two dimensions of a tensor) is row-major when `dims[-1] == 1` or `stride[-1] == 1`; otherwise it is column-major when `dims[-2] == 1` or `stride[-2] == 1`; otherwise it is not supported. A size-1 dimension therefore accepts any stride. The same rule derives the transpose flag and the hipBLASLt matrix layout.
+
+The leading dimension the layout uses (the row stride of a row-major matrix, the column stride of a column-major one) must not be negative for A and B; the engine declines a matrix whose leading dimension is negative. Zero is allowed for A and B, for example a broadcast operand whose rows or columns repeat. The output must not overlap itself, so its row stride must be at least its column count (a single-row output takes any row stride), and when it has a batch, its batch stride must be at least the span of one output matrix ((rows - 1) × row stride + columns); a padded output satisfies both. A size-1 dimension's stride is never used, so it does not have to be positive.
+
+The output must be row-major under this rule. The tensor written to the output (the activation output, else the bias output, else the matmul output) is checked, and the engine declines a column-major output.
+
 ## Current Operation Support
 
 ### Stand-alone Matmul (GEMM)
@@ -16,11 +22,12 @@ hipBLASLt Provider Plugin supports stand-alone Matmul (GEMM, general matrix mult
 - Input and output data types: FP32, FP16, BF16. A and B must have the same data type. With a fused activation, the activation output must be FP32, FP16 or BF16
 - Compute data type: FP32
 - Transposed inputs: supported
-- Batched matmuls: only equal batch sizes are supported, or broadcasting when one input has a single batch (batch=1). hipBLASLt takes one flattened batch stride, so the batch axes of each tensor must nest contiguously (each axis with extent above one strides by the inner batch stride times the extents inside it). Batch axes of size 1 are ignored. In a fused graph, the final output must have the same batch dimensions and the same flattened batch stride as the matmul output
+- Batched matmuls: only equal batch sizes are supported, or broadcasting when one input has a single batch (batch=1). hipBLASLt takes one flattened batch stride, so the batch axes of each tensor must nest contiguously (each axis with extent above one strides by the inner batch stride times the extents inside it). Batch axes of size 1 are ignored. In a fused graph, the final output must have the same batch dimensions as the matmul output; its batch stride is its own, so a padded final output is served
 - Pass-by-value tensors: A, B, the bias input and the output each need a device buffer, so none of them may be pass-by-value
 - Tensor roles: the plan writes only the final output, so every fused intermediate (the matmul output when a bias or activation follows, the bias output when an activation follows) must be `virtual`; all other tensors must not be. A graph with any other layout is declined
 - Bias: a bias tensor must have packed strides (hipBLASLt reads it as a vector; strides of size-1 dimensions are ignored) and data type FP32 or the final output type (hipBLASLt's documented bias types are the D type and the FP32 scale type); other FP16/BF16 combinations pass the type check and are declined when hipBLASLt has no kernel
 - Fused operations: Matmul supports fused bias, forward activation (ReLU, clamp, GELU with tanh approximation, and Swish with unit beta), and fused bias + forward activation (same supported activations).
+- Fused intermediate data types: the matmul output when a bias or activation follows, and the bias output when an activation follows, must be FP32. hipBLASLt runs the epilogue on the FP32 accumulator and rounds once to the output type, so a narrower intermediate cannot be honored and the engine declines the graph. Half-precision inputs and outputs with FP32 intermediates (the cuDNN v8 mixed-precision shape) are accepted.
 - ReLU parameters (`RELU_FWD`): an unset `relu_lower_clip` is treated as 0, an unset `relu_upper_clip` as no upper bound, and an unset `relu_lower_clip_slope` or a slope of exactly 0 as no leaky slope.
     - Standard ReLU: no upper clip and a lower clip of 0 (or unset)
     - Clamp: `relu_upper_clip` set; the lower bound is `relu_lower_clip`, or 0 if unset (so ReLU6 needs only the upper clip)

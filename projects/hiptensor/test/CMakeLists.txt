@@ -482,6 +482,7 @@ endif()
 # category parser from test_categories.yaml.
 
 set(_HIPTENSOR_HOST_TESTS
+  api_attribute_test
   batched_contraction_test
   compute_descriptor_test
   concurrency_test

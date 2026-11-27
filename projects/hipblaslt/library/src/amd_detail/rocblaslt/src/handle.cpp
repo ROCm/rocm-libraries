@@ -64,9 +64,10 @@ _rocblaslt_handle::_rocblaslt_handle()
     // ASIC revision
     asic_rev = properties.asicRevision;
 
-    // TODO(ROCM-33832): uniform summation order disables StaggerU, which slows RDNA
-    // GEMMs, so RDNA defaults it off. Remove once RDNA is as fast with it on.
-    // gfx942 also defaults it off.
+    // TODO(ROCM-33832): uniform summation order disables StaggerU on every arch. That
+    // slows RDNA GEMMs, so RDNA defaults it off; remove once RDNA is as fast with it on.
+    // gfx942 also defaults it off. The other archs default it on, so their GEMMs run
+    // without StaggerU unless the caller turns it off.
     const std::string arch = properties.gcnArchName;
     if(arch.find("gfx11") != std::string::npos || arch.find("gfx120") != std::string::npos
        || arch.find("gfx942") != std::string::npos)
