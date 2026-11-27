@@ -23,6 +23,7 @@
 ################################################################################
 
 import pytest
+import json
 import os
 import sys
 
@@ -325,12 +326,39 @@ def dpxSkipMark(config):
     return None
 
 
-def pytest_terminal_summary(terminalreporter):
-    """Report how many logic-corpus-dependent tests ran in this lane and how many skipped.
+def _stage_timing_line(timeline):
+    fields = []
+    for stage in ("build", "run"):
+        if stage in timeline:
+            start, end = timeline[stage]
+            fields.append(f"{stage}_s={end - start:.3f}")
+    locks = timeline["client_locks"]
+    fields.append(f"lock_wait_s={sum(lock['acquired'] - lock['wait_start'] for lock in locks):.3f}")
+    fields.append(f"lock_held_s={sum(lock['released'] - lock['acquired'] for lock in locks):.3f}")
+    fields.append(f"worker={timeline['worker']}")
+    return f"TENSILELITE_STAGE_TIMING {' '.join(fields)} nodeid={timeline['nodeid']}"
 
-    Without this line a lane that lacks the corpus reads as covered as one that
-    has it, since these skips look like any other. See ``Tests/unit/logic_corpus.py``.
-    """
+
+def pytest_terminal_summary(terminalreporter):
+    """Report common YAML stage timelines and logic-corpus test coverage."""
+    # xdist forwards test reports to the controller, which owns the console.
+    timelines = [
+        json.loads(value)
+        for reports in terminalreporter.stats.values()
+        for report in reports
+        if getattr(report, "when", None) == "call"
+        for _, value in report.get_sections("Captured tensilelite timeline call")
+    ]
+    if timelines:
+        terminalreporter.write_sep("-", "TensileLite stage timings")
+        for timeline in sorted(timelines, key=lambda timeline: timeline["nodeid"]):
+            terminalreporter.write_line(_stage_timing_line(timeline))
+        # Wall-clock start and end of each test, its build and run, and every client lock wait and hold.
+        terminalreporter.write_sep("-", "TensileLite timelines")
+        for timeline in sorted(timelines, key=lambda timeline: timeline["start"]):
+            terminalreporter.write_line(f"TENSILELITE_TIMELINE {json.dumps(timeline, separators=(',', ':'))}")
+
+    # Distinguish a lane missing the logic corpus from one that exercised it.
     outcomes = {}
     for category in ("passed", "failed", "error", "skipped"):
         outcomes[category] = {

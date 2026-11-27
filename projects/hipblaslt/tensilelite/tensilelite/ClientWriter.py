@@ -39,7 +39,7 @@ from .Toolchain.Component import Assembler
 
 from . import LibraryIO
 from .Common import ensurePath, print1, printExit, printWarning, ClientExecutionLock,\
-                           LIBRARY_LOGIC_DIR, LIBRARY_CLIENT_DIR
+                           recordClientLockHold, LIBRARY_LOGIC_DIR, LIBRARY_CLIENT_DIR
 from .Common.Architectures import (ARCH_CAP_OVERRIDES, archNamesByIsa, baseArchName,
                                    capOverrideKeyOf, isaToGfx)
 from .Common.GlobalParameters import globalParameters, preserveGlobalParameters
@@ -331,7 +331,9 @@ def runClient(libraryLogicPath, forBenchmark, enableTileSelection, cxxCompiler: 
     with timing_context(f"{timerPrefix}_write_run_script"):
       runScriptName = writeRunScript(buildPath, forBenchmark, enableTileSelection, cxxCompiler, cCompiler, buildPath, configPaths)
 
-    with ClientExecutionLock(globalParameters["ClientExecutionLockPath"]):
+    lockPath = globalParameters["ClientExecutionLockPath"]
+    lockWaitStart = time.time()
+    with ClientExecutionLock(lockPath), recordClientLockHold(lockPath, lockWaitStart):
       with timing_context(f"{timerPrefix}_subprocess"):
         if timingEnabled and forBenchmark:
           # Wall-clock stamps (ns since epoch) so analyze_timing.py can split the

@@ -52,13 +52,17 @@ here.
 """
 
 import contextlib
+import json
 import os
 import shutil
 import subprocess
 import sys
+import time
 
 import py
 import pytest
+
+from tensilelite.Common.Utilities import CLIENT_LOCK_LOG_ENV
 
 from artifact_helpers import artifact_name_for_config
 
@@ -72,6 +76,7 @@ def _call_helper_in_subprocess(
     output_dir: str,
     artifact_dir: str,
     tensile_args: list[str],
+    extra_env: dict[str, str],
 ) -> None:
     """Call module.func(config, output_dir, artifact_dir, tensile_args) in a subprocess.
 
@@ -84,7 +89,7 @@ def _call_helper_in_subprocess(
         f"from {module} import {func}; "
         f"{func}(sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4:])"
     )
-    env = {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)}
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path), **extra_env}
     subprocess.run(
         [sys.executable, "-c", script, config, output_dir, artifact_dir, *tensile_args],
         check=True,
@@ -92,7 +97,26 @@ def _call_helper_in_subprocess(
     )
 
 
-def test_config(tensile_args: list[str], config: str, tmpdir: py.path.local, pytestconfig: pytest.Config) -> None:
+@contextlib.contextmanager
+def _record_stage(timeline: dict, stage: str):
+    start = time.time()
+    try:
+        yield
+    finally:
+        timeline[stage] = [round(start, 3), round(time.time(), 3)]
+
+
+def _read_client_locks(lock_log: str) -> list[dict]:
+    if not os.path.exists(lock_log):
+        return []
+    with open(lock_log) as log:
+        return [json.loads(line) for line in log]
+
+
+def test_config(
+    tensile_args: list[str], config: str, tmpdir: py.path.local,
+    pytestconfig: pytest.Config, request: pytest.FixtureRequest, target_archs: list[str],
+) -> None:
     """Pytest wrapper: run the full build→artifact→run round-trip on a single machine.
 
     Activated in the default mode (no ``--build-only`` / ``--use-cache`` flags).
@@ -104,11 +128,32 @@ def test_config(tensile_args: list[str], config: str, tmpdir: py.path.local, pyt
     output_dir = os.path.join(tmpdir.strpath, artifact_name)
     artifact_dir = tmpdir.strpath
     artifact_path = os.path.join(artifact_dir, artifact_name + ".tar.gz")
+    # Stage and client lock timings are not collected for gfx1250 (gfx1250 or gfx1250-strict).
+    record_timeline = not any(arch.startswith("gfx1250") for arch in target_archs)
+    # The build and run subprocesses append every client lock wait and hold here.
+    lock_log = os.path.join(tmpdir.strpath, "client-locks.jsonl")
+    lock_env = {CLIENT_LOCK_LOG_ENV: lock_log} if record_timeline else {}
+    # Wall-clock times, so the controller can line up tests from different workers.
+    timeline = {
+        "nodeid": request.node.nodeid,
+        "worker": os.environ.get("PYTEST_XDIST_WORKER", "main"),
+        "start": round(time.time(), 3),
+    }
 
-    _call_helper_in_subprocess("test_config_build", "_build", config, output_dir, artifact_dir, tensile_args)
-    shutil.rmtree(output_dir)
     try:
-        _call_helper_in_subprocess("test_config_run", "_run", config, output_dir, artifact_dir, tensile_args)
+        with _record_stage(timeline, "build"):
+            _call_helper_in_subprocess(
+                "test_config_build", "_build", config, output_dir, artifact_dir, tensile_args, lock_env)
+        shutil.rmtree(output_dir)
+        try:
+            with _record_stage(timeline, "run"):
+                _call_helper_in_subprocess(
+                    "test_config_run", "_run", config, output_dir, artifact_dir, tensile_args, lock_env)
+        finally:
+            with contextlib.suppress(FileNotFoundError):
+                os.remove(artifact_path)
     finally:
-        with contextlib.suppress(FileNotFoundError):
-            os.remove(artifact_path)
+        if record_timeline:
+            timeline["end"] = round(time.time(), 3)
+            timeline["client_locks"] = _read_client_locks(lock_log)
+            request.node.add_report_section("call", "tensilelite timeline", json.dumps(timeline))

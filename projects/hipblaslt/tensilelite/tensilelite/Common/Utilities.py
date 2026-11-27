@@ -24,12 +24,14 @@
 
 from ..ExecutionPolicy import isPersistentDataParallel, hasStaticAssignment, isStreamKSpatialCluster
 import functools
+import json
 import math
 import os
 import sys
 import time
 import re
 
+from contextlib import contextmanager
 from inspect import currentframe, getframeinfo
 from copy import deepcopy
 from enum import Enum
@@ -429,6 +431,36 @@ def ClientExecutionLock(lockPath: str):
     import filelock
 
     return filelock.FileLock(lockPath)
+
+
+# When set, every client launch appends one JSON line to this file with the time it
+# started waiting for the client lock, acquired it, and released it.
+CLIENT_LOCK_LOG_ENV = "TENSILELITE_CLIENT_LOCK_LOG"
+
+
+@contextmanager
+def recordClientLockHold(lockPath: str, waitStart: float):
+    """Log one client lock hold to the file named by ``CLIENT_LOCK_LOG_ENV``.
+
+    Enter it just inside ``with ClientExecutionLock(lockPath)``, passing the
+    ``time.time()`` taken before that statement, so the record spans the wait
+    (``wait_start`` to ``acquired``) and the hold (``acquired`` to ``released``).
+    """
+    acquired = time.time()
+    try:
+        yield
+    finally:
+        logPath = os.environ.get(CLIENT_LOCK_LOG_ENV)
+        if logPath:
+            record = {
+                "lock": lockPath,
+                "pid": os.getpid(),
+                "wait_start": round(waitStart, 3),
+                "acquired": round(acquired, 3),
+                "released": round(time.time(), 3),
+            }
+            with open(logPath, "a") as log:
+                log.write(json.dumps(record) + "\n")
 
 
 def assignParameterWithDefault(destinationDictionary, key, sourceDictionary, defaultDictionary):
