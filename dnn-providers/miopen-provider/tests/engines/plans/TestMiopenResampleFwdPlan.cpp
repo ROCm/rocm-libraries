@@ -256,30 +256,30 @@ TEST_F(TestGpuMiopenResampleFwdPlan, MaxPoolWritesValuesAndInt32Indices)
 
 TEST_F(TestGpuMiopenResampleFwdPlan, MaxPoolWritesInt8Indices)
 {
-    constexpr size_t indexCount = 4;
-    constexpr size_t checkedBytes = indexCount * sizeof(int32_t);
-    constexpr int sentinel = 0x5a;
+    constexpr size_t INDEX_COUNT = 4;
+    constexpr size_t CHECKED_BYTES = INDEX_COUNT * sizeof(int32_t);
+    constexpr int SENTINEL = 0x5a;
     const auto plan = buildPlan(planarMaxSpec(DataType::INT8));
     // Allocate X and Y with the usual fixture; provide the index output separately with a suffix guard.
     PoolingTensors<float, int8_t> tensors(planarMaxSpec(std::nullopt), planarMaxInput());
     auto buffers = tensors.deviceBuffers();
-    const hipdnn_data_sdk::utilities::Workspace<> guardedIndex(checkedBytes);
-    const size_t workspaceBytes = std::max(plan->getWorkspaceSize(*_handle), checkedBytes);
+    const hipdnn_data_sdk::utilities::Workspace<> guardedIndex(CHECKED_BYTES);
+    const size_t workspaceBytes = std::max(plan->getWorkspaceSize(*_handle), CHECKED_BYTES);
     const hipdnn_data_sdk::utilities::Workspace<> workspace(workspaceBytes);
     buffers.push_back({ResampleFwdGraphSpec::INDEX_UID, guardedIndex.get()});
-    ASSERT_EQ(hipMemset(guardedIndex.get(), sentinel, checkedBytes), hipSuccess);
+    ASSERT_EQ(hipMemset(guardedIndex.get(), SENTINEL, CHECKED_BYTES), hipSuccess);
     ASSERT_EQ(hipMemset(workspace.get(), 0, workspaceBytes), hipSuccess);
     plan->execute(*_handle, buffers.data(), static_cast<uint32_t>(buffers.size()), workspace.get());
     ASSERT_NO_FATAL_FAILURE(synchronize());
-    std::array<uint8_t, checkedBytes> bytes{};
+    std::array<uint8_t, CHECKED_BYTES> bytes{};
     ASSERT_EQ(hipMemcpy(bytes.data(), guardedIndex.get(), bytes.size(), hipMemcpyDeviceToHost),
               hipSuccess);
     auto result = tensors.read();
-    result.index.assign(bytes.begin(), bytes.begin() + static_cast<std::ptrdiff_t>(indexCount));
+    result.index.assign(bytes.begin(), bytes.begin() + static_cast<std::ptrdiff_t>(INDEX_COUNT));
     expectMatches(result, planarMaxExpected(), 0.0);
-    for(size_t i = indexCount; i < bytes.size(); ++i)
+    for(size_t i = INDEX_COUNT; i < bytes.size(); ++i)
     {
-        EXPECT_EQ(bytes[i], sentinel) << "index suffix byte " << (i - indexCount);
+        EXPECT_EQ(bytes[i], SENTINEL) << "index suffix byte " << (i - INDEX_COUNT);
     }
 }
 
