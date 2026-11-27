@@ -27,11 +27,14 @@ Checks:
   is stored to, for every lane and group of a 3 x 2 grid of workgroups (the
   indices are affine in the workgroup ids, so more than one workgroup along
   each axis shows a wrong tile base); and the per-output factors of a lane
-  come from one packed ``<4 x float>`` multiply.
+  come from one packed ``<4 x float>`` multiply. The weight-scale index is
+  the one within the expert's slice (``KernelIR.address_offset``): which
+  expert's slice is read depends on an expert id the kernel loads, so only
+  the GPU check sees a wrong expert base.
 * On a gfx942 or gfx950 GPU, the whole kernel (gate and up, SiLU, the
   dynamic fp8 requantization of the hidden activation, down and the weighted
   reduce into Y), with A scales that differ from row to row within every MFMA
-  tile, matches a float reference within the runbook GEMM tolerance. The
+  tile and weights that differ from expert to expert, matches a float reference within the runbook GEMM tolerance. The
   reference requantizes the hidden activation to the e4m3 encoding the target
   converts to (FNUZ on gfx942, OCP on gfx950), scaled to its largest value.
   That requantization is why the bound is the random-data one and not the

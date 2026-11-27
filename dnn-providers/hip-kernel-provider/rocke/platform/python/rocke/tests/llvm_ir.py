@@ -226,7 +226,10 @@ class KernelIR:
         """(pointer parameter, element offset) of a ``getelementptr`` load or
         store address. A base that is itself a ``getelementptr`` of the
         parameter (a slice of it, such as one expert's weights) is followed to
-        the parameter; the offset is the one within that slice."""
+        the parameter; the offset is the one within that slice. The slice's own
+        offset is dropped, not added: it is often computed from loaded data
+        (an expert id read from memory), which :meth:`evaluate` cannot follow,
+        so a check built on this offset does not see a wrong slice base."""
         assert self.opcode(address) == "getelementptr", self.definitions[address]
         _, base, offset = self.operands(address)
         while base in self.definitions:
@@ -239,7 +242,8 @@ class KernelIR:
     ) -> tuple[str, np.ndarray | np.int64]:
         """(pointer parameter, element index) a 4-byte load reads, the index
         evaluated for ``inputs``: from a global load's ``getelementptr``
-        (:meth:`address_offset`), or from a buffer load's resource (its base
+        (:meth:`address_offset`, so within the slice of the parameter the load
+        addresses), or from a buffer load's resource (its base
         pointer) and its per-lane and scalar byte offsets, plus 4 bytes per
         element for an element of a vector buffer load."""
         element = 0
