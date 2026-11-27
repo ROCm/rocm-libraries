@@ -66,6 +66,7 @@ test_categories:
       - "RocprimDeviceReduceByKey.LargeIndicesReduceByKeyLargeValueTypeWithGraphs"
       - "RocprimDeviceReduceByKey.LargeSegmentCountReduceByKeyLargeValueType"
       - "RocprimDeviceSelectTests/CustomHugeType1024Int.*"
+      - "*/RocprimDeviceSegmentedRadixSort/*.SortKeysLarge*"
     labels:
       - "quick"
 

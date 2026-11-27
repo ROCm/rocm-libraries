@@ -121,14 +121,10 @@ def test_check_invalid_solutions(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# removeInvalidSolutionsAndKernels (ParallelMap2 + Naming stubbed)
+# removeInvalidSolutionsAndKernels (Naming stubbed)
 # ---------------------------------------------------------------------------
 def test_remove_invalid_solutions_and_kernels(monkeypatch):
     monkeypatch.setattr(M, "getKernelCompileKey", lambda k, split: k["name"])
-    monkeypatch.setattr(
-        M, "ParallelMap2",
-        lambda fn, iterable, desc, return_as=None: [fn(*x) for x in iterable],
-    )
     results = [SimpleNamespace(err=0), SimpleNamespace(err=1)]
     kernels = [{"name": "k0", "SolutionIndex": 0, "SolutionNameMin": "s0"},
                {"name": "k1", "SolutionIndex": 1, "SolutionNameMin": "s1"}]

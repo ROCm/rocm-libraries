@@ -327,6 +327,53 @@ function(_hkp_require_dvc_arg out_var)
 endfunction()
 
 # ---------------------------------------------------------------------------
+# _hkp_resolve_stage_files(<out_sources> <out_commands> <out_manifest> <name> <out_root>
+#                          [<src> <dest>]...)
+#   Resolve STAGE_FILES pairs into pack inputs (<out_sources>), COMMAND steps that
+#   copy each file (<out_commands>), and "<src> -> <dest>" manifest lines
+#   (<out_manifest>). Each <dest> is relative to <out_root> and must stay inside it.
+# ---------------------------------------------------------------------------
+function(_hkp_resolve_stage_files out_sources out_commands out_manifest name out_root)
+    set(_pairs ${ARGN})
+    list(LENGTH _pairs _stage_len)
+    math(EXPR _stage_odd "${_stage_len} % 2")
+    if(_stage_odd)
+        message(FATAL_ERROR
+            "hkp: root '${name}' has an odd STAGE_FILES list (${_pairs}); "
+            "it takes <src> <dest> pairs.")
+    endif()
+    set(_sources "")
+    set(_dirs "")
+    set(_copies "")
+    set(_manifest "")
+    while(_pairs)
+        list(POP_FRONT _pairs _src _rel)
+        cmake_path(NORMAL_PATH _rel OUTPUT_VARIABLE _norm)
+        cmake_path(HAS_ROOT_PATH _norm _rooted)
+        if(_rooted OR _norm STREQUAL "" OR _norm STREQUAL ".." OR _norm MATCHES "^\\.\\./")
+            message(FATAL_ERROR
+                "hkp: root '${name}' stages '${_src}' to '${_rel}', "
+                "which is not a path inside OUT_ROOT (${out_root}).")
+        endif()
+        set(_dest "${out_root}/${_norm}")
+        get_filename_component(_dir "${_dest}" DIRECTORY)
+        list(APPEND _sources "${_src}")
+        list(APPEND _dirs "${_dir}")
+        list(APPEND _copies COMMAND "${CMAKE_COMMAND}" -E copy "${_src}" "${_dest}")
+        list(APPEND _manifest "${_src} -> ${_norm}")
+    endwhile()
+    set(_commands "")
+    if(_dirs)
+        list(REMOVE_DUPLICATES _dirs)
+        set(_commands COMMAND "${CMAKE_COMMAND}" -E make_directory ${_dirs})
+    endif()
+    list(APPEND _commands ${_copies})
+    set(${out_sources} "${_sources}" PARENT_SCOPE)
+    set(${out_commands} "${_commands}" PARENT_SCOPE)
+    set(${out_manifest} "${_manifest}" PARENT_SCOPE)
+endfunction()
+
+# ---------------------------------------------------------------------------
 # hkp_wire_pack_target(NAME <label> SOURCE_ROOT <dir>
 #               ARCHES <list> HIP_COMPILER <path>
 #               HIP_PATH <path> DEVICE_LIB_PATH <path>
@@ -334,7 +381,8 @@ endfunction()
 #               [ROCKE_INTERP <path> ROCKE_READY <path> ROCKE_PYTHON_DIR <dir>
 #                ROCKE_WHEEL_STAMP <path> [ROCKE_COMGR_LIB <path>]
 #                [ROCKE_LLVM_FLAVOR <flavor>]]
-#               [EXCLUDE_FOLDERS <name>...] [PACK_JOBS <n>])
+#               [EXCLUDE_FOLDERS <name>...] [PACK_JOBS <n>]
+#               [STAGE_FILES <src> <dest> [<src> <dest>...]])
 #   Wire the compile -> prune -> pack DAG for ONE authored source root.
 #
 #   The root is walked recursively. Each descriptor's authored
@@ -348,6 +396,11 @@ endfunction()
 #   Installation is not wired here -- a root delivers into arch_content/ or
 #   test_arch_content/ in the build tree, and those two trees are installed
 #   wholesale by hip-kernel-provider/CMakeLists.txt.
+#
+#   STAGE_FILES copies each <src> to OUT_ROOT/<dest> as steps of the pack command,
+#   after the packer and before the stamp: the pack wipes OUT_ROOT, so a separate
+#   copy rule would be deleted on repack. <dest> must not name a path the packer
+#   writes, and may neither be rooted nor climb out of OUT_ROOT.
 #
 #   A source root that is not a directory, or a missing output root, is a
 #   configure error: each one makes the pack step write nothing, and a consumer
@@ -403,7 +456,7 @@ function(hkp_wire_pack_target)
         ROCM_KPACK_DIR OUT_ROOT ENABLE_ROCKE ROCKE_INTERP ROCKE_READY
         ROCKE_PYTHON_DIR ROCKE_COMGR_LIB ROCKE_LLVM_FLAVOR ROCKE_WHEEL_STAMP
         PACK_JOBS)
-    cmake_parse_arguments(PARSE_ARGV 0 ARG "" "${_one}" "EXCLUDE_FOLDERS")
+    cmake_parse_arguments(PARSE_ARGV 0 ARG "" "${_one}" "EXCLUDE_FOLDERS;STAGE_FILES")
     if(ARG_UNPARSED_ARGUMENTS)
         message(FATAL_ERROR
             "hkp_wire_pack_target: unrecognised argument(s): "
@@ -436,6 +489,8 @@ function(hkp_wire_pack_target)
         list(APPEND _exclude_args --exclude-folder "${_folder}")
     endforeach()
     _hkp_require_dvc_arg(_require_dvc_arg)
+    _hkp_resolve_stage_files(_stage_sources _stage_commands _stage_manifest
+                             "${ARG_NAME}" "${ARG_OUT_ROOT}" ${ARG_STAGE_FILES})
 
     set(_inter_root "${CMAKE_CURRENT_BINARY_DIR}/hkp-${ARG_NAME}-intermediate")
     # Inside the output root, so the stamp shares the fate of the tree it vouches for.
@@ -474,14 +529,14 @@ function(hkp_wire_pack_target)
     # an incremental build.
     #
     # This manifest puts the input SET into the edge. Its content changes when a
-    # path leaves either glob, which makes it newer than the stamp and forces the
-    # pack. file(CONFIGURE) rewrites only when the content differs, so an
-    # unchanged tree does not repack on every configure. It lives in the binary
-    # dir rather than under ARG_OUT_ROOT because the pack command wipes that tree
-    # -- a dependency deleted by the command it guards would make every build
-    # repack. @ONLY because the body is paths, not a template.
+    # path leaves either glob or a STAGE_FILES pair is dropped, which makes it newer
+    # than the stamp and forces the pack. file(CONFIGURE) rewrites only when the
+    # content differs, so an unchanged tree does not repack on every configure. It
+    # lives in the binary dir rather than under ARG_OUT_ROOT because the pack command
+    # wipes that tree -- a dependency deleted by the command it guards would make
+    # every build repack. @ONLY because the body is paths, not a template.
     set(_input_manifest "${CMAKE_CURRENT_BINARY_DIR}/hkp-${ARG_NAME}-inputs.txt")
-    set(_manifest_paths ${_source_inputs} ${_tool_sources})
+    set(_manifest_paths ${_source_inputs} ${_tool_sources} ${_stage_manifest})
     list(SORT _manifest_paths)
     string(REPLACE ";" "\n" _manifest_body "${_manifest_paths}")
     # The COMGR and the IR flavor decide the code every rocKE kernel compiles to, so a
@@ -516,6 +571,9 @@ function(hkp_wire_pack_target)
     # nothing never creates it and `touch` does not create parents. Such a root holds
     # the stamp alone, and installs as an empty directory: the install rules exclude the
     # stamp file, not the directory it sits in.
+    #
+    # STAGE_FILES copies run before the stamp, so a stamp never vouches for a tree
+    # missing them.
     add_custom_command(
         OUTPUT "${_stamp}"
         COMMAND "${CMAKE_COMMAND}" -E rm -rf "${ARG_OUT_ROOT}"
@@ -535,10 +593,11 @@ function(hkp_wire_pack_target)
                 ${_exclude_args}
                 ${_require_dvc_arg}
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${ARG_OUT_ROOT}"
+        ${_stage_commands}
         COMMAND "${CMAKE_COMMAND}" -E touch "${_stamp}"
         DEPENDS "${HKP_TOOL}" ${_source_inputs} ${_tool_sources}
                 "${_input_manifest}" "${HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON}"
-                ${_producer_deps}
+                ${_producer_deps} ${_stage_sources}
         COMMENT "hkp: packing root '${ARG_NAME}' for ${ARG_ARCHES}"
         VERBATIM)
 
@@ -1862,6 +1921,9 @@ endfunction()
 #   nothing for any architecture this build packs for -- a clean skip, not an error,
 #   whether the root was named or inherited. Production root set but not a directory =
 #   fatal.
+#
+#   HIPKERNELPROVIDER_PRODUCT_STAGE_FILES is the product pack's STAGE_FILES list. A
+#   dormant product pack stages nothing, so the caller then delivers that content itself.
 # ---------------------------------------------------------------------------
 function(hkp_add_packaging)
     if(NOT HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON
@@ -1911,6 +1973,7 @@ function(hkp_add_packaging)
         ROCM_KPACK_DIR "${_rocm_kpack_dir}"
         OUT_ROOT "${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}"
         ${_product_jobs_args}
+        STAGE_FILES ${HIPKERNELPROVIDER_PRODUCT_STAGE_FILES}
         ${_root_args} ${HKP_PRODUCT_EXCLUDED_BUNDLES})
 
     # Test descriptors, one pack per authored set. The shared root is packed into both

@@ -454,9 +454,9 @@ TEST_F(TestMiopenUnaryActivationPlanBuilder, IsApplicableReturnsTrueForReluWithL
     EXPECT_TRUE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
 
-TEST_F(TestMiopenUnaryActivationPlanBuilder,
-       IsApplicableReturnsFalseForReluWithNonZeroLowerClipOnly)
+TEST_F(TestMiopenUnaryActivationPlanBuilder, IsApplicableReturnsTrueForReluWithNonZeroLowerClipOnly)
 {
+    // Runs as CLAMP with the float maximum as the upper bound.
     auto builder
         = createPointwiseGraph(PointwiseGraphSpec::unary(PointwiseMode::RELU_FWD,
                                                          {1, 3, 4, 4},
@@ -468,7 +468,7 @@ TEST_F(TestMiopenUnaryActivationPlanBuilder,
                                                          /*reluLowerClip=*/0.5f));
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
-    EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
+    EXPECT_TRUE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
 
 TEST_F(TestMiopenUnaryActivationPlanBuilder,
@@ -490,7 +490,7 @@ TEST_F(TestMiopenUnaryActivationPlanBuilder,
 }
 
 TEST_F(TestMiopenUnaryActivationPlanBuilder,
-       IsApplicableReturnsFalseForReluWithNegativeLowerClipAndNoUpperClipOrSlope)
+       IsApplicableReturnsTrueForReluWithNegativeLowerClipAndNoUpperClipOrSlope)
 {
     auto builder
         = createPointwiseGraph(PointwiseGraphSpec::unary(PointwiseMode::RELU_FWD,
@@ -503,7 +503,7 @@ TEST_F(TestMiopenUnaryActivationPlanBuilder,
                                                          /*reluLowerClip=*/-1.0f));
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
-    EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
+    EXPECT_TRUE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
 
 TEST_F(TestMiopenUnaryActivationPlanBuilder, IsApplicableReturnsTrueForReluWithZeroLowerClipOnly)
@@ -605,10 +605,9 @@ TEST_F(TestMiopenUnaryActivationPlanBuilder,
 }
 
 TEST_F(TestMiopenUnaryActivationPlanBuilder,
-       IsApplicableReturnsFalseForReluWithNonZeroLowerClipAndZeroSlope)
+       IsApplicableReturnsTrueForReluWithNonZeroLowerClipAndZeroSlope)
 {
-    // A zero slope is no slope, so this is a standard ReLU with a shifted knee, which MIOpen
-    // cannot represent.
+    // A zero slope is no slope, so this is a lower clip alone, which runs as CLAMP.
     auto builder
         = createPointwiseGraph(PointwiseGraphSpec::unary(PointwiseMode::RELU_FWD,
                                                          {1, 3, 4, 4},
@@ -622,7 +621,7 @@ TEST_F(TestMiopenUnaryActivationPlanBuilder,
                                                          /*reluLowerClipSlope=*/0.0f));
     const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
-    EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
+    EXPECT_TRUE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
 
 // ============================================================================

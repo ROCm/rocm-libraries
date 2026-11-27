@@ -643,6 +643,16 @@ else()
         PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
         DESTINATION ${DATA_INSTALL_DIR}/bin
         COMPONENT clients)
+    # Golden-vector fixtures read by CPU_LgbmForest_NONE and CPU_LgbmPcfgForest_NONE through
+    # GetSystemDbPath(). The installed tests look in <prefix>/share/miopen/db, next to the model
+    # assets, and fail when a fixture is missing, so they ship with miopen_gtest.
+    if(MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
+      install(FILES
+          ${PROJECT_SOURCE_DIR}/src/kernels/lgbm_rank_golden.json
+          ${PROJECT_SOURCE_DIR}/src/kernels/lgbm_pcfg_golden.json
+          DESTINATION ${DATABASE_INSTALL_DIR}
+          COMPONENT clients)
+    endif()
   endif()
 endif()
 

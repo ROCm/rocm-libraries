@@ -10,6 +10,7 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 * Added fixed-size-segments variant for `rocprim::device_segmented_reduce`.
 * Added support for large number of segments to `rocprim::device_segmented_reduce`.
 * Added support for large sizes to `rocprim::device_run_length_encode` and `rocprim::device_run_length_encode_non_trivial_runs`.
+* gfx1031 to gfx1036 now select the gfx1030-tuned configurations at run time instead of the generic fallback configuration.
 
 ### Changed
 
@@ -21,7 +22,6 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 
 * Added autotuned gfx950 (MI355X) configs for the following device algorithms:
   * `adjacent_find`, `merge`, `partition` (flag, predicate, three-way, two-way flag, two-way predicate), `radix_sort` (block sort), `reduce`, `run_length_encode`, `run_length_encode_non_trivial_runs`, `scan`, `scan_by_key`, `search_n`, `segmented_reduce`, `select` (flag, predicate, predicated flag, unique, unique by key), `transform`, and `transform` (pointer).
-* `block_histogram` uses the __match_any intrinsic.
 
 ### Removed
 
@@ -44,6 +44,7 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
   * `segmented_radix_sort` (`device_segmented_radix_sort.hpp`). The tuner did not limit the shared memory of the warp sorts, so a config needed more than 64 KiB and broke builds for targets that rocPRIM doesn't recognize. The tuner now checks this limit.
   * `reduce_by_key` (`device_reduce_by_key.hpp`). Tuned only for integer value types, so floating-point value types got no tuned config. The tuner now also tunes `double`, `float`, and `rocprim::half` values.
   * `radix_sort` onesweep variant (`device_radix_sort_onesweep.hpp`). The tuner's shared memory check let oversized configs through.
+* TODO: Confirm on hardware that the gfx1030-tuned configurations outperform the generic fallback on gfx1031 to gfx1036. The change was validated on gfx1030 only.
 
 ### Resolved Issues
 

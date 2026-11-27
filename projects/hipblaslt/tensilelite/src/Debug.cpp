@@ -26,7 +26,11 @@
 
 #include <Tensile/Debug.hpp>
 
+#include <algorithm>
+#include <cctype>
+#include <cstdio>
 #include <mutex>
+#include <string>
 
 #ifndef DEBUG_SM
 #define DEBUG_SM 0
@@ -128,6 +132,11 @@ namespace TensileLite
     bool Debug::printNoSolutionUniformSummationOrder() const
     {
         return m_value & 0x400000;
+    }
+
+    bool Debug::bypassUniformSummationOrderRefusals() const
+    {
+        return m_usoBypassRefusals;
     }
 
     bool Debug::naivePropertySearch() const
@@ -288,6 +297,20 @@ namespace TensileLite
         const char* tensile_disable_staggerU = std::getenv("TENSILE_DISABLE_STAGGERU");
         if(tensile_disable_staggerU)
             m_disableStaggerU = strtol(tensile_disable_staggerU, nullptr, 0) != 0;
+
+        if(const char* bypass = std::getenv("HIPBLASLT_USO_BYPASS_REFUSALS"))
+        {
+            std::string v(bypass);
+            std::transform(v.begin(), v.end(), v.begin(), [](unsigned char c) {
+                return static_cast<char>(std::tolower(c));
+            });
+            m_usoBypassRefusals = v == "1" || v == "on" || v == "true";
+            if(m_usoBypassRefusals)
+                std::fprintf(stderr,
+                             "hipBLASLt warning: HIPBLASLT_USO_BYPASS_REFUSALS is set: when "
+                             "uniform summation order is on, kernels it refuses are still "
+                             "selected and launched, and the guarantee no longer holds\n");
+        }
     }
 
     void Debug::reloadDebugBitsForTest()
