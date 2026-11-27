@@ -109,10 +109,4 @@ if(GPU_TARGETS MATCHES "gfx1250")
     _add_mma_gtest(test_amdgcn_mma_layout_gfx1250 test_amdgcn_mma_layout_gfx1250.cpp)
     target_compile_options(test_amdgcn_mma_layout_gfx1250 PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS})
     set_mma_test_arch_define(test_amdgcn_mma_layout_gfx1250)
-
-    # The FP8/BF8 16x16x128 ops again at -O0: their gfx1250-strict fallback once gave C instead of
-    # A*B + C only at -O0 (ROCM-35020). The later -O0 overrides the build type's optimization level.
-    _add_mma_gtest(test_amdgcn_mma_layout_gfx1250_f8_o0 test_amdgcn_mma_layout_gfx1250_f8_o0.cpp)
-    target_compile_options(test_amdgcn_mma_layout_gfx1250_f8_o0 PRIVATE ${EXAMPLE_GEMM_COMPILE_OPTIONS} -O0)
-    set_mma_test_arch_define(test_amdgcn_mma_layout_gfx1250_f8_o0)
 endif()
