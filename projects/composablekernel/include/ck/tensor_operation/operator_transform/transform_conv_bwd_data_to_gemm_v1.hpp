@@ -31,7 +31,8 @@ template <
     typename CDataType        = float,
     index_t NumGroupsToMerge_ = 1,
     typename IndexType        = index_t,
-    bool CTranspose           = false>
+    bool CTranspose           = false,
+    bool MergeOutPadding      = false>
 struct TransformConvBwdDataToGemm_v1
 {
     private:
@@ -43,6 +44,13 @@ struct TransformConvBwdDataToGemm_v1
      */
     static constexpr bool UsePaddingOnKDim             = std::is_same_v<IndexType, long_index_t>;
     static constexpr bool CustomTensorTransformBwdData = std::is_same_v<IndexType, index_t>;
+
+    // Opt-in: the Ho / Wo bounds and the GEMM M / K padding are handled by the custom transform
+    // itself (see ConvBwdDataImplicitGemmOutTransform) instead of by outer Pad transforms. There
+    // is no 3D version of the custom transform, so the 3D descriptors always use the outer Pad
+    // transforms.
+    static constexpr bool MergePaddingInCustomTransform =
+        MergeOutPadding && CustomTensorTransformBwdData && NDimSpatial == 2;
 
     template <index_t N>
     using NumberType =
@@ -141,6 +149,52 @@ struct TransformConvBwdDataToGemm_v1
 
     public:
     __host__ __device__ constexpr TransformConvBwdDataToGemm_v1() {}
+
+    // With the padding merged in the custom transform (MergePaddingInCustomTransform) the GEMM
+    // padding is reported through a poison added to the Ho coordinate, see
+    // IsConvPaddingPoisonRangeSupported. The smallest Ho coordinate of a row is bounded by the
+    // largest ydot (ydot < YDot_, plus the rows the padding of GemmK adds: at most GemmKPerBlock)
+    // times the ydot step. The offsets of the poisoned coordinates (coordinate * stride, in 32-bit
+    // arithmetic) must not overflow either: the bound is conservative, with the first dimension
+    // with its poison, the other dimensions with their largest coordinate and the n of the
+    // padding rows. m_padded is the padded GemmM of the A descriptor.
+    __host__ bool IsMergedOutPaddingRangeSupported(long_index_t m_padded) const
+    {
+        if constexpr(!MergePaddingInCustomTransform)
+        {
+            return true;
+        }
+        else
+        {
+            const auto abs_value = [](long_index_t x) { return x < 0 ? -x : x; };
+
+            const long_index_t ratio_h  = ConvDilationH_ / GcdStrideDilationH_;
+            const long_index_t ratio_w  = ConvDilationW_ / GcdStrideDilationW_;
+            const long_index_t max_ydot = static_cast<long_index_t>(YDot_) + GemmKPerBlock;
+            const long_index_t max_xdot = static_cast<long_index_t>(XDot_) + GemmKPerBlock;
+            const long_index_t min_ho   = -max_ydot * ratio_h;
+            // the largest Ho coordinate is below HTilde (the ydot term is not positive)
+            if(!IsConvPaddingPoisonRangeSupported(Ho_, min_ho, HTilde_))
+            {
+                return false;
+            }
+            const long_index_t poison = Ho_ - min_ho;
+
+            // M = N * TildeSlice is at most GemmMPerBlock - 1 below m_padded
+            const long_index_t tilde_slice_min =
+                math::max(long_index_t{1}, (m_padded - GemmMPerBlock + N_) / N_);
+            const long_index_t n_max = (m_padded - 1) / tilde_slice_min;
+
+            long_index_t bound = n_max * abs_value(NStrideTensorA_);
+            bound += (static_cast<long_index_t>(K_) - 1) * abs_value(KStrideTensorA_);
+            // the range of the coordinates (from the smallest to the largest, the kernels move a
+            // coordinate by the difference of two of them), times the stride
+            bound +=
+                (HTilde_ + 2 * poison + math::max(-min_ho, long_index_t{0})) * abs_value(HoStride_);
+            bound += (WTilde_ + max_xdot * ratio_w) * abs_value(WoStride_);
+            return bound <= (long_index_t{1} << 31) - 1;
+        }
+    }
 
     template <typename TransformConvBwdDataToGemm_v1Base>
     __host__ __device__ TransformConvBwdDataToGemm_v1(
@@ -815,39 +869,51 @@ struct TransformConvBwdDataToGemm_v1
                 }
                 else
                 {
-                    const auto out_n_hop_wop_k_grid_desc = transform_tensor_descriptor(
-                        out_grid_desc,
-                        make_tuple(make_pass_through_transform(N_),
-                                   make_pad_transform(Ho_, I0, I0),
-                                   make_pad_transform(Wo_, I0, I0),
-                                   make_pass_through_transform(K_)),
-                        make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}),
-                        make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}));
+                    const auto out_n_hop_wop_k_grid_desc = [&]() {
+                        if constexpr(MergePaddingInCustomTransform)
+                        {
+                            return out_grid_desc;
+                        }
+                        else
+                        {
+                            return transform_tensor_descriptor(
+                                out_grid_desc,
+                                make_tuple(make_pass_through_transform(N_),
+                                           make_pad_transform(Ho_, I0, I0),
+                                           make_pad_transform(Wo_, I0, I0),
+                                           make_pass_through_transform(K_)),
+                                make_tuple(
+                                    Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}),
+                                make_tuple(
+                                    Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}));
+                        }
+                    }();
 
                     const auto out_n_hop_wop_k_grid_desc_final = transform_tensor_descriptor(
                         out_n_hop_wop_k_grid_desc,
-                        make_tuple(make_conv_bwd_data_out_transform(N_,
-                                                                    Ho_,
-                                                                    Wo_,
-                                                                    K_,
-                                                                    YDot_,
-                                                                    XDot_,
-                                                                    HTilde_,
-                                                                    WTilde_,
-                                                                    ConvDilationH_,
-                                                                    ConvDilationW_,
-                                                                    HTildeSlice,
-                                                                    WTildeSlice,
-                                                                    YDotSlice,
-                                                                    XDotSlice,
-                                                                    IHTildeSliceBegin,
-                                                                    IWTildeSliceBegin,
-                                                                    GcdStrideDilationH_,
-                                                                    GcdStrideDilationW_,
-                                                                    AK0 * batch_k_,
-                                                                    AK1,
-                                                                    GemmMPerBlock,
-                                                                    GemmKPerBlock)),
+                        make_tuple(make_conv_bwd_data_out_transform<MergePaddingInCustomTransform>(
+                            N_,
+                            Ho_,
+                            Wo_,
+                            K_,
+                            YDot_,
+                            XDot_,
+                            HTilde_,
+                            WTilde_,
+                            ConvDilationH_,
+                            ConvDilationW_,
+                            HTildeSlice,
+                            WTildeSlice,
+                            YDotSlice,
+                            XDotSlice,
+                            IHTildeSliceBegin,
+                            IWTildeSliceBegin,
+                            GcdStrideDilationH_,
+                            GcdStrideDilationW_,
+                            AK0 * batch_k_,
+                            AK1,
+                            GemmMPerBlock,
+                            GemmKPerBlock)),
                         make_tuple(Sequence<0, 1, 2, 3>{}),
                         make_tuple(Sequence<0, 1, 2>{}));
 

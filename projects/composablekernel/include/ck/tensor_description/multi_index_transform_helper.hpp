@@ -104,6 +104,7 @@ __host__ __device__ constexpr auto make_unmerge_transform(
     return UnMerge<UpLengths, Use24BitIntegerCalculation>{up_lengths};
 }
 
+template <bool MergePadding = false>
 __host__ __device__ constexpr auto make_conv_bwd_data_out_transform(index_t N,
                                                                     index_t Ho,
                                                                     index_t Wo,
@@ -136,25 +137,50 @@ __host__ __device__ constexpr auto make_conv_bwd_data_out_transform(index_t N,
     const auto KPadded = math::integer_divide_ceil(KRaw, GemmKPerBlock) * GemmKPerBlock;
     const auto KPad    = KPadded - KRaw;
 
-    return ConvBwdDataImplicitGemmOutTransform{N,
-                                               Ho,
-                                               Wo,
-                                               K,
-                                               XDot,
-                                               HTilde,
-                                               WTilde,
-                                               WTildeSlice,
-                                               HTildeSlice * WTildeSlice,
-                                               IHTildeSliceBegin,
-                                               IWTildeSliceBegin,
-                                               -ConvDilationH / GcdStrideDilationH,
-                                               -ConvDilationW / GcdStrideDilationW,
-                                               XDotSlice * K,
-                                               K0,
-                                               MPadded,
-                                               K1,
-                                               MPad,
-                                               KPad};
+    return ConvBwdDataImplicitGemmOutTransform<MergePadding>{N,
+                                                             Ho,
+                                                             Wo,
+                                                             K,
+                                                             XDot,
+                                                             HTilde,
+                                                             WTilde,
+                                                             WTildeSlice,
+                                                             HTildeSlice * WTildeSlice,
+                                                             IHTildeSliceBegin,
+                                                             IWTildeSliceBegin,
+                                                             -ConvDilationH / GcdStrideDilationH,
+                                                             -ConvDilationW / GcdStrideDilationW,
+                                                             XDotSlice * K,
+                                                             K0,
+                                                             MPadded,
+                                                             K1,
+                                                             MPad,
+                                                             KPad};
+}
+
+template <index_t NDimSpatial>
+__host__ __device__ constexpr auto
+make_conv_fwd_data_in_transform(index_t N,
+                                index_t C,
+                                const MultiIndex<NDimSpatial>& in_lengths,
+                                const MultiIndex<NDimSpatial>& filter_lengths,
+                                const MultiIndex<NDimSpatial>& out_lengths,
+                                const MultiIndex<NDimSpatial>& conv_strides,
+                                const MultiIndex<NDimSpatial>& conv_dilations,
+                                const MultiIndex<NDimSpatial>& left_pads,
+                                index_t M_padded,
+                                index_t K_padded)
+{
+    return ConvFwdDataImplicitGemmInTransform<NDimSpatial>{N,
+                                                           C,
+                                                           in_lengths,
+                                                           filter_lengths,
+                                                           out_lengths,
+                                                           conv_strides,
+                                                           conv_dilations,
+                                                           left_pads,
+                                                           M_padded,
+                                                           K_padded};
 }
 
 template <typename LowerIndex>

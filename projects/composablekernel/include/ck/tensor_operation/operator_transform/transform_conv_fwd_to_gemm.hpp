@@ -6,6 +6,7 @@
 #include "ck/utility/common_header.hpp"
 #include "ck/tensor_description/tensor_descriptor.hpp"
 #include "ck/tensor_description/tensor_descriptor_helper.hpp"
+#include "ck/tensor_description/multi_index_transform_helper.hpp"
 #include "ck/tensor_operation/gpu/device/tensor_layout.hpp"
 #include "ck/tensor_operation/gpu/device/convolution_forward_specialization.hpp"
 
@@ -14,12 +15,13 @@ namespace tensor_operation {
 
 template <index_t NDimSpatial,
           device::ConvolutionForwardSpecialization ConvForwardSpecialization,
-          bool SplitN              = false,
-          typename ADataType       = float,
-          typename CDataType       = float,
-          index_t NumGroupsToMerge = 1,
-          typename IndexType       = index_t,
-          bool CTranspose          = false>
+          bool SplitN                       = false,
+          typename ADataType                = float,
+          typename CDataType                = float,
+          index_t NumGroupsToMerge          = 1,
+          typename IndexType                = index_t,
+          bool CTranspose                   = false,
+          bool CustomTensorTransformFwdData = false>
 struct TransformConvFwdToGemm
 {
     private:
@@ -101,7 +103,67 @@ struct TransformConvFwdToGemm
     }
 
     public:
+    // true when MakeADescriptorWithCustomTransform_M_K can be used: the A descriptor is then built
+    // by ConvFwdDataImplicitGemmInTransform instead of the pad / embed / merge chain.
+    static constexpr bool UseCustomTransformA =
+        CustomTensorTransformFwdData &&
+        ConvForwardSpecialization == device::ConvolutionForwardSpecialization::Default &&
+        std::is_same_v<IndexType, index_t> && NumGroupsToMerge == 1 && !CTranspose;
+
     __host__ __device__ constexpr TransformConvFwdToGemm() {}
+
+    // The custom transform (UseCustomTransformA) needs the first spatial lower coordinates and the
+    // offsets of the poisoned coordinates to stay in range, see IsConvInputTransformRangeSupported.
+    // m_padded and k_padded are the padded GEMM lengths of the A descriptor.
+    __host__ bool IsCustomTransformPaddingRangeSupported(index_t m_padded, index_t k_padded) const
+    {
+        const auto arr = [](auto... v) {
+            return Array<long_index_t, sizeof...(v)>{{static_cast<long_index_t>(v)...}};
+        };
+        if constexpr(NDimSpatial == 1)
+            return IsConvInputTransformRangeSupported<1>(N_,
+                                                         C_,
+                                                         arr(Wi_),
+                                                         arr(X_),
+                                                         arr(Wo_),
+                                                         arr(ConvStrideW_),
+                                                         arr(ConvDilationW_),
+                                                         arr(InLeftPadW_),
+                                                         m_padded,
+                                                         k_padded,
+                                                         NStrideTensorA_,
+                                                         arr(WiStride_),
+                                                         CStrideTensorA_);
+        else if constexpr(NDimSpatial == 2)
+            return IsConvInputTransformRangeSupported<2>(N_,
+                                                         C_,
+                                                         arr(Hi_, Wi_),
+                                                         arr(Y_, X_),
+                                                         arr(Ho_, Wo_),
+                                                         arr(ConvStrideH_, ConvStrideW_),
+                                                         arr(ConvDilationH_, ConvDilationW_),
+                                                         arr(InLeftPadH_, InLeftPadW_),
+                                                         m_padded,
+                                                         k_padded,
+                                                         NStrideTensorA_,
+                                                         arr(HiStride_, WiStride_),
+                                                         CStrideTensorA_);
+        else
+            return IsConvInputTransformRangeSupported<3>(
+                N_,
+                C_,
+                arr(Di_, Hi_, Wi_),
+                arr(Z_, Y_, X_),
+                arr(Do_, Ho_, Wo_),
+                arr(ConvStrideD_, ConvStrideH_, ConvStrideW_),
+                arr(ConvDilationD_, ConvDilationH_, ConvDilationW_),
+                arr(InLeftPadD_, InLeftPadH_, InLeftPadW_),
+                m_padded,
+                k_padded,
+                NStrideTensorA_,
+                arr(DiStride_, HiStride_, WiStride_),
+                CStrideTensorA_);
+    }
 
     template <typename TransformConvFwdToGemmBase>
     __host__ __device__
@@ -1328,6 +1390,84 @@ struct TransformConvFwdToGemm
                        make_pass_through_transform(C_)),
             make_tuple(Sequence<0, 1>{}, Sequence<2>{}),
             make_tuple(Sequence<0>{}, Sequence<1>{}));
+    }
+
+    // A descriptor [GemmM, GemmK] built by ConvFwdDataImplicitGemmInTransform
+    // (UseCustomTransformA). The GEMM is padded to multiples of MPerBlock x KPerBlock (MNKPadding)
+    // and the padding rows / columns are reported as invalid by the transform itself, so the GEMM
+    // padder (right-pad transforms and their compares) must not be applied on top.
+    __host__ __device__ auto MakeADescriptorWithCustomTransform_M_K(index_t m_per_block,
+                                                                    index_t k_per_block) const
+    {
+        static_assert(UseCustomTransformA);
+        if constexpr(NDimSpatial == 1)
+        {
+            const index_t m_padded    = math::integer_least_multiple(N_ * Wo_, m_per_block);
+            const index_t k_padded    = math::integer_least_multiple(X_ * C_, k_per_block);
+            const auto in_n_wi_c_desc = make_naive_tensor_descriptor(
+                make_tuple(N_, Wi_, C_), make_tuple(NStrideTensorA_, WiStride_, CStrideTensorA_));
+            return transform_tensor_descriptor(
+                in_n_wi_c_desc,
+                make_tuple(make_conv_fwd_data_in_transform<1>(N_,
+                                                              C_,
+                                                              make_multi_index(Wi_),
+                                                              make_multi_index(X_),
+                                                              make_multi_index(Wo_),
+                                                              make_multi_index(ConvStrideW_),
+                                                              make_multi_index(ConvDilationW_),
+                                                              make_multi_index(InLeftPadW_),
+                                                              m_padded,
+                                                              k_padded)),
+                make_tuple(Sequence<0, 1, 2>{}),
+                make_tuple(Sequence<0, 1>{}));
+        }
+        else if constexpr(NDimSpatial == 2)
+        {
+            const index_t m_padded = math::integer_least_multiple(N_ * Ho_ * Wo_, m_per_block);
+            const index_t k_padded = math::integer_least_multiple(Y_ * X_ * C_, k_per_block);
+            const auto in_n_hi_wi_c_desc = make_naive_tensor_descriptor(
+                make_tuple(N_, Hi_, Wi_, C_),
+                make_tuple(NStrideTensorA_, HiStride_, WiStride_, CStrideTensorA_));
+            return transform_tensor_descriptor(in_n_hi_wi_c_desc,
+                                               make_tuple(make_conv_fwd_data_in_transform<2>(
+                                                   N_,
+                                                   C_,
+                                                   make_multi_index(Hi_, Wi_),
+                                                   make_multi_index(Y_, X_),
+                                                   make_multi_index(Ho_, Wo_),
+                                                   make_multi_index(ConvStrideH_, ConvStrideW_),
+                                                   make_multi_index(ConvDilationH_, ConvDilationW_),
+                                                   make_multi_index(InLeftPadH_, InLeftPadW_),
+                                                   m_padded,
+                                                   k_padded)),
+                                               make_tuple(Sequence<0, 1, 2, 3>{}),
+                                               make_tuple(Sequence<0, 1>{}));
+        }
+        else
+        {
+            static_assert(NDimSpatial == 3);
+            const index_t m_padded =
+                math::integer_least_multiple(N_ * Do_ * Ho_ * Wo_, m_per_block);
+            const index_t k_padded = math::integer_least_multiple(Z_ * Y_ * X_ * C_, k_per_block);
+            const auto in_n_di_hi_wi_c_desc = make_naive_tensor_descriptor(
+                make_tuple(N_, Di_, Hi_, Wi_, C_),
+                make_tuple(NStrideTensorA_, DiStride_, HiStride_, WiStride_, CStrideTensorA_));
+            return transform_tensor_descriptor(
+                in_n_di_hi_wi_c_desc,
+                make_tuple(make_conv_fwd_data_in_transform<3>(
+                    N_,
+                    C_,
+                    make_multi_index(Di_, Hi_, Wi_),
+                    make_multi_index(Z_, Y_, X_),
+                    make_multi_index(Do_, Ho_, Wo_),
+                    make_multi_index(ConvStrideD_, ConvStrideH_, ConvStrideW_),
+                    make_multi_index(ConvDilationD_, ConvDilationH_, ConvDilationW_),
+                    make_multi_index(InLeftPadD_, InLeftPadH_, InLeftPadW_),
+                    m_padded,
+                    k_padded)),
+                make_tuple(Sequence<0, 1, 2, 3, 4>{}),
+                make_tuple(Sequence<0, 1>{}));
+        }
     }
 
     template <typename BLayout,

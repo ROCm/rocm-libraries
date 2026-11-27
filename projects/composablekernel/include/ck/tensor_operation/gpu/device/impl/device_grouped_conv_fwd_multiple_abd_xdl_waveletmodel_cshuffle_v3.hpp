@@ -364,12 +364,17 @@ struct DeviceGroupedConvFwdMultipleABD_WaveletModel_Xdl_CShuffle_V3
     static constexpr auto I4 = Number<4>{};
     static constexpr auto I5 = Number<5>{};
 
+    static constexpr bool UseCustomTransform = DirectLoad;
+
     using ConvToGemmFwdTransformer = TransformConvFwdToGemm<NDimSpatial,
                                                             ConvForwardSpecialization,
                                                             true /*SplitN*/,
                                                             ADataType,
                                                             EDataType,
-                                                            NumGroupsToMerge>;
+                                                            NumGroupsToMerge,
+                                                            index_t,
+                                                            false, // CTranspose
+                                                            UseCustomTransform>;
 
     using ComputePtrOffset = ComputePtrOffsetOfStridedBatch<I1, I1, NumDTensor>;
 
@@ -403,11 +408,21 @@ struct DeviceGroupedConvFwdMultipleABD_WaveletModel_Xdl_CShuffle_V3
                                 ctc::NDHWGC,
                                 ALay>>;
 
-        const auto in_gemmmraw_gemmkraw_desc =
-            conv_to_gemm_transformer.template MakeADescriptor_M_K<Layout>();
-
-        const auto in_gemmm_gemmk_desc =
-            matrix_padder.PadADescriptor_M_K(in_gemmmraw_gemmkraw_desc);
+        const auto in_gemmm_gemmk_desc = [&]() {
+            if constexpr(ConvToGemmFwdTransformer::UseCustomTransformA)
+            {
+                // The custom transform pads to MPerBlock x KPerBlock and reports the padding
+                // rows / columns as invalid itself, so the GEMM padder must not be applied.
+                static_assert(GemmSpec == GemmSpecialization::MNKPadding);
+                return conv_to_gemm_transformer.MakeADescriptorWithCustomTransform_M_K(MPerBlock,
+                                                                                       KPerBlock);
+            }
+            else
+            {
+                return matrix_padder.PadADescriptor_M_K(
+                    conv_to_gemm_transformer.template MakeADescriptor_M_K<Layout>());
+            }
+        }();
 
         const auto M = in_gemmm_gemmk_desc.GetLength(I0);
         const auto K = in_gemmm_gemmk_desc.GetLength(I1);
@@ -1612,6 +1627,27 @@ struct DeviceGroupedConvFwdMultipleABD_WaveletModel_Xdl_CShuffle_V3
                           << ", in function: " << __func__ << std::endl;
             }
             return false;
+        }
+
+        // The custom transform reports the GEMM padding through a poison of the first spatial
+        // coordinate. The 2GB check below is in bytes and does not bound the number of elements of
+        // 8-bit types, so the range of the poison is checked explicitly.
+        if constexpr(ConvToGemmFwdTransformer::UseCustomTransformA)
+        {
+            if(!arg.conv_to_gemm_transformer_.IsCustomTransformPaddingRangeSupported(
+                   arg.a_grid_desc_ak0_m_ak1_.GetLength(I1),
+                   arg.a_grid_desc_ak0_m_ak1_.GetLength(I0) *
+                       arg.a_grid_desc_ak0_m_ak1_.GetLength(I2)))
+            {
+                if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+                {
+                    std::cout << "The lower coordinates or their offsets are out of the range of "
+                                 "the custom transform!"
+                              << " In " << __FILE__ << ":" << __LINE__
+                              << ", in function: " << __func__ << std::endl;
+                }
+                return false;
+            }
         }
 
         // Gridwise gemm v3 doesn't verify descriptors size

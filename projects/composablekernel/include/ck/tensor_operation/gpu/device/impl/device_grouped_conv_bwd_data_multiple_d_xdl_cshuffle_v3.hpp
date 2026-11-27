@@ -660,23 +660,26 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
     // TODO: Add support for different A and B data types.
     using ABDataType = ADataType;
 
-    using ConvToGemmBwdDataTransform = TransformConvBwdDataToGemm_v1<NDimSpatial,
-                                                                     ConvBackwardDataSpecialization,
-                                                                     AK1,
-                                                                     BK1,
-                                                                     MPerBlock,
-                                                                     NPerBlock,
-                                                                     KPerBlock,
-                                                                     DoPadGemmM,
-                                                                     DoPadGemmN,
-                                                                     ALayout,
-                                                                     BLayout,
-                                                                     ELayout,
-                                                                     false, /*SplitConvN*/
-                                                                     ABDataType,
-                                                                     EDataType,
-                                                                     1,
-                                                                     IndexType>;
+    using ConvToGemmBwdDataTransform =
+        TransformConvBwdDataToGemm_v1<NDimSpatial,
+                                      ConvBackwardDataSpecialization,
+                                      AK1,
+                                      BK1,
+                                      MPerBlock,
+                                      NPerBlock,
+                                      KPerBlock,
+                                      DoPadGemmM,
+                                      DoPadGemmN,
+                                      ALayout,
+                                      BLayout,
+                                      ELayout,
+                                      false, /*SplitConvN*/
+                                      ABDataType,
+                                      EDataType,
+                                      1,
+                                      IndexType,
+                                      false,                         /*CTranspose*/
+                                      WaveletEnabled && DirectLoad>; // MergeOutPadding
 
     // Dummy function just used to create an alias to Grid Descriptors
     static auto
@@ -1080,6 +1083,8 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
                         }();
 
                         const IndexType GemmM = a_grid_desc_m_k.GetLength(I0);
+                        padding_range_supported_ &=
+                            conv_to_gemm_transform_.IsMergedOutPaddingRangeSupported(GemmM);
                         const IndexType GemmN = b_grid_desc_n_k.GetLength(I0);
 
                         const auto e_grid_desc_mblock_mperblock_nblock_nperblock =
@@ -1205,6 +1210,8 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
         index_t gemms_count_ = 0;
         std::vector<std::array<GemmArgs, MaxGroupedGemmGroupsNum>> gemm_kernel_args_;
 
+        // false if the padding merged in the custom transform can not be reported (poison range)
+        bool padding_range_supported_ = true;
         bool bwd_needs_zero_out;
         long_index_t e_space_size_bytes;
         bool stride_overflow;
@@ -1564,6 +1571,20 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
                 std::cout << "SplitK(" << arg.k_batch_ << ") tests are not supported!" << " In "
                           << __FILE__ << ":" << __LINE__ << ", in function: " << __func__
                           << std::endl;
+            }
+
+            return false;
+        }
+
+        // The custom transform reports the GEMM padding through a poison of the Ho coordinate. The
+        // 2GB checks are in bytes and do not bound the number of elements of 8-bit types, so the
+        // range of the poison is checked explicitly.
+        if(!arg.padding_range_supported_)
+        {
+            if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+            {
+                std::cout << "Ho is too big for the custom transform!" << " In " << __FILE__ << ":"
+                          << __LINE__ << ", in function: " << __func__ << std::endl;
             }
 
             return false;
