@@ -35,6 +35,12 @@ _COMMON_DIR = Path(__file__).parent
 _ARCHS_KEY = pytest.StashKey[list]()
 
 
+@pytest.fixture(scope="session")
+def target_archs(pytestconfig: pytest.Config) -> list[str]:
+    """Architectures the YAML configs were selected for: ``--gpu-targets`` or the detected GPUs."""
+    return pytestconfig.stash.get(_ARCHS_KEY, [])
+
+
 def pytest_ignore_collect(collection_path: Path, config: pytest.Config):
     """Filter direct children of common/ based on --build-only / --use-cache mode."""
     if collection_path.parent != _COMMON_DIR:

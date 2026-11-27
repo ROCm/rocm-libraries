@@ -115,7 +115,7 @@ def _read_client_locks(lock_log: str) -> list[dict]:
 
 def test_config(
     tensile_args: list[str], config: str, tmpdir: py.path.local,
-    pytestconfig: pytest.Config, request: pytest.FixtureRequest,
+    pytestconfig: pytest.Config, request: pytest.FixtureRequest, target_archs: list[str],
 ) -> None:
     """Pytest wrapper: run the full build→artifact→run round-trip on a single machine.
 
@@ -128,9 +128,11 @@ def test_config(
     output_dir = os.path.join(tmpdir.strpath, artifact_name)
     artifact_dir = tmpdir.strpath
     artifact_path = os.path.join(artifact_dir, artifact_name + ".tar.gz")
+    # Stage and client lock timings are not collected for gfx1250 (gfx1250 or gfx1250-strict).
+    record_timeline = not any(arch.startswith("gfx1250") for arch in target_archs)
     # The build and run subprocesses append every client lock wait and hold here.
     lock_log = os.path.join(tmpdir.strpath, "client-locks.jsonl")
-    lock_env = {CLIENT_LOCK_LOG_ENV: lock_log}
+    lock_env = {CLIENT_LOCK_LOG_ENV: lock_log} if record_timeline else {}
     # Wall-clock times, so the controller can line up tests from different workers.
     timeline = {
         "nodeid": request.node.nodeid,
@@ -151,6 +153,7 @@ def test_config(
             with contextlib.suppress(FileNotFoundError):
                 os.remove(artifact_path)
     finally:
-        timeline["end"] = round(time.time(), 3)
-        timeline["client_locks"] = _read_client_locks(lock_log)
-        request.node.add_report_section("call", "tensilelite timeline", json.dumps(timeline))
+        if record_timeline:
+            timeline["end"] = round(time.time(), 3)
+            timeline["client_locks"] = _read_client_locks(lock_log)
+            request.node.add_report_section("call", "tensilelite timeline", json.dumps(timeline))
