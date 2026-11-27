@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -353,10 +353,8 @@ void ref_lapack_xrotg(T& ca, T& cb, U& c, T& s)
 {
     if(rocblas_abs(ca) != 0)
     {
-        const U scale = rocblas_abs(ca) + rocblas_abs(cb);
-        const U norm  = scale
-                       * std::sqrt((rocblas_abs(ca / scale)) * (rocblas_abs(ca / scale))
-                                   + (rocblas_abs(cb / scale)) * (rocblas_abs(cb / scale)));
+        // hypot avoids the overflow of scaling by |ca| + |cb|
+        const U norm = std::hypot(rocblas_abs(ca), rocblas_abs(cb));
         T alpha = ca / rocblas_abs(ca);
         c       = rocblas_abs(ca) / norm;
         s       = alpha * conjugate(cb) / norm;

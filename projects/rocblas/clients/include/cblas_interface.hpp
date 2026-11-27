@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,6 +26,8 @@
 #include <cblas.h>
 
 #include "rocblas.h"
+#include <cmath>
+#include <limits>
 #include <type_traits>
 
 // fwd declaration for lapack_utilities
@@ -379,16 +381,47 @@ inline void ref_rot(int64_t                       n,
 template <typename T, typename U>
 inline void ref_rotg(T* a, T* b, U* c, T* s);
 
+// Reference rotg implementations may scale by |a| + |b|, which overflows for
+// some finite inputs whose r = sqrt(a^2 + b^2) does not. Compute those on the host.
+template <typename T>
+inline bool ref_rotg_scale_overflows(T a, T b)
+{
+    return std::isfinite(a) && std::isfinite(b)
+           && std::abs(a) > std::numeric_limits<T>::max() - std::abs(b);
+}
+
+template <typename T>
+inline void ref_rotg_hypot(T* a, T* b, T* c, T* s)
+{
+    T roe = std::abs(*a) > std::abs(*b) ? *a : *b;
+    T r   = std::copysign(std::hypot(*a, *b), roe);
+    *c    = *a / r;
+    *s    = *b / r;
+    T z   = 1;
+    if(std::abs(*a) > std::abs(*b))
+        z = *s;
+    if(std::abs(*b) >= std::abs(*a) && *c != 0)
+        z = 1 / *c;
+    *a = r;
+    *b = z;
+}
+
 template <>
 inline void ref_rotg(float* a, float* b, float* c, float* s)
 {
-    cblas_srotg(a, b, c, s);
+    if(ref_rotg_scale_overflows(*a, *b))
+        ref_rotg_hypot(a, b, c, s);
+    else
+        cblas_srotg(a, b, c, s);
 }
 
 template <>
 inline void ref_rotg(double* a, double* b, double* c, double* s)
 {
-    cblas_drotg(a, b, c, s);
+    if(ref_rotg_scale_overflows(*a, *b))
+        ref_rotg_hypot(a, b, c, s);
+    else
+        cblas_drotg(a, b, c, s);
 }
 
 template <>

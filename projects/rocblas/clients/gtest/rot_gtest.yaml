@@ -133,6 +133,54 @@ Tests:
       - { alpha: -1.3, beta:  1.4 , alphai:  0.3, betai: -0.4}
       - { alpha:  1.6, beta: -1.5 , alphai: -0.6, betai:  0.5}
 
+  # |a| + |b| overflows but r = sqrt(|a|^2 + |b|^2) does not
+  - name: blas1_large_values
+    category: quick
+    api: [ C, FORTRAN ]
+    function:
+      - rotg: *single_precision
+      - rotg_batched: *single_precision
+      - rotg_strided_batched: *single_precision
+    alpha_beta:
+      - { alpha:  2.0e+38, beta:  2.0e+38 }
+      - { alpha:  3.0e+38, beta:  1.0e+38 }
+      - { alpha: -2.0e+38, beta:  2.0e+38 }
+      - { alpha:  1.0e+38, beta: -3.0e+38 }
+
+  - name: blas1_large_values
+    category: quick
+    api: [ C, FORTRAN ]
+    function:
+      - rotg: *double_precision
+      - rotg_batched: *double_precision
+      - rotg_strided_batched: *double_precision
+    alpha_beta:
+      - { alpha:  1.0e+308, beta:  1.0e+308 }
+      - { alpha:  1.5e+308, beta:  0.5e+308 }
+      - { alpha: -1.0e+308, beta:  1.0e+308 }
+
+  - name: blas1_large_values
+    category: quick
+    api: [ C, FORTRAN ]
+    function:
+      - rotg: *single_precision_complex_real_in_complex_compute
+      - rotg_batched: *single_precision_complex_real_in_complex_compute
+      - rotg_strided_batched: *single_precision_complex_real_in_complex_compute
+    alpha_beta:
+      - { alpha: 1.4e+38, beta:  1.4e+38, alphai:  1.4e+38, betai: -1.4e+38 }
+      - { alpha: 3.0e+38, beta:  1.0e+38, alphai:  0.0,     betai:  0.0 }
+
+  - name: blas1_large_values
+    category: quick
+    api: [ C, FORTRAN ]
+    function:
+      - rotg: *double_precision_complex_real_in_complex_compute
+      - rotg_batched: *double_precision_complex_real_in_complex_compute
+      - rotg_strided_batched: *double_precision_complex_real_in_complex_compute
+    alpha_beta:
+      - { alpha: 7.0e+307, beta:  7.0e+307, alphai:  7.0e+307, betai: -7.0e+307 }
+      - { alpha: 1.5e+308, beta:  0.5e+308, alphai:  0.0,      betai:  0.0 }
+
   - name: blas1
     category: quick
     api: [ C, FORTRAN ]
