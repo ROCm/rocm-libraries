@@ -280,6 +280,11 @@ def validate_client(client: Path, installation: Installation) -> None:
         )
 
 
+def client_build_rocm(client: Path) -> str:
+    """Return the ROCm the client was compiled against: ``"<identity> <full|base|unknown>"``."""
+    return _query_client(client, "--build-rocm")
+
+
 def _query_client(client: Path, option: str) -> str:
     """Run one of the client's one-line identity queries."""
     try:
