@@ -47,7 +47,7 @@ extern "C" {
 
 /* ------------------------------------------------------------ BatchNorm2DSpec
  *
- * Mirror of Python BatchNorm2DSpec. `dtype` is the Literal["f16","bf16"]
+ * Mirror of Python BatchNorm2DSpec. `dtype` is the Literal["f16","bf16","f32"]
  * string (compared by strcmp like Python). The computed @property fields
  * (hw, n_per_channel, elems_per_thread) are NOT stored; use the accessor
  * functions below. */
@@ -59,7 +59,7 @@ typedef struct rocke_batchnorm2d_spec
     int w;
     int block_size; /* default 256                       */
     int vec; /* default 4                         */
-    const char* dtype; /* default "f16" ("f16"|"bf16")      */
+    const char* dtype; /* default "f16" ("f16"|"bf16"|"f32") */
     bool training; /* default true                      */
     bool save_mean_invstd; /* default false                     */
     int channels_per_block; /* default 1 (byte-identical when 1) */
@@ -86,9 +86,8 @@ int rocke_batchnorm2d_elems_per_thread(const rocke_batchnorm2d_spec_t* spec);
 
 /* BatchNorm2DSpec.kernel_name() -> NUL-terminated into out (capacity out_cap).
  * Returns ROCKE_OK or ROCKE_ERR_VALUE (buffer too small). */
-rocke_status_t rocke_batchnorm2d_kernel_name(const rocke_batchnorm2d_spec_t* spec,
-                                             char* out,
-                                             size_t out_cap);
+rocke_status_t
+    rocke_batchnorm2d_kernel_name(const rocke_batchnorm2d_spec_t* spec, char* out, size_t out_cap);
 
 /* is_valid_spec(spec, arch) -> (ok, reason). `arch` NULL => "gfx950". On a
  * reject, `reason` (if non-NULL, capacity reason_cap) receives the structured
@@ -111,8 +110,7 @@ rocke_kernel_def_t* rocke_build_batchnorm2d_new(rocke_ir_builder_t* b,
                                                 const rocke_batchnorm2d_spec_t* spec);
 
 /* batchnorm2d_grid(c, spec) -> (x, y, z). Returns (c, 1, 1). */
-rocke_status_t
-    rocke_batchnorm2d_grid(int c, const rocke_batchnorm2d_spec_t* spec, int out[3]);
+rocke_status_t rocke_batchnorm2d_grid(int c, const rocke_batchnorm2d_spec_t* spec, int out[3]);
 
 /* batchnorm2d_signature(spec): build the {name,type} manifest into the
  * caller-provided `sb` (already rocke_signature_builder_init'd). Returns the
@@ -182,32 +180,171 @@ bool rocke_batchnorm2d_is_valid_split_spec(const rocke_batchnorm2d_split_spec_t*
                                            size_t reason_cap);
 
 /* batchnorm2d_reduce_partial_grid(c, spec) -> (c/cpb, split_hw, 1). */
-rocke_status_t rocke_batchnorm2d_reduce_partial_grid(
-    int c, const rocke_batchnorm2d_split_spec_t* spec, int out[3]);
+rocke_status_t rocke_batchnorm2d_reduce_partial_grid(int c,
+                                                     const rocke_batchnorm2d_split_spec_t* spec,
+                                                     int out[3]);
 
 /* batchnorm2d_combine_apply_grid(c, spec) -> (c/cpb, 1, 1). */
-rocke_status_t rocke_batchnorm2d_combine_apply_grid(
-    int c, const rocke_batchnorm2d_split_spec_t* spec, int out[3]);
+rocke_status_t rocke_batchnorm2d_combine_apply_grid(int c,
+                                                    const rocke_batchnorm2d_split_spec_t* spec,
+                                                    int out[3]);
 
 /* build_batchnorm2d_reduce_partial(spec): kernel A of the split-reduction
  * pair. Builds into `b` (already rocke_ir_builder_init'd); returns b->kernel
  * or NULL with b's sticky error set. */
-rocke_kernel_def_t* rocke_build_batchnorm2d_reduce_partial(
-    rocke_ir_builder_t* b, const rocke_batchnorm2d_split_spec_t* spec);
+rocke_kernel_def_t*
+    rocke_build_batchnorm2d_reduce_partial(rocke_ir_builder_t* b,
+                                           const rocke_batchnorm2d_split_spec_t* spec);
 
 /* Convenience: init `b` with spec.kernel_name("reduce"), then build. */
-rocke_kernel_def_t* rocke_build_batchnorm2d_reduce_partial_new(
-    rocke_ir_builder_t* b, const rocke_batchnorm2d_split_spec_t* spec);
+rocke_kernel_def_t*
+    rocke_build_batchnorm2d_reduce_partial_new(rocke_ir_builder_t* b,
+                                               const rocke_batchnorm2d_split_spec_t* spec);
 
 /* build_batchnorm2d_combine_apply(spec): kernel B of the split-reduction
  * pair. Builds into `b` (already rocke_ir_builder_init'd); returns b->kernel
  * or NULL with b's sticky error set. */
-rocke_kernel_def_t* rocke_build_batchnorm2d_combine_apply(
-    rocke_ir_builder_t* b, const rocke_batchnorm2d_split_spec_t* spec);
+rocke_kernel_def_t*
+    rocke_build_batchnorm2d_combine_apply(rocke_ir_builder_t* b,
+                                          const rocke_batchnorm2d_split_spec_t* spec);
 
 /* Convenience: init `b` with spec.kernel_name("combine"), then build. */
-rocke_kernel_def_t* rocke_build_batchnorm2d_combine_apply_new(
-    rocke_ir_builder_t* b, const rocke_batchnorm2d_split_spec_t* spec);
+rocke_kernel_def_t*
+    rocke_build_batchnorm2d_combine_apply_new(rocke_ir_builder_t* b,
+                                              const rocke_batchnorm2d_split_spec_t* spec);
+
+/* ------------------------------------------------ flat elementwise inference
+ *
+ * C99 port of batchnorm2d.py's BatchNorm2DFlatInferSpec /
+ * build_batchnorm2d_flat_infer: an AOT-generic inference kernel gridded over
+ * the flat N*C*H*W element space (see the Python "Flat elementwise
+ * inference" section). The Python dataclass also carries interface-parity
+ * fields (training, save_mean_invstd, dynamic, channels_per_block, n_groups,
+ * fast_reduce) for its host-side launch code; they never reach the IR and
+ * are not mirrored. */
+typedef struct rocke_batchnorm2d_flat_infer_spec
+{
+    int block_size; /* default 256 */
+    int vec; /* default 8 */
+    int unroll; /* default 1 */
+    bool aligned; /* default true */
+    const char* dtype; /* default "f16" ("f16"|"bf16") */
+    int wave_size; /* default 64 */
+    const char* name; /* default "rocke_batchnorm2d_flat_infer" */
+} rocke_batchnorm2d_flat_infer_spec_t;
+
+rocke_batchnorm2d_flat_infer_spec_t rocke_batchnorm2d_flat_infer_spec_default(void);
+
+/* BatchNorm2DFlatInferSpec.tile_elems property: block_size * vec * unroll. */
+int rocke_batchnorm2d_flat_infer_tile_elems(const rocke_batchnorm2d_flat_infer_spec_t* spec);
+
+/* BatchNorm2DFlatInferSpec.kernel_name(). */
+rocke_status_t rocke_batchnorm2d_flat_infer_kernel_name(
+    const rocke_batchnorm2d_flat_infer_spec_t* spec, char* out, size_t out_cap);
+
+/* is_valid_flat_infer_spec(spec, arch); same reason/arch contract as
+ * rocke_batchnorm2d_is_valid_spec. */
+bool rocke_batchnorm2d_is_valid_flat_infer_spec(const rocke_batchnorm2d_flat_infer_spec_t* spec,
+                                                const char* arch,
+                                                char* reason,
+                                                size_t reason_cap);
+
+/* flat_infer_admits(spec, n, c, h, w): runtime-shape admission. */
+bool rocke_batchnorm2d_flat_infer_admits(const rocke_batchnorm2d_flat_infer_spec_t* spec,
+                                         int n,
+                                         int c,
+                                         int h,
+                                         int w,
+                                         char* reason,
+                                         size_t reason_cap);
+
+/* batchnorm2d_flat_infer_grid(n, c, h, w, spec) -> (ceil(NCHW / tile), 1, 1). */
+rocke_status_t rocke_batchnorm2d_flat_infer_grid(
+    int n, int c, int h, int w, const rocke_batchnorm2d_flat_infer_spec_t* spec, int out[3]);
+
+/* build_batchnorm2d_flat_infer(spec) into an initialised builder `b`. */
+rocke_kernel_def_t*
+    rocke_build_batchnorm2d_flat_infer(rocke_ir_builder_t* b,
+                                       const rocke_batchnorm2d_flat_infer_spec_t* spec);
+
+/* Convenience: init `b` with spec.kernel_name(), then build. */
+rocke_kernel_def_t*
+    rocke_build_batchnorm2d_flat_infer_new(rocke_ir_builder_t* b,
+                                           const rocke_batchnorm2d_flat_infer_spec_t* spec);
+
+/* ------------------------------------------ dynamic cross-CTA split reduction
+ *
+ * C99 port of batchnorm2d.py's BatchNorm2DSplitDynSpec /
+ * build_batchnorm2d_split_dyn_reduce / build_batchnorm2d_split_dyn_apply:
+ * the shape-generic training split pair, grid (C, SH, SN), split geometry
+ * passed as kernargs (see the Python "Dynamic (AOT-generic) cross-CTA split
+ * reduction" section). */
+typedef struct rocke_batchnorm2d_split_dyn_spec
+{
+    int block_size; /* default 256 */
+    int vec; /* default 8 */
+    const char* dtype; /* default "f16" ("f16"|"bf16"|"f32") */
+    bool fast_reduce; /* default false */
+    bool save_mean_invstd; /* default true */
+    int wave_size; /* default 64 */
+    bool dynamic; /* default true (interface parity; always dynamic) */
+    const char* name; /* default "rocke_batchnorm2d_splitdyn" */
+} rocke_batchnorm2d_split_dyn_spec_t;
+
+rocke_batchnorm2d_split_dyn_spec_t rocke_batchnorm2d_split_dyn_spec_default(void);
+
+/* BatchNorm2DSplitDynSpec.kernel_name(kind), kind "reduce" | "apply". */
+rocke_status_t rocke_batchnorm2d_split_dyn_kernel_name(
+    const rocke_batchnorm2d_split_dyn_spec_t* spec, const char* kind, char* out, size_t out_cap);
+
+/* BatchNorm2DSplitPlan: runtime split geometry of one launch pair. */
+typedef struct rocke_batchnorm2d_split_plan
+{
+    int n_chunk;
+    int hw_chunk;
+    int sn;
+    int sh;
+} rocke_batchnorm2d_split_plan_t;
+
+/* batchnorm2d_split_plan(spec, n, h, w, sn_req=, sh_req=). Returns true and
+ * fills *out on a valid plan; false where Python returns None. */
+bool rocke_batchnorm2d_split_plan(const rocke_batchnorm2d_split_dyn_spec_t* spec,
+                                  int n,
+                                  int h,
+                                  int w,
+                                  int sn_req,
+                                  int sh_req,
+                                  rocke_batchnorm2d_split_plan_t* out);
+
+/* batchnorm2d_split_dyn_workspace_floats(c, plan): c * sn * sh * 3. */
+int rocke_batchnorm2d_split_dyn_workspace_floats(int c, const rocke_batchnorm2d_split_plan_t* plan);
+
+/* batchnorm2d_split_dyn_grid(c, plan) -> (c, sh, sn). */
+rocke_status_t
+    rocke_batchnorm2d_split_dyn_grid(int c, const rocke_batchnorm2d_split_plan_t* plan, int out[3]);
+
+/* is_valid_split_dyn_spec(spec, arch); same reason/arch contract as
+ * rocke_batchnorm2d_is_valid_spec. */
+bool rocke_batchnorm2d_is_valid_split_dyn_spec(const rocke_batchnorm2d_split_dyn_spec_t* spec,
+                                               const char* arch,
+                                               char* reason,
+                                               size_t reason_cap);
+
+/* build_batchnorm2d_split_dyn_reduce(spec) / _apply(spec) into an
+ * initialised builder `b`; the _new variants init `b` with
+ * spec.kernel_name("reduce") / ("apply") first. */
+rocke_kernel_def_t*
+    rocke_build_batchnorm2d_split_dyn_reduce(rocke_ir_builder_t* b,
+                                             const rocke_batchnorm2d_split_dyn_spec_t* spec);
+rocke_kernel_def_t*
+    rocke_build_batchnorm2d_split_dyn_reduce_new(rocke_ir_builder_t* b,
+                                                 const rocke_batchnorm2d_split_dyn_spec_t* spec);
+rocke_kernel_def_t*
+    rocke_build_batchnorm2d_split_dyn_apply(rocke_ir_builder_t* b,
+                                            const rocke_batchnorm2d_split_dyn_spec_t* spec);
+rocke_kernel_def_t*
+    rocke_build_batchnorm2d_split_dyn_apply_new(rocke_ir_builder_t* b,
+                                                const rocke_batchnorm2d_split_dyn_spec_t* spec);
 
 #ifdef __cplusplus
 } /* extern "C" */

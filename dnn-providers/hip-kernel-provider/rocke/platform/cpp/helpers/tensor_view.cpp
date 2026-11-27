@@ -932,7 +932,7 @@ void rocke_tile_window_store_vec_from_f32(rocke_ir_builder_t* b,
                                           int num_values)
 {
     /* Python TileWindow.store_vec_from_f32:
-     *   if self.dtype.name not in ("f16", "bf16"):
+     *   if self.dtype.name not in ("f16", "bf16", "f32"):
      *       raise NotImplementedError(...)
      *   if len(values) == 1:
      *       scalar = b.cast_f32_to(values[0], self.dtype)
@@ -949,7 +949,8 @@ void rocke_tile_window_store_vec_from_f32(rocke_ir_builder_t* b,
     if(b == NULL || w == NULL || w->view == NULL)
         return;
     dt = w->view->desc.dtype;
-    if(!(rocke_tv_name_is(dt, "f16") || rocke_tv_name_is(dt, "bf16")))
+    if(!(rocke_tv_name_is(dt, "f16") || rocke_tv_name_is(dt, "bf16")
+         || rocke_tv_name_is(dt, "f32")))
     {
         /* Python: NotImplementedError "store_vec_from_f32 not wired for ...". */
         rocke_i_set_err(b,

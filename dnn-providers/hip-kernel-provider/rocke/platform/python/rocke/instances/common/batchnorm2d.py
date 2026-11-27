@@ -303,7 +303,7 @@ def is_valid_spec(spec: BatchNorm2DSpec, arch: str = "gfx950") -> Tuple[bool, st
             dtype=spec.dtype,
             block_size=spec.block_size,
             vec=spec.vec,
-            allowed_dtypes=("f16", "bf16", "f32"),
+            allowed_dtypes=("f16", "fp16", "bf16", "f32"),
             allowed_vecs=_vecs,
         )
     )
