@@ -116,7 +116,8 @@ jobs:
             -DHIPBLASLT_ENABLE_YAML=OFF \
             -DPython3_EXECUTABLE="$(command -v python3)" \
             -DPython_EXECUTABLE="$(command -v python3)"
-          cmake --build build --parallel --target tensilelite-tests cpu-gemm-driver
+          # tensilelite-client: the TensileLiteClient.* identity tests run it (--version etc.).
+          cmake --build build --parallel --target tensilelite-tests cpu-gemm-driver tensilelite-client
 
       # A PR that changes only a file this build reads, but the lane's path filter misses,
       # would skip the lane. Fail here instead, naming the file to add to component_ci.py.
