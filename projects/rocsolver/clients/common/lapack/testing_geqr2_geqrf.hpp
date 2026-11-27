@@ -442,8 +442,8 @@ void geqr2_geqrf_getPerfData(const rocblas_handle handle,
                                              hIpiv);
 
         timer.start(stream);
-        rocsolver_geqr2_geqrf(STRIDED, GEQRF, handle, m, n, dA.data(), lda, stA, dIpiv.data(), stP,
-                              bc);
+        CHECK_ROCBLAS_ALLOCATION(rocsolver_geqr2_geqrf(STRIDED, GEQRF, handle, m, n, dA.data(), lda,
+                                                       stA, dIpiv.data(), stP, bc));
         timer.end(stream);
     }
     *gpu_time_used = timer.get_combined();

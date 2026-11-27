@@ -101,8 +101,8 @@ void testing_gerq2_gerqf_bad_arg()
         // memory allocations
         device_batch_vector<T> dA(1, 1, 1);
         device_strided_batch_vector<T> dIpiv(1, 1, 1, 1);
-        CHECK_HIP_ERROR(dA.memcheck());
-        CHECK_HIP_ERROR(dIpiv.memcheck());
+        CHECK_DEVICE_ALLOCATION(dA.memcheck());
+        CHECK_DEVICE_ALLOCATION(dIpiv.memcheck());
 
         // check bad arguments
         gerq2_gerqf_checkBadArgs<STRIDED, GERQF>(handle, m, n, dA.data(), lda, stA, dIpiv.data(),
@@ -113,8 +113,8 @@ void testing_gerq2_gerqf_bad_arg()
         // memory allocations
         device_strided_batch_vector<T> dA(1, 1, 1, 1);
         device_strided_batch_vector<T> dIpiv(1, 1, 1, 1);
-        CHECK_HIP_ERROR(dA.memcheck());
-        CHECK_HIP_ERROR(dIpiv.memcheck());
+        CHECK_DEVICE_ALLOCATION(dA.memcheck());
+        CHECK_DEVICE_ALLOCATION(dIpiv.memcheck());
 
         // check bad arguments
         gerq2_gerqf_checkBadArgs<STRIDED, GERQF>(handle, m, n, dA.data(), lda, stA, dIpiv.data(),
@@ -202,22 +202,22 @@ void gerq2_gerqf_getError(const rocblas_handle handle,
 
     // GPU scalar for lange output, shared by all checks below.
     device_strided_batch_vector<S> dnorm(1, 1, 1, 1);
-    CHECK_HIP_ERROR(dnorm.memcheck());
+    CHECK_DEVICE_ALLOCATION(dnorm.memcheck());
     host_strided_batch_vector<S> hnorm(1, 1, 1, 1);
 
     // Compute norm( A ) on GPU before gerqf overwrites dA.
     std::vector<S> A_norms(bc);
     for(rocblas_int b = 0; b < bc; ++b)
     {
-        CHECK_ROCBLAS_ERROR(
+        CHECK_ROCBLAS_ALLOCATION(
             rocsolver_lange(handle, rocsolver_norm_type_one, m, n, dA[b], lda, dnorm[0]));
         CHECK_HIP_ERROR(hnorm.transfer_from(dnorm));
         A_norms[b] = hnorm[0][0];
     }
 
     // GPU lapack
-    CHECK_ROCBLAS_ERROR(rocsolver_gerq2_gerqf(STRIDED, GERQF, handle, m, n, dA.data(), lda, stA,
-                                              dIpiv.data(), stP, bc));
+    CHECK_ROCBLAS_ALLOCATION(rocsolver_gerq2_gerqf(STRIDED, GERQF, handle, m, n, dA.data(), lda,
+                                                   stA, dIpiv.data(), stP, bc));
     CHECK_HIP_ERROR(hARes.transfer_from(dA));
     CHECK_HIP_ERROR(hIpiv.transfer_from(dIpiv));
 
@@ -395,8 +395,8 @@ void gerq2_gerqf_getPerfData(const rocblas_handle handle,
         gerq2_gerqf_initData<false, true, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA,
                                              hIpiv);
 
-        CHECK_ROCBLAS_ERROR(rocsolver_gerq2_gerqf(STRIDED, GERQF, handle, m, n, dA.data(), lda, stA,
-                                                  dIpiv.data(), stP, bc));
+        CHECK_ROCBLAS_ALLOCATION(rocsolver_gerq2_gerqf(STRIDED, GERQF, handle, m, n, dA.data(), lda,
+                                                       stA, dIpiv.data(), stP, bc));
     }
 
     // gpu-lapack performance
@@ -420,8 +420,8 @@ void gerq2_gerqf_getPerfData(const rocblas_handle handle,
                                              hIpiv);
 
         timer.start(stream);
-        rocsolver_gerq2_gerqf(STRIDED, GERQF, handle, m, n, dA.data(), lda, stA, dIpiv.data(), stP,
-                              bc);
+        CHECK_ROCBLAS_ALLOCATION(rocsolver_gerq2_gerqf(STRIDED, GERQF, handle, m, n, dA.data(), lda,
+                                                       stA, dIpiv.data(), stP, bc));
         timer.end(stream);
     }
     *gpu_time_used = timer.get_combined();
@@ -501,9 +501,9 @@ void testing_gerq2_gerqf(Arguments& argus)
         device_batch_vector<T> dA(size_A, 1, bc);
         device_strided_batch_vector<T> dIpiv(size_P, 1, stP, bc);
         if(size_A)
-            CHECK_HIP_ERROR(dA.memcheck());
+            CHECK_DEVICE_ALLOCATION(dA.memcheck());
         if(size_P)
-            CHECK_HIP_ERROR(dIpiv.memcheck());
+            CHECK_DEVICE_ALLOCATION(dIpiv.memcheck());
 
         // check quick return
         if(m == 0 || n == 0 || bc == 0)
@@ -538,9 +538,9 @@ void testing_gerq2_gerqf(Arguments& argus)
         device_strided_batch_vector<T> dA(size_A, 1, stA, bc);
         device_strided_batch_vector<T> dIpiv(size_P, 1, stP, bc);
         if(size_A)
-            CHECK_HIP_ERROR(dA.memcheck());
+            CHECK_DEVICE_ALLOCATION(dA.memcheck());
         if(size_P)
-            CHECK_HIP_ERROR(dIpiv.memcheck());
+            CHECK_DEVICE_ALLOCATION(dIpiv.memcheck());
 
         // check quick return
         if(m == 0 || n == 0 || bc == 0)
