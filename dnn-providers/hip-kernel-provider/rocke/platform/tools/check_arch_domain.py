@@ -16,9 +16,10 @@
 #     cannot lower is a kernel bug, and waivers are for wrong measurements;
 #   * no stale waiver: a waived cell that no longer measures negative means the
 #     column was fixed, and the waiver goes in the same change;
-#   * when the rocke_engine extension is importable, the C++ engine in `error`
-#     mode refuses exactly the cases the Python lowerer would, over the same
-#     intrinsic -- one table only helps if both engines act on it alike.
+#   * when the shared C++ engine (librocke, through rocke.core.native_engine)
+#     loads, the C++ engine in `error` mode refuses exactly the cases the
+#     Python lowerer would, over the same intrinsic -- one table only helps if
+#     both engines act on it alike.
 #
 # Lowering is pure Python and the artifact is committed data, so this gate needs
 # no toolchain and rules on every flavor on any host. It overlaps
@@ -142,8 +143,8 @@ def _cpp_verdicts(
             continue
         except BackendMismatch as exc:
             # The backend raises this, not ArchDomainError, when the engine
-            # refused a cell this checkout's table does not: an extension built
-            # from other columns or waivers. That is the disagreement this gate
+            # refused a cell this checkout's table does not: a shared engine
+            # built from other columns or waivers. That is the disagreement this gate
             # exists to find, so it is counted rather than filed below.
             out.append(f"{cid} @ {flavor}: cpp refused, python did not -- {exc}")
             continue

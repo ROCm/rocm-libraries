@@ -21,7 +21,7 @@ import unittest
 from pathlib import Path
 
 from rocke.core.lower_llvm import lower_kernel_to_llvm
-from rocke.tests.comgr import loaded_compiler_build
+from rocke.tests.comgr import compile_kernel_or_skip, loaded_compiler_build
 from rocke.tests.compiler_tools import require_tools_or_skip
 from rocke.tests.pending_lanes import (
     measured_budget_kernels,
@@ -632,19 +632,13 @@ class TestAgprAccResources(unittest.TestCase):
         try:
             from rocke.analysis.isa import analyze_hsaco
             from rocke.core.lower_llvm import _is_modern_flavor, _resolve_llvm_flavor
-            from rocke.helpers.compile import compile_kernel
         except ImportError as exc:  # pragma: no cover - environment-dependent
             require_tools_or_skip(f"comgr/resource tools unavailable: {exc}")
         if not _is_modern_flavor(_resolve_llvm_flavor()):
             raise unittest.SkipTest("agpr_acc needs an llvm22 / llvm23 comgr")
-        try:
-            art = compile_kernel(
-                build_mla_prefill_fwd(_aa_spec(), arch="gfx942"),
-                arch="gfx942",
-                capture_ir_text=False,
-            )
-        except (ImportError, RuntimeError) as exc:  # pragma: no cover
-            require_tools_or_skip(f"comgr toolchain unavailable: {exc}")
+        art = compile_kernel_or_skip(
+            build_mla_prefill_fwd(_aa_spec(), arch="gfx942"), arch="gfx942"
+        )
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "mla_prefill_fwd_aa.hsaco"
             path.write_bytes(bytes(art.hsaco))

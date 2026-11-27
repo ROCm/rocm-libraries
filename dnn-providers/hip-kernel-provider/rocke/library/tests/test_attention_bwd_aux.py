@@ -385,10 +385,8 @@ def test_shipped_aux_instances_have_zero_scratch_and_spills(arch):
     from ._attention_bwd_resources import (
         compile_or_skip,
         evaluate_resource_gate,
-        pin_production_comgr,
     )
 
-    pin_production_comgr()  # torch's bundled comgr, by path; torch not imported
     facts = attn_bwd_arch_facts(arch)
     failures = []
     for stage, D, dt, sm, sv, lay in itertools.product(
@@ -523,10 +521,8 @@ def test_aux_tuning_instances_have_zero_scratch_and_spills(arch):
     from ._attention_bwd_resources import (
         compile_or_skip,
         evaluate_resource_gate,
-        pin_production_comgr,
     )
 
-    pin_production_comgr()  # torch's bundled comgr, by path; torch not imported
     facts = attn_bwd_arch_facts(arch)
     failures = []
     cases = [("convert", v, x) for v in X.CONVERT_VECS for x in (1, 2, 4)]
@@ -683,10 +679,8 @@ def test_worklist_prep_instances_have_zero_scratch_and_spills(arch, D):
     from ._attention_bwd_resources import (
         compile_or_skip,
         evaluate_resource_gate,
-        pin_production_comgr,
     )
 
-    pin_production_comgr()  # torch's bundled comgr, by path; torch not imported
     facts = attn_bwd_arch_facts(arch)
     failures = []
     for dt, sv, lay, x in itertools.product(

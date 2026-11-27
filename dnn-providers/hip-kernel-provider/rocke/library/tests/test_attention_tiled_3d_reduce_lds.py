@@ -17,6 +17,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
+from rocke.tests.comgr import compile_kernel_or_skip
 from rocke.tests.lanes import BUILD_VARIANT, skip_until
 
 # An installed test tree carries a copy of the two headers under ``hkp_packs/``
@@ -64,12 +65,7 @@ def _reduce(num_segments: int):
 def _compiled_lds_bytes(kernel, arch: str) -> int:
     """``group_segment_fixed_size`` of ``kernel`` compiled for ``arch``; skips when the
     comgr toolchain or the HSACO reader is unavailable."""
-    try:
-        from rocke.helpers.compile import compile_kernel
-
-        art = compile_kernel(kernel, arch=arch, capture_ir_text=False)
-    except (ImportError, OSError, RuntimeError) as e:  # pragma: no cover
-        pytest.skip(f"comgr toolchain unavailable: {e}")
+    art = compile_kernel_or_skip(kernel, arch=arch)
     from rocke.analysis.isa import analyze_hsaco
 
     with tempfile.NamedTemporaryFile(suffix=".hsaco") as fh:

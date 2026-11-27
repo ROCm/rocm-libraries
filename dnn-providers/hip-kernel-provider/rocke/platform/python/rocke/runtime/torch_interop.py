@@ -42,9 +42,12 @@ def _require_torch():
 
 
 def is_torch_tensor(value: object) -> bool:
-    """Whether ``value`` is a torch object, judged by its type's module so torch
-    is never imported to answer."""
-    return type(value).__module__.split(".", 1)[0] == "torch"
+    """Whether ``value`` is a torch object, a subclass of a torch type included,
+    judged by the modules of its type and that type's bases so torch is never
+    imported to answer."""
+    return any(
+        cls.__module__.split(".", 1)[0] == "torch" for cls in type(value).__mro__
+    )
 
 
 def resolve_stream(stream, device=None) -> int:

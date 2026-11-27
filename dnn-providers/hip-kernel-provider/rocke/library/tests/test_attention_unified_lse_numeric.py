@@ -28,7 +28,11 @@ from rocke.tests.gpu import current_device_arch_in
 from rocke.tests.host_arrays import HostArray
 from rocke.tests.lanes import TICKET, import_or_skip_until
 
-from ._attention_paged_reference import paged_attention_reference_with_lse
+from ._attention_paged_reference import (
+    PAGED_OUTPUT_ATOL,
+    PAGED_OUTPUT_RTOL,
+    paged_attention_reference_with_lse,
+)
 from ._attention_unified_support import random_half
 
 
@@ -44,6 +48,20 @@ def cdna3_or_4():
 
 def _tolerance(dtype):
     return 2e-2 if dtype == "fp16" else 4e-2
+
+
+# The fp32 LSE's bound, whatever the output dtype.
+_LSE_ATOL = 1e-3
+_LSE_RTOL = 1e-3
+# The split-KV O bound. On the decode shapes max |O| is only about 0.1-0.3, so
+# the output-dtype bound above would pass one misaddressed K or V page or a
+# dropped key tile; the paged output bound (PAGED_OUTPUT_ATOL/RTOL) holds there.
+# The PV product takes the probabilities in the KV dtype, so its error grows
+# with the values it averages: on the short sequences, where a row averages a
+# few keys and |O| reaches the values' own size, the absolute bound is 1/128 of
+# the largest |O| instead (still far below what a misplaced page moves O by
+# there; test_the_split_kv_bound_fails_one_misplaced_page).
+_SPLIT_KV_O_ATOL_PER_MAX_O = 2**-7
 
 
 def _paged_reference(data, scale, softcap, sliding_window=0, additive_bias=None):
@@ -194,14 +212,8 @@ def test_split_kv_output_and_lse(cdna3_or_4, dtype, d, q_lens, kv_lens):
         dataclasses.replace(problem, emit_lse=False), data, lse=None, softcap=0.0
     )
     o_ref, lse_ref = _paged_reference(data, 1.0 / math.sqrt(d), 0.0)
-    lse = lse.values()
-    tol = _tolerance(dtype)
     np.testing.assert_array_equal(out, off, err_msg="LSE-on changed O")
-    assert np.abs(out - o_ref).max() < tol
-    np.testing.assert_array_equal(np.isneginf(lse), np.isneginf(lse_ref))
-    finite = np.isfinite(lse_ref)
-    assert not np.isnan(lse).any()
-    assert np.abs(lse[finite] - lse_ref[finite]).max() < tol
+    _assert_matches_reference(out, lse.values(), o_ref, lse_ref)
 
 
 @pytest.mark.gpu
@@ -218,13 +230,14 @@ def test_split_kv_lse_nan_query_row_stays_nan(cdna3_or_4, dtype):
     out = _run(problem, data, lse=lse, softcap=0.0)
     o_ref, lse_ref = _paged_reference(data, 1.0 / math.sqrt(data.q.shape[-1]), 0.0)
     _assert_only_the_nan_row_is_nan(
-        out, lse.values(), o_ref, lse_ref, (nan_token, nan_head), dtype
+        out, lse.values(), o_ref, lse_ref, (nan_token, nan_head), _assert_split_kv_o
     )
 
 
-def _assert_only_the_nan_row_is_nan(out, lse, o_ref, lse_ref, nan_row, dtype):
+def _assert_only_the_nan_row_is_nan(out, lse, o_ref, lse_ref, nan_row, assert_o):
     """NaN O and LSE at ``nan_row`` (token, head) only; every other row is
-    written, finite and matches the reference."""
+    written, finite and matches the reference: its O by ``assert_o(out,
+    o_ref)``, its LSE within the fp32 LSE bound."""
     assert not np.isposinf(lse).any(), "an LSE row was left unwritten"
     assert np.isnan(lse[nan_row]).all(), "NaN row got a non-NaN LSE"
     assert np.isnan(out[nan_row]).all(), "NaN row was hidden in O"
@@ -232,7 +245,7 @@ def _assert_only_the_nan_row_is_nan(out, lse, o_ref, lse_ref, nan_row, dtype):
     rest[nan_row] = False
     assert np.isfinite(lse[..., 0][rest]).all(), "NaN leaked into another LSE"
     assert np.isfinite(out[rest]).all(), "NaN leaked into another (row, head)"
-    assert np.abs(out[rest] - o_ref[rest]).max() < _tolerance(dtype)
+    assert_o(out[rest], o_ref[rest])
     np.testing.assert_allclose(
         lse[..., 0][rest], lse_ref[..., 0][rest], atol=_LSE_ATOL, rtol=_LSE_RTOL
     )
@@ -245,24 +258,36 @@ def test_split_kv_lse_with_softcap(cdna3_or_4):
     lse = _lse_array(problem, np.nan)
     _run(problem, data, lse=lse, softcap=30.0)
     _, lse_ref = _paged_reference(data, 1.0 / math.sqrt(128), 30.0)
-    assert np.abs(lse.values() - lse_ref).max() < _tolerance("bf16")
+    _assert_split_kv_lse(lse.values(), lse_ref)
 
 
-def _assert_matches_reference(out, lse, o_ref, lse_ref, tol):
-    assert np.isfinite(out).all(), "non-finite O"
-    assert np.abs(out - o_ref).max() < tol
+def _assert_split_kv_o(out, o_ref):
+    """O matches the reference element-wise within the split-KV bound."""
+    largest = float(np.abs(o_ref).max(initial=0.0))
+    atol = max(PAGED_OUTPUT_ATOL, _SPLIT_KV_O_ATOL_PER_MAX_O * largest)
+    np.testing.assert_allclose(out, o_ref, atol=atol, rtol=PAGED_OUTPUT_RTOL)
+
+
+def _assert_split_kv_lse(lse, lse_ref):
+    """Every LSE row is written, the keyless rows are -inf, and the rest match
+    the reference within the fp32 LSE bound."""
     assert not np.isnan(lse).any(), "an LSE row was left unwritten"
     np.testing.assert_array_equal(np.isneginf(lse), np.isneginf(lse_ref))
     finite = np.isfinite(lse_ref)
-    assert np.abs(lse[finite] - lse_ref[finite]).max() < tol
+    np.testing.assert_allclose(
+        lse[finite], lse_ref[finite], atol=_LSE_ATOL, rtol=_LSE_RTOL
+    )
+
+
+def _assert_matches_reference(out, lse, o_ref, lse_ref):
+    assert np.isfinite(out).all(), "non-finite O"
+    _assert_split_kv_o(out, o_ref)
+    _assert_split_kv_lse(lse, lse_ref)
 
 
 # ---------------------------------------------------------------------------
 # Tiled 2D LSE (gfx942 / gfx950 build_unified_attention_2d_tiled)
 # ---------------------------------------------------------------------------
-
-_LSE_ATOL = 1e-3
-_LSE_RTOL = 1e-3
 
 # Prefill shapes the tiled 2D path serves. With 32 query / 8 KV heads every one
 # routes to 2D under backend="auto" (UnifiedAttentionProblem.select_path).
@@ -315,11 +340,16 @@ def _run2d_lse_off(problem, data, *, softcap, backend):
         return _run2d(off, data, lse=None, softcap=softcap, backend=backend)
 
 
+def _assert_2d_o(out, o_ref, dtype):
+    """O matches the reference within the output dtype's bound."""
+    assert np.abs(out - o_ref).max() < _tolerance(dtype)
+
+
 def _assert_2d_result(out, off, lse, o_ref, lse_ref, dtype):
     assert not np.isnan(lse).any(), "an LSE row was left unwritten"
     np.testing.assert_array_equal(out, off, err_msg="LSE-on changed O")
     assert np.isfinite(out).all(), "non-finite O"
-    assert np.abs(out - o_ref).max() < _tolerance(dtype)
+    _assert_2d_o(out, o_ref, dtype)
     keyless = np.isneginf(lse_ref[..., 0])  # [total_q, Hq]
     assert (out[keyless] == 0).all(), "a row with no visible key has O != 0"
     np.testing.assert_array_equal(
@@ -403,7 +433,7 @@ def test_split_kv_lse_with_one_query_head_per_kv_head(cdna3_or_4, q_lens, kv_len
     lse = _lse_array(problem, np.nan)
     out = _run(problem, data, lse=lse, softcap=0.0)
     o_ref, lse_ref = _paged_reference(data, 1.0 / math.sqrt(128), 0.0)
-    _assert_matches_reference(out, lse.values(), o_ref, lse_ref, _tolerance("bf16"))
+    _assert_matches_reference(out, lse.values(), o_ref, lse_ref)
 
 
 @pytest.mark.gpu
@@ -415,7 +445,7 @@ def test_split_kv_lse_with_sliding_window(cdna3_or_4, q_lens, kv_lens, window):
     lse = _lse_array(problem, np.nan)
     out = _run(problem, data, lse=lse, softcap=0.0)
     o_ref, lse_ref = _paged_reference(data, 1.0 / math.sqrt(128), 0.0, window)
-    _assert_matches_reference(out, lse.values(), o_ref, lse_ref, _tolerance("bf16"))
+    _assert_matches_reference(out, lse.values(), o_ref, lse_ref)
 
 
 _PINNED_SPLIT_KV_SPEC = {
@@ -458,7 +488,6 @@ def test_pinned_split_kv_spec_end_to_end(cdna3_or_4):
         lse.values(),
         o_ref,
         lse_ref,
-        _tolerance("bf16"),
     )
 
 
@@ -466,6 +495,15 @@ def test_pinned_split_kv_spec_end_to_end(cdna3_or_4):
 # causal: row 0 sees kv_len - q_len + 1 keys), for any tile of 16, 32 or 64; 5/3
 # also leaves rows 0 and 1 with no visible key at all.
 _MASKED_TILE_SHAPES = [(4, 17), (4, 33), (4, 65), (5, 3)]
+
+
+def _masked_tile_case(q_len, kv_len):
+    """One sequence whose every visible logit is -200: Q=2, K=-12.5, D=64,
+    scale 1/8."""
+    problem, data = _case([q_len], [kv_len], d=64)
+    data.q[...] = 2.0
+    data.k_cache[...] = -12.5
+    return problem, data
 
 
 @pytest.mark.gpu
@@ -478,21 +516,16 @@ def test_masked_segment_does_not_underflow_the_merge(
     every visible logit at -200 (Q=2, K=-12.5, D=64, scale 1/8), letting that
     max set the merge max underflows every real segment: O became 0 and LSE
     -inf for rows that do see keys. Keyless rows must stay O=0, LSE=-inf."""
-    problem, data = _case([q_len], [kv_len], d=64)
-    data.q[...] = 2.0
-    data.k_cache[...] = -12.5
+    problem, data = _masked_tile_case(q_len, kv_len)
     problem = dataclasses.replace(problem, emit_lse=emit_lse)
     lse = _lse_array(problem, np.nan) if emit_lse else None
     out = _run(problem, data, lse=lse, softcap=0.0)
     o_ref, lse_ref = _paged_reference(data, 0.125, 0.0)
     assert np.isfinite(out).all(), "the merge produced a non-finite O"
-    assert np.abs(out - o_ref).max() < _tolerance("bf16")
+    _assert_split_kv_o(out, o_ref)
     if emit_lse:
-        lse = lse.values()
-        np.testing.assert_array_equal(np.isneginf(lse), np.isneginf(lse_ref))
-        finite = np.isfinite(lse_ref)
-        assert finite.any(), "the case has no row with visible keys"
-        assert np.abs(lse[finite] - lse_ref[finite]).max() < _tolerance("bf16")
+        assert np.isfinite(lse_ref).any(), "the case has no row with visible keys"
+        _assert_split_kv_lse(lse.values(), lse_ref)
 
 
 @pytest.mark.gpu
@@ -512,11 +545,13 @@ def _forbid_tiled_2d(*_args, **_kwargs):
     raise AssertionError("an LSE request the tiled 2D gate declines reached it")
 
 
+# D256 prefill at block size 32: shapes gfx942's tiled 2D gate declines with LSE
+# on, so they run split-KV.
+_D256_PREFILL_SHAPES = [([2048], [2048]), ([37, 300, 1], [37, 812, 900])]
+
+
 @pytest.mark.gpu
-@pytest.mark.parametrize(
-    "q_lens,kv_lens",
-    [([2048], [2048]), ([37, 300, 1], [37, 812, 900])],
-)
+@pytest.mark.parametrize("q_lens,kv_lens", _D256_PREFILL_SHAPES)
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
 def test_auto_hands_lse_to_split_kv_when_tiled_2d_declines(
     cdna3_or_4, dtype, q_lens, kv_lens
@@ -538,7 +573,68 @@ def test_auto_hands_lse_to_split_kv_when_tiled_2d_declines(
     )
     o_ref, lse_ref = _paged_reference(data, 1.0 / math.sqrt(256), 0.0)
     np.testing.assert_array_equal(out, off, err_msg="LSE-on changed the split-KV O")
-    _assert_matches_reference(out, lse.values(), o_ref, lse_ref, _tolerance(dtype))
+    _assert_matches_reference(out, lse.values(), o_ref, lse_ref)
+
+
+# Every shape a split-KV O check above runs: (q_lens, kv_lens, how its case is
+# built).
+_SPLIT_KV_CHECKED_CASES = [
+    *(
+        pytest.param(list(q_lens), list(kv_lens), _case, id=f"shape-{q_lens}-{kv_lens}")
+        for q_lens, kv_lens in dict.fromkeys(
+            (tuple(q_lens), tuple(kv_lens))
+            for q_lens, kv_lens in _SHAPES + _DECODE_SHAPES
+        )
+    ),
+    *(
+        pytest.param(
+            [q_len],
+            [kv_len],
+            lambda q_lens, kv_lens: _masked_tile_case(q_lens[0], kv_lens[0]),
+            id=f"masked-tile-{q_len}-{kv_len}",
+        )
+        for q_len, kv_len in _MASKED_TILE_SHAPES
+    ),
+    *(
+        pytest.param(
+            q_lens,
+            kv_lens,
+            lambda q_lens, kv_lens: _case(q_lens, kv_lens, d=256, bs=32),
+            id=f"d256-prefill-{q_lens}-{kv_lens}",
+        )
+        for q_lens, kv_lens in _D256_PREFILL_SHAPES
+    ),
+]
+
+
+@pytest.mark.parametrize("q_lens,kv_lens,make_case", _SPLIT_KV_CHECKED_CASES)
+def test_the_split_kv_bound_fails_one_misplaced_page(q_lens, kv_lens, make_case):
+    """The split-KV O bound is tight enough to fail a launch that read one
+    page of the longest sequence from the wrong place: on every shape the
+    split-KV O checks run, the reference with that page misplaced differs from
+    the true one by more than the bound."""
+    _, data = make_case(q_lens, kv_lens)
+    scale = 1.0 / math.sqrt(data.q.shape[-1])
+    o_ref, _ = _paged_reference(data, scale, 0.0)
+    longest = int(np.argmax(kv_lens))
+    block_size = data.k_cache.shape[1]
+    pages_used = {
+        int(page)
+        for seq, kv_len in enumerate(kv_lens)
+        for page in data.block_table[seq, : -(-kv_len // block_size)]
+    }
+    spare = next(
+        (page for page in range(data.k_cache.shape[0]) if page not in pages_used),
+        None,
+    )
+    assert spare is not None, "the case's cache has no page the sequences leave free"
+    block_table = data.block_table.copy()
+    block_table[longest, 0] = spare
+    misplaced, _ = _paged_reference(
+        SimpleNamespace(**{**vars(data), "block_table": block_table}), scale, 0.0
+    )
+    with pytest.raises(AssertionError):
+        _assert_split_kv_o(misplaced, o_ref)
 
 
 @pytest.mark.gpu
@@ -936,7 +1032,12 @@ def test_2d_lse_nan_query_row_stays_nan(cdna3_or_4, branch, dtype):
     o_ref, lse_ref = _paged_reference(data, 1.0 / math.sqrt(data.q.shape[-1]), 0.0)
     np.testing.assert_array_equal(out, off)  # NaN positions must match too
     _assert_only_the_nan_row_is_nan(
-        out, lse.values(), o_ref, lse_ref, (_NAN_ROW, _NAN_HEAD), dtype
+        out,
+        lse.values(),
+        o_ref,
+        lse_ref,
+        (_NAN_ROW, _NAN_HEAD),
+        lambda got, want: _assert_2d_o(got, want, dtype),
     )
 
 

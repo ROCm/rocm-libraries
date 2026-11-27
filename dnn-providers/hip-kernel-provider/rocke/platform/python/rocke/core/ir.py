@@ -311,6 +311,7 @@ _SMEM_VECTOR_ELEMENTS = (
     "i32",
     "tf32",
     "f64",
+    "i64",
     "fp8e4m3",
     "bf8e5m2",
     "i8",
@@ -1331,10 +1332,17 @@ def _check_u32(op: str, field: str, value: int) -> int:
     return v
 
 
+def fits_i32(value: int) -> bool:
+    """Whether ``value`` is a signed ``i32``: -2147483648 to 2147483647. LLVM reads
+    an ``i32`` literal outside that range as another number, and an ``nsw`` result
+    outside it is poison."""
+    return -(1 << 31) <= value < (1 << 31)
+
+
 def _check_i32(op: str, field: str, value: int) -> int:
     """Range-check a signed byte offset carried by an LLVM ``i32``."""
     v = int(value)
-    if not -(1 << 31) <= v < (1 << 31):
+    if not fits_i32(v):
         raise ValueError(
             f"{op} {field} must fit a signed i32 (-2147483648..2147483647), got {v}"
         )
@@ -5248,7 +5256,7 @@ class IRBuilder:
         _require_smem_vector_element("smem_store_vN", elem_name)
         if elem_name in ("i8", "fp8e4m3", "bf8e5m2"):
             allowed_n = (2, 4, 8, 16)
-        elif elem_name == "f64":
+        elif elem_name in ("f64", "i64"):
             allowed_n = (2,)
         else:
             allowed_n = (2, 4, 8)
@@ -5288,8 +5296,8 @@ class IRBuilder:
 
     def smem_load_vN(self, smem: Value, *indices, dtype: Type, n: int = 0) -> Value:
         """LDS load of ``<N x dtype>``. Supports 8-bit (fp8e4m3 / bf8e5m2 /
-        i8), 16-bit (f16 / bf16 / i16), 32-bit (f32 / i32) and 64-bit (f64,
-        ``n in {1, 2}``) element types; loads exactly N elements. In addition to
+        i8), 16-bit (f16 / bf16 / i16), 32-bit (f32 / i32) and 64-bit (f64 /
+        i64, ``n in {1, 2}``) element types; loads exactly N elements. In addition to
         power-of-two widths, accepts 96-bit payloads (12 bytes, six halfwords,
         or three words), using element alignment. The target and alignment
         determine instruction selection.
@@ -5305,7 +5313,7 @@ class IRBuilder:
             allowed_n = (1, 2, 4, 8, 12, 16)
         elif dtype.name in ("f16", "bf16", "i16"):
             allowed_n = (1, 2, 4, 6, 8)
-        elif dtype.name == "f64":
+        elif dtype.name in ("f64", "i64"):
             allowed_n = (1, 2)
         else:
             allowed_n = (1, 2, 3, 4, 8)
@@ -7709,12 +7717,18 @@ class IRBuilder:
     def iglp_opt(self, level: int = 0) -> None:
         """`__builtin_amdgcn_iglp_opt(level)`.
 
-        Asks the AMDGPU post-RA scheduler to apply a canned instruction
-        interleaving for the enclosing loop (MFMA / ds_read / ds_write /
-        VMEM). ``level`` selects the pattern (0 = GEMM MFMA-interleave,
-        1 = attention-style). Placed once at the top of the main loop body;
-        it owns the loop schedule, so manual ``sched_barrier`` /
-        ``sched_group_barrier`` hints should be suppressed when it is used.
+        Asks the AMDGPU scheduler to apply a canned instruction interleaving
+        (MFMA / ds_read / ds_write / VMEM) to the scheduling region it sits
+        in. ``level`` selects LLVM's strategy (0 = ``MFMASmallGemmOpt``,
+        1 = ``MFMASmallGemmSingleWaveOpt``). Placed once at the top of the
+        main loop body; it owns the loop schedule, so manual
+        ``sched_barrier`` / ``sched_group_barrier`` hints should be
+        suppressed when it is used.
+
+        Level 1 needs ROCm 7.11 or newer, the 10.x releases included (LLVM
+        commit 576e1affab35): older compilers run out of memory on a region
+        with fewer than 4 LDS reads. See known issue 8 in
+        ``dsl_docs/architecture/gfx_support_audit.md``.
         """
         self._op("tile.iglp_opt", attrs={"level": int(level)})
 

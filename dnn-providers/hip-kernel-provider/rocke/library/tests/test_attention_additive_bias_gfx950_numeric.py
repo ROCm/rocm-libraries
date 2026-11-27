@@ -21,9 +21,10 @@ Bias addressing (element strides; Sk stride is always 1):
 A stride of 0 broadcasts that dimension. ``q_head`` is the *query* head, so
 the GQA cases check that a per-query-head bias is not collapsed onto KV heads.
 
-The numeric tests are marked ``gpu`` and skip off a gfx950 device. The host-side
+The numeric tests are marked ``gpu`` and skip off a gfx950 device. The
 argument-validation tests at the bottom run on host-only array stand-ins, so they
-need neither a GPU nor torch. Run standalone:
+need neither a GPU nor torch, except the offset-view storage bound, which needs a
+real device view: it is marked ``gpu`` and runs on any GPU. Run standalone:
 
     HIP_VISIBLE_DEVICES=0 python -m pytest tests/test_attention_additive_bias_gfx950_numeric.py
 """
@@ -31,12 +32,13 @@ need neither a GPU nor torch. Run standalone:
 from __future__ import annotations
 
 import itertools
+import re
 
 import numpy as np
 import pytest
 from kernels import UnifiedAttentionProblem, run_unified_attention_torch
 from rocke.runtime.device_array import DeviceArray
-from rocke.tests.gpu import current_device_arch_in
+from rocke.tests.gpu import current_device_arch, current_device_arch_in
 from rocke.tests.host_arrays import HostArray
 
 from ._attention_paged_reference import paged_attention_reference
@@ -517,8 +519,10 @@ def test_additive_bias_stride_range_rejected(batch_stride):
 
 
 # _bias_problem reads index 3*sq_stride + 63 at most, so sq_stride=64 needs 256
-# backed elements from the array's start. (How a torch view's storage offset
-# counts against its storage is torch_array_info's, tested with the runtime.)
+# backed elements from the array's start: counted from a view's own start in
+# test_additive_bias_offset_view_storage_bounds below. (How a torch view's
+# storage offset counts against its storage is torch_array_info's, tested with
+# the runtime.)
 @pytest.mark.parametrize(
     "backed, ok", [(256, True), (255, False)], ids=["exact", "short"]
 )
@@ -531,6 +535,31 @@ def test_additive_bias_storage_bounds(backed, ok):
         assert _validate_additive_bias(*args) == 64
     else:
         with pytest.raises(ValueError, match="only backs"):
+            _validate_additive_bias(*args)
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize(
+    "offset, ok", [(64, True), (65, False)], ids=["offset_exact", "offset_short"]
+)
+def test_additive_bias_offset_view_storage_bounds(offset, ok):
+    """A bias that is a view starting ``offset`` elements into a 320-element
+    device buffer backs only the elements from its own start: 256 from element
+    64, which is just enough, and 255 from element 65, which is refused."""
+    from kernels.common.attention_unified import _validate_additive_bias
+
+    current_device_arch()
+    buffer = DeviceArray(np.zeros(320, np.float32))
+    bias = buffer.view((320 - offset,), offset=offset)
+    args = (_bias_problem(), bias, 0, 0, 64, bias.device)
+    if ok:
+        assert _validate_additive_bias(*args) == 64
+    else:
+        message = (
+            "additive_bias strides reach element 255 but the array only backs "
+            "255 elements from its start"
+        )
+        with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
             _validate_additive_bias(*args)
 
 

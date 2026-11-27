@@ -141,13 +141,17 @@ def _checked_layout(
     room: int,
 ) -> tuple[tuple[int, ...], tuple[int, ...], int]:
     """``(shape, strides, offset)`` as ints, for a view of ``room`` elements
-    from its origin: one non-negative stride per axis, a non-negative offset,
-    and every element inside ``room``. Raises ``ValueError`` naming ``caller``
-    otherwise. The one check both :meth:`ArrayInfo.view` and
-    :meth:`DeviceArray.view` make."""
+    from its origin: non-negative extents, one non-negative stride per axis, a
+    non-negative offset, and every element inside ``room``. Raises
+    ``ValueError`` naming ``caller`` otherwise. The one check both
+    :meth:`ArrayInfo.view` and :meth:`DeviceArray.view` make."""
     shape = tuple(int(extent) for extent in shape)
     strides = tuple(int(stride) for stride in strides)
     offset = int(offset)
+    if min(shape, default=0) < 0:
+        raise ValueError(
+            f"{caller} failed - shape={shape}, expected a non-negative extent per axis"
+        )
     if len(strides) != len(shape) or min((*strides, offset), default=0) < 0:
         raise ValueError(
             f"{caller} failed - shape={shape} strides={strides} offset={offset}, "

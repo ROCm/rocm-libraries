@@ -353,14 +353,8 @@ class AttentionDenseSpec:
         format is an arch-specific knob, so the arch whose loader implements one
         overrides this (gfx950 fp8).
 
-        This is the one arch override the SHARED checks read, via the KV extent
-        in :func:`check_dense_spec_preflight`. The C++ mirror of this spec has
-        no narrow-KV field, so it always computes that extent at 2 B, and a
-        narrow-KV spec would be sized as its wide twin there. Nothing hands the
-        mirror such a spec today: the field lives on the arch subclass, which
-        the mirror does not carry, exactly like ``kv_segments``, ``emit_lse``
-        and ``wide_lds_dma``. Giving the mirror a narrow KV format means giving
-        it the field and the width, not only this property.
+        Both the paged cache bound and the K/V extent in
+        :func:`check_dense_spec_preflight` use the concrete spec's width.
         """
         return 2
 

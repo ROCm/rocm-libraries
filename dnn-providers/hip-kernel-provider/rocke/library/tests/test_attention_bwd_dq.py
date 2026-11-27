@@ -933,10 +933,8 @@ def test_zero_scratch_no_spills_and_no_key_loop_agpr_copies(arch, var):
         current_flavor,
         evaluate_resource_gate,
         find_objdump,
-        pin_production_comgr,
     )
 
-    pin_production_comgr()  # torch's bundled comgr, by path; torch not imported
     if find_objdump() is None:
         pytest.skip("llvm-objdump not found (needed for the key-loop AGPR copy rule)")
     flavor, comgr = current_flavor(), comgr_version()

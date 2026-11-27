@@ -41,7 +41,17 @@ __all__ = [
 ]
 
 PATTERN_FILE = Path(__file__).resolve().with_name("compliance_patterns.json")
-_RULE_KEYS = frozenset({"id", "pattern", "ignore_case", "message", "allowed"})
+# The type of each key of a rule entry. Checked, not coerced: an ``allowed`` string
+# would be read as its characters, and an ``ignore_case`` string such as "false"
+# as true.
+_RULE_KEY_TYPES = {
+    "id": str,
+    "pattern": str,
+    "ignore_case": bool,
+    "message": str,
+    "allowed": list,
+}
+_RULE_KEYS = frozenset(_RULE_KEY_TYPES)
 _SKIPPED_DIRECTORY_NAMES = frozenset({".git", "__pycache__"})
 EXIT_CLEAN, EXIT_HITS, EXIT_USAGE = 0, 1, 2
 
@@ -75,6 +85,17 @@ def _rule_from_entry(entry: object, source: Path) -> ComplianceRule:
         raise ValueError(
             f"load_rules failed - file={source.name!r} entry={entry!r}, "
             f"expected an object with exactly the keys {sorted(_RULE_KEYS)}"
+        )
+    for key, expected in _RULE_KEY_TYPES.items():
+        if type(entry[key]) is not expected:
+            raise ValueError(
+                f"load_rules failed - file={source.name!r} rule={entry['id']!r} "
+                f"{key}={entry[key]!r}, expected a {expected.__name__}"
+            )
+    if not all(type(text) is str for text in entry["allowed"]):
+        raise ValueError(
+            f"load_rules failed - file={source.name!r} rule={entry['id']!r} "
+            f"allowed={entry['allowed']!r}, expected a list of strings"
         )
     flags = re.IGNORECASE if entry["ignore_case"] else 0
     try:

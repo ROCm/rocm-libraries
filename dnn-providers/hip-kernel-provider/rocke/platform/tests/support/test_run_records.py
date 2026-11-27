@@ -116,6 +116,11 @@ def test_each_test_event_is_recorded_with_its_node_and_reason(tmp_path):
     records = tmp_path / "records"
     _run_pytest(tree, records, "-m", "not integration", "-W", "ignore")
     events = _events(records)
+    # Every event names its file with "/" separators, on every OS.
+    assert {record.file for record in read_run_records(records)} == {
+        (tree / name).resolve().as_posix()
+        for name in ("test_cases.py", "test_skipped_module.py")
+    }
     ran = {node for file, node, event, _ in events if event == "ran"}
     assert ran == {
         "test_passes",

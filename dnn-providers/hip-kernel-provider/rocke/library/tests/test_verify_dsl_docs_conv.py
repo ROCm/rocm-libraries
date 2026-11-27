@@ -34,6 +34,7 @@ from rocke.core.lower_cktile import (
     lower_implicit_gemm_conv_to_cktile,
     lower_spec_to_cktile,
 )
+from rocke.tests.comgr import require_comgr_target
 
 from kernels.common.conv_direct_grouped import (
     DirectConv16cSpec,
@@ -127,13 +128,8 @@ class TestVerifyDslDocsConv(unittest.TestCase):
         # The static build alone proves the IR + LLVM + comgr path; nothing is
         # allocated or launched. A host without comgr (the CPU lane allows one)
         # skips here; with comgr loaded, a compile error fails the test.
-        from rocke.runtime import comgr
-
-        try:
-            comgr.supported_isas()
-        except comgr.ComgrError as exc:
-            self.skipTest(f"comgr unavailable: {exc}")
-        art = compile_kernel(build_implicit_gemm_conv(_conv_spec()))
+        require_comgr_target("gfx950")
+        art = compile_kernel(build_implicit_gemm_conv(_conv_spec()), arch="gfx950")
         self.assertGreater(art.hsaco_bytes, 0)
 
 

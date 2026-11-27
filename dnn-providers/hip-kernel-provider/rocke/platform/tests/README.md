@@ -68,7 +68,7 @@ for what is actually exercised vs. manual/diagnostic/demo.
 |---|---|---|
 | `core/` | `test_ir_serialize.py`, `dsl_optimization/` (constant-fold, unroll, barrier) | `ir_serialize_roundtrip.cpp` (**CTest**); `test_gemm_spec_dict_binding_parity.py` (source-only: the GEMM spec dicts against the binding's key reads, run from the source tree as the `rocke_gemm_spec_dict_binding_parity` **CTest**); `smoke.cpp` (optional build-only target, **not** registered); `ir_lower_cli.cpp` (built as `rocke_ir_lower_cli`, not a test: the C++ HIP lowerer of the both-engine HIP checks where the binding is absent) |
 | `helpers/` | (covered today via `test_rocke.py` TestHelpers; dedicated split is a follow-up) | - |
-| `instances/` | `test_rocke_multiarch.py`, `test_gfx1250_*`, `test_moe_*`, `test_wmma_schedule.py`, `test_rocke_gfx950_smoke.py` | `tiled_attention_2d_reentrancy.cpp` (**CTest**); `parity/` 47 `*_emit.py`/`*_emit.c` pairs + `run_parity.py` (driven by the byte-identity gate, **not** pytest); `differential/` drivers `run_diff.py`, `fuzz_diff.py`, `ir_artifact_diff.py`, `numeric.py`; `jit_demo.cpp`, `gemm_jit_demo.cpp` (manual demos, **not** built/registered) |
+| `instances/` | `test_rocke_multiarch.py`, `test_gfx1250_*`, `test_moe_*`, `test_wmma_schedule.py` | `tiled_attention_2d_reentrancy.cpp` (**CTest**); `parity/` `*_emit.py`/`*_emit.c` pairs + `run_parity.py` (driven by the byte-identity gate, **not** pytest); `differential/` drivers `run_diff.py`, `fuzz_diff.py`, `ir_artifact_diff.py`, `numeric.py`; `jit_demo.cpp`, `gemm_jit_demo.cpp` (manual demos, **not** built/registered) |
 | `runtime/` | (covered via `test_rocke.py`; dedicated split is a follow-up) | - |
 | `dispatch/` | `dispatch_tests/{gemm,attention,conv,moe,norm}` | - |
 | `analysis/` | (covered via `test_rocke.py`) | - |
@@ -314,20 +314,81 @@ CTests. Legacy violations remain tracked as TESTING.md gap G9.
 | `rocke_library_runner_contract_pytest` | Affordable-lane selection, resource defaults, and gate verdict policy | comprehensive and full; excluded from quick/standard pre-merge and post-merge runs |
 | `rocke_library_worker_integration_pytest` | Real file-worker subprocess, timeout, signal, package-identity, and process-ownership lifecycle | comprehensive and full; excluded from quick/standard pre-merge and post-merge runs |
 | `rocke_library_counted_structural_gate` | Exhaustive counted-wait IR model, LDS hazards, step equivalence, lowering and mirror-edge refusal coverage | comprehensive and full; host-only structural gate |
-| `rocke_library_counted_compiler_gate` | Pinned representative compile/final-ISA/resource subset and canonical full-barrier twins on the LLVM 22/reference-comgr toolchain | comprehensive and full; compiler preflight required |
+| `rocke_library_counted_compiler_gate` | Representative compile/final-ISA/resource subset and canonical full-barrier twins | comprehensive and full; compiler preflight required |
 
-The compiler gate preserves the resource table's existing qualification contract:
-LLVM 22 with the reference ROCm 7.2 comgr. LLVM 23 and LLVM 24 are emission/parity
-profiles, not qualified code-object resource lanes; their scheduling and register
-allocation cannot be judged against thresholds calibrated on the reference compiler.
-The two counted gates share the `rocke_counted_sync_gate` CTest resource
-lock. The installed compiler gate forces required mode; a mismatched compiler,
-missing target support, or missing `llvm-objdump` fails once at preflight. The
-source runner treats that gate as optional unless passed
-`--require-compiler-gate`; an accepted optional skip reports `INCOMPLETE`, never
-plain `GREEN`.
+Tests use the loaded compiler
+([the test compiler rule](../dsl_docs/reference/env_flags.md#compiler-detection-and-provenance)).
+The compiler gate's resource thresholds keep the toolchain they were calibrated on
+until AICK-3320 unpins them: on any other LLVM flavor (requested or run by the
+loaded compiler) or comgr its preflight skips
+every row, naming the difference, as its `rocke.tests.pending_lanes` record says,
+and the session ends with exit 77, which the installed entry reports as a skip; the
+source runner reports `INCOMPLETE`, never plain `GREEN`, or a failure when passed
+`--require-compiler-gate`. The two counted gates share the
+`rocke_counted_sync_gate` CTest resource lock. The installed compiler gate forces
+required mode for the rest: a toolchain query that fails, a reference comgr without
+a gate arch, or a missing `llvm-objdump` fails once at preflight. The source runner
+treats those as an optional skip unless passed `--require-compiler-gate`.
 See [TESTING.md §5.0.1](../../TESTING.md#501-unit-discovery-versus-explicit-resource-gates)
 for the reusable placement contract.
+
+## Dense-attention host contracts
+
+The shared dense spec and the concrete gfx950 host spec have native tests because
+validation reasons, kernel identity, LDS admission and launch arguments are not
+all visible in emitted IR:
+
+- `rocke_attention_dense_spec` checks the architecture-neutral spec. Its subclass
+  hook fixtures supply recorded answers; they do not implement a gfx950 spec.
+- `rocke_attention_dense_gfx950_spec` calculates the concrete gfx950 answers from
+  raw spec fields: validation/support reasons, resolved knobs, runtime fields,
+  names, LDS, grids, thread blocks, signatures and runtime scalar values.
+- `rocke_sha256` checks the digest used in tuned kernel names. For float values
+  in those names, the spec uses the same formatter as the IR printer, serializer
+  and HIP lowerer; `rocke_float_format` tests that formatter.
+
+The Python drift guard and native tests consume
+`golden/attention_dense_spec_vectors.json` and
+`golden/attention_dense_gfx950_spec_vectors.json`. After an intended Python change,
+regenerate the vectors and update the native implementation in the same change.
+From `platform/`:
+
+```bash
+PYTHONPATH=python:../library python ../library/tests/test_attention_dense_spec_vectors.py --regenerate
+python -m pytest -q ../library/tests/test_attention_dense_spec_vectors.py
+cmake --build <build> --target rocke_attention_dense_spec rocke_attention_dense_gfx950_spec rocke_sha256 rocke_float_format
+ctest --test-dir <build> -R '^(rocke_attention_dense_spec|rocke_attention_dense_gfx950_spec|rocke_sha256|rocke_float_format)$' --output-on-failure
+```
+
+The native contract binaries embed their vectors and run after relocation without
+source-tree data paths or pybind. They are quick/ffm-quick checks of a shipped
+kernel's identity and launch contract; they do not compile or run GPU kernels.
+The Python drift guard runs in the sharded standard `rocke_library_attention_cpu_pytest`
+entry. Provider installs that ship the shared engine run that entry in strict C++ mode.
+The native gfx950 test also accepts `--vectors FILE` for live host comparisons.
+The gfx950 fixture stores the common problem once and only the raw overrides in
+each case. Expected signatures are shared by index; the native test builds its
+own signature from the input spec rather than using that index to construct it.
+
+The C spec uses the annotations' integer, boolean, double and optional-string
+types, not arbitrary Python numeric coercions. In particular, preserve raw
+optional presence: `None` and an explicit value can resolve identically but have
+different codegen-name hashes. The host runtime-argument preparation separately
+checks the persistent fast-division dividend limit; passing `supports` does not
+imply that those values can be prepared.
+
+With `kv_storage_dtype="fp8e4m3"`, only K and V are FP8. The signature adds
+`k_scale` and `v_scale` (both `f32`) immediately after `scale`, before the shape
+arguments. These scales are supplied by the caller, not by `runtime_args`.
+The K/V address bound uses the stored element width; Q/O remain at the compute
+dtype. The host cases include the one- versus two-byte limit and plain causal
+D64 paging without a sliding window. For FP8 K/V with attention sinks, the
+vectors also pin which rejection wins: an invalid KV segment count or an
+incompatible tile is reported before the unsupported sinks.
+
+This port is host metadata only. The gfx950 dense C++ GPU builders and their
+paired IR emitters are separate work; these tests do not establish builder
+byte identity or GPU numerical correctness.
 
 ## Multi-arch coverage (don't be blindsided by gfx950)
 

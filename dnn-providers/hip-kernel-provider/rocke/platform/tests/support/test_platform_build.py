@@ -3,15 +3,20 @@
 """rocke.tests.platform_build.generator_arguments gives a fresh build tree Ninja
 when ``ninja`` is on PATH and CMake's default otherwise, and leaves an existing
 tree its generator. Each case puts PATH on a directory that holds a ``ninja``
-or holds nothing."""
+or holds nothing.
+
+cmake_cache_entries reads what a real configure of a small project (no
+compiler: LANGUAGES NONE) recorded in its CMakeCache.txt."""
 
 from __future__ import annotations
 
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
-from rocke.tests.platform_build import generator_arguments
+from rocke.tests.cmake_generator import ninja_generator_or_skip
+from rocke.tests.platform_build import cmake_cache_entries, generator_arguments
 
 
 def _tool_directory(directory: Path, *, with_ninja: bool) -> str:
@@ -41,3 +46,37 @@ def test_an_existing_tree_keeps_its_generator(tmp_path, monkeypatch, with_ninja)
     build.mkdir()
     (build / "CMakeCache.txt").write_text("CMAKE_GENERATOR:INTERNAL=Unix Makefiles\n")
     assert generator_arguments(build) == []
+
+
+def test_cache_entries_are_what_the_configure_recorded(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "CMakeLists.txt").write_text(
+        "cmake_minimum_required(VERSION 3.16)\nproject(cache_demo LANGUAGES NONE)\n"
+    )
+    build = tmp_path / "build"
+    generator = ninja_generator_or_skip(build)
+    subprocess.run(
+        [
+            "cmake",
+            "-S",
+            str(source),
+            "-B",
+            str(build),
+            "-DDEMO_VALUE:STRING=a=b",
+            *generator,
+        ],
+        check=True,
+        capture_output=True,
+        timeout=60,
+    )
+    entries = cmake_cache_entries(build)
+    # A value keeps every "=" after the first, which ends the name and type.
+    assert entries["DEMO_VALUE"] == "a=b"
+    assert Path(entries["CMAKE_HOME_DIRECTORY"]).resolve() == source.resolve()
+    assert Path(entries["CMAKE_COMMAND"]).is_file()
+
+
+def test_an_unconfigured_tree_has_no_cache_entries(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        cmake_cache_entries(tmp_path)

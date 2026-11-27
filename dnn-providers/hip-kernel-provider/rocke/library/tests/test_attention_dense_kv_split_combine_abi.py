@@ -87,6 +87,13 @@ def test_combine_launch_matches_reduce_params(monkeypatch, arch, spec_cls):
 
     params = [p.name for p in built["kernel"].params]
     assert params == [a["name"] for a in built["signature"]]
-    assert "num_query_heads" in params
-    assert set(params) <= set(built["vals"])
+    # Each pointer the launch passes is the very array it was given: the
+    # stand-ins are distinct objects, so a swapped or misnamed argument fails.
+    pointers = {**workspace, "output_ptr": out}
+    assert set(built["vals"]) == set(params)
+    assert set(params) == set(pointers) | {"seq_lens_ptr", "num_query_heads"}
+    for name, array in pointers.items():
+        assert built["vals"][name] is array, name
+    # The combine body never reads seq_lens_ptr; any buffer of the launch fills it.
+    assert any(built["vals"]["seq_lens_ptr"] is array for array in pointers.values())
     assert built["vals"]["num_query_heads"] == spec.num_query_heads

@@ -44,12 +44,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+# The toolchain the gate's resource thresholds were calibrated on. Tests use the
+# compiler rocKE's discovery loads, so on any other one the gate's verdicts do not
+# count and its cases skip. The two pins stay in this file, which the gate tests
+# and the counted gates' preflight read, until AICK-3320 unpins the gate. The
+# flavor alone does not name the comgr: a preset ``ROCKE_LLVM_FLAVOR=llvm22``
+# also reports llvm22 when a process loaded a newer comgr, whose register
+# allocation differs.
 GATE_FLAVOR = "llvm22"
-# The production comgr: the ROCm vintage of the library that compiled the gate's
-# kernels must be this one (torch's bundled comgr on the cluster, pinned by path
-# without importing torch: :func:`pin_production_comgr`). The flavor alone does
-# not say it: a preset ``ROCKE_LLVM_FLAVOR=llvm22`` also reports llvm22 when a
-# process loaded a newer system comgr, whose register allocation differs.
 GATE_COMGR_ROCM = "7.2"
 
 
@@ -738,16 +740,6 @@ def disassemble(hsaco: bytes, *, arch: str) -> str:
     return _probe_isa_inspect().disassemble_hsaco(bytes(hsaco), mcpu=arch)
 
 
-def pin_production_comgr() -> str | None:
-    """Make the next compile in this process use the production comgr
-    (torch's bundled library, pinned by path) without importing torch; the
-    library conftest already did it for the session. Returns the pinned path
-    (None: nothing to pin, the gate then reads whichever comgr loads)."""
-    from kernels.common.attention_bwd_comgr import ensure_production_comgr
-
-    return ensure_production_comgr()
-
-
 def comgr_version() -> str | None:
     """``major.minor`` of the loaded comgr library plus its ROCm vintage, if known."""
     try:
@@ -820,7 +812,9 @@ def gate_toolchain_gap(arch: str) -> str | None:
 def compile_or_skip(kernel: Any, *, arch: str, **kw: Any) -> Any:
     """``compile_kernel(kernel, arch=arch, **kw)`` for a test that compiles.
 
-    A loaded compiler that does not accept a ``-mllvm`` option the kernel
+    A COMGR that does not load or cannot target ``arch`` first takes the
+    compiler-tool policy (``rocke.tests.comgr.require_comgr_target``). A
+    loaded compiler that does not accept a ``-mllvm`` option the kernel
     needs is handled by the shared compile-test policy
     (:func:`~._compiler_test_utils.skip_where_compiler_refuses_option`): the
     test skips, or fails under ``ROCKE_REQUIRE_COMPILER_TOOLS=1``. Any other
@@ -832,9 +826,11 @@ def compile_or_skip(kernel: Any, *, arch: str, **kw: Any) -> Any:
     import pytest
     from rocke.helpers.compile import compile_kernel
     from rocke.runtime import CompilerOptionNotAccepted
+    from rocke.tests.comgr import require_comgr_target
 
     from ._compiler_test_utils import skip_where_compiler_refuses_option
 
+    require_comgr_target(arch)
     with skip_where_compiler_refuses_option():
         try:
             return compile_kernel(kernel, arch=arch, **kw)

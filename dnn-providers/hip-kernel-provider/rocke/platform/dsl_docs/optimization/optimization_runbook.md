@@ -1711,11 +1711,12 @@ optimization possible anyway:
   the achievable WG/CU exactly. This is also how a backend artifact gets
   caught: an early llvm20 reading of the d128 attention prefill body showed
   256 VGPR + spills / 1 WG/CU and pointed at an LDS-cut occupancy story; the
-  production llvm22 reading of the same body is 213 VGPR / 0 spill / 2 WG/CU,
+  llvm22 reading of the same body is 213 VGPR / 0 spill / 2 WG/CU,
   so occupancy was never the wall and the lever is a schedule hint
   (`iglp_opt`), not a register/LDS redesign — see arch reference §21.4a.
-  (Register/occupancy counts are backend-sensitive; always read them on the
-  production backend — llvm22 + comgr 7.2, torch imported first.)
+  (Register/occupancy counts are compiler-sensitive; read them on the
+  compiler rocKE's discovery loads and record which one it was, see
+  [Compiler detection and provenance](../reference/env_flags.md#compiler-detection-and-provenance).)
 - **Perf only via same-session ratios + large effects.** Benchmark the
   candidate and its reference (flash, CK Tile, or the prior config)
   **back-to-back in one process**, and only trust the *ratio*; the throttle

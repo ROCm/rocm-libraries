@@ -44,7 +44,7 @@ IEEE 754 throughout: RNE, overflow to +-inf, NaN kept, subnormals kept.
 |---|---|
 | each conversion is one LLVM instruction; the hub casts refuse f64 | [tests/core/test_f64_conversions.py](../../tests/core/test_f64_conversions.py) |
 | f64 arithmetic and conversions are exact on edge values, on the GPU | same file (`test_f64_arithmetic_and_conversions_are_exact_on_edge_values_on_gpu`) |
-| f64 MFMA and GEMM results | [tests/numeric/test_gfx942_f64_mma_numeric.py](../../tests/numeric/test_gfx942_f64_mma_numeric.py), [tests/numeric/test_f64_gemm_numeric.py](../../tests/numeric/test_f64_gemm_numeric.py) |
+| f64 MFMA and GEMM results | [tests/numeric/test_f64_mma_numeric.py](../../tests/numeric/test_f64_mma_numeric.py), [tests/numeric/test_f64_gemm_numeric.py](../../tests/numeric/test_f64_gemm_numeric.py) |
 
 ## How to decide
 

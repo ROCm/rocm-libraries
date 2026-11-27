@@ -463,11 +463,8 @@ def test_zero_scratch_no_spills_and_lds_equal_to_the_plan(row):
         compile_or_skip,
         evaluate_resource_gate,
         find_objdump,
-        pin_production_comgr,
     )
 
-    # torch's bundled (production) comgr, pinned by path; torch not imported
-    pin_production_comgr()
     if find_objdump() is None:
         pytest.skip("llvm-objdump not found (needed for the q-loop AGPR copy rule)")
     arch = row[0]

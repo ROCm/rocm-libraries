@@ -109,17 +109,6 @@ def test_both_engines_emit_the_same_text(kernel):
 # --------------------------------------------------------------------------
 
 
-def _gpu_arch():
-    try:
-        from rocke.runtime.hip_module import get_device_arch
-    except ImportError:
-        return None
-    try:
-        return get_device_arch()
-    except Exception:  # noqa: BLE001 - no HIP runtime means no GPU test
-        return None
-
-
 def _run(arch, kernel, inputs):
     """Launch ``kernel`` on one wave over ``inputs``; return its i32 output."""
     from rocke.runtime.comgr import build_hsaco_from_llvm_ir
@@ -157,9 +146,9 @@ def _run(arch, kernel, inputs):
 
 @pytest.fixture(scope="module")
 def gpu_arch():
-    arch = _gpu_arch()
-    if not arch:
-        pytest.skip("no GPU")
+    from rocke.tests.gpu import current_device_arch
+
+    arch = current_device_arch()
     return arch
 
 
