@@ -28,12 +28,15 @@ when such an entry covers a collected item, after the test modules are
 imported, and the compiler before the GPU: probing the GPU loads HIP, which
 maps its own COMGR, and a process with a COMGR mapped loads no different one.
 A compiler that cannot be identified (no COMGR loads here) is none of the
-named ones, so its tests run. ``ROCKE_QUARANTINE=ignore`` runs every
+named ones, so its tests run. An entry past its expiry still holds its test
+out until someone re-decides it, and adds ``(expired <date>)`` to the reason,
+so every run's report shows that the record is due. ``ROCKE_QUARANTINE=ignore`` runs every
 quarantined test, to debug or fix it.
 """
 
 from __future__ import annotations
 
+import datetime
 import functools
 import os
 from collections.abc import Callable, Iterable
@@ -49,6 +52,7 @@ from .pending_lanes import (
     QUARANTINED,
     QuarantinedTest,
     quarantined_test,
+    utc_today,
 )
 
 __all__ = [
@@ -129,6 +133,7 @@ def skip_quarantined_items(
     }
     if not files:
         return
+    today = utc_today()
     resolved: dict[Path, Path] = {}
     for item in items:
         item_path = Path(item.path)
@@ -141,7 +146,10 @@ def skip_quarantined_items(
         if entry is None:
             continue
         reason = quarantine_skip_reason(
-            entry, device_arch=_device_arch, compiler_build=_loaded_compiler_build
+            entry,
+            device_arch=_device_arch,
+            compiler_build=_loaded_compiler_build,
+            today=today,
         )
         if reason is not None:
             item.add_marker(pytest.mark.skip(reason=reason))
@@ -152,12 +160,14 @@ def quarantine_skip_reason(
     *,
     device_arch: Callable[[], str | None],
     compiler_build: Callable[[], CompilerBuild],
+    today: datetime.date,
 ) -> str | None:
     """The reason ``entry`` skips the items it covers in this process, or None
     where it does not hold them out. ``device_arch`` (None: no GPU) and
     ``compiler_build`` probe this process; each is called only when ``entry``
     names arches or compilers, the compiler first (see the module docstring).
-    The decision under :func:`skip_quarantined_items`."""
+    An entry whose expiry is before ``today`` still holds them out, and the
+    reason says it expired. The decision under :func:`skip_quarantined_items`."""
     build = compiler_build() if entry.compilers else None
     if build is not None and not entry.holds_out_with(build):
         return None
@@ -173,6 +183,8 @@ def quarantine_skip_reason(
             if build.llvm_commit
             else f" with LLVM {build.llvm_major}"
         )
+    if entry.expiry_date < today:
+        reason += f" (expired {entry.expires})"
     return reason
 
 

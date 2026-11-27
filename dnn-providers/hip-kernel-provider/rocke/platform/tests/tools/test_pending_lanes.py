@@ -1322,7 +1322,10 @@ def test_a_quarantine_skip_reason_names_the_scope_it_holds_its_test_out_in():
     unscoped = _quarantined("library/tests/test_x.py::test_y", issue="AICK-1")
     assert (
         quarantine_skip_reason(
-            unscoped, device_arch=_never_probed, compiler_build=_never_probed
+            unscoped,
+            device_arch=_never_probed,
+            compiler_build=_never_probed,
+            today=utc_today(),
         )
         == "quarantined: AICK-1"
     )
@@ -1331,14 +1334,20 @@ def test_a_quarantine_skip_reason_names_the_scope_it_holds_its_test_out_in():
     )
     assert (
         quarantine_skip_reason(
-            on_gfx950, device_arch=_probe("gfx950"), compiler_build=_never_probed
+            on_gfx950,
+            device_arch=_probe("gfx950"),
+            compiler_build=_never_probed,
+            today=utc_today(),
         )
         == "quarantined: AICK-2 on gfx950"
     )
     for arch in ("gfx942", None):
         assert (
             quarantine_skip_reason(
-                on_gfx950, device_arch=_probe(arch), compiler_build=_never_probed
+                on_gfx950,
+                device_arch=_probe(arch),
+                compiler_build=_never_probed,
+                today=utc_today(),
             )
             is None
         )
@@ -1353,6 +1362,7 @@ def test_a_quarantine_skip_reason_names_the_scope_it_holds_its_test_out_in():
             with_build,
             device_arch=_probe("gfx950"),
             compiler_build=_probe(gfx950_build),
+            today=utc_today(),
         )
         == f"quarantined: AICK-3 on gfx950 with llvm-project {gfx950_build.llvm_commit}"
     )
@@ -1367,6 +1377,7 @@ def test_a_quarantine_skip_reason_names_the_scope_it_holds_its_test_out_in():
                 with_build,
                 device_arch=_never_probed,
                 compiler_build=_probe(other_build),
+                today=utc_today(),
             )
             is None
         )
@@ -1380,8 +1391,37 @@ def test_a_quarantine_skip_reason_names_the_scope_it_holds_its_test_out_in():
             by_major,
             device_arch=_never_probed,
             compiler_build=_probe(CompilerBuild(24, None)),
+            today=utc_today(),
         )
         == "quarantined: AICK-4 with LLVM 24"
+    )
+
+
+def test_an_expired_quarantine_still_skips_and_says_it_expired():
+    """An entry past its expiry holds its test out until it is re-decided (a
+    date alone turns no run red), and its reason says it expired, so every
+    report shows the record is due; on its expiry date it is not yet expired."""
+    entry = _quarantined(
+        "library/tests/test_x.py::test_y", issue="AICK-5", expires="2026-12-18"
+    )
+    expiry = datetime.date(2026, 12, 18)
+    assert (
+        quarantine_skip_reason(
+            entry,
+            device_arch=_never_probed,
+            compiler_build=_never_probed,
+            today=expiry,
+        )
+        == "quarantined: AICK-5"
+    )
+    assert (
+        quarantine_skip_reason(
+            entry,
+            device_arch=_never_probed,
+            compiler_build=_never_probed,
+            today=expiry + datetime.timedelta(days=1),
+        )
+        == "quarantined: AICK-5 (expired 2026-12-18)"
     )
 
 
@@ -1503,7 +1543,10 @@ def test_a_registered_quarantine_skips_its_collected_cases_in_its_scope(
         )
         arch = entry.arches[0] if entry.arches else other_arch
         reason = quarantine_skip_reason(
-            entry, device_arch=_probe(arch), compiler_build=_probe(build)
+            entry,
+            device_arch=_probe(arch),
+            compiler_build=_probe(build),
+            today=utc_today(),
         )
         assert reason is not None and reason.startswith(
             f"quarantined: {entry.issue}"
@@ -1512,14 +1555,20 @@ def test_a_registered_quarantine_skips_its_collected_cases_in_its_scope(
             assert f" on {arch}" in reason, reason
             assert (
                 quarantine_skip_reason(
-                    entry, device_arch=_probe(other_arch), compiler_build=_probe(build)
+                    entry,
+                    device_arch=_probe(other_arch),
+                    compiler_build=_probe(build),
+                    today=utc_today(),
                 )
                 is None
             ), entry.test_id
         if entry.compilers:
             assert (
                 quarantine_skip_reason(
-                    entry, device_arch=_probe(arch), compiler_build=_probe(unidentified)
+                    entry,
+                    device_arch=_probe(arch),
+                    compiler_build=_probe(unidentified),
+                    today=utc_today(),
                 )
                 is None
             ), entry.test_id
