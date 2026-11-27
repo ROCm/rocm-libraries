@@ -1839,7 +1839,7 @@ feature-semantics revision covers that half of the contract.
   compiled into the same build) reads no published feature, so no bump refuses it.
 - **The bump rule.** Bump the revision in the same change that alters the value or the meaning of any
   feature already published — a FLOP or byte convention, a refusal that removes a value, a unit, an
-  encoding — and retrain the models that ship with it. Adding a feature name, or publishing a value
+  encoding — and retrain, or re-stamp, the models that ship with it. Adding a feature name, or publishing a value
   where none was published before (a node type gaining a formula), does not bump: no model could have
   read it. The one signature such an addition changes is one that branches on absence (`present`,
   `value_or_default`); that is a coverage change, like an additive descriptor revision
@@ -1847,6 +1847,12 @@ feature-semantics revision covers that half of the contract.
   refusing.
 - **A test enforces it.** The golden FLOP and feature values sit beside an assertion on the revision, so
   changing a golden value fails until the revision and the assertion move together.
+- **A re-stamp is offline and proven.** `uhd_gen restamp-semantics` moves a model's recorded revision
+  forward without retraining only when the features it reads, through its signature or its label (a
+  `tflops` label reads `$graph.flops`), cannot have moved: it reads none of the features the
+  revisions in between changed, or two corpora of its graphs collected at the two revisions publish
+  every one of them identically. The proof is kept in the ignored `trained_against["x-restamps"]`;
+  the runtime check stays exact equality.
 
 ---
 

@@ -13,7 +13,9 @@ namespace hipdnn_plugin_sdk::heuristics
 /// `features_hash` covers feature names, not how their values are computed; the loader
 /// refuses a model trained against another revision. Bump it when any published feature
 /// changes meaning or value (FLOP/byte convention, operand encoding, renames), not when a
-/// feature is added. Models that record no revision are revision 1.
+/// feature is added. Models that record no revision are revision 1. A bump also lists the
+/// features it changed in `REVISION_CHANGES` (tools/uhd_gen/restamp_semantics.py), which
+/// decides which models `uhd_gen restamp-semantics` may move forward without a retrain.
 ///
 /// Revision 2: SDPA backward counts each product on its own head dimension
 /// (2·pairs·(3·D_qk + 2·D_v) instead of 2.5x the forward), max-pool backward counts one

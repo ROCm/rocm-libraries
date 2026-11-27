@@ -110,10 +110,17 @@ def validate_provenance(snapshot: object) -> dict:
     `feature_semantics_revision` (absent means 1) and an optional `codegen_revision`
     (`hard_provenance` sets it aside). RFC 0021 §9 adds two slot forms: `slot`
     beside `kmd` (one slot's ranker), and `kmds: [{slot, id, revision}]` in place of `kmd`
-    (a slotted engine's `predict_engine` model).
+    (a slotted engine's `predict_engine` model). Members starting with `x-` or `_` are
+    extension data (a re-stamp's proof, `x-restamps`), ignored as the loader and hkp_pack
+    ignore them, and never returned.
     """
     if not isinstance(snapshot, dict):
         raise ProvenanceError("trained_against must be an object")
+    snapshot = {
+        key: value
+        for key, value in snapshot.items()
+        if not (isinstance(key, str) and key.startswith(("x-", "_")))
+    }
     unknown = set(snapshot) - {
         "ued",
         "kmd",

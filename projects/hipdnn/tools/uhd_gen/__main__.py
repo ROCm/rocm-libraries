@@ -11,6 +11,7 @@ Subcommands for collection, training, evaluation and descriptor installation:
     promote             install that pair into a descriptor tree and point a UED at it
     generate            graph corpus -> public collection -> train/evaluate/promote
     feature-search      training rows -> a searched feature recipe (recipe.json)
+    restamp-semantics   re-stamp a model's feature semantics revision, with proof its inputs held
 
 Collect, train and install:
 
@@ -238,6 +239,18 @@ def main(argv: list[str] | None = None) -> int:
     )
     add_rewrite_arguments(rewrite)
 
+    from .restamp_semantics import (
+        add_restamp_semantics_arguments,
+        run_restamp_semantics,
+    )
+
+    restamp_semantics = subparsers.add_parser(
+        "restamp-semantics",
+        help="re-stamp a model's feature_semantics_revision, only with proof the features "
+        "it reads did not change",
+    )
+    add_restamp_semantics_arguments(restamp_semantics)
+
     # Split off before the main parser sees flags it does not declare.
     if argv is None:
         argv = sys.argv[1:]
@@ -291,6 +304,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_merge(args)
     if args.command == "rewrite-signature":
         return run_rewrite(args)
+    if args.command == "restamp-semantics":
+        return run_restamp_semantics(args)
     code = _run_train(args)
     if code == 0:
         print(install_hint(args.output_dir, args.role, args.arch, args.uhd_id))
