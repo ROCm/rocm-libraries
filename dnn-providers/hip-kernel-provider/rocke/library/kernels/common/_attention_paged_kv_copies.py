@@ -8,8 +8,10 @@ of each copy lies in one page, that page is a function of the copy and the wave 
 read once per tile with a wave-uniform block-table index, before the copies: a read per copy made
 the compiler wait on it right before its copy, a vmcnt drain of the copies in flight. A copy is
 then addressed as its page's base, its offset in the page and the lane's own part. The page base
-goes to ``soffset`` or into ``voffset`` (the kernel picks by measurement), or, for a cache that
-needs 64-bit offsets, into one buffer resource per page shared by its copies.
+goes to ``soffset`` or into ``voffset`` (the kernel picks by measurement), or into one buffer
+resource per page shared by its copies: always for a cache that needs 64-bit offsets, and on
+request (``page_resources``) for one that does not. A copy inside one row (``head_size`` a
+multiple of the copy) then puts its part of the offset in ``soffset``.
 
 The C twin is ``instance_attention_paged_kv_copies_internal.h``; both emit the same ops in the
 same order.
@@ -50,6 +52,8 @@ class PagedKVCopies:
         zero_soff: Value,
         i64: bool,
         page_base_in_soffset: bool,
+        page_resources: bool = False,
+        cache_bytes: Value | None = None,
     ) -> None:
         self.b = b
         self.block_size = block_size
@@ -68,6 +72,13 @@ class PagedKVCopies:
         self.zero_soff = zero_soff
         self.i64 = i64
         self.page_base_in_soffset = page_base_in_soffset
+        # One buffer resource per page, also under 32-bit offsets. A page at or above the
+        # 32-bit whole-cache bound ``cache_bytes`` (a corrupt or padding id) then gets an empty
+        # resource and its buffer copies read zeros, as through the whole-cache resource,
+        # rather than faulting. A copy through the page's pointer (global_load_lds) is not
+        # bounded.
+        self.page_resources = page_resources or i64
+        self.cache_bytes = None if i64 else cache_bytes
         page_halves = block_size * head_size
         self.wave_halves = halves_per_call // num_warps
         # A wave's part of every copy lies in one page: the condition for page copies.
@@ -84,7 +95,15 @@ class PagedKVCopies:
         self.uniform_blocks = blocks_per_tile == 1 or (
             halves_per_call <= page_halves and page_halves % halves_per_call == 0
         )
+        # A copy inside one row: each lane's position splits into its own part, built once,
+        # and the copy's part, the same for every lane, which goes in ``soffset``.
+        self.in_row_copies = (
+            page_resources
+            and halves_per_call < head_size
+            and head_size % halves_per_call == 0
+        )
         self.lane_within_b: Value | None = None
+        self.page_limit: Value | None = None
         self.copy_tok_b: dict[int, Value] = {}
         self.page_stride_i64: Value | None = None
 
@@ -112,8 +131,24 @@ class PagedKVCopies:
                     self.copy_tok_b[tok0] = b.mul(
                         self.token_stride_b, b.const_i32(tok0)
                     )
-        if self.i64:
+        elif self.in_row_copies:
+            self.lane_within_b = b.add(
+                b.add(
+                    b.mul(
+                        b.div(self.lane_half_base, b.const_i32(self.head_size)),
+                        self.token_stride_b,
+                    ),
+                    b.mul(self.kv_head, b.const_i32(self.head_stride_b)),
+                ),
+                b.mul(
+                    b.mod(self.lane_half_base, b.const_i32(self.head_size)),
+                    b.const_i32(self.kv_bytes),
+                ),
+            )
+        if self.page_resources:
             self.page_stride_i64 = b.zext(self.page_stride_b, I64)
+            if self.cache_bytes is not None:
+                self.page_limit = b.div(self.cache_bytes, self.page_stride_b)
 
     def copy_block(self, call: int):
         """The tile's block that the calling wave's part of copy ``call`` lies in: an int when
@@ -143,18 +178,54 @@ class PagedKVCopies:
                 pages[key] = page_id(blk)
         return blocks, pages
 
+    def build_resources(self, blocks, pages, src: Value) -> None:
+        """Each page's pointer and resource (``page_resources``), built before the tile's
+        copies: built at a page's first copy, between the copies, they measured slower on
+        gfx942. ``copy`` then takes them from ``pages``."""
+        for call in range(self.calls_per_tile):
+            key = _key(blocks[call], call)
+            if ("rsrc", key) in pages:
+                continue
+            pages[("rsrc", key)] = self._page_resource(src, pages[key])
+
+    def _page_resource(self, src: Value, page: Value):
+        """(pointer, resource) of page ``page`` of ``src``."""
+        b = self.b
+        assert self.page_stride_i64 is not None, "emit_offsets() first"
+        ptr = b.global_ptr_add(src, b.mul(b.zext(page, I64), self.page_stride_i64))
+        num_records = self.page_bytes
+        if self.page_limit is not None:
+            num_records = b.select(
+                b.cmp_ult(page, self.page_limit), num_records, b.const_i32(0)
+            )
+        return ptr, b.buffer_rsrc(ptr, num_records)
+
     def copy(self, call: int, blocks, pages, src: Value, src_rsrc: Value):
         """(pointer, resource, voffset, soffset) of copy ``call``."""
         b = self.b
         blk = blocks[call]
         key = _key(blk, call)
         page = pages[key]
+        soff = self.zero_soff
         if self.whole_row_copies:
             voff = self.lane_within_b
             assert voff is not None, "emit_offsets() first"
             tok0 = (call * self.copy_tokens) % self.block_size
             if tok0:
                 voff = b.add(voff, self.copy_tok_b[tok0])
+        elif self.in_row_copies:
+            voff = self.lane_within_b
+            assert voff is not None, "emit_offsets() first"
+            page_halves = self.block_size * self.head_size
+            tok, dim = divmod(call * self.halves_per_call % page_halves, self.head_size)
+            part = None
+            if tok:
+                part = b.mul(self.token_stride_b, b.const_i32(tok))
+            if dim:
+                dim_b = b.const_i32(dim * self.kv_bytes)
+                part = dim_b if part is None else b.add(part, dim_b)
+            if part is not None:
+                soff = part
         else:
             page_halves = self.block_size * self.head_size
             start = (
@@ -175,16 +246,12 @@ class PagedKVCopies:
                 ),
                 b.mul(dim, b.const_i32(self.kv_bytes)),
             )
-        if self.i64:
+        if self.page_resources:
             # One pointer and resource per page, shared by its copies.
             if ("rsrc", key) not in pages:
-                assert self.page_stride_i64 is not None, "emit_offsets() first"
-                ptr = b.global_ptr_add(
-                    src, b.mul(b.zext(page, I64), self.page_stride_i64)
-                )
-                pages[("rsrc", key)] = ptr, b.buffer_rsrc(ptr, self.page_bytes)
+                pages[("rsrc", key)] = self._page_resource(src, page)
             ptr, rsrc = pages[("rsrc", key)]
-            return ptr, rsrc, voff, self.zero_soff
+            return ptr, rsrc, voff, soff
         page_b = b.mul(page, self.page_stride_b)
         if self.page_base_in_soffset:
             return src, src_rsrc, voff, page_b
