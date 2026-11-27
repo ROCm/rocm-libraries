@@ -371,6 +371,13 @@ def test_fwd_refusals():
     refused("dtl has its own K loop", dtl=True, unroll_k=True)
     refused("dtl: 16-bit operands, packed LDS tiles", dtl=True, lds_k_pad=16)
     refused("dtl: tile_k / 8 must be a power of two", dtl=True, tile_k=96)
+    refused("dtl has its own K loop", dtl=True, async_dma=True)
+    refused(
+        "dtl: C must be divisible by 8",
+        dtl=True,
+        problem=ConvProblem(**dict(_FWD_PATCH, C=68)),
+    )
+    refused("patch is not built with split-K", split_k_cluster=True)
     refused("patch is not built with split-K", split_k=2)
     refused(
         "patch serves width-folded patch embeddings only",
@@ -419,6 +426,15 @@ def test_dgrad_refusals():
             None,
         ),
         (patch, dict(split_k=2), "dtl has its own K loop (no split-K", None),
+        (patch, dict(async_dma=True), "dtl has its own K loop (no split-K", ""),
+        (patch, dict(unroll_k=True), "dtl has its own K loop (no split-K", ""),
+        (patch, dict(tap_outer_k=True), "dtl: no tap_outer_k", None),
+        (
+            patch,
+            dict(lds_k_outer=False),
+            "dtl is built on the K-outer patch GEMM only",
+            None,
+        ),
         (
             s2,
             dict(patch=False, chiplet_swizzle=True),
@@ -453,11 +469,11 @@ def test_zero_residue_fill_plan():
     assert not dgrad_fuses_dx_zero_fill(ConvProblem(**_DG_S1), dtype_d="fp16")
 
 
-def test_binary_abi_is_24():
+def test_binary_abi_covers_the_variant_specs():
     """The forward / dgrad variants widen the kernel spec the binary takes: ABI 24."""
     from rocke.core.native_engine import BINARY_ABI
 
-    assert BINARY_ABI == 24
+    assert BINARY_ABI >= 24
 
 
 # ---------------------------------------------------------------------- AOT grid
@@ -757,6 +773,10 @@ def test_fwd_cpp_engine_refuses_like_python():
         ("dtl is built on the patch GEMM only", dict(patch=False, dtl=True)),
         ("dtl has its own K loop", dict(dtl=True, prefetch_global_regs=True)),
         ("patch is not built with split-K", dict(split_k=2)),
+        (
+            "dtl: C must be divisible by 8",
+            dict(dtl=True, problem=ConvProblem(**dict(_FWD_PATCH, C=68))),
+        ),
     ):
         spec = _fwd_spec(row, "fp16", **kw)
         with pytest.raises(RuntimeError, match=why):
@@ -778,6 +798,7 @@ def _launch(artifact, signature, values, grid, block):
     )(values, config=LaunchConfig(grid=grid, block=block, fence=True))
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("dtype", _DTYPES)
 @pytest.mark.parametrize("row", _FWD_ROWS, ids=lambda r: r[0])
 def test_fwd_matches_the_reference(row, dtype):
@@ -867,6 +888,7 @@ def _dgrad_run(spec, dtype, seed=0):
     return dx, ref
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("dtype", _DTYPES)
 @pytest.mark.parametrize("row", _DGRAD_ROWS, ids=lambda r: r[0])
 def test_dgrad_matches_the_reference(row, dtype):

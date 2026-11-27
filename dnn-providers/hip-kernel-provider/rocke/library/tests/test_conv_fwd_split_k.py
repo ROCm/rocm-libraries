@@ -1566,6 +1566,7 @@ class TestSplitKPrefetchGlobalRegsNumerics(unittest.TestCase):
                         self.assertLess(err, 2e-2, f"{name} {dtype} degree {degree}")
 
 
+@pytest.mark.gpu
 @unittest.skipIf(_GPU_SKIP, _GPU_SKIP)
 class TestSplitKAutoNumerics(unittest.TestCase):
     """The binary an auto (-1) spec builds, launched at the resolved degree."""

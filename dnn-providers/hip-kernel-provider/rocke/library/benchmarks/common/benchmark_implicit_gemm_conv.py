@@ -6755,20 +6755,10 @@ def _extras_and_grid(direction, problem, ident, rt, dtype, split_k=None):
         # should name everything it holds.
         extras["sub_gemm_bytes"] = int(flat.nbytes)
         # The product plan (ConvDgradAotPlan.zero_dx) zeroes dX first when the
-        # kernel leaves residues unwritten (1x1 at stride 2): part of the cost.
-        from builders.common.convolution_backward_data import _dx_fully_written
+        # kernel leaves residues unwritten: part of the cost. Same helper.
+        from builders.common.convolution_backward_data import dgrad_needs_dx_zero
 
-        from kernels.common.conv_implicit_gemm_dgrad import dgrad_fuses_dx_zero_fill
-
-        # The kernel zeroes the residues of its own tile when it can (no memset).
-        extras["zero_dx"] = not _dx_fully_written(
-            problem, sub_gemms, bool(ident.patch)
-        ) and not dgrad_fuses_dx_zero_fill(
-            problem,
-            dtype_d=ident.dtype_d,
-            split_k=ident.split_k,
-            pipeline=ident.pipeline,
-        )
+        extras["zero_dx"] = dgrad_needs_dx_zero(problem, sub_gemms, ident)
         blocks = sum(
             -(-sg.gemm_m // ident.tile_m) * -(-sg.gemm_n // ident.tile_n)
             for sg in sub_gemms

@@ -1638,6 +1638,17 @@ def _covered(extent: int, runs) -> bool:
     return True
 
 
+def dgrad_needs_dx_zero(problem: ConvProblem, sub_gemms, identity) -> bool:
+    """Whether the plan must memset dX before the launch.
+
+    The single home for the decision, shared with the benchmark so the timed
+    path is the product path. The memset follows sub-GEMM coverage alone: the
+    zero fill some 16-bit kernels do for 1x1 stride-2 residues
+    (``dgrad_fuses_dx_zero_fill``) is not yet relied on by the plan.
+    """
+    return not _dx_fully_written(problem, sub_gemms, bool(identity.patch))
+
+
 def _dx_fully_written(problem: ConvProblem, sub_gemms, patch: bool) -> bool:
     """Whether the implicit-GEMM kernel stores every dX element of ``problem``.
 
@@ -1777,7 +1788,7 @@ def _implicit_plan(
             )
         )
         table_bytes += 4 * len(table)
-        zero_dx = zero_dx or not _dx_fully_written(p, sub_gemms, bool(spec.patch))
+        zero_dx = zero_dx or dgrad_needs_dx_zero(p, sub_gemms, identity)
     return (
         ConvDgradAotPlan(
             launched=launched,

@@ -1104,6 +1104,10 @@ bool rocke_conv_fwd_dtl_reason(const rocke_implicit_gemm_conv_spec_t* s,
         why = "dtl: no split-K, no wavelet, wave64 only";
     else if(!b16 || (s->has_lds_k_pad && s->lds_k_pad != 0))
         why = "dtl: 16-bit operands, packed LDS tiles";
+    else if(s->lds_layout != NULL)
+        why = "dtl: the DMA writes packed rows, so an explicit lds_layout is refused";
+    else if(s->problem.C % 8)
+        why = "dtl: C must be divisible by 8 (a 16-byte chunk may not cross a filter row)";
     else if(s->tile_k % 8 || (cpr & (cpr - 1)))
         why = "dtl: tile_k / 8 must be a power of two";
     else

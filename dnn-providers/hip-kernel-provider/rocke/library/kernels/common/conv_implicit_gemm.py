@@ -214,6 +214,12 @@ def _fwd_dtl_conflict(spec: "ImplicitGemmConvSpec") -> str:
         return "dtl: no split-K, no wavelet, wave64 only"
     if spec.data.dtype_a not in ("fp16", "bf16") or spec.lds_k_pad not in (None, 0):
         return "dtl: 16-bit operands, packed LDS tiles"
+    if spec.lds_layout is not None:
+        return "dtl: the DMA writes packed rows, so an explicit lds_layout is refused"
+    if spec.problem.C % 8:
+        return (
+            "dtl: C must be divisible by 8 (a 16-byte chunk may not cross a filter row)"
+        )
     cpr = spec.tile_k // 8
     if spec.tile_k % 8 or cpr & (cpr - 1):
         return "dtl: tile_k / 8 must be a power of two"

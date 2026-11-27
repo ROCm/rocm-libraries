@@ -4785,7 +4785,11 @@ static rocke_kernel_def_t*
         rocke_value_t* uk_xs1 = rocke_b_cmp_eq(b, c_xs, c1);
         rocke_value_t* uk_ys1 = rocke_b_cmp_eq(b, rec_y_dot_slice, c1);
         rocke_value_t* uk_single = rocke_b_land(b, uk_xs1, uk_ys1);
-        rocke_value_t* uk_span = rocke_b_sub(b, k_hi, k_lo);
+        /* A padded split-K slice may end past the real reduction (kpg); cap it. */
+        rocke_value_t* uk_real_hi
+            = rocke_b_select(b, rocke_b_cmp_lt(b, c_kdiv, k_hi), c_kdiv, k_hi);
+        rocke_value_t* uk_span = rocke_b_select(
+            b, rocke_b_cmp_lt(b, k_lo, uk_real_hi), rocke_b_sub(b, uk_real_hi, k_lo), c0);
         rocke_value_t* uk_nt = rocke_b_div(b, uk_span, c_block_k);
         rocke_value_t* uk_n_full = rocke_b_mul(b, uk_nt, c_block_k);
         rocke_value_t* uk_hi = rocke_b_select(

@@ -3210,7 +3210,11 @@ def _build_tilde_dgrad(
         # loop runs on the floor((k_hi - k_lo) / tile_k) full tiles and the
         # plain loop below peels the tail. Multi-tap problems keep the plain loop.
         uk_single = b.land(b.cmp_eq(c_xs, c1), b.cmp_eq(rec_y_dot_slice, c1))
-        uk_n_full = b.mul(b.div(b.sub(k_hi, k_lo), c_block_k), c_block_k)
+        # A padded split-K slice may end past the real reduction (kpg); cap it
+        # there so no full tile reads the next group's channels.
+        uk_real_hi = b.select(b.cmp_lt(c_kd, k_hi), c_kd, k_hi)
+        uk_span = b.select(b.cmp_lt(k_lo, uk_real_hi), b.sub(uk_real_hi, k_lo), c0)
+        uk_n_full = b.mul(b.div(uk_span, c_block_k), c_block_k)
         uk_hi = b.select(uk_ok, k_hi, b.select(uk_single, b.add(k_lo, uk_n_full), k_lo))
 
         uk_cap: List[Optional[Tuple[Value, ...]]] = [None]
