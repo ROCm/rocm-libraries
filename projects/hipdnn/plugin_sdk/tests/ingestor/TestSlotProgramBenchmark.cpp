@@ -385,18 +385,41 @@ TEST(TestSlotProgramBenchmark, TimesTheReferenceThenOneSlotVariedRunsThenTheWinn
     EXPECT_EQ(served, WINNERS);
 }
 
-TEST(TestSlotProgramBenchmark, ABenchmarkingPlanIsNotSaveable)
+TEST(TestSlotProgramBenchmark, ABenchmarkingProgramServesNothingBeforeItsFirstExecute)
 {
     Bench bench;
     const auto context = bench.planFor();
 
-    // Before and after the benchmark has picked a program: RFC 0021 §11, a slot program is not
-    // serialized (RFC 0009), though every slot's pick is a saveable GenericPlan.
-    EXPECT_EQ(context.plan().saveablePlan(), nullptr);
+    // The engine is built with benchmarking on, so its plan is the benchmark. The tests build
+    // without RTTI, so the cast is static.
+    const auto& benchmark = static_cast<const SlotProgramBenchmark<StubHandle>&>(context.plan());
+    EXPECT_EQ(benchmark.servedProgram(), nullptr);
+}
+
+TEST(TestSlotProgramBenchmark, ABenchmarkingProgramServesTheProgramItExecuted)
+{
+    Bench bench;
+    const auto context = bench.planFor();
     std::vector<char> workspace(WORKSPACE_BYTES);
     const StubHandle handle;
     context.plan().execute(handle, nullptr, 0, workspace.data());
-    EXPECT_EQ(context.plan().saveablePlan(), nullptr);
+
+    const auto& benchmark = static_cast<const SlotProgramBenchmark<StubHandle>&>(context.plan());
+    const auto* served = benchmark.servedProgram();
+    ASSERT_NE(served, nullptr);
+
+    Program seeds;
+    for(const auto& stage : served->stages())
+    {
+        seeds.push_back(seedOf(stage.plan->kernel().kernelId));
+    }
+    EXPECT_EQ(seeds, WINNERS);
+
+    // The served program counts the scratch of its own picks only (dkdv_c's 8192); the
+    // benchmark counts the largest scratch of every candidate (dkdv_b's 16384).
+    EXPECT_EQ(served->getWorkspaceSize(handle), 1024U + 8192U);
+    EXPECT_EQ(context.plan().getWorkspaceSize(handle), WORKSPACE_BYTES);
+    EXPECT_EQ(served->alignedSharedBytes(), 1024U);
 }
 
 TEST(TestSlotProgramBenchmark, TheWorkspaceIsTheAlignedSharedRegionPlusTheLargestScratchOfAnyKernel)

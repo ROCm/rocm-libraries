@@ -23,8 +23,8 @@
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdNativeShared.hpp"
-#include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdNoSerialization.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdSchemaGate.hpp"
+#include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdSerialization.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 
 /**
@@ -329,11 +329,11 @@ TEST(TestFlydslSdpaBwdPacks, ServesStampedRaggedGraphsAndDeclinesTheFieldsTheMat
     EXPECT_FALSE(invisible.has_value()) << invisible.value_or("");
 }
 
-// Pins that neither engine advertises or performs plan saving. Remove or invert when RFC 0021
-// slot-program saving lands (split) or the merged dispatch handler implements save/restore.
-TEST(TestFlydslSdpaBwdPacks, RefusesPlanSerialization)
+// The engine computes the plan serialization note: every handler of its packs saves and
+// restores every launch.
+TEST(TestFlydslSdpaBwdPacks, ReportsThePlanSerializationNote)
 {
-    expectEngineRefusesPlanSerialization(loadedSet(ENGINE_NAME));
+    expectEngineReportsPlanSerialization(loadedSet(ENGINE_NAME));
 }
 
 // The engine's UED authors `numerical_notes: []`, the claim that no note applies: the engine is

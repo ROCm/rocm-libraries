@@ -37,13 +37,16 @@
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericPlan.hpp>
+#include <hipdnn_plugin_sdk/ingestor/SavedDispatch.hpp>
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "core/Container.hpp"
 #include "core/Context.hpp"
 #include "core/Handle.hpp"
+#include "engines/kernel_ingestor_engine/IngestorPreparedDispatch.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslNormDeviceTestSupport.hpp"
+#include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdLaunchValues.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdTestGraphs.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaDropout.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaObjectTestSupport.hpp"
@@ -184,6 +187,21 @@ enum class BwdPoison
 /// The (query row, key) of the NaN a NaN-bias launch puts in the bias (BwdCase::nanBiasAt).
 inline constexpr std::pair<int64_t, int64_t> NAN_BIAS_AT{5, 7};
 
+/// The tensors of a padded, sequence-major case that carry an offset tensor of their own,
+/// [0, S, 2 * S, ...], and a multiplier that puts batch b at the address the sequence-major
+/// layout gives it, so the memory is that layout's. The others stay dense.
+enum class BwdRagged
+{
+    NONE,
+    /// Q, O, dO, dQ and the stats; dK and dV are dense, so the tail-zero launch runs.
+    QUERY_SIDE,
+    /// K, V, dK and dV; dQ is dense, so the tail-zero launch runs.
+    KEY_SIDE,
+    /// dQ, dK and dV alone, beside dense inputs: no gradient is dense, so no tail-zero launch
+    /// runs.
+    GRADIENTS
+};
+
 /// What a graph computes: its shape and the features it turns on.
 struct BwdCase
 {
@@ -248,6 +266,8 @@ struct BwdCase
     /// sequence stride) and the log-sum-exp packed (H, T). Sequence-major, with per-batch lengths;
     /// seqQ and seqKv stay the graph's declared extents.
     bool packed = false;
+    /// The tensors that are ragged; anything but NONE needs a padded case in BwdLayout::SEQ_MAJOR.
+    BwdRagged ragged = BwdRagged::NONE;
     float dropout = 0.0F;
     int64_t seed = 0x1234567;
     int64_t offset = 77;
@@ -577,6 +597,51 @@ inline TensorView biasViewOf(const BwdCase& c)
     return view;
 }
 
+/// A ragged tensor of a case: its name in the graph, the uid of its offset tensor, the multiplier
+/// that puts batch b at the address of the sequence-major layout, and whether its sequence is the
+/// query's.
+struct RaggedTensor
+{
+    std::string_view name;
+    int64_t offsetUid;
+    int64_t multiplier;
+    bool queryAxis;
+};
+
+/// The ragged tensors of @p c, in the order of the graph's tensors.
+inline std::vector<RaggedTensor> raggedTensorsOf(const BwdCase& c)
+{
+    if(c.ragged == BwdRagged::NONE)
+    {
+        return {};
+    }
+    if(!c.padded() || c.layout != BwdLayout::SEQ_MAJOR)
+    {
+        throw std::invalid_argument(
+            "a ragged case needs a padded case in the sequence-major layout");
+    }
+    const auto pitchQk = ceilToVectorOf(c.dtype, c.headDim);
+    const auto pitchV = ceilToVectorOf(c.dtype, c.valueDim());
+    const RaggedTensor q{"q", uid::RAGGED_OFFSET_Q, c.heads * pitchQk, true};
+    const RaggedTensor k{"k", uid::RAGGED_OFFSET_K, c.kvHeads * pitchQk, false};
+    const RaggedTensor v{"v", uid::RAGGED_OFFSET_V, c.kvHeads * pitchV, false};
+    const RaggedTensor o{"o", uid::RAGGED_OFFSET_O, c.heads * pitchV, true};
+    const RaggedTensor dO{"do", uid::RAGGED_OFFSET_DO, c.heads * pitchV, true};
+    const RaggedTensor dQ{"dq", uid::RAGGED_OFFSET_DQ, c.heads * pitchQk, true};
+    const RaggedTensor dK{"dk", uid::RAGGED_OFFSET_DK, c.kvHeads * pitchQk, false};
+    const RaggedTensor dV{"dv", uid::RAGGED_OFFSET_DV, c.kvHeads * pitchV, false};
+    const RaggedTensor stats{"stats", uid::RAGGED_OFFSET_STATS, c.heads, true};
+    switch(c.ragged)
+    {
+    case BwdRagged::QUERY_SIDE:
+        return {q, o, dO, dQ, stats};
+    case BwdRagged::KEY_SIDE:
+        return {k, v, dK, dV};
+    default:
+        return {dQ, dK, dV};
+    }
+}
+
 inline SdpaBwdSpec specOf(const BwdCase& c)
 {
     SdpaBwdSpec spec;
@@ -681,6 +746,12 @@ inline SdpaBwdSpec specOf(const BwdCase& c)
                 addRagged(g, name, view->strides[2]);
             }
         });
+    }
+    for(const auto& tensor : raggedTensorsOf(c))
+    {
+        const auto name = std::string(tensor.name);
+        const auto multiplier = tensor.multiplier;
+        spec = spec.withEdit([=](SdpaBwdGraph& g) { addRagged(g, name, multiplier); });
     }
     if(c.dropout > 0.0F)
     {
@@ -1088,6 +1159,11 @@ public:
     void* get() const
     {
         return _ptr;
+    }
+
+    size_t bytes() const
+    {
+        return _bytes;
     }
 
     template <typename T>
@@ -1693,30 +1769,42 @@ inline void expectPlanLaunches(const Context& context, const ObjectPin& pin)
     }
 }
 
-/// Executes @p plan, the plan of the graph of @p c, on deterministic inputs and checks every
-/// gradient against the reference; with @p c's repeatLaunches above 1 it then launches again on
-/// poisoned outputs and workspace and checks every output is bit-for-bit the first launch's.
+/// The host side of one case's device inputs, in the dtype @p T of Q and @p B of the bias: the
+/// inputs and the forward results the backward consumes, rounded to the graph's dtype, and each
+/// buffer group's contents laid out through the views of the case. `in` is what the reference
+/// reads; the device's K and V hold the case's poison at the keys no row sees.
 template <typename T, typename B = T>
-void expectPlanMatchesReference(const BwdCase& c,
-                                const hipdnn_plugin_sdk::IPlan<Handle>& plan,
-                                const Handle& handle)
+struct HostStaging
 {
-    ASSERT_TRUE(c.heads % c.kvHeads == 0 && c.heads % c.valueHeadCount() == 0)
-        << "the query heads are not a multiple of K's or of V's";
-    ASSERT_GE(c.repeatLaunches, 1);
+    Inputs in;
+    Forward forward;
+    std::vector<double> oRounded;
+    BwdViews views;
+    std::array<size_t, GROUP_COUNT> elements{};
+    std::array<std::vector<T>, GROUP_COUNT> data;
+    std::vector<float> stats;
+    std::vector<B> bias;
+};
 
-    // Inputs, and the forward results the backward consumes, rounded to the graph's dtype.
+/// Stages @p c: the deterministic inputs, with the rows of a padded graph past its lengths zero
+/// in dO (the gradient's input is zero there, as a packed batch's padding is), the case's NaN
+/// bias element, the padding of O's rows holding what the case says and the poison in the
+/// device's K and V. The elements between a view's rows start as zero.
+template <typename T, typename B = T>
+HostStaging<T, B> hostStagingOf(const BwdCase& c)
+{
+    HostStaging<T, B> host;
     const int64_t dqk = c.headDim;
     const int64_t dv = c.valueDim();
-    Inputs in;
-    const auto qCount = static_cast<size_t>(c.batch * c.heads * c.seqQ * dqk);
-    const auto kCount = static_cast<size_t>(c.batch * c.kvHeads * c.seqKv * dqk);
-    const auto vCount = static_cast<size_t>(c.batch * c.valueHeadCount() * c.seqKv * dv);
-    const auto oCount = static_cast<size_t>(c.batch * c.heads * c.seqQ * dv);
-    in.q = widened(roundedTo<T>(fillValues(qCount, 1U)));
-    in.k = widened(roundedTo<T>(fillValues(kCount, 2U)));
-    in.v = widened(roundedTo<T>(fillValues(vCount, 3U)));
-    in.dO = widened(roundedTo<T>(fillValues(oCount, 4U)));
+    auto& in = host.in;
+    in.q = widened(
+        roundedTo<T>(fillValues(static_cast<size_t>(c.batch * c.heads * c.seqQ * dqk), 1U)));
+    in.k = widened(
+        roundedTo<T>(fillValues(static_cast<size_t>(c.batch * c.kvHeads * c.seqKv * dqk), 2U)));
+    in.v = widened(roundedTo<T>(
+        fillValues(static_cast<size_t>(c.batch * c.valueHeadCount() * c.seqKv * dv), 3U)));
+    in.dO = widened(
+        roundedTo<T>(fillValues(static_cast<size_t>(c.batch * c.heads * c.seqQ * dv), 4U)));
     if(c.data == BwdData::ZERO_SCORES)
     {
         std::fill(in.q.begin(), in.q.end(), 0.0);
@@ -1728,8 +1816,6 @@ void expectPlanMatchesReference(const BwdCase& c,
     {
         in.bias = biasInputsOf<B>(c);
     }
-    // A padded graph's rows past its lengths carry no data: the gradient's input is zero
-    // there, as a packed batch's padding is.
     if(c.padded())
     {
         const auto scope = scopeOf(c, true, c.heads, dv);
@@ -1738,12 +1824,12 @@ void expectPlanMatchesReference(const BwdCase& c,
             in.dO[i] = scope[i] ? in.dO[i] : 0.0;
         }
     }
-    const auto forward = forwardOf(c, in);
-    const auto oRounded = widened(roundedTo<T>(forward.o));
+    host.forward = forwardOf(c, in);
+    host.oRounded = widened(roundedTo<T>(host.forward.o));
     if(c.nanBiasAt.has_value())
     {
-        ASSERT_TRUE(c.bias) << "a NaN bias element needs a bias";
-        for(int64_t b = 0; b < c.biasBatch(); ++b)
+        EXPECT_TRUE(c.bias) << "a NaN bias element needs a bias";
+        for(int64_t b = 0; b < c.biasBatch() && c.bias; ++b)
         {
             for(int64_t h = 0; h < c.biasHeads(); ++h)
             {
@@ -1753,22 +1839,14 @@ void expectPlanMatchesReference(const BwdCase& c,
             }
         }
     }
-    const auto expected
-        = backwardOf(c,
-                     in,
-                     oRounded,
-                     forward.lse,
-                     usesFlushAwareReference(packedArchDeviceProperties().gcnArchName, c.dtype));
-    // The device's K and V hold the poison at the keys no row sees; the reference above read the
-    // clean values.
-    std::vector<bool> removedK(in.k.size(), false);
-    std::vector<bool> removedV(in.v.size(), false);
+    // The reference reads the clean K and V; the device's hold the poison at the keys no row
+    // sees.
+    auto keysOnDevice = in.k;
+    auto valuesOnDevice = in.v;
     if(c.poison != BwdPoison::NONE)
     {
-        const auto poisonOut = [&](std::vector<double>& values,
-                                   std::vector<bool>& removed,
-                                   int64_t heads,
-                                   int64_t width) {
+        size_t removed = 0;
+        const auto poisonOut = [&](std::vector<double>& values, int64_t heads, int64_t width) {
             for(int64_t b = 0; b < c.batch; ++b)
             {
                 for(int64_t h = 0; h < heads; ++h)
@@ -1781,10 +1859,9 @@ void expectPlanMatchesReference(const BwdCase& c,
                         }
                         for(int64_t d = 0; d < width; ++d)
                         {
-                            const auto at
-                                = static_cast<size_t>(((b * heads + h) * c.seqKv + j) * width + d);
-                            values[at] = static_cast<double>(c.poisonValue);
-                            removed[at] = true;
+                            values[static_cast<size_t>(((b * heads + h) * c.seqKv + j) * width + d)]
+                                = static_cast<double>(c.poisonValue);
+                            ++removed;
                         }
                     }
                 }
@@ -1792,21 +1869,18 @@ void expectPlanMatchesReference(const BwdCase& c,
         };
         if(c.poison != BwdPoison::V)
         {
-            poisonOut(in.k, removedK, c.kvHeads, dqk);
+            poisonOut(keysOnDevice, c.kvHeads, dqk);
         }
         if(c.poison != BwdPoison::K)
         {
-            poisonOut(in.v, removedV, c.valueHeadCount(), dv);
+            poisonOut(valuesOnDevice, c.valueHeadCount(), dv);
         }
-        ASSERT_TRUE(std::count(removedK.begin(), removedK.end(), true) > 0
-                    || std::count(removedV.begin(), removedV.end(), true) > 0)
-            << "the case has no key that no row sees";
+        EXPECT_GT(removed, 0U) << "the case has no key that no row sees";
     }
 
-    // Each group's buffer holds the tensors that share it; the elements between a view's
-    // rows start as zero.
-    const auto views = viewsOf(c);
-    auto elements = views.groupElements();
+    host.views = viewsOf(c);
+    const auto& views = host.views;
+    host.elements = views.groupElements();
     const auto oPitch = ceilToVectorOf(c.dtype, c.valueDim());
     if(c.oPadFill != BwdOPadFill::ZERO)
     {
@@ -1815,93 +1889,143 @@ void expectPlanMatchesReference(const BwdCase& c,
         const auto& o = views.o;
         const auto lastRow = o.offset + (o.dims[0] - 1) * o.strides[0]
                              + (o.dims[1] - 1) * o.strides[1] + (o.dims[2] - 1) * o.strides[2];
-        elements[o.group] = std::max(elements[o.group], static_cast<size_t>(lastRow + oPitch));
+        host.elements[o.group]
+            = std::max(host.elements[o.group], static_cast<size_t>(lastRow + oPitch));
     }
-    std::array<std::vector<T>, GROUP_COUNT> hostData;
     for(size_t group = 0; group < GROUP_COUNT; ++group)
     {
-        hostData[group].assign(elements[group], T(0.0F));
+        host.data[group].assign(host.elements[group], T(0.0F));
     }
-    scatter(hostData[views.q.group], in.q, views.q);
-    scatter(hostData[views.k.group], in.k, views.k);
-    scatter(hostData[views.v.group], in.v, views.v);
-    scatter(hostData[views.o.group], oRounded, views.o);
+    scatter(host.data[views.q.group], in.q, views.q);
+    scatter(host.data[views.k.group], keysOnDevice, views.k);
+    scatter(host.data[views.v.group], valuesOnDevice, views.v);
+    scatter(host.data[views.o.group], host.oRounded, views.o);
     if(c.oPadFill != BwdOPadFill::ZERO)
     {
-        fillRowPadding(hostData[views.o.group],
+        fillRowPadding(host.data[views.o.group],
                        views.o,
                        oPitch,
                        c.oPadFill == BwdOPadFill::NAN_VALUE
                            ? std::numeric_limits<float>::quiet_NaN()
                            : std::numeric_limits<float>::infinity());
     }
-    scatter(hostData[views.dO.group], in.dO, views.dO);
-    std::vector<float> statsHost(elements[views.stats.group], 0.0F);
+    scatter(host.data[views.dO.group], in.dO, views.dO);
+
+    // The log-sum-exp through its own strides.
+    host.stats.assign(host.elements[views.stats.group], 0.0F);
+    const auto& stats = views.stats;
+    size_t next = 0;
+    for(int64_t b = 0; b < stats.dims[0]; ++b)
     {
-        // The log-sum-exp through its own strides.
-        const auto& view = views.stats;
-        size_t next = 0;
-        for(int64_t b = 0; b < view.dims[0]; ++b)
+        for(int64_t h = 0; h < stats.dims[1]; ++h)
         {
-            for(int64_t h = 0; h < view.dims[1]; ++h)
+            for(int64_t s = 0; s < stats.dims[2]; ++s)
             {
-                for(int64_t s = 0; s < view.dims[2]; ++s)
+                const auto lse = host.forward.lse[next++];
+                if(s < stats.rowsOf(b))
                 {
-                    const auto lse = forward.lse[next++];
-                    if(s < view.rowsOf(b))
-                    {
-                        statsHost[static_cast<size_t>(view.startOf(b) + h * view.strides[1]
-                                                      + s * view.strides[2])]
-                            = lse;
-                    }
+                    host.stats[static_cast<size_t>(stats.startOf(b) + h * stats.strides[1]
+                                                   + s * stats.strides[2])]
+                        = lse;
                 }
             }
         }
     }
+    if(c.bias)
+    {
+        host.bias = stagedBias<B>(c, in.bias);
+    }
+    return host;
+}
 
-    std::vector<std::unique_ptr<DeviceBuffer>> device(GROUP_COUNT);
+using DeviceGroups = std::array<std::unique_ptr<DeviceBuffer>, GROUP_COUNT>;
+
+/// A device buffer for every group of @p host, the inputs uploaded and dQ, dK and dV poisoned.
+template <typename T, typename B>
+DeviceGroups uploadStaging(const HostStaging<T, B>& host)
+{
+    const auto& views = host.views;
+    DeviceGroups device;
     for(size_t group = 0; group < GROUP_COUNT; ++group)
     {
         const auto bytes
-            = elements[group] * (group == views.stats.group ? sizeof(float) : sizeof(T));
+            = host.elements[group] * (group == views.stats.group ? sizeof(float) : sizeof(T));
         if(bytes > 0)
         {
             device[group] = std::make_unique<DeviceBuffer>(bytes);
         }
     }
-    device[views.q.group]->upload(hostData[views.q.group]);
+    device[views.q.group]->upload(host.data[views.q.group]);
     if(views.k.group != views.q.group)
     {
-        device[views.k.group]->upload(hostData[views.k.group]);
+        device[views.k.group]->upload(host.data[views.k.group]);
     }
     if(views.v.group != views.q.group)
     {
-        device[views.v.group]->upload(hostData[views.v.group]);
+        device[views.v.group]->upload(host.data[views.v.group]);
     }
-    device[views.o.group]->upload(hostData[views.o.group]);
-    device[views.dO.group]->upload(hostData[views.dO.group]);
-    device[views.stats.group]->upload(statsHost);
+    device[views.o.group]->upload(host.data[views.o.group]);
+    device[views.dO.group]->upload(host.data[views.dO.group]);
+    device[views.stats.group]->upload(host.stats);
+    for(const auto* view : {&views.dq, &views.dk, &views.dv})
+    {
+        device[view->group]->poison();
+    }
+    return device;
+}
+
+/// The buffer of every tensor of the nine, by uid, over the groups of @p device.
+template <typename T>
+std::vector<hipdnnPluginDeviceBuffer_t> tensorBuffers(const BwdViews& views,
+                                                      const DeviceGroups& device)
+{
     const auto pointerOf = [&](const TensorView& view) {
         return static_cast<char*>(device[view.group]->get())
                + static_cast<size_t>(view.offset) * sizeof(T);
     };
-    std::vector<hipdnnPluginDeviceBuffer_t> buffers{{uid::Q, pointerOf(views.q)},
-                                                    {uid::K, pointerOf(views.k)},
-                                                    {uid::V, pointerOf(views.v)},
-                                                    {uid::O, pointerOf(views.o)},
-                                                    {uid::DO, pointerOf(views.dO)},
-                                                    {uid::STATS, device[views.stats.group]->get()},
-                                                    {uid::DQ, pointerOf(views.dq)},
-                                                    {uid::DK, pointerOf(views.dk)},
-                                                    {uid::DV, pointerOf(views.dv)}};
+    return {{uid::Q, pointerOf(views.q)},
+            {uid::K, pointerOf(views.k)},
+            {uid::V, pointerOf(views.v)},
+            {uid::O, pointerOf(views.o)},
+            {uid::DO, pointerOf(views.dO)},
+            {uid::STATS, device[views.stats.group]->get()},
+            {uid::DQ, pointerOf(views.dq)},
+            {uid::DK, pointerOf(views.dk)},
+            {uid::DV, pointerOf(views.dv)}};
+}
+
+/// Executes @p plan, the plan of the graph of @p c, on deterministic inputs and checks every
+/// gradient against the reference; with @p c's repeatLaunches above 1 it then launches again on
+/// poisoned outputs and workspace and checks every output is bit-for-bit the first launch's.
+template <typename T, typename B = T>
+void expectPlanMatchesReference(const BwdCase& c,
+                                const hipdnn_plugin_sdk::IPlan<Handle>& plan,
+                                const Handle& handle)
+{
+    ASSERT_TRUE(c.heads % c.kvHeads == 0 && c.heads % c.valueHeadCount() == 0)
+        << "the query heads are not a multiple of K's or of V's";
+    ASSERT_GE(c.repeatLaunches, 1);
+
+    const auto host = hostStagingOf<T, B>(c);
+    const auto& in = host.in;
+    const auto& views = host.views;
+    const auto expected
+        = backwardOf(c,
+                     in,
+                     host.oRounded,
+                     host.forward.lse,
+                     usesFlushAwareReference(packedArchDeviceProperties().gcnArchName, c.dtype));
+    const int64_t dqk = c.headDim;
+    const int64_t dv = c.valueDim();
+    auto device = uploadStaging(host);
+    auto buffers = tensorBuffers<T>(views, device);
 
     const auto biasView = biasViewOf(c);
-    std::vector<B> biasHost;
+    const auto& biasHost = host.bias;
     std::unique_ptr<DeviceBuffer> bias;
     std::unique_ptr<DeviceBuffer> dbias;
     if(c.bias)
     {
-        biasHost = stagedBias<B>(c, in.bias);
         bias = std::make_unique<DeviceBuffer>(biasHost.size() * sizeof(B));
         bias->upload(biasHost);
         buffers.push_back({uid::BIAS, bias->get()});
@@ -2377,6 +2501,996 @@ protected:
 
 private:
     const std::vector<std::string_view>& _ops;
+};
+
+// ---------------------------------------------------------------------------
+// Launch contract samples
+// ---------------------------------------------------------------------------
+
+/// One sample of every launch input, each member a distinct value, so a swapped or dropped
+/// mapping shows. The values are valid for every reader but are not one launchable problem's:
+/// the host tests of the `.v1` contracts read and write them, and nothing launches them. The
+/// contract the samples are written under is spelled out in commonValues(): the names are the
+/// stored contract, and a test that shared the constants would not see a rename.
+namespace launch_sample
+{
+
+namespace bwd = hip_kernel_provider::kernel_ingestor_engine::flydsl_sdpa_bwd;
+using hip_kernel_provider::kernel_ingestor_engine::FlydslSdpaBwdDkdvLaunchInputs;
+using hip_kernel_provider::kernel_ingestor_engine::FlydslSdpaBwdDqLaunchInputs;
+using hip_kernel_provider::kernel_ingestor_engine::FlydslSdpaBwdMergedLaunchInputs;
+using hip_kernel_provider::kernel_ingestor_engine::FlydslSdpaBwdPrepLaunchInputs;
+using hip_kernel_provider::kernel_ingestor_engine::FlydslSdpaBwdUids;
+using hipdnn_plugin_sdk::ingestor::MetadataValues;
+
+/// A broadcast-over-batch dBias, a padded varlen mask, a pass-by-value tensor scale and a
+/// pass-by-value 64-bit seed (user supplied) and offset (baked).
+inline bwd::SdpaBwdProblem problem()
+{
+    bwd::SdpaBwdProblem p;
+    p.elementBytes = 2;
+    // An f32 bias beside the 16-bit Q: the width the dBias reduce launch divides by.
+    p.biasElementBytes = 4;
+    p.batch = 2;
+    p.numHeads = 8;
+    p.numKvHeads = 4;
+    p.numVHeads = 4;
+    p.seqLenQ = 96;
+    p.seqLenKv = 112;
+    p.headDimQk = 96;
+    p.headDimV = 80;
+    p.q = {0, 112, 113};
+    p.k = {0, 122, 123};
+    p.v = {131, 132, 133};
+    p.o = {0, 142, 143};
+    p.dO = {151, 152, 153};
+    p.dQ = {0, 162, 163};
+    p.dK = {171, 172, 173};
+    p.dV = {181, 182, 183};
+    p.scaleSource = bwd::ScaleSource::TENSOR;
+    p.scaleValue = 0.5F;
+    p.scaleUid = 91;
+    p.masked = true;
+    p.alignBottomRight = true;
+    p.diagonalOffset = 7;
+    p.windowLeft = 33;
+    p.windowRight = 44;
+    p.paddingMask = true;
+    p.seqLenQUid = 61;
+    p.seqLenKvUid = 62;
+    p.biasUid = 71;
+    p.dbiasUid = 72;
+    p.biasStrides = {201, 202, 203};
+    p.dbiasStrides = {211, 212, 213};
+    p.biasBroadcastBatch = true;
+    p.biasBroadcastHead = false;
+    p.dropoutP = 0.25F;
+    p.seedWidth = bwd::SeedWidth::INT64;
+    p.seedForm = bwd::SeedForm::PASS_BY_VALUE;
+    p.seedUid = 81;
+    p.offsetUid = 82;
+    // Q, K, O, dQ and the stats are ragged, each with an offset tensor and multiplier of its own;
+    // V, dO, dK and dV are dense. A ragged tensor has no batch stride.
+    p.ragged.q = {301, 3};
+    p.ragged.k = {302, 5};
+    p.ragged.o = {304, 7};
+    p.ragged.dQ = {306, 11};
+    p.ragged.stats = {309, 13};
+    p.stats = {0, 321, 322};
+    return p;
+}
+
+/// The sample problem as the merged engine serves it: the merged engine declines an f32 bias, so
+/// the bias is as wide as Q.
+inline bwd::SdpaBwdProblem mergedProblem()
+{
+    auto p = problem();
+    p.biasElementBytes = p.elementBytes;
+    return p;
+}
+
+/// The sample problem as a u2 handler serves it: V has fewer heads than K, and there is no bias,
+/// no dropout and no ragged tensor. The tensors the sample made ragged are dense, with batch
+/// strides.
+inline bwd::SdpaBwdProblem u2Problem()
+{
+    auto p = problem();
+    p.numVHeads = 2;
+    p.biasElementBytes = p.elementBytes;
+    p.ragged = {};
+    p.q.batch = 114;
+    p.k.batch = 124;
+    p.o.batch = 144;
+    p.dQ.batch = 164;
+    p.stats.batch = 323;
+    p.biasUid = bwd::NO_UID;
+    p.dbiasUid = bwd::NO_UID;
+    p.biasStrides = {};
+    p.dbiasStrides = {};
+    p.biasBroadcastBatch = false;
+    p.biasBroadcastHead = false;
+    p.dropoutP = 0.0F;
+    p.seedWidth = bwd::SeedWidth::NONE;
+    p.seedForm = bwd::SeedForm::NONE;
+    p.seedUid = bwd::NO_UID;
+    p.offsetUid = bwd::NO_UID;
+    return p;
+}
+
+inline FlydslSdpaBwdUids uids()
+{
+    return FlydslSdpaBwdUids{101, 102, 103, 104, 105, 106, 107, 108, 109};
+}
+
+inline hip_kernel_provider::kernel_ingestor_engine::flydsl_sdpa_bwd_native::ScalarOperands scalars()
+{
+    hip_kernel_provider::kernel_ingestor_engine::flydsl_sdpa_bwd_native::ScalarOperands operands;
+    hipdnn_plugin_sdk::ScalarOperand scale;
+    scale.uid = 91;
+    scale.dataType = DataType::FLOAT;
+    scale.isRuntimeUserSupplied = false;
+    scale.bakedDefault = hipdnn_plugin_sdk::ScalarValue{0.5F};
+    operands.scale = scale;
+    hipdnn_plugin_sdk::ScalarOperand seed;
+    seed.uid = 81;
+    seed.dataType = DataType::INT64;
+    seed.isRuntimeUserSupplied = true;
+    operands.seed = seed;
+    hipdnn_plugin_sdk::ScalarOperand offset;
+    offset.uid = 82;
+    offset.dataType = DataType::INT64;
+    offset.isRuntimeUserSupplied = false;
+    offset.bakedDefault = hipdnn_plugin_sdk::ScalarValue{int64_t{123}};
+    operands.offset = offset;
+    return operands;
+}
+
+/// The scale alone: a u2 problem has no dropout, so no seed or offset binding.
+inline hip_kernel_provider::kernel_ingestor_engine::flydsl_sdpa_bwd_native::ScalarOperands
+    u2Scalars()
+{
+    auto operands = scalars();
+    operands.seed.reset();
+    operands.offset.reset();
+    return operands;
+}
+
+/// The values every `.v1` contract of the sample problem holds, by name and type.
+inline MetadataValues commonValues()
+{
+    return {{"element_bytes", int64_t{2}},
+            {"bias_element_bytes", int64_t{4}},
+            {"num_v_heads", int64_t{4}},
+            {"batch", int64_t{2}},
+            {"num_heads", int64_t{8}},
+            {"num_kv_heads", int64_t{4}},
+            {"seqlen_q", int64_t{96}},
+            {"seqlen_kv", int64_t{112}},
+            {"head_dim_qk", int64_t{96}},
+            {"head_dim_v", int64_t{80}},
+            {"q.uid", int64_t{101}},
+            {"k.uid", int64_t{102}},
+            {"v.uid", int64_t{103}},
+            {"o.uid", int64_t{104}},
+            {"do.uid", int64_t{105}},
+            {"dq.uid", int64_t{106}},
+            {"dk.uid", int64_t{107}},
+            {"dv.uid", int64_t{108}},
+            {"stats.uid", int64_t{109}},
+            {"q.stride_batch", int64_t{0}},
+            {"q.stride_head", int64_t{112}},
+            {"q.stride_seq", int64_t{113}},
+            {"k.stride_batch", int64_t{0}},
+            {"k.stride_head", int64_t{122}},
+            {"k.stride_seq", int64_t{123}},
+            {"v.stride_batch", int64_t{131}},
+            {"v.stride_head", int64_t{132}},
+            {"v.stride_seq", int64_t{133}},
+            {"o.stride_batch", int64_t{0}},
+            {"o.stride_head", int64_t{142}},
+            {"o.stride_seq", int64_t{143}},
+            {"do.stride_batch", int64_t{151}},
+            {"do.stride_head", int64_t{152}},
+            {"do.stride_seq", int64_t{153}},
+            {"dq.stride_batch", int64_t{0}},
+            {"dq.stride_head", int64_t{162}},
+            {"dq.stride_seq", int64_t{163}},
+            {"dk.stride_batch", int64_t{171}},
+            {"dk.stride_head", int64_t{172}},
+            {"dk.stride_seq", int64_t{173}},
+            {"dv.stride_batch", int64_t{181}},
+            {"dv.stride_head", int64_t{182}},
+            {"dv.stride_seq", int64_t{183}},
+            {"stats.stride_batch", int64_t{0}},
+            {"stats.stride_head", int64_t{321}},
+            {"stats.stride_seq", int64_t{322}},
+            {"q.ragged_offset_uid", int64_t{301}},
+            {"q.ragged_offset_multiplier", int64_t{3}},
+            {"k.ragged_offset_uid", int64_t{302}},
+            {"k.ragged_offset_multiplier", int64_t{5}},
+            {"v.ragged_offset_uid", int64_t{-1}},
+            {"v.ragged_offset_multiplier", int64_t{0}},
+            {"o.ragged_offset_uid", int64_t{304}},
+            {"o.ragged_offset_multiplier", int64_t{7}},
+            {"do.ragged_offset_uid", int64_t{-1}},
+            {"do.ragged_offset_multiplier", int64_t{0}},
+            {"dq.ragged_offset_uid", int64_t{306}},
+            {"dq.ragged_offset_multiplier", int64_t{11}},
+            {"dk.ragged_offset_uid", int64_t{-1}},
+            {"dk.ragged_offset_multiplier", int64_t{0}},
+            {"dv.ragged_offset_uid", int64_t{-1}},
+            {"dv.ragged_offset_multiplier", int64_t{0}},
+            {"stats.ragged_offset_uid", int64_t{309}},
+            {"stats.ragged_offset_multiplier", int64_t{13}},
+            {"scale_source", std::string("tensor")},
+            {"scale_value", 0.5},
+            {"scale.uid", int64_t{91}},
+            {"scale.data_type", std::string("FLOAT")},
+            {"scale.user_supplied", false},
+            {"scale.baked", 0.5},
+            {"masked", true},
+            {"align_bottom_right", true},
+            {"diagonal_offset", int64_t{7}},
+            {"window_left", int64_t{33}},
+            {"window_right", int64_t{44}},
+            {"padding_mask", true},
+            {"seq_len_q.uid", int64_t{61}},
+            {"seq_len_kv.uid", int64_t{62}},
+            {"bias.uid", int64_t{71}},
+            {"dbias.uid", int64_t{72}},
+            {"bias.stride_batch", int64_t{201}},
+            {"bias.stride_head", int64_t{202}},
+            {"bias.stride_seq", int64_t{203}},
+            {"dbias.stride_batch", int64_t{211}},
+            {"dbias.stride_head", int64_t{212}},
+            {"dbias.stride_seq", int64_t{213}},
+            {"bias_broadcast_batch", true},
+            {"bias_broadcast_head", false},
+            {"dropout_p", 0.25},
+            {"seed_width", std::string("int64")},
+            {"seed_form", std::string("pass_by_value")},
+            {"seed.uid", int64_t{81}},
+            {"seed.data_type", std::string("INT64")},
+            {"seed.user_supplied", true},
+            {"offset.uid", int64_t{82}},
+            {"offset.data_type", std::string("INT64")},
+            {"offset.user_supplied", false},
+            {"offset.baked", int64_t{123}}};
+}
+
+/// The values of @p contract: the common values plus the row fields @p row.
+inline MetadataValues withRow(const MetadataValues& row)
+{
+    auto values = commonValues();
+    for(const auto& entry : row)
+    {
+        values[entry.first] = entry.second;
+    }
+    return values;
+}
+
+/// The values of a u2 contract: the common values of u2Problem() plus the row fields @p row.
+inline MetadataValues u2WithRow(const MetadataValues& row)
+{
+    auto values = withRow(row);
+    const MetadataValues changed{{"bias_element_bytes", int64_t{2}},
+                                 {"num_v_heads", int64_t{2}},
+                                 {"q.stride_batch", int64_t{114}},
+                                 {"k.stride_batch", int64_t{124}},
+                                 {"o.stride_batch", int64_t{144}},
+                                 {"dq.stride_batch", int64_t{164}},
+                                 {"stats.stride_batch", int64_t{323}},
+                                 {"bias.uid", int64_t{-1}},
+                                 {"dbias.uid", int64_t{-1}},
+                                 {"bias.stride_batch", int64_t{0}},
+                                 {"bias.stride_head", int64_t{0}},
+                                 {"bias.stride_seq", int64_t{0}},
+                                 {"dbias.stride_batch", int64_t{0}},
+                                 {"dbias.stride_head", int64_t{0}},
+                                 {"dbias.stride_seq", int64_t{0}},
+                                 {"bias_broadcast_batch", false},
+                                 {"dropout_p", 0.0},
+                                 {"seed_width", std::string("none")},
+                                 {"seed_form", std::string("none")}};
+    for(const auto& entry : changed)
+    {
+        values[entry.first] = entry.second;
+    }
+    for(const char* tensor : {"q", "k", "v", "o", "do", "dq", "dk", "dv", "stats"})
+    {
+        values[std::string(tensor) + ".ragged_offset_uid"] = int64_t{-1};
+        values[std::string(tensor) + ".ragged_offset_multiplier"] = int64_t{0};
+    }
+    for(const char* dropped : {"seed.uid",
+                               "seed.data_type",
+                               "seed.user_supplied",
+                               "offset.uid",
+                               "offset.data_type",
+                               "offset.user_supplied",
+                               "offset.baked"})
+    {
+        values.erase(dropped);
+    }
+    return values;
+}
+
+inline FlydslSdpaBwdPrepLaunchInputs prepInputs()
+{
+    return FlydslSdpaBwdPrepLaunchInputs{
+        problem(), uids(), scalars(), 128, "qblocks_by_heads_by_seqs"};
+}
+
+inline MetadataValues prepRowValues()
+{
+    return {{"head_dim", int64_t{128}}, {"grid", std::string("qblocks_by_heads_by_seqs")}};
+}
+
+inline FlydslSdpaBwdDkdvLaunchInputs dkdvInputs()
+{
+    return FlydslSdpaBwdDkdvLaunchInputs{
+        problem(), uids(), scalars(), 128, 256, 32, "kheads_by_kvblocks_by_seqs"};
+}
+
+inline MetadataValues dkdvRowValues()
+{
+    return {{"head_dim", int64_t{128}},
+            {"block_threads", int64_t{256}},
+            {"block_kv", int64_t{32}},
+            {"grid", std::string("kheads_by_kvblocks_by_seqs")}};
+}
+
+inline FlydslSdpaBwdDqLaunchInputs dqInputs()
+{
+    return FlydslSdpaBwdDqLaunchInputs{
+        problem(), uids(), scalars(), 128, 256, 64, "qheads_by_qblocks_by_seqs"};
+}
+
+inline MetadataValues dqRowValues()
+{
+    return {{"head_dim", int64_t{128}},
+            {"block_threads", int64_t{256}},
+            {"block_m", int64_t{64}},
+            {"grid", std::string("qheads_by_qblocks_by_seqs")}};
+}
+
+inline FlydslSdpaBwdMergedLaunchInputs mergedInputs()
+{
+    return FlydslSdpaBwdMergedLaunchInputs{mergedProblem(), uids(), scalars(), 128, 256, 32, 64};
+}
+
+inline MetadataValues mergedRowValues()
+{
+    return {{"bias_element_bytes", int64_t{2}},
+            {"head_dim", int64_t{128}},
+            {"block_threads", int64_t{256}},
+            {"block_kv", int64_t{32}},
+            {"block_m", int64_t{64}}};
+}
+
+/// The dkdv u2 contract's launch: the dkdv inputs over u2Problem().
+inline FlydslSdpaBwdDkdvLaunchInputs dkdvU2Inputs()
+{
+    return FlydslSdpaBwdDkdvLaunchInputs{
+        u2Problem(), uids(), u2Scalars(), 128, 256, 32, "kheads_by_kvblocks_by_seqs"};
+}
+
+/// The dq u2 contract's launch: the dq inputs over u2Problem(). Its problem is padded and its dQ,
+/// dK and dV are dense, so the plan has a tail-zero launch.
+inline FlydslSdpaBwdDqLaunchInputs dqU2Inputs()
+{
+    return FlydslSdpaBwdDqLaunchInputs{
+        u2Problem(), uids(), u2Scalars(), 128, 256, 64, "qheads_by_qblocks_by_seqs"};
+}
+
+/// Expects @p got to be @p want, problem() by default: every member the launch reads. The data
+/// type and the bias alignment are not saved, so they are not compared.
+inline void expectSampleProblem(const bwd::SdpaBwdProblem& got,
+                                const bwd::SdpaBwdProblem& want = problem())
+{
+    EXPECT_EQ(got.elementBytes, want.elementBytes);
+    EXPECT_EQ(got.biasElementBytes, want.biasElementBytes);
+    EXPECT_EQ(got.batch, want.batch);
+    EXPECT_EQ(got.numHeads, want.numHeads);
+    EXPECT_EQ(got.numKvHeads, want.numKvHeads);
+    EXPECT_EQ(got.numVHeads, want.numVHeads);
+    EXPECT_EQ(got.seqLenQ, want.seqLenQ);
+    EXPECT_EQ(got.seqLenKv, want.seqLenKv);
+    EXPECT_EQ(got.headDimQk, want.headDimQk);
+    EXPECT_EQ(got.headDimV, want.headDimV);
+    const auto sameStrides = [](const char* name, const bwd::Strides& a, const bwd::Strides& b) {
+        EXPECT_EQ(a.batch, b.batch) << name;
+        EXPECT_EQ(a.head, b.head) << name;
+        EXPECT_EQ(a.seq, b.seq) << name;
+    };
+    sameStrides("q", got.q, want.q);
+    sameStrides("k", got.k, want.k);
+    sameStrides("v", got.v, want.v);
+    sameStrides("o", got.o, want.o);
+    sameStrides("dO", got.dO, want.dO);
+    sameStrides("dQ", got.dQ, want.dQ);
+    sameStrides("dK", got.dK, want.dK);
+    sameStrides("dV", got.dV, want.dV);
+    sameStrides("stats", got.stats, want.stats);
+    const auto sameRagged
+        = [](const char* name, const bwd::RaggedOffset& a, const bwd::RaggedOffset& b) {
+              EXPECT_EQ(a.uid, b.uid) << name;
+              EXPECT_EQ(a.multiplier, b.multiplier) << name;
+          };
+    sameRagged("q", got.ragged.q, want.ragged.q);
+    sameRagged("k", got.ragged.k, want.ragged.k);
+    sameRagged("v", got.ragged.v, want.ragged.v);
+    sameRagged("o", got.ragged.o, want.ragged.o);
+    sameRagged("dO", got.ragged.dO, want.ragged.dO);
+    sameRagged("dQ", got.ragged.dQ, want.ragged.dQ);
+    sameRagged("dK", got.ragged.dK, want.ragged.dK);
+    sameRagged("dV", got.ragged.dV, want.ragged.dV);
+    sameRagged("stats", got.ragged.stats, want.ragged.stats);
+    sameStrides("bias", got.biasStrides, want.biasStrides);
+    sameStrides("dbias", got.dbiasStrides, want.dbiasStrides);
+    EXPECT_EQ(got.scaleSource, want.scaleSource);
+    EXPECT_EQ(got.scaleValue, want.scaleValue);
+    EXPECT_EQ(got.scaleUid, want.scaleUid);
+    EXPECT_EQ(got.masked, want.masked);
+    EXPECT_EQ(got.alignBottomRight, want.alignBottomRight);
+    EXPECT_EQ(got.diagonalOffset, want.diagonalOffset);
+    EXPECT_EQ(got.windowLeft, want.windowLeft);
+    EXPECT_EQ(got.windowRight, want.windowRight);
+    EXPECT_EQ(got.paddingMask, want.paddingMask);
+    EXPECT_EQ(got.seqLenQUid, want.seqLenQUid);
+    EXPECT_EQ(got.seqLenKvUid, want.seqLenKvUid);
+    EXPECT_EQ(got.biasUid, want.biasUid);
+    EXPECT_EQ(got.dbiasUid, want.dbiasUid);
+    EXPECT_EQ(got.biasBroadcastBatch, want.biasBroadcastBatch);
+    EXPECT_EQ(got.biasBroadcastHead, want.biasBroadcastHead);
+    EXPECT_EQ(got.dropoutP, want.dropoutP);
+    EXPECT_EQ(got.seedWidth, want.seedWidth);
+    EXPECT_EQ(got.seedForm, want.seedForm);
+    EXPECT_EQ(got.seedUid, want.seedUid);
+    EXPECT_EQ(got.offsetUid, want.offsetUid);
+}
+
+/// Expects @p got to be uids().
+inline void expectSampleUids(const FlydslSdpaBwdUids& got)
+{
+    const auto want = uids();
+    EXPECT_EQ(got.q, want.q);
+    EXPECT_EQ(got.k, want.k);
+    EXPECT_EQ(got.v, want.v);
+    EXPECT_EQ(got.o, want.o);
+    EXPECT_EQ(got.dO, want.dO);
+    EXPECT_EQ(got.dQ, want.dQ);
+    EXPECT_EQ(got.dK, want.dK);
+    EXPECT_EQ(got.dV, want.dV);
+    EXPECT_EQ(got.stats, want.stats);
+}
+
+/// Expects @p scalars to hold the baked scale alone: a u2 problem has no seed or offset.
+inline void expectSampleScaleOnly(
+    const hip_kernel_provider::kernel_ingestor_engine::flydsl_sdpa_bwd_native::ScalarOperands&
+        scalars)
+{
+    ASSERT_TRUE(scalars.scale.has_value());
+    EXPECT_EQ(scalars.scale->uid, 91);
+    EXPECT_EQ(scalars.scale->dataType, DataType::FLOAT);
+    EXPECT_FALSE(scalars.scale->isRuntimeUserSupplied);
+    EXPECT_FALSE(scalars.seed.has_value());
+    EXPECT_FALSE(scalars.offset.has_value());
+}
+
+/// Expects @p got to be uids() and scalars(): the tensor uids and the three bindings, the
+/// scale and the offset baked, the seed left to the user.
+inline void expectSampleUidsAndScalars(
+    const FlydslSdpaBwdUids& got,
+    const hip_kernel_provider::kernel_ingestor_engine::flydsl_sdpa_bwd_native::ScalarOperands&
+        scalars)
+{
+    expectSampleUids(got);
+    ASSERT_TRUE(scalars.scale.has_value());
+    EXPECT_EQ(scalars.scale->uid, 91);
+    EXPECT_EQ(scalars.scale->dataType, DataType::FLOAT);
+    EXPECT_FALSE(scalars.scale->isRuntimeUserSupplied);
+    ASSERT_TRUE(std::holds_alternative<float>(scalars.scale->bakedDefault));
+    EXPECT_EQ(std::get<float>(scalars.scale->bakedDefault), 0.5F);
+    ASSERT_TRUE(scalars.seed.has_value());
+    EXPECT_EQ(scalars.seed->uid, 81);
+    EXPECT_EQ(scalars.seed->dataType, DataType::INT64);
+    EXPECT_TRUE(scalars.seed->isRuntimeUserSupplied);
+    ASSERT_TRUE(scalars.offset.has_value());
+    EXPECT_EQ(scalars.offset->uid, 82);
+    EXPECT_EQ(scalars.offset->dataType, DataType::INT64);
+    EXPECT_FALSE(scalars.offset->isRuntimeUserSupplied);
+    ASSERT_TRUE(std::holds_alternative<int64_t>(scalars.offset->bakedDefault));
+    EXPECT_EQ(std::get<int64_t>(scalars.offset->bakedDefault), 123);
+}
+
+} // namespace launch_sample
+
+// ---------------------------------------------------------------------------
+// A plan built through the engine, and its device inputs
+// ---------------------------------------------------------------------------
+
+/// The plain case: no bias, no dBias.
+inline BwdCase plainCase()
+{
+    return BwdCase{};
+}
+
+/// A padded sequence-major case with the ragged tensors @p ragged names.
+inline BwdCase raggedCase(BwdRagged ragged)
+{
+    BwdCase c;
+    c.layout = BwdLayout::SEQ_MAJOR;
+    c.lengthsQ = {96, 70};
+    c.lengthsKv = {96, 50};
+    c.ragged = ragged;
+    return c;
+}
+
+/// A padded case with a ragged query side. dK and dV are dense, so the tail-zero launch runs
+/// beside the kernel.
+inline BwdCase raggedQuerySideCase()
+{
+    return raggedCase(BwdRagged::QUERY_SIDE);
+}
+
+/// A padded case with a ragged key side: K, V, dK and dV are ragged, dQ is dense.
+inline BwdCase raggedKeySideCase()
+{
+    return raggedCase(BwdRagged::KEY_SIDE);
+}
+
+/// A padded case whose dQ, dK and dV are all ragged beside dense inputs: no gradient is dense, so
+/// no tail-zero launch runs.
+inline BwdCase raggedGradientsCase()
+{
+    return raggedCase(BwdRagged::GRADIENTS);
+}
+
+/// A padded case with nothing ragged: every gradient is dense, so the tail-zero launch runs.
+inline BwdCase paddedCase()
+{
+    return raggedCase(BwdRagged::NONE);
+}
+
+/// A dBias gradient the reduce kernel sums over the batch and head axes.
+inline BwdCase broadcastBiasCase()
+{
+    BwdCase c;
+    c.bias = true;
+    c.dbias = true;
+    c.biasOverBatch = true;
+    c.biasOverHead = true;
+    return c;
+}
+
+/// A broadcast dBias beside an f32 bias: the bias is wider than the half-precision Q.
+inline BwdCase f32BroadcastBiasCase()
+{
+    auto c = broadcastBiasCase();
+    c.biasType = DataType::FLOAT;
+    return c;
+}
+
+/// A graph whose V and dV have @p valueHeads heads beside @p kvHeads key heads: the split engine
+/// serves it with its u2 dkdv and dq objects. With @p padded every batch has lengths of its own,
+/// so the dq stage also launches the tail-zero kernel for the dense dK and dV.
+inline BwdCase splitValueHeadsCase(
+    DataType dtype, int64_t heads, int64_t kvHeads, int64_t valueHeads, bool padded)
+{
+    BwdCase c;
+    c.dtype = dtype;
+    c.heads = heads;
+    c.kvHeads = kvHeads;
+    c.valueHeads = valueHeads;
+    if(padded)
+    {
+        c.lengthsQ = {96, 70};
+        c.lengthsKv = {96, 50};
+    }
+    return c;
+}
+
+/// An engine's plan for a graph, and the context that owns it.
+class BwdEnginePlan
+{
+public:
+    /// Records a fatal failure when the engine does not claim the graph of @p spec.
+    void build(std::string_view engine, const SdpaBwdSpec& spec)
+    {
+        _builder = buildSdpaBwdGraph(spec);
+        _graph.emplace(_builder.GetBufferPointer(), _builder.GetSize());
+        auto& manager = _container.getEngineManager();
+        const auto engineId = idOf(engine);
+        const auto applicable = manager.getApplicableEngineIds(_handle, *_graph);
+        ASSERT_NE(std::find(applicable.begin(), applicable.end(), engineId), applicable.end())
+            << engine << " does not claim the graph";
+        stubEngineId(_config, engineId);
+        ASSERT_NO_THROW(manager.initializeExecutionContext(_handle, *_graph, _config, _context));
+        ASSERT_TRUE(_context.hasValidPlan());
+    }
+
+    Handle& handle()
+    {
+        return _handle;
+    }
+
+    Context& context()
+    {
+        return _context;
+    }
+
+    const hipdnn_plugin_sdk::IPlan<Handle>& plan() const
+    {
+        return _context.plan();
+    }
+
+private:
+    flatbuffers::FlatBufferBuilder _builder;
+    std::optional<hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper> _graph;
+    core::Container _container;
+    Handle _handle;
+    Context _context;
+    hipdnn_test_sdk::utilities::MockEngineConfig _config;
+};
+
+/// The deterministic half-precision inputs of one case on the device: the forward results the
+/// backward consumes, the buffers of every tensor the case binds, and the gradient outputs,
+/// poisoned. The forward reference reads the case's own dropout seed and scale: the values of an
+/// execute are not the reference's, and the comparisons are of one plan's output with another's.
+class BwdStagedInputs
+{
+public:
+    void stage(const BwdCase& c)
+    {
+        if(c.bias && c.biasDtype() == DataType::FLOAT)
+        {
+            stageWithBias<float>(c);
+        }
+        else
+        {
+            stageWithBias<hipdnn_data_sdk::types::half>(c);
+        }
+    }
+
+    /// The device buffers of every tensor the case binds, by tensor uid.
+    const std::vector<hipdnnPluginDeviceBuffer_t>& buffers() const
+    {
+        return _buffers;
+    }
+
+    /// The bytes of dQ, dK, dV and, when the case asks for it, dBias, as they are now (dBias
+    /// is empty otherwise).
+    std::vector<std::vector<uint8_t>> outputs() const
+    {
+        std::vector<std::vector<uint8_t>> bytes;
+        for(const auto* group : {&_dq, &_dk, &_dv, &_dbias})
+        {
+            bytes.push_back(*group != nullptr ? (*group)->template download<uint8_t>()
+                                              : std::vector<uint8_t>{});
+        }
+        return bytes;
+    }
+
+    /// Fills every output with all-ones bytes, NaN in half precision, so an element no kernel
+    /// wrote is never mistaken for a result.
+    void poisonOutputs()
+    {
+        for(const auto* group : {&_dq, &_dk, &_dv, &_dbias})
+        {
+            if(*group != nullptr)
+            {
+                (*group)->poison();
+            }
+        }
+    }
+
+private:
+    /// Stages the case with a bias of type @p B: the bias and the dBias buffers hold one B per
+    /// element of the bias view.
+    template <typename B>
+    void stageWithBias(const BwdCase& c)
+    {
+        using T = hipdnn_data_sdk::types::half;
+        const auto host = hostStagingOf<T, B>(c);
+        const auto& views = host.views;
+        _device = uploadStaging(host);
+        _buffers = tensorBuffers<T>(views, _device);
+        _dq = _device[views.dq.group].get();
+        _dk = _device[views.dk.group].get();
+        _dv = _device[views.dv.group].get();
+
+        if(c.padded())
+        {
+            _buffers.push_back({uid::SEQ_LEN_Q, stageInt32(c.lengthsQ)});
+            _buffers.push_back({uid::SEQ_LEN_KV, stageInt32(c.lengthsKv)});
+        }
+        for(const auto& tensor : raggedTensorsOf(c))
+        {
+            const auto rows = tensor.queryAxis ? c.seqQ : c.seqKv;
+            std::vector<int32_t> offsets;
+            offsets.reserve(static_cast<size_t>(c.batch) + 1);
+            for(int64_t b = 0; b <= c.batch; ++b)
+            {
+                offsets.push_back(static_cast<int32_t>(b * rows));
+            }
+            _buffers.push_back({tensor.offsetUid, stageInt32(offsets)});
+        }
+
+        if(c.bias)
+        {
+            const auto biasBytes
+                = biasViewOf(c).extent() * (c.biasDtype() == DataType::FLOAT ? 4U : 2U);
+            _bias = std::make_unique<DeviceBuffer>(host.bias.size() * sizeof(B));
+            EXPECT_EQ(_bias->bytes(), biasBytes);
+            _bias->upload(host.bias);
+            _buffers.push_back({uid::BIAS, _bias->get()});
+            if(c.dbias)
+            {
+                _dbiasOwner = std::make_unique<DeviceBuffer>(host.bias.size() * sizeof(B));
+                EXPECT_EQ(_dbiasOwner->bytes(), biasBytes);
+                _dbiasOwner->poison();
+                _buffers.push_back({uid::DBIAS, _dbiasOwner->get()});
+                _dbias = _dbiasOwner.get();
+            }
+        }
+    }
+
+    /// A device copy of @p values, which this object owns.
+    void* stageInt32(const std::vector<int32_t>& values)
+    {
+        auto& buffer = _int32Buffers.emplace_back(
+            std::make_unique<DeviceBuffer>(values.size() * sizeof(int32_t)));
+        buffer->upload(values);
+        return buffer->get();
+    }
+
+    std::array<std::unique_ptr<DeviceBuffer>, GROUP_COUNT> _device;
+    std::vector<std::unique_ptr<DeviceBuffer>> _int32Buffers;
+    std::unique_ptr<DeviceBuffer> _bias;
+    std::unique_ptr<DeviceBuffer> _dbiasOwner;
+    DeviceBuffer* _dq = nullptr;
+    DeviceBuffer* _dk = nullptr;
+    DeviceBuffer* _dv = nullptr;
+    DeviceBuffer* _dbias = nullptr;
+    std::vector<hipdnnPluginDeviceBuffer_t> _buffers;
+};
+
+/// An engine's plan for one half-precision case (dense, no dropout, scale as a value), with
+/// deterministic device inputs and poisoned outputs. A handler-level test takes the plan's
+/// prepared dispatches out of it and launches them over these buffers: the stages of a split
+/// plan one by one, the one kernel of a merged plan.
+class BwdPlanRig
+{
+public:
+    /// Records a fatal failure when the engine does not claim the case.
+    void build(std::string_view engine, const BwdCase& c)
+    {
+        ASSERT_EQ(c.dtype, DataType::HALF) << "the rig builds half-precision cases";
+        ASSERT_FALSE(c.padded());
+        ASSERT_EQ(c.dropout, 0.0F);
+        ASSERT_TRUE(c.scaleForm == BwdScale::VALUE);
+
+        ASSERT_NO_FATAL_FAILURE(_enginePlan.build(engine, specOf(c)));
+        ASSERT_NO_FATAL_FAILURE(_inputs.stage(c));
+    }
+
+    Handle& handle()
+    {
+        return _enginePlan.handle();
+    }
+
+    const hipdnn_plugin_sdk::IPlan<Handle>& plan() const
+    {
+        return _enginePlan.plan();
+    }
+
+    /// The built kernel of @p slot of a slotted plan, or of the plan itself for an empty
+    /// @p slot; null when there is none.
+    const hipdnn_plugin_sdk::ingestor::GenericPlan<Handle>*
+        kernelPlan(const std::string& slot) const
+    {
+        if(slot.empty())
+        {
+            return _enginePlan.plan().saveablePlan();
+        }
+        const auto* program
+            = dynamic_cast<const hipdnn_plugin_sdk::ingestor::SlotProgramPlan<Handle>*>(
+                &_enginePlan.plan());
+        if(program == nullptr)
+        {
+            return nullptr;
+        }
+        for(const auto& stage : program->stages())
+        {
+            if(stage.slot == slot)
+            {
+                return stage.plan.get();
+            }
+        }
+        return nullptr;
+    }
+
+    /// The device buffers of every tensor the case binds, by tensor uid.
+    const std::vector<hipdnnPluginDeviceBuffer_t>& buffers() const
+    {
+        return _inputs.buffers();
+    }
+
+    /// Launches one prepared dispatch over the rig's buffers and waits for it.
+    void launch(const hipdnn_plugin_sdk::ingestor::IKernelDispatchHandler<Handle>& handler,
+                const hipdnn_plugin_sdk::ingestor::PreparedDispatch& prepared,
+                void* workspace)
+    {
+        const auto& buffers = _inputs.buffers();
+        ASSERT_NO_THROW(handler.launch(_enginePlan.handle(),
+                                       prepared,
+                                       buffers.data(),
+                                       static_cast<uint32_t>(buffers.size()),
+                                       workspace));
+        ASSERT_EQ(hipSuccess, hipDeviceSynchronize());
+    }
+
+    /// The bytes of dQ, dK, dV and, when the case asks for it, dBias, as they are now.
+    std::vector<std::vector<uint8_t>> outputs() const
+    {
+        return _inputs.outputs();
+    }
+
+    /// Fills every output with all-ones bytes, NaN in half precision, so an element no kernel
+    /// wrote is never mistaken for a result.
+    void poisonOutputs()
+    {
+        _inputs.poisonOutputs();
+    }
+
+private:
+    BwdEnginePlan _enginePlan;
+    BwdStagedInputs _inputs;
+};
+
+/// The bytes at @p device, @p bytes of them.
+inline std::vector<uint8_t> downloadBytes(const void* device, size_t bytes)
+{
+    std::vector<uint8_t> host(bytes);
+    EXPECT_EQ(hipSuccess, hipMemcpy(host.data(), device, bytes, hipMemcpyDeviceToHost));
+    return host;
+}
+
+// ---------------------------------------------------------------------------
+// A plan run twice over identical inputs: fresh, and again after a save and a load
+// ---------------------------------------------------------------------------
+
+/// How a round trip case passes its scale, seed and offset.
+enum class BwdScalarMode
+{
+    /// The scale is a value of the graph and there is no dropout: nothing is passed by value.
+    NONE,
+    /// Scale, seed and offset are pass-by-value tensors without a value: the caller supplies
+    /// each one at every execute, as a host pointer.
+    RUNTIME,
+    /// Scale, seed and offset are pass-by-value tensors that carry their values in the graph.
+    BAKED
+};
+
+/// The user-supplied values of one execute of a RUNTIME plan, or the baked values of a BAKED
+/// graph.
+struct BwdScalarValues
+{
+    float scale = 0.07F;
+    int64_t seed = 0x1234567;
+    int64_t offset = 77;
+};
+
+/// The graph of @p c with its scalars in the form @p mode names. A mode other than NONE turns
+/// the scale into a tensor and gives the case dropout, so the graph has all three scalars.
+inline SdpaBwdSpec roundTripSpecOf(BwdCase c, BwdScalarMode mode, const BwdScalarValues& baked)
+{
+    if(mode != BwdScalarMode::NONE)
+    {
+        c.scaleForm = BwdScale::RUNTIME_TENSOR;
+        c.dropout = 0.2F;
+    }
+    auto spec = specOf(c);
+    if(mode == BwdScalarMode::RUNTIME)
+    {
+        spec = spec.withEdit([](SdpaBwdGraph& g) {
+            g.tensor("seed").runtimePassByValue = true;
+            g.tensor("offset").runtimePassByValue = true;
+        });
+    }
+    else if(mode == BwdScalarMode::BAKED)
+    {
+        spec = spec.withEdit([=](SdpaBwdGraph& g) {
+            auto& scale = g.tensor("scale");
+            scale.runtimePassByValue = false;
+            scale.value = baked.scale;
+            g.tensor("seed").value = baked.seed;
+            g.tensor("offset").value = baked.offset;
+        });
+    }
+    return spec;
+}
+
+/// An engine's plan for one half-precision dense case, with deterministic device inputs.
+/// run() executes any plan over them, the fresh one or one a load created, and returns the
+/// raw bytes of dQ, dK, dV and, when the case asks for it, dBias. Every run starts from the
+/// same poisoned outputs and the same poisoned workspace.
+class BwdRoundTripRig
+{
+public:
+    /// Records a fatal failure when the engine does not claim the case.
+    void build(std::string_view engine,
+               const BwdCase& c,
+               BwdScalarMode mode = BwdScalarMode::NONE,
+               const BwdScalarValues& baked = {})
+    {
+        ASSERT_EQ(c.dtype, DataType::HALF) << "the rig builds half-precision cases";
+        _mode = mode;
+        ASSERT_NO_FATAL_FAILURE(_enginePlan.build(engine, roundTripSpecOf(c, mode, baked)));
+        ASSERT_NO_FATAL_FAILURE(_inputs.stage(c));
+    }
+
+    Handle& handle()
+    {
+        return _enginePlan.handle();
+    }
+
+    /// The context the engine built: the plan the save hook is given.
+    Context& context()
+    {
+        return _enginePlan.context();
+    }
+
+    const hipdnn_plugin_sdk::IPlan<Handle>& plan() const
+    {
+        return _enginePlan.plan();
+    }
+
+    /// Executes @p plan on @p handle and gives the output bytes, in the order dQ, dK, dV, dBias
+    /// (empty when there is no dBias). @p values is read when the case's scalars are RUNTIME:
+    /// it is what the caller supplies at this execute.
+    void run(const hipdnn_plugin_sdk::IPlan<Handle>& plan,
+             const Handle& handle,
+             const BwdScalarValues* values,
+             std::vector<std::vector<uint8_t>>& outputs)
+    {
+        _inputs.poisonOutputs();
+
+        // The scalars are host values that stay alive until the execute returns.
+        auto buffers = _inputs.buffers();
+        float scale = 0.0F;
+        int64_t seed = 0;
+        int64_t offset = 0;
+        if(_mode == BwdScalarMode::RUNTIME)
+        {
+            ASSERT_NE(values, nullptr) << "a RUNTIME plan needs the values of this execute";
+            scale = values->scale;
+            seed = values->seed;
+            offset = values->offset;
+            buffers.push_back({uid::SCALE, &scale});
+            buffers.push_back({uid::SEED, &seed});
+            buffers.push_back({uid::OFFSET, &offset});
+        }
+
+        const size_t bytes = plan.getWorkspaceSize(handle);
+        const GuardedWorkspace workspace(bytes);
+        if(bytes > 0)
+        {
+            ASSERT_EQ(hipSuccess, hipMemset(workspace.get(), 0xFF, bytes));
+        }
+        ASSERT_NO_THROW(plan.execute(
+            handle, buffers.data(), static_cast<uint32_t>(buffers.size()), workspace.get()));
+        ASSERT_EQ(hipSuccess, hipDeviceSynchronize());
+        EXPECT_EQ(workspace.overwrittenGuardBytes(), 0U)
+            << "the launch wrote past the " << bytes << "-byte workspace it reported";
+
+        outputs = _inputs.outputs();
+    }
+
+private:
+    BwdScalarMode _mode = BwdScalarMode::NONE;
+    BwdEnginePlan _enginePlan;
+    BwdStagedInputs _inputs;
 };
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing::bwd_device

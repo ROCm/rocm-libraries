@@ -24,6 +24,7 @@
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <hipdnn_plugin_sdk/ingestor/SavedDispatch.hpp>
 #include <hipdnn_plugin_sdk/ingestor/SymbolScope.hpp>
 #include <limits>
 #include <memory>
@@ -45,9 +46,13 @@
 #include "core/Handle.hpp"
 #include "engines/hip_mlops_engine/HipMlopsKernelCompiler.hpp"
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
+#include "engines/kernel_ingestor_engine/IngestorLaunchRestore.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
+#include "engines/kernel_ingestor_engine/IngestorPreparedDispatch.hpp"
+#include "engines/kernel_ingestor_engine/IngestorScalarBindings.hpp"
 #include "engines/kernel_ingestor_engine/LaunchKernelDefinition.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdCommon.hpp"
+#include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdLaunchValues.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdNativeShared.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaDropout.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaShared.hpp"
@@ -160,7 +165,7 @@ constexpr std::string_view DQ_U2_DISPATCH_SYMBOL = "hipkernel.flydsl_sdpa_bwd_sp
 constexpr std::string_view DKDV_LAUNCH = "dkdv";
 constexpr std::string_view DVONLY_LAUNCH = "dvonly";
 /// The launch names of a dq row's `sources`.
-constexpr std::string_view DQ_LAUNCH = "dq";
+constexpr std::string_view DQ_LAUNCH = FLYDSL_SDPA_BWD_DQ_LAUNCH;
 
 // Kernel metadata fields beyond the shared ones, declared by each slot's KMD: they belong to the
 // slot that names them.
@@ -190,10 +195,10 @@ constexpr std::string_view U2_DK = "dk";
 constexpr std::string_view U2_DQ = "dq";
 
 /// The `grid` values, one launch order per spelling: x, y, z, with the batch always on z.
-constexpr std::string_view GRID_PREP = "qblocks_by_heads_by_seqs";
-constexpr std::string_view GRID_DKDV_HEADS_FIRST = "kheads_by_kvblocks_by_seqs";
-constexpr std::string_view GRID_DKDV_BLOCKS_FIRST = "kvblocks_by_kheads_by_seqs";
-constexpr std::string_view GRID_DQ = "qheads_by_qblocks_by_seqs";
+constexpr std::string_view GRID_PREP = FLYDSL_SDPA_BWD_GRID_PREP;
+constexpr std::string_view GRID_DKDV_HEADS_FIRST = FLYDSL_SDPA_BWD_GRID_DKDV_HEADS_FIRST;
+constexpr std::string_view GRID_DKDV_BLOCKS_FIRST = FLYDSL_SDPA_BWD_GRID_DKDV_BLOCKS_FIRST;
+constexpr std::string_view GRID_DQ = FLYDSL_SDPA_BWD_GRID_DQ;
 // A `dkdv_u2` row's `grid` is its dK-only object's; the dV-only object's grid is the same
 // spelling over the V heads (`vheads_by_kvblocks_by_seqs`, `kvblocks_by_vheads_by_seqs`).
 
@@ -767,6 +772,7 @@ struct GraphFacts
     int64_t seqLenQ = 0;
     int64_t seqLenKv = 0;
     int64_t reducePlanes = 0;
+    int64_t elementBytes = 0;
 };
 
 std::optional<GraphFacts> readFacts(const BoundTokens& bound)
@@ -814,7 +820,8 @@ std::optional<GraphFacts> readFacts(const BoundTokens& bound)
                       *numVHeads,
                       *seqLenQ,
                       *seqLenKv,
-                      *planes};
+                      *planes,
+                      elementBytesOf(std::get<std::string>(dtype->second))};
 }
 
 /// A launch grid.
@@ -827,9 +834,9 @@ struct Grid
 
 /// The prep launch's rows per block: its 256 threads put `gcd(tile / VEC, 16)` lanes on a row,
 /// VEC being the elements of a 16-byte access (`prep_threads_per_row`).
-int64_t prepRowsPerBlock(int64_t tile, std::string_view dtype)
+int64_t prepRowsPerBlock(int64_t tile, int64_t elementBytes)
 {
-    const int64_t vector = VECTOR_BYTES / elementBytesOf(dtype);
+    const int64_t vector = VECTOR_BYTES / elementBytes;
     const int64_t lanes = std::gcd(tile / vector, PREP_MAX_LANES_PER_ROW);
     return lanes > 0 ? PREP_BLOCK_THREADS / lanes : 0;
 }
@@ -869,7 +876,7 @@ std::optional<Grid>
         {
             return std::nullopt;
         }
-        x = blocks(facts.seqLenQ, prepRowsPerBlock(row.tile, row.dtype));
+        x = blocks(facts.seqLenQ, prepRowsPerBlock(row.tile, facts.elementBytes));
         y = facts.numHeads;
     }
     else if(slot == Slot::DKDV)
@@ -1042,6 +1049,11 @@ struct SplitPlan : native::BwdPlanCommon
     /// A `dkdv` row with `u2`: the dV-only launch's grid, over the V heads. The launch has the
     /// dK-only launch's block and arguments.
     Grid dvonlyGrid;
+    /// The row fields a saved launch carries beside the problem.
+    int64_t tile = 0;
+    int64_t blockKv = 0;
+    int64_t blockM = 0;
+    std::string gridName;
 };
 
 bwd::SdpaBwdProblem problemOf(const MatchContext& context)
@@ -1074,62 +1086,54 @@ void requireTokens(const BoundTokens& bound, const native::WorkspaceLayout& layo
     }
 }
 
-SplitPlan planFor(Slot slot,
-                  const MatchContext& context,
-                  const BoundTokens& bound,
-                  const KernelDefinition& kernel)
+/// The plan of @p slot over a problem and the record of its kernel. The one place a plan is
+/// derived, so a plan built at prepare() and one restored from saved values are the same
+/// function of their inputs. @p reduceSymbol is the dq slot's reduce symbol, kept when the
+/// problem's dBias is broadcast.
+SplitPlan makePlan(Slot slot,
+                   const bwd::SdpaBwdProblem& problem,
+                   const native::Uids& uids,
+                   native::ScalarOperands scalars,
+                   const Row& row,
+                   const GraphFacts& facts,
+                   std::string_view reduceSymbol,
+                   const std::string& kernelName)
 {
-    SplitPlan plan;
-    plan.slot = slot;
-    plan.problem = problemOf(context);
-    const auto& problem = plan.problem;
-
-    const auto row = readRow(kernel, slot);
-    if(!row)
-    {
-        native::failBadParam(ERROR_SCOPE,
-                             "kernel '" + kernel.name + "' lacks a field of the "
-                                 + std::string(slotName(slot)) + " record");
-    }
-    const auto facts = readFacts(bound);
-    if(!facts)
-    {
-        native::failBadParam(ERROR_SCOPE, "the bound tokens of the graph are incomplete");
-    }
-    const auto grid = gridOf(slot, *facts, *row);
+    const auto grid = gridOf(slot, facts, row);
     if(!grid)
     {
         native::failBadParam(ERROR_SCOPE,
-                             "launch grid exceeds its limits for kernel '" + kernel.name + "'");
+                             "launch grid exceeds its limits for kernel '" + kernelName + "'");
     }
-    plan.blockThreads = static_cast<unsigned int>(blockThreadsOf(slot, *row));
+    SplitPlan plan;
+    plan.slot = slot;
+    plan.problem = problem;
+    plan.uids = uids;
+    plan.blockThreads = static_cast<unsigned int>(blockThreadsOf(slot, row));
     plan.grid = *grid;
-    plan.u2 = row->u2Role != U2_NONE;
+    plan.u2 = row.u2Role != U2_NONE;
     if(slot == Slot::DKDV && plan.u2)
     {
-        const auto dvonlyGrid = gridOf(slot, *facts, *row, true);
+        const auto dvonlyGrid = gridOf(slot, facts, row, true);
         if(!dvonlyGrid)
         {
             native::failBadParam(ERROR_SCOPE,
-                                 "dV-only launch grid exceeds its limits for kernel '" + kernel.name
+                                 "dV-only launch grid exceeds its limits for kernel '" + kernelName
                                      + "'");
         }
         plan.dvonlyGrid = *dvonlyGrid;
     }
+    plan.tile = row.tile;
+    plan.blockKv = row.blockKv;
+    plan.blockM = row.blockM;
+    plan.gridName = row.grid;
 
-    native::bindGraphOperands(plan, context, row->tile);
+    native::bindProblemOperands(plan, uids, scalars, row.tile);
 
     plan.workspace = native::workspaceLayout(problem, requestFor(problem));
-    requireTokens(bound, plan.workspace);
     if(slot == Slot::DQ && plan.workspace.reduces)
     {
-        if(row->reduceSymbol.empty())
-        {
-            native::failBadParam(ERROR_SCOPE,
-                                 "kernel '" + kernel.name
-                                     + "' serves a broadcast dBias but names no reduce kernel");
-        }
-        plan.reduceSymbol = row->reduceSymbol;
+        plan.reduceSymbol = std::string(reduceSymbol);
         plan.reduceGrid = native::reduceGridOf(problem, reduceVectorOf(problem));
     }
     if(slot == Slot::DQ)
@@ -1143,6 +1147,168 @@ SplitPlan planFor(Slot slot,
                 native::failBadParam(ERROR_SCOPE, "the tail-zero launch grid exceeds its limits");
             }
             plan.tailzeroGrid = *tailzeroGrid;
+        }
+    }
+    return plan;
+}
+
+SplitPlan planFor(Slot slot,
+                  const MatchContext& context,
+                  const BoundTokens& bound,
+                  const KernelDefinition& kernel)
+{
+    const auto problem = problemOf(context);
+
+    const auto row = readRow(kernel, slot);
+    if(!row)
+    {
+        native::failBadParam(ERROR_SCOPE,
+                             "kernel '" + kernel.name + "' lacks a field of the "
+                                 + std::string(slotName(slot)) + " record");
+    }
+    const auto facts = readFacts(bound);
+    if(!facts)
+    {
+        native::failBadParam(ERROR_SCOPE, "the bound tokens of the graph are incomplete");
+    }
+
+    auto plan = makePlan(slot,
+                         problem,
+                         native::uidsOf(context),
+                         native::scalarOperandsOf(context.graph.getTensorMap(), problem),
+                         *row,
+                         *facts,
+                         row->reduceSymbol,
+                         kernel.name);
+    requireTokens(bound, plan.workspace);
+    if(slot == Slot::DQ && plan.workspace.reduces && row->reduceSymbol.empty())
+    {
+        native::failBadParam(ERROR_SCOPE,
+                             "kernel '" + kernel.name
+                                 + "' serves a broadcast dBias but names no reduce kernel");
+    }
+    return plan;
+}
+
+/// The graph facts the launch grid reads, from a restored problem.
+GraphFacts factsOf(const bwd::SdpaBwdProblem& problem)
+{
+    GraphFacts facts;
+    facts.batch = problem.batch;
+    facts.numHeads = problem.numHeads;
+    facts.numKvHeads = problem.numKvHeads;
+    facts.numVHeads = problem.numVHeads;
+    facts.seqLenQ = problem.seqLenQ;
+    facts.seqLenKv = problem.seqLenKv;
+    facts.elementBytes = static_cast<int64_t>(problem.elementBytes);
+    return facts;
+}
+
+/// The plan of a slot from its saved values, with no graph, bound tokens or kernel record.
+/// The workspace layout, grids, window, thresholds and flags are recomputed from the restored
+/// problem, and a problem that cannot be launched is refused.
+template <Slot SLOT, bool SOURCES, bool DQ_U2>
+SplitPlan restoredPlan(const SavedLaunchInputs& inputs)
+{
+    bwd::SdpaBwdProblem problem;
+    native::Uids uids;
+    native::ScalarOperands scalars;
+    Row row;
+    row.u2Role = std::string(U2_NONE);
+    if constexpr(SLOT == Slot::PREP)
+    {
+        auto launch = readFlydslSdpaBwdPrepLaunchInputs(inputs);
+        problem = launch.problem;
+        uids = launch.uids;
+        scalars = launch.scalars;
+        row.tile = launch.headDim;
+        row.grid = launch.grid;
+    }
+    else if constexpr(SLOT == Slot::DKDV)
+    {
+        auto launch = SOURCES ? readFlydslSdpaBwdDkdvU2LaunchInputs(inputs)
+                              : readFlydslSdpaBwdDkdvLaunchInputs(inputs);
+        problem = launch.problem;
+        uids = launch.uids;
+        scalars = launch.scalars;
+        row.tile = launch.headDim;
+        row.blockThreads = launch.blockThreads;
+        row.blockKv = launch.blockKv;
+        row.grid = launch.grid;
+        row.u2Role = std::string(SOURCES ? U2_DK : U2_NONE);
+    }
+    else
+    {
+        auto launch = [&] {
+            if constexpr(DQ_U2)
+            {
+                return readFlydslSdpaBwdDqU2LaunchInputs(inputs);
+            }
+            else if constexpr(SOURCES)
+            {
+                return readFlydslSdpaBwdDqReduceLaunchInputs(inputs);
+            }
+            else
+            {
+                return readFlydslSdpaBwdDqLaunchInputs(inputs);
+            }
+        }();
+        problem = launch.problem;
+        uids = launch.uids;
+        scalars = launch.scalars;
+        row.tile = launch.headDim;
+        row.blockThreads = launch.blockThreads;
+        row.blockM = launch.blockM;
+        row.grid = launch.grid;
+        row.u2Role = std::string(DQ_U2 ? U2_DQ : U2_NONE);
+    }
+
+    // The prep launch reads the value width only; the others read both.
+    const int64_t widest
+        = SLOT == Slot::PREP ? problem.headDimV : std::max(problem.headDimQk, problem.headDimV);
+    if(widest > row.tile)
+    {
+        detail::refuseBwdRestore(inputs,
+                                 "the head dim " + std::to_string(widest)
+                                     + " exceeds the tile head_dim " + std::to_string(row.tile)
+                                     + " of the kernel");
+    }
+
+    SplitPlan plan;
+    try
+    {
+        plan = makePlan(SLOT,
+                        problem,
+                        uids,
+                        scalars,
+                        row,
+                        factsOf(problem),
+                        std::string_view{},
+                        "of the saved plan");
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+    {
+        if(error.getStatus() != HIPDNN_PLUGIN_STATUS_BAD_PARAM)
+        {
+            throw;
+        }
+        detail::refuseBwdRestore(inputs,
+                                 "the saved problem cannot be launched: " + error.getMessage());
+    }
+    const auto why = proveWorkspace(plan.workspace);
+    if(!why.empty())
+    {
+        detail::refuseBwdRestore(inputs, "the saved problem has no provable workspace: " + why);
+    }
+    // The plain dq handler launches no reduce kernel: a problem that needs one is a plan of the
+    // `dq_reduce` dispatch.
+    if constexpr(SLOT == Slot::DQ && !SOURCES && !DQ_U2)
+    {
+        if(plan.workspace.reduces)
+        {
+            detail::refuseBwdRestore(inputs,
+                                     "the saved problem has a broadcast dBias, which needs the "
+                                     "reduce kernel this dispatch does not launch");
         }
     }
     return plan;
@@ -1740,21 +1906,36 @@ LaunchArguments launchArguments(const SplitPlan& plan,
 // Dispatch
 // ---------------------------------------------------------------------------
 
-/// The slot's kernel, the dV-only kernel of a `dkdv_u2` row, the reduce kernel when the graph
-/// needs one, and the plan.
-class PreparedFlydslSdpaBwdSplit : public PreparedDispatch
+using LaunchRecord = native::LaunchRecord;
+
+/// The slot's kernel, the dV-only kernel of a `dkdv_u2` row, the reduce and tail-zero kernels
+/// when the graph needs them, and the plan.
+class PreparedFlydslSdpaBwdSplit : public IngestorPreparedDispatch
 {
 public:
+    /// @param primaryLaunch The launch name of the slot's kernel when the dispatch also launches
+    ///        the reduce or tail-zero kernel. Without them the slot's kernel is the only launch,
+    ///        and unnamed.
     PreparedFlydslSdpaBwdSplit(SplitPlan plan,
                                IngestorKernelCode code,
+                               LaunchRecord record,
                                std::optional<IngestorKernelCode> dvonlyCode,
+                               std::optional<LaunchRecord> dvonlyRecord,
                                std::optional<IngestorKernelCode> reduceCode,
-                               std::optional<IngestorKernelCode> tailzeroCode)
+                               std::optional<LaunchRecord> reduceRecord,
+                               std::optional<IngestorKernelCode> tailzeroCode,
+                               std::optional<LaunchRecord> tailzeroRecord,
+                               std::string primaryLaunch)
         : _plan(std::move(plan))
         , _code(std::move(code))
+        , _record(std::move(record))
         , _dvonly(std::move(dvonlyCode))
+        , _dvonlyRecord(std::move(dvonlyRecord))
         , _reduce(std::move(reduceCode))
+        , _reduceRecord(std::move(reduceRecord))
         , _tailzero(std::move(tailzeroCode))
+        , _tailzeroRecord(std::move(tailzeroRecord))
+        , _primaryLaunch(std::move(primaryLaunch))
     {
     }
 
@@ -1788,30 +1969,64 @@ public:
         return _tailzero->kernelForStream(stream);
     }
 
+    const IngestorKernelCode& kernelCode() const override
+    {
+        return _code;
+    }
+
+    std::vector<IngestorLaunchedKernel> launchedKernels() const override
+    {
+        return native::launchedKernelsOf(_primaryLaunch,
+                                         _code,
+                                         _record,
+                                         {{DVONLY_LAUNCH, &_dvonly, &_dvonlyRecord},
+                                          {REDUCE_LAUNCH, &_reduce, &_reduceRecord},
+                                          {TAILZERO_LAUNCH, &_tailzero, &_tailzeroRecord}});
+    }
+
+    /// The scalars the slot's launch resolves at execute: the seed and offset, and for every
+    /// slot but prep the scale.
+    std::vector<int64_t> userSuppliedPassByValueUids() const override
+    {
+        return native::userSuppliedUidsOf(_plan.scalars, _plan.slot != Slot::PREP);
+    }
+
 private:
     SplitPlan _plan;
     IngestorKernelCode _code;
+    LaunchRecord _record;
     std::optional<IngestorKernelCode> _dvonly;
+    std::optional<LaunchRecord> _dvonlyRecord;
     std::optional<IngestorKernelCode> _reduce;
+    std::optional<LaunchRecord> _reduceRecord;
     std::optional<IngestorKernelCode> _tailzero;
+    std::optional<LaunchRecord> _tailzeroRecord;
+    std::string _primaryLaunch;
 };
 
 /**
  * @brief The native dispatch behind one slot's UDD: reports the slot's scratch, and launches
- *        the slot's kernel; prep first uploads the seed, dq follows its kernel with the reduce
- *        kernel when the graph's dBias is broadcast.
+ *        the slot's kernel; prep first uploads the seed, dkdv of a `dkdv_u2` row follows its
+ *        dK-only kernel with the dV-only one, dq follows its kernel with the reduce kernel
+ *        when the graph's dBias is broadcast and the tail-zero kernel when the graph pads and
+ *        some gradient output is dense (native::tailzeroMaskOf).
  *
- * With @p SOURCES the dispatch is multi-launch. On dq it is the `dq_reduce` dispatch: every row
- * carries the dQ kernel and the dBias reduce kernel as the launches `dq` and `dbias_reduce` of
- * its `sources`, and each is built from its own entry; the plain `dq` dispatch serves the rows
- * that name no reduce kernel and refuses one that does. On dkdv @p SOURCES is the `dkdv_u2`
- * dispatch (dK-only and dV-only launches).
+ * Launches per dispatch, each in the `sources` of its rows: `dq` carries `dq` and `tailzero`;
+ * `dq_reduce` carries `dq`, `dbias_reduce` and `tailzero`, each built from its own entry;
+ * `dkdv_u2` carries `dkdv` and `dvonly`; `dq_u2` carries `dq` and `tailzero`; `prep` and `dkdv`
+ * carry one kernel. The plain `dq` dispatch serves the rows that name no reduce kernel and
+ * refuses one that does.
  *
- * With @p DQ_U2 (dq only) the dispatch serves the rows of `u2_role` `dq`, whose launches are
- * the V-head dQ kernel and the V-head tail-zero kernel; the standard dq dispatches refuse
- * such a row and `dq_u2` refuses any other.
+ * With @p SOURCES the dispatch is multi-launch: on dq the `dq_reduce` dispatch, on dkdv the
+ * `dkdv_u2` dispatch (dK-only and dV-only launches). With @p DQ_U2 (dq only) the dispatch
+ * serves the rows of `u2_role` `dq`, whose launches are the V-head dQ kernel and the V-head
+ * tail-zero kernel; the standard dq dispatches refuse such a row and `dq_u2` refuses any other.
  *
- * Split handlers do not save plans: supportsSaving() is the SDK default, false.
+ * Every handler, `dkdv_u2` and `dq_u2` included, saves and restores all its launches
+ * (supportsSavingAllLaunches()), under the `.v1` contract of its dispatch
+ * (FlydslSdpaBwdLaunchValues.hpp). A stage that makes more than one launch saves each under its
+ * name (`dkdv` and `dvonly`; `dq` with `dbias_reduce` and `tailzero` as the problem needs
+ * them); every other stage saves its one kernel under the empty launch name.
  */
 template <Slot SLOT, bool SOURCES = false, bool DQ_U2 = false>
 class FlydslSdpaBwdSplitDispatchHandler : public IKernelDispatchHandler<Handle>
@@ -1957,47 +2172,50 @@ public:
             _kernelCompiler, _kpackLoader, context, slotKernel, options, slotSignature);
         code.setBlockSize(plan.blockThreads, 1, 1);
         code.setGridSize(plan.grid.x, plan.grid.y, plan.grid.z);
+        LaunchRecord record{slotKernel.source.kind, slotKernel.source.signature};
 
         // The dV-only object runs at the dK-only object's block over the V heads.
-        std::optional<IngestorKernelCode> dvonlyCode;
-        if(dvonlyKernel.has_value())
-        {
-            dvonlyCode.emplace(buildIngestorKernelCode(
-                _kernelCompiler, _kpackLoader, context, *dvonlyKernel, options, slotSignature));
-            dvonlyCode->setBlockSize(plan.blockThreads, 1, 1);
-            dvonlyCode->setGridSize(plan.dvonlyGrid.x, plan.dvonlyGrid.y, plan.dvonlyGrid.z);
-        }
-
-        std::optional<IngestorKernelCode> reduceCode;
-        if(reduceKernel.has_value())
-        {
-            reduceCode.emplace(buildIngestorKernelCode(_kernelCompiler,
-                                                       _kpackLoader,
-                                                       context,
-                                                       *reduceKernel,
-                                                       options,
-                                                       native::reduceSignature()));
-            reduceCode->setBlockSize(native::REDUCE_THREADS, 1, 1);
-            reduceCode->setGridSize(plan.reduceGrid.x, plan.reduceGrid.y, 1);
-        }
-        std::optional<IngestorKernelCode> tailzeroCode;
-        if(tailzeroKernel.has_value())
-        {
-            tailzeroCode.emplace(buildIngestorKernelCode(_kernelCompiler,
-                                                         _kpackLoader,
-                                                         context,
-                                                         *tailzeroKernel,
-                                                         options,
-                                                         plan.u2 ? native::tailzeroHvSignature()
-                                                                 : native::tailzeroSignature()));
-            tailzeroCode->setBlockSize(native::TAILZERO_THREADS, 1, 1);
-            tailzeroCode->setGridSize(plan.tailzeroGrid.x, plan.tailzeroGrid.y, 1);
-        }
+        auto dvonly
+            = native::buildOptionalLaunch(_kernelCompiler,
+                                          _kpackLoader,
+                                          context,
+                                          dvonlyKernel.has_value() ? &*dvonlyKernel : nullptr,
+                                          options,
+                                          slotSignature,
+                                          plan.blockThreads,
+                                          plan.dvonlyGrid.x,
+                                          plan.dvonlyGrid.y,
+                                          plan.dvonlyGrid.z);
+        auto reduce
+            = native::buildOptionalLaunch(_kernelCompiler,
+                                          _kpackLoader,
+                                          context,
+                                          reduceKernel.has_value() ? &*reduceKernel : nullptr,
+                                          options,
+                                          native::reduceSignature(),
+                                          native::REDUCE_THREADS,
+                                          plan.reduceGrid.x,
+                                          plan.reduceGrid.y);
+        auto tailzero = native::buildOptionalLaunch(
+            _kernelCompiler,
+            _kpackLoader,
+            context,
+            tailzeroKernel.has_value() ? &*tailzeroKernel : nullptr,
+            options,
+            plan.u2 ? native::tailzeroHvSignature() : native::tailzeroSignature(),
+            native::TAILZERO_THREADS,
+            plan.tailzeroGrid.x,
+            plan.tailzeroGrid.y);
         return std::make_unique<PreparedFlydslSdpaBwdSplit>(std::move(plan),
                                                             std::move(code),
-                                                            std::move(dvonlyCode),
-                                                            std::move(reduceCode),
-                                                            std::move(tailzeroCode));
+                                                            std::move(record),
+                                                            std::move(dvonly.code),
+                                                            std::move(dvonly.record),
+                                                            std::move(reduce.code),
+                                                            std::move(reduce.record),
+                                                            std::move(tailzero.code),
+                                                            std::move(tailzero.record),
+                                                            primaryLaunchName());
     }
 
     void launch(const Handle& handle,
@@ -2057,7 +2275,169 @@ public:
         }
     }
 
+    std::optional<SavedLaunchInputs>
+        saveLaunchInputs(const PreparedDispatch& prepared) const override
+    {
+        const auto& plan = dynamic_cast<const PreparedFlydslSdpaBwdSplit&>(prepared).plan();
+        if constexpr(SLOT == Slot::PREP)
+        {
+            return SavedLaunchInputs{
+                std::string(FLYDSL_SDPA_BWD_SPLIT_PREP_DISPATCH_SYMBOL_V1),
+                flydslSdpaBwdPrepLaunchValues(FlydslSdpaBwdPrepLaunchInputs{
+                    plan.problem, plan.uids, plan.scalars, plan.tile, plan.gridName})};
+        }
+        else if constexpr(SLOT == Slot::DKDV)
+        {
+            return SavedLaunchInputs{
+                std::string(SOURCES ? FLYDSL_SDPA_BWD_SPLIT_DKDV_U2_DISPATCH_SYMBOL_V1
+                                    : FLYDSL_SDPA_BWD_SPLIT_DKDV_DISPATCH_SYMBOL_V1),
+                flydslSdpaBwdDkdvLaunchValues(FlydslSdpaBwdDkdvLaunchInputs{plan.problem,
+                                                                            plan.uids,
+                                                                            plan.scalars,
+                                                                            plan.tile,
+                                                                            plan.blockThreads,
+                                                                            plan.blockKv,
+                                                                            plan.gridName})};
+        }
+        else
+        {
+            const std::string_view contract = [] {
+                if constexpr(DQ_U2)
+                {
+                    return FLYDSL_SDPA_BWD_SPLIT_DQ_U2_DISPATCH_SYMBOL_V1;
+                }
+                else if constexpr(SOURCES)
+                {
+                    return FLYDSL_SDPA_BWD_SPLIT_DQ_REDUCE_DISPATCH_SYMBOL_V1;
+                }
+                else
+                {
+                    return FLYDSL_SDPA_BWD_SPLIT_DQ_DISPATCH_SYMBOL_V1;
+                }
+            }();
+            return SavedLaunchInputs{
+                std::string(contract),
+                flydslSdpaBwdDqLaunchValues(FlydslSdpaBwdDqLaunchInputs{plan.problem,
+                                                                        plan.uids,
+                                                                        plan.scalars,
+                                                                        plan.tile,
+                                                                        plan.blockThreads,
+                                                                        plan.blockM,
+                                                                        plan.gridName})};
+        }
+    }
+
+    std::unique_ptr<PreparedDispatch> restoreLaunch(const SavedLaunchInputs& inputs,
+                                                    SavedKernelCode code,
+                                                    int deviceOrdinal) const override
+    {
+        std::vector<SavedKernelCode> codes;
+        codes.push_back(std::move(code));
+        return restoreLaunches(inputs, std::move(codes), deviceOrdinal);
+    }
+
+    /// Refuses, in this order and each as INCOMPATIBLE: a kernel whose recorded signature is
+    /// not the one this handler launches (the reduce kernel's is native::reduceSignature(), the
+    /// tail-zero kernel's the V-head variant's for `dq_u2`); a dispatch name of another
+    /// contract; an extra, missing or mistyped launch value; a value out of range or a problem
+    /// that cannot be launched; a set of launch names that is not the set the recomputed
+    /// problem implies (the one unnamed launch without a dV-only, reduce or tail-zero launch,
+    /// otherwise `dkdv` with `dvonly`, or `dq` with `dbias_reduce` and `tailzero` as the problem
+    /// needs them); and code the driver refuses.
+    std::unique_ptr<PreparedDispatch> restoreLaunches(const SavedLaunchInputs& inputs,
+                                                      std::vector<SavedKernelCode> codes,
+                                                      int deviceOrdinal) const override
+    {
+        const std::string primaryName = primaryLaunchName();
+        const native::LaunchNames names{primaryName, DVONLY_LAUNCH, REDUCE_LAUNCH, TAILZERO_LAUNCH};
+        native::requireSavedSignatures(inputs,
+                                       codes,
+                                       names,
+                                       signatureOfSlot(SLOT, IS_U2),
+                                       DQ_U2 ? native::tailzeroHvSignature()
+                                             : native::tailzeroSignature());
+
+        auto plan = restoredPlan<SLOT, SOURCES, DQ_U2>(inputs);
+
+        // The launches the problem implies, by name.
+        const bool dvonly = SLOT == Slot::DKDV && plan.u2;
+        const bool reduces = SLOT == Slot::DQ && plan.workspace.reduces;
+        const bool zeroesTails = plan.tailzeroMask != 0;
+        const auto selected
+            = native::selectSavedLaunches(inputs, codes, dvonly, reduces, zeroesTails, names);
+        if(reduces)
+        {
+            plan.reduceSymbol = selected.reduce->symbol;
+        }
+
+        auto primary = native::loadSavedKernel(inputs, std::move(*selected.primary), deviceOrdinal);
+        primary.code.setBlockSize(plan.blockThreads, 1, 1);
+        primary.code.setGridSize(plan.grid.x, plan.grid.y, plan.grid.z);
+
+        // The dV-only object runs at the dK-only object's block over the V heads.
+        auto dvonlyLoaded = native::loadOptionalLaunch(inputs,
+                                                       selected.dvonly,
+                                                       deviceOrdinal,
+                                                       plan.blockThreads,
+                                                       plan.dvonlyGrid.x,
+                                                       plan.dvonlyGrid.y,
+                                                       plan.dvonlyGrid.z);
+        auto reduce = native::loadOptionalLaunch(inputs,
+                                                 selected.reduce,
+                                                 deviceOrdinal,
+                                                 native::REDUCE_THREADS,
+                                                 plan.reduceGrid.x,
+                                                 plan.reduceGrid.y);
+        auto tailzero = native::loadOptionalLaunch(inputs,
+                                                   selected.tailzero,
+                                                   deviceOrdinal,
+                                                   native::TAILZERO_THREADS,
+                                                   plan.tailzeroGrid.x,
+                                                   plan.tailzeroGrid.y);
+        return std::make_unique<PreparedFlydslSdpaBwdSplit>(std::move(plan),
+                                                            std::move(primary.code),
+                                                            std::move(primary.record),
+                                                            std::move(dvonlyLoaded.code),
+                                                            std::move(dvonlyLoaded.record),
+                                                            std::move(reduce.code),
+                                                            std::move(reduce.record),
+                                                            std::move(tailzero.code),
+                                                            std::move(tailzero.record),
+                                                            primaryLaunchName());
+    }
+
+    bool supportsSaving() const override
+    {
+        return true;
+    }
+
+    bool supportsSavingAllLaunches() const override
+    {
+        return true;
+    }
+
 private:
+    /// The name of the slot's kernel when the stage also launches another one: the dV-only or
+    /// the reduce or the tail-zero kernel.
+    static std::string primaryLaunchName()
+    {
+        if constexpr(SLOT == Slot::DQ)
+        {
+            return std::string(DQ_LAUNCH);
+        }
+        else if constexpr(SLOT == Slot::DKDV && SOURCES)
+        {
+            return std::string(DKDV_LAUNCH);
+        }
+        else
+        {
+            return {};
+        }
+    }
+
+    /// The handlers whose rows serve V heads that differ from K's.
+    static constexpr bool IS_U2 = (SLOT == Slot::DKDV && SOURCES) || DQ_U2;
+
     const compilation::IKernelCompiler& _kernelCompiler;
     const compilation::KpackKernelLoader& _kpackLoader;
 };
@@ -2105,6 +2485,24 @@ void registerFlydslSdpaBwdSplitSymbols(SymbolScope<Handle>& scope)
               &flydslSdpaBwdSplitDispatchHandler<Slot::DKDV, true>());
     scope.add(std::string(DQ_U2_DISPATCH_SYMBOL),
               &flydslSdpaBwdSplitDispatchHandler<Slot::DQ, false, true>());
+    scope.add(std::string(FLYDSL_SDPA_BWD_SPLIT_PREP_DISPATCH_SYMBOL_V1),
+              &flydslSdpaBwdSplitDispatchHandler<Slot::PREP>());
+    scope.add(std::string(FLYDSL_SDPA_BWD_SPLIT_DKDV_DISPATCH_SYMBOL_V1),
+              &flydslSdpaBwdSplitDispatchHandler<Slot::DKDV>());
+    scope.add(std::string(FLYDSL_SDPA_BWD_SPLIT_DQ_DISPATCH_SYMBOL_V1),
+              &flydslSdpaBwdSplitDispatchHandler<Slot::DQ>());
+    scope.add(std::string(FLYDSL_SDPA_BWD_SPLIT_DQ_REDUCE_DISPATCH_SYMBOL_V1),
+              &flydslSdpaBwdSplitDispatchHandler<Slot::DQ, true>());
+    scope.add(std::string(FLYDSL_SDPA_BWD_SPLIT_DKDV_U2_DISPATCH_SYMBOL_V1),
+              &flydslSdpaBwdSplitDispatchHandler<Slot::DKDV, true>());
+    scope.add(std::string(FLYDSL_SDPA_BWD_SPLIT_DQ_U2_DISPATCH_SYMBOL_V1),
+              &flydslSdpaBwdSplitDispatchHandler<Slot::DQ, false, true>());
+}
+
+const std::vector<KernelArgument>& flydslSdpaBwdSplitSignature(FlydslSdpaBwdSplitSlot slot,
+                                                               bool valueHeads)
+{
+    return signatureOfSlot(slot, valueHeads);
 }
 
 FlydslSdpaBwdSplitLaunchDump describeFlydslSdpaBwdSplitLaunchForTesting(

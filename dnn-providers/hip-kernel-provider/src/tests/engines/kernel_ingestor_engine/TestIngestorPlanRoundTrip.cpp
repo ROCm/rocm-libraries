@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <variant>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -91,7 +92,7 @@ void captureConvFwd(const ScopedDirectory& scratch, PackedPlan& built, IngestorP
         return;
     }
     const Handle handle;
-    payload = captureIngestorPlan(*built.plan, handle);
+    payload = std::get<IngestorPlanPayload>(captureIngestorPlan(*built.plan, handle));
 }
 
 // Reads and clears both HIP error values after a refused restore. A value that HIP sets

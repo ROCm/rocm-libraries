@@ -1887,12 +1887,19 @@ TEST(TestFlydslSdpaBwdSplitLaunch, ALaunchWithoutItsWorkspaceIsRefused)
 // Dispatch handlers
 // ---------------------------------------------------------------------------
 
-TEST(TestFlydslSdpaBwdSplitDispatch, NoSlotHandlerSupportsSaving)
+TEST(TestFlydslSdpaBwdSplitDispatch, EverySlotHandlerSupportsSavingAllLaunches)
 {
     for(const Slot slot : SLOTS)
     {
-        EXPECT_FALSE(dispatchHandler(splitSymbols(slot)).supportsSaving());
+        EXPECT_TRUE(dispatchHandler(splitSymbols(slot)).supportsSaving());
+        EXPECT_TRUE(dispatchHandler(splitSymbols(slot)).supportsSavingAllLaunches());
     }
+    EXPECT_TRUE(dispatchHandler(DQ_REDUCE).supportsSaving());
+    EXPECT_TRUE(dispatchHandler(DQ_REDUCE).supportsSavingAllLaunches());
+    EXPECT_TRUE(dispatchHandler(DKDV_U2).supportsSaving());
+    EXPECT_TRUE(dispatchHandler(DKDV_U2).supportsSavingAllLaunches());
+    EXPECT_TRUE(dispatchHandler(DQ_U2).supportsSaving());
+    EXPECT_TRUE(dispatchHandler(DQ_U2).supportsSavingAllLaunches());
 }
 
 TEST(TestFlydslSdpaBwdSplitDispatch, EachSlotsWorkspaceBytesAreItsScratchOnly)
@@ -2024,9 +2031,7 @@ TEST(TestFlydslSdpaBwdSplitDispatch, TheDqHandlersDeclareTheirLaunchesAndTheOthe
     {
         EXPECT_TRUE(dispatchHandler(splitSymbols(slot)).launchNames().empty());
     }
-    EXPECT_FALSE(dispatchHandler(DQ_REDUCE).supportsSaving());
     EXPECT_EQ(dispatchHandler(DQ_U2).launchNames(), (std::set<std::string>{"dq", "tailzero"}));
-    EXPECT_FALSE(dispatchHandler(DQ_U2).supportsSaving());
 }
 
 TEST(TestFlydslSdpaBwdSplitDispatch, TheDqReduceHandlerHasTheDqHandlersScratch)
@@ -2605,7 +2610,6 @@ KernelDefinition dkdvSourcesRow(const RowSpec& row,
 TEST(TestFlydslSdpaBwdSplitDispatch, TheDkdvU2HandlerLaunchesTheDkOnlyAndTheDvOnlyObject)
 {
     EXPECT_EQ(dispatchHandler(DKDV_U2).launchNames(), (std::set<std::string>{"dkdv", "dvonly"}));
-    EXPECT_FALSE(dispatchHandler(DKDV_U2).supportsSaving());
 
     const auto spec = withValueHeads(baseSpec(), 4, 2);
     const GraphFixture fixture(buildSdpaBwdGraph(spec));

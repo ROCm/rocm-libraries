@@ -208,9 +208,9 @@ launch -- and is verified on all three arches; the order in which it widens is i
 **SDPA backward** (**gfx950**: split and merged, 2,707 object files; **gfx942**, **gfx90a** and
 **gfx11-generic**: split only, 509 object files each): two engines over one graph
 matcher (`FlydslSdpaBwdCommon.hpp`). `hipkernel:flydsl_sdpa_bwd_merged` is a single launch
-computing dK, dV, dQ and, on a bias graph, dBias; its plans are not serializable (no plan
-saving in its dispatch handler). `hipkernel:flydsl_sdpa_bwd_split` is
-slotted, three launches in order -- prep, dK/dV, dQ -- and so is not plan-serializable either. The
+computing dK, dV, dQ and, on a bias graph, dBias. `hipkernel:flydsl_sdpa_bwd_split` is
+slotted, three launches in order -- prep, dK/dV, dQ. Plans of both engines can be saved
+and loaded (RFC 0009 multi-kernel plans). The
 split engine's slot ops are `sdpa_bwd_prep`, `sdpa_bwd_dkdv` and `sdpa_bwd_dq`;
 `sdpa_bwd_split` is descriptor-only (no objects): its UED, and its engine estimate, which is
 engine-level (it models the whole program); trained estimates install under

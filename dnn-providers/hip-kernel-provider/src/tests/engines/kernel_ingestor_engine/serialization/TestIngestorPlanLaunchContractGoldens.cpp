@@ -6,11 +6,11 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <iostream>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -31,6 +31,7 @@
 #include "engines/kernel_ingestor_engine/packs/PointwiseLaunchValues.hpp"
 #include "engines/kernel_ingestor_engine/serialization/IngestorPlanCodec.hpp"
 #include "engines/kernel_ingestor_engine/serialization/IngestorPlanPayload.hpp"
+#include "engines/kernel_ingestor_engine/serialization/IngestorPlanTestUtilities.hpp"
 #include "utilities/Digest.hpp"
 
 /**
@@ -66,14 +67,11 @@ using hipdnn_plugin_sdk::ingestor::KernelSourceKind;
 using hipdnn_plugin_sdk::ingestor::MetadataValues;
 using hipdnn_plugin_sdk::ingestor::SavedLaunchInputs;
 
+using serialization::SAMPLE_CODE_OBJECT;
+
 // ---------------------------------------------------------------------------
 // The sample payloads
 // ---------------------------------------------------------------------------
-
-// The code object every sample carries: a few bytes standing in for an HSACO, so a
-// checked-in sample stays small. Nothing on this path loads it.
-constexpr std::array<uint8_t, 8> SAMPLE_CODE_OBJECT
-    = {0x7F, 0x45, 0x4C, 0x46, 0x02, 0x01, 0x01, 0x40};
 
 // The dispatch names the samples were written under. Spelled out so a pack rename fails
 // this test.
@@ -243,30 +241,17 @@ MetadataValues gfx942AttentionDensePersistentThreePairSampleValues()
         {"num_persistent", int64_t{304}}};
 }
 
-// The fields outside the dispatch contract. Fixed across the samples, so they differ only
-// in the contract under test. Each signature column holds different values, and one name
-// is empty, so a decoder that mixes up two columns fails the comparison.
+// Each signature column holds different values, and one name is empty, so a decoder that mixes
+// up two columns fails the comparison.
 serialization::IngestorPlanPayload samplePayload(std::string dispatchSymbol,
                                                  MetadataValues launchValues)
 {
-    serialization::IngestorPlanPayload payload;
-    for(size_t index = 0; index < payload.kernelDescriptorId.size(); ++index)
-    {
-        payload.kernelDescriptorId[index] = static_cast<uint8_t>(0x20U + index);
-    }
-    payload.workspaceBytes = 4096;
-    payload.dispatchSymbol = std::move(dispatchSymbol);
-    payload.launchValues = std::move(launchValues);
-    payload.sourceKind = KernelSourceKind::KPACK;
-    payload.symbol = "golden_kernel";
-    payload.target = "gfx942";
-    payload.recordedSignature = {KernelArgument{"global_buffer", 8, 0, "a_ptr"},
-                                 KernelArgument{"by_value", 4, 8, "count"},
-                                 KernelArgument{"by_value", 2, 12, ""}};
-    payload.codeObject.assign(SAMPLE_CODE_OBJECT.begin(), SAMPLE_CODE_OBJECT.end());
-    payload.sha256 = utilities::sha256Hex(payload.codeObject.data(), payload.codeObject.size());
-    payload.providerVersion = "1.0.0";
-    return payload;
+    return serialization::goldenSamplePayload(std::move(dispatchSymbol),
+                                              std::move(launchValues),
+                                              "gfx942",
+                                              {KernelArgument{"global_buffer", 8, 0, "a_ptr"},
+                                               KernelArgument{"by_value", 4, 8, "count"},
+                                               KernelArgument{"by_value", 2, 12, ""}});
 }
 
 serialization::IngestorPlanPayload pointwiseSamplePayload()
@@ -314,6 +299,71 @@ serialization::IngestorPlanPayload gfx942AttentionDensePersistentThreePairSample
 {
     return samplePayload(std::string(GFX942_ATTENTION_DENSE_SAMPLE_DISPATCH),
                          gfx942AttentionDensePersistentThreePairSampleValues());
+}
+
+// The second code object of the kind 2 sample.
+constexpr std::array<uint8_t, 8> SAMPLE_SECOND_CODE_OBJECT
+    = {0x7F, 0x45, 0x4C, 0x46, 0x02, 0x01, 0x01, 0x41};
+
+constexpr std::string_view MULTI_KERNEL_SAMPLE_DISPATCH_A = "hipkernel.sample_multi_a.dispatch.v1";
+constexpr std::string_view MULTI_KERNEL_SAMPLE_DISPATCH_B = "hipkernel.sample_multi_b.dispatch.v1";
+
+// A two-stage kind 2 payload: the first stage launches two kernels from two code objects,
+// the second launches one kernel from the first code object. The signature columns differ,
+// and one name is empty, as in the kind 1 samples.
+serialization::IngestorMultiKernelPayload multiKernelSamplePayload()
+{
+    serialization::IngestorMultiKernelPayload payload;
+
+    serialization::IngestorCodeObjectPayload first;
+    first.sourceKind = KernelSourceKind::KPACK;
+    first.target = "gfx942";
+    first.codeObject.assign(SAMPLE_CODE_OBJECT.begin(), SAMPLE_CODE_OBJECT.end());
+    first.sha256 = utilities::sha256Hex(first.codeObject.data(), first.codeObject.size());
+    serialization::IngestorCodeObjectPayload second;
+    second.sourceKind = KernelSourceKind::HSACO_FILE;
+    second.target = "gfx90a";
+    second.codeObject.assign(SAMPLE_SECOND_CODE_OBJECT.begin(), SAMPLE_SECOND_CODE_OBJECT.end());
+    second.sha256 = utilities::sha256Hex(second.codeObject.data(), second.codeObject.size());
+    payload.codeObjects = {first, second};
+
+    serialization::IngestorStagePayload stageA;
+    stageA.slot = "slot_a";
+    for(size_t index = 0; index < stageA.kernelDescriptorId.size(); ++index)
+    {
+        stageA.kernelDescriptorId[index] = static_cast<uint8_t>(0x20U + index);
+    }
+    stageA.dispatchSymbol = std::string(MULTI_KERNEL_SAMPLE_DISPATCH_A);
+    stageA.launchValues = {{"x.uid", int64_t{11}}, {"block_size", int64_t{256}}, {"scale", 0.5}};
+    stageA.kernels = {
+        serialization::IngestorStageKernelPayload{
+            "dq",
+            "golden_dq",
+            {KernelArgument{"global_buffer", 8, 0, "a_ptr"}, KernelArgument{"by_value", 4, 8, ""}},
+            0},
+        serialization::IngestorStageKernelPayload{
+            "dbias_reduce", "golden_reduce", {KernelArgument{"by_value", 2, 0, "count"}}, 1}};
+
+    serialization::IngestorStagePayload stageB;
+    stageB.slot = "slot_b";
+    for(size_t index = 0; index < stageB.kernelDescriptorId.size(); ++index)
+    {
+        stageB.kernelDescriptorId[index] = static_cast<uint8_t>(0x40U + index);
+    }
+    stageB.dispatchSymbol = std::string(MULTI_KERNEL_SAMPLE_DISPATCH_B);
+    stageB.launchValues = {{"y.uid", int64_t{22}},
+                           {"layout", std::string("bshd")},
+                           {"shape", std::vector<int64_t>{2, 3}},
+                           {"flag", true}};
+    stageB.kernels = {serialization::IngestorStageKernelPayload{
+        "", "golden_single", {KernelArgument{"global_buffer", 8, 0, ""}}, 0}};
+
+    payload.stages = {stageA, stageB};
+    payload.sharedWorkspaceBytes = 1024;
+    payload.workspaceBytes = 4096;
+    payload.runtimePassByValueUids = {7, 9};
+    payload.providerVersion = "1.1.0";
+    return payload;
 }
 
 // ---------------------------------------------------------------------------
@@ -1022,35 +1072,105 @@ constexpr std::array<uint8_t, 1600> GFX942_ATTENTION_DENSE_V1_PERSISTENT_THREE_P
     0x05, 0x00, 0x00, 0x00, 0x61, 0x5F, 0x70, 0x74, 0x72, 0x00, 0x00, 0x00, 0x0D, 0x00, 0x00, 0x00,
     0x67, 0x6C, 0x6F, 0x62, 0x61, 0x6C, 0x5F, 0x62, 0x75, 0x66, 0x66, 0x65, 0x72, 0x00, 0x00, 0x00};
 
+constexpr std::array<uint8_t, 1424> MULTI_KERNEL_V1_1_GOLDEN = {
+    0x48, 0x4B, 0x49, 0x50, 0x01, 0x00, 0x01, 0x00, 0x02, 0x00, 0x30, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x78, 0x7D, 0xD6, 0xB3, 0xB0, 0x9C, 0x63, 0x83, 0x09, 0xBD, 0x15, 0x6F, 0x30, 0xC8, 0x95, 0x56,
+    0xAC, 0x4D, 0xFE, 0xE4, 0x22, 0xEE, 0x64, 0x9C, 0x0E, 0x7F, 0x16, 0x7C, 0xEE, 0x89, 0xBC, 0x98,
+    0x24, 0x00, 0x00, 0x00, 0x48, 0x4B, 0x4D, 0x50, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x24, 0x00, 0x04, 0x00, 0x08, 0x00, 0x14, 0x00, 0x1C, 0x00,
+    0x0C, 0x00, 0x10, 0x00, 0x10, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x2C, 0x04, 0x00, 0x00,
+    0x24, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00, 0x31, 0x2E, 0x31, 0x2E,
+    0x30, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0xB0, 0x01, 0x00, 0x00,
+    0x04, 0x00, 0x00, 0x00, 0x64, 0xFE, 0xFF, 0xFF, 0x1C, 0x00, 0x00, 0x00, 0x40, 0x41, 0x42, 0x43,
+    0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4A, 0x4B, 0x4C, 0x4D, 0x4E, 0x4F, 0x14, 0x00, 0x00, 0x00,
+    0x24, 0x01, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00, 0x73, 0x6C, 0x6F, 0x74, 0x5F, 0x62, 0x00, 0x00,
+    0x58, 0xFE, 0xFF, 0xFF, 0x08, 0x00, 0x00, 0x00, 0x30, 0x00, 0x00, 0x00, 0x24, 0x00, 0x00, 0x00,
+    0x68, 0x69, 0x70, 0x6B, 0x65, 0x72, 0x6E, 0x65, 0x6C, 0x2E, 0x73, 0x61, 0x6D, 0x70, 0x6C, 0x65,
+    0x5F, 0x6D, 0x75, 0x6C, 0x74, 0x69, 0x5F, 0x62, 0x2E, 0x64, 0x69, 0x73, 0x70, 0x61, 0x74, 0x63,
+    0x68, 0x2E, 0x76, 0x31, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0xB0, 0x00, 0x00, 0x00,
+    0x74, 0x00, 0x00, 0x00, 0x34, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0xFA, 0xFD, 0xFF, 0xFF,
+    0x00, 0x00, 0x00, 0x02, 0x08, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00,
+    0x79, 0x2E, 0x75, 0x69, 0x64, 0x00, 0x06, 0x00, 0x0C, 0x00, 0x04, 0x00, 0x06, 0x00, 0x00, 0x00,
+    0x16, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x26, 0xFE, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x05,
+    0x08, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00, 0x73, 0x68, 0x61, 0x70,
+    0x65, 0x00, 0x00, 0x00, 0xC2, 0xFF, 0xFF, 0xFF, 0x04, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00,
+    0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x62, 0xFE, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x04, 0x08, 0x00, 0x00, 0x00,
+    0x18, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00, 0x6C, 0x61, 0x79, 0x6F, 0x75, 0x74, 0x00, 0x00,
+    0x00, 0x00, 0x06, 0x00, 0x08, 0x00, 0x04, 0x00, 0x06, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00,
+    0x04, 0x00, 0x00, 0x00, 0x62, 0x73, 0x68, 0x64, 0x00, 0x00, 0x00, 0x00, 0x9A, 0xFE, 0xFF, 0xFF,
+    0x00, 0x00, 0x00, 0x01, 0x08, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00,
+    0x66, 0x6C, 0x61, 0x67, 0x00, 0x00, 0x06, 0x00, 0x08, 0x00, 0x07, 0x00, 0x06, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0xCA, 0xFD, 0xFF, 0xFF,
+    0x20, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x20, 0x00, 0x00, 0x00, 0x0D, 0x00, 0x00, 0x00,
+    0x67, 0x6F, 0x6C, 0x64, 0x65, 0x6E, 0x5F, 0x73, 0x69, 0x6E, 0x67, 0x6C, 0x65, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00,
+    0xA8, 0xFF, 0xFF, 0xFF, 0x08, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x0D, 0x00, 0x00, 0x00,
+    0x67, 0x6C, 0x6F, 0x62, 0x61, 0x6C, 0x5F, 0x62, 0x75, 0x66, 0x66, 0x65, 0x72, 0x00, 0x00, 0x00,
+    0x0C, 0x00, 0x20, 0x00, 0x04, 0x00, 0x08, 0x00, 0x18, 0x00, 0x1C, 0x00, 0x0C, 0x00, 0x00, 0x00,
+    0x1C, 0x00, 0x00, 0x00, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B,
+    0x2C, 0x2D, 0x2E, 0x2F, 0x1C, 0x00, 0x00, 0x00, 0xFC, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00,
+    0x73, 0x6C, 0x6F, 0x74, 0x5F, 0x61, 0x00, 0x00, 0x08, 0x00, 0x0C, 0x00, 0x04, 0x00, 0x08, 0x00,
+    0x08, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x30, 0x00, 0x00, 0x00, 0x24, 0x00, 0x00, 0x00,
+    0x68, 0x69, 0x70, 0x6B, 0x65, 0x72, 0x6E, 0x65, 0x6C, 0x2E, 0x73, 0x61, 0x6D, 0x70, 0x6C, 0x65,
+    0x5F, 0x6D, 0x75, 0x6C, 0x74, 0x69, 0x5F, 0x61, 0x2E, 0x64, 0x69, 0x73, 0x70, 0x61, 0x74, 0x63,
+    0x68, 0x2E, 0x76, 0x31, 0x00, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x70, 0x00, 0x00, 0x00,
+    0x34, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0xA6, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x02,
+    0x08, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00, 0x78, 0x2E, 0x75, 0x69,
+    0x64, 0x00, 0x00, 0x00, 0x96, 0xFF, 0xFF, 0xFF, 0x0B, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0xD2, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x03, 0x08, 0x00, 0x00, 0x00,
+    0x14, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00, 0x73, 0x63, 0x61, 0x6C, 0x65, 0x00, 0x06, 0x00,
+    0x0E, 0x00, 0x04, 0x00, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xE0, 0x3F,
+    0x00, 0x00, 0x0A, 0x00, 0x10, 0x00, 0x08, 0x00, 0x07, 0x00, 0x0C, 0x00, 0x0A, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x02, 0x08, 0x00, 0x00, 0x00, 0x1C, 0x00, 0x00, 0x00, 0x0A, 0x00, 0x00, 0x00,
+    0x62, 0x6C, 0x6F, 0x63, 0x6B, 0x5F, 0x73, 0x69, 0x7A, 0x65, 0x00, 0x00, 0x00, 0x00, 0x06, 0x00,
+    0x10, 0x00, 0x04, 0x00, 0x06, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x84, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00,
+    0x0C, 0x00, 0x14, 0x00, 0x04, 0x00, 0x08, 0x00, 0x0C, 0x00, 0x10, 0x00, 0x0C, 0x00, 0x00, 0x00,
+    0x24, 0x00, 0x00, 0x00, 0x0C, 0x00, 0x00, 0x00, 0x30, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
+    0x0D, 0x00, 0x00, 0x00, 0x67, 0x6F, 0x6C, 0x64, 0x65, 0x6E, 0x5F, 0x72, 0x65, 0x64, 0x75, 0x63,
+    0x65, 0x00, 0x00, 0x00, 0x0C, 0x00, 0x00, 0x00, 0x64, 0x62, 0x69, 0x61, 0x73, 0x5F, 0x72, 0x65,
+    0x64, 0x75, 0x63, 0x65, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00,
+    0x74, 0xFF, 0xFF, 0xFF, 0x18, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00,
+    0x05, 0x00, 0x00, 0x00, 0x63, 0x6F, 0x75, 0x6E, 0x74, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00,
+    0x62, 0x79, 0x5F, 0x76, 0x61, 0x6C, 0x75, 0x65, 0x00, 0x00, 0x00, 0x00, 0xCA, 0xFF, 0xFF, 0xFF,
+    0x1C, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x1C, 0x00, 0x00, 0x00, 0x09, 0x00, 0x00, 0x00,
+    0x67, 0x6F, 0x6C, 0x64, 0x65, 0x6E, 0x5F, 0x64, 0x71, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00,
+    0x64, 0x71, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x0A, 0x00, 0x10, 0x00, 0x04, 0x00, 0x08, 0x00, 0x0C, 0x00, 0x0A, 0x00, 0x00, 0x00,
+    0x0C, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00,
+    0x62, 0x79, 0x5F, 0x76, 0x61, 0x6C, 0x75, 0x65, 0x00, 0x00, 0x00, 0x00, 0x0C, 0x00, 0x10, 0x00,
+    0x04, 0x00, 0x08, 0x00, 0x00, 0x00, 0x0C, 0x00, 0x0C, 0x00, 0x00, 0x00, 0x18, 0x00, 0x00, 0x00,
+    0x08, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00, 0x61, 0x5F, 0x70, 0x74,
+    0x72, 0x00, 0x00, 0x00, 0x0D, 0x00, 0x00, 0x00, 0x67, 0x6C, 0x6F, 0x62, 0x61, 0x6C, 0x5F, 0x62,
+    0x75, 0x66, 0x66, 0x65, 0x72, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x88, 0x00, 0x00, 0x00,
+    0x04, 0x00, 0x00, 0x00, 0x8C, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x03, 0x54, 0x00, 0x00, 0x00,
+    0x08, 0x00, 0x00, 0x00, 0x58, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x35, 0x30, 0x38, 0x62,
+    0x64, 0x33, 0x38, 0x38, 0x39, 0x31, 0x38, 0x31, 0x61, 0x65, 0x61, 0x34, 0x66, 0x32, 0x34, 0x30,
+    0x34, 0x31, 0x66, 0x36, 0x30, 0x39, 0x33, 0x39, 0x33, 0x35, 0x33, 0x61, 0x35, 0x33, 0x33, 0x31,
+    0x35, 0x37, 0x37, 0x31, 0x66, 0x65, 0x38, 0x63, 0x34, 0x31, 0x32, 0x61, 0x30, 0x32, 0x39, 0x38,
+    0x61, 0x33, 0x66, 0x65, 0x31, 0x66, 0x63, 0x32, 0x66, 0x63, 0x65, 0x61, 0x00, 0x00, 0x00, 0x00,
+    0x06, 0x00, 0x00, 0x00, 0x67, 0x66, 0x78, 0x39, 0x30, 0x61, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00,
+    0x7F, 0x45, 0x4C, 0x46, 0x02, 0x01, 0x01, 0x41, 0x0C, 0x00, 0x14, 0x00, 0x07, 0x00, 0x08, 0x00,
+    0x0C, 0x00, 0x10, 0x00, 0x0C, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x54, 0x00, 0x00, 0x00,
+    0x08, 0x00, 0x00, 0x00, 0x58, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x65, 0x66, 0x35, 0x31,
+    0x39, 0x39, 0x39, 0x39, 0x39, 0x32, 0x38, 0x65, 0x37, 0x38, 0x37, 0x39, 0x62, 0x64, 0x64, 0x30,
+    0x36, 0x32, 0x33, 0x30, 0x31, 0x39, 0x31, 0x36, 0x33, 0x35, 0x64, 0x35, 0x32, 0x65, 0x64, 0x34,
+    0x32, 0x37, 0x37, 0x37, 0x64, 0x34, 0x62, 0x33, 0x36, 0x34, 0x66, 0x62, 0x63, 0x63, 0x38, 0x66,
+    0x36, 0x31, 0x66, 0x62, 0x30, 0x62, 0x35, 0x34, 0x30, 0x61, 0x35, 0x38, 0x00, 0x00, 0x00, 0x00,
+    0x06, 0x00, 0x00, 0x00, 0x67, 0x66, 0x78, 0x39, 0x34, 0x32, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00,
+    0x7F, 0x45, 0x4C, 0x46, 0x02, 0x01, 0x01, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+
 // ---------------------------------------------------------------------------
 // Reading a sample
 // ---------------------------------------------------------------------------
 
-// Prints the payload fields that identify a sample, for a failed comparison.
-std::string describePayload(const serialization::IngestorPlanPayload& payload)
-{
-    return "target=" + payload.target + " symbol=" + payload.symbol
-           + " dispatchSymbol=" + payload.dispatchSymbol + " sha256=" + payload.sha256
-           + " workspaceBytes=" + std::to_string(payload.workspaceBytes) + " signature=["
-           + hipdnn_plugin_sdk::ingestor::describeKernelSignature(payload.recordedSignature) + "]";
-}
-
-// Decodes a sample, compares the whole payload with the expected payload, and hands back
-// the dispatch contract it carries.
-template <size_t SIZE>
-SavedLaunchInputs readSample(const std::array<uint8_t, SIZE>& golden,
-                             const serialization::IngestorPlanPayload& expected)
-{
-    const serialization::IngestorPlanPayload decoded
-        = serialization::decodeIngestorPlan(golden.data(), golden.size());
-    EXPECT_TRUE(decoded == expected) << "decoded:  " << describePayload(decoded) << "\n"
-                                     << "expected: " << describePayload(expected);
-    return SavedLaunchInputs{decoded.dispatchSymbol, decoded.launchValues};
-}
-
 TEST(TestIngestorPlanLaunchContractGoldens, PointwiseV1SampleStillReadsAsItsContract)
 {
-    const SavedLaunchInputs inputs = readSample(POINTWISE_V1_GOLDEN, pointwiseSamplePayload());
+    const SavedLaunchInputs inputs
+        = serialization::readGoldenSample(POINTWISE_V1_GOLDEN, pointwiseSamplePayload());
     ASSERT_EQ(inputs.dispatchSymbol, "hipkernel.pointwise.dispatch.v1");
 
     const PointwiseLaunchInputs launch = readPointwiseLaunchInputs(inputs);
@@ -1062,7 +1182,8 @@ TEST(TestIngestorPlanLaunchContractGoldens, PointwiseV1SampleStillReadsAsItsCont
 
 TEST(TestIngestorPlanLaunchContractGoldens, ConvFwdV1SampleStillReadsAsItsContract)
 {
-    const SavedLaunchInputs inputs = readSample(CONV_FWD_V1_GOLDEN, convFwdSamplePayload());
+    const SavedLaunchInputs inputs
+        = serialization::readGoldenSample(CONV_FWD_V1_GOLDEN, convFwdSamplePayload());
     ASSERT_EQ(inputs.dispatchSymbol, "hipkernel.conv_fwd.dispatch.v1");
 
     const ConvFwdLaunchInputs launch = readConvFwdLaunchInputs(inputs);
@@ -1081,8 +1202,8 @@ TEST(TestIngestorPlanLaunchContractGoldens, ConvFwdV1SampleStillReadsAsItsContra
 
 TEST(TestIngestorPlanLaunchContractGoldens, Gfx950AttentionDenseV1SampleStillReadsAsItsContract)
 {
-    const SavedLaunchInputs inputs
-        = readSample(GFX950_ATTENTION_DENSE_V1_GOLDEN, gfx950AttentionDenseSamplePayload());
+    const SavedLaunchInputs inputs = serialization::readGoldenSample(
+        GFX950_ATTENTION_DENSE_V1_GOLDEN, gfx950AttentionDenseSamplePayload());
     ASSERT_EQ(inputs.dispatchSymbol, "hipkernel.gfx950_attention_dense.dispatch.v1");
 
     const Gfx950AttentionDenseLaunchInputs launch = readGfx950AttentionDenseLaunchInputs(inputs);
@@ -1107,8 +1228,9 @@ TEST(TestIngestorPlanLaunchContractGoldens, Gfx950AttentionDenseV1SampleStillRea
 // changes meaning passes the field assertions above and lands here as a different launch.
 TEST(TestIngestorPlanLaunchContractGoldens, Gfx950AttentionDenseV1SampleGivesTheSameGeometry)
 {
-    const Gfx950AttentionDenseLaunchInputs launch = readGfx950AttentionDenseLaunchInputs(
-        readSample(GFX950_ATTENTION_DENSE_V1_GOLDEN, gfx950AttentionDenseSamplePayload()));
+    const Gfx950AttentionDenseLaunchInputs launch
+        = readGfx950AttentionDenseLaunchInputs(serialization::readGoldenSample(
+            GFX950_ATTENTION_DENSE_V1_GOLDEN, gfx950AttentionDenseSamplePayload()));
 
     const Gfx950AttentionDenseGeometry geometry
         = gfx950AttentionDenseGeometry(launch.blockM,
@@ -1125,8 +1247,8 @@ TEST(TestIngestorPlanLaunchContractGoldens, Gfx950AttentionDenseV1SampleGivesThe
 
 TEST(TestIngestorPlanLaunchContractGoldens, Gfx950AttentionDenseV2SampleStillReadsAsItsContract)
 {
-    const SavedLaunchInputs inputs
-        = readSample(GFX950_ATTENTION_DENSE_V2_GOLDEN, gfx950AttentionDenseV2SamplePayload());
+    const SavedLaunchInputs inputs = serialization::readGoldenSample(
+        GFX950_ATTENTION_DENSE_V2_GOLDEN, gfx950AttentionDenseV2SamplePayload());
     ASSERT_EQ(inputs.dispatchSymbol, "hipkernel.gfx950_attention_dense.dispatch.v2");
 
     const Gfx950AttentionDenseLaunchInputs launch = readGfx950AttentionDenseLaunchInputs(inputs);
@@ -1149,8 +1271,9 @@ TEST(TestIngestorPlanLaunchContractGoldens, Gfx950AttentionDenseV2SampleStillRea
 
 TEST(TestIngestorPlanLaunchContractGoldens, Gfx950AttentionDenseV2SampleGivesTheSameGeometry)
 {
-    const Gfx950AttentionDenseLaunchInputs launch = readGfx950AttentionDenseLaunchInputs(
-        readSample(GFX950_ATTENTION_DENSE_V2_GOLDEN, gfx950AttentionDenseV2SamplePayload()));
+    const Gfx950AttentionDenseLaunchInputs launch
+        = readGfx950AttentionDenseLaunchInputs(serialization::readGoldenSample(
+            GFX950_ATTENTION_DENSE_V2_GOLDEN, gfx950AttentionDenseV2SamplePayload()));
 
     const Gfx950AttentionDenseGeometry geometry
         = gfx950AttentionDenseGeometry(launch.blockM,
@@ -1209,8 +1332,8 @@ Gfx942SampleLaunch gfx942SampleLaunch(const Gfx942AttentionDenseLaunchInputs& la
 TEST(TestIngestorPlanLaunchContractGoldens,
      Gfx942AttentionDenseV1DenseSampleStillReadsAsItsContract)
 {
-    const SavedLaunchInputs inputs = readSample(GFX942_ATTENTION_DENSE_V1_DENSE_GOLDEN,
-                                                gfx942AttentionDenseDenseSamplePayload());
+    const SavedLaunchInputs inputs = serialization::readGoldenSample(
+        GFX942_ATTENTION_DENSE_V1_DENSE_GOLDEN, gfx942AttentionDenseDenseSamplePayload());
     ASSERT_EQ(inputs.dispatchSymbol, "hipkernel.gfx942_attention_dense.dispatch.v1");
 
     const Gfx942AttentionDenseLaunchInputs launch = readGfx942AttentionDenseLaunchInputs(inputs);
@@ -1236,7 +1359,7 @@ TEST(TestIngestorPlanLaunchContractGoldens,
 TEST(TestIngestorPlanLaunchContractGoldens, Gfx942AttentionDenseV1DenseSampleGivesTheSameGeometry)
 {
     const Gfx942SampleLaunch sample
-        = gfx942SampleLaunch(readGfx942AttentionDenseLaunchInputs(readSample(
+        = gfx942SampleLaunch(readGfx942AttentionDenseLaunchInputs(serialization::readGoldenSample(
             GFX942_ATTENTION_DENSE_V1_DENSE_GOLDEN, gfx942AttentionDenseDenseSamplePayload())));
 
     EXPECT_EQ(sample.blockX, 256U);
@@ -1248,8 +1371,8 @@ TEST(TestIngestorPlanLaunchContractGoldens, Gfx942AttentionDenseV1DenseSampleGiv
 TEST(TestIngestorPlanLaunchContractGoldens,
      Gfx942AttentionDenseV1DenseLseSampleStillReadsAsItsContract)
 {
-    const SavedLaunchInputs inputs = readSample(GFX942_ATTENTION_DENSE_V1_DENSE_LSE_GOLDEN,
-                                                gfx942AttentionDenseDenseLseSamplePayload());
+    const SavedLaunchInputs inputs = serialization::readGoldenSample(
+        GFX942_ATTENTION_DENSE_V1_DENSE_LSE_GOLDEN, gfx942AttentionDenseDenseLseSamplePayload());
     ASSERT_EQ(inputs.dispatchSymbol, "hipkernel.gfx942_attention_dense.dispatch.v1");
 
     const Gfx942AttentionDenseLaunchInputs launch = readGfx942AttentionDenseLaunchInputs(inputs);
@@ -1276,8 +1399,8 @@ TEST(TestIngestorPlanLaunchContractGoldens,
      Gfx942AttentionDenseV1DenseLseSampleGivesTheSameGeometry)
 {
     const Gfx942SampleLaunch sample = gfx942SampleLaunch(readGfx942AttentionDenseLaunchInputs(
-        readSample(GFX942_ATTENTION_DENSE_V1_DENSE_LSE_GOLDEN,
-                   gfx942AttentionDenseDenseLseSamplePayload())));
+        serialization::readGoldenSample(GFX942_ATTENTION_DENSE_V1_DENSE_LSE_GOLDEN,
+                                        gfx942AttentionDenseDenseLseSamplePayload())));
 
     EXPECT_EQ(sample.blockX, 512U);
     EXPECT_EQ(sample.grid, (std::array<int64_t, 3>{2, 12, 4}));
@@ -1289,8 +1412,8 @@ TEST(TestIngestorPlanLaunchContractGoldens,
      Gfx942AttentionDenseV1PersistentTwoPairLseSampleStillReadsAsItsContract)
 {
     const SavedLaunchInputs inputs
-        = readSample(GFX942_ATTENTION_DENSE_V1_PERSISTENT_TWO_PAIR_LSE_GOLDEN,
-                     gfx942AttentionDensePersistentTwoPairLseSamplePayload());
+        = serialization::readGoldenSample(GFX942_ATTENTION_DENSE_V1_PERSISTENT_TWO_PAIR_LSE_GOLDEN,
+                                          gfx942AttentionDensePersistentTwoPairLseSamplePayload());
     ASSERT_EQ(inputs.dispatchSymbol, "hipkernel.gfx942_attention_dense.dispatch.v1");
 
     const Gfx942AttentionDenseLaunchInputs launch = readGfx942AttentionDenseLaunchInputs(inputs);
@@ -1319,8 +1442,8 @@ TEST(TestIngestorPlanLaunchContractGoldens,
      Gfx942AttentionDenseV1PersistentTwoPairLseSampleGivesTheSameGeometry)
 {
     const Gfx942SampleLaunch sample = gfx942SampleLaunch(readGfx942AttentionDenseLaunchInputs(
-        readSample(GFX942_ATTENTION_DENSE_V1_PERSISTENT_TWO_PAIR_LSE_GOLDEN,
-                   gfx942AttentionDensePersistentTwoPairLseSamplePayload())));
+        serialization::readGoldenSample(GFX942_ATTENTION_DENSE_V1_PERSISTENT_TWO_PAIR_LSE_GOLDEN,
+                                        gfx942AttentionDensePersistentTwoPairLseSamplePayload())));
 
     EXPECT_EQ(sample.blockX, 256U);
     EXPECT_EQ(sample.grid, (std::array<int64_t, 3>{304, 1, 1}));
@@ -1333,8 +1456,8 @@ TEST(TestIngestorPlanLaunchContractGoldens,
      Gfx942AttentionDenseV1PersistentThreePairSampleStillReadsAsItsContract)
 {
     const SavedLaunchInputs inputs
-        = readSample(GFX942_ATTENTION_DENSE_V1_PERSISTENT_THREE_PAIR_GOLDEN,
-                     gfx942AttentionDensePersistentThreePairSamplePayload());
+        = serialization::readGoldenSample(GFX942_ATTENTION_DENSE_V1_PERSISTENT_THREE_PAIR_GOLDEN,
+                                          gfx942AttentionDensePersistentThreePairSamplePayload());
     ASSERT_EQ(inputs.dispatchSymbol, "hipkernel.gfx942_attention_dense.dispatch.v1");
 
     const Gfx942AttentionDenseLaunchInputs launch = readGfx942AttentionDenseLaunchInputs(inputs);
@@ -1363,8 +1486,8 @@ TEST(TestIngestorPlanLaunchContractGoldens,
      Gfx942AttentionDenseV1PersistentThreePairSampleGivesTheSameGeometry)
 {
     const Gfx942SampleLaunch sample = gfx942SampleLaunch(readGfx942AttentionDenseLaunchInputs(
-        readSample(GFX942_ATTENTION_DENSE_V1_PERSISTENT_THREE_PAIR_GOLDEN,
-                   gfx942AttentionDensePersistentThreePairSamplePayload())));
+        serialization::readGoldenSample(GFX942_ATTENTION_DENSE_V1_PERSISTENT_THREE_PAIR_GOLDEN,
+                                        gfx942AttentionDensePersistentThreePairSamplePayload())));
 
     EXPECT_EQ(sample.blockX, 512U);
     EXPECT_EQ(sample.grid, (std::array<int64_t, 3>{304, 1, 1}));
@@ -1376,8 +1499,8 @@ TEST(TestIngestorPlanLaunchContractGoldens,
 
 TEST(TestIngestorPlanLaunchContractGoldens, ConvFwdV1SampleGivesTheSameGeometry)
 {
-    const ConvFwdLaunchInputs launch
-        = readConvFwdLaunchInputs(readSample(CONV_FWD_V1_GOLDEN, convFwdSamplePayload()));
+    const ConvFwdLaunchInputs launch = readConvFwdLaunchInputs(
+        serialization::readGoldenSample(CONV_FWD_V1_GOLDEN, convFwdSamplePayload()));
 
     const ConvFwdLaunchGeometry geometry = convFwdLaunchGeometry(launch);
 
@@ -1387,8 +1510,8 @@ TEST(TestIngestorPlanLaunchContractGoldens, ConvFwdV1SampleGivesTheSameGeometry)
 
 TEST(TestIngestorPlanLaunchContractGoldens, PointwiseV1SampleGivesTheSameGeometry)
 {
-    const PointwiseLaunchInputs launch
-        = readPointwiseLaunchInputs(readSample(POINTWISE_V1_GOLDEN, pointwiseSamplePayload()));
+    const PointwiseLaunchInputs launch = readPointwiseLaunchInputs(
+        serialization::readGoldenSample(POINTWISE_V1_GOLDEN, pointwiseSamplePayload()));
 
     const PointwiseLaunchGeometry geometry = pointwiseLaunchGeometry(launch);
 
@@ -1396,54 +1519,93 @@ TEST(TestIngestorPlanLaunchContractGoldens, PointwiseV1SampleGivesTheSameGeometr
     EXPECT_EQ(geometry.gridX, 1U);
 }
 
+// The kind 2 sample carries format 1.1. It reads as the payload it was written from, and
+// every field has the value the format promises.
+TEST(TestIngestorPlanLaunchContractGoldens, MultiKernelV1Point1SampleStillReads)
+{
+    constexpr size_t MINOR_OFFSET = 6;
+    constexpr size_t KIND_OFFSET = 8;
+    EXPECT_EQ(MULTI_KERNEL_V1_1_GOLDEN[MINOR_OFFSET], 0x01);
+    EXPECT_EQ(MULTI_KERNEL_V1_1_GOLDEN[KIND_OFFSET], 0x02);
+
+    const serialization::IngestorSavedPlan saved = serialization::decodeIngestorSavedPlan(
+        MULTI_KERNEL_V1_1_GOLDEN.data(), MULTI_KERNEL_V1_1_GOLDEN.size());
+    const auto* decoded = std::get_if<serialization::IngestorMultiKernelPayload>(&saved);
+    ASSERT_NE(decoded, nullptr);
+    EXPECT_TRUE(*decoded == multiKernelSamplePayload());
+
+    EXPECT_EQ(decoded->sharedWorkspaceBytes, 1024U);
+    EXPECT_EQ(decoded->workspaceBytes, 4096U);
+    EXPECT_EQ(decoded->runtimePassByValueUids, (std::vector<int64_t>{7, 9}));
+    EXPECT_EQ(decoded->providerVersion, "1.1.0");
+
+    ASSERT_EQ(decoded->codeObjects.size(), 2U);
+    EXPECT_EQ(decoded->codeObjects[0].sourceKind, KernelSourceKind::KPACK);
+    EXPECT_EQ(decoded->codeObjects[0].target, "gfx942");
+    EXPECT_EQ(decoded->codeObjects[1].sourceKind, KernelSourceKind::HSACO_FILE);
+    EXPECT_EQ(decoded->codeObjects[1].target, "gfx90a");
+
+    ASSERT_EQ(decoded->stages.size(), 2U);
+    const serialization::IngestorStagePayload& stageA = decoded->stages[0];
+    EXPECT_EQ(stageA.slot, "slot_a");
+    EXPECT_EQ(stageA.dispatchSymbol, "hipkernel.sample_multi_a.dispatch.v1");
+    EXPECT_EQ(std::get<int64_t>(stageA.launchValues.at("x.uid")), 11);
+    EXPECT_EQ(std::get<int64_t>(stageA.launchValues.at("block_size")), 256);
+    EXPECT_EQ(std::get<double>(stageA.launchValues.at("scale")), 0.5);
+    ASSERT_EQ(stageA.kernels.size(), 2U);
+    EXPECT_EQ(stageA.kernels[0].launchName, "dq");
+    EXPECT_EQ(stageA.kernels[0].symbol, "golden_dq");
+    EXPECT_EQ(stageA.kernels[0].codeObjectIndex, 0U);
+    EXPECT_EQ(stageA.kernels[1].launchName, "dbias_reduce");
+    EXPECT_EQ(stageA.kernels[1].symbol, "golden_reduce");
+    EXPECT_EQ(stageA.kernels[1].codeObjectIndex, 1U);
+
+    const serialization::IngestorStagePayload& stageB = decoded->stages[1];
+    EXPECT_EQ(stageB.slot, "slot_b");
+    EXPECT_EQ(stageB.dispatchSymbol, "hipkernel.sample_multi_b.dispatch.v1");
+    EXPECT_EQ(std::get<int64_t>(stageB.launchValues.at("y.uid")), 22);
+    EXPECT_EQ(std::get<std::string>(stageB.launchValues.at("layout")), "bshd");
+    EXPECT_EQ(std::get<std::vector<int64_t>>(stageB.launchValues.at("shape")),
+              (std::vector<int64_t>{2, 3}));
+    EXPECT_TRUE(std::get<bool>(stageB.launchValues.at("flag")));
+    ASSERT_EQ(stageB.kernels.size(), 1U);
+    EXPECT_EQ(stageB.kernels[0].launchName, "");
+    EXPECT_EQ(stageB.kernels[0].codeObjectIndex, 0U);
+}
+
 // ---------------------------------------------------------------------------
 // Writing a sample
 // ---------------------------------------------------------------------------
-
-std::string hexByte(uint8_t value)
-{
-    constexpr std::string_view DIGITS = "0123456789ABCDEF";
-    std::string text = "0x00";
-    text[2] = DIGITS[static_cast<size_t>(value >> 4U)];
-    text[3] = DIGITS[static_cast<size_t>(value & 0x0FU)];
-    return text;
-}
-
-void printSample(std::string_view name, const std::vector<uint8_t>& bytes)
-{
-    constexpr size_t PER_LINE = 12;
-    std::cout << "constexpr std::array<uint8_t, " << bytes.size() << "> " << name << " = {\n";
-    for(size_t index = 0; index < bytes.size(); ++index)
-    {
-        const bool lineStart = index % PER_LINE == 0;
-        const bool last = index + 1 == bytes.size();
-        std::cout << (lineStart ? "    " : " ") << hexByte(bytes[index]) << (last ? "" : ",")
-                  << ((last || index % PER_LINE == PER_LINE - 1) ? "\n" : "");
-    }
-    std::cout << "};\n\n";
-}
 
 // Writes one payload per contract as a C++ array, for a new sample to be checked in
 // beside the ones already here. Excluded from every suite: it asserts nothing and only
 // prints.
 TEST(TestIngestorPlanLaunchContractGoldens, DISABLED_PrintLaunchContractSamples)
 {
-    printSample("POINTWISE_V1_GOLDEN", serialization::encodeIngestorPlan(pointwiseSamplePayload()));
-    printSample("CONV_FWD_V1_GOLDEN", serialization::encodeIngestorPlan(convFwdSamplePayload()));
-    printSample("GFX950_ATTENTION_DENSE_V1_GOLDEN",
-                serialization::encodeIngestorPlan(gfx950AttentionDenseSamplePayload()));
-    printSample("GFX950_ATTENTION_DENSE_V2_GOLDEN",
-                serialization::encodeIngestorPlan(gfx950AttentionDenseV2SamplePayload()));
-    printSample("GFX942_ATTENTION_DENSE_V1_DENSE_GOLDEN",
-                serialization::encodeIngestorPlan(gfx942AttentionDenseDenseSamplePayload()));
-    printSample("GFX942_ATTENTION_DENSE_V1_DENSE_LSE_GOLDEN",
-                serialization::encodeIngestorPlan(gfx942AttentionDenseDenseLseSamplePayload()));
-    printSample(
+    serialization::printGoldenSample("POINTWISE_V1_GOLDEN",
+                                     serialization::encodeIngestorPlan(pointwiseSamplePayload()));
+    serialization::printGoldenSample("CONV_FWD_V1_GOLDEN",
+                                     serialization::encodeIngestorPlan(convFwdSamplePayload()));
+    serialization::printGoldenSample(
+        "GFX950_ATTENTION_DENSE_V1_GOLDEN",
+        serialization::encodeIngestorPlan(gfx950AttentionDenseSamplePayload()));
+    serialization::printGoldenSample(
+        "GFX950_ATTENTION_DENSE_V2_GOLDEN",
+        serialization::encodeIngestorPlan(gfx950AttentionDenseV2SamplePayload()));
+    serialization::printGoldenSample(
+        "GFX942_ATTENTION_DENSE_V1_DENSE_GOLDEN",
+        serialization::encodeIngestorPlan(gfx942AttentionDenseDenseSamplePayload()));
+    serialization::printGoldenSample(
+        "GFX942_ATTENTION_DENSE_V1_DENSE_LSE_GOLDEN",
+        serialization::encodeIngestorPlan(gfx942AttentionDenseDenseLseSamplePayload()));
+    serialization::printGoldenSample(
         "GFX942_ATTENTION_DENSE_V1_PERSISTENT_TWO_PAIR_LSE_GOLDEN",
         serialization::encodeIngestorPlan(gfx942AttentionDensePersistentTwoPairLseSamplePayload()));
-    printSample(
+    serialization::printGoldenSample(
         "GFX942_ATTENTION_DENSE_V1_PERSISTENT_THREE_PAIR_GOLDEN",
         serialization::encodeIngestorPlan(gfx942AttentionDensePersistentThreePairSamplePayload()));
+    serialization::printGoldenSample("MULTI_KERNEL_V1_1_GOLDEN",
+                                     serialization::encodeIngestorPlan(multiKernelSamplePayload()));
 }
 
 } // namespace

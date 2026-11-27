@@ -5,13 +5,17 @@ target_sources(hip_kernel_provider_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/TestCodeObjectTarget.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/TestHandleDeviceResolver.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/TestIngestorKernelCode.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/TestIngestorPlanMultiKernelCapture.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/TestIngestorPlanMultiKernelRestore.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/TestIngestorPlanRestoreChecks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/TestKernelIngestorEngine.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/TestLaunchKernelDefinition.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/TestMultiLaunchEndToEnd.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/TestMultiLaunchSaveLoad.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/TestRankingTraceSupport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/TestUnpulledModelsRecord.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/TestRestoredIngestorPlan.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/TestRestoredSlotProgramPlan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestPointwiseAddDispatchHandler.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestPointwiseAddMatchers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestStandalonePointwise.cpp
@@ -54,9 +58,11 @@ target_sources(hip_kernel_provider_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1250ConvDgradMatchers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1151WmmaAttentionPaged.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestIngestorDispatchAliases.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestIngestorScalarBindings.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestPackLaunchValues.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/serialization/TestIngestorPlanHeader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/serialization/TestIngestorPlanCodec.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/serialization/TestIngestorPlanMultiKernelCodec.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/serialization/TestIngestorPlanLaunchContractGoldens.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/serialization/TestSerializableSourceKind.cpp
 )
@@ -161,6 +167,9 @@ if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaBwdObjects.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaBwdRemovedKeys.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaBwdParity.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaBwdHandlerRestore.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaBwdSaveLoad.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/serialization/TestFlydslSdpaBwdLaunchContractGoldens.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaBwdObjectsPerObject.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaBwdPhiloxOracle.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaBwdPhiloxDevice.cpp

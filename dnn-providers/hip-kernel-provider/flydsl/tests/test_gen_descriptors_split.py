@@ -206,8 +206,8 @@ def test_the_ued_is_slotted_1_1_and_carries_no_engine_wide_selection() -> None:
     }
     for member in FORBIDDEN_UED_MEMBERS:
         assert member not in ued
-    # A slotted engine's plans cannot be saved, so the serialization note is not authored;
-    # graph capture is its only note.
+    # The runtime computes the serialization note, so it is not authored; graph capture is
+    # the only authored note.
     assert ued["behavior_notes"] == ["supports_graph_capture"]
     # No ranker at all: the runtime orders a slot by priority, then id.
     assert not any("sort_kernel_catalog" in slot for slot in ued["slots"])

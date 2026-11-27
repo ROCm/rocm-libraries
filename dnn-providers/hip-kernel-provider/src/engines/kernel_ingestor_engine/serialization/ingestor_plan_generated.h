@@ -60,6 +60,22 @@ struct ExecutionPlan;
 struct ExecutionPlanBuilder;
 struct ExecutionPlanT;
 
+struct CodeObject;
+struct CodeObjectBuilder;
+struct CodeObjectT;
+
+struct StageKernel;
+struct StageKernelBuilder;
+struct StageKernelT;
+
+struct Stage;
+struct StageBuilder;
+struct StageT;
+
+struct MultiKernelPlan;
+struct MultiKernelPlanBuilder;
+struct MultiKernelPlanT;
+
 bool operator==(const Uuid &lhs, const Uuid &rhs);
 bool operator!=(const Uuid &lhs, const Uuid &rhs);
 bool operator==(const KernelArgumentT &lhs, const KernelArgumentT &rhs);
@@ -82,6 +98,14 @@ bool operator==(const KernelImageT &lhs, const KernelImageT &rhs);
 bool operator!=(const KernelImageT &lhs, const KernelImageT &rhs);
 bool operator==(const ExecutionPlanT &lhs, const ExecutionPlanT &rhs);
 bool operator!=(const ExecutionPlanT &lhs, const ExecutionPlanT &rhs);
+bool operator==(const CodeObjectT &lhs, const CodeObjectT &rhs);
+bool operator!=(const CodeObjectT &lhs, const CodeObjectT &rhs);
+bool operator==(const StageKernelT &lhs, const StageKernelT &rhs);
+bool operator!=(const StageKernelT &lhs, const StageKernelT &rhs);
+bool operator==(const StageT &lhs, const StageT &rhs);
+bool operator!=(const StageT &lhs, const StageT &rhs);
+bool operator==(const MultiKernelPlanT &lhs, const MultiKernelPlanT &rhs);
+bool operator!=(const MultiKernelPlanT &lhs, const MultiKernelPlanT &rhs);
 
 enum class SourceKind : uint8_t {
   UNSET = 0,
@@ -1310,6 +1334,538 @@ inline ::flatbuffers::Offset<ExecutionPlan> CreateExecutionPlanDirect(
 
 ::flatbuffers::Offset<ExecutionPlan> CreateExecutionPlan(::flatbuffers::FlatBufferBuilder &_fbb, const ExecutionPlanT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
 
+struct CodeObjectT : public ::flatbuffers::NativeTable {
+  typedef CodeObject TableType;
+  hip_kernel_provider::kernel_ingestor_engine::serialization::fb::SourceKind source_kind = hip_kernel_provider::kernel_ingestor_engine::serialization::fb::SourceKind::UNSET;
+  std::string target{};
+  std::string sha256{};
+  std::vector<uint8_t> code_object{};
+};
+
+struct CodeObject FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
+  typedef CodeObjectT NativeTableType;
+  typedef CodeObjectBuilder Builder;
+  enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
+    VT_SOURCE_KIND = 4,
+    VT_TARGET = 6,
+    VT_SHA256 = 8,
+    VT_CODE_OBJECT = 10
+  };
+  hip_kernel_provider::kernel_ingestor_engine::serialization::fb::SourceKind source_kind() const {
+    return static_cast<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::SourceKind>(GetField<uint8_t>(VT_SOURCE_KIND, 0));
+  }
+  bool mutate_source_kind(hip_kernel_provider::kernel_ingestor_engine::serialization::fb::SourceKind _source_kind = static_cast<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::SourceKind>(0)) {
+    return SetField<uint8_t>(VT_SOURCE_KIND, static_cast<uint8_t>(_source_kind), 0);
+  }
+  const ::flatbuffers::String *target() const {
+    return GetPointer<const ::flatbuffers::String *>(VT_TARGET);
+  }
+  ::flatbuffers::String *mutable_target() {
+    return GetPointer<::flatbuffers::String *>(VT_TARGET);
+  }
+  const ::flatbuffers::String *sha256() const {
+    return GetPointer<const ::flatbuffers::String *>(VT_SHA256);
+  }
+  ::flatbuffers::String *mutable_sha256() {
+    return GetPointer<::flatbuffers::String *>(VT_SHA256);
+  }
+  const ::flatbuffers::Vector<uint8_t> *code_object() const {
+    return GetPointer<const ::flatbuffers::Vector<uint8_t> *>(VT_CODE_OBJECT);
+  }
+  ::flatbuffers::Vector<uint8_t> *mutable_code_object() {
+    return GetPointer<::flatbuffers::Vector<uint8_t> *>(VT_CODE_OBJECT);
+  }
+  bool Verify(::flatbuffers::Verifier &verifier) const {
+    return VerifyTableStart(verifier) &&
+           VerifyField<uint8_t>(verifier, VT_SOURCE_KIND, 1) &&
+           VerifyOffsetRequired(verifier, VT_TARGET) &&
+           verifier.VerifyString(target()) &&
+           VerifyOffsetRequired(verifier, VT_SHA256) &&
+           verifier.VerifyString(sha256()) &&
+           VerifyOffsetRequired(verifier, VT_CODE_OBJECT) &&
+           verifier.VerifyVector(code_object()) &&
+           verifier.EndTable();
+  }
+  CodeObjectT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  void UnPackTo(CodeObjectT *_o, const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  static ::flatbuffers::Offset<CodeObject> Pack(::flatbuffers::FlatBufferBuilder &_fbb, const CodeObjectT* _o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+};
+
+struct CodeObjectBuilder {
+  typedef CodeObject Table;
+  ::flatbuffers::FlatBufferBuilder &fbb_;
+  ::flatbuffers::uoffset_t start_;
+  void add_source_kind(hip_kernel_provider::kernel_ingestor_engine::serialization::fb::SourceKind source_kind) {
+    fbb_.AddElement<uint8_t>(CodeObject::VT_SOURCE_KIND, static_cast<uint8_t>(source_kind), 0);
+  }
+  void add_target(::flatbuffers::Offset<::flatbuffers::String> target) {
+    fbb_.AddOffset(CodeObject::VT_TARGET, target);
+  }
+  void add_sha256(::flatbuffers::Offset<::flatbuffers::String> sha256) {
+    fbb_.AddOffset(CodeObject::VT_SHA256, sha256);
+  }
+  void add_code_object(::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> code_object) {
+    fbb_.AddOffset(CodeObject::VT_CODE_OBJECT, code_object);
+  }
+  explicit CodeObjectBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  ::flatbuffers::Offset<CodeObject> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = ::flatbuffers::Offset<CodeObject>(end);
+    fbb_.Required(o, CodeObject::VT_TARGET);
+    fbb_.Required(o, CodeObject::VT_SHA256);
+    fbb_.Required(o, CodeObject::VT_CODE_OBJECT);
+    return o;
+  }
+};
+
+inline ::flatbuffers::Offset<CodeObject> CreateCodeObject(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    hip_kernel_provider::kernel_ingestor_engine::serialization::fb::SourceKind source_kind = hip_kernel_provider::kernel_ingestor_engine::serialization::fb::SourceKind::UNSET,
+    ::flatbuffers::Offset<::flatbuffers::String> target = 0,
+    ::flatbuffers::Offset<::flatbuffers::String> sha256 = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> code_object = 0) {
+  CodeObjectBuilder builder_(_fbb);
+  builder_.add_code_object(code_object);
+  builder_.add_sha256(sha256);
+  builder_.add_target(target);
+  builder_.add_source_kind(source_kind);
+  return builder_.Finish();
+}
+
+inline ::flatbuffers::Offset<CodeObject> CreateCodeObjectDirect(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    hip_kernel_provider::kernel_ingestor_engine::serialization::fb::SourceKind source_kind = hip_kernel_provider::kernel_ingestor_engine::serialization::fb::SourceKind::UNSET,
+    const char *target = nullptr,
+    const char *sha256 = nullptr,
+    const std::vector<uint8_t> *code_object = nullptr) {
+  auto target__ = target ? _fbb.CreateString(target) : 0;
+  auto sha256__ = sha256 ? _fbb.CreateString(sha256) : 0;
+  if (code_object) { _fbb.ForceVectorAlignment(code_object->size(), sizeof(uint8_t), 16); }
+  auto code_object__ = code_object ? _fbb.CreateVector<uint8_t>(*code_object) : 0;
+  return hip_kernel_provider::kernel_ingestor_engine::serialization::fb::CreateCodeObject(
+      _fbb,
+      source_kind,
+      target__,
+      sha256__,
+      code_object__);
+}
+
+::flatbuffers::Offset<CodeObject> CreateCodeObject(::flatbuffers::FlatBufferBuilder &_fbb, const CodeObjectT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+
+struct StageKernelT : public ::flatbuffers::NativeTable {
+  typedef StageKernel TableType;
+  std::string launch_name{};
+  std::string symbol{};
+  std::vector<std::unique_ptr<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::KernelArgumentT>> signature{};
+  uint32_t code_object_index = 0;
+  StageKernelT() = default;
+  StageKernelT(const StageKernelT &o);
+  StageKernelT(StageKernelT&&) FLATBUFFERS_NOEXCEPT = default;
+  StageKernelT &operator=(StageKernelT o) FLATBUFFERS_NOEXCEPT;
+};
+
+struct StageKernel FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
+  typedef StageKernelT NativeTableType;
+  typedef StageKernelBuilder Builder;
+  enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
+    VT_LAUNCH_NAME = 4,
+    VT_SYMBOL = 6,
+    VT_SIGNATURE = 8,
+    VT_CODE_OBJECT_INDEX = 10
+  };
+  const ::flatbuffers::String *launch_name() const {
+    return GetPointer<const ::flatbuffers::String *>(VT_LAUNCH_NAME);
+  }
+  ::flatbuffers::String *mutable_launch_name() {
+    return GetPointer<::flatbuffers::String *>(VT_LAUNCH_NAME);
+  }
+  const ::flatbuffers::String *symbol() const {
+    return GetPointer<const ::flatbuffers::String *>(VT_SYMBOL);
+  }
+  ::flatbuffers::String *mutable_symbol() {
+    return GetPointer<::flatbuffers::String *>(VT_SYMBOL);
+  }
+  const ::flatbuffers::Vector<::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::KernelArgument>> *signature() const {
+    return GetPointer<const ::flatbuffers::Vector<::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::KernelArgument>> *>(VT_SIGNATURE);
+  }
+  ::flatbuffers::Vector<::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::KernelArgument>> *mutable_signature() {
+    return GetPointer<::flatbuffers::Vector<::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::KernelArgument>> *>(VT_SIGNATURE);
+  }
+  uint32_t code_object_index() const {
+    return GetField<uint32_t>(VT_CODE_OBJECT_INDEX, 0);
+  }
+  bool mutate_code_object_index(uint32_t _code_object_index = 0) {
+    return SetField<uint32_t>(VT_CODE_OBJECT_INDEX, _code_object_index, 0);
+  }
+  bool Verify(::flatbuffers::Verifier &verifier) const {
+    return VerifyTableStart(verifier) &&
+           VerifyOffsetRequired(verifier, VT_LAUNCH_NAME) &&
+           verifier.VerifyString(launch_name()) &&
+           VerifyOffsetRequired(verifier, VT_SYMBOL) &&
+           verifier.VerifyString(symbol()) &&
+           VerifyOffsetRequired(verifier, VT_SIGNATURE) &&
+           verifier.VerifyVector(signature()) &&
+           verifier.VerifyVectorOfTables(signature()) &&
+           VerifyField<uint32_t>(verifier, VT_CODE_OBJECT_INDEX, 4) &&
+           verifier.EndTable();
+  }
+  StageKernelT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  void UnPackTo(StageKernelT *_o, const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  static ::flatbuffers::Offset<StageKernel> Pack(::flatbuffers::FlatBufferBuilder &_fbb, const StageKernelT* _o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+};
+
+struct StageKernelBuilder {
+  typedef StageKernel Table;
+  ::flatbuffers::FlatBufferBuilder &fbb_;
+  ::flatbuffers::uoffset_t start_;
+  void add_launch_name(::flatbuffers::Offset<::flatbuffers::String> launch_name) {
+    fbb_.AddOffset(StageKernel::VT_LAUNCH_NAME, launch_name);
+  }
+  void add_symbol(::flatbuffers::Offset<::flatbuffers::String> symbol) {
+    fbb_.AddOffset(StageKernel::VT_SYMBOL, symbol);
+  }
+  void add_signature(::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::KernelArgument>>> signature) {
+    fbb_.AddOffset(StageKernel::VT_SIGNATURE, signature);
+  }
+  void add_code_object_index(uint32_t code_object_index) {
+    fbb_.AddElement<uint32_t>(StageKernel::VT_CODE_OBJECT_INDEX, code_object_index, 0);
+  }
+  explicit StageKernelBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  ::flatbuffers::Offset<StageKernel> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = ::flatbuffers::Offset<StageKernel>(end);
+    fbb_.Required(o, StageKernel::VT_LAUNCH_NAME);
+    fbb_.Required(o, StageKernel::VT_SYMBOL);
+    fbb_.Required(o, StageKernel::VT_SIGNATURE);
+    return o;
+  }
+};
+
+inline ::flatbuffers::Offset<StageKernel> CreateStageKernel(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    ::flatbuffers::Offset<::flatbuffers::String> launch_name = 0,
+    ::flatbuffers::Offset<::flatbuffers::String> symbol = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::KernelArgument>>> signature = 0,
+    uint32_t code_object_index = 0) {
+  StageKernelBuilder builder_(_fbb);
+  builder_.add_code_object_index(code_object_index);
+  builder_.add_signature(signature);
+  builder_.add_symbol(symbol);
+  builder_.add_launch_name(launch_name);
+  return builder_.Finish();
+}
+
+inline ::flatbuffers::Offset<StageKernel> CreateStageKernelDirect(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    const char *launch_name = nullptr,
+    const char *symbol = nullptr,
+    const std::vector<::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::KernelArgument>> *signature = nullptr,
+    uint32_t code_object_index = 0) {
+  auto launch_name__ = launch_name ? _fbb.CreateString(launch_name) : 0;
+  auto symbol__ = symbol ? _fbb.CreateString(symbol) : 0;
+  auto signature__ = signature ? _fbb.CreateVector<::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::KernelArgument>>(*signature) : 0;
+  return hip_kernel_provider::kernel_ingestor_engine::serialization::fb::CreateStageKernel(
+      _fbb,
+      launch_name__,
+      symbol__,
+      signature__,
+      code_object_index);
+}
+
+::flatbuffers::Offset<StageKernel> CreateStageKernel(::flatbuffers::FlatBufferBuilder &_fbb, const StageKernelT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+
+struct StageT : public ::flatbuffers::NativeTable {
+  typedef Stage TableType;
+  std::string slot{};
+  std::unique_ptr<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Uuid> kernel_descriptor_id{};
+  std::unique_ptr<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::DispatchDataT> dispatch_data{};
+  std::vector<std::unique_ptr<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::StageKernelT>> kernels{};
+  StageT() = default;
+  StageT(const StageT &o);
+  StageT(StageT&&) FLATBUFFERS_NOEXCEPT = default;
+  StageT &operator=(StageT o) FLATBUFFERS_NOEXCEPT;
+};
+
+struct Stage FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
+  typedef StageT NativeTableType;
+  typedef StageBuilder Builder;
+  enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
+    VT_SLOT = 4,
+    VT_KERNEL_DESCRIPTOR_ID = 6,
+    VT_DISPATCH_DATA = 8,
+    VT_KERNELS = 10
+  };
+  const ::flatbuffers::String *slot() const {
+    return GetPointer<const ::flatbuffers::String *>(VT_SLOT);
+  }
+  ::flatbuffers::String *mutable_slot() {
+    return GetPointer<::flatbuffers::String *>(VT_SLOT);
+  }
+  const hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Uuid *kernel_descriptor_id() const {
+    return GetStruct<const hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Uuid *>(VT_KERNEL_DESCRIPTOR_ID);
+  }
+  hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Uuid *mutable_kernel_descriptor_id() {
+    return GetStruct<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Uuid *>(VT_KERNEL_DESCRIPTOR_ID);
+  }
+  const hip_kernel_provider::kernel_ingestor_engine::serialization::fb::DispatchData *dispatch_data() const {
+    return GetPointer<const hip_kernel_provider::kernel_ingestor_engine::serialization::fb::DispatchData *>(VT_DISPATCH_DATA);
+  }
+  hip_kernel_provider::kernel_ingestor_engine::serialization::fb::DispatchData *mutable_dispatch_data() {
+    return GetPointer<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::DispatchData *>(VT_DISPATCH_DATA);
+  }
+  const ::flatbuffers::Vector<::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::StageKernel>> *kernels() const {
+    return GetPointer<const ::flatbuffers::Vector<::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::StageKernel>> *>(VT_KERNELS);
+  }
+  ::flatbuffers::Vector<::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::StageKernel>> *mutable_kernels() {
+    return GetPointer<::flatbuffers::Vector<::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::StageKernel>> *>(VT_KERNELS);
+  }
+  bool Verify(::flatbuffers::Verifier &verifier) const {
+    return VerifyTableStart(verifier) &&
+           VerifyOffsetRequired(verifier, VT_SLOT) &&
+           verifier.VerifyString(slot()) &&
+           VerifyFieldRequired<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Uuid>(verifier, VT_KERNEL_DESCRIPTOR_ID, 1) &&
+           VerifyOffsetRequired(verifier, VT_DISPATCH_DATA) &&
+           verifier.VerifyTable(dispatch_data()) &&
+           VerifyOffsetRequired(verifier, VT_KERNELS) &&
+           verifier.VerifyVector(kernels()) &&
+           verifier.VerifyVectorOfTables(kernels()) &&
+           verifier.EndTable();
+  }
+  StageT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  void UnPackTo(StageT *_o, const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  static ::flatbuffers::Offset<Stage> Pack(::flatbuffers::FlatBufferBuilder &_fbb, const StageT* _o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+};
+
+struct StageBuilder {
+  typedef Stage Table;
+  ::flatbuffers::FlatBufferBuilder &fbb_;
+  ::flatbuffers::uoffset_t start_;
+  void add_slot(::flatbuffers::Offset<::flatbuffers::String> slot) {
+    fbb_.AddOffset(Stage::VT_SLOT, slot);
+  }
+  void add_kernel_descriptor_id(const hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Uuid *kernel_descriptor_id) {
+    fbb_.AddStruct(Stage::VT_KERNEL_DESCRIPTOR_ID, kernel_descriptor_id);
+  }
+  void add_dispatch_data(::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::DispatchData> dispatch_data) {
+    fbb_.AddOffset(Stage::VT_DISPATCH_DATA, dispatch_data);
+  }
+  void add_kernels(::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::StageKernel>>> kernels) {
+    fbb_.AddOffset(Stage::VT_KERNELS, kernels);
+  }
+  explicit StageBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  ::flatbuffers::Offset<Stage> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = ::flatbuffers::Offset<Stage>(end);
+    fbb_.Required(o, Stage::VT_SLOT);
+    fbb_.Required(o, Stage::VT_KERNEL_DESCRIPTOR_ID);
+    fbb_.Required(o, Stage::VT_DISPATCH_DATA);
+    fbb_.Required(o, Stage::VT_KERNELS);
+    return o;
+  }
+};
+
+inline ::flatbuffers::Offset<Stage> CreateStage(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    ::flatbuffers::Offset<::flatbuffers::String> slot = 0,
+    const hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Uuid *kernel_descriptor_id = nullptr,
+    ::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::DispatchData> dispatch_data = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::StageKernel>>> kernels = 0) {
+  StageBuilder builder_(_fbb);
+  builder_.add_kernels(kernels);
+  builder_.add_dispatch_data(dispatch_data);
+  builder_.add_kernel_descriptor_id(kernel_descriptor_id);
+  builder_.add_slot(slot);
+  return builder_.Finish();
+}
+
+inline ::flatbuffers::Offset<Stage> CreateStageDirect(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    const char *slot = nullptr,
+    const hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Uuid *kernel_descriptor_id = nullptr,
+    ::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::DispatchData> dispatch_data = 0,
+    const std::vector<::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::StageKernel>> *kernels = nullptr) {
+  auto slot__ = slot ? _fbb.CreateString(slot) : 0;
+  auto kernels__ = kernels ? _fbb.CreateVector<::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::StageKernel>>(*kernels) : 0;
+  return hip_kernel_provider::kernel_ingestor_engine::serialization::fb::CreateStage(
+      _fbb,
+      slot__,
+      kernel_descriptor_id,
+      dispatch_data,
+      kernels__);
+}
+
+::flatbuffers::Offset<Stage> CreateStage(::flatbuffers::FlatBufferBuilder &_fbb, const StageT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+
+struct MultiKernelPlanT : public ::flatbuffers::NativeTable {
+  typedef MultiKernelPlan TableType;
+  std::vector<std::unique_ptr<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::StageT>> stages{};
+  std::vector<std::unique_ptr<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::CodeObjectT>> code_objects{};
+  ::flatbuffers::Optional<uint64_t> shared_workspace_bytes = ::flatbuffers::nullopt;
+  ::flatbuffers::Optional<uint64_t> workspace_bytes = ::flatbuffers::nullopt;
+  std::vector<int64_t> runtime_pass_by_value_uids{};
+  std::string provider_version{};
+  MultiKernelPlanT() = default;
+  MultiKernelPlanT(const MultiKernelPlanT &o);
+  MultiKernelPlanT(MultiKernelPlanT&&) FLATBUFFERS_NOEXCEPT = default;
+  MultiKernelPlanT &operator=(MultiKernelPlanT o) FLATBUFFERS_NOEXCEPT;
+};
+
+struct MultiKernelPlan FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
+  typedef MultiKernelPlanT NativeTableType;
+  typedef MultiKernelPlanBuilder Builder;
+  enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
+    VT_STAGES = 4,
+    VT_CODE_OBJECTS = 6,
+    VT_SHARED_WORKSPACE_BYTES = 8,
+    VT_WORKSPACE_BYTES = 10,
+    VT_RUNTIME_PASS_BY_VALUE_UIDS = 12,
+    VT_PROVIDER_VERSION = 14
+  };
+  const ::flatbuffers::Vector<::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Stage>> *stages() const {
+    return GetPointer<const ::flatbuffers::Vector<::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Stage>> *>(VT_STAGES);
+  }
+  ::flatbuffers::Vector<::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Stage>> *mutable_stages() {
+    return GetPointer<::flatbuffers::Vector<::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Stage>> *>(VT_STAGES);
+  }
+  const ::flatbuffers::Vector<::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::CodeObject>> *code_objects() const {
+    return GetPointer<const ::flatbuffers::Vector<::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::CodeObject>> *>(VT_CODE_OBJECTS);
+  }
+  ::flatbuffers::Vector<::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::CodeObject>> *mutable_code_objects() {
+    return GetPointer<::flatbuffers::Vector<::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::CodeObject>> *>(VT_CODE_OBJECTS);
+  }
+  ::flatbuffers::Optional<uint64_t> shared_workspace_bytes() const {
+    return GetOptional<uint64_t, uint64_t>(VT_SHARED_WORKSPACE_BYTES);
+  }
+  bool mutate_shared_workspace_bytes(uint64_t _shared_workspace_bytes) {
+    return SetField<uint64_t>(VT_SHARED_WORKSPACE_BYTES, _shared_workspace_bytes);
+  }
+  ::flatbuffers::Optional<uint64_t> workspace_bytes() const {
+    return GetOptional<uint64_t, uint64_t>(VT_WORKSPACE_BYTES);
+  }
+  bool mutate_workspace_bytes(uint64_t _workspace_bytes) {
+    return SetField<uint64_t>(VT_WORKSPACE_BYTES, _workspace_bytes);
+  }
+  const ::flatbuffers::Vector<int64_t> *runtime_pass_by_value_uids() const {
+    return GetPointer<const ::flatbuffers::Vector<int64_t> *>(VT_RUNTIME_PASS_BY_VALUE_UIDS);
+  }
+  ::flatbuffers::Vector<int64_t> *mutable_runtime_pass_by_value_uids() {
+    return GetPointer<::flatbuffers::Vector<int64_t> *>(VT_RUNTIME_PASS_BY_VALUE_UIDS);
+  }
+  const ::flatbuffers::String *provider_version() const {
+    return GetPointer<const ::flatbuffers::String *>(VT_PROVIDER_VERSION);
+  }
+  ::flatbuffers::String *mutable_provider_version() {
+    return GetPointer<::flatbuffers::String *>(VT_PROVIDER_VERSION);
+  }
+  bool Verify(::flatbuffers::Verifier &verifier) const {
+    return VerifyTableStart(verifier) &&
+           VerifyOffsetRequired(verifier, VT_STAGES) &&
+           verifier.VerifyVector(stages()) &&
+           verifier.VerifyVectorOfTables(stages()) &&
+           VerifyOffsetRequired(verifier, VT_CODE_OBJECTS) &&
+           verifier.VerifyVector(code_objects()) &&
+           verifier.VerifyVectorOfTables(code_objects()) &&
+           VerifyField<uint64_t>(verifier, VT_SHARED_WORKSPACE_BYTES, 8) &&
+           VerifyField<uint64_t>(verifier, VT_WORKSPACE_BYTES, 8) &&
+           VerifyOffsetRequired(verifier, VT_RUNTIME_PASS_BY_VALUE_UIDS) &&
+           verifier.VerifyVector(runtime_pass_by_value_uids()) &&
+           VerifyOffsetRequired(verifier, VT_PROVIDER_VERSION) &&
+           verifier.VerifyString(provider_version()) &&
+           verifier.EndTable();
+  }
+  MultiKernelPlanT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  void UnPackTo(MultiKernelPlanT *_o, const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  static ::flatbuffers::Offset<MultiKernelPlan> Pack(::flatbuffers::FlatBufferBuilder &_fbb, const MultiKernelPlanT* _o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+};
+
+struct MultiKernelPlanBuilder {
+  typedef MultiKernelPlan Table;
+  ::flatbuffers::FlatBufferBuilder &fbb_;
+  ::flatbuffers::uoffset_t start_;
+  void add_stages(::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Stage>>> stages) {
+    fbb_.AddOffset(MultiKernelPlan::VT_STAGES, stages);
+  }
+  void add_code_objects(::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::CodeObject>>> code_objects) {
+    fbb_.AddOffset(MultiKernelPlan::VT_CODE_OBJECTS, code_objects);
+  }
+  void add_shared_workspace_bytes(uint64_t shared_workspace_bytes) {
+    fbb_.AddElement<uint64_t>(MultiKernelPlan::VT_SHARED_WORKSPACE_BYTES, shared_workspace_bytes);
+  }
+  void add_workspace_bytes(uint64_t workspace_bytes) {
+    fbb_.AddElement<uint64_t>(MultiKernelPlan::VT_WORKSPACE_BYTES, workspace_bytes);
+  }
+  void add_runtime_pass_by_value_uids(::flatbuffers::Offset<::flatbuffers::Vector<int64_t>> runtime_pass_by_value_uids) {
+    fbb_.AddOffset(MultiKernelPlan::VT_RUNTIME_PASS_BY_VALUE_UIDS, runtime_pass_by_value_uids);
+  }
+  void add_provider_version(::flatbuffers::Offset<::flatbuffers::String> provider_version) {
+    fbb_.AddOffset(MultiKernelPlan::VT_PROVIDER_VERSION, provider_version);
+  }
+  explicit MultiKernelPlanBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  ::flatbuffers::Offset<MultiKernelPlan> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = ::flatbuffers::Offset<MultiKernelPlan>(end);
+    fbb_.Required(o, MultiKernelPlan::VT_STAGES);
+    fbb_.Required(o, MultiKernelPlan::VT_CODE_OBJECTS);
+    fbb_.Required(o, MultiKernelPlan::VT_RUNTIME_PASS_BY_VALUE_UIDS);
+    fbb_.Required(o, MultiKernelPlan::VT_PROVIDER_VERSION);
+    return o;
+  }
+};
+
+inline ::flatbuffers::Offset<MultiKernelPlan> CreateMultiKernelPlan(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Stage>>> stages = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::CodeObject>>> code_objects = 0,
+    ::flatbuffers::Optional<uint64_t> shared_workspace_bytes = ::flatbuffers::nullopt,
+    ::flatbuffers::Optional<uint64_t> workspace_bytes = ::flatbuffers::nullopt,
+    ::flatbuffers::Offset<::flatbuffers::Vector<int64_t>> runtime_pass_by_value_uids = 0,
+    ::flatbuffers::Offset<::flatbuffers::String> provider_version = 0) {
+  MultiKernelPlanBuilder builder_(_fbb);
+  if(workspace_bytes) { builder_.add_workspace_bytes(*workspace_bytes); }
+  if(shared_workspace_bytes) { builder_.add_shared_workspace_bytes(*shared_workspace_bytes); }
+  builder_.add_provider_version(provider_version);
+  builder_.add_runtime_pass_by_value_uids(runtime_pass_by_value_uids);
+  builder_.add_code_objects(code_objects);
+  builder_.add_stages(stages);
+  return builder_.Finish();
+}
+
+inline ::flatbuffers::Offset<MultiKernelPlan> CreateMultiKernelPlanDirect(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    const std::vector<::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Stage>> *stages = nullptr,
+    const std::vector<::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::CodeObject>> *code_objects = nullptr,
+    ::flatbuffers::Optional<uint64_t> shared_workspace_bytes = ::flatbuffers::nullopt,
+    ::flatbuffers::Optional<uint64_t> workspace_bytes = ::flatbuffers::nullopt,
+    const std::vector<int64_t> *runtime_pass_by_value_uids = nullptr,
+    const char *provider_version = nullptr) {
+  auto stages__ = stages ? _fbb.CreateVector<::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Stage>>(*stages) : 0;
+  auto code_objects__ = code_objects ? _fbb.CreateVector<::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::CodeObject>>(*code_objects) : 0;
+  auto runtime_pass_by_value_uids__ = runtime_pass_by_value_uids ? _fbb.CreateVector<int64_t>(*runtime_pass_by_value_uids) : 0;
+  auto provider_version__ = provider_version ? _fbb.CreateString(provider_version) : 0;
+  return hip_kernel_provider::kernel_ingestor_engine::serialization::fb::CreateMultiKernelPlan(
+      _fbb,
+      stages__,
+      code_objects__,
+      shared_workspace_bytes,
+      workspace_bytes,
+      runtime_pass_by_value_uids__,
+      provider_version__);
+}
+
+::flatbuffers::Offset<MultiKernelPlan> CreateMultiKernelPlan(::flatbuffers::FlatBufferBuilder &_fbb, const MultiKernelPlanT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+
 
 inline bool operator==(const KernelArgumentT &lhs, const KernelArgumentT &rhs) {
   return
@@ -1792,6 +2348,264 @@ inline ::flatbuffers::Offset<ExecutionPlan> CreateExecutionPlan(::flatbuffers::F
       _runtime_pass_by_value_uids,
       _dispatch_data,
       _kernel_image,
+      _provider_version);
+}
+
+
+inline bool operator==(const CodeObjectT &lhs, const CodeObjectT &rhs) {
+  return
+      (lhs.source_kind == rhs.source_kind) &&
+      (lhs.target == rhs.target) &&
+      (lhs.sha256 == rhs.sha256) &&
+      (lhs.code_object == rhs.code_object);
+}
+
+inline bool operator!=(const CodeObjectT &lhs, const CodeObjectT &rhs) {
+    return !(lhs == rhs);
+}
+
+
+inline CodeObjectT *CodeObject::UnPack(const ::flatbuffers::resolver_function_t *_resolver) const {
+  auto _o = std::unique_ptr<CodeObjectT>(new CodeObjectT());
+  UnPackTo(_o.get(), _resolver);
+  return _o.release();
+}
+
+inline void CodeObject::UnPackTo(CodeObjectT *_o, const ::flatbuffers::resolver_function_t *_resolver) const {
+  (void)_o;
+  (void)_resolver;
+  { auto _e = source_kind(); _o->source_kind = _e; }
+  { auto _e = target(); if (_e) _o->target = _e->str(); }
+  { auto _e = sha256(); if (_e) _o->sha256 = _e->str(); }
+  { auto _e = code_object(); if (_e) { _o->code_object.resize(_e->size()); std::copy(_e->begin(), _e->end(), _o->code_object.begin()); } }
+}
+
+inline ::flatbuffers::Offset<CodeObject> CodeObject::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const CodeObjectT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  return CreateCodeObject(_fbb, _o, _rehasher);
+}
+
+inline ::flatbuffers::Offset<CodeObject> CreateCodeObject(::flatbuffers::FlatBufferBuilder &_fbb, const CodeObjectT *_o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  (void)_rehasher;
+  (void)_o;
+  struct _VectorArgs { ::flatbuffers::FlatBufferBuilder *__fbb; const CodeObjectT* __o; const ::flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
+  auto _source_kind = _o->source_kind;
+  auto _target = _fbb.CreateString(_o->target);
+  auto _sha256 = _fbb.CreateString(_o->sha256);
+  _fbb.ForceVectorAlignment(_o->code_object.size(), sizeof(uint8_t), 16);
+  auto _code_object = _fbb.CreateVector(_o->code_object);
+  return hip_kernel_provider::kernel_ingestor_engine::serialization::fb::CreateCodeObject(
+      _fbb,
+      _source_kind,
+      _target,
+      _sha256,
+      _code_object);
+}
+
+
+inline bool operator==(const StageKernelT &lhs, const StageKernelT &rhs) {
+  return
+      (lhs.launch_name == rhs.launch_name) &&
+      (lhs.symbol == rhs.symbol) &&
+      (lhs.signature.size() == rhs.signature.size() && std::equal(lhs.signature.cbegin(), lhs.signature.cend(), rhs.signature.cbegin(), [](std::unique_ptr<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::KernelArgumentT> const &a, std::unique_ptr<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::KernelArgumentT> const &b) { return (a == b) || (a && b && *a == *b); })) &&
+      (lhs.code_object_index == rhs.code_object_index);
+}
+
+inline bool operator!=(const StageKernelT &lhs, const StageKernelT &rhs) {
+    return !(lhs == rhs);
+}
+
+
+inline StageKernelT::StageKernelT(const StageKernelT &o)
+      : launch_name(o.launch_name),
+        symbol(o.symbol),
+        code_object_index(o.code_object_index) {
+  signature.reserve(o.signature.size());
+  for (const auto &signature_ : o.signature) { signature.emplace_back((signature_) ? new hip_kernel_provider::kernel_ingestor_engine::serialization::fb::KernelArgumentT(*signature_) : nullptr); }
+}
+
+inline StageKernelT &StageKernelT::operator=(StageKernelT o) FLATBUFFERS_NOEXCEPT {
+  std::swap(launch_name, o.launch_name);
+  std::swap(symbol, o.symbol);
+  std::swap(signature, o.signature);
+  std::swap(code_object_index, o.code_object_index);
+  return *this;
+}
+
+inline StageKernelT *StageKernel::UnPack(const ::flatbuffers::resolver_function_t *_resolver) const {
+  auto _o = std::unique_ptr<StageKernelT>(new StageKernelT());
+  UnPackTo(_o.get(), _resolver);
+  return _o.release();
+}
+
+inline void StageKernel::UnPackTo(StageKernelT *_o, const ::flatbuffers::resolver_function_t *_resolver) const {
+  (void)_o;
+  (void)_resolver;
+  { auto _e = launch_name(); if (_e) _o->launch_name = _e->str(); }
+  { auto _e = symbol(); if (_e) _o->symbol = _e->str(); }
+  { auto _e = signature(); if (_e) { _o->signature.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { if(_o->signature[_i]) { _e->Get(_i)->UnPackTo(_o->signature[_i].get(), _resolver); } else { _o->signature[_i] = std::unique_ptr<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::KernelArgumentT>(_e->Get(_i)->UnPack(_resolver)); } } } else { _o->signature.resize(0); } }
+  { auto _e = code_object_index(); _o->code_object_index = _e; }
+}
+
+inline ::flatbuffers::Offset<StageKernel> StageKernel::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const StageKernelT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  return CreateStageKernel(_fbb, _o, _rehasher);
+}
+
+inline ::flatbuffers::Offset<StageKernel> CreateStageKernel(::flatbuffers::FlatBufferBuilder &_fbb, const StageKernelT *_o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  (void)_rehasher;
+  (void)_o;
+  struct _VectorArgs { ::flatbuffers::FlatBufferBuilder *__fbb; const StageKernelT* __o; const ::flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
+  auto _launch_name = _fbb.CreateString(_o->launch_name);
+  auto _symbol = _fbb.CreateString(_o->symbol);
+  auto _signature = _fbb.CreateVector<::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::KernelArgument>> (_o->signature.size(), [](size_t i, _VectorArgs *__va) { return CreateKernelArgument(*__va->__fbb, __va->__o->signature[i].get(), __va->__rehasher); }, &_va );
+  auto _code_object_index = _o->code_object_index;
+  return hip_kernel_provider::kernel_ingestor_engine::serialization::fb::CreateStageKernel(
+      _fbb,
+      _launch_name,
+      _symbol,
+      _signature,
+      _code_object_index);
+}
+
+
+inline bool operator==(const StageT &lhs, const StageT &rhs) {
+  return
+      (lhs.slot == rhs.slot) &&
+      ((lhs.kernel_descriptor_id == rhs.kernel_descriptor_id) || (lhs.kernel_descriptor_id && rhs.kernel_descriptor_id && *lhs.kernel_descriptor_id == *rhs.kernel_descriptor_id)) &&
+      ((lhs.dispatch_data == rhs.dispatch_data) || (lhs.dispatch_data && rhs.dispatch_data && *lhs.dispatch_data == *rhs.dispatch_data)) &&
+      (lhs.kernels.size() == rhs.kernels.size() && std::equal(lhs.kernels.cbegin(), lhs.kernels.cend(), rhs.kernels.cbegin(), [](std::unique_ptr<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::StageKernelT> const &a, std::unique_ptr<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::StageKernelT> const &b) { return (a == b) || (a && b && *a == *b); }));
+}
+
+inline bool operator!=(const StageT &lhs, const StageT &rhs) {
+    return !(lhs == rhs);
+}
+
+
+inline StageT::StageT(const StageT &o)
+      : slot(o.slot),
+        kernel_descriptor_id((o.kernel_descriptor_id) ? new hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Uuid(*o.kernel_descriptor_id) : nullptr),
+        dispatch_data((o.dispatch_data) ? new hip_kernel_provider::kernel_ingestor_engine::serialization::fb::DispatchDataT(*o.dispatch_data) : nullptr) {
+  kernels.reserve(o.kernels.size());
+  for (const auto &kernels_ : o.kernels) { kernels.emplace_back((kernels_) ? new hip_kernel_provider::kernel_ingestor_engine::serialization::fb::StageKernelT(*kernels_) : nullptr); }
+}
+
+inline StageT &StageT::operator=(StageT o) FLATBUFFERS_NOEXCEPT {
+  std::swap(slot, o.slot);
+  std::swap(kernel_descriptor_id, o.kernel_descriptor_id);
+  std::swap(dispatch_data, o.dispatch_data);
+  std::swap(kernels, o.kernels);
+  return *this;
+}
+
+inline StageT *Stage::UnPack(const ::flatbuffers::resolver_function_t *_resolver) const {
+  auto _o = std::unique_ptr<StageT>(new StageT());
+  UnPackTo(_o.get(), _resolver);
+  return _o.release();
+}
+
+inline void Stage::UnPackTo(StageT *_o, const ::flatbuffers::resolver_function_t *_resolver) const {
+  (void)_o;
+  (void)_resolver;
+  { auto _e = slot(); if (_e) _o->slot = _e->str(); }
+  { auto _e = kernel_descriptor_id(); if (_e) _o->kernel_descriptor_id = std::unique_ptr<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Uuid>(new hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Uuid(*_e)); }
+  { auto _e = dispatch_data(); if (_e) { if(_o->dispatch_data) { _e->UnPackTo(_o->dispatch_data.get(), _resolver); } else { _o->dispatch_data = std::unique_ptr<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::DispatchDataT>(_e->UnPack(_resolver)); } } else if (_o->dispatch_data) { _o->dispatch_data.reset(); } }
+  { auto _e = kernels(); if (_e) { _o->kernels.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { if(_o->kernels[_i]) { _e->Get(_i)->UnPackTo(_o->kernels[_i].get(), _resolver); } else { _o->kernels[_i] = std::unique_ptr<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::StageKernelT>(_e->Get(_i)->UnPack(_resolver)); } } } else { _o->kernels.resize(0); } }
+}
+
+inline ::flatbuffers::Offset<Stage> Stage::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const StageT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  return CreateStage(_fbb, _o, _rehasher);
+}
+
+inline ::flatbuffers::Offset<Stage> CreateStage(::flatbuffers::FlatBufferBuilder &_fbb, const StageT *_o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  (void)_rehasher;
+  (void)_o;
+  struct _VectorArgs { ::flatbuffers::FlatBufferBuilder *__fbb; const StageT* __o; const ::flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
+  auto _slot = _fbb.CreateString(_o->slot);
+  auto _kernel_descriptor_id = _o->kernel_descriptor_id ? _o->kernel_descriptor_id.get() : nullptr;
+  auto _dispatch_data = _o->dispatch_data ? CreateDispatchData(_fbb, _o->dispatch_data.get(), _rehasher) : 0;
+  auto _kernels = _fbb.CreateVector<::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::StageKernel>> (_o->kernels.size(), [](size_t i, _VectorArgs *__va) { return CreateStageKernel(*__va->__fbb, __va->__o->kernels[i].get(), __va->__rehasher); }, &_va );
+  return hip_kernel_provider::kernel_ingestor_engine::serialization::fb::CreateStage(
+      _fbb,
+      _slot,
+      _kernel_descriptor_id,
+      _dispatch_data,
+      _kernels);
+}
+
+
+inline bool operator==(const MultiKernelPlanT &lhs, const MultiKernelPlanT &rhs) {
+  return
+      (lhs.stages.size() == rhs.stages.size() && std::equal(lhs.stages.cbegin(), lhs.stages.cend(), rhs.stages.cbegin(), [](std::unique_ptr<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::StageT> const &a, std::unique_ptr<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::StageT> const &b) { return (a == b) || (a && b && *a == *b); })) &&
+      (lhs.code_objects.size() == rhs.code_objects.size() && std::equal(lhs.code_objects.cbegin(), lhs.code_objects.cend(), rhs.code_objects.cbegin(), [](std::unique_ptr<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::CodeObjectT> const &a, std::unique_ptr<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::CodeObjectT> const &b) { return (a == b) || (a && b && *a == *b); })) &&
+      (lhs.shared_workspace_bytes == rhs.shared_workspace_bytes) &&
+      (lhs.workspace_bytes == rhs.workspace_bytes) &&
+      (lhs.runtime_pass_by_value_uids == rhs.runtime_pass_by_value_uids) &&
+      (lhs.provider_version == rhs.provider_version);
+}
+
+inline bool operator!=(const MultiKernelPlanT &lhs, const MultiKernelPlanT &rhs) {
+    return !(lhs == rhs);
+}
+
+
+inline MultiKernelPlanT::MultiKernelPlanT(const MultiKernelPlanT &o)
+      : shared_workspace_bytes(o.shared_workspace_bytes),
+        workspace_bytes(o.workspace_bytes),
+        runtime_pass_by_value_uids(o.runtime_pass_by_value_uids),
+        provider_version(o.provider_version) {
+  stages.reserve(o.stages.size());
+  for (const auto &stages_ : o.stages) { stages.emplace_back((stages_) ? new hip_kernel_provider::kernel_ingestor_engine::serialization::fb::StageT(*stages_) : nullptr); }
+  code_objects.reserve(o.code_objects.size());
+  for (const auto &code_objects_ : o.code_objects) { code_objects.emplace_back((code_objects_) ? new hip_kernel_provider::kernel_ingestor_engine::serialization::fb::CodeObjectT(*code_objects_) : nullptr); }
+}
+
+inline MultiKernelPlanT &MultiKernelPlanT::operator=(MultiKernelPlanT o) FLATBUFFERS_NOEXCEPT {
+  std::swap(stages, o.stages);
+  std::swap(code_objects, o.code_objects);
+  std::swap(shared_workspace_bytes, o.shared_workspace_bytes);
+  std::swap(workspace_bytes, o.workspace_bytes);
+  std::swap(runtime_pass_by_value_uids, o.runtime_pass_by_value_uids);
+  std::swap(provider_version, o.provider_version);
+  return *this;
+}
+
+inline MultiKernelPlanT *MultiKernelPlan::UnPack(const ::flatbuffers::resolver_function_t *_resolver) const {
+  auto _o = std::unique_ptr<MultiKernelPlanT>(new MultiKernelPlanT());
+  UnPackTo(_o.get(), _resolver);
+  return _o.release();
+}
+
+inline void MultiKernelPlan::UnPackTo(MultiKernelPlanT *_o, const ::flatbuffers::resolver_function_t *_resolver) const {
+  (void)_o;
+  (void)_resolver;
+  { auto _e = stages(); if (_e) { _o->stages.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { if(_o->stages[_i]) { _e->Get(_i)->UnPackTo(_o->stages[_i].get(), _resolver); } else { _o->stages[_i] = std::unique_ptr<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::StageT>(_e->Get(_i)->UnPack(_resolver)); } } } else { _o->stages.resize(0); } }
+  { auto _e = code_objects(); if (_e) { _o->code_objects.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { if(_o->code_objects[_i]) { _e->Get(_i)->UnPackTo(_o->code_objects[_i].get(), _resolver); } else { _o->code_objects[_i] = std::unique_ptr<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::CodeObjectT>(_e->Get(_i)->UnPack(_resolver)); } } } else { _o->code_objects.resize(0); } }
+  { auto _e = shared_workspace_bytes(); _o->shared_workspace_bytes = _e; }
+  { auto _e = workspace_bytes(); _o->workspace_bytes = _e; }
+  { auto _e = runtime_pass_by_value_uids(); if (_e) { _o->runtime_pass_by_value_uids.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { _o->runtime_pass_by_value_uids[_i] = _e->Get(_i); } } else { _o->runtime_pass_by_value_uids.resize(0); } }
+  { auto _e = provider_version(); if (_e) _o->provider_version = _e->str(); }
+}
+
+inline ::flatbuffers::Offset<MultiKernelPlan> MultiKernelPlan::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const MultiKernelPlanT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  return CreateMultiKernelPlan(_fbb, _o, _rehasher);
+}
+
+inline ::flatbuffers::Offset<MultiKernelPlan> CreateMultiKernelPlan(::flatbuffers::FlatBufferBuilder &_fbb, const MultiKernelPlanT *_o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  (void)_rehasher;
+  (void)_o;
+  struct _VectorArgs { ::flatbuffers::FlatBufferBuilder *__fbb; const MultiKernelPlanT* __o; const ::flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
+  auto _stages = _fbb.CreateVector<::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::Stage>> (_o->stages.size(), [](size_t i, _VectorArgs *__va) { return CreateStage(*__va->__fbb, __va->__o->stages[i].get(), __va->__rehasher); }, &_va );
+  auto _code_objects = _fbb.CreateVector<::flatbuffers::Offset<hip_kernel_provider::kernel_ingestor_engine::serialization::fb::CodeObject>> (_o->code_objects.size(), [](size_t i, _VectorArgs *__va) { return CreateCodeObject(*__va->__fbb, __va->__o->code_objects[i].get(), __va->__rehasher); }, &_va );
+  auto _shared_workspace_bytes = _o->shared_workspace_bytes;
+  auto _workspace_bytes = _o->workspace_bytes;
+  auto _runtime_pass_by_value_uids = _fbb.CreateVector(_o->runtime_pass_by_value_uids);
+  auto _provider_version = _fbb.CreateString(_o->provider_version);
+  return hip_kernel_provider::kernel_ingestor_engine::serialization::fb::CreateMultiKernelPlan(
+      _fbb,
+      _stages,
+      _code_objects,
+      _shared_workspace_bytes,
+      _workspace_bytes,
+      _runtime_pass_by_value_uids,
       _provider_version);
 }
 

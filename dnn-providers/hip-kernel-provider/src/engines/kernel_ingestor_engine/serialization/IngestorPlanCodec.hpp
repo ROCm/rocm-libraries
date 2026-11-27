@@ -15,7 +15,7 @@
 #include "engines/kernel_ingestor_engine/serialization/IngestorPlanPayload.hpp"
 
 /// @file IngestorPlanCodec.hpp
-/// Turns an `IngestorPlanPayload` into the bytes of a saved ingestor plan, and back.
+/// Turns an `IngestorSavedPlan` into the bytes of a saved ingestor plan, and back.
 ///
 /// The codec works for every kernel source kind. It makes no HIP call, and it does not
 /// check whether this provider can launch the plan.
@@ -32,36 +32,55 @@ struct EncodedIngestorPlan
     size_t size = 0;
 };
 
-/// Writes the header and the FlatBuffer body of `payload` into one buffer.
+/// Writes the header and the FlatBuffer body of `payload` into one buffer. A kind 1 payload
+/// (`IngestorPlanPayload`) writes a kind 1 body, and a kind 2 payload
+/// (`IngestorMultiKernelPayload`) a kind 2 body.
 ///
 /// The function frees the code bytes of `payload` after it copies them. Move the payload in
 /// to keep the number of code object copies low.
 ///
+/// A kind 2 payload writes each code object once: entries with the same digest, source kind
+/// and target share one entry, and the kernels name it.
+///
 /// Throws the same errors as `encodeIngestorPlan`.
-EncodedIngestorPlan encodeIngestorPlanToBuffer(IngestorPlanPayload payload);
+EncodedIngestorPlan encodeIngestorPlanToBuffer(IngestorSavedPlan payload);
 
 /// Returns the header and the FlatBuffer body of `payload`.
 ///
 /// Throws `HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR` when the payload breaks a rule the caller
 /// owns: a source kind that is not a `KernelSourceKind` value, an empty `providerVersion`,
-/// `symbol` or `dispatchSymbol`, or a `sha256` that is not 64 lowercase hex characters.
+/// `symbol` or `dispatchSymbol`, or a `sha256` that is not 64 lowercase hex characters. A
+/// kind 2 payload also breaks a rule when it has no stage, a stage has no kernel, a kernel
+/// names a code object outside `codeObjects`, a stage repeats a launch name, or the shared
+/// workspace region is larger than the total workspace.
 /// Throws `HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE` when the code object is too large for the
 /// format.
-std::vector<uint8_t> encodeIngestorPlan(const IngestorPlanPayload& payload);
+std::vector<uint8_t> encodeIngestorPlan(const IngestorSavedPlan& payload);
 
-/// Reads the payload bytes at `data`. `data` needs no particular alignment.
+/// Reads the payload bytes at `data`, of either kind. The header kind selects the body. `data`
+/// needs no particular alignment.
 ///
 /// The checks run in this order, and the first failure throws:
 /// 1. The header checks of `decodeIngestorPlanHeader`.
 /// 2. The body size (`INVALID_VALUE`).
 /// 3. The body digest in the header (`INVALID_VALUE`).
-/// 4. The FlatBuffers verifier and the file identifier (`INVALID_VALUE`).
-/// 5. The structure rules that the verifier does not check (`INVALID_VALUE`). One rule is
-///    that the kernel SHA-256 text is valid and matches the code object.
-/// 6. The runtime pass-by-value tensor list is empty (`NOT_APPLICABLE`).
+/// 4. The FlatBuffers verifier and the file identifier of the kind (`INVALID_VALUE`).
+/// 5. The structure rules that the verifier does not check (`INVALID_VALUE`). For a kind 1
+///    payload one rule is that the kernel SHA-256 text is valid and matches the code object.
+///    For a kind 2 payload the rules are: both workspace fields are present and the shared
+///    region is not above the total, at least one stage, at least one kernel in each stage,
+///    launch names unique within a stage, every code object index in range, and every code
+///    object's SHA-256 text valid and matching its bytes.
+///
+/// A payload that lists runtime pass-by-value UIDs reads like any other: the caller checks
+/// the list against the handlers it restores.
 ///
 /// The caller runs the checks that need the provider: GPU, handler, signature and module
 /// load.
+IngestorSavedPlan decodeIngestorSavedPlan(const uint8_t* data, size_t size);
+
+/// Reads a kind 1 payload. The checks are those of `decodeIngestorSavedPlan`. A kind 2
+/// payload throws `HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE`.
 IngestorPlanPayload decodeIngestorPlan(const uint8_t* data, size_t size);
 
 /// Returns `text` for use in an error message. Text longer than 80 characters is cut, and

@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <initializer_list>
 #include <limits>
 #include <optional>
 #include <string>
@@ -32,20 +33,32 @@
 #include <hipdnn_plugin_sdk/RuntimePassByValue.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
+#include <hipdnn_plugin_sdk/ingestor/SavedDispatch.hpp>
 
+#include "compilation/IKernelCompiler.hpp"
+#include "compilation/KernelCompileOptions.hpp"
+#include "compilation/KpackKernelLoader.hpp"
+#include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
+#include "engines/kernel_ingestor_engine/IngestorLaunchRestore.hpp"
+#include "engines/kernel_ingestor_engine/IngestorPreparedDispatch.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdCommon.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaDropout.hpp"
+#include "engines/kernel_ingestor_engine/serialization/IngestorPlanRefusal.hpp"
 
 /**
  * @file FlydslSdpaBwdNativeShared.hpp
  * @brief What every FlyDSL SDPA backward native handler computes the same way, whatever the
  *        launch it makes: the workspace layout, the window values, the dBias reduce launch and
- *        its arguments, the seed's workspace binding and upload, and the kernel argument
- *        machinery (signature, image).
+ *        its arguments, the tail-zero launch and its arguments, the seed's workspace binding
+ *        and upload, the kernel argument machinery (signature, image), the build of a launch
+ *        beside the primary one, and the restore steps of a handler that makes one or more
+ *        launches (the launch-set check, the selection of each saved launch by name, its load,
+ *        and the report of what a prepared dispatch launches).
  *
- * A handler owns its kernel's argument struct and fills it from these values; one launch per
- * handler, the by-symbol dBias reduce a second launch of the same code object. The workspace
- * layout is the one place every region's size and offset is decided, with checked arithmetic.
+ * A handler owns its kernel's argument struct and fills it from these values; it makes one
+ * launch, or several: the dV-only launch beside a `dkdv_u2` dK-only one, the dBias reduce
+ * launch and the tail-zero launch beside a dq or merged one, each a launch of its own. The workspace layout is the one place every region's size
+ * and offset is decided, with checked arithmetic.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::flydsl_sdpa_bwd_native
 {
@@ -1022,32 +1035,39 @@ inline bwd::SdpaBwdProblem
     failBadParam(scope, "the graph no longer matches [" + decline.cause + "]: " + decline.detail);
 }
 
-/**
- * @brief Fills what every engine's plan takes from the graph the same way: the tensor uids, the
- *        window, the dropout threshold and scale, the runtime flags, the varlen bits and the
- *        scalar operands.
- *
- * `plan.problem` is set before the call. @p tile is the kernel's head-dim tile: a head dim
- * below it sets RT_FLAG_PADDED.
- */
-inline void bindGraphOperands(BwdPlanCommon& plan,
-                              const hipdnn_plugin_sdk::ingestor::MatchContext& context,
-                              int64_t tile)
+/// The tensor uids the backward node of @p context binds.
+inline Uids uidsOf(const hipdnn_plugin_sdk::ingestor::MatchContext& context)
 {
-    const auto& problem = plan.problem;
     const auto& attributes
         = context.graph.getNodeWrapper(0)
               .attributesAs<hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributes>();
-    plan.uids = Uids{attributes.q_tensor_uid(),
-                     attributes.k_tensor_uid(),
-                     attributes.v_tensor_uid(),
-                     attributes.o_tensor_uid(),
-                     attributes.do_tensor_uid(),
-                     attributes.dq_tensor_uid(),
-                     attributes.dk_tensor_uid(),
-                     attributes.dv_tensor_uid(),
-                     attributes.stats_tensor_uid()};
+    return Uids{attributes.q_tensor_uid(),
+                attributes.k_tensor_uid(),
+                attributes.v_tensor_uid(),
+                attributes.o_tensor_uid(),
+                attributes.do_tensor_uid(),
+                attributes.dq_tensor_uid(),
+                attributes.dk_tensor_uid(),
+                attributes.dv_tensor_uid(),
+                attributes.stats_tensor_uid()};
+}
 
+/**
+ * @brief Fills what every engine's plan takes from the problem the same way: the tensor uids,
+ *        the window, the dropout threshold and scale, the runtime flags, the varlen bits and the
+ *        scalar operands.
+ *
+ * `plan.problem` is set before the call. @p tile is the kernel's head-dim tile: a head dim
+ * below it sets RT_FLAG_PADDED. The values come from a graph at prepare and from a saved plan
+ * at restore, so the plan is the same function of either.
+ */
+inline void bindProblemOperands(BwdPlanCommon& plan,
+                                const Uids& uids,
+                                const ScalarOperands& scalars,
+                                int64_t tile)
+{
+    const auto& problem = plan.problem;
+    plan.uids = uids;
     plan.window = windowFor(problem);
     if(problem.dropoutP > 0.0F)
     {
@@ -1058,8 +1078,7 @@ inline void bindGraphOperands(BwdPlanCommon& plan,
     plan.runtimeFlags
         = (paddedHead ? RT_FLAG_PADDED : 0) | (problem.dropoutP > 0.0F ? RT_FLAG_DROPOUT : 0);
     plan.varlenBits = varlenBitsOf(problem);
-
-    plan.scalars = scalarOperandsOf(context.graph.getTensorMap(), problem);
+    plan.scalars = scalars;
 }
 
 /// The tail-zero arguments over the outputs at @p dQ, @p dK and @p dV and the lengths at
@@ -1113,5 +1132,311 @@ std::vector<unsigned char> kernargImage(const Kernargs& kernargs)
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::flydsl_sdpa_bwd_native
+
+namespace hip_kernel_provider::kernel_ingestor_engine
+{
+
+namespace detail
+{
+
+/// Refuses the plan, as INCOMPATIBLE, naming the dispatch.
+[[noreturn]] inline void
+    refuseBwdRestore(const hipdnn_plugin_sdk::ingestor::SavedLaunchInputs& inputs,
+                     const std::string& why)
+{
+    serialization::refuseIngestorPlan(serialization::IngestorPlanRefusal::INCOMPATIBLE,
+                                      "dispatch '" + inputs.dispatchSymbol + "': " + why);
+}
+
+/// Refuses the plan, as INCOMPATIBLE, unless the launch names of @p codes are exactly
+/// @p expected, each once, in any order.
+inline void
+    requireBwdLaunchSet(const hipdnn_plugin_sdk::ingestor::SavedLaunchInputs& inputs,
+                        const std::vector<hipdnn_plugin_sdk::ingestor::SavedKernelCode>& codes,
+                        std::vector<std::string> expected)
+{
+    std::vector<std::string> found;
+    found.reserve(codes.size());
+    for(const auto& code : codes)
+    {
+        found.push_back(code.launchName);
+    }
+    std::sort(found.begin(), found.end());
+    std::sort(expected.begin(), expected.end());
+    if(found == expected)
+    {
+        return;
+    }
+    const auto describe = [](const std::vector<std::string>& names) {
+        std::string text = "{";
+        for(const auto& name : names)
+        {
+            text += (text.size() > 1 ? ", '" : "'") + name + "'";
+        }
+        return text + "}";
+    };
+    serialization::refuseIngestorPlan(
+        serialization::IngestorPlanRefusal::INCOMPATIBLE,
+        "dispatch '" + inputs.dispatchSymbol + "' launches " + describe(expected)
+            + " for the saved problem, and the plan holds the launches " + describe(found));
+}
+
+} // namespace detail
+
+namespace flydsl_sdpa_bwd_native
+{
+
+/// A launch of a prepared dispatch: where its code came from and the arguments recorded for it.
+struct LaunchRecord
+{
+    hipdnn_plugin_sdk::ingestor::KernelSourceKind sourceKind{};
+    std::vector<hipdnn_plugin_sdk::ingestor::KernelArgument> signature;
+};
+
+/// The launch names of a handler: its primary launch, the dV-only launch of a `dkdv_u2` stage,
+/// the dBias reduce launch and the tail-zero launch. The primary launch is named only when the
+/// stage launches more than one kernel.
+struct LaunchNames
+{
+    std::string_view primary;
+    std::string_view dvonly;
+    std::string_view reduce;
+    std::string_view tailzero;
+};
+
+/// Refuses the plan, as INCOMPATIBLE, unless every kernel of @p codes records the signature its
+/// launch passes: the reduce kernel's for the launch named @p names.reduce, @p tailzero for
+/// the launch named @p names.tailzero (the V-head variant's for a `dq_u2` stage),
+/// @p primarySignature for every other.
+inline void requireSavedSignatures(
+    const hipdnn_plugin_sdk::ingestor::SavedLaunchInputs& inputs,
+    const std::vector<hipdnn_plugin_sdk::ingestor::SavedKernelCode>& codes,
+    const LaunchNames& names,
+    const std::vector<hipdnn_plugin_sdk::ingestor::KernelArgument>& primarySignature,
+    const std::vector<hipdnn_plugin_sdk::ingestor::KernelArgument>& tailzero)
+{
+    for(const auto& code : codes)
+    {
+        if(code.launchName == names.reduce)
+        {
+            requireRestoredSignature(inputs, code, reduceSignature());
+        }
+        else if(code.launchName == names.tailzero)
+        {
+            requireRestoredSignature(inputs, code, tailzero);
+        }
+        else
+        {
+            requireRestoredSignature(inputs, code, primarySignature);
+        }
+    }
+}
+
+/// The saved kernel of a handler's primary launch and, when they are launched, of the dV-only,
+/// dBias reduce and tail-zero launches.
+struct SavedLaunches
+{
+    hipdnn_plugin_sdk::ingestor::SavedKernelCode* primary = nullptr;
+    hipdnn_plugin_sdk::ingestor::SavedKernelCode* dvonly = nullptr;
+    hipdnn_plugin_sdk::ingestor::SavedKernelCode* reduce = nullptr;
+    hipdnn_plugin_sdk::ingestor::SavedKernelCode* tailzero = nullptr;
+};
+
+/// The launches of @p codes by role. Refuses the plan, as INCOMPATIBLE, unless the launch names
+/// are exactly the set the recomputed problem implies: the single unnamed launch when the
+/// stage launches neither @p dvonly, nor the dBias @p reduces, nor @p zeroesTails; otherwise
+/// @p names.primary and the dV-only, reduce and tail-zero launches the stage has.
+inline SavedLaunches
+    selectSavedLaunches(const hipdnn_plugin_sdk::ingestor::SavedLaunchInputs& inputs,
+                        std::vector<hipdnn_plugin_sdk::ingestor::SavedKernelCode>& codes,
+                        bool dvonly,
+                        bool reduces,
+                        bool zeroesTails,
+                        const LaunchNames& names)
+{
+    std::vector<std::string> expected;
+    if(dvonly || reduces || zeroesTails)
+    {
+        expected.emplace_back(names.primary);
+        if(dvonly)
+        {
+            expected.emplace_back(names.dvonly);
+        }
+        if(reduces)
+        {
+            expected.emplace_back(names.reduce);
+        }
+        if(zeroesTails)
+        {
+            expected.emplace_back(names.tailzero);
+        }
+    }
+    else
+    {
+        expected.emplace_back();
+    }
+    detail::requireBwdLaunchSet(inputs, codes, std::move(expected));
+
+    SavedLaunches selected;
+    for(auto& code : codes)
+    {
+        if(dvonly && code.launchName == names.dvonly)
+        {
+            selected.dvonly = &code;
+        }
+        else if(reduces && code.launchName == names.reduce)
+        {
+            selected.reduce = &code;
+        }
+        else if(zeroesTails && code.launchName == names.tailzero)
+        {
+            selected.tailzero = &code;
+        }
+        else
+        {
+            selected.primary = &code;
+        }
+    }
+    return selected;
+}
+
+/// A saved kernel's record and its code, loaded on @p deviceOrdinal.
+struct LoadedSavedKernel
+{
+    LaunchRecord record;
+    IngestorKernelCode code;
+};
+
+inline LoadedSavedKernel
+    loadSavedKernel(const hipdnn_plugin_sdk::ingestor::SavedLaunchInputs& inputs,
+                    hipdnn_plugin_sdk::ingestor::SavedKernelCode saved,
+                    int deviceOrdinal)
+{
+    LaunchRecord record{saved.sourceKind, saved.recordedSignature};
+    std::string label = detail::describeSavedKernel(saved, inputs.dispatchSymbol);
+    return LoadedSavedKernel{
+        std::move(record),
+        IngestorKernelCode::fromSavedKernelCode(std::move(saved), std::move(label), deviceOrdinal)};
+}
+
+/// A launch a prepared dispatch holds beside its primary one, with the code object it launches.
+struct LoadedLaunch
+{
+    std::optional<LaunchRecord> record;
+    std::optional<IngestorKernelCode> code;
+};
+
+/// The kernel @p kernel built from its own `sources` entry at @p block threads over the grid
+/// (@p gridX, @p gridY, @p gridZ); empty when @p kernel is null, the launch the problem does not
+/// need.
+inline LoadedLaunch
+    buildOptionalLaunch(const compilation::IKernelCompiler& compiler,
+                        const compilation::KpackKernelLoader& kpackLoader,
+                        const hipdnn_plugin_sdk::ingestor::MatchContext& context,
+                        const hipdnn_plugin_sdk::ingestor::KernelDefinition* kernel,
+                        const compilation::KernelCompileOptions& options,
+                        const std::vector<hipdnn_plugin_sdk::ingestor::KernelArgument>& signature,
+                        unsigned int block,
+                        unsigned int gridX,
+                        unsigned int gridY,
+                        unsigned int gridZ = 1)
+{
+    LoadedLaunch built;
+    if(kernel == nullptr)
+    {
+        return built;
+    }
+    auto code
+        = buildIngestorKernelCode(compiler, kpackLoader, context, *kernel, options, signature);
+    code.setBlockSize(block, 1, 1);
+    code.setGridSize(gridX, gridY, gridZ);
+    built.record = LaunchRecord{kernel->source.kind, kernel->source.signature};
+    built.code.emplace(std::move(code));
+    return built;
+}
+
+/// The saved kernel @p saved loaded on @p deviceOrdinal at @p block threads over the grid
+/// (@p gridX, @p gridY, @p gridZ); empty when @p saved is null, the launch the problem does not
+/// need.
+inline LoadedLaunch loadOptionalLaunch(const hipdnn_plugin_sdk::ingestor::SavedLaunchInputs& inputs,
+                                       hipdnn_plugin_sdk::ingestor::SavedKernelCode* saved,
+                                       int deviceOrdinal,
+                                       unsigned int block,
+                                       unsigned int gridX,
+                                       unsigned int gridY,
+                                       unsigned int gridZ = 1)
+{
+    LoadedLaunch loaded;
+    if(saved == nullptr)
+    {
+        return loaded;
+    }
+    auto kernel = loadSavedKernel(inputs, std::move(*saved), deviceOrdinal);
+    kernel.code.setBlockSize(block, 1, 1);
+    kernel.code.setGridSize(gridX, gridY, gridZ);
+    loaded.record = std::move(kernel.record);
+    loaded.code.emplace(std::move(kernel.code));
+    return loaded;
+}
+
+/// The launches of a prepared dispatch beside its primary one, in launch order, each named:
+/// the dV-only, the dBias reduce and the tail-zero launch.
+struct ExtraLaunch
+{
+    std::string_view name;
+    const std::optional<IngestorKernelCode>* code = nullptr;
+    const std::optional<LaunchRecord>* record = nullptr;
+};
+
+/// What a prepared dispatch reports as launched: the primary launch, named @p primaryName only
+/// when a launch of @p extras is present beside it, then every present launch of @p extras.
+inline std::vector<IngestorLaunchedKernel>
+    launchedKernelsOf(std::string_view primaryName,
+                      const IngestorKernelCode& primaryCode,
+                      const LaunchRecord& primaryRecord,
+                      std::initializer_list<ExtraLaunch> extras)
+{
+    const bool several = std::any_of(extras.begin(), extras.end(), [](const ExtraLaunch& extra) {
+        return extra.code->has_value();
+    });
+    std::vector<IngestorLaunchedKernel> launched;
+    launched.push_back(IngestorLaunchedKernel{several ? std::string(primaryName) : std::string(),
+                                              &primaryCode,
+                                              primaryRecord.sourceKind,
+                                              primaryRecord.signature});
+    for(const auto& extra : extras)
+    {
+        if(extra.code->has_value())
+        {
+            launched.push_back(IngestorLaunchedKernel{std::string(extra.name),
+                                                      &**extra.code,
+                                                      (*extra.record)->sourceKind,
+                                                      (*extra.record)->signature});
+        }
+    }
+    return launched;
+}
+
+/// The uids of the scalars @p scalars holds that the user supplies at execute, sorted, unique;
+/// the scale only when @p includeScale (the prep launch reads none).
+inline std::vector<int64_t> userSuppliedUidsOf(const ScalarOperands& scalars, bool includeScale)
+{
+    std::vector<int64_t> uids;
+    for(const auto* operand :
+        {includeScale ? &scalars.scale : nullptr, &scalars.seed, &scalars.offset})
+    {
+        if(operand != nullptr && operand->has_value() && (*operand)->isRuntimeUserSupplied)
+        {
+            uids.push_back((*operand)->uid);
+        }
+    }
+    std::sort(uids.begin(), uids.end());
+    uids.erase(std::unique(uids.begin(), uids.end()), uids.end());
+    return uids;
+}
+
+} // namespace flydsl_sdpa_bwd_native
+
+} // namespace hip_kernel_provider::kernel_ingestor_engine
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR && HIPDNN_ENGINE_FLYDSL

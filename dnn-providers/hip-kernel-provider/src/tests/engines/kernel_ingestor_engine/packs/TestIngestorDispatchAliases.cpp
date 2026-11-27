@@ -3,6 +3,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <array>
 #include <string>
 #include <string_view>
 
@@ -13,6 +14,9 @@
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvFwdLaunchValues.hpp"
+#ifdef HIPDNN_ENGINE_FLYDSL
+#include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdLaunchValues.hpp"
+#endif
 #include "engines/kernel_ingestor_engine/packs/Gfx942AttentionDenseLaunchValues.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseLaunchValues.hpp"
 #include "engines/kernel_ingestor_engine/packs/PointwiseLaunchValues.hpp"
@@ -77,6 +81,46 @@ TEST(TestIngestorDispatchAliases, Gfx942AttentionDenseHasOneContractOnItsCatalog
     EXPECT_EQ(DispatchRegistry<Handle>::tryResolve("hipkernel.gfx942_attention_dense.dispatch.v2"),
               nullptr);
 }
+
+#ifdef HIPDNN_ENGINE_FLYDSL
+struct FlydslSdpaBwdDispatch
+{
+    std::string_view unversioned;
+    std::string_view versioned;
+};
+
+const std::array<FlydslSdpaBwdDispatch, 8> FLYDSL_SDPA_BWD_DISPATCHES = {{
+    {"hipkernel.flydsl_sdpa_bwd_split.prep.dispatch",
+     FLYDSL_SDPA_BWD_SPLIT_PREP_DISPATCH_SYMBOL_V1},
+    {"hipkernel.flydsl_sdpa_bwd_split.dkdv.dispatch",
+     FLYDSL_SDPA_BWD_SPLIT_DKDV_DISPATCH_SYMBOL_V1},
+    {"hipkernel.flydsl_sdpa_bwd_split.dq.dispatch", FLYDSL_SDPA_BWD_SPLIT_DQ_DISPATCH_SYMBOL_V1},
+    {"hipkernel.flydsl_sdpa_bwd_split.dq_reduce.dispatch",
+     FLYDSL_SDPA_BWD_SPLIT_DQ_REDUCE_DISPATCH_SYMBOL_V1},
+    {"hipkernel.flydsl_sdpa_bwd_split.dkdv_u2.dispatch",
+     FLYDSL_SDPA_BWD_SPLIT_DKDV_U2_DISPATCH_SYMBOL_V1},
+    {"hipkernel.flydsl_sdpa_bwd_split.dq_u2.dispatch",
+     FLYDSL_SDPA_BWD_SPLIT_DQ_U2_DISPATCH_SYMBOL_V1},
+    {"hipkernel.flydsl_sdpa_bwd_merged.dispatch", FLYDSL_SDPA_BWD_MERGED_DISPATCH_SYMBOL_V1},
+    {"hipkernel.flydsl_sdpa_bwd_merged_reduce.dispatch",
+     FLYDSL_SDPA_BWD_MERGED_REDUCE_DISPATCH_SYMBOL_V1},
+}};
+
+TEST(TestIngestorDispatchAliases,
+     EachFlydslSdpaBwdAliasResolvesToTheHandlerOfItsUnversionedNameAndSavesEveryLaunch)
+{
+    registerNativeIngestorSymbols();
+
+    for(const auto& [unversioned, versioned] : FLYDSL_SDPA_BWD_DISPATCHES)
+    {
+        expectOneHandler(unversioned, versioned);
+        const auto* handler = DispatchRegistry<Handle>::tryResolve(std::string(unversioned));
+        ASSERT_NE(handler, nullptr) << unversioned;
+        EXPECT_TRUE(handler->supportsSaving()) << unversioned;
+        EXPECT_TRUE(handler->supportsSavingAllLaunches()) << unversioned;
+    }
+}
+#endif // HIPDNN_ENGINE_FLYDSL
 
 } // namespace
 } // namespace hip_kernel_provider::kernel_ingestor_engine

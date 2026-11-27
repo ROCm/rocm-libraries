@@ -78,6 +78,16 @@ inline const hipdnn_plugin_sdk::ingestor::MetadataValue&
                                           + ", and the plan holds " + found);
 }
 
+[[noreturn]] inline void
+    refuseUnknownLaunchValue(const hipdnn_plugin_sdk::ingestor::SavedLaunchInputs& inputs,
+                             const std::string& name)
+{
+    serialization::refuseIngestorPlan(serialization::IngestorPlanRefusal::INCOMPATIBLE,
+                                      "launch value '" + name
+                                          + "' is not part of the contract of dispatch '"
+                                          + inputs.dispatchSymbol + "'");
+}
+
 } // namespace detail
 
 /// Refuses the plan unless its dispatch name is @p alias, the contract the caller reads.
@@ -167,10 +177,7 @@ inline void requireOnlyLaunchValues(const hipdnn_plugin_sdk::ingestor::SavedLaun
     {
         if(std::find(names.begin(), names.end(), std::string_view(entry.first)) == names.end())
         {
-            serialization::refuseIngestorPlan(serialization::IngestorPlanRefusal::INCOMPATIBLE,
-                                              "launch value '" + entry.first
-                                                  + "' is not part of the contract of dispatch '"
-                                                  + inputs.dispatchSymbol + "'");
+            detail::refuseUnknownLaunchValue(inputs, entry.first);
         }
     }
 }
@@ -180,6 +187,45 @@ inline void requireOnlyLaunchValues(const hipdnn_plugin_sdk::ingestor::SavedLaun
                                     std::initializer_list<std::string_view> names)
 {
     requireOnlyLaunchValues(inputs, std::vector<std::string_view>(names));
+}
+
+/// Refuses the plan when it holds a launch value that is not in @p names.
+inline void requireOnlyLaunchValues(const hipdnn_plugin_sdk::ingestor::SavedLaunchInputs& inputs,
+                                    const std::vector<std::string>& names)
+{
+    for(const auto& entry : inputs.values)
+    {
+        if(std::find(names.begin(), names.end(), entry.first) == names.end())
+        {
+            detail::refuseUnknownLaunchValue(inputs, entry.first);
+        }
+    }
+}
+
+/// Refuses the plan, as INCOMPATIBLE, when the signature recorded for @p code is not
+/// @p declared, the arguments the handler launches for that kernel. Any other failure of the
+/// comparison propagates unchanged.
+inline void requireRestoredSignature(
+    const hipdnn_plugin_sdk::ingestor::SavedLaunchInputs& inputs,
+    const hipdnn_plugin_sdk::ingestor::SavedKernelCode& code,
+    const std::vector<hipdnn_plugin_sdk::ingestor::KernelArgument>& declared)
+{
+    const std::string label = detail::describeSavedKernel(code, inputs.dispatchSymbol);
+    try
+    {
+        requireSignatureMatch(code.recordedSignature, declared, code.symbol, label);
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+    {
+        if(error.getStatus() != HIPDNN_PLUGIN_STATUS_INVALID_VALUE)
+        {
+            throw;
+        }
+        serialization::refuseIngestorPlan(
+            serialization::IngestorPlanRefusal::INCOMPATIBLE,
+            "the saved kernel's arguments do not match what this provider launches: "
+                + error.getMessage());
+    }
 }
 
 /// Runs the restore checks a pack shares, in order, and loads the saved code on
@@ -200,22 +246,7 @@ RestoredLaunch<TLaunchInputs> restoreIngestorLaunch(
 {
     const std::string label = detail::describeSavedKernel(code, inputs.dispatchSymbol);
 
-    // Compare the kernel's argument lists.
-    try
-    {
-        requireSignatureMatch(code.recordedSignature, declaredSignature, code.symbol, label);
-    }
-    catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
-    {
-        if(error.getStatus() != HIPDNN_PLUGIN_STATUS_INVALID_VALUE)
-        {
-            throw;
-        }
-        serialization::refuseIngestorPlan(
-            serialization::IngestorPlanRefusal::INCOMPATIBLE,
-            "the saved kernel's arguments do not match what this provider launches: "
-                + error.getMessage());
-    }
+    requireRestoredSignature(inputs, code, declaredSignature);
 
     TLaunchInputs launch = readLaunchInputs(inputs);
 

@@ -472,7 +472,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 EveryKernelDeclaresTheMergedSignature
                 DeclaresASchemaAtLeastTheRaggedOffsetMultiplierFloor
                 ServesStampedRaggedGraphsAndDeclinesTheFieldsTheMatcherRejects
-                RefusesPlanSerialization
+                ReportsThePlanSerializationNote
                 DeclaresItsNumericalNotes
         )
     endif()
@@ -502,7 +502,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 EveryServedRowsSlotCatalogsHaveUniqueEnrolledKnobTuples
                 DeclaresASchemaAtLeastTheRaggedOffsetMultiplierFloor
                 ServesStampedRaggedGraphsAndDeclinesTheFieldsTheMatcherRejects
-                RefusesPlanSerialization
+                ReportsThePlanSerializationNote
                 TheChunkContractKeepsAnAlignedBiasOffDirectRowsWithAStagedAlternative
                 PrepVecTailIsOneOnTheCdna9RowsAndTheKmdDefaultElsewhere
                 EveryProbeGraphIsServedByTheRowsTheModelNames

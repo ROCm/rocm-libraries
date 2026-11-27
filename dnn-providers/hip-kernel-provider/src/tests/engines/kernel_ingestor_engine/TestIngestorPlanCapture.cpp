@@ -9,6 +9,7 @@
 #include <optional>
 #include <string>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -207,10 +208,14 @@ INSTANTIATE_TEST_SUITE_P(,
                                         : std::string("EMBEDDED_SOURCE");
                          });
 
-TEST(TestIngestorPlanCapture, RefusesAMultiLaunchKernelAsMultiLaunch)
+// Needs no packed shard: the kernel is built in memory and the handler is the stub that reports
+// no launches.
+TEST(TestIngestorPlanCapture, RefusesAMultiLaunchPlanOfAHandlerThatDoesNotOptIn)
 {
-    // Every launch is a kpack entry, and `source` stays default as the loader leaves it. A
-    // capture that read `source` would see an embedded_source kernel and refuse it as one.
+    // A handler that is unaware of the launches of a `sources` kernel reports none, so saving
+    // would read the kernel's unused `source`. It is refused, and `source`, which is left
+    // default as the loader leaves it, is not read: every launch is a kpack entry, and a capture
+    // that read `source` would refuse the kernel as embedded_source.
     hipdnn_plugin_sdk::ingestor::KernelSource launch;
     launch.kind = KernelSourceKind::KPACK;
     auto kernel = packs::stubKernel(0x06, KernelSourceKind::KPACK);
@@ -223,6 +228,110 @@ TEST(TestIngestorPlanCapture, RefusesAMultiLaunchKernelAsMultiLaunch)
     const std::string message
         = expectSaveRefusal(*plan, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "several launches");
     EXPECT_EQ(message.find("embedded_source"), std::string::npos) << message;
+}
+
+// Plans of the stub handlers, which prepare real code objects of the packed multi_launch
+// shard and need no device. A launch is a `source` of the packed kernel.
+class TestIngestorPlanCaptureStub : public ::testing::Test
+{
+protected:
+    using Config = packs::MultiKernelStubHandler::Config;
+    using Launch = packs::MultiKernelStubHandler::Launch;
+
+    void SetUp() override
+    {
+        ASSERT_NO_FATAL_FAILURE(packs::loadPackedLaunchSource(_source));
+    }
+
+    static Config configFor(const std::string& alias)
+    {
+        Config config;
+        config.alias = alias;
+        config.tag = "stub";
+        return config;
+    }
+
+    static IngestorPlanPayload captureKindOne(const hipdnn_plugin_sdk::IPlan<Handle>& plan)
+    {
+        const Handle handle;
+        const auto saved = captureIngestorPlan(plan, handle);
+        const auto* payload = std::get_if<IngestorPlanPayload>(&saved);
+        EXPECT_NE(payload, nullptr) << "expected a kind 1 payload";
+        return payload != nullptr ? *payload : IngestorPlanPayload{};
+    }
+
+    const hipdnn_plugin_sdk::ingestor::KernelSource& sourceOf(const std::string& launch) const
+    {
+        return _source.kernel.sources.at(launch);
+    }
+
+    packs::PackedLaunchSource _source;
+};
+
+TEST_F(TestIngestorPlanCaptureStub, SavesASingleLaunchPlanAsKindOne)
+{
+    // The handler opts in, and launches one kernel: the plan is still a kind 1 payload.
+    auto config = configFor("hipkernel.capture_test.single.dispatch.v1");
+    config.optsIn = true;
+    config.workspaceBytes = 512;
+    const packs::RegisteredStubHandler stub(config, _source.arch);
+    const auto kernel = _source.singleLaunchKernel();
+    const auto plan = makeStubPlan(stub.handler, kernel);
+
+    const auto payload = captureKindOne(*plan);
+
+    EXPECT_EQ(payload.kernelDescriptorId, kernel.kernelId);
+    EXPECT_EQ(payload.workspaceBytes, 512U);
+    EXPECT_EQ(payload.dispatchSymbol, config.alias);
+    EXPECT_EQ(payload.launchValues, (MetadataValues{{"tag", std::string("stub")}}));
+    EXPECT_EQ(payload.sourceKind, KernelSourceKind::KPACK);
+    EXPECT_EQ(payload.symbol, sourceOf(packs::PACKED_PRODUCE_LAUNCH).symbol);
+    EXPECT_EQ(payload.sha256, sourceOf(packs::PACKED_PRODUCE_LAUNCH).sha256);
+    EXPECT_EQ(utilities::sha256Hex(payload.codeObject.data(), payload.codeObject.size()),
+              payload.sha256);
+    EXPECT_TRUE(serialization::detail::sameKernelSignature(
+        payload.recordedSignature, sourceOf(packs::PACKED_PRODUCE_LAUNCH).signature));
+}
+
+TEST_F(TestIngestorPlanCaptureStub, SavesAHandlerLaunchingOneKernelFromASourcesKernelAsKindOne)
+{
+    // The kernel declares two launches, and the handler launches one of them for this
+    // problem, as the split SDPA backward `dq` does without a broadcast dBias. It reports a
+    // one-entry launch list with no name. It saves without the multi-kernel opt-in.
+    auto config = configFor("hipkernel.capture_test.one_of_sources.dispatch.v1");
+    config.launches = {Launch{"", packs::PACKED_CONSUME_LAUNCH}};
+    const packs::RegisteredStubHandler stub(config, _source.arch);
+    const auto plan = makeStubPlan(stub.handler, _source.kernel);
+
+    const auto payload = captureKindOne(*plan);
+
+    EXPECT_EQ(payload.symbol, sourceOf(packs::PACKED_CONSUME_LAUNCH).symbol);
+    EXPECT_EQ(payload.sha256, sourceOf(packs::PACKED_CONSUME_LAUNCH).sha256);
+    EXPECT_TRUE(serialization::detail::sameKernelSignature(
+        payload.recordedSignature, sourceOf(packs::PACKED_CONSUME_LAUNCH).signature));
+}
+
+TEST_F(TestIngestorPlanCaptureStub, RecordsTheUserSuppliedUidsOfAKindOnePlan)
+{
+    auto config = configFor("hipkernel.capture_test.kind_one_uids.dispatch.v1");
+    config.uids = {5, 9};
+    const packs::RegisteredStubHandler stub(config, _source.arch);
+    const auto plan = makeStubPlan(stub.handler, _source.singleLaunchKernel());
+
+    const auto payload = captureKindOne(*plan);
+
+    EXPECT_EQ(payload.runtimePassByValueUids, (std::vector<int64_t>{5, 9}));
+    // The saved inputs hold the stub's tag and nothing for a user-supplied scalar.
+    EXPECT_EQ(payload.launchValues, (MetadataValues{{"tag", std::string("stub")}}));
+}
+
+TEST_F(TestIngestorPlanCaptureStub, FillsNoUidForAPlanWithoutUserSuppliedScalars)
+{
+    const packs::RegisteredStubHandler stub(configFor("hipkernel.capture_test.no_uids.dispatch.v1"),
+                                            _source.arch);
+    const auto plan = makeStubPlan(stub.handler, _source.singleLaunchKernel());
+
+    EXPECT_TRUE(captureKindOne(*plan).runtimePassByValueUids.empty());
 }
 
 // ---------------------------------------------------------------------------
@@ -259,7 +368,8 @@ TEST_P(TestIngestorPlanCaptureKpack, CapturesAKpackPlan)
     const auto& plan = built.plan;
 
     const Handle handle;
-    const IngestorPlanPayload payload = captureIngestorPlan(*plan, handle);
+    const IngestorPlanPayload payload
+        = std::get<IngestorPlanPayload>(captureIngestorPlan(*plan, handle));
 
     EXPECT_EQ(payload.kernelDescriptorId, kernel.kernelId);
     EXPECT_EQ(payload.workspaceBytes, param.workspaceBytes);
@@ -377,7 +487,7 @@ TEST(TestIngestorPlanCapture, CapturesTheBenchmarkWinnersOwnWorkspace)
     plan.execute(handle, buffers.data(), static_cast<uint32_t>(buffers.size()), workspace.get());
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
-    const auto payload = captureIngestorPlan(plan, handle);
+    const auto payload = std::get<IngestorPlanPayload>(captureIngestorPlan(plan, handle));
     EXPECT_EQ(payload.kernelDescriptorId, smallKernel.kernelId);
     EXPECT_EQ(payload.workspaceBytes, 0U);
 }

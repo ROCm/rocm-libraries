@@ -3,8 +3,11 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <initializer_list>
 #include <limits>
 #include <string>
@@ -25,6 +28,11 @@
 #include "engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseLaunchValues.hpp"
 #include "engines/kernel_ingestor_engine/packs/PointwiseLaunchValues.hpp"
 #include "engines/kernel_ingestor_engine/serialization/IngestorPlanTestUtilities.hpp"
+
+#ifdef HIPDNN_ENGINE_FLYDSL
+#include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdDeviceHarness.hpp"
+#include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdLaunchValues.hpp"
+#endif
 
 /**
  * @file TestPackLaunchValues.cpp
@@ -1017,6 +1025,1170 @@ INSTANTIATE_TEST_SUITE_P(,
                          [](const ::testing::TestParamInfo<const AttentionDenseReader*>& info) {
                              return std::string(info.param->label);
                          });
+
+#ifdef HIPDNN_ENGINE_FLYDSL
+
+// The eight FlyDSL SDPA backward contracts. The sample problem, its common values and each
+// contract's row values are spelled out in FlydslSdpaBwdDeviceHarness.hpp (launch_sample); a
+// contract writes the common values and its own row fields, and reads them back into the
+// sample.
+namespace sample = hip_kernel_provider::kernel_ingestor_engine::testing::bwd_device::launch_sample;
+
+TEST(TestPackLaunchValues, SplitPrepValuesMatchTheV1Contract)
+{
+    const auto launch = sample::prepInputs();
+
+    const MetadataValues values = flydslSdpaBwdPrepLaunchValues(launch);
+
+    EXPECT_EQ(values, sample::withRow(sample::prepRowValues()));
+    EXPECT_EQ(FLYDSL_SDPA_BWD_SPLIT_PREP_DISPATCH_SYMBOL_V1,
+              "hipkernel.flydsl_sdpa_bwd_split.prep.dispatch.v1");
+
+    const auto read = readFlydslSdpaBwdPrepLaunchInputs(
+        {std::string(FLYDSL_SDPA_BWD_SPLIT_PREP_DISPATCH_SYMBOL_V1), values});
+    sample::expectSampleProblem(read.problem);
+    sample::expectSampleUidsAndScalars(read.uids, read.scalars);
+    EXPECT_EQ(read.headDim, 128);
+    EXPECT_EQ(read.grid, "qblocks_by_heads_by_seqs");
+}
+
+TEST(TestPackLaunchValues, SplitDkdvValuesMatchTheV1Contract)
+{
+    const auto launch = sample::dkdvInputs();
+
+    const MetadataValues values = flydslSdpaBwdDkdvLaunchValues(launch);
+
+    EXPECT_EQ(values, sample::withRow(sample::dkdvRowValues()));
+    EXPECT_EQ(FLYDSL_SDPA_BWD_SPLIT_DKDV_DISPATCH_SYMBOL_V1,
+              "hipkernel.flydsl_sdpa_bwd_split.dkdv.dispatch.v1");
+
+    const auto read = readFlydslSdpaBwdDkdvLaunchInputs(
+        {std::string(FLYDSL_SDPA_BWD_SPLIT_DKDV_DISPATCH_SYMBOL_V1), values});
+    sample::expectSampleProblem(read.problem);
+    sample::expectSampleUidsAndScalars(read.uids, read.scalars);
+    EXPECT_EQ(read.headDim, 128);
+    EXPECT_EQ(read.blockThreads, 256);
+    EXPECT_EQ(read.blockKv, 32);
+    EXPECT_EQ(read.grid, "kheads_by_kvblocks_by_seqs");
+}
+
+TEST(TestPackLaunchValues, SplitDqValuesMatchTheV1Contract)
+{
+    const auto launch = sample::dqInputs();
+
+    const MetadataValues values = flydslSdpaBwdDqLaunchValues(launch);
+
+    EXPECT_EQ(values, sample::withRow(sample::dqRowValues()));
+    EXPECT_EQ(FLYDSL_SDPA_BWD_SPLIT_DQ_DISPATCH_SYMBOL_V1,
+              "hipkernel.flydsl_sdpa_bwd_split.dq.dispatch.v1");
+
+    const auto read = readFlydslSdpaBwdDqLaunchInputs(
+        {std::string(FLYDSL_SDPA_BWD_SPLIT_DQ_DISPATCH_SYMBOL_V1), values});
+    sample::expectSampleProblem(read.problem);
+    sample::expectSampleUidsAndScalars(read.uids, read.scalars);
+    EXPECT_EQ(read.headDim, 128);
+    EXPECT_EQ(read.blockThreads, 256);
+    EXPECT_EQ(read.blockM, 64);
+    EXPECT_EQ(read.grid, "qheads_by_qblocks_by_seqs");
+}
+
+TEST(TestPackLaunchValues, SplitDqReduceValuesMatchTheV1Contract)
+{
+    const auto launch = sample::dqInputs();
+
+    const MetadataValues values = flydslSdpaBwdDqLaunchValues(launch);
+
+    EXPECT_EQ(values, sample::withRow(sample::dqRowValues()));
+    EXPECT_EQ(FLYDSL_SDPA_BWD_SPLIT_DQ_REDUCE_DISPATCH_SYMBOL_V1,
+              "hipkernel.flydsl_sdpa_bwd_split.dq_reduce.dispatch.v1");
+
+    const auto read = readFlydslSdpaBwdDqReduceLaunchInputs(
+        {std::string(FLYDSL_SDPA_BWD_SPLIT_DQ_REDUCE_DISPATCH_SYMBOL_V1), values});
+    sample::expectSampleProblem(read.problem);
+    sample::expectSampleUidsAndScalars(read.uids, read.scalars);
+    EXPECT_EQ(read.headDim, 128);
+    EXPECT_EQ(read.blockThreads, 256);
+    EXPECT_EQ(read.blockM, 64);
+    EXPECT_EQ(read.grid, "qheads_by_qblocks_by_seqs");
+}
+
+TEST(TestPackLaunchValues, MergedValuesMatchTheV1Contract)
+{
+    const auto launch = sample::mergedInputs();
+
+    const MetadataValues values = flydslSdpaBwdMergedLaunchValues(launch);
+
+    EXPECT_EQ(values, sample::withRow(sample::mergedRowValues()));
+    EXPECT_EQ(FLYDSL_SDPA_BWD_MERGED_DISPATCH_SYMBOL_V1,
+              "hipkernel.flydsl_sdpa_bwd_merged.dispatch.v1");
+
+    const auto read = readFlydslSdpaBwdMergedLaunchInputs(
+        {std::string(FLYDSL_SDPA_BWD_MERGED_DISPATCH_SYMBOL_V1), values});
+    sample::expectSampleProblem(read.problem, sample::mergedProblem());
+    sample::expectSampleUidsAndScalars(read.uids, read.scalars);
+    EXPECT_EQ(read.headDim, 128);
+    EXPECT_EQ(read.blockThreads, 256);
+    EXPECT_EQ(read.blockKv, 32);
+    EXPECT_EQ(read.blockM, 64);
+}
+
+TEST(TestPackLaunchValues, MergedReduceValuesMatchTheV1Contract)
+{
+    const auto launch = sample::mergedInputs();
+
+    const MetadataValues values = flydslSdpaBwdMergedLaunchValues(launch);
+
+    EXPECT_EQ(values, sample::withRow(sample::mergedRowValues()));
+    EXPECT_EQ(FLYDSL_SDPA_BWD_MERGED_REDUCE_DISPATCH_SYMBOL_V1,
+              "hipkernel.flydsl_sdpa_bwd_merged_reduce.dispatch.v1");
+
+    const auto read = readFlydslSdpaBwdMergedReduceLaunchInputs(
+        {std::string(FLYDSL_SDPA_BWD_MERGED_REDUCE_DISPATCH_SYMBOL_V1), values});
+    sample::expectSampleProblem(read.problem, sample::mergedProblem());
+    sample::expectSampleUidsAndScalars(read.uids, read.scalars);
+    EXPECT_EQ(read.headDim, 128);
+    EXPECT_EQ(read.blockThreads, 256);
+    EXPECT_EQ(read.blockKv, 32);
+    EXPECT_EQ(read.blockM, 64);
+}
+
+TEST(TestPackLaunchValues, SplitDkdvU2ValuesMatchTheV1Contract)
+{
+    const auto launch = sample::dkdvU2Inputs();
+
+    const MetadataValues values = flydslSdpaBwdDkdvLaunchValues(launch);
+
+    EXPECT_EQ(values, sample::u2WithRow(sample::dkdvRowValues()));
+    EXPECT_EQ(FLYDSL_SDPA_BWD_SPLIT_DKDV_U2_DISPATCH_SYMBOL_V1,
+              "hipkernel.flydsl_sdpa_bwd_split.dkdv_u2.dispatch.v1");
+
+    const auto read = readFlydslSdpaBwdDkdvU2LaunchInputs(
+        {std::string(FLYDSL_SDPA_BWD_SPLIT_DKDV_U2_DISPATCH_SYMBOL_V1), values});
+    sample::expectSampleProblem(read.problem, sample::u2Problem());
+    sample::expectSampleUids(read.uids);
+    sample::expectSampleScaleOnly(read.scalars);
+    EXPECT_EQ(read.headDim, 128);
+    EXPECT_EQ(read.blockThreads, 256);
+    EXPECT_EQ(read.blockKv, 32);
+    EXPECT_EQ(read.grid, "kheads_by_kvblocks_by_seqs");
+}
+
+TEST(TestPackLaunchValues, SplitDqU2ValuesMatchTheV1Contract)
+{
+    const auto launch = sample::dqU2Inputs();
+
+    const MetadataValues values = flydslSdpaBwdDqLaunchValues(launch);
+
+    EXPECT_EQ(values, sample::u2WithRow(sample::dqRowValues()));
+    EXPECT_EQ(FLYDSL_SDPA_BWD_SPLIT_DQ_U2_DISPATCH_SYMBOL_V1,
+              "hipkernel.flydsl_sdpa_bwd_split.dq_u2.dispatch.v1");
+
+    const auto read = readFlydslSdpaBwdDqU2LaunchInputs(
+        {std::string(FLYDSL_SDPA_BWD_SPLIT_DQ_U2_DISPATCH_SYMBOL_V1), values});
+    sample::expectSampleProblem(read.problem, sample::u2Problem());
+    sample::expectSampleUids(read.uids);
+    sample::expectSampleScaleOnly(read.scalars);
+    EXPECT_EQ(read.headDim, 128);
+    EXPECT_EQ(read.blockThreads, 256);
+    EXPECT_EQ(read.blockM, 64);
+    EXPECT_EQ(read.grid, "qheads_by_qblocks_by_seqs");
+}
+
+// A contract serves the value heads of its own handler: a plan saved under another handler's
+// contract is refused, so a `dkdv` plan never restores into the `dkdv_u2` launches.
+TEST(TestPackLaunchValues, EachContractRefusesTheValueHeadsOfAnotherHandler)
+{
+    const std::string standardRule = "must be equal to num_kv_heads (4) for this contract, and the "
+                                     "plan holds 2";
+    const std::string u2Rule = "must be different from num_kv_heads for this contract, and the "
+                               "plan holds 4";
+
+    const auto u2Dkdv = sample::u2WithRow(sample::dkdvRowValues());
+    expectReadRefusal(&readFlydslSdpaBwdDkdvLaunchInputs,
+                      {std::string(FLYDSL_SDPA_BWD_SPLIT_DKDV_DISPATCH_SYMBOL_V1), u2Dkdv},
+                      standardRule);
+    const auto standardDkdv = sample::withRow(sample::dkdvRowValues());
+    expectReadRefusal(&readFlydslSdpaBwdDkdvU2LaunchInputs,
+                      {std::string(FLYDSL_SDPA_BWD_SPLIT_DKDV_U2_DISPATCH_SYMBOL_V1), standardDkdv},
+                      u2Rule);
+
+    const auto u2Dq = sample::u2WithRow(sample::dqRowValues());
+    expectReadRefusal(&readFlydslSdpaBwdDqLaunchInputs,
+                      {std::string(FLYDSL_SDPA_BWD_SPLIT_DQ_DISPATCH_SYMBOL_V1), u2Dq},
+                      standardRule);
+    expectReadRefusal(&readFlydslSdpaBwdDqReduceLaunchInputs,
+                      {std::string(FLYDSL_SDPA_BWD_SPLIT_DQ_REDUCE_DISPATCH_SYMBOL_V1), u2Dq},
+                      standardRule);
+    const auto standardDq = sample::withRow(sample::dqRowValues());
+    expectReadRefusal(&readFlydslSdpaBwdDqU2LaunchInputs,
+                      {std::string(FLYDSL_SDPA_BWD_SPLIT_DQ_U2_DISPATCH_SYMBOL_V1), standardDq},
+                      u2Rule);
+
+    auto u2Merged = sample::withRow(sample::mergedRowValues());
+    u2Merged["num_v_heads"] = int64_t{2};
+    expectReadRefusal(&readFlydslSdpaBwdMergedLaunchInputs,
+                      {std::string(FLYDSL_SDPA_BWD_MERGED_DISPATCH_SYMBOL_V1), u2Merged},
+                      standardRule);
+    expectReadRefusal(&readFlydslSdpaBwdMergedReduceLaunchInputs,
+                      {std::string(FLYDSL_SDPA_BWD_MERGED_REDUCE_DISPATCH_SYMBOL_V1), u2Merged},
+                      standardRule);
+
+    // The prep launch reads the values of either.
+    EXPECT_NO_THROW(static_cast<void>(readFlydslSdpaBwdPrepLaunchInputs(
+        {std::string(FLYDSL_SDPA_BWD_SPLIT_PREP_DISPATCH_SYMBOL_V1),
+         sample::u2WithRow(sample::prepRowValues())})));
+}
+
+// V heads that differ from K's are served only without 4-byte data, a bias and a ragged tensor
+// (the matcher declines them).
+TEST(TestPackLaunchValues, SplitDqU2RefusesWhatTheMatcherDeclinesBesideValueHeads)
+{
+    const std::string why = "must be equal to num_kv_heads with 4-byte data, a bias or a ragged "
+                            "tensor, and the plan holds 2";
+    const auto valid = sample::u2WithRow(sample::dqRowValues());
+
+    const std::vector<std::pair<std::string, std::function<void(MetadataValues&)>>> rows{
+        {"a bias",
+         [](MetadataValues& v) {
+             v["bias.uid"] = int64_t{71};
+             v["bias_element_bytes"] = int64_t{2};
+         }},
+        {"4-byte data",
+         [](MetadataValues& v) {
+             v["element_bytes"] = int64_t{4};
+             v["bias_element_bytes"] = int64_t{4};
+         }},
+        {"a ragged Q",
+         [](MetadataValues& v) {
+             for(const char* tensor : {"q", "stats"})
+             {
+                 v[std::string(tensor) + ".ragged_offset_uid"] = int64_t{301};
+                 v[std::string(tensor) + ".ragged_offset_multiplier"] = int64_t{3};
+                 v[std::string(tensor) + ".stride_batch"] = int64_t{0};
+             }
+         }},
+        {"a ragged K and no ragged Q", [](MetadataValues& v) {
+             v["k.ragged_offset_uid"] = int64_t{302};
+             v["k.ragged_offset_multiplier"] = int64_t{5};
+             v["k.stride_batch"] = int64_t{0};
+         }}};
+    for(const auto& [label, edit] : rows)
+    {
+        SCOPED_TRACE(label);
+        MetadataValues edited = valid;
+        edit(edited);
+        expectReadRefusal(&readFlydslSdpaBwdDqU2LaunchInputs,
+                          {std::string(FLYDSL_SDPA_BWD_SPLIT_DQ_U2_DISPATCH_SYMBOL_V1), edited},
+                          why);
+    }
+}
+
+// An f32 bias is a launch of the split engine only, and a pass-by-value 32-bit seed is not a
+// device one: the split reader keeps both.
+TEST(TestPackLaunchValues, ASplitPlanKeepsAnF32BiasAndAPassByValueInt32Seed)
+{
+    auto values = sample::withRow(sample::dqRowValues());
+    values["seed_width"] = std::string("int32");
+    values["seed.data_type"] = std::string("INT32");
+    values["offset.data_type"] = std::string("INT32");
+    const auto read = readFlydslSdpaBwdDqReduceLaunchInputs(
+        {std::string(FLYDSL_SDPA_BWD_SPLIT_DQ_REDUCE_DISPATCH_SYMBOL_V1), values});
+    EXPECT_EQ(read.problem.biasElementBytes, 4U);
+    EXPECT_EQ(read.problem.seedWidth, flydsl_sdpa_bwd::SeedWidth::INT32);
+    EXPECT_EQ(read.problem.seedForm, flydsl_sdpa_bwd::SeedForm::PASS_BY_VALUE);
+}
+
+// The merged engine declines an f32 bias, and serves a masked or biased head dim 192 problem
+// like any other head dim.
+TEST(TestPackLaunchValues, MergedRefusesWhatTheMergedMatcherDeclinesAndServesHeadDim192)
+{
+    const auto valid = sample::withRow(sample::mergedRowValues());
+    const auto d192 = [](MetadataValues& v) {
+        v["head_dim_qk"] = int64_t{192};
+        v["head_dim_v"] = int64_t{192};
+    };
+
+    struct MergedReader
+    {
+        std::string contract;
+        std::function<void(const SavedLaunchInputs&)> read;
+    };
+    const std::array<MergedReader, 2> readers{
+        {{std::string(FLYDSL_SDPA_BWD_MERGED_DISPATCH_SYMBOL_V1),
+          [](const SavedLaunchInputs& in) {
+              static_cast<void>(readFlydslSdpaBwdMergedLaunchInputs(in));
+          }},
+         {std::string(FLYDSL_SDPA_BWD_MERGED_REDUCE_DISPATCH_SYMBOL_V1),
+          [](const SavedLaunchInputs& in) {
+              static_cast<void>(readFlydslSdpaBwdMergedReduceLaunchInputs(in));
+          }}}};
+    for(const auto& reader : readers)
+    {
+        SCOPED_TRACE(reader.contract);
+        MetadataValues f32Bias = valid;
+        f32Bias["bias_element_bytes"] = int64_t{4};
+        expectReadRefusal(
+            reader.read, {reader.contract, f32Bias}, "launch value 'bias_element_bytes'");
+        expectReadRefusal(reader.read,
+                          {reader.contract, f32Bias},
+                          "must be 2 (the merged engine serves a 16-bit bias only), and the "
+                          "plan holds 4");
+
+        // A head dim 192 problem is served with a mask or a bias, with both and with neither.
+        for(const bool masked : {false, true})
+        {
+            for(const bool biased : {false, true})
+            {
+                SCOPED_TRACE(std::string(masked ? "masked" : "unmasked")
+                             + (biased ? " biased" : " unbiased"));
+                MetadataValues served = valid;
+                d192(served);
+                served["masked"] = masked;
+                if(!biased)
+                {
+                    served["bias.uid"] = flydsl_sdpa_bwd::NO_UID;
+                    served["dbias.uid"] = flydsl_sdpa_bwd::NO_UID;
+                }
+                EXPECT_NO_THROW(reader.read({reader.contract, served}));
+            }
+        }
+    }
+    const auto read = readFlydslSdpaBwdMergedLaunchInputs(
+        {std::string(FLYDSL_SDPA_BWD_MERGED_DISPATCH_SYMBOL_V1), [&] {
+             MetadataValues plain = valid;
+             d192(plain);
+             plain["bias.uid"] = flydsl_sdpa_bwd::NO_UID;
+             plain["dbias.uid"] = flydsl_sdpa_bwd::NO_UID;
+             plain["masked"] = false;
+             return plain;
+         }()});
+    EXPECT_EQ(read.problem.headDimQk, 192);
+    EXPECT_EQ(read.problem.headDimV, 192);
+}
+
+// Each of the nine tensors saves its ragged offset under its own name and reads it back into
+// its own member: no two tensors' entries are exchanged.
+struct BwdTensorCase
+{
+    const char* name;
+    flydsl_sdpa_bwd::RaggedOffset flydsl_sdpa_bwd::RaggedOffsets::*ragged;
+    flydsl_sdpa_bwd::Strides flydsl_sdpa_bwd::SdpaBwdProblem::*strides;
+};
+
+const std::vector<BwdTensorCase>& bwdTensorCases()
+{
+    using flydsl_sdpa_bwd::RaggedOffsets;
+    using flydsl_sdpa_bwd::SdpaBwdProblem;
+    static const std::vector<BwdTensorCase> s_cases{
+        {"q", &RaggedOffsets::q, &SdpaBwdProblem::q},
+        {"k", &RaggedOffsets::k, &SdpaBwdProblem::k},
+        {"v", &RaggedOffsets::v, &SdpaBwdProblem::v},
+        {"o", &RaggedOffsets::o, &SdpaBwdProblem::o},
+        {"do", &RaggedOffsets::dO, &SdpaBwdProblem::dO},
+        {"dq", &RaggedOffsets::dQ, &SdpaBwdProblem::dQ},
+        {"dk", &RaggedOffsets::dK, &SdpaBwdProblem::dK},
+        {"dv", &RaggedOffsets::dV, &SdpaBwdProblem::dV},
+        {"stats", &RaggedOffsets::stats, &SdpaBwdProblem::stats}};
+    return s_cases;
+}
+
+TEST(TestPackLaunchValues, EveryTensorSavesAndRestoresItsOwnRaggedOffset)
+{
+    // The stats are ragged exactly when Q is, so Q and the stats are ragged together; every
+    // other tensor is ragged alone. Each ragged offset has an uid and a multiplier of its own.
+    const auto& cases = bwdTensorCases();
+    for(size_t index = 0; index < cases.size(); ++index)
+    {
+        const std::string tensor = cases[index].name;
+        if(tensor == "stats")
+        {
+            continue;
+        }
+        SCOPED_TRACE(tensor);
+        const int64_t uid = 500 + static_cast<int64_t>(index);
+        const int64_t multiplier = 20 + static_cast<int64_t>(index);
+        const bool withStats = tensor == "q";
+
+        auto launch = sample::dqInputs();
+        launch.problem.ragged = {};
+        for(const auto& each : cases)
+        {
+            (launch.problem.*each.strides).batch = 700;
+        }
+        launch.problem.ragged.*cases[index].ragged = {uid, multiplier};
+        (launch.problem.*cases[index].strides).batch = 0;
+        if(withStats)
+        {
+            launch.problem.ragged.stats = {600, 30};
+            launch.problem.stats.batch = 0;
+        }
+        const auto wantUid = [&](const std::string& name) -> int64_t {
+            if(name == tensor)
+            {
+                return uid;
+            }
+            return withStats && name == "stats" ? 600 : -1;
+        };
+        const auto wantMultiplier = [&](const std::string& name) -> int64_t {
+            if(name == tensor)
+            {
+                return multiplier;
+            }
+            return withStats && name == "stats" ? 30 : 0;
+        };
+
+        // The writer puts the offset of the member under the tensor's name.
+        const MetadataValues values = flydslSdpaBwdDqLaunchValues(launch);
+        for(const auto& other : cases)
+        {
+            const std::string name = other.name;
+            EXPECT_EQ(std::get<int64_t>(values.at(name + ".ragged_offset_uid")), wantUid(name))
+                << name;
+            EXPECT_EQ(std::get<int64_t>(values.at(name + ".ragged_offset_multiplier")),
+                      wantMultiplier(name))
+                << name;
+        }
+
+        // The reader puts the offset under the tensor's name into its member.
+        const auto read = readFlydslSdpaBwdDqReduceLaunchInputs(
+            {std::string(FLYDSL_SDPA_BWD_SPLIT_DQ_REDUCE_DISPATCH_SYMBOL_V1), values});
+        for(const auto& other : cases)
+        {
+            const std::string name = other.name;
+            const auto& got = read.problem.ragged.*other.ragged;
+            EXPECT_EQ(got.uid, wantUid(name)) << name;
+            EXPECT_EQ(got.multiplier, wantMultiplier(name)) << name;
+        }
+    }
+}
+
+// The graph's window bounds are int64 and the launch clamps them itself, so a plan that saved a
+// bound above INT32_MAX loads and holds the same bound.
+TEST(TestPackLaunchValues,
+     WindowBoundsBeyondTheLaunchRangeRoundTripThroughEveryContractThatReadsThem)
+{
+    constexpr int64_t BEYOND_INT32 = int64_t{1} << 40;
+    constexpr int64_t LARGEST = std::numeric_limits<int64_t>::max();
+
+    for(const auto& [left, right] : {std::pair<int64_t, int64_t>{BEYOND_INT32, LARGEST},
+                                     std::pair<int64_t, int64_t>{LARGEST, BEYOND_INT32}})
+    {
+        SCOPED_TRACE(left);
+
+        auto dq = sample::dqInputs();
+        dq.problem.windowLeft = left;
+        dq.problem.windowRight = right;
+        const auto readDq = readFlydslSdpaBwdDqLaunchInputs(
+            {std::string(FLYDSL_SDPA_BWD_SPLIT_DQ_DISPATCH_SYMBOL_V1),
+             flydslSdpaBwdDqLaunchValues(dq)});
+        EXPECT_EQ(readDq.problem.windowLeft, left);
+        EXPECT_EQ(readDq.problem.windowRight, right);
+
+        auto merged = sample::mergedInputs();
+        merged.problem.windowLeft = left;
+        merged.problem.windowRight = right;
+        const auto readMerged = readFlydslSdpaBwdMergedLaunchInputs(
+            {std::string(FLYDSL_SDPA_BWD_MERGED_DISPATCH_SYMBOL_V1),
+             flydslSdpaBwdMergedLaunchValues(merged)});
+        EXPECT_EQ(readMerged.problem.windowLeft, left);
+        EXPECT_EQ(readMerged.problem.windowRight, right);
+    }
+}
+
+// One row edits one value of a sample so that exactly one check of the shared reader refuses
+// it. `name` and `expectation` are the two parts of the refusal message.
+struct BwdReadRefusalRow
+{
+    std::string label;
+    std::function<void(MetadataValues&)> edit;
+    std::string name;
+    std::string expectation;
+};
+
+// The edit that makes the sample's seed a device seed: the pass-by-value bindings go, the two
+// tensor uids stay.
+void makeSeedADeviceSeed(MetadataValues& values)
+{
+    values["seed_form"] = std::string("device");
+    for(const char* name : {"seed.data_type",
+                            "seed.user_supplied",
+                            "offset.data_type",
+                            "offset.user_supplied",
+                            "offset.baked"})
+    {
+        values.erase(name);
+    }
+}
+
+// The edit that gives the sample no seed: dropout stays on, the seed form and width go.
+void dropTheSeed(MetadataValues& values)
+{
+    values["seed_form"] = std::string("none");
+    values["seed_width"] = std::string("none");
+    for(const char* name : {"seed.uid",
+                            "seed.data_type",
+                            "seed.user_supplied",
+                            "offset.uid",
+                            "offset.data_type",
+                            "offset.user_supplied",
+                            "offset.baked"})
+    {
+        values.erase(name);
+    }
+}
+
+// One reader of a SDPA backward contract, with a sample of the values it reads.
+struct BwdReader
+{
+    std::string label;
+    std::string contract;
+    MetadataValues valid;
+    std::function<void(const SavedLaunchInputs&)> read;
+    /// The values the contract has beyond the shared ones.
+    std::vector<std::string> rowValues;
+    /// The `grid` spellings the contract accepts; empty for a contract without a grid.
+    std::vector<std::string> grids;
+    /// The relation the contract requires between the value heads and the key heads.
+    enum class ValueHeads
+    {
+        ANY,
+        EQUAL,
+        DIFFERENT
+    } valueHeads
+        = ValueHeads::EQUAL;
+};
+
+template <typename TReader>
+BwdReader bwdReader(std::string label,
+                    std::string_view contract,
+                    MetadataValues valid,
+                    TReader read,
+                    std::vector<std::string> rowValues,
+                    std::vector<std::string> grids,
+                    BwdReader::ValueHeads valueHeads = BwdReader::ValueHeads::EQUAL)
+{
+    return BwdReader{std::move(label),
+                     std::string(contract),
+                     std::move(valid),
+                     [read](const SavedLaunchInputs& inputs) { static_cast<void>(read(inputs)); },
+                     std::move(rowValues),
+                     std::move(grids),
+                     valueHeads};
+}
+
+// Every reader of the eight contracts, each with a valid sample of its own.
+const std::vector<BwdReader>& bwdReaders()
+{
+    using Heads = BwdReader::ValueHeads;
+    const std::vector<std::string> dqRow{"head_dim", "block_threads", "block_m", "grid"};
+    const std::vector<std::string> dkdvRow{"head_dim", "block_threads", "block_kv", "grid"};
+    const std::vector<std::string> mergedRow{"head_dim", "block_threads", "block_kv", "block_m"};
+    const std::vector<std::string> dqGrids{"qheads_by_qblocks_by_seqs"};
+    const std::vector<std::string> dkdvGrids{"kheads_by_kvblocks_by_seqs",
+                                             "kvblocks_by_kheads_by_seqs"};
+    static const std::vector<BwdReader> s_readers{
+        bwdReader("prep",
+                  FLYDSL_SDPA_BWD_SPLIT_PREP_DISPATCH_SYMBOL_V1,
+                  sample::withRow(sample::prepRowValues()),
+                  &readFlydslSdpaBwdPrepLaunchInputs,
+                  {"head_dim", "grid"},
+                  {"qblocks_by_heads_by_seqs"},
+                  Heads::ANY),
+        bwdReader("dkdv",
+                  FLYDSL_SDPA_BWD_SPLIT_DKDV_DISPATCH_SYMBOL_V1,
+                  sample::withRow(sample::dkdvRowValues()),
+                  &readFlydslSdpaBwdDkdvLaunchInputs,
+                  dkdvRow,
+                  dkdvGrids),
+        bwdReader("dkdv_u2",
+                  FLYDSL_SDPA_BWD_SPLIT_DKDV_U2_DISPATCH_SYMBOL_V1,
+                  sample::u2WithRow(sample::dkdvRowValues()),
+                  &readFlydslSdpaBwdDkdvU2LaunchInputs,
+                  dkdvRow,
+                  dkdvGrids,
+                  Heads::DIFFERENT),
+        bwdReader("dq",
+                  FLYDSL_SDPA_BWD_SPLIT_DQ_DISPATCH_SYMBOL_V1,
+                  sample::withRow(sample::dqRowValues()),
+                  &readFlydslSdpaBwdDqLaunchInputs,
+                  dqRow,
+                  dqGrids),
+        bwdReader("dq_reduce",
+                  FLYDSL_SDPA_BWD_SPLIT_DQ_REDUCE_DISPATCH_SYMBOL_V1,
+                  sample::withRow(sample::dqRowValues()),
+                  &readFlydslSdpaBwdDqReduceLaunchInputs,
+                  dqRow,
+                  dqGrids),
+        bwdReader("dq_u2",
+                  FLYDSL_SDPA_BWD_SPLIT_DQ_U2_DISPATCH_SYMBOL_V1,
+                  sample::u2WithRow(sample::dqRowValues()),
+                  &readFlydslSdpaBwdDqU2LaunchInputs,
+                  dqRow,
+                  dqGrids,
+                  Heads::DIFFERENT),
+        bwdReader("merged",
+                  FLYDSL_SDPA_BWD_MERGED_DISPATCH_SYMBOL_V1,
+                  sample::withRow(sample::mergedRowValues()),
+                  &readFlydslSdpaBwdMergedLaunchInputs,
+                  mergedRow,
+                  {}),
+        bwdReader("merged_reduce",
+                  FLYDSL_SDPA_BWD_MERGED_REDUCE_DISPATCH_SYMBOL_V1,
+                  sample::withRow(sample::mergedRowValues()),
+                  &readFlydslSdpaBwdMergedReduceLaunchInputs,
+                  mergedRow,
+                  {})};
+    return s_readers;
+}
+
+const BwdReader& bwdReader(std::string_view label)
+{
+    const auto& readers = bwdReaders();
+    return *std::find_if(readers.begin(), readers.end(), [&](const BwdReader& reader) {
+        return reader.label == label;
+    });
+}
+
+// Expects @p reader to refuse @p edit of its sample, naming @p name and saying @p expectation.
+void expectBwdReaderRefuses(const BwdReader& reader,
+                            const std::function<void(MetadataValues&)>& edit,
+                            const std::string& name,
+                            const std::string& expectation)
+{
+    MetadataValues edited = reader.valid;
+    edit(edited);
+    const SavedLaunchInputs inputs{reader.contract, edited};
+    expectReadRefusal(reader.read, inputs, name);
+    expectReadRefusal(reader.read, inputs, expectation);
+}
+
+// Expects @p reader to accept @p edit of its sample.
+void expectBwdReaderAccepts(const BwdReader& reader,
+                            const std::function<void(MetadataValues&)>& edit)
+{
+    MetadataValues edited = reader.valid;
+    edit(edited);
+    const SavedLaunchInputs inputs{reader.contract, edited};
+    EXPECT_NO_THROW(reader.read(inputs));
+}
+
+// The shared checks, run against the four readers whose sample is the shared problem. The
+// values of one reader's own row are refused by EachReaderRefusesEachRowValueOutsideItsContract.
+TEST(TestPackLaunchValues, EachReaderRefusesEachValueOutsideTheSharedContract)
+{
+    const std::string seedRule
+        = "must be set exactly when dropout_p is above 0, with a seed width, and the plan holds ";
+    const std::string lengthRule = "must be both length uids set with padding_mask and neither "
+                                   "without it, and the plan holds ";
+
+    const std::vector<BwdReadRefusalRow> rows{
+        {"an element width of 3",
+         [](MetadataValues& v) { v["element_bytes"] = int64_t{3}; },
+         "launch value 'element_bytes'",
+         "must be 2 or 4, and the plan holds 3"},
+        {"kv heads that do not divide the heads",
+         [](MetadataValues& v) { v["num_kv_heads"] = int64_t{3}; },
+         "launch value 'num_kv_heads'",
+         "must be a divisor of num_heads (8), and the plan holds 3"},
+        {"a padding mask without a length uid",
+         [](MetadataValues& v) { v["seq_len_q.uid"] = flydsl_sdpa_bwd::NO_UID; },
+         "launch value 'seq_len_q.uid'",
+         lengthRule + "-1 and 62"},
+        {"length uids without a padding mask",
+         [](MetadataValues& v) { v["padding_mask"] = false; },
+         "launch value 'seq_len_q.uid'",
+         lengthRule + "61 and 62"},
+        {"a dbias uid without a bias",
+         [](MetadataValues& v) { v["bias.uid"] = flydsl_sdpa_bwd::NO_UID; },
+         "launch value 'dbias.uid'",
+         "must be unset when there is no bias, and the plan holds 72"},
+        {"a dropout probability of 1",
+         [](MetadataValues& v) { v["dropout_p"] = 1.0; },
+         "launch value 'dropout_p'",
+         "must be in [0, 1), and the plan holds 1.000000"},
+        {"a seed form without dropout",
+         [](MetadataValues& v) { v["dropout_p"] = 0.0; },
+         "launch value 'seed_form'",
+         seedRule + "pass_by_value with width int64"},
+        {"a seed form without a seed width",
+         [](MetadataValues& v) { v["seed_width"] = std::string("none"); },
+         "launch value 'seed_form'",
+         seedRule + "pass_by_value with width none"},
+        {"dropout without a seed form",
+         dropTheSeed,
+         "launch value 'seed_form'",
+         seedRule + "none with width none"},
+        {"a seed that is not the seed width",
+         [](MetadataValues& v) { v["seed.data_type"] = std::string("INT32"); },
+         "launch value 'seed.data_type'",
+         "must be INT64, and the plan holds INT32"},
+        {"an offset that is not the seed width",
+         [](MetadataValues& v) { v["offset.data_type"] = std::string("INT32"); },
+         "launch value 'offset.data_type'",
+         "must be INT64, and the plan holds INT32"},
+        {"a 32-bit seed width over a 64-bit seed",
+         [](MetadataValues& v) { v["seed_width"] = std::string("int32"); },
+         "launch value 'seed.data_type'",
+         "must be INT32, and the plan holds INT64"},
+        {"a device seed without a seed uid",
+         [](MetadataValues& v) {
+             makeSeedADeviceSeed(v);
+             v["seed.uid"] = flydsl_sdpa_bwd::NO_UID;
+         },
+         "launch value 'seed.uid'",
+         "must be a tensor uid, and the plan holds unset"},
+        {"a device seed without an offset uid",
+         [](MetadataValues& v) {
+             makeSeedADeviceSeed(v);
+             v["offset.uid"] = flydsl_sdpa_bwd::NO_UID;
+         },
+         "launch value 'seed.uid'",
+         "must be a tensor uid, and the plan holds unset"},
+        {"an unknown scale source",
+         [](MetadataValues& v) { v["scale_source"] = std::string("bogus"); },
+         "launch value 'scale_source'",
+         "must be one of 'value' 'tensor', and the plan holds 'bogus'"},
+        {"an unknown seed form",
+         [](MetadataValues& v) { v["seed_form"] = std::string("bogus"); },
+         "launch value 'seed_form'",
+         "must be one of 'none' 'device' 'pass_by_value', and the plan holds 'bogus'"},
+        {"an unknown seed width",
+         [](MetadataValues& v) { v["seed_width"] = std::string("bogus"); },
+         "launch value 'seed_width'",
+         "must be one of 'none' 'int32' 'int64', and the plan holds 'bogus'"},
+        {"a ragged offset uid below the unset sentinel",
+         [](MetadataValues& v) { v["q.ragged_offset_uid"] = int64_t{-2}; },
+         "launch value 'q.ragged_offset_uid'",
+         "must be int in [-1, 9223372036854775807], and the plan holds -2"},
+        {"a negative ragged offset multiplier",
+         [](MetadataValues& v) { v["q.ragged_offset_multiplier"] = int64_t{-1}; },
+         "launch value 'q.ragged_offset_multiplier'",
+         "must be int in [0, 9223372036854775807], and the plan holds -1"},
+        {"a ragged offset uid with a zero multiplier",
+         [](MetadataValues& v) { v["k.ragged_offset_multiplier"] = int64_t{0}; },
+         "launch value 'k.ragged_offset_multiplier'",
+         "must be at least 1 beside a ragged offset uid, and the plan holds 0"},
+        {"a ragged offset multiplier without a uid",
+         [](MetadataValues& v) { v["v.ragged_offset_multiplier"] = int64_t{2}; },
+         "launch value 'v.ragged_offset_multiplier'",
+         "must be 0 without a ragged offset uid, and the plan holds 2"},
+        {"a ragged offset without a padding mask",
+         [](MetadataValues& v) {
+             v["padding_mask"] = false;
+             v["seq_len_q.uid"] = flydsl_sdpa_bwd::NO_UID;
+             v["seq_len_kv.uid"] = flydsl_sdpa_bwd::NO_UID;
+         },
+         "launch value 'q.ragged_offset_uid'",
+         "must be unset without padding_mask, and the plan holds 301"},
+        {"a ragged tensor with a batch stride",
+         [](MetadataValues& v) { v["o.stride_batch"] = int64_t{5}; },
+         "launch value 'o.stride_batch'",
+         "must be 0 on a ragged tensor, and the plan holds 5"},
+        {"ragged stats with a batch stride",
+         [](MetadataValues& v) { v["stats.stride_batch"] = int64_t{4}; },
+         "launch value 'stats.stride_batch'",
+         "must be 0 on a ragged tensor, and the plan holds 4"},
+        {"a negative stats stride",
+         [](MetadataValues& v) { v["stats.stride_head"] = int64_t{-1}; },
+         "launch value 'stats.stride_head'",
+         "must be int in [0, 9223372036854775807], and the plan holds -1"},
+        {"ragged stats beside a dense Q",
+         [](MetadataValues& v) {
+             v["q.ragged_offset_uid"] = flydsl_sdpa_bwd::NO_UID;
+             v["q.ragged_offset_multiplier"] = int64_t{0};
+         },
+         "launch value 'stats.ragged_offset_uid'",
+         "must be set exactly when q.ragged_offset_uid is, and the plan holds 309"},
+        {"dense stats beside a ragged Q",
+         [](MetadataValues& v) {
+             v["stats.ragged_offset_uid"] = flydsl_sdpa_bwd::NO_UID;
+             v["stats.ragged_offset_multiplier"] = int64_t{0};
+         },
+         "launch value 'stats.ragged_offset_uid'",
+         "must be set exactly when q.ragged_offset_uid is, and the plan holds -1"},
+        {"a left window bound below the unbounded sentinel",
+         [](MetadataValues& v) { v["window_left"] = int64_t{-2}; },
+         "launch value 'window_left'",
+         "must be int in [-1, 9223372036854775807], and the plan holds -2"},
+        {"a right window bound below the unbounded sentinel",
+         [](MetadataValues& v) { v["window_right"] = int64_t{-2}; },
+         "launch value 'window_right'",
+         "must be int in [-1, 9223372036854775807], and the plan holds -2"},
+        {"a left window bound of 0, which the matcher declines",
+         [](MetadataValues& v) { v["window_left"] = int64_t{0}; },
+         "launch value 'window_left'",
+         "must be -1 or at least 1, and the plan holds 0"},
+        {"a device seed of 32 bits, which the matcher declines",
+         [](MetadataValues& v) {
+             makeSeedADeviceSeed(v);
+             v["seed_width"] = std::string("int32");
+         },
+         "launch value 'seed_width'",
+         "must be int64 beside a device seed (the kernels read 8 bytes there), and the plan "
+         "holds int32"},
+        {"a bias width of 3",
+         [](MetadataValues& v) { v["bias_element_bytes"] = int64_t{3}; },
+         "launch value 'bias_element_bytes'",
+         "must be 2 or 4, and the plan holds 3"},
+        {"a bias width above 4",
+         [](MetadataValues& v) { v["bias_element_bytes"] = int64_t{5}; },
+         "launch value 'bias_element_bytes'",
+         "must be int in [2, 4], and the plan holds 5"},
+        {"a bias width of 4 without a bias",
+         [](MetadataValues& v) {
+             v["bias.uid"] = flydsl_sdpa_bwd::NO_UID;
+             v["dbias.uid"] = flydsl_sdpa_bwd::NO_UID;
+         },
+         "launch value 'bias_element_bytes'",
+         "must be equal to element_bytes (2) when there is no bias, and the plan holds 4"},
+        {"a 16-bit bias beside 4-byte data",
+         [](MetadataValues& v) {
+             v["element_bytes"] = int64_t{4};
+             v["bias_element_bytes"] = int64_t{2};
+         },
+         "launch value 'bias_element_bytes'",
+         "must be 4 beside 4-byte data, and the plan holds 2"},
+        {"no value heads",
+         [](MetadataValues& v) { v["num_v_heads"] = int64_t{0}; },
+         "launch value 'num_v_heads'",
+         "must be int in [1, 2147483647], and the plan holds 0"},
+        {"value heads that do not divide the heads",
+         [](MetadataValues& v) { v["num_v_heads"] = int64_t{3}; },
+         "launch value 'num_v_heads'",
+         "must be a divisor of num_heads (8), and the plan holds 3"},
+        {"an extent beyond INT32_MAX",
+         [](MetadataValues& v) { v["batch"] = int64_t{2147483648}; },
+         "launch value 'batch'",
+         "must be int in [1, 2147483647], and the plan holds 2147483648"},
+        {"a Q/K head dim of 0",
+         [](MetadataValues& v) { v["head_dim_qk"] = int64_t{0}; },
+         "launch value 'head_dim_qk'",
+         "must be int in [1, 512], and the plan holds 0"},
+        {"a Q/K head dim above 512",
+         [](MetadataValues& v) { v["head_dim_qk"] = int64_t{513}; },
+         "launch value 'head_dim_qk'",
+         "must be int in [1, 512], and the plan holds 513"},
+        {"a V head dim of 0",
+         [](MetadataValues& v) { v["head_dim_v"] = int64_t{0}; },
+         "launch value 'head_dim_v'",
+         "must be int in [1, 512], and the plan holds 0"},
+        {"a V head dim above 512",
+         [](MetadataValues& v) { v["head_dim_v"] = int64_t{513}; },
+         "launch value 'head_dim_v'",
+         "must be int in [1, 512], and the plan holds 513"},
+        {"a scale above 2^20",
+         [](MetadataValues& v) { v["scale_value"] = 1048577.0; },
+         "launch value 'scale_value'",
+         "must be a double that a float holds exactly, in [-1048576.000000, 1048576.000000], and "
+         "the plan holds 1048577.000000"},
+        {"a scale no float holds",
+         [](MetadataValues& v) { v["scale_value"] = 0.1; },
+         "launch value 'scale_value'",
+         "must be a double that a float holds exactly, in [-1048576.000000, 1048576.000000], and "
+         "the plan holds 0.100000"},
+        {"a diagonal offset above INT32_MAX",
+         [](MetadataValues& v) { v["diagonal_offset"] = int64_t{2147483648}; },
+         "launch value 'diagonal_offset'",
+         "must be int in [-2147483647, 2147483647], and the plan holds 2147483648"},
+        {"a diagonal offset below -INT32_MAX",
+         [](MetadataValues& v) { v["diagonal_offset"] = int64_t{-2147483648}; },
+         "launch value 'diagonal_offset'",
+         "must be int in [-2147483647, 2147483647], and the plan holds -2147483648"},
+        {"a dropout probability below 0",
+         [](MetadataValues& v) { v["dropout_p"] = -0.5; },
+         "launch value 'dropout_p'",
+         "must be a double that a float holds exactly, in [0.000000, 1.000000], and the plan "
+         "holds -0.500000"},
+        {"a dropout probability no float holds",
+         [](MetadataValues& v) { v["dropout_p"] = 0.1; },
+         "launch value 'dropout_p'",
+         "must be a double that a float holds exactly, in [0.000000, 1.000000], and the plan "
+         "holds 0.100000"},
+        {"a negative stride on the first strided tensor",
+         [](MetadataValues& v) { v["q.stride_head"] = int64_t{-1}; },
+         "launch value 'q.stride_head'",
+         "must be int in [0, 9223372036854775807], and the plan holds -1"},
+        {"a negative stride on the last strided tensor",
+         [](MetadataValues& v) { v["dv.stride_seq"] = int64_t{-1}; },
+         "launch value 'dv.stride_seq'",
+         "must be int in [0, 9223372036854775807], and the plan holds -1"}};
+
+    // The sample of every one of these readers is the shared problem, so every row applies to
+    // each of them: the shared checks are one function, and a reader that stopped calling it
+    // would show here.
+    for(const char* label : {"prep", "dkdv", "dq", "dq_reduce"})
+    {
+        const auto& reader = bwdReader(label);
+        for(const auto& row : rows)
+        {
+            SCOPED_TRACE(std::string(label) + ": " + row.label);
+            expectBwdReaderRefuses(reader, row.edit, row.name, row.expectation);
+        }
+    }
+}
+
+// The values a contract has beyond the shared ones, refused one reader at a time: a head dim of
+// 0 or above 512, a block of 0 threads or more than a block holds, a tile of 0 rows or beyond
+// INT32_MAX, a grid spelling of another launch, a grid on a contract that has none, and the
+// value heads of another handler.
+TEST(TestPackLaunchValues, EachReaderRefusesEachRowValueOutsideItsContract)
+{
+    const auto has = [](const BwdReader& reader, const char* value) {
+        return std::find(reader.rowValues.begin(), reader.rowValues.end(), value)
+               != reader.rowValues.end();
+    };
+    const auto set = [](const char* name, int64_t value) {
+        return [=](MetadataValues& v) { v[name] = value; };
+    };
+    const std::string threads = "must be int in [1, 1024], and the plan holds ";
+    const std::string rows = "must be int in [1, 2147483647], and the plan holds ";
+
+    for(const auto& reader : bwdReaders())
+    {
+        SCOPED_TRACE(reader.label);
+        EXPECT_TRUE(has(reader, "head_dim"));
+        expectBwdReaderRefuses(reader,
+                               set("head_dim", 0),
+                               "launch value 'head_dim'",
+                               "must be int in [1, 512], and the plan holds 0");
+        expectBwdReaderRefuses(reader,
+                               set("head_dim", 513),
+                               "launch value 'head_dim'",
+                               "must be int in [1, 512], and the plan holds 513");
+        if(has(reader, "block_threads"))
+        {
+            expectBwdReaderRefuses(
+                reader, set("block_threads", 0), "launch value 'block_threads'", threads + "0");
+            expectBwdReaderRefuses(reader,
+                                   set("block_threads", 1025),
+                                   "launch value 'block_threads'",
+                                   threads + "1025");
+        }
+        for(const char* tile : {"block_kv", "block_m"})
+        {
+            if(has(reader, tile))
+            {
+                const std::string name = std::string("launch value '") + tile + "'";
+                expectBwdReaderRefuses(reader, set(tile, 0), name, rows + "0");
+                expectBwdReaderRefuses(reader, set(tile, 2147483648), name, rows + "2147483648");
+            }
+        }
+        if(reader.grids.empty())
+        {
+            expectBwdReaderRefuses(
+                reader,
+                [](MetadataValues& v) { v["grid"] = std::string("qheads_by_qblocks_by_seqs"); },
+                "launch value 'grid'",
+                "is not part of the contract");
+        }
+        else
+        {
+            // The spelling of a launch this contract is not: the prep grid for the others, a dq
+            // grid for prep.
+            const std::string other
+                = reader.label == "prep" ? "qheads_by_qblocks_by_seqs" : "qblocks_by_heads_by_seqs";
+            std::string accepted;
+            for(const auto& grid : reader.grids)
+            {
+                accepted += (accepted.empty() ? "'" : " '") + grid + "'";
+            }
+            std::string message = "must be one of ";
+            message.append(accepted).append(", and the plan holds '").append(other).append("'");
+            expectBwdReaderRefuses(
+                reader,
+                [&](MetadataValues& v) { v["grid"] = other; },
+                "launch value 'grid'",
+                message);
+        }
+    }
+
+    // The value heads: a contract of `Hk == Hv` refuses other value heads, a `u2` contract
+    // refuses equal ones, and prep serves either.
+    for(const auto& reader : bwdReaders())
+    {
+        SCOPED_TRACE(reader.label);
+        switch(reader.valueHeads)
+        {
+        case BwdReader::ValueHeads::EQUAL:
+            expectBwdReaderRefuses(reader,
+                                   set("num_v_heads", 2),
+                                   "launch value 'num_v_heads'",
+                                   "must be equal to num_kv_heads (4) for this contract, and the "
+                                   "plan holds 2");
+            break;
+        case BwdReader::ValueHeads::DIFFERENT:
+            expectBwdReaderRefuses(reader,
+                                   set("num_v_heads", 4),
+                                   "launch value 'num_v_heads'",
+                                   "must be different from num_kv_heads for this contract, and "
+                                   "the plan holds 4");
+            break;
+        case BwdReader::ValueHeads::ANY:
+        default:
+            EXPECT_NO_THROW(
+                reader.read({reader.contract, sample::u2WithRow(sample::prepRowValues())}));
+            EXPECT_NO_THROW(reader.read({reader.contract, reader.valid}));
+            break;
+        }
+    }
+}
+
+// A value exactly at a limit of its range reads back, beside the rows that refuse the value one
+// step beyond it.
+TEST(TestPackLaunchValues, EachReaderAcceptsEachRowValueAtItsLimit)
+{
+    const auto set = [](const char* name, int64_t value) {
+        return [=](MetadataValues& v) { v[name] = value; };
+    };
+    for(const auto& reader : bwdReaders())
+    {
+        SCOPED_TRACE(reader.label);
+        for(const int64_t headDim : {int64_t{1}, int64_t{512}})
+        {
+            expectBwdReaderAccepts(reader, set("head_dim", headDim));
+        }
+        for(const char* name : {"block_threads", "block_kv", "block_m"})
+        {
+            if(std::find(reader.rowValues.begin(), reader.rowValues.end(), name)
+               == reader.rowValues.end())
+            {
+                continue;
+            }
+            const int64_t largest = std::string(name) == "block_threads" ? 1024 : 2147483647;
+            for(const int64_t value : {int64_t{1}, largest})
+            {
+                SCOPED_TRACE(std::string(name) + " " + std::to_string(value));
+                expectBwdReaderAccepts(reader, set(name, value));
+            }
+        }
+        for(const auto& grid : reader.grids)
+        {
+            SCOPED_TRACE(grid);
+            expectBwdReaderAccepts(reader, [&](MetadataValues& v) { v["grid"] = grid; });
+        }
+    }
+}
+
+// A shared value exactly at a limit of its range reads back into its own member of the problem.
+TEST(TestPackLaunchValues, TheSharedReaderAcceptsEachValueAtItsLimit)
+{
+    constexpr int64_t INT32_MAX_VALUE = 2147483647;
+    constexpr int64_t INT64_MAX_VALUE = std::numeric_limits<int64_t>::max();
+    const auto& reader = bwdReader("dq_reduce");
+
+    struct Row
+    {
+        std::string label;
+        std::function<void(MetadataValues&)> edit;
+        std::function<void(const flydsl_sdpa_bwd::SdpaBwdProblem&)> check;
+    };
+    const std::vector<Row> rows{
+        {"a batch of INT32_MAX",
+         [&](MetadataValues& v) { v["batch"] = INT32_MAX_VALUE; },
+         [&](const auto& p) { EXPECT_EQ(p.batch, INT32_MAX_VALUE); }},
+        {"a Q length of INT32_MAX",
+         [&](MetadataValues& v) { v["seqlen_q"] = INT32_MAX_VALUE; },
+         [&](const auto& p) { EXPECT_EQ(p.seqLenQ, INT32_MAX_VALUE); }},
+        {"a K length of INT32_MAX",
+         [&](MetadataValues& v) { v["seqlen_kv"] = INT32_MAX_VALUE; },
+         [&](const auto& p) { EXPECT_EQ(p.seqLenKv, INT32_MAX_VALUE); }},
+        {"head dims of 512",
+         [](MetadataValues& v) {
+             v["head_dim_qk"] = int64_t{512};
+             v["head_dim_v"] = int64_t{512};
+         },
+         [](const auto& p) {
+             EXPECT_EQ(p.headDimQk, 512);
+             EXPECT_EQ(p.headDimV, 512);
+         }},
+        {"head dims of 1",
+         [](MetadataValues& v) {
+             v["head_dim_qk"] = int64_t{1};
+             v["head_dim_v"] = int64_t{1};
+         },
+         [](const auto& p) {
+             EXPECT_EQ(p.headDimQk, 1);
+             EXPECT_EQ(p.headDimV, 1);
+         }},
+        {"4-byte data and bias",
+         [](MetadataValues& v) {
+             v["element_bytes"] = int64_t{4};
+             v["bias_element_bytes"] = int64_t{4};
+             v["num_v_heads"] = int64_t{4};
+         },
+         [](const auto& p) {
+             EXPECT_EQ(p.elementBytes, 4U);
+             EXPECT_EQ(p.biasElementBytes, 4U);
+         }},
+        {"a scale of 2^20",
+         [](MetadataValues& v) { v["scale_value"] = 1048576.0; },
+         [](const auto& p) { EXPECT_EQ(p.scaleValue, 1048576.0F); }},
+        {"a scale of -2^20",
+         [](MetadataValues& v) { v["scale_value"] = -1048576.0; },
+         [](const auto& p) { EXPECT_EQ(p.scaleValue, -1048576.0F); }},
+        {"a diagonal offset of INT32_MAX",
+         [&](MetadataValues& v) { v["diagonal_offset"] = INT32_MAX_VALUE; },
+         [&](const auto& p) { EXPECT_EQ(p.diagonalOffset, INT32_MAX_VALUE); }},
+        {"a diagonal offset of -INT32_MAX",
+         [&](MetadataValues& v) { v["diagonal_offset"] = -INT32_MAX_VALUE; },
+         [&](const auto& p) { EXPECT_EQ(p.diagonalOffset, -INT32_MAX_VALUE); }},
+        {"the largest dropout probability below 1",
+         [](MetadataValues& v) { v["dropout_p"] = 1.0 - 1.0 / 16777216.0; },
+         [](const auto& p) { EXPECT_LT(p.dropoutP, 1.0F); }},
+        {"strides of 0",
+         [](MetadataValues& v) {
+             v["q.stride_head"] = int64_t{0};
+             v["dv.stride_seq"] = int64_t{0};
+         },
+         [](const auto& p) {
+             EXPECT_EQ(p.q.head, 0);
+             EXPECT_EQ(p.dV.seq, 0);
+         }},
+        {"strides of INT64_MAX",
+         [&](MetadataValues& v) {
+             v["q.stride_head"] = INT64_MAX_VALUE;
+             v["dv.stride_seq"] = INT64_MAX_VALUE;
+         },
+         [&](const auto& p) {
+             EXPECT_EQ(p.q.head, INT64_MAX_VALUE);
+             EXPECT_EQ(p.dV.seq, INT64_MAX_VALUE);
+         }}};
+    for(const auto& row : rows)
+    {
+        SCOPED_TRACE(row.label);
+        MetadataValues edited = reader.valid;
+        row.edit(edited);
+        const auto read = readFlydslSdpaBwdDqReduceLaunchInputs({reader.contract, edited});
+        row.check(read.problem);
+    }
+}
+
+// A launch that holds no scalar for a pass-by-value operand cannot be saved: the handler has a
+// defect, so the refusal is an internal error and not a load refusal.
+TEST(TestPackLaunchValues, SplitDqRefusesToWriteAPassByValueOperandTheLaunchHoldsNoScalarFor)
+{
+    const std::string scaleWhy = "cannot save the SDPA backward launch: the scale is a tensor and "
+                                 "the launch holds no scalar for it";
+    const std::string seedWhy = "cannot save the SDPA backward launch: the seed is pass-by-value "
+                                "and the launch holds no scalar for it";
+
+    auto noScale = sample::dqInputs();
+    noScale.scalars.scale.reset();
+    serialization::expectPluginInternalError(
+        [&]() { static_cast<void>(flydslSdpaBwdDqLaunchValues(noScale)); }, scaleWhy);
+
+    auto noSeed = sample::dqInputs();
+    noSeed.scalars.seed.reset();
+    serialization::expectPluginInternalError(
+        [&]() { static_cast<void>(flydslSdpaBwdDqLaunchValues(noSeed)); }, seedWhy);
+
+    auto noOffset = sample::dqInputs();
+    noOffset.scalars.offset.reset();
+    serialization::expectPluginInternalError(
+        [&]() { static_cast<void>(flydslSdpaBwdDqLaunchValues(noOffset)); }, seedWhy);
+}
+
+#endif // HIPDNN_ENGINE_FLYDSL
 
 } // namespace
 } // namespace hip_kernel_provider::kernel_ingestor_engine

@@ -214,20 +214,20 @@ are in `dnn-providers/hip-kernel-provider/src/core/PluginSerialization.cpp`.
 
 ### Supported Engines
 
-An ingestor engine supports serialization when each kernel in its descriptor set is a single-launch
-kpack code object. Each dispatch handler of the set must also report `supportsSaving()`. The provider
-calculates this from the descriptor set and its dispatch handlers. A supported engine reports the
-behavior note `HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION`. The other engines of the
-provider do not report this note.
+An ingestor engine supports serialization when each launch of each kernel in its descriptor set is a
+kpack code object. Each dispatch handler of the set must also report `supportsSaving()`. A set with a
+multi-launch kernel (RFC 0017 §15.1) also needs a handler that reports `supportsSavingAllLaunches()`
+(see [Save Rules](#save-rules)). The provider calculates this from the descriptor set and its dispatch
+handlers. A supported engine reports the behavior note
+`HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION`. The other engines of the provider do not
+report this note.
 
-A multi-launch kernel (RFC 0017 §15.1) cannot be saved. The payload holds one kernel image: one
-symbol, one signature and one code object. A multi-launch kernel has a symbol and a signature for
-each launch, and its launches can use more than one code object. An engine with a multi-launch
-kernel does not report the note. Saving these plans needs a payload that holds an image for each
-launch, and a dispatch handler contract that saves and restores every launch.
+The rule is the same for an engine that declares slots (RFC 0021): it applies to the kernels and
+handlers of every slot. The plan of a slotted engine is a slot program, and the save hook saves it as a
+multi-kernel plan (see [Multi-Kernel Plans](#multi-kernel-plans)). A benchmarking slot program saves
+after its first execute and holds the program that execute served.
 
-The save hook refuses a plan that no ingestor engine built. Such a plan has no single-kernel ingestor
-plan to save.
+The save hook refuses a plan that no ingestor engine built. Such a plan has no ingestor plan to save.
 
 ### Payload Layout
 
@@ -238,19 +238,20 @@ offset  size  field
 0       4     marker: "HKIP"
 4       2     format_major: uint16
 6       2     format_minor: uint16
-8       2     kind: uint16 (1 = single-kernel plan)
+8       2     kind: uint16 (1 = single-kernel plan, 2 = multi-kernel plan)
 10      2     header_size: uint16
 12      4     reserved: zero
 16      32    body_sha256: SHA-256 of the body
 ```
 
-The body starts at `header_size`. The body is a FlatBuffer with the file identifier `HKSP`. The
-schema is `dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/serialization/ingestor_plan.fbs`.
-The body contains this data:
+The body starts at `header_size`. The body is a FlatBuffer. The file identifier is `HKSP` for a kind 1
+body and `HKMP` for a kind 2 body, and each kind has its own root table. The schema is
+`dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/serialization/ingestor_plan.fbs`.
+The body of a kind 1 plan contains this data:
 
 - The kernel descriptor ID.
 - The workspace size in bytes.
-- The UIDs of the runtime pass-by-value tensors.
+- The UIDs of the runtime pass-by-value tensors whose values the user supplies at each execute.
 - The dispatch data: the versioned dispatch name and the named, typed launch values.
 - The kernel image: the source kind, the kernel symbol, the target (the base architecture of the
   GPU that saved the plan), the SHA-256 of the code object, the recorded argument signature, and
@@ -259,6 +260,54 @@ The body contains this data:
 
 The launch values are the inputs from which the dispatch handler calculates a launch. The payload
 does not hold calculated grid sizes or kernel argument values.
+
+A runtime pass-by-value scalar of a launch (RFC 0016) is a set of launch values, named by the role of
+the scalar in the launch: `<role>.uid` (the tensor UID), `<role>.data_type` (the data type name),
+`<role>.user_supplied` and, only when `<role>.user_supplied` is false, `<role>.baked`. A scalar that
+the user supplies saves no value. The restored plan reads it from the device buffers at each execute,
+and its UID is in the UID list of the payload. A baked scalar saves its value in the type of its data
+type: a double for double, float, half and bfloat16, an int64 for int32 and int64, and a bool for
+boolean. The restore refuses a binding with a missing or mistyped value, with a `.baked` value next to
+`user_supplied = true`, with no `.baked` value next to `user_supplied = false`, or with a data type
+that has no scalar value type. These names and meanings belong to the dispatch handler contract, so
+a change of them takes a new dispatch version (see [Versioning](#versioning)). These refusals are
+check 15 (`NOT_APPLICABLE`).
+
+A restored plan reports the workspace size that the payload records, and restore trusts that size.
+Restore does not compare it with the workspace that the restored handlers need. The dispatch version
+contract keeps it right: a change of the size or layout of the workspace takes a new dispatch version
+(see [Versioning](#versioning)).
+
+### Multi-Kernel Plans
+
+A plan that holds several kernels is saved as kind 2. These plans are a slot program (RFC 0021), and
+an unslotted plan whose dispatch launches several kernels. The body of a kind 2 plan has its own root
+table, `MultiKernelPlan`, with the file identifier `HKMP`. It contains this data:
+
+- The stages, in the order they run. An unslotted plan is one stage with an empty slot name. A stage
+  holds the slot name, the kernel descriptor ID, the dispatch data (as for kind 1), and the kernels
+  that the dispatch launches, in launch order. A kernel holds its launch name (empty when the stage
+  launches one kernel), its symbol, its recorded argument signature, and the index of its code object.
+- The code objects. Each code object is stored once, and kernels with the same code object share
+  one entry. An entry holds the source kind, the target, the SHA-256, and the uncompressed bytes.
+- The workspace size in bytes of the whole plan (`workspace_bytes`), and the size of the shared
+  region in it (`shared_workspace_bytes`, 0 for an unslotted plan). Both fields are required, and the
+  shared size is not more than the total.
+- The UIDs of the runtime pass-by-value tensors that the user supplies: the union over the stages.
+- The provider version, for diagnostics only.
+
+The capture rule: an unslotted plan that one launch serves is saved as kind 1, whatever its handler
+can save. A slot program, and an unslotted plan with several launches, is saved as kind 2.
+The workspace size of a kind 2 plan is the size of the plan that served, which for a benchmarking slot
+program is the served program and not the benchmark.
+
+Every kind 2 payload restores as a slot program: the stages run in stage order, on the stream of the
+execute, over the recorded workspace. A stage restores through the dispatch handler that its dispatch
+name selects. A handler that opts in restores every stage of its plans through `restoreLaunches`,
+also a stage with one kernel (one code, empty `launchName`). A plan of one launch without slots is
+kind 1 and restores through `restoreLaunch`, so a handler that opts in provides both. A handler that
+does not opt in restores a stage with one kernel through `restoreLaunch`, and the restore refuses a
+stage with several kernels.
 
 A loaded plan runs the code it was saved with. Upgrading the provider does not change the kernel
 inside a saved plan, even when the upgrade fixes that kernel. To use the new kernel, build the plan
@@ -270,10 +319,15 @@ without a handle loads only the graph. Build the plan from that graph, then save
 
 ### Versioning
 
-The current format version is 1.0. A reader reads a payload when these conditions are true:
+The current format version is 1.1. The minor version of a payload depends on its kind. A kind 1
+payload carries 1.0, and a kind 2 payload carries 1.1. A reader reads a payload when these conditions
+are true:
 
 - The major version of the payload is equal to the major version of the reader.
 - The minor version of the payload is not more than the minor version of the reader.
+
+Thus a 1.0 reader refuses a 1.1 payload, which is a kind 2 payload, and a 1.1 reader reads a 1.0
+payload. A 1.0 reader keeps loading the kind 1 payloads that a newer provider saves.
 
 A new minor version can make only these changes to the schema:
 
@@ -282,6 +336,7 @@ A new minor version can make only these changes to the schema:
 - Add a member at the end of a union.
 - Add a value at the end of an enum.
 - Declare a new table or enum that only a new field or a new union member uses.
+- Add a plan kind with its own root table and its own file identifier.
 - Retire a field: mark the field `(deprecated)`. Keep its field ID.
 
 The reader of the new minor version accepts a payload without the new field, and a payload of an
@@ -313,6 +368,7 @@ launch. Use a new dispatch version when one of these items changes:
 - The names, types, or meanings of the launch values.
 - The kernel arguments that the launch passes: their order, count, kinds, sizes, or meanings.
 - How the launch calculates the grid, the block, or the dynamic LDS from the launch values.
+- The size or layout of the workspace the launch uses.
 
 Keep the dispatch handler of the old version registered while plans saved with that version must
 load.
@@ -326,20 +382,23 @@ hipDNN uses the envelope engine ID to find the plugin. When no loaded plugin ser
 hipDNN refuses the plan with `HIPDNN_STATUS_INTERNAL_ERROR`. The plugin does not run. Nothing checks
 that the payload belongs to the engine of the envelope engine ID.
 
-The load hook then does these checks in this order. The first check that fails stops the load.
+The load hook then does these checks in this order, except check 10, which runs after check 16. The
+first check that fails stops the load.
 
 1. The payload holds the fixed header fields (`INVALID_VALUE`).
 2. The marker is `HKIP` (`INVALID_VALUE`).
 3. The provider reads the format version (`NOT_APPLICABLE`).
-4. The plan kind is known (`NOT_APPLICABLE`).
+4. The plan kind is known: 1 or 2 (`NOT_APPLICABLE`).
 5. The header size is valid for the payload (`INVALID_VALUE`).
 6. The body size is in the FlatBuffers limits (`INVALID_VALUE`).
 7. The SHA-256 of the body is equal to the header value (`INVALID_VALUE`).
-8. The FlatBuffers verifier accepts the body, and the body has the `HKSP` identifier
-   (`INVALID_VALUE`).
+8. The FlatBuffers verifier accepts the body, and the body has the identifier of its kind: `HKSP`
+   for kind 1, `HKMP` for kind 2 (`INVALID_VALUE`).
 9. The workspace size and the source kind are valid. The kernel SHA-256 text is valid and matches
    the code object. The launch values are valid. Each of these refusals is `INVALID_VALUE`.
-10. The plan has no runtime pass-by-value tensors (`NOT_APPLICABLE`).
+10. The user-supplied runtime pass-by-value UIDs that the payload lists are exactly the UIDs that
+    the restored dispatch handlers bind (`NOT_APPLICABLE`). This check runs after check 16, because
+    the restored dispatches report the UIDs that they bind.
 11. The device of the handle can run the stored GPU target (`NOT_APPLICABLE`). For a kpack plan,
     the stored target is the base architecture of the GPU that saved the plan, for example
     `gfx942`. A device matches when its architecture name is that target, with or without feature
@@ -353,6 +412,16 @@ The load hook then does these checks in this order. The first check that fails s
 15. The handler accepts the launch values (`NOT_APPLICABLE`).
 16. The driver loads the code object on the device of the handle and finds the kernel symbol
     (`NOT_APPLICABLE`).
+
+For a kind 2 plan, checks 9, 11 and 16 apply to every stage and code object, and check 9 also
+refuses a stage with no kernel, a launch name that occurs twice in a stage, a code object index that
+is out of range, a missing workspace size, and a shared size above the total (`INVALID_VALUE`). Check
+10 compares against the handlers of all stages. The provider makes check 10 after it restores the
+handlers, because the restored dispatches report the UIDs that they bind.
+
+A load trusts the payload to be the output of a live plan. The launch value readers range-check the
+saved values, but they do not apply again the per-operand layout rules (for example the 32-bit slab
+limit) that an engine's matcher applies to a graph. The SHA-256 of the body guards against damage.
 
 The load hook loads the code object on the device of the handle, so a code object that the driver
 refuses fails the load, not the first execute. The restored plan keeps the code object bytes and can
@@ -384,9 +453,29 @@ this order:
 1. A context without a plan.
 2. A benchmarking plan that has not selected a kernel.
 3. A plan that no ingestor engine built.
-4. A kernel with more than one launch.
+4. A kernel with sources whose dispatch handler does not report its launches.
 5. A kernel with a source kind other than kpack.
 6. A plan whose dispatch handler does not support save.
+
+A dispatch handler opts in to saving all launches with three parts:
+
+- `supportsSavingAllLaunches()` returns true. The handler then also returns true from
+  `supportsSaving()`. The handler vouches for every launch of a multi-launch kernel, and for a second
+  kernel that it launches from the same code object.
+- `restoreLaunches` rebuilds the prepared dispatch from the saved launch inputs and one
+  `SavedKernelCode` for each launch, in launch order. It refuses when the launch names differ from the
+  set that the inputs imply. The provider calls it for every stage of an opted-in handler, a stage
+  with one kernel included (one code, empty `launchName`).
+- `SavedKernelCode::launchName` names the launch. It is empty only for a stage that launches one
+  kernel. The prepared dispatch reports its launches, in launch order, with
+  `IngestorPreparedDispatch::launchedKernels()`.
+
+An opted-in handler also provides `restoreLaunch`, because a plan of one launch without slots is
+saved as kind 1 and restores through `restoreLaunch`.
+
+A handler that does not opt in keeps the single-launch contract: it saves and restores one kernel
+through `saveLaunchInputs` and `restoreLaunch`. A dispatch of such a handler that launches several
+kernels is a fault of the provider (`HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR`, not a refusal).
 
 hipDNN saves a loaded plan from the plan bytes it was loaded from. `to_binary()` of a graph that
 `from_binary()` loaded with its plan returns the plan bytes unchanged, inside a graph-and-plan
@@ -405,7 +494,9 @@ hipDNN does not make that call.
 For rule 2: a benchmarking plan usually selects its kernel at the first execute. A stored benchmark
 result can cover all candidates. In that case, the build makes a plain plan, and the plan saves before
 the first execute. To save a benchmarking plan, execute the plan one time, then save it. Or, build the
-plan with benchmarking off.
+plan with benchmarking off. A benchmarking slot program also refuses a save before its first execute.
+After that execute, the save holds the program that served (`servedProgram()`) and not the programs
+that the benchmark timed.
 
 The save hook reads the code object from the kpack archive that the plan build used. The save hook
 can read the archive through the handle that the plan build opened. It also checks the SHA-256 of

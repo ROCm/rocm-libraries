@@ -2276,7 +2276,10 @@ may carry a `sources` map keyed by launch name in place of `kernel_source`:
   ([RFC 0021 § 4](0021_KernelSlots.md#4-descriptor-format)).
 
 The pack's native dispatch handler launches the entries, in an order it owns, and owns workspace
-and the hand-off between them. Until `launches[]` exists the handler declares the launch names it
+and the hand-off between them. A saved plan holds every launch of a multi-launch kernel, one entry
+for each launch name, if the handler opts in to saving all launches
+([RFC 0009](0009_CompiledPlanSerialization.md#save-rules)). Until `launches[]` exists the handler
+declares the launch names it
 launches (`launchNames()`, provisional), and the plugin SDK's kernel ingestor state manager drops
 a kernel whose launch names differ from that set when it builds its catalog, so an accepted kernel
 is always launchable ([§8.6](#86-the-base-path-invariant)). The default is no names, which is a
@@ -2461,11 +2464,10 @@ follow-up RFCs.
   mistake, is caught at load, logged, and ignored without taking down the provider. This framing is
   provisional: it does not yet cover an in-place kernel retune, the same id with different compiled
   bytes, which the copy-paste rule as stated would wrongly drop. Whether kernel ids stay mutable
-  (retune keeps the id) or move to content identity (retune mints a new id) depends on how plan
-  serialization for the generic ingestor, a future feature, ends up working. A plan that captures the
-  compiled binary itself makes id mutability irrelevant to it; a plan that captures only which kernel
-  was picked requires strict id immutability and stricter plan versioning, since a mutated id could
-  then resolve to different compiled code on replay. Overlapping matches that are not id collisions
+  (retune keeps the id) or move to content identity (retune mints a new id) is open. A saved ingestor
+  plan ([RFC 0009](0009_CompiledPlanSerialization.md)) captures the compiled binary itself and keeps
+  the kernel id for diagnostics only, so id mutability does not affect it. Overlapping matches that
+  are not id collisions
   are handled by arbitration.
 - **Compatibility and caching.** Each descriptor file type is versioned independently as
   `major.minor`; a descriptor newer than the runtime understands is refused, an older minor within
@@ -2541,9 +2543,8 @@ follow-up RFCs.
   Removing a dropped-in pack is deleting its file: the provider notices the inventory change and
   drops it, along with anything cached from it, on the next query. What that pack contained is not
   hipDNN's to manage, since a drop-in pack is self-contained and its lifecycle belongs to whoever
-  dropped it in. One case is unspecified here: a serialized plan that has baked in a removed id.
-  Plan serialization for the generic ingestor does not exist yet, and how it captures a selected
-  kernel is undecided, so there is nothing yet to keep consistent.
+  dropped it in. A saved ingestor plan ([RFC 0009](0009_CompiledPlanSerialization.md)) holds the compiled
+  code of its kernels and the kernel id for diagnostics only, so removing a pack does not affect it.
 
   The validation tooling flags a metadata change as a retraining event at author time, against the
   classification above, instead of leaving it to be discovered at review or at runtime.

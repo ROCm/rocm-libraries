@@ -359,7 +359,9 @@ headers.
 | Cheaper training collection | Collect from benchmarking mode instead of the full product, once winner records carry the benchmark tool's per-run statistics. |
 | `predict_applicable_kernels` per slot | `slots[].predict_applicable_kernels`. |
 | Shared-region tokens from declarative graph matches | Declarative publication of the `ws` token root, which this RFC reserves for slotted engines, in RFC 0020 § 6.1. |
-| Saving a slot program (RFC 0009) | A saved ingestor plan holds one kernel's code object and launch inputs. A slotted engine does not advertise `SUPPORTS_EXECUTION_PLAN_SERIALIZATION`, and a save of its plan is refused. Saving needs a payload that carries every slot's pick. |
+
+A slot program is saved and restored as a multi-kernel plan, with each stage holding its slot's pick
+([RFC 0009](0009_CompiledPlanSerialization.md#multi-kernel-plans)).
 
 **Open questions.**
 

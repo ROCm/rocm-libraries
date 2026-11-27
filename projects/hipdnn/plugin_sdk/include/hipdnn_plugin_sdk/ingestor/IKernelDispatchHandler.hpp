@@ -110,6 +110,34 @@ public:
     {
         return false;
     }
+
+    /// True when this handler saves and restores every launch of a multi-launch kernel and
+    /// every second kernel it launches from the same code object. A handler that returns
+    /// true here also returns true from supportsSaving(), and overrides saveLaunchInputs,
+    /// restoreLaunch and restoreLaunches. The provider restores every stage of such a
+    /// handler through restoreLaunches, a stage with one kernel included, and restores
+    /// a plan of one launch without slots through restoreLaunch.
+    // NOLINTNEXTLINE(portability-template-virtual-member-function)
+    virtual bool supportsSavingAllLaunches() const
+    {
+        return false;
+    }
+
+    /// Rebuilds a prepared dispatch from saved launch inputs and the kernel codes of a
+    /// stage, one per launch, in launch order, with the code loaded on @p deviceOrdinal.
+    /// A stage with one kernel passes one code with an empty launchName. Refuses
+    /// (throws) when the set of launch names differs from the set the inputs imply.
+    /// The default returns nullptr: the handler does not support restoring through
+    /// restoreLaunches.
+    // NOLINTBEGIN(portability-template-virtual-member-function, performance-unnecessary-value-param)
+    virtual std::unique_ptr<PreparedDispatch>
+        restoreLaunches(const SavedLaunchInputs& /*inputs*/,
+                        std::vector<SavedKernelCode> /*codes*/,
+                        int /*deviceOrdinal*/) const
+    {
+        return nullptr;
+    }
+    // NOLINTEND(portability-template-virtual-member-function, performance-unnecessary-value-param)
 };
 
 } // namespace hipdnn_plugin_sdk::ingestor

@@ -487,18 +487,72 @@ TEST(TestKernelIngestorEngine, SupportsSerializationOnlyWhenEveryKernelPassesThe
     EXPECT_FALSE(supportsExecutionPlanSerialization(setWithKernels({{}, {}}, CONV_FWD.dispatch)));
 }
 
-// As captureIngestorPlan(), a kernel with several launches cannot be saved, even when each
-// launch is kpack. `source` stays kpack too, so a gate that read it instead of the launches
-// would accept the set.
-TEST(TestKernelIngestorEngine, NoNoteForAMultiLaunchKernel)
+// A handler that saves, and opts in to saving every launch of a multi-launch kernel or does not.
+class SavingStubHandler : public packs::StubDispatchHandler
 {
-    DescriptorSet set = setWithKernels({{KernelSourceKind::KPACK}}, CONV_FWD.dispatch);
-    ASSERT_TRUE(supportsExecutionPlanSerialization(set));
+public:
+    explicit SavingStubHandler(bool savesAllLaunches)
+        : _savesAllLaunches(savesAllLaunches)
+    {
+    }
 
+    bool supportsSaving() const override
+    {
+        return true;
+    }
+
+    bool supportsSavingAllLaunches() const override
+    {
+        return _savesAllLaunches;
+    }
+
+private:
+    bool _savesAllLaunches;
+};
+
+// A set whose one kernel has two launches, each a kpack entry. `source` stays kpack as well, so a
+// gate that read it instead of the launches would accept the set on that evidence alone.
+DescriptorSet multiLaunchSet(std::string_view dispatchSymbol)
+{
+    DescriptorSet set = setWithKernels({{KernelSourceKind::KPACK}}, dispatchSymbol);
     auto& kernel = set.packs.front().kernels.front();
     kernel.sources["decode"].kind = KernelSourceKind::KPACK;
     kernel.sources["merge"].kind = KernelSourceKind::KPACK;
+    return set;
+}
+
+TEST(TestKernelIngestorEngine, ReportsTheNoteForAMultiLaunchKernelOfAnOptedInHandler)
+{
+    using hipdnn_plugin_sdk::ingestor::SymbolScope;
+
+    const std::string symbol = "hipkernel.engine_test.opted_in.dispatch";
+    const SavingStubHandler handler(true);
+    // Not committed: the symbol is unregistered again when the scope ends.
+    SymbolScope<Handle> scope;
+    scope.add(symbol, &handler);
+
+    DescriptorSet set = multiLaunchSet(symbol);
+    EXPECT_TRUE(supportsExecutionPlanSerialization(set));
+
+    // The opt-in covers the saving of every launch, not the saving of a launch the source
+    // kind gate refuses.
+    set.packs.front().kernels.front().sources["merge"].kind = KernelSourceKind::EMBEDDED_SOURCE;
     EXPECT_FALSE(supportsExecutionPlanSerialization(set));
+}
+
+TEST(TestKernelIngestorEngine, NoNoteForAMultiLaunchKernelOfAHandlerThatDoesNotOptIn)
+{
+    using hipdnn_plugin_sdk::ingestor::SymbolScope;
+
+    const std::string symbol = "hipkernel.engine_test.saves_one_launch.dispatch";
+    const SavingStubHandler handler(false);
+    SymbolScope<Handle> scope;
+    scope.add(symbol, &handler);
+
+    // The same handler saves a kernel with one launch.
+    ASSERT_TRUE(
+        supportsExecutionPlanSerialization(setWithKernels({{KernelSourceKind::KPACK}}, symbol)));
+    EXPECT_FALSE(supportsExecutionPlanSerialization(multiLaunchSet(symbol)));
 }
 
 TEST(TestKernelIngestorEngine, NoNoteWhenAHandlerCannotSave)
@@ -542,14 +596,10 @@ TEST(TestKernelIngestorEngine, NoNoteWithoutAResolvableDispatch)
         setWithKernels({{KernelSourceKind::KPACK}}, unregistered)));
 }
 
-TEST(TestKernelIngestorEngine, ASlottedSetIsNotSaveableThoughItsSlotsPacksWouldBe)
+// A slotted set with one slot for each pack of `unslotted`: the packs sit under their slots, as
+// the loader places them, and `packs` stays empty.
+DescriptorSet slottedFrom(const DescriptorSet& unslotted)
 {
-    // RFC 0021 §11: a slot program is not serialized (RFC 0009), so a slotted set advertises
-    // no serialization even when every slot's pack holds only saveable kernels.
-    const DescriptorSet unslotted
-        = setWithKernels({{KernelSourceKind::KPACK}, {KernelSourceKind::KPACK}}, CONV_FWD.dispatch);
-    ASSERT_TRUE(supportsExecutionPlanSerialization(unslotted));
-
     DescriptorSet slotted;
     slotted.dispatches = unslotted.dispatches;
     for(const auto& pack : unslotted.packs)
@@ -557,10 +607,51 @@ TEST(TestKernelIngestorEngine, ASlottedSetIsNotSaveableThoughItsSlotsPacksWouldB
         slotted.slots.emplace_back().packs.push_back(pack);
     }
     slotted.engine.behaviorNotes = {RUNTIME_COMPILATION_NOTE};
+    return slotted;
+}
 
-    EXPECT_FALSE(supportsExecutionPlanSerialization(slotted));
+TEST(TestKernelIngestorEngine, ReportsTheNoteForASlottedSetWhoseEverySlotSaves)
+{
+    const DescriptorSet slotted = slottedFrom(
+        setWithKernels({{KernelSourceKind::KPACK}, {KernelSourceKind::KPACK}}, CONV_FWD.dispatch));
+    ASSERT_TRUE(slotted.packs.empty());
+
+    EXPECT_TRUE(supportsExecutionPlanSerialization(slotted));
     EXPECT_EQ(withComputedBehaviorNotes(slotted).engine.behaviorNotes,
+              (std::vector<int32_t>{RUNTIME_COMPILATION_NOTE, SERIALIZATION_NOTE}));
+}
+
+TEST(TestKernelIngestorEngine, NoNoteForASlottedSetWithOneSlotThatCannotSave)
+{
+    using hipdnn_plugin_sdk::ingestor::SymbolScope;
+
+    const DescriptorSet unslotted
+        = setWithKernels({{KernelSourceKind::KPACK}, {KernelSourceKind::KPACK}}, CONV_FWD.dispatch);
+    ASSERT_TRUE(supportsExecutionPlanSerialization(slottedFrom(unslotted)));
+
+    // A kernel of the second slot that saving does not support.
+    DescriptorSet embedded = unslotted;
+    embedded.packs.back().kernels.front().source.kind = KernelSourceKind::EMBEDDED_SOURCE;
+    EXPECT_FALSE(supportsExecutionPlanSerialization(slottedFrom(embedded)));
+
+    // A second slot whose handler cannot save.
+    const std::string symbol = "hipkernel.engine_test.slot_no_save.dispatch";
+    const packs::StubDispatchHandler handler;
+    SymbolScope<Handle> scope;
+    scope.add(symbol, &handler);
+    DescriptorSet unsaving = unslotted;
+    unsaving.dispatches.back().dispatchSymbol = symbol;
+    const DescriptorSet slottedUnsaving = slottedFrom(unsaving);
+    EXPECT_FALSE(supportsExecutionPlanSerialization(slottedUnsaving));
+    EXPECT_EQ(withComputedBehaviorNotes(slottedUnsaving).engine.behaviorNotes,
               std::vector<int32_t>{RUNTIME_COMPILATION_NOTE});
+
+    // A slot whose kernel has several launches under a handler that does not opt in.
+    const std::string multiSymbol = "hipkernel.engine_test.slot_one_launch.dispatch";
+    const SavingStubHandler savesOneLaunch(false);
+    scope.add(multiSymbol, &savesOneLaunch);
+    const DescriptorSet multi = multiLaunchSet(multiSymbol);
+    EXPECT_FALSE(supportsExecutionPlanSerialization(slottedFrom(multi)));
 }
 
 TEST(TestKernelIngestorEngine, WithComputedBehaviorNotesAddsTheNoteOnce)
@@ -681,9 +772,12 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
     EXPECT_EQ(packDispatchSymbols.size(), ingestorPacks().size())
         << "add the dispatch symbol of each new pack to this list";
 #ifdef HIPDNN_ENGINE_FLYDSL
+    // The slot handlers beside the first slot's, which a pack above stands for. The census
+    // above walks only `set.packs`, so a slot's handler is reached here or not at all.
     const std::vector<std::string_view> slotDispatchSymbols{
         "hipkernel.flydsl_sdpa_bwd_split.dkdv.dispatch",
         "hipkernel.flydsl_sdpa_bwd_split.dq.dispatch",
+        "hipkernel.flydsl_sdpa_bwd_split.dq_reduce.dispatch",
     };
 #else
     const std::vector<std::string_view> slotDispatchSymbols;
@@ -746,6 +840,27 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
         EXPECT_EQ(saves, restores) << symbol << ": saves " << saves << ", restores " << restores;
         EXPECT_EQ(handler->supportsSaving(), saves && restores)
             << symbol << ": supportsSaving() disagrees with the save and restore overrides";
+
+        // The same probe for the several-launch restore: the default returns nullptr without
+        // throwing, and an override refuses an empty set of codes.
+        bool restoresAllLaunches = false;
+        try
+        {
+            static_cast<void>(handler->restoreLaunches(SavedLaunchInputs{}, {}, 0));
+        }
+        catch(const HipdnnPluginException& refusal)
+        {
+            EXPECT_EQ(refusal.getStatus(), HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE)
+                << symbol << ": " << refusal.getMessage();
+            restoresAllLaunches = true;
+        }
+        EXPECT_EQ(handler->supportsSavingAllLaunches(), restoresAllLaunches)
+            << symbol
+            << ": supportsSavingAllLaunches() disagrees with the restoreLaunches override";
+        if(restoresAllLaunches)
+        {
+            EXPECT_TRUE(saves && restores) << symbol << ": restores several launches but not one";
+        }
         if(saves && restores)
         {
             ++saving;

@@ -27,6 +27,8 @@
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPlanRestore.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
+#include "engines/kernel_ingestor_engine/PackedPlanTestSupport.hpp"
+#include "engines/kernel_ingestor_engine/RestoredIngestorPlan.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvFwdLaunchValues.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx942AttentionDenseLaunchValues.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseLaunchValues.hpp"
@@ -536,6 +538,58 @@ TEST_F(TestIngestorPlanRestoreChecks, RefusesAnUnversionedAlias)
     payload.dispatchSymbol = "hipkernel.conv_fwd.dispatch";
 
     expectRefusal(payload, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "names no launch-value contract");
+}
+
+// The payload struct goes straight to restoreIngestorSavedPlan(), so the cases do not depend on
+// the codec's reading of a payload that lists UIDs.
+std::unique_ptr<hipdnn_plugin_sdk::IPlan<Handle>> restoreKindOne(const IngestorPlanPayload& payload)
+{
+    const FakeDeviceResolver resolver;
+    IngestorPlanRestoreEnvironment environment;
+    environment.deviceResolver = &resolver;
+    const Handle handle;
+    return restoreIngestorSavedPlan(payload, handle, environment);
+}
+
+// The handler restores the payload and binds no user-supplied scalar, as the conv handler
+// does. The saved plan lists UID 7 as one the handlers bind, so no restored handler binds it.
+TEST_F(TestIngestorPlanRestoreChecks, RefusesAKindOnePlanWhoseHandlerBindsNoListedUid)
+{
+    packs::MultiKernelStubHandler::Config config;
+    config.alias = "hipkernel.restore_test.conv_like.dispatch.v1";
+    const packs::RegisteredStubHandler stub(config);
+
+    auto payload = validConvFwdPayload();
+    payload.dispatchSymbol = config.alias;
+    payload.runtimePassByValueUids = {7};
+
+    const std::string message
+        = expectIngestorPlanRefusal([&]() { static_cast<void>(restoreKindOne(payload)); },
+                                    HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
+                                    "{7}");
+    EXPECT_NE(message.find("{}"), std::string::npos) << message;
+    // The handler did restore the launch: the refusal comes after it.
+    EXPECT_EQ(stub.handler.received().size(), 1U);
+
+    payload.runtimePassByValueUids.clear();
+    EXPECT_NE(restoreKindOne(payload), nullptr);
+}
+
+TEST_F(TestIngestorPlanRestoreChecks, RestoresAKindOnePlanWhoseHandlerBindsExactlyTheListedUids)
+{
+    packs::MultiKernelStubHandler::Config config;
+    config.alias = "hipkernel.restore_test.binds_seven.dispatch.v1";
+    config.uids = {7};
+    const packs::RegisteredStubHandler stub(config);
+
+    auto payload = validConvFwdPayload();
+    payload.dispatchSymbol = config.alias;
+    payload.runtimePassByValueUids = {7};
+
+    const auto plan = restoreKindOne(payload);
+
+    ASSERT_NE(plan, nullptr);
+    EXPECT_NE(dynamic_cast<const RestoredIngestorPlan<Handle>*>(plan.get()), nullptr);
 }
 
 struct OrderCase

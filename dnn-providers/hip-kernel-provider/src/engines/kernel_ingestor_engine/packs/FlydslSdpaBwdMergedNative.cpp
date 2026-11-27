@@ -34,6 +34,7 @@
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <hipdnn_plugin_sdk/ingestor/SavedDispatch.hpp>
 #include <hipdnn_plugin_sdk/ingestor/SymbolScope.hpp>
 
 #include "compilation/IKernelCompiler.hpp"
@@ -43,9 +44,13 @@
 #include "core/Handle.hpp"
 #include "engines/hip_mlops_engine/HipMlopsKernelCompiler.hpp"
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
+#include "engines/kernel_ingestor_engine/IngestorLaunchRestore.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
+#include "engines/kernel_ingestor_engine/IngestorPreparedDispatch.hpp"
+#include "engines/kernel_ingestor_engine/IngestorScalarBindings.hpp"
 #include "engines/kernel_ingestor_engine/LaunchKernelDefinition.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdCommon.hpp"
+#include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdLaunchValues.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdNativeShared.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaDropout.hpp"
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaShared.hpp"
@@ -58,8 +63,7 @@
  * Every object is one launch of `fmha_bwd_merged_gfx950`, which computes dK, dV, dQ and, on
  * a bias graph, dBias in one grid, with no prep kernel and no Delta buffer. A bias object
  * also carries `fmha_bwd_dbias_reduce_gfx950`, the sum over a broadcast bias's batch and
- * head axes, as a second symbol of the same code object; it runs only when the graph's
- * dBias is broadcast.
+ * head axes; it runs only when the graph's dBias is broadcast.
  *
  * Every row's `sources` name the launches `merged` (the kernel) and `tailzero`, and a bias
  * row's also `dbias_reduce`, an entry that names the row's own object and the reduce symbol;
@@ -130,7 +134,7 @@ constexpr std::string_view REDUCE_DISPATCH_SYMBOL
 constexpr std::string_view F16_DTYPE = "f16";
 
 /// The merged kernel's launch name in a row's `sources`.
-constexpr std::string_view MERGED_LAUNCH = "merged";
+constexpr std::string_view MERGED_LAUNCH = FLYDSL_SDPA_BWD_MERGED_LAUNCH;
 
 // What graph_match binds for kernel_match.
 constexpr std::string_view CLASS_TOKEN = "flydsl_sdpa_bwd_merged.class";
@@ -513,6 +517,10 @@ double flydslSdpaBwdMergedScore(const MatchContext& /*context*/,
 struct MergedPlan : native::BwdPlanCommon
 {
     unsigned int gridBlocks = 0;
+    /// The row fields a saved launch carries beside the problem.
+    int64_t tile = 0;
+    int64_t blockKv = 0;
+    int64_t blockM = 0;
 };
 
 bwd::SdpaBwdProblem problemOf(const MatchContext& context)
@@ -520,46 +528,42 @@ bwd::SdpaBwdProblem problemOf(const MatchContext& context)
     return native::matchedProblemOf(context, bwd::MatchOptions{}, ERROR_SCOPE);
 }
 
-MergedPlan planFor(const MatchContext& context, const KernelDefinition& kernel)
+/// The plan over a problem and the record of its kernel. The one place a plan is derived, so a
+/// plan built at prepare() and one restored from saved values are the same function of their
+/// inputs. @p reduceSymbol is kept when the problem's dBias is broadcast.
+MergedPlan makePlan(const bwd::SdpaBwdProblem& problem,
+                    const native::Uids& uids,
+                    native::ScalarOperands scalars,
+                    const Row& row,
+                    std::string_view reduceSymbol,
+                    const std::string& kernelName)
 {
-    MergedPlan plan;
-    plan.problem = problemOf(context);
-    const auto& problem = plan.problem;
-
-    const auto row = readRow(kernel);
-    if(!row)
-    {
-        native::failBadParam(ERROR_SCOPE,
-                             "kernel '" + kernel.name + "' lacks a field of the merged record");
-    }
     const auto blocks = mergedGridBlocks(problem.batch,
                                          problem.numHeads,
                                          problem.numKvHeads,
                                          problem.seqLenQ,
                                          problem.seqLenKv,
-                                         *row);
+                                         row);
     if(!blocks)
     {
         native::failBadParam(
-            ERROR_SCOPE, "launch grid exceeds the launch limits for kernel '" + kernel.name + "'");
+            ERROR_SCOPE, "launch grid exceeds the launch limits for kernel '" + kernelName + "'");
     }
-    plan.blockThreads = static_cast<unsigned int>(row->blockThreads);
+    MergedPlan plan;
+    plan.problem = problem;
+    plan.uids = uids;
+    plan.blockThreads = static_cast<unsigned int>(row.blockThreads);
     plan.gridBlocks = static_cast<unsigned int>(*blocks);
+    plan.tile = row.tile;
+    plan.blockKv = row.blockKv;
+    plan.blockM = row.blockM;
 
-    native::bindGraphOperands(plan, context, row->tile);
+    native::bindProblemOperands(plan, uids, scalars, row.tile);
 
     plan.workspace = native::workspaceLayout(problem);
     if(plan.workspace.reduces)
     {
-        // Read only now: an object without a broadcast dBias never names a reduce kernel.
-        plan.reduceSymbol
-            = flydsl_sdpa::stringMetadata(kernel, REDUCE_SYMBOL_FIELD).value_or(std::string());
-        if(plan.reduceSymbol.empty())
-        {
-            native::failBadParam(ERROR_SCOPE,
-                                 "kernel '" + kernel.name
-                                     + "' serves a broadcast dBias but names no reduce kernel");
-        }
+        plan.reduceSymbol = std::string(reduceSymbol);
         plan.reduceGrid = native::reduceGridOf(problem);
     }
     plan.tailzeroMask = native::tailzeroMaskOf(problem);
@@ -571,6 +575,90 @@ MergedPlan planFor(const MatchContext& context, const KernelDefinition& kernel)
             native::failBadParam(ERROR_SCOPE, "the tail-zero launch grid exceeds its limits");
         }
         plan.tailzeroGrid = *tailzeroGrid;
+    }
+    return plan;
+}
+
+MergedPlan planFor(const MatchContext& context, const KernelDefinition& kernel)
+{
+    const auto problem = problemOf(context);
+
+    const auto row = readRow(kernel);
+    if(!row)
+    {
+        native::failBadParam(ERROR_SCOPE,
+                             "kernel '" + kernel.name + "' lacks a field of the merged record");
+    }
+
+    // Read only for a broadcast dBias: an object without one never names a reduce kernel.
+    const auto reduceSymbol
+        = flydsl_sdpa::stringMetadata(kernel, REDUCE_SYMBOL_FIELD).value_or(std::string());
+    auto plan = makePlan(problem,
+                         native::uidsOf(context),
+                         native::scalarOperandsOf(context.graph.getTensorMap(), problem),
+                         *row,
+                         reduceSymbol,
+                         kernel.name);
+    if(plan.workspace.reduces && reduceSymbol.empty())
+    {
+        native::failBadParam(ERROR_SCOPE,
+                             "kernel '" + kernel.name
+                                 + "' serves a broadcast dBias but names no reduce kernel");
+    }
+    return plan;
+}
+
+/// The plan from saved values, with no graph, bound tokens or kernel record. The workspace
+/// layout, grid, window, threshold and flags are recomputed from the restored problem, and a
+/// problem that cannot be launched is refused. The plain handler also refuses a problem that
+/// needs the reduce kernel, which it does not launch.
+template <bool REDUCES>
+MergedPlan restoredPlan(const SavedLaunchInputs& inputs)
+{
+    const auto launch = REDUCES ? readFlydslSdpaBwdMergedReduceLaunchInputs(inputs)
+                                : readFlydslSdpaBwdMergedLaunchInputs(inputs);
+    Row row;
+    row.tile = launch.headDim;
+    row.blockThreads = launch.blockThreads;
+    row.blockKv = launch.blockKv;
+    row.blockM = launch.blockM;
+
+    const int64_t widest = std::max(launch.problem.headDimQk, launch.problem.headDimV);
+    if(widest > row.tile)
+    {
+        detail::refuseBwdRestore(inputs,
+                                 "the head dim " + std::to_string(widest)
+                                     + " exceeds the tile head_dim " + std::to_string(row.tile)
+                                     + " of the kernel");
+    }
+
+    MergedPlan plan;
+    try
+    {
+        plan = makePlan(launch.problem,
+                        launch.uids,
+                        launch.scalars,
+                        row,
+                        std::string_view{},
+                        "of the saved plan");
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+    {
+        if(error.getStatus() != HIPDNN_PLUGIN_STATUS_BAD_PARAM)
+        {
+            throw;
+        }
+        detail::refuseBwdRestore(inputs,
+                                 "the saved problem cannot be launched: " + error.getMessage());
+    }
+    if constexpr(!REDUCES)
+    {
+        if(plan.workspace.reduces)
+        {
+            detail::refuseBwdRestore(inputs,
+                                     "the saved problem has a broadcast dBias, which needs the "
+                                     "reduce kernel this dispatch does not launch");
+        }
     }
     return plan;
 }
@@ -875,18 +963,26 @@ LaunchArguments launchArguments(const MergedPlan& plan,
 // Dispatch
 // ---------------------------------------------------------------------------
 
+using LaunchRecord = native::LaunchRecord;
+
 /// The merged kernel, the reduce kernel when the graph needs one, and the plan.
-class PreparedFlydslSdpaBwdMerged : public PreparedDispatch
+class PreparedFlydslSdpaBwdMerged : public IngestorPreparedDispatch
 {
 public:
     PreparedFlydslSdpaBwdMerged(MergedPlan plan,
                                 IngestorKernelCode mergedCode,
+                                LaunchRecord mergedRecord,
                                 std::optional<IngestorKernelCode> reduceCode,
-                                std::optional<IngestorKernelCode> tailzeroCode)
+                                std::optional<LaunchRecord> reduceRecord,
+                                std::optional<IngestorKernelCode> tailzeroCode,
+                                std::optional<LaunchRecord> tailzeroRecord)
         : _plan(std::move(plan))
         , _merged(std::move(mergedCode))
+        , _mergedRecord(std::move(mergedRecord))
         , _reduce(std::move(reduceCode))
+        , _reduceRecord(std::move(reduceRecord))
         , _tailzero(std::move(tailzeroCode))
+        , _tailzeroRecord(std::move(tailzeroRecord))
     {
     }
 
@@ -910,11 +1006,34 @@ public:
         return _tailzero->kernelForStream(stream);
     }
 
+    const IngestorKernelCode& kernelCode() const override
+    {
+        return _merged;
+    }
+
+    std::vector<IngestorLaunchedKernel> launchedKernels() const override
+    {
+        return native::launchedKernelsOf(MERGED_LAUNCH,
+                                         _merged,
+                                         _mergedRecord,
+                                         {{REDUCE_LAUNCH, &_reduce, &_reduceRecord},
+                                          {TAILZERO_LAUNCH, &_tailzero, &_tailzeroRecord}});
+    }
+
+    /// The scale, seed and offset the launch resolves at execute.
+    std::vector<int64_t> userSuppliedPassByValueUids() const override
+    {
+        return native::userSuppliedUidsOf(_plan.scalars, true);
+    }
+
 private:
     MergedPlan _plan;
     IngestorKernelCode _merged;
+    LaunchRecord _mergedRecord;
     std::optional<IngestorKernelCode> _reduce;
+    std::optional<LaunchRecord> _reduceRecord;
     std::optional<IngestorKernelCode> _tailzero;
+    std::optional<LaunchRecord> _tailzeroRecord;
 };
 
 /**
@@ -924,6 +1043,12 @@ private:
  * With @p REDUCES the dispatch serves the rows that name a `reduce_symbol`: each carries the
  * reduce kernel as the launch `dbias_reduce` of its `sources`, built from its own entry. The
  * plain dispatch serves the rows that name none and refuses one that does.
+ *
+ * Saves and restores all its launches (supportsSavingAllLaunches()) under the contract of
+ * its dispatch name (FlydslSdpaBwdLaunchValues.hpp). A stage that launches the reduce
+ * kernel saves the launches `merged` and `dbias_reduce`, and one that launches the
+ * tail-zero kernel also saves `tailzero`, each a code object of its own; a stage with
+ * neither saves its one kernel under the empty name.
  */
 template <bool REDUCES>
 class FlydslSdpaBwdMergedDispatchHandler : public IKernelDispatchHandler<Handle>
@@ -999,33 +1124,35 @@ public:
             _kernelCompiler, _kpackLoader, context, mergedKernel, options, mergedSignature());
         mergedCode.setBlockSize(plan.blockThreads, 1, 1);
         mergedCode.setGridSize(plan.gridBlocks, 1, 1);
+        LaunchRecord mergedRecord{mergedKernel.source.kind, mergedKernel.source.signature};
 
-        std::optional<IngestorKernelCode> reduceCode;
-        if(reduceKernel.has_value())
-        {
-            reduceCode.emplace(buildIngestorKernelCode(_kernelCompiler,
-                                                       _kpackLoader,
-                                                       context,
-                                                       *reduceKernel,
-                                                       options,
-                                                       native::reduceSignature()));
-            reduceCode->setBlockSize(native::REDUCE_THREADS, 1, 1);
-            reduceCode->setGridSize(plan.reduceGrid.x, plan.reduceGrid.y, 1);
-        }
-        std::optional<IngestorKernelCode> tailzeroCode;
-        if(tailzeroKernel.has_value())
-        {
-            tailzeroCode.emplace(buildIngestorKernelCode(_kernelCompiler,
-                                                         _kpackLoader,
-                                                         context,
-                                                         *tailzeroKernel,
-                                                         options,
-                                                         native::tailzeroSignature()));
-            tailzeroCode->setBlockSize(native::TAILZERO_THREADS, 1, 1);
-            tailzeroCode->setGridSize(plan.tailzeroGrid.x, plan.tailzeroGrid.y, 1);
-        }
-        return std::make_unique<PreparedFlydslSdpaBwdMerged>(
-            std::move(plan), std::move(mergedCode), std::move(reduceCode), std::move(tailzeroCode));
+        auto reduce
+            = native::buildOptionalLaunch(_kernelCompiler,
+                                          _kpackLoader,
+                                          context,
+                                          reduceKernel.has_value() ? &*reduceKernel : nullptr,
+                                          options,
+                                          native::reduceSignature(),
+                                          native::REDUCE_THREADS,
+                                          plan.reduceGrid.x,
+                                          plan.reduceGrid.y);
+        auto tailzero
+            = native::buildOptionalLaunch(_kernelCompiler,
+                                          _kpackLoader,
+                                          context,
+                                          tailzeroKernel.has_value() ? &*tailzeroKernel : nullptr,
+                                          options,
+                                          native::tailzeroSignature(),
+                                          native::TAILZERO_THREADS,
+                                          plan.tailzeroGrid.x,
+                                          plan.tailzeroGrid.y);
+        return std::make_unique<PreparedFlydslSdpaBwdMerged>(std::move(plan),
+                                                             std::move(mergedCode),
+                                                             std::move(mergedRecord),
+                                                             std::move(reduce.code),
+                                                             std::move(reduce.record),
+                                                             std::move(tailzero.code),
+                                                             std::move(tailzero.record));
     }
 
     void launch(const Handle& handle,
@@ -1068,6 +1195,92 @@ public:
         }
     }
 
+    std::optional<SavedLaunchInputs>
+        saveLaunchInputs(const PreparedDispatch& prepared) const override
+    {
+        const auto& plan = dynamic_cast<const PreparedFlydslSdpaBwdMerged&>(prepared).plan();
+        return SavedLaunchInputs{
+            std::string(REDUCES ? FLYDSL_SDPA_BWD_MERGED_REDUCE_DISPATCH_SYMBOL_V1
+                                : FLYDSL_SDPA_BWD_MERGED_DISPATCH_SYMBOL_V1),
+            flydslSdpaBwdMergedLaunchValues(FlydslSdpaBwdMergedLaunchInputs{plan.problem,
+                                                                            plan.uids,
+                                                                            plan.scalars,
+                                                                            plan.tile,
+                                                                            plan.blockThreads,
+                                                                            plan.blockKv,
+                                                                            plan.blockM})};
+    }
+
+    std::unique_ptr<PreparedDispatch> restoreLaunch(const SavedLaunchInputs& inputs,
+                                                    SavedKernelCode code,
+                                                    int deviceOrdinal) const override
+    {
+        std::vector<SavedKernelCode> codes;
+        codes.push_back(std::move(code));
+        return restoreLaunches(inputs, std::move(codes), deviceOrdinal);
+    }
+
+    /// Refuses, in this order and each as INCOMPATIBLE: a kernel whose recorded signature is
+    /// not the one this handler launches (the reduce kernel's is native::reduceSignature());
+    /// a dispatch name of another contract; an extra, missing or mistyped launch value; a
+    /// value out of range or a problem that cannot be launched; a set of launch names that is
+    /// not the set the recomputed problem implies (the one unnamed launch without a reduce or
+    /// tail-zero launch, otherwise `merged` with `dbias_reduce` and `tailzero` as the problem
+    /// needs them); and code the driver refuses.
+    std::unique_ptr<PreparedDispatch> restoreLaunches(const SavedLaunchInputs& inputs,
+                                                      std::vector<SavedKernelCode> codes,
+                                                      int deviceOrdinal) const override
+    {
+        const native::LaunchNames names{MERGED_LAUNCH, {}, REDUCE_LAUNCH, TAILZERO_LAUNCH};
+        native::requireSavedSignatures(
+            inputs, codes, names, mergedSignature(), native::tailzeroSignature());
+
+        auto plan = restoredPlan<REDUCES>(inputs);
+
+        const bool reduces = plan.workspace.reduces;
+        const bool zeroesTails = plan.tailzeroMask != 0;
+        const auto selected
+            = native::selectSavedLaunches(inputs, codes, false, reduces, zeroesTails, names);
+        if(reduces)
+        {
+            plan.reduceSymbol = selected.reduce->symbol;
+        }
+
+        auto merged = native::loadSavedKernel(inputs, std::move(*selected.primary), deviceOrdinal);
+        merged.code.setBlockSize(plan.blockThreads, 1, 1);
+        merged.code.setGridSize(plan.gridBlocks, 1, 1);
+
+        auto reduce = native::loadOptionalLaunch(inputs,
+                                                 selected.reduce,
+                                                 deviceOrdinal,
+                                                 native::REDUCE_THREADS,
+                                                 plan.reduceGrid.x,
+                                                 plan.reduceGrid.y);
+        auto tailzero = native::loadOptionalLaunch(inputs,
+                                                   selected.tailzero,
+                                                   deviceOrdinal,
+                                                   native::TAILZERO_THREADS,
+                                                   plan.tailzeroGrid.x,
+                                                   plan.tailzeroGrid.y);
+        return std::make_unique<PreparedFlydslSdpaBwdMerged>(std::move(plan),
+                                                             std::move(merged.code),
+                                                             std::move(merged.record),
+                                                             std::move(reduce.code),
+                                                             std::move(reduce.record),
+                                                             std::move(tailzero.code),
+                                                             std::move(tailzero.record));
+    }
+
+    bool supportsSaving() const override
+    {
+        return true;
+    }
+
+    bool supportsSavingAllLaunches() const override
+    {
+        return true;
+    }
+
 private:
     const compilation::IKernelCompiler& _kernelCompiler;
     const compilation::KpackKernelLoader& _kpackLoader;
@@ -1106,6 +1319,15 @@ void registerFlydslSdpaBwdMergedSymbols(SymbolScope<Handle>& scope)
     scope.add(std::string(SCORE_SYMBOL), &flydslSdpaBwdMergedScore);
     scope.add(std::string(DISPATCH_SYMBOL), &flydslSdpaBwdMergedDispatchHandler<false>());
     scope.add(std::string(REDUCE_DISPATCH_SYMBOL), &flydslSdpaBwdMergedDispatchHandler<true>());
+    scope.add(std::string(FLYDSL_SDPA_BWD_MERGED_DISPATCH_SYMBOL_V1),
+              &flydslSdpaBwdMergedDispatchHandler<false>());
+    scope.add(std::string(FLYDSL_SDPA_BWD_MERGED_REDUCE_DISPATCH_SYMBOL_V1),
+              &flydslSdpaBwdMergedDispatchHandler<true>());
+}
+
+const std::vector<KernelArgument>& flydslSdpaBwdMergedSignature()
+{
+    return mergedSignature();
 }
 
 FlydslSdpaBwdMergedLaunchDump describeFlydslSdpaBwdMergedLaunchForTesting(

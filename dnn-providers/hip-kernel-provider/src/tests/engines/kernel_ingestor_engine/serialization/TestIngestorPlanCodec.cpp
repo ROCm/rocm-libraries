@@ -25,7 +25,6 @@
 #include "engines/kernel_ingestor_engine/serialization/IngestorPlanRefusal.hpp"
 #include "engines/kernel_ingestor_engine/serialization/IngestorPlanTestUtilities.hpp"
 #include "engines/kernel_ingestor_engine/serialization/ingestor_plan_generated.h"
-#include "utilities/Digest.hpp"
 
 // The ingestor plan codec: the round trip of every field, the body layout, and the order of
 // the reader's checks. No GPU is used. A test that builds a damaged or foreign body writes a
@@ -40,22 +39,9 @@ using hipdnn_plugin_sdk::HipdnnPluginException;
 using hipdnn_plugin_sdk::ingestor::KernelArgument;
 using hipdnn_plugin_sdk::ingestor::KernelSourceKind;
 
-constexpr size_t HEADER_SIZE = INGESTOR_PLAN_HEADER_SIZE;
-constexpr size_t ALIGNMENT = INGESTOR_PLAN_BODY_ALIGNMENT;
-constexpr size_t SHA256_HEX_LENGTH = INGESTOR_PLAN_DIGEST_SIZE * 2;
 constexpr size_t FILE_IDENTIFIER_OFFSET = sizeof(flatbuffers::uoffset_t);
 constexpr std::array<uint8_t, 4> PLAN_IDENTIFIER = {0x48, 0x4B, 0x53, 0x50}; // HKSP
 constexpr std::array<uint8_t, 4> FOREIGN_IDENTIFIER = {0x58, 0x58, 0x58, 0x58}; // XXXX
-
-std::vector<uint8_t> patternBytes(size_t size, uint8_t seed)
-{
-    std::vector<uint8_t> bytes(size);
-    for(size_t index = 0; index < size; ++index)
-    {
-        bytes[index] = static_cast<uint8_t>(seed + (index * 7U));
-    }
-    return bytes;
-}
 
 IngestorPlanPayload makePayload(KernelSourceKind sourceKind, size_t codeSize = 37)
 {
@@ -66,43 +52,16 @@ IngestorPlanPayload makePayload(KernelSourceKind sourceKind, size_t codeSize = 3
     }
     payload.workspaceBytes = 4096;
     payload.dispatchSymbol = "hipkernel.test.dispatch.v1";
-    payload.launchValues = {
-        {"flag", true},
-        {"count", int64_t{-42}},
-        {"scale", 0.25},
-        {"layout", std::string("bshd")},
-        {"shape", std::vector<int64_t>{2, 3, 5}},
-    };
+    payload.launchValues = sampleLaunchValues();
     payload.sourceKind = sourceKind;
     payload.symbol = "test_kernel";
     payload.target = "gfx90a:xnack-";
     payload.codeObject = patternBytes(codeSize, 0x31);
-    payload.sha256 = utilities::sha256Hex(payload.codeObject.data(), payload.codeObject.size());
+    payload.sha256 = sha256Of(payload.codeObject);
     payload.recordedSignature
         = {KernelArgument{"global_buffer", 8, 0, ""}, KernelArgument{"by_value", 4, 8, "count"}};
     payload.providerVersion = "9.8.7";
     return payload;
-}
-
-std::vector<uint8_t> bodyOf(const std::vector<uint8_t>& payload)
-{
-    return {payload.begin() + static_cast<std::ptrdiff_t>(HEADER_SIZE), payload.end()};
-}
-
-// Puts a header with the matching digest in front of body.
-std::vector<uint8_t> seal(const std::vector<uint8_t>& body)
-{
-    std::vector<uint8_t> bytes
-        = encodeIngestorPlanHeader(IngestorPlanKind::SINGLE_KERNEL_PLAN,
-                                   detail::computeIngestorPlanBodyDigest(body.data(), body.size()));
-    bytes.insert(bytes.end(), body.begin(), body.end());
-    return bytes;
-}
-
-// Writes the header digest again after a test changes body bytes.
-void reseal(std::vector<uint8_t>& payload)
-{
-    payload = seal(bodyOf(payload));
 }
 
 // The offset of the code bytes from the start of the body.
@@ -141,15 +100,6 @@ void expectEncodeInternalError(const IngestorPlanPayload& payload, const std::st
     }
 }
 
-// One launch value as the raw builder writes it. A type other than NONE gets an Int64Value
-// table as its data when withData is true.
-struct RawLaunchValue
-{
-    std::string name;
-    fb::LaunchValueData type = fb::LaunchValueData::Int64Value;
-    bool withData = true;
-};
-
 // The code bytes of every raw build.
 std::vector<uint8_t> rawCodeObject()
 {
@@ -158,8 +108,7 @@ std::vector<uint8_t> rawCodeObject()
 
 std::string rawCodeObjectSha256()
 {
-    const std::vector<uint8_t> code = rawCodeObject();
-    return utilities::sha256Hex(code.data(), code.size());
+    return sha256Of(rawCodeObject());
 }
 
 // The body fields a raw build can set to values that encodeIngestorPlan never writes.
@@ -189,18 +138,7 @@ std::vector<uint8_t> buildRawPayload(const RawPlan& raw)
     const auto kernelImage = fb::CreateKernelImage(
         builder, raw.sourceKind, symbol, target, sha256, signature, codeObject);
 
-    std::vector<flatbuffers::Offset<fb::LaunchValue>> values;
-    for(const RawLaunchValue& value : raw.values)
-    {
-        flatbuffers::Offset<void> data;
-        if(value.type != fb::LaunchValueData::NONE && value.withData)
-        {
-            data = fb::CreateInt64Value(builder, 5).Union();
-        }
-        const auto name = builder.CreateString(value.name);
-        values.push_back(fb::CreateLaunchValue(builder, name, value.type, data));
-    }
-    const auto valuesVector = builder.CreateVector(values);
+    const auto valuesVector = writeRawLaunchValues(builder, raw.values);
     const auto dispatchSymbol = builder.CreateString("raw.dispatch.v1");
     const auto dispatchData = fb::CreateDispatchData(builder, dispatchSymbol, valuesVector);
     const auto uids = builder.CreateVector(raw.runtimePassByValueUids);
@@ -229,7 +167,8 @@ std::vector<uint8_t> buildRawPayload(const RawPlan& raw)
     fb::FinishExecutionPlanBuffer(builder, root);
 
     const uint8_t* body = builder.GetBufferPointer();
-    return seal(std::vector<uint8_t>(body, body + builder.GetSize()));
+    return sealIngestorPlanBody(IngestorPlanKind::SINGLE_KERNEL_PLAN,
+                                std::vector<uint8_t>(body, body + builder.GetSize()));
 }
 
 class TestIngestorPlanCodecRoundTrip : public ::testing::TestWithParam<KernelSourceKind>
@@ -408,7 +347,7 @@ TEST(TestIngestorPlanCodec, VerifierRejectsACorruptRootOffsetWithAValidDigest)
         = encodeIngestorPlan(makePayload(KernelSourceKind::EMBEDDED_SOURCE));
     const auto outside = static_cast<flatbuffers::uoffset_t>(payload.size());
     std::memcpy(payload.data() + HEADER_SIZE, &outside, sizeof(outside));
-    reseal(payload);
+    resealIngestorPlan(payload);
     expectDecodeRefusal(payload, HIPDNN_PLUGIN_STATUS_INVALID_VALUE, "verifier");
 }
 
@@ -419,7 +358,7 @@ TEST(TestIngestorPlanCodec, RejectsABodyWithAnotherFileIdentifier)
     uint8_t* identifier = payload.data() + HEADER_SIZE + FILE_IDENTIFIER_OFFSET;
     ASSERT_EQ(std::memcmp(identifier, PLAN_IDENTIFIER.data(), PLAN_IDENTIFIER.size()), 0);
     std::memcpy(identifier, FOREIGN_IDENTIFIER.data(), FOREIGN_IDENTIFIER.size());
-    reseal(payload);
+    resealIngestorPlan(payload);
     expectDecodeRefusal(payload, HIPDNN_PLUGIN_STATUS_INVALID_VALUE, "verifier");
 }
 
@@ -431,7 +370,7 @@ void expectSelfConsistentPayload(const IngestorPlanPayload& decoded, size_t body
     EXPECT_TRUE(std::all_of(decoded.sha256.begin(), decoded.sha256.end(), [](char character) {
         return (character >= '0' && character <= '9') || (character >= 'a' && character <= 'f');
     })) << decoded.sha256;
-    EXPECT_TRUE(decoded.runtimePassByValueUids.empty());
+    EXPECT_LE(decoded.runtimePassByValueUids.size(), bodySize);
     EXPECT_LE(decoded.codeObject.size(), bodySize);
     EXPECT_LE(decoded.symbol.size(), bodySize);
     EXPECT_LE(decoded.target.size(), bodySize);
@@ -491,7 +430,7 @@ TEST(TestIngestorPlanCodec, RefusesOrReadsEveryResealedBodyByteFlip)
         std::vector<uint8_t> damaged = encoded;
         const size_t index = HEADER_SIZE + offset;
         damaged[index] = static_cast<uint8_t>(damaged[index] ^ FLIP_MASK);
-        reseal(damaged);
+        resealIngestorPlan(damaged);
 
         // An exact-size heap copy lets ASAN see any read past the end of the payload.
         const std::vector<uint8_t> probe(damaged.begin(), damaged.end());
@@ -525,24 +464,17 @@ TEST(TestIngestorPlanCodec, RejectsAnOversizeBody)
     EXPECT_NO_THROW(detail::checkIngestorPlanBodySize(minSize));
 }
 
-TEST(TestIngestorPlanCodec, RefusesANonEmptyRuntimePassByValueList)
+TEST(TestIngestorPlanCodec, ReadsAPayloadThatListsRuntimePassByValueUids)
 {
     IngestorPlanPayload payload = makePayload(KernelSourceKind::EMBEDDED_SOURCE);
-    payload.runtimePassByValueUids = {7};
-    expectDecodeRefusal(encodeIngestorPlan(payload),
-                        HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
-                        "pass-by-value tensors (UIDs 7)");
-}
+    payload.runtimePassByValueUids = {7, 9};
+    const IngestorPlanPayload decoded = decode(encodeIngestorPlan(payload));
+    EXPECT_EQ(decoded.runtimePassByValueUids, (std::vector<int64_t>{7, 9}));
+    EXPECT_TRUE(decoded == payload);
 
-TEST(TestIngestorPlanCodec, DamageIsReportedBeforeIncompatibility)
-{
     RawPlan raw;
-    raw.runtimePassByValueUids = {7};
-    raw.values = {RawLaunchValue{""}};
-    expectDecodeRefusal(buildRawPayload(raw), HIPDNN_PLUGIN_STATUS_INVALID_VALUE, "has no name");
-
-    raw.values = {RawLaunchValue{"count"}};
-    expectDecodeRefusal(buildRawPayload(raw), HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "UIDs 7");
+    raw.runtimePassByValueUids = {7, 9};
+    EXPECT_EQ(decode(buildRawPayload(raw)).runtimePassByValueUids, raw.runtimePassByValueUids);
 }
 
 TEST(TestIngestorPlanCodec, RejectsMalformedLaunchValues)
@@ -615,8 +547,7 @@ TEST(TestIngestorPlanCodec, RefusesAKernelDigestThatDoesNotMatchTheCodeObject)
                                     HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
                                     "does not match the code object");
     EXPECT_NE(refusal.find(otherDigest), std::string::npos) << refusal;
-    const std::string actual
-        = utilities::sha256Hex(payload.codeObject.data(), payload.codeObject.size());
+    const std::string actual = sha256Of(payload.codeObject);
     EXPECT_NE(refusal.find(actual), std::string::npos) << refusal;
 }
 
