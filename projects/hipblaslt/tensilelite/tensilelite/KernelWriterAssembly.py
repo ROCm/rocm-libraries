@@ -58,7 +58,7 @@ from .ir import BranchInstruction, BufferLoadB128, BufferLoadB32, \
   SEndpgm, SFf1B32, SGetRegB32, SFlbitI32B32, SLShiftLeft2AddU32, SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, \
   SLShiftRightB64, SLoadB32, SLoadB64, SLoadB128, SMFMAInstruction, SMemLoadInstruction, SMaxI32, SMaxU32, SMinI32, \
   SMinU32, SMovB32, SMovB64, SMulHIU32, SMulI32, SNop, SOrB32, SOrSaveExecB32, \
-  SOrSaveExecB64, SSExtI16toI32, SSetPCB64, SSetRegIMM32B32, SSetPrior, SSubBU32, SSubI32, SSubU32, SSubU64, SSetVgprMsb,\
+  SOrSaveExecB64, SSExtI16toI32, SSetPCB64, SSetRegIMM32B32, SSetPrior, SSleep, SSubBU32, SSubI32, SSubU32, SSubU64, SSetVgprMsb,\
   SWaitCnt, SWaitAlu, SXorB32, VAShiftRightI32, VAccvgprReadB32, VAccvgprWrite, VAccvgprWriteB32, \
   VAdd3U32, VAddCCOU32, VAddCOU32, VAddF32, VAddF64, VAddLShiftLeftU32, VAddU32, VAndB32, \
   VBfeU32, VBfiB32, VSwapB32, VCmpEQI32, VCmpEQU32, VCmpGEI32, VCmpGEU32, VCmpGtU32, VCmpGTI32, VCmpLeI32, VCmpLtI32, \
@@ -8213,6 +8213,9 @@ class KernelWriterAssembly(KernelWriter):
         imod.add(SAddU32(dst=sgpr("StaggerUIter"), src0=sgpr("StaggerUIter"), \
                 src1=(pf), \
                 comment="Subtract (PGR-1); StaggerUIter now contains target iteration to wrap"))
+      if kernel["ProblemType"]["FusedA2A"] == "A2AGemm":
+        imod.add(SMovB32(dst=sgpr("StaggerUIter"), src=hex(0xFFFFFFFF),
+                         comment="no wrap iteration"))
     return imod
 
   ##############################################################################
@@ -9663,15 +9666,16 @@ class KernelWriterAssembly(KernelWriter):
     return 0
 
   ##############################################################################
-  # A2A-GEMM shard loop
+  # A2A-GEMM segments
   ##############################################################################
-  def a2aShardLoopLabel(self):
-    return Label("A2AShardLoopBegin", "", alignment=16)
-
-  def openA2AShardLoop(self, kernel, tPA, tPB):
-    module = Module("openA2AShardLoop")
+  def a2aSetupSegments(self, kernel, tPA, tPB):
+    module = Module("a2aSetupSegments")
     if kernel["ProblemType"]["FusedA2A"] != "A2AGemm":
       return module
+    assert kernel["ExpertSchedulingMode"] == 0, "A2AGemm segment switches need ExpertSchedulingMode=0"
+    assert not kernel["SuppressNoLoadLoop"], "A2AGemm segment switches need SuppressNoLoadLoop=0"
+    assert not (kernel["UnrollLoopSwapGlobalReadOrder"] and kernel["AdaptiveGemmNTAB"]), \
+      "A2AGemm segment switches need AdaptiveGemmNTAB=0 with UnrollLoopSwapGlobalReadOrder"
     layout = fusedA2AKernArgLayout()
     base   = self.states.fusedA2AKernArgBase
     module.add(self.argLoader.loadKernArg("A2AW", "KernArgAddress",
@@ -9681,9 +9685,9 @@ class KernelWriterAssembly(KernelWriter):
                                           sgprOffset=hex(base + layout["FusedMyRank"]),
                                           dword=1))
     module.add(SWaitCnt(kmcnt=0, comment="wait FusedW and FusedMyRank"))
-    tmpVgpr = self.vgprPool.checkOutAligned(4, 2, tag="openA2AShardLoop_divide")
+    tmpVgpr = self.vgprPool.checkOutAligned(4, 2, tag="a2aSetupSegments_divide")
     vgprRes = ContinuousRegister(idx=tmpVgpr, size=4)
-    with self.allocTmpSgpr(1, tag="openA2AShardLoop_tmpSgprInfo") as tmpSgprInfo:
+    with self.allocTmpSgpr(1, tag="a2aSetupSegments_tmpSgprInfo") as tmpSgprInfo:
       module.add(scalarUInt32DivideAndRemainder(
           qReg="A2AKLocal", dReg="SizesSum+%u" % self.states.unrollIdx,
           divReg="A2AW", rReg=tmpSgprInfo.idx,
@@ -9702,10 +9706,22 @@ class KernelWriterAssembly(KernelWriter):
     module.add(SAddU32(dst=sgpr("A2AShardIdx"), src0=sgpr("A2AShardIdx"), src1=1,
                        comment="gathered segment = peer queue + 1"))
     self.vgprPool.checkIn(tmpVgpr)
-    module.add(self.a2aShiftSrd(kernel, tPA, "A2AFeatIdx"))
-    module.add(self.a2aShiftSrd(kernel, tPB, "A2AFeatIdx"))
+    # AddressA and AddressB carry the unshifted tile bases from here on; A2ATileBaseA
+    # holds B's tile offset until the gathered buffer is known.
+    module.add(RegSet("s", "sgprA2ATileBaseA", self.sgprs["AddressA"]))
+    module.add(RegSet("s", "sgprA2ATileBaseB", self.sgprs["AddressB"]))
+    module.add(SSubU32(dst=sgpr("A2ATileBaseA+0"), src0=sgpr("SrdB+0"), src1=sgpr("AddressB+0"),
+                       comment="B tile offset"))
+    module.add(SSubBU32(dst=sgpr("A2ATileBaseA+1"), src0=sgpr("SrdB+1"), src1=sgpr("AddressB+1")))
     module.add(self.a2aRebaseAddressB(kernel, tPB))
     module.add(self.a2aBatchSpan(kernel, tPB))
+    module.add(SAddU32(dst=sgpr("A2ATileBaseB+0"), src0=sgpr("AddressB+0"), src1=sgpr("A2ATileBaseA+0"),
+                       comment="gathered B tile base"))
+    module.add(SAddCU32(dst=sgpr("A2ATileBaseB+1"), src0=sgpr("AddressB+1"), src1=sgpr("A2ATileBaseA+1")))
+    module.add(SMovB32(dst=sgpr("A2ATileBaseA+0"), src=sgpr("SrdA+0"), comment="A tile base"))
+    module.add(SMovB32(dst=sgpr("A2ATileBaseA+1"), src=sgpr("SrdA+1")))
+    module.add(self.a2aShiftSrd(kernel, tPA, "A2AFeatIdx"))
+    module.add(self.a2aShiftSrd(kernel, tPB, "A2AFeatIdx"))
     subRounds = kernel["A2ASubRounds"]
     if subRounds > 1:
       module.add(SSubU32(dst=sgpr("A2AShardCounter"), src0=sgpr("A2AW"), src1=1,
@@ -9716,7 +9732,6 @@ class KernelWriterAssembly(KernelWriter):
                          comment="rounds = 1 + (W-1) * S"))
     else:
       module.add(SMovB32(dst=sgpr("A2AShardCounter"), src=sgpr("A2AW"), comment="rounds = W"))
-    module.add(self.a2aShardLoopLabel())
     return module
 
   def a2aPrePadB(self, kernel, tPB):
@@ -10389,17 +10404,6 @@ class KernelWriterAssembly(KernelWriter):
       self.vgprPool.checkIn(reg)
     return module
 
-  def closeA2AShardLoop(self, kernel):
-    module = Module("closeA2AShardLoop")
-    if kernel["ProblemType"]["FusedA2A"] != "A2AGemm":
-      return module
-    module.add(SSubU32(dst=sgpr("A2AShardCounter"), src0=sgpr("A2AShardCounter"), src1=1,
-                       comment="dec shard counter"))
-    module.add(SCmpEQI32(src0=sgpr("A2AShardCounter"), src1=0, comment="shard counter==0"))
-    module.add(SCBranchSCC0(labelName=self.a2aShardLoopLabel().getLabelName(),
-                            comment="restart shard loop"))
-    return module
-
   def a2aExitTally(self, kernel):
     """Count this work-group out of its token block, and the token block out of the
     grid. The grid's last work-group clears the flag block and the SDMA cursors and,
@@ -10419,7 +10423,7 @@ class KernelWriterAssembly(KernelWriter):
     pubLbl  = Label(self.labels.getNameInc("a2a_publish_done"), "")
     nextLbl = Label(self.labels.getNameInc("a2a_publish_next"), "")
 
-    # The shard loop is over; its registers carry the drain state from here on.
+    # Past the last segment switch; its registers carry the drain state from here on.
     module.add(RegSet("s", "sgprA2ADrainArmed",  self.sgprs["A2AShardIdx"]))
     module.add(RegSet("s", "sgprA2ADrainMyRank", self.sgprs["A2AShardCounter"]))
 
@@ -10567,44 +10571,215 @@ class KernelWriterAssembly(KernelWriter):
     module.add(endLbl)
     return module
 
-  def a2aWaitFlag(self, kernel):
-    """Spin until the next shard's segment has landed in gathered.
+  def a2aSwitchSegment(self, kernel, tPA, tPB, stepBack):
+    """Point the global reads at the next segment and wait until it has landed.
 
-    Polls flag[bLast][A2AShardIdx - 1], bLast being the last block placed in
-    b's group; must be emitted before A2AShardIdx advances.
+    Emitted where the current segment's last read is issued and another segment
+    follows. SrdA/SrdB go to the next segment's start, one GlobalReadIncs (DepthU
+    under UseSubtileImpl) back when stepBack, and LoopCounterL gains its iterations.
+    The flag polled is flag[bLast][A2AShardIdx - 1], bLast being the last block placed
+    in b's group.
+    Lane 0 of Serial carries the poll and is restored; no other VGPR is touched.
     """
-    module = Module("a2aWaitFlag")
-    spin   = Label("A2AWaitFlag", "")
-
-    vOff = self.vgprPool.checkOut(1, tag="a2aWaitFlag_offset")
-    vVal = self.vgprPool.checkOut(1, tag="a2aWaitFlag_value")
+    module    = Module("a2aSwitchSegment")
+    layout    = fusedA2AKernArgLayout()
+    base      = self.states.fusedA2AKernArgBase
     subRounds = kernel["A2ASubRounds"]
-    with self.allocTmpSgpr(1 if subRounds == 1 else 2, tag="a2aWaitFlag_slot") as tmpSgprInfo:
-      s = tmpSgprInfo.idx
-      module.add(SAddU32(dst=sgpr(s), src0=sgpr("A2AFlagRow"), src1=sgpr("A2AShardIdx"),
-                         comment="flag slot = flag row + segment"))
-      module.add(SSubU32(dst=sgpr(s), src0=sgpr(s), src1=1, comment="i = segment - 1"))
-      if subRounds > 1:
-        module.add(SLShiftLeftB32(dst=sgpr(s), shiftHex=log2(subRounds), src=sgpr(s),
-                                  comment="slot * S"))
-        module.add(self.a2aSubRoundIdx(kernel, s + 1))
-        module.add(SAddU32(dst=sgpr(s), src0=sgpr(s), src1=sgpr(s + 1), comment="+ sub-round"))
-      module.add(SLShiftLeftB32(dst=sgpr(s), shiftHex=2, src=sgpr(s),
-                                comment="flag slot byte offset"))
-      module.add(VMovB32(dst=vgpr(vOff), src=sgpr(s), comment="poll offset"))
+    depthU    = kernel["DepthU"]
+    loopCounter = self.loopCounter(kernel, self.states.unrollIdx)
+    pollLabel   = Label(self.labels.getNameInc("A2AWaitFlag"), "")
+    readyLabel  = Label(self.labels.getNameInc("A2AFlagReady"), "")
 
-    module.add(spin)
-    module.add(GlobalLoadB32(dst=vgpr(vVal), vaddr=vgpr(vOff),
-        saddr=sgpr("FusedCounterPtr", 2),
-        modifier=GLOBALModifiers(offset=FUSED_A2A_A2AGEMM_FLAG_OFFSET, glc=True, slc=True,
-                                 scope=CacheScope.SCOPE_NONE, isStore=False),
-        comment="poll flag[b][i] at system scope"))
-    module.add(SWaitCnt(vlcnt=0, comment="wait the flag poll"))
-    module.add(VCmpLtU32(VCC(), vgpr(vVal), 1, comment="flag < 1?"))
-    module.add(SCBranchVCCNZ(labelName=spin.getLabelName(), comment="segment short -> poll again"))
-    self.vgprPool.checkIn(vVal)
-    self.vgprPool.checkIn(vOff)
+    with self.allocTmpSgpr(8, alignment=2, tag="a2aSwitchSegment") as tmpSgprInfo:
+      prod   = tmpSgprInfo.idx
+      iters  = prod + 2
+      flag   = prod + 3
+      slot   = prod + 4
+      rank   = prod + 5
+      h      = prod + 6
+      serial = prod + 7
+      module.add(SAddU32(dst=sgpr(slot), src0=sgpr("A2AFlagRow"), src1=sgpr("A2AShardIdx"),
+                         comment="flag slot = flag row + segment"))
+      module.add(SSubU32(dst=sgpr(slot), src0=sgpr(slot), src1=1, comment="i = segment - 1"))
+      if subRounds > 1:
+        module.add(self.a2aSubRoundIdx(kernel, h))
+        module.add(SLShiftLeftB32(dst=sgpr(slot), shiftHex=log2(subRounds), src=sgpr(slot),
+                                  comment="slot * S"))
+        module.add(SAddU32(dst=sgpr(slot), src0=sgpr(slot), src1=sgpr(h), comment="+ sub-round"))
+      module.add(SLShiftLeftB32(dst=sgpr(slot), shiftHex=2, src=sgpr(slot),
+                                comment="flag slot byte offset"))
+      def pollFlag():
+        poll = Module("a2aPollFlag")
+        poll.add(VMovB32(dst=vgpr("Serial"), src=sgpr(slot), comment="poll offset"))
+        poll.add(GlobalLoadB32(dst=vgpr("Serial"), vaddr=vgpr("Serial"),
+            saddr=sgpr("FusedCounterPtr", 2),
+            modifier=GLOBALModifiers(offset=FUSED_A2A_A2AGEMM_FLAG_OFFSET, glc=True, slc=True,
+                                     scope=CacheScope.SCOPE_NONE, isStore=False),
+            comment="poll flag[b][i] at system scope"))
+        return poll
+      module.add(SMovB64(dst=EXEC(), src=1, comment="lane 0 polls"))
+      module.add(VReadfirstlaneB32(dst=sgpr(serial), src=vgpr("Serial"), comment="save Serial lane 0"))
+      module.add(pollFlag())
+      module.add(self.argLoader.loadKernArg(rank, "KernArgAddress",
+                                            sgprOffset=hex(base + layout["FusedMyRank"]), dword=1))
+
+      if not kernel["UseSubtileImpl"]:
+        module.addComment0("iterations of the segment being left")
+        module.add(scalarStaticDivideAndRemainder(qReg=iters, rReg=-1, dReg="A2AKLocal", divisor=depthU,
+                                                  tmpSgprRes=ContinuousRegister(prod, 2), doRemainder=False))
+        for tP in (tPA, tPB):
+          tc  = tP["tensorChar"]
+          inc = self.globalReadIncsOperand(tc, self.states.unrollIdx)
+          if self.states.use64bShadowLimit:
+            module.add(SMulHIU32(dst=sgpr(prod + 1), src0=sgpr(iters), src1=inc,
+                                 comment="bytes the %s reads advanced over it" % tc))
+            module.add(SMulI32(dst=sgpr(prod), src0=sgpr(iters), src1=inc))
+            module.add(SAddU32(dst=sgpr("ShadowLimit%s+0" % tc), src0=sgpr("ShadowLimit%s+0" % tc),
+                               src1=sgpr(prod), comment="limit as at the next segment's start"))
+            module.add(SAddCU32(dst=sgpr("ShadowLimit%s+1" % tc), src0=sgpr("ShadowLimit%s+1" % tc),
+                                src1=sgpr(prod + 1)))
+          else:
+            module.add(SMulI32(dst=sgpr(prod), src0=sgpr(iters), src1=inc,
+                               comment="bytes the %s reads advanced over it" % tc))
+            module.add(SAddU32(dst=sgpr("Srd%s+2" % tc), src0=sgpr("Srd%s+2" % tc), src1=sgpr(prod),
+                               comment="limit as at the next segment's start"))
+
+      if subRounds > 1:
+        first = prod
+        w     = prod + 1
+        module.add(SSubU32(dst=sgpr(first), src0=sgpr("A2AW"), src1=1, comment="W - 1"))
+        module.add(SLShiftLeftB32(dst=sgpr(first), shiftHex=log2(subRounds), src=sgpr(first),
+                                  comment="(W-1) * S"))
+        module.add(SAddU32(dst=sgpr(first), src0=sgpr(first), src1=1,
+                           comment="segments left during the local segment"))
+        module.add(SLShiftRightB32(dst=sgpr(w), shiftHex=log2(subRounds), src=sgpr("A2AKLocal"),
+                                   comment="k_local / S"))
+        module.add(SCmpEQU32(src0=sgpr("A2AShardCounter"), src1=sgpr(first),
+                             comment="leaving the local segment?"))
+        module.add(SCSelectB32(dst=sgpr("A2AKLocal"), src0=sgpr(w), src1=sgpr("A2AKLocal"),
+                               comment="peer sub-segments cover k_local / S"))
+
+      # B is indexed by the gathered segment, A by the feature shard.
+      shiftsB = [("A2AShardIdx", None)] + ([(h, True)] if subRounds > 1 else [])
+      module.add(self.a2aSegmentSrd(kernel, tPB, shiftsB, stepBack))
+      module.addComment0("iterations of the next segment")
+      module.add(scalarStaticDivideAndRemainder(qReg=iters, rReg=-1, dReg="A2AKLocal", divisor=depthU,
+                                                tmpSgprRes=ContinuousRegister(prod, 2), doRemainder=False))
+      module.add(SAddU32(dst=loopCounter, src0=loopCounter, src1=sgpr(iters),
+                         comment="count them into LoopCounterL"))
+
+      module.add(SWaitCnt(kmcnt=0, comment="wait FusedMyRank"))
+      module.add(SAddU32(dst=sgpr("A2AFeatIdx"), src0=sgpr(rank), src1=sgpr("A2AShardIdx"),
+                         comment="feature shard = myRank + gathered segment"))
+      module.add(SSubU32(dst=sgpr(rank), src0=sgpr("A2AFeatIdx"), src1=sgpr("A2AW"),
+                         comment="feature shard - W, underflowing while below W"))
+      module.add(SMinU32(dst=sgpr("A2AFeatIdx"), src0=sgpr("A2AFeatIdx"), src1=sgpr(rank),
+                         comment="wrap the feature shard at W"))
+      if subRounds > 1:
+        module.add(SLShiftLeftB32(dst=sgpr(rank), shiftHex=log2(subRounds),
+                                  src=sgpr("A2AFeatIdx"), comment="feature shard * S"))
+        module.add(SAddU32(dst=sgpr(rank), src0=sgpr(rank), src1=sgpr(h),
+                           comment="feature sub-shard"))
+        module.add(self.a2aSegmentSrd(kernel, tPA, [(rank, None)], stepBack))
+      else:
+        module.add(self.a2aSegmentSrd(kernel, tPA, [("A2AFeatIdx", None)], stepBack))
+
+      nxt = rank
+      module.add(SAddU32(dst=sgpr(nxt), src0=sgpr("A2AShardIdx"), src1=1,
+                         comment="next peer queue"))
+      module.add(SCmpLtU32(src0=sgpr(nxt), src1=sgpr("A2AW"), comment="segment < W?"))
+      module.add(SCSelectB32(dst=sgpr(nxt), src0=sgpr(nxt), src1=1,
+                             comment="wrap the gathered segment back to 1 at W"))
+      if subRounds > 1:
+        module.add(SCmpEQU32(src0=sgpr(h), src1=subRounds - 1, comment="last sub-round?"))
+        module.add(SCSelectB32(dst=sgpr("A2AShardIdx"), src0=sgpr(nxt), src1=sgpr("A2AShardIdx"),
+                               comment="step to the next segment after its last sub-round"))
+      else:
+        module.add(SMovB32(dst=sgpr("A2AShardIdx"), src=sgpr(nxt),
+                           comment="step to the next peer queue"))
+      module.add(SSubU32(dst=sgpr("A2AShardCounter"), src0=sgpr("A2AShardCounter"), src1=1,
+                         comment="segments left"))
+
+      module.add(SWaitCnt(vlcnt=0, comment="wait the flag poll"))
+      module.add(VReadfirstlaneB32(dst=sgpr(flag), src=vgpr("Serial"), comment="flag"))
+      module.add(SCmpGeU32(src0=sgpr(flag), src1=1, comment="segment landed?"))
+      module.add(SCBranchSCC1(labelName=readyLabel.getLabelName(), comment="yes"))
+      module.add(pollLabel)
+      module.add(SSleep(simm16=1, comment="back off between polls"))
+      module.add(pollFlag())
+      module.add(SWaitCnt(vlcnt=0, comment="wait the flag poll"))
+      module.add(VReadfirstlaneB32(dst=sgpr(flag), src=vgpr("Serial"), comment="flag"))
+      module.add(SCmpLtU32(src0=sgpr(flag), src1=1, comment="flag < 1?"))
+      module.add(SCBranchSCC1(labelName=pollLabel.getLabelName(), comment="segment short -> poll again"))
+      module.add(readyLabel)
+      module.add(VMovB32(dst=vgpr("Serial"), src=sgpr(serial), comment="restore Serial lane 0"))
+      module.add(SMovB64(dst=EXEC(), src=-1, comment="restore EXEC = full"))
     return module
+
+  def a2aSegmentSrd(self, kernel, tP, shifts, stepBack):
+    """Srd<tc> := the tile base plus `shifts` (a2aShiftSrd index, alongK), one
+    GlobalReadIncs (DepthU under UseSubtileImpl) back when stepBack; Srd<tc>+2 from
+    ShadowLimit<tc> if there is one."""
+    module = Module("a2aSegmentSrd")
+    tc     = tP["tensorChar"]
+    module.add(SMovB32(dst=sgpr("Srd%s+0" % tc), src=sgpr("A2ATileBase%s+0" % tc),
+                       comment="Srd%s base = tile base" % tc))
+    module.add(SMovB32(dst=sgpr("Srd%s+1" % tc), src=sgpr("A2ATileBase%s+1" % tc)))
+    for idx, alongK in shifts:
+      module.add(self.a2aShiftSrd(kernel, tP, idx, alongK))
+    if stepBack:
+      if kernel["UseSubtileImpl"]:
+        inc     = (self.states.a if tP["isA"] else self.states.b).tileInfo.depthUBytes
+        comment = "one DepthU back"
+      else:
+        inc     = self.globalReadIncsOperand(tc, self.states.unrollIdx)
+        comment = "one GlobalReadIncs back"
+      module.add(SSubU32(dst=sgpr("Srd%s+0" % tc), src0=sgpr("Srd%s+0" % tc), src1=inc,
+                         comment=comment))
+      module.add(SSubBU32(dst=sgpr("Srd%s+1" % tc), src0=sgpr("Srd%s+1" % tc), src1=0))
+    if self.states.use64bShadowLimit:
+      module.add(SCmpEQU32(src0=sgpr("ShadowLimit%s+1" % tc), src1=0, comment="are we within 2^32?"))
+      module.add(SCSelectB32(dst=sgpr("Srd%s+2" % tc), src0=sgpr("ShadowLimit%s+0" % tc),
+                             src1="BufferLimit", comment="Move shadow to real if we are within 2^32"))
+      module.add(self.shiftSrd(tc))
+    return module
+
+  def a2aNextSegment(self, kernel, tPA, tPB, stepBack, targetLabel):
+    """Unless this is the last segment, switch to the next one and branch to targetLabel."""
+    module = Module("a2aNextSegment")
+    if kernel["ProblemType"]["FusedA2A"] != "A2AGemm":
+      return module
+    lastLabel = Label(self.labels.getNameInc("A2ALastSegment"), "")
+    module.add(SCmpEQU32(src0=sgpr("A2AShardCounter"), src1=1, comment="last segment?"))
+    module.add(SCBranchSCC1(labelName=lastLabel.getLabelName(), comment="nothing to switch to"))
+    module.add(self.a2aSwitchSegment(kernel, tPA, tPB, stepBack))
+    module.add(SBranch(labelName=targetLabel.getLabelName(), comment="read the next segment"))
+    module.add(lastLabel)
+    return module
+
+  def a2aPrefetchSegment(self, kernel, tPA, tPB, idxPgr, skipLabel):
+    """Before prefetch batch idxPgr: once the current segment's reads have all been issued,
+    switch to the next segment, or branch to skipLabel if this is the last one."""
+    module      = Module("a2aPrefetchSegment")
+    loopCounter = self.loopCounter(kernel, self.states.unrollIdx)
+    comment     = "PGR=%d but only %d loop" % (kernel["PrefetchGlobalRead"], idxPgr)
+    contLabel   = Label(self.labels.getNameInc("A2APrefetch%d" % idxPgr), "")
+    module.add(SCmpEQU32(src0=loopCounter, src1=hex(idxPgr), comment=comment))
+    module.add(SCBranchSCC0(labelName=contLabel.getLabelName(), comment="segment has reads left"))
+    module.add(SCmpEQU32(src0=sgpr("A2AShardCounter"), src1=1, comment="last segment?"))
+    if self.states.postLoopStoreInNll:
+      module.add(self.longBranchScc1(skipLabel, posNeg=1, comment=comment + " (long)"))
+    else:
+      module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment=comment))
+    module.add(self.a2aSwitchSegment(kernel, tPA, tPB, stepBack=False))
+    module.add(contLabel)
+    return module
+
+  def a2aSecondCopyLabel(self, kernel, nta=0, ntb=0):
+    """Start of the second unrolled-loop copy, entered by a segment switch at the first copy's exit."""
+    loopChar = self.states.indexChars[kernel["ProblemType"]["IndicesSummation"][self.states.unrollIdx]]
+    strNtab  = "" if kernel["AdaptiveGemmNTAB"] == 0 else "_NTA%s_NTB%s" % (nta, ntb)
+    return Label(self.rapLabel("LoopCopy2%s%s" % (loopChar, strNtab)), "")
 
   def a2aSubRoundIdx(self, kernel, dstSgpr):
     """dstSgpr = sub-round of the round about to start, from the shard counter
@@ -10649,96 +10824,6 @@ class KernelWriterAssembly(KernelWriter):
                          src1=sgpr(s + 2), comment="Srd%s base += shard offset" % tc))
       module.add(SAddCU32(dst=sgpr("Srd%s+1" % tc), src0=sgpr("Srd%s+1" % tc),
                           src1=sgpr(s + 3)))
-    return module
-
-  def a2aTransitionPhase(self, kernel, tPA, tPB):
-    module = Module("a2aTransitionPhase")
-    if kernel["ProblemType"]["FusedA2A"] != "A2AGemm":
-      return module
-    module.addComment1("A2A_TRANSITION begin")
-    endLabel = Label("A2ATransitionEnd", "")
-    module.add(SCmpEQI32(src0=sgpr("A2AShardCounter"), src1=1, comment="last shard round"))
-    module.add(SCBranchSCC1(labelName=endLabel.getLabelName(),
-                            comment="skip the next round's setup"))
-    layout    = fusedA2AKernArgLayout()
-    base      = self.states.fusedA2AKernArgBase
-    subRounds = kernel["A2ASubRounds"]
-    if subRounds > 1:
-      with self.allocTmpSgpr(2, tag="a2aKLocalSwitch") as tmpSgprInfo:
-        w     = tmpSgprInfo.idx
-        first = tmpSgprInfo.idx + 1
-        module.add(SSubU32(dst=sgpr(first), src0=sgpr("A2AW"), src1=1, comment="W - 1"))
-        module.add(SLShiftLeftB32(dst=sgpr(first), shiftHex=log2(subRounds), src=sgpr(first),
-                                  comment="(W-1) * S"))
-        module.add(SAddU32(dst=sgpr(first), src0=sgpr(first), src1=1,
-                           comment="rounds left during the local round"))
-        module.add(SLShiftRightB32(dst=sgpr(w), shiftHex=log2(subRounds), src=sgpr("A2AKLocal"),
-                                   comment="k_local / S"))
-        module.add(SCmpEQU32(src0=sgpr("A2AShardCounter"), src1=sgpr(first),
-                             comment="leaving the local round?"))
-        module.add(SCSelectB32(dst=sgpr("A2AKLocal"), src0=sgpr(w), src1=sgpr("A2AKLocal"),
-                               comment="peer sub-rounds cover k_local / S"))
-    module.add(self.a2aWaitFlag(kernel))
-    with self.allocTmpSgpr(1, tag="a2aFeatWrap") as tmpSgprInfo:
-      rank = tmpSgprInfo.idx
-      module.add(self.argLoader.loadKernArg(rank, "KernArgAddress",
-          sgprOffset=hex(base + layout["FusedMyRank"]), dword=1))
-      module.add(SWaitCnt(kmcnt=0, comment="wait FusedMyRank"))
-      module.add(SAddU32(dst=sgpr("A2AFeatIdx"), src0=sgpr(rank), src1=sgpr("A2AShardIdx"),
-                         comment="feature shard = myRank + gathered segment"))
-      module.add(SSubU32(dst=sgpr(rank), src0=sgpr("A2AFeatIdx"), src1=sgpr("A2AW"),
-                         comment="feature shard - W, underflowing while below W"))
-      module.add(SMinU32(dst=sgpr("A2AFeatIdx"), src0=sgpr("A2AFeatIdx"), src1=sgpr(rank),
-                         comment="wrap the feature shard at W"))
-    if not (kernel["DirectToLdsA"] and kernel["DirectToLdsB"]):
-      module.add(self._syncThreads(kernel, "A2A round transition sync"))
-    module.add(self.localWriteResetOffsetsAB(kernel, tPA, tPB))
-    for tP in (tPA, tPB):
-      tc = tP["tensorChar"]
-      module.add(self.localReadResetOffsets(kernel, tP))
-      module.add(self.computeLoadSrd(kernel, tP, tc,
-                                     kernel["ProblemType"]["IndexAssignments%s" % tc],
-                                     tP["bpeGR"]))
-      # A is indexed by the feature shard, B by the gathered segment.
-      if subRounds == 1:
-        module.add(self.a2aShiftSrd(kernel, tP,
-                                    "A2AFeatIdx" if tP["isA"] else "A2AShardIdx"))
-        continue
-      with self.allocTmpSgpr(2, tag="a2aSubRoundShift") as tmpSgprInfo:
-        h = tmpSgprInfo.idx
-        module.add(self.a2aSubRoundIdx(kernel, h))
-        if tP["isA"]:
-          module.add(SLShiftLeftB32(dst=sgpr(h + 1), shiftHex=log2(subRounds),
-                                    src=sgpr("A2AFeatIdx"), comment="feature shard * S"))
-          module.add(SAddU32(dst=sgpr(h), src0=sgpr(h), src1=sgpr(h + 1),
-                             comment="feature sub-shard"))
-          module.add(self.a2aShiftSrd(kernel, tP, h))
-        else:
-          module.add(self.a2aShiftSrd(kernel, tP, "A2AShardIdx"))
-          module.add(self.a2aShiftSrd(kernel, tP, h, alongK=True))
-    if subRounds > 1:
-      with self.allocTmpSgpr(2, tag="a2aSegWrap") as tmpSgprInfo:
-        w    = tmpSgprInfo.idx
-        nxt  = tmpSgprInfo.idx + 1
-        module.add(SAddU32(dst=sgpr(nxt), src0=sgpr("A2AShardIdx"), src1=1,
-                           comment="next peer queue"))
-        module.add(SCmpLtU32(src0=sgpr(nxt), src1=sgpr("A2AW"), comment="segment < W?"))
-        module.add(SCSelectB32(dst=sgpr(nxt), src0=sgpr(nxt), src1=1,
-                               comment="wrap the gathered segment back to 1 at W"))
-        module.add(self.a2aSubRoundIdx(kernel, w))
-        module.add(SCmpEQU32(src0=sgpr(w), src1=subRounds - 1, comment="last sub-round?"))
-        module.add(SCSelectB32(dst=sgpr("A2AShardIdx"), src0=sgpr(nxt), src1=sgpr("A2AShardIdx"),
-                               comment="step to the next segment after its last sub-round"))
-      module.add(endLabel)
-      module.addComment1("A2A_TRANSITION end")
-      return module
-    module.add(SAddU32(dst=sgpr("A2AShardIdx"), src0=sgpr("A2AShardIdx"), src1=1,
-                       comment="step to the next peer queue"))
-    module.add(SCmpLtU32(src0=sgpr("A2AShardIdx"), src1=sgpr("A2AW"), comment="segment < W?"))
-    module.add(SCSelectB32(dst=sgpr("A2AShardIdx"), src0=sgpr("A2AShardIdx"), src1=1,
-                           comment="wrap the gathered segment back to 1 at W"))
-    module.add(endLabel)
-    module.addComment1("A2A_TRANSITION end")
     return module
 
   ##############################################################################
@@ -10838,6 +10923,8 @@ class KernelWriterAssembly(KernelWriter):
               comment="LoopCounter%s <= EndCounter"%(loopChar) ))
           remainPgr = endCounter - 1
           jumpLabel = Label(self.rapLabel("NoGlobalLoadLoop_%d"%remainPgr), "")
+          if kernel["ProblemType"]["FusedA2A"] == "A2AGemm":
+            jumpLabel = loopLabelEnd
           module.add(SCBranchSCC1(labelName=jumpLabel.getLabelName(), \
                     comment="do not enter Loop%s"%loopChar ))
         else:
@@ -11128,6 +11215,10 @@ class KernelWriterAssembly(KernelWriter):
         evenIterCode = Module()
         if not kernel["SuppressNoLoadLoop"] and kernel["ExpandPointerSwap"]:
           oddIterPreCode.add(loopLabelEndOddExit)
+          if kernel["ProblemType"]["FusedA2A"] == "A2AGemm":
+            assert kernel["PrefetchGlobalRead"] == 1, "A2AGemm ExpandPointerSwap needs PrefetchGlobalRead=1"
+            oddIterPreCode.add(self.a2aNextSegment(kernel, tPA, tPB, stepBack=False,
+                                                   targetLabel=self.a2aSecondCopyLabel(kernel, nta, ntb)))
           # In this case we kept the 'no-load' loop which has LDS offsets assuming first bank of LDS
           # if we exit the main loop at an odd iter - need to swap LDS read pointers
           # so the ds_reads read from the 'high' buffer of LDS
@@ -22970,13 +23061,15 @@ class KernelWriterAssembly(KernelWriter):
         self.assembler.version, numBatches, inter_iter_rowInc, direct_next_rowInc)
 
   ##############################################################################
-  def openPrefetchGlobalRead2orMore(self, kernel, idxPgr):
+  def openPrefetchGlobalRead2orMore(self, kernel, tPA, tPB, idxPgr):
     imod = Module()
     # early exit check
     # jump to idxPgr=1 label (wait 0)
     loopCounter = self.loopCounter(kernel, self.states.unrollIdx)
-    imod.add(SCmpEQU32(src0=loopCounter, src1=hex(idxPgr), comment="PGR=%d but only %d loop"%(kernel["PrefetchGlobalRead"], idxPgr)))
     skipPGRn = Label(self.rapGetName("skipPGR%d_%d"%(kernel["PrefetchGlobalRead"], 1)), "")
+    if kernel["ProblemType"]["FusedA2A"] == "A2AGemm":
+      return self.a2aPrefetchSegment(kernel, tPA, tPB, idxPgr, skipPGRn)
+    imod.add(SCmpEQU32(src0=loopCounter, src1=hex(idxPgr), comment="PGR=%d but only %d loop"%(kernel["PrefetchGlobalRead"], idxPgr)))
     imod.add(SCBranchSCC1(labelName=skipPGRn.getLabelName(), comment="PGR=%d but only %d loop"%(kernel["PrefetchGlobalRead"], idxPgr)))
     return imod
 

@@ -7096,6 +7096,16 @@ class LogicalScheduler:
                 before=None,
                 source=None))
 
+        # A2AGemm: the PGR=2 batch-1 skip first switches to the next segment if there is one.
+        if kernel["ProblemType"].get("FusedA2A") == "A2AGemm" and self.config.pgr == 2:
+            em_list = preloop_emitted[0][0]
+            skip_idx = next(i for i, em in enumerate(em_list)
+                            if em.opType == 'skip' and em.source.value == 1)
+            em_list.insert(skip_idx, EmittedModule(
+                moduleId=max(em.moduleId for em in em_list) + 1,
+                instructions=[writer.a2aPrefetchSegment(kernel, writer.tPA, writer.tPB, 1,
+                                                        Label("SkipToNLL", ""))]))
+
         module.add(self._emitLoop(writer, kernel, "PRELOOP",
                                   preloop_emitted, schedule=False))
         return module
@@ -7271,9 +7281,18 @@ class LogicalScheduler:
 
         # ── NGLL + NLL exit paths ──
         hasNGLL = self.config.pgr >= 2
+        a2aGemm = kernel["ProblemType"].get("FusedA2A") == "A2AGemm"
+        if a2aGemm:
+            assert uf == 1 and self.config.numPartitions == 1, \
+                "A2AGemm segment switches need unroll_factor=1 and one partition"
+            a2aNextSegment = writer.a2aNextSegment(kernel, tensorParametersA, tensorParametersB,
+                                                   stepBack=self.config.pgr >= 1,
+                                                   targetLabel=Label("LoopBeginL", ""))
         module.add(Label("SkipMainloop", ""))
         if hasNGLL:
             module.add(Label("SkipToNGLL", ""))
+            if a2aGemm:
+                module.add(a2aNextSegment)
 
         # _per_unroll[i] has tiles for unroll_iter=i.
         # After mainloop C{ui}, data in LDS/vgprs corresponds to
@@ -7329,6 +7348,8 @@ class LogicalScheduler:
                                       self._ngll_per_unroll[(last + 1) % uf]))
         if nll_ft == 0:
             module.add(Label("SkipToNLL", ""))
+            if a2aGemm and not hasNGLL:
+                module.add(a2aNextSegment)
         if spanNgll:
             tailPrelude = self._buildFourDeepTailEntry(writer, kernel, nll_ft_3d)
         module.addComment0(f"NLL_C{last}")

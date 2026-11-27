@@ -170,6 +170,7 @@ def test_custom_kernel_tile_sources():
     assert isCustomKernelSolution(plain)
     assert isCustomKernelSolution({"CustomKernel": {"macrotile": [16, 16, 128]}})
     assert not isCustomKernelSolution({"CustomKernel": {}})
+    assert not isCustomKernelSolution({"CustomKernel": {"name": "Cijk_A2AGemm", "generated": True}})
     assert not isCustomKernelSolution({})
 
 
