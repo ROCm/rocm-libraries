@@ -192,10 +192,12 @@ _RESOURCE_GATE_TOOLCHAIN = (
 
 def _with_pinned_resource_gate(reason: str) -> str:
     """``reason`` of a backward file whose resource-gate cases skip off the
-    gate's reference toolchain until AICK-3320, saying so."""
+    gate's reference toolchain until its pin's issue (``_PINNED_RESOURCE_GATE``)
+    removes the pin, saying so."""
     return (
         f"{reason}; its resource-gate cases count only on {_RESOURCE_GATE_TOOLCHAIN} "
-        "and skip on any other compiler until AICK-3320 unpins them"
+        f"and skip on any other compiler until {_PINNED_RESOURCE_GATE.issue} "
+        "unpins them"
     )
 
 
@@ -698,9 +700,9 @@ def _waiting_tests(
 
 # The attention backward CTest entries, not registered yet.
 _ATTENTION_BWD_ENTRIES = LaneTicket("AICK-3259", TICKET, "2026-12-31")
-# The counted compiler gate, which keeps the resource gate's reference
-# toolchain until it is unpinned.
-_UNPINNED_RESOURCE_GATE = LaneTicket("AICK-3320", TICKET, "2027-02-15")
+# The counted compiler gate, pinned to the resource gate's reference toolchain
+# until the issue unpins it.
+_PINNED_RESOURCE_GATE = LaneTicket("AICK-3320", TICKET, "2027-02-15")
 # The cases that take torch tensors or capture a graph, until they run without
 # torch.
 _TORCH_CASES = LaneTicket("AICK-3408", TICKET, "2027-01-08")
@@ -722,7 +724,7 @@ _SOURCE_CHECKOUT = LaneTicket("AICK-3470", SOURCE_TREE, "2027-01-22")
 _SCHEDULED_TIERS = LaneTicket("AICK-3471", TICKET, "2027-01-15")
 LANE_TICKETS: tuple[LaneTicket, ...] = (
     _ATTENTION_BWD_ENTRIES,
-    _UNPINNED_RESOURCE_GATE,
+    _PINNED_RESOURCE_GATE,
     _TORCH_CASES,
     _RUNTIME_TORCH_INTEROP,
     _GFX950_RUNNERS,
@@ -849,10 +851,11 @@ PENDING: tuple[PendingTest, ...] = (
         "library/tests/test_attention_bwd_tiles_numeric.py",
         whole_file=True,
     ),
-    _UNPINNED_RESOURCE_GATE.waiting(
+    _PINNED_RESOURCE_GATE.waiting(
         "library/tests/gates/attention_bwd_counted_compiler_gate.py",
         f"the counted compiler gate keeps {_RESOURCE_GATE_TOOLCHAIN}: on any other "
-        "compiler its preflight skips every case until AICK-3320 unpins it",
+        "compiler its preflight skips every case until "
+        f"{_PINNED_RESOURCE_GATE.issue} unpins it",
         _LIBRARY,
         whole_file=True,
     ),
