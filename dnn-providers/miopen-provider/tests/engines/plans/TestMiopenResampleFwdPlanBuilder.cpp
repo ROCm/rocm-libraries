@@ -72,6 +72,12 @@ protected:
 // isApplicable
 // ============================================================================
 
+TEST_F(TestGpuMiopenResampleFwdPlanBuilder, IsApplicableDefersToTheChecks)
+{
+    EXPECT_TRUE(isApplicable(ResampleFwdGraphSpec{}));
+    EXPECT_FALSE(isApplicable(unsupportedSpec()));
+}
+
 TEST_F(TestGpuMiopenResampleFwdPlanBuilder, IsApplicableReturnsFalseForOverrideShapeEnabledGraph)
 {
     ResampleFwdGraphSpec spec;
