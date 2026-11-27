@@ -428,16 +428,6 @@ def _device_memory_info() -> tuple[int, int] | None:
     return (int(free.value), int(total.value)) if rc == 0 else None
 
 
-def get_device_free_memory() -> int | None:
-    """Free bytes on HIP's current device (``hipMemGetInfo``), or ``None`` if the
-    runtime cannot be queried. Torch-free twin of ``torch.cuda.mem_get_info``'s
-    first value. It changes with what every process on the device holds, so it
-    is no test for whether a device can run a case (see
-    :func:`get_device_total_memory`)."""
-    info = _device_memory_info()
-    return None if info is None else info[0]
-
-
 def get_device_total_memory() -> int | None:
     """Total bytes of HIP's current device (``hipMemGetInfo``), or ``None`` if the
     runtime cannot be queried. It is fixed for the device, so a test that needs a
