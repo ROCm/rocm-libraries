@@ -967,6 +967,13 @@ PENDING: tuple[PendingTest, ...] = (
     ),
     *_waiting(
         _SOURCE_CHECKOUT,
+        "its cases check cmake/make_pyenv.py, which sits beside the platform tree and "
+        "is not installed, so they skip in CI; run_all.py runs them",
+        _PLATFORM,
+        "platform/tests/tools/test_make_pyenv.py",
+    ),
+    *_waiting(
+        _SOURCE_CHECKOUT,
         "every test carries the integration marker (pytestmark), which the installed "
         "entries deselect with -m 'not integration'; run_all.py runs it",
         _PLATFORM,
@@ -1111,8 +1118,10 @@ PENDING: tuple[PendingTest, ...] = (
         "build them",
         _PLATFORM,
         "platform/tests/core/test_f64_mma.py",
+        "platform/tests/instances/test_block_scale_gemm_scales.py",
         "platform/tests/instances/test_gemm_tdm_padding.py",
         "platform/tests/instances/test_gemm_tdm_traits_cpp_engine.py",
+        "platform/tests/instances/test_moe_fused_mega_fp8.py",
         "platform/tests/instances/test_mx_gemm_scale_range.py",
         "platform/tests/test_binding_compiler_selection.py",
         "platform/tests/test_compiler_detection_native.py",
