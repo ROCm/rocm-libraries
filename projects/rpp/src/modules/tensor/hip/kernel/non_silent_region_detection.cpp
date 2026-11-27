@@ -253,6 +253,9 @@ __global__ void find_region_hip_tensor(float* srcPtr, uint nStride, int* beginTe
         }
     }
 
+    // Wait for all wavefronts to publish their atomics before thread 0 reads the results
+    __syncthreads();
+
     // Final store to dst
     if (hipThreadIdx_x == 0) {
         if (beginResult == srcLength || endResult == 0) {
