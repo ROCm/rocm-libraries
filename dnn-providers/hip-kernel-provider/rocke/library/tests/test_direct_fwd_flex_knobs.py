@@ -270,6 +270,17 @@ def test_rows_are_valid_and_build(rid, build, row, dtype):
     assert 1 <= grid[0] <= 256 and block == (spec.threads_per_block, 1, 1)
 
 
+@pytest.mark.parametrize("rid", ["bk64", "cs4", "cs2", "ds_s2_3x3_wt"])
+def test_lowered_ir_compiles_and_links(rid):
+    """The LDS DMAs are inline asm with a buffer descriptor operand: one row
+    per builder (main, cs4, cs2, strided dgrad) must give a module LLVM
+    accepts (the descriptor printed with its LLVM type)."""
+    from rocke.tests.ir_validity import assert_kernel_target_accepts
+
+    _, build, row = next(r for r in _all_rows() if r[0] == rid)
+    assert_kernel_target_accepts(build_fwd_flex_mfma(build(row, "bf16")), "gfx950")
+
+
 def test_row_names_are_distinct_per_knob_set():
     """The kernel name carries every knob: rows of different knobs never share
     one (the AOT cache and the run records key on it)."""
