@@ -409,6 +409,16 @@ const MxScalePrep& MxMatmulPlan::bScalePrep() const
     return _bScalePrep;
 }
 
+size_t MxMatmulPlan::bScalePrepOffset() const
+{
+    return _bScalePrepOffset;
+}
+
+size_t MxMatmulPlan::matmulWorkspaceOffset() const
+{
+    return _matmulWorkspaceOffset;
+}
+
 void MxMatmulPlan::execute(const HipdnnEnginePluginHandle& handle,
                            const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                            uint32_t numDeviceBuffers,

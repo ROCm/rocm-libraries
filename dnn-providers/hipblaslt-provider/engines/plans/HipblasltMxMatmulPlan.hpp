@@ -157,6 +157,11 @@ public:
     const MxScalePrep& aScalePrep() const;
     const MxScalePrep& bScalePrep() const;
 
+    // Workspace offsets of the B_SCALE prep region and of the hipBLASLt matmul
+    // workspace (the A_SCALE prep region starts at 0).
+    size_t bScalePrepOffset() const;
+    size_t matmulWorkspaceOffset() const;
+
 private:
     MxMatmulParams _params;
     hipblasLtMatmulHeuristicResult_t _heuristicResult;

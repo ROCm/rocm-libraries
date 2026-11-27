@@ -648,6 +648,9 @@ struct MxShape
 constexpr MxShape EXEC_SHAPE{64, 96, 256};
 // Small M and N with a large K: hipBLASLt asks for a workspace of its own.
 constexpr MxShape LARGE_K_SHAPE{16, 16, 8192};
+// M and N not multiples of 32 and K/32 not a multiple of 8: gfx950's pre-swizzled
+// scales are padded on both axes.
+constexpr MxShape MN_PADDED_SHAPE{16, 48, 384};
 // What C holds before execute(), far above the tolerance of the host reference.
 constexpr float INITIAL_C = 1e6f;
 
@@ -768,6 +771,10 @@ struct MxExecution
     bool scaleAPrepared = false; // our A's scale (hipBLAS B_SCALE)
     bool scaleBPrepared = false; // our B's scale (hipBLAS A_SCALE)
     size_t preparedScaleBytes = 0; // the two scale regions at the front of the workspace
+    size_t aScalePrepSize = 0; // workspace regions, see MxMatmulPlan
+    size_t bScalePrepOffset = 0;
+    size_t bScalePrepSize = 0;
+    size_t matmulWorkspaceOffset = 0;
     std::vector<uint8_t> preparedWhileHeld; // those regions read while the stream was held
     std::vector<uint8_t> c;
 };
@@ -885,6 +892,10 @@ MxExecution execute(const HipdnnEnginePluginHandle& handle,
     result.scaleBPrepared = !plan->aScalePrep().isPassThrough();
     result.preparedScaleBytes
         = plan->aScalePrep().workspaceSize() + plan->bScalePrep().workspaceSize();
+    result.aScalePrepSize = plan->aScalePrep().workspaceSize();
+    result.bScalePrepOffset = plan->bScalePrepOffset();
+    result.bScalePrepSize = plan->bScalePrep().workspaceSize();
+    result.matmulWorkspaceOffset = plan->matmulWorkspaceOffset();
 
     auto a = upload(inMemoryOrder(in.a, m, k, s.aKContiguous));
     auto b = upload(inMemoryOrder(in.b, k, n, !s.bKContiguous));
@@ -1009,6 +1020,17 @@ std::vector<std::optional<MxScaleFormat>> formatsUnderTest()
     return {std::nullopt};
 }
 
+// The workspace regions [A_SCALE prep | B_SCALE prep | hipBLASLt workspace] neither
+// overlap nor start off WORKSPACE_ALIGNMENT.
+void expectDisjointAlignedRegions(const MxExecution& run, const std::string& name)
+{
+    EXPECT_GE(run.bScalePrepOffset, run.aScalePrepSize) << name;
+    EXPECT_GE(run.matmulWorkspaceOffset, run.bScalePrepOffset + run.bScalePrepSize) << name;
+    EXPECT_EQ(run.bScalePrepOffset % hipblaslt_utils::WORKSPACE_ALIGNMENT, 0u) << name;
+    EXPECT_EQ(run.matmulWorkspaceOffset % hipblaslt_utils::WORKSPACE_ALIGNMENT, 0u) << name;
+    EXPECT_GE(run.workspaceSize, run.matmulWorkspaceOffset) << name;
+}
+
 } // namespace
 
 // Unlike TestGpuMxMatmulPlan this also runs on gfx1250, for the layouts hipBLASLt
@@ -1111,11 +1133,13 @@ TEST_F(TestGpuMxMatmulPlanExecute, RunsWithoutWorkspaceWhenNoneIsNeeded)
 // the prepared scales: placed over them, or left out, C changes. A format for which
 // hipBLASLt asks for no workspace is recorded and passed over; the test skips only
 // when that is so for every format.
+// The plan's region offsets are checked for every format.
 TEST_F(TestGpuMxMatmulPlanExecute, PreparedScalesAndHipblasltWorkspaceDoNotOverlap)
 {
     const auto inputs = randomInputs(LARGE_K_SHAPE);
     const auto formats = formatsUnderTest();
     std::string withoutWorkspace;
+    std::string formatsChecked;
     size_t checked = 0;
     for(const auto& format : formats)
     {
@@ -1123,6 +1147,8 @@ TEST_F(TestGpuMxMatmulPlanExecute, PreparedScalesAndHipblasltWorkspaceDoNotOverl
         const auto actual = execute(_handle, {true, true, false, false}, inputs, false, format);
         const auto name = toString(actual.format);
         ASSERT_GT(actual.preparedScaleBytes, 0u) << name;
+        expectDisjointAlignedRegions(actual, name);
+        formatsChecked += std::string(name) + " ";
         if(actual.workspaceSize <= actual.preparedScaleBytes)
         {
             withoutWorkspace += withoutWorkspace.empty() ? "" : ", ";
@@ -1133,6 +1159,7 @@ TEST_F(TestGpuMxMatmulPlanExecute, PreparedScalesAndHipblasltWorkspaceDoNotOverl
         EXPECT_TRUE(actual.c == expected.c)
             << name << ": prepared scales next to a hipBLASLt workspace give a different C";
     }
+    RecordProperty("formats_checked", formatsChecked);
     if(!withoutWorkspace.empty())
     {
         RecordProperty("formats_without_hipblaslt_workspace", withoutWorkspace);
@@ -1222,9 +1249,8 @@ TEST_F(TestGpuMxMatmulPlanExecute, PreparesScalesByFormat)
 }
 
 // gfx950's Tensile kernels read 32x8 pre-swizzled scales, which only the relayout kernel
-// writes; the provider does not select this format on its own yet. Every scale order
-// is swizzled into the same bytes, so C matches the host reference and is bitwise
-// equal across them.
+// writes, padding included (MN_PADDED_SHAPE). Every scale order is swizzled into the
+// same bytes, so C matches the host reference and is bitwise equal across them.
 TEST_F(TestGpuMxMatmulPlanExecute, Gfx950SwizzledScalesAnyScaleOrder)
 {
     if(!onGfx950())
@@ -1232,22 +1258,41 @@ TEST_F(TestGpuMxMatmulPlanExecute, Gfx950SwizzledScalesAnyScaleOrder)
         GTEST_SKIP() << "gfx950-only check";
     }
     const MxStorage reference{true, true, true, true};
-    const auto inputs = randomInputs();
-    const auto swizzled
-        = execute(_handle, reference, inputs, false, MxScaleFormat::SWIZZLED_GFX950);
-    if(swizzled.format != MxScaleFormat::SWIZZLED_GFX950)
+    std::string fellBack;
+    size_t ran = 0;
+    for(const auto& shape : {EXEC_SHAPE, MN_PADDED_SHAPE})
     {
-        GTEST_SKIP() << "hipBLASLt selected no gfx950 Tensile kernel for this GEMM";
-    }
-    expectMatchesHostReference(swizzled, inputs, describe(reference));
+        const auto inputs = randomInputs(shape);
+        const auto label = describe(reference) + " " + std::to_string(shape.m) + "x"
+                           + std::to_string(shape.n) + "x" + std::to_string(shape.k);
+        const auto swizzled
+            = execute(_handle, reference, inputs, false, MxScaleFormat::SWIZZLED_GFX950);
+        if(swizzled.format != MxScaleFormat::SWIZZLED_GFX950)
+        {
+            fellBack += label + "; ";
+            continue;
+        }
+        ++ran;
+        expectMatchesHostReference(swizzled, inputs, label);
+        expectDisjointAlignedRegions(swizzled, label);
 
-    for(const auto& storage :
-        {MxStorage{true, true, false, true}, {true, true, true, false}, {true, true, false, false}})
+        for(const auto& storage : {MxStorage{true, true, false, true},
+                                   MxStorage{true, true, true, false},
+                                   MxStorage{true, true, false, false}})
+        {
+            const auto actual
+                = execute(_handle, storage, inputs, false, MxScaleFormat::SWIZZLED_GFX950);
+            const auto name = describe(storage) + " " + label;
+            EXPECT_EQ(actual.format, MxScaleFormat::SWIZZLED_GFX950) << name;
+            EXPECT_TRUE(actual.c == swizzled.c) << name << " gives a different C";
+        }
+    }
+    if(!fellBack.empty())
     {
-        const auto actual
-            = execute(_handle, storage, inputs, false, MxScaleFormat::SWIZZLED_GFX950);
-        EXPECT_EQ(actual.format, MxScaleFormat::SWIZZLED_GFX950) << describe(storage);
-        EXPECT_TRUE(actual.c == swizzled.c)
-            << describe(storage) << " gives a different C than " << describe(reference);
+        RecordProperty("shapes_without_tensile_kernel", fellBack);
+    }
+    if(ran == 0)
+    {
+        GTEST_SKIP() << "hipBLASLt selected no gfx950 Tensile kernel for " << fellBack;
     }
 }
