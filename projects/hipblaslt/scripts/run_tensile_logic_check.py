@@ -1,97 +1,37 @@
 #!/usr/bin/env python3
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-#
-# Run TensileLogic --check-all on library logic. Cross-platform (Windows and Unix).
-#
-# How to run (from hipblaslt project root):
-#   python scripts/run_tensile_logic_check.py [--changed-files=FILE] [LIBLOGIC_PATH]
-# --changed-files=FILE takes the changed paths, one per line, and checks only
-# the architectures of the changed logic YAMLs; a changed validator, known-bugs
-# list or this script, or an empty value, checks everything.
-# If the current Python is missing deps (e.g. joblib), the script will re-run itself
-# with .venv/bin/python (Unix) or .venv\Scripts\python.exe (Windows) if that venv exists.
-# Requires: a full build first so rocisa exists under build/tensilelite/rocisa
-# (nanobind package: rocisa/_rocisa*.so) or legacy build/tensilelite/rocisa/lib,
-# or a pip-installed rocisa.
 
-import importlib.util
-import os
-import sys
+"""Run the installed TensileLite logic validator without checkout path injection.
+
+How to run (from hipblaslt project root):
+  python scripts/run_tensile_logic_check.py [--changed-files=FILE] [LIBLOGIC_PATH]
+
+--changed-files=FILE takes the changed paths, one per line, and checks only the
+architectures of the changed logic YAMLs; a changed validator, known-bugs list
+or this script, or an empty value, checks everything.
+"""
+
+from __future__ import annotations
+
 from pathlib import Path
+import subprocess
+import sys
 
 
-def _find_hipblaslt_root() -> Path:
+def _hipblaslt_root() -> Path:
     root = Path(__file__).resolve().parent.parent
-    if not (root / "tensilelite").is_dir() or not (root / "library").is_dir():
-        raise SystemExit(
-            "Error: Cannot find hipblaslt root (expected tensilelite/ and library/). "
-            "Run from hipblaslt root or keep scripts/ in the project tree."
-        )
+    if not (root / "library").is_dir():
+        raise SystemExit(f"Cannot find the hipBLASLt library directory below {root}")
     return root
 
 
-def _ensure_paths(root: Path, build_dir: Path, lib_logic_path: Path) -> None:
-    """Prepend sys.path entries so `import rocisa` and tensilelite resolve.
-
-    CMake places the nanobind module under build/tensilelite/rocisa/rocisa/
-    (_rocisa*.so). The importable package root is build/tensilelite/rocisa.
-    Older trees may only have a single rocisa*.so under rocisa/lib/; prefer
-    the modern layout when both exist so a stale lib/ artifact cannot shadow.
-    """
-    tensilelite = root / "tensilelite"
-    rocisa_build = build_dir / "tensilelite" / "rocisa"
-    rocisa_pkg = rocisa_build / "rocisa"
-    rocisa_lib = rocisa_build / "lib"
-
-    def _has_modern_rocisa() -> bool:
-        if not rocisa_pkg.is_dir():
-            return False
-        return bool(
-            list(rocisa_pkg.glob("_rocisa*.so")) + list(rocisa_pkg.glob("_rocisa*.pyd"))
-        )
-
-    def _has_legacy_rocisa() -> bool:
-        if not rocisa_lib.is_dir():
-            return False
-        return bool(
-            list(rocisa_lib.glob("rocisa*.so")) + list(rocisa_lib.glob("rocisa*.pyd"))
-        )
-
-    def _has_installed_rocisa() -> bool:
-        # A pip-installed rocisa (e.g. `tox -e logic-corpus`). A spec without an
-        # origin is the rocisa/ source directory seen as a namespace package.
-        spec = importlib.util.find_spec("rocisa")
-        return spec is not None and spec.origin is not None
-
-    if _has_modern_rocisa():
-        rocisa_path_entries = [rocisa_build]
-    elif _has_legacy_rocisa():
-        rocisa_path_entries = [rocisa_lib]
-    elif _has_installed_rocisa():
-        rocisa_path_entries = []
-    else:
-        raise SystemExit(
-            "Error: rocisa not built. Run a full build first, or pip install "
-            "tensilelite/rocisa. Expected either:\n"
-            f"  {rocisa_pkg} with _rocisa*.so or .pyd, or legacy\n"
-            f"  {rocisa_lib} with rocisa*.so or .pyd"
-        )
-
-    if not lib_logic_path.exists():
-        raise SystemExit(f"Error: Library logic path not found: {lib_logic_path}")
-
-    for path in (*rocisa_path_entries, tensilelite):
-        path_str = str(path.resolve())
-        if path_str not in sys.path:
-            sys.path.insert(0, path_str)
-
-
-def _parse_argv(root: Path):
+def _parse_argv(root: Path, args=None):
     """Split script argv into library path (or default), the --changed-files value
-    (None if not given), and options to pass to TensileLogic (-j, -v, etc.)."""
+    (None if not given), and options to pass to the TensileLite logic command
+    (-j, -v, etc.)."""
     default_lib = root / "library"
-    args = sys.argv[1:]
+    args = list(sys.argv[1:] if args is None else args)
     lib_path = None
     changed_files = None
     passthrough = []
@@ -174,11 +114,11 @@ def _changed_architectures(root: Path, list_file: Path):
     return archs
 
 
-def main() -> None:
-    root = _find_hipblaslt_root()
-    build_dir = root / "build"
-    lib_logic_path, changed_files, passthrough = _parse_argv(root)
-    _ensure_paths(root, build_dir, lib_logic_path)
+def main(argv=None) -> int:
+    root = _hipblaslt_root()
+    logic_path, changed_files, passthrough = _parse_argv(root, argv)
+    if not logic_path.exists():
+        raise SystemExit(f"Library logic path not found: {logic_path}")
 
     if changed_files:
         archs = _changed_architectures(root, Path(changed_files))
@@ -186,7 +126,7 @@ def main() -> None:
             print("The changes can affect every architecture; checking everything.")
         elif not archs:
             print("No library logic or validator files changed; nothing to check.")
-            return
+            return 0
         else:
             print(f"Checking the architectures of the changed logic files: {', '.join(sorted(archs))}")
             passthrough = ["--architecture", ";".join(sorted(archs))] + passthrough
@@ -198,36 +138,19 @@ def main() -> None:
     )
     if not has_known_bugs_option:
         passthrough = ["--use-bundled-known-bugs"] + passthrough
-
-    # TensileLogic: LOGIC_PATH [options] --check-all
-    sys.argv = ["TensileLogic", str(lib_logic_path.resolve())] + passthrough + ["--check-all"]
-
-    from tensilelite.logic import main as tensile_logic_main
-    tensile_logic_main()
-
-
-def _try_venv_reexec() -> None:
-    """If key deps are missing but project .venv exists, re-exec with venv Python (never returns)."""
-    if os.environ.get("HIPBLASLT_LOGIC_CHECK_VENV"):
-        return  # Already running under venv
-    try:
-        import joblib  # noqa: F401
-        return
-    except ImportError:
-        pass
-    root = Path(__file__).resolve().parent.parent
-    if sys.platform == "win32":
-        venv_py = root / ".venv" / "Scripts" / "python.exe"
-    else:
-        venv_py = root / ".venv" / "bin" / "python"
-    if not venv_py.is_file():
-        return
-    os.environ["HIPBLASLT_LOGIC_CHECK_VENV"] = "1"
-    script = Path(__file__).resolve()
-    os.execv(venv_py, [str(venv_py), str(script)] + sys.argv[1:])
-    # execv does not return on success
+    if "--check-all" not in passthrough:
+        passthrough = [*passthrough, "--check-all"]
+    return subprocess.call(
+        [
+            sys.executable,
+            "-m",
+            "tensilelite",
+            "logic",
+            str(logic_path.resolve()),
+            *passthrough,
+        ]
+    )
 
 
 if __name__ == "__main__":
-    _try_venv_reexec()
-    main()
+    raise SystemExit(main())
