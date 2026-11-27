@@ -3,6 +3,9 @@
 
 #pragma once
 
+#include <algorithm>
+#include <array>
+#include <atomic>
 #include <numeric>
 #include <functional>
 #include "ck_tile/core/config.hpp"
@@ -124,6 +127,24 @@ kentry_max_waves(Args... args)
     KENTRY_BODY;
 }
 
+#if CK_TILE_ENABLE_CLUSTER_LAUNCH
+// Entry whose workgroups form clusters of ClusterX along x (see make_cluster_kernel).
+template <int ClusterX, int MinBlockPerCu, typename Kernel, typename... Args>
+KENTRY_LAUNCH_BOUNDS __attribute__((cluster_dims(ClusterX, 1, 1))) __global__ void
+kentry_cluster(Args... args)
+{
+    KENTRY_BODY;
+}
+#endif
+
+#if CK_TILE_ENABLE_CLUSTER_LAUNCH
+// An empty kernel to ask the runtime about clusters with (see get_max_cluster_size).
+template <typename = void>
+__global__ void kentry_cluster_probe()
+{
+}
+#endif
+
 #undef KENTRY_LAUNCH_BOUNDS
 #undef KENTRY_LAUNCH_BOUNDS_NO_MIN
 #undef KENTRY_MIN_WAVES_PER_EU
@@ -202,6 +223,136 @@ CK_TILE_HOST auto make_kernel(KernelImpl /*f*/,
     };
 }
 #endif
+
+//
+// Cluster launch with the cluster size (ClusterX workgroups along x) known at compile time, for
+// launches that must keep their clusters when the stream is captured into a HIP graph: capture
+// drops a cluster size that hipLaunchKernelEx gets as a launch attribute only (the overload
+// above), and the graph then replays without clusters.
+// - One workgroup is no cluster: a plain entry and launch, also for devices without clusters.
+// - Up to 15 workgroups the size is the cluster_dims attribute of the entry (kentry_cluster).
+// - clang takes at most 15 per cluster_dims dimension (4 bits) while a gfx1250 cluster holds 16
+//   workgroups, so 16 goes through hipDrvLaunchKernelEx, whose capture keeps the launch attribute.
+//
+#if CK_TILE_ENABLE_CLUSTER_LAUNCH
+namespace detail {
+// The handle of kentry<MinBlockPerCu, KernelImpl, Args...>. hipGetFuncBySymbol returns one for
+// the current device, so one is kept per device (and per entry: the template arguments).
+template <int MinBlockPerCu, typename KernelImpl, typename... Args>
+CK_TILE_HOST hipError_t get_device_function(hipFunction_t& fn)
+{
+    static std::array<std::atomic<hipFunction_t>, 64> per_device{};
+    const void* sym = reinterpret_cast<const void*>(&kentry<MinBlockPerCu, KernelImpl, Args...>);
+    int dev         = 0;
+    if(const hipError_t e = hipGetDevice(&dev); e != hipSuccess)
+        return e;
+    if(dev < 0 || dev >= static_cast<int>(per_device.size()))
+        return hipGetFuncBySymbol(&fn, sym);
+    fn = per_device[dev].load(std::memory_order_relaxed);
+    if(fn != nullptr)
+        return hipSuccess;
+    const hipError_t e = hipGetFuncBySymbol(&fn, sym);
+    if(e == hipSuccess)
+        per_device[dev].store(fn, std::memory_order_relaxed);
+    return e;
+}
+} // namespace detail
+
+template <int ClusterX,
+          int MinBlockPerCu = CK_TILE_MIN_BLOCK_PER_CU,
+          typename KernelImpl,
+          typename... Args>
+CK_TILE_HOST auto make_cluster_kernel(
+    KernelImpl /*f*/, dim3 grid_dim, dim3 block_dim, std::size_t lds_byte, Args... args)
+{
+    static_assert(1 <= ClusterX && ClusterX <= 16);
+    return [=](const stream_config& s) -> hipError_t {
+        hipLaunchAttribute attrs[1];
+        attrs[0].id               = hipLaunchAttributeClusterDimension;
+        attrs[0].val.clusterDim.x = ClusterX;
+        attrs[0].val.clusterDim.y = 1;
+        attrs[0].val.clusterDim.z = 1;
+        if constexpr(ClusterX == 1)
+        {
+            hipLaunchConfig_t config{};
+            config.gridDim          = grid_dim;
+            config.blockDim         = block_dim;
+            config.dynamicSmemBytes = lds_byte;
+            config.stream           = s.stream_id_;
+            return hipLaunchKernelEx(&config, kentry<MinBlockPerCu, KernelImpl, Args...>, args...);
+        }
+        else if constexpr(ClusterX <= 15)
+        {
+            hipLaunchConfig_t config{};
+            config.gridDim          = grid_dim;
+            config.blockDim         = block_dim;
+            config.dynamicSmemBytes = lds_byte;
+            config.stream           = s.stream_id_;
+            // must match the cluster_dims of the entry
+            config.attrs    = attrs;
+            config.numAttrs = 1;
+            return hipLaunchKernelEx(
+                &config, kentry_cluster<ClusterX, MinBlockPerCu, KernelImpl, Args...>, args...);
+        }
+        else
+        {
+            hipFunction_t fn = nullptr;
+            if(const hipError_t e =
+                   detail::get_device_function<MinBlockPerCu, KernelImpl, Args...>(fn);
+               e != hipSuccess)
+                return e;
+            HIP_LAUNCH_CONFIG config{};
+            config.gridDimX       = grid_dim.x;
+            config.gridDimY       = grid_dim.y;
+            config.gridDimZ       = grid_dim.z;
+            config.blockDimX      = block_dim.x;
+            config.blockDimY      = block_dim.y;
+            config.blockDimZ      = block_dim.z;
+            config.sharedMemBytes = static_cast<unsigned int>(lds_byte);
+            config.hStream        = s.stream_id_;
+            config.attrs          = attrs;
+            config.numAttrs       = 1;
+            // HIP copies the arguments at launch
+            void* params[] = {const_cast<void*>(static_cast<const void*>(&args))...};
+            return hipDrvLaunchKernelEx(&config, fn, params, nullptr);
+        }
+    };
+}
+#endif
+
+// Workgroups one cluster can hold on the current device: at most 16, fewer when the device (or
+// the partition it runs in) has fewer workgroup processors per shader engine, 1 without cluster
+// launch. A launch with a larger cluster fails with hipErrorInvalidClusterSize.
+CK_TILE_HOST int get_max_cluster_size()
+{
+    static std::array<std::atomic<int>, 64> per_device{};
+    int dev = 0;
+    if(hipGetDevice(&dev) != hipSuccess)
+        return 1;
+    const bool cached = 0 <= dev && dev < static_cast<int>(per_device.size());
+    if(cached)
+        if(const int size = per_device[dev].load(std::memory_order_relaxed); size > 0)
+            return size;
+    int size = 1;
+#if CK_TILE_ENABLE_CLUSTER_LAUNCH
+    hipDeviceProp_t props{};
+    if(hipGetDeviceProperties(&props, dev) == hipSuccess && props.clusterLaunch != 0)
+    {
+        hipLaunchConfig_t config{};
+        config.gridDim  = dim3(1);
+        config.blockDim = dim3(1);
+        int limit       = 0;
+        if(hipOccupancyMaxPotentialClusterSize(
+               &limit, reinterpret_cast<const void*>(&kentry_cluster_probe<>), &config) ==
+               hipSuccess &&
+           limit > 1)
+            size = std::min(limit, 16);
+    }
+#endif
+    if(cached)
+        per_device[dev].store(size, std::memory_order_relaxed);
+    return size;
+}
 
 template <typename... Callables>
 CK_TILE_HOST void launch_and_check(const stream_config& sc, Callables&&... callables)

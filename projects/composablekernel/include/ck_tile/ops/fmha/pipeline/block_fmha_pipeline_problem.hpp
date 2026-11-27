@@ -403,4 +403,43 @@ struct BlockFmhaFwdAppendKVPipelineProblem
     static constexpr index_t kBlockPerCu = Traits::kBlockPerCu;
 };
 
+// Decode (one query token per sequence) over a paged KV cache: the kM0 query heads of one kv head
+// against 16-token pages of keys.
+template <typename QDataType_,
+          typename KDataType_,
+          typename VDataType_,
+          typename ODataType_,
+          index_t kHeadDim_,
+          typename Traits_>
+struct BlockFmhaFwdDecodePagedKVPipelineProblem
+{
+    using QDataType = remove_cvref_t<QDataType_>;
+    using KDataType = remove_cvref_t<KDataType_>;
+    using VDataType = remove_cvref_t<VDataType_>;
+    using ODataType = remove_cvref_t<ODataType_>;
+    using Traits    = remove_cvref_t<Traits_>;
+
+    static constexpr index_t kNumWarps  = 4;
+    static constexpr index_t kBlockSize = 128;
+
+    static constexpr index_t kHeadDim = kHeadDim_;
+    static constexpr index_t kM0      = 16; // query heads per kv head (rows of one workgroup)
+    static constexpr index_t kN0      = 16; // keys per page as the pipeline steps through them
+
+    // attributes from traits
+    static constexpr bool kWaveSplit        = Traits::kWaveSplit;
+    static constexpr index_t kPageBlockSize = Traits::kPageBlockSize;
+    static constexpr auto kKVMemoryLayout   = Traits::kKVMemoryLayout;
+    static constexpr auto kKVLookupTable    = Traits::kKVLookupTable;
+    static constexpr index_t kBlockPerCu    = Traits::kBlockPerCu;
+
+    // this problem with the cooperative layout
+    using Cooperative = BlockFmhaFwdDecodePagedKVPipelineProblem<QDataType_,
+                                                                 KDataType_,
+                                                                 VDataType_,
+                                                                 ODataType_,
+                                                                 kHeadDim_,
+                                                                 typename Traits::Cooperative>;
+};
+
 } // namespace ck_tile

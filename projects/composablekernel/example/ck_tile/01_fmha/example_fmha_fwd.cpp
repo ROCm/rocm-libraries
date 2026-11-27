@@ -4,6 +4,9 @@
 #include "ck_tile/host.hpp"
 #include "fmha_fwd.hpp"
 #include "fmha_fwd_runner.hpp"
+#if CK_TILE_FMHA_FWD_DECODE_PAGEDKV_API
+#include "fmha_fwd_decode_pagedkv_runner.hpp"
+#endif
 
 #include <string>
 
@@ -122,8 +125,16 @@ auto create_args(int argc, char* argv[])
                 "Batch-mode only: per-batch effective seqlen for KV (exclude PAD).\n"
                 "Comma-separated list of length 'b'. If empty, no override.")
         .insert("init_sink", "0", "value to init the output tensor sink value for validation")
-        .insert(
-            "pack_gqa", "1", "1: enable Pack-GQA (fold GQA Q heads into seqlen for non-causal)");
+        .insert("pack_gqa", "1", "1: enable Pack-GQA (fold GQA Q heads into seqlen for non-causal)")
+        .insert("decode_paged",
+                "0",
+                "1: gfx125 decode (one query token per sequence) over a paged fp8 K/V cache in\n"
+                "the vectorized layout, fmha_fwd_decode_pagedkv. Reads b, h, h_k, s_k, d, mask,\n"
+                "page_block_size, prec (bf16|fp16: Q and the output), num_splits, max_s_k, seed,\n"
+                "v, warmup and repeat")
+        .insert("max_s_k",
+                "0",
+                "decode_paged: context length the launch is sized for, 0 = the longest s_k");
 
     bool result = arg_parser.parse(argc, argv);
     return std::make_tuple(result, arg_parser);
@@ -227,6 +238,16 @@ int main(int argc, char* argv[])
         auto [result, arg_parser] = create_args(argc, argv);
         if(!result)
             return -1;
+
+        if(arg_parser.get_bool("decode_paged"))
+        {
+#if CK_TILE_FMHA_FWD_DECODE_PAGEDKV_API
+            return fmha_fwd_decode_pagedkv_runner::run_example(arg_parser);
+#else
+            std::cerr << "decode_paged is built for gfx125 targets only" << std::endl;
+            return -1;
+#endif
+        }
 
         const std::string data_type = arg_parser.get_str("prec");
         // MX scales on FP8 inputs run the MX path with the same output type.
