@@ -16,6 +16,7 @@
 #include <hipdnn_frontend/attributes/LayernormAttributes.hpp>
 #include <hipdnn_frontend/attributes/LayernormBackwardAttributes.hpp>
 #include <hipdnn_frontend/attributes/MatmulAttributes.hpp>
+#include <hipdnn_frontend/attributes/MegakernelDecodeAttributes.hpp>
 #include <hipdnn_frontend/attributes/MoeGroupedMatmulAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_frontend/attributes/RMSNormAttributes.hpp>
@@ -561,6 +562,32 @@ void attributesBindings(nb::module_& m)
         .def("get_outputs", &graph::CustomOpAttributes::get_outputs)
         .def("set_data", &graph::CustomOpAttributes::set_data, nb::rv_policy::reference_internal)
         .def("get_data", &graph::CustomOpAttributes::get_data);
+
+    using MegakernelDecode = graph::MegakernelDecodeAttributes;
+    nb::class_<MegakernelDecode>(m, "MegakernelDecodeAttributes")
+        .def(nb::init<>())
+        .def("set_model", &MegakernelDecode::set_model, nb::rv_policy::reference_internal)
+        .def("get_model", &MegakernelDecode::get_model)
+        .def("set_src", &MegakernelDecode::set_src, nb::rv_policy::reference_internal)
+        .def("get_src", &MegakernelDecode::get_src)
+        .def("set_arch", &MegakernelDecode::set_arch, nb::rv_policy::reference_internal)
+        .def("get_arch", &MegakernelDecode::get_arch)
+        .def("set_cus", &MegakernelDecode::set_cus, nb::rv_policy::reference_internal)
+        .def("get_cus", &MegakernelDecode::get_cus)
+        .def("set_kv", &MegakernelDecode::set_kv, nb::rv_policy::reference_internal)
+        .def("get_kv", &MegakernelDecode::get_kv)
+        .def("set_block", &MegakernelDecode::set_block, nb::rv_policy::reference_internal)
+        .def("get_block", &MegakernelDecode::get_block)
+        .def("set_m", &MegakernelDecode::set_m, nb::rv_policy::reference_internal)
+        .def("get_m", &MegakernelDecode::get_m)
+        .def("set_tp", &MegakernelDecode::set_tp, nb::rv_policy::reference_internal)
+        .def("get_tp", &MegakernelDecode::get_tp)
+        .def("set_rt", &MegakernelDecode::set_rt, nb::rv_policy::reference_internal)
+        .def("get_rt", &MegakernelDecode::get_rt)
+        .def("set_lm_head", &MegakernelDecode::set_lm_head, nb::rv_policy::reference_internal)
+        .def("get_lm_head", &MegakernelDecode::get_lm_head)
+        .def("set_nlayers", &MegakernelDecode::set_nlayers, nb::rv_policy::reference_internal)
+        .def("get_nlayers", &MegakernelDecode::get_nlayers);
 
     // LayernormAttributes
     nb::class_<graph::LayernormAttributes>(m, "LayernormAttributes")

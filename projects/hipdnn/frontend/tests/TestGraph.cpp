@@ -14,6 +14,7 @@
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_frontend/attributes/ResampleFwdAttributes.hpp>
 #include <hipdnn_frontend/autotune/PlanSpec.hpp>
+#include <hipdnn_frontend/node/CustomOpNode.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #ifdef HIPDNN_ENABLE_SDPA
 #include <hipdnn_frontend/attributes/SdpaAttributes.hpp>
@@ -7592,6 +7593,101 @@ TEST_F(TestGraph, CustomOpValidateFailsWithNullInput)
     auto err = graph.validate();
     EXPECT_FALSE(err.is_good());
 }
+
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
+namespace
+{
+MegakernelDecodeAttributes gemmaDecodeAttributes()
+{
+    MegakernelDecodeAttributes attributes;
+    attributes.set_model("gemma4-26b-a4b-fp8-gfx942")
+        .set_src("8224cd6018173b2341e67a98948ebedcd0f38cad14158cbd6a95d1393e404f11")
+        .set_arch("gfx942")
+        .set_cus(304)
+        .set_kv("TRITON_ATTN:1")
+        .set_block(16)
+        .set_m(1)
+        .set_tp(1)
+        .set_rt(0)
+        .set_lm_head(false)
+        .set_nlayers(1);
+    return attributes;
+}
+} // namespace
+
+TEST_F(TestGraph, MegakernelDecodeMatchesManifestEntry)
+{
+    GraphTestUtils graph;
+    graph.set_compute_data_type(DataType::FLOAT);
+    auto tab = std::make_shared<TensorAttributes>();
+    tab->set_uid(1).set_dim({16}).set_stride({1}).set_data_type(DataType::INT64);
+    auto glob = std::make_shared<TensorAttributes>();
+    glob->set_uid(2).set_dim({8}).set_stride({1}).set_data_type(DataType::INT64);
+
+    const auto added = graph.megakernel_decode(tab, glob, gemmaDecodeAttributes());
+    ASSERT_TRUE(added.is_good()) << added.get_message();
+    const auto validated = graph.validate();
+    ASSERT_TRUE(validated.is_good()) << validated.get_message();
+    const auto& nodes = graph.getPrivateGraphSubnodes();
+    ASSERT_EQ(nodes.size(), 1u);
+    const auto node = std::dynamic_pointer_cast<CustomOpNode>(nodes.front());
+    ASSERT_NE(node, nullptr);
+    EXPECT_EQ(node->attributes.get_custom_op_id(), "megakernel.gemma4-26b-a4b-fp8-gfx942");
+    EXPECT_THAT(node->attributes.get_inputs(), ElementsAre(tab, glob));
+    EXPECT_TRUE(node->attributes.get_outputs().empty());
+
+    // Binary fields from descriptors/megakernel/manifest.json at bf3255d71eb,
+    // first entry. The matcher adds the schema version and runtime layer count.
+    const auto expectedPayload = nlohmann::json::parse(R"({
+        "schema": 1,
+        "model": "gemma4-26b-a4b-fp8-gfx942",
+        "src": "8224cd6018173b2341e67a98948ebedcd0f38cad14158cbd6a95d1393e404f11",
+        "arch": "gfx942",
+        "cus": 304,
+        "kv": "TRITON_ATTN:1",
+        "block": 16,
+        "M": 1,
+        "tp": 1,
+        "rt": 0,
+        "lm_head": false,
+        "nlayers": 1
+    })");
+    EXPECT_EQ(nlohmann::json::parse(node->attributes.get_data()), expectedPayload);
+}
+
+TEST_F(TestGraph, MegakernelDecodeRejectsInvalidInputsAndAttributes)
+{
+    GraphTestUtils graph;
+    auto tab = std::make_shared<TensorAttributes>();
+    auto glob = std::make_shared<TensorAttributes>();
+    tab->set_data_type(DataType::INT64);
+    glob->set_data_type(DataType::INT64);
+    auto attributes = gemmaDecodeAttributes();
+
+    EXPECT_EQ(graph.megakernel_decode(nullptr, glob, attributes).code, ErrorCode::INVALID_VALUE);
+    EXPECT_EQ(graph.megakernel_decode(tab, nullptr, attributes).code, ErrorCode::INVALID_VALUE);
+    tab->set_data_type(DataType::FLOAT);
+    EXPECT_EQ(graph.megakernel_decode(tab, glob, attributes).code, ErrorCode::INVALID_VALUE);
+    tab->set_data_type(DataType::INT64);
+    glob->set_data_type(DataType::FLOAT);
+    EXPECT_EQ(graph.megakernel_decode(tab, glob, attributes).code, ErrorCode::INVALID_VALUE);
+    glob->set_data_type(DataType::INT64);
+
+    EXPECT_EQ(graph.megakernel_decode(tab, glob, MegakernelDecodeAttributes{}).code,
+              ErrorCode::ATTRIBUTE_NOT_SET);
+    EXPECT_EQ(graph.megakernel_decode(tab, glob, attributes.set_src("")).code,
+              ErrorCode::ATTRIBUTE_NOT_SET);
+    attributes = gemmaDecodeAttributes();
+    EXPECT_EQ(graph.megakernel_decode(tab, glob, attributes.set_cus(0)).code,
+              ErrorCode::INVALID_VALUE);
+    attributes = gemmaDecodeAttributes();
+    EXPECT_EQ(graph.megakernel_decode(tab, glob, attributes.set_nlayers(0)).code,
+              ErrorCode::INVALID_VALUE);
+    EXPECT_EQ(graph.megakernel_decode(tab, glob, attributes.set_nlayers(int64_t{1} << 31)).code,
+              ErrorCode::INVALID_VALUE);
+    EXPECT_TRUE(graph.getPrivateGraphSubnodes().empty());
+}
+#endif // HIPDNN_FRONTEND_SKIP_JSON_LIB
 
 TEST_F(TestGraph, ValidateFailsNegativeStrideOnGraphInput)
 {

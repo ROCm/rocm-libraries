@@ -933,6 +933,24 @@ void graphBindings(nb::module_& m)
              nb::arg("inputs"),
              nb::arg("num_outputs"),
              nb::arg("attributes"))
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
+        .def(
+            "megakernel_decode",
+            [](graph::Graph& g,
+               const std::shared_ptr<graph::TensorAttributes>& tab,
+               const std::shared_ptr<graph::TensorAttributes>& glob,
+               const graph::MegakernelDecodeAttributes& attributes) {
+                const auto err = g.megakernel_decode(tab, glob, attributes);
+                if(err.is_bad())
+                {
+                    throw nb::value_error(err.get_message().c_str());
+                }
+            },
+            nb::arg("tab").none(),
+            nb::arg("glob").none(),
+            nb::arg("attributes"),
+            "Add a megakernel decode with two INT64 device tensors and no outputs.")
+#endif
 #ifdef HIPDNN_ENABLE_SDPA
         .def(
             "sdpa",
