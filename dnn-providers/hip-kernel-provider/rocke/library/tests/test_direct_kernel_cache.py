@@ -2341,16 +2341,10 @@ def test_w32_small_k_and_narrow_small_c_rows_are_their_tables(w32_jobs):
         ("direct_wgrad_small_k", A.WGRAD_SMALL_K_CONFIGS),
         ("direct_wgrad_small_c", A.WGRAD_SMALL_C_NARROW_CONFIGS),
     ):
-        narrow = {
-            (k, pad, st, cpg, kpg)
-            for k, st, pad, chans in A._SMALL_C_NARROW
-            for cpg, kpg in chans
-        }
         caps = [
             c
             for c in dks.DIRECT_CAPABILITIES[variant][1]
-            if variant == "direct_wgrad_small_k"
-            or (c.KH, c.PAD, c.stride, c.cpg, c.kpg) in narrow
+            if variant == "direct_wgrad_small_k" or c in A._SMALL_C_NARROW_CAPS
         ]
         assert caps, variant
         for c in caps:

@@ -184,6 +184,8 @@ static const wgrad_case_t k_wgrad_cases[] = {
     {"sc_mfma_k", BASE_SC, [](W* s) { s->mfma_k = 16; }, "gfx1250"},
     {"sc_groups", BASE_SC, [](W* s) { s->problem.groups = 2; }, "gfx1250"},
     {"sc_kpg", BASE_SC, [](W* s) { s->problem.kpg = 12; }, "gfx1250"},
+    {"sc_cpg0", BASE_SC, [](W* s) { s->problem.cpg = 0; }, "gfx1250"},
+    {"sc_kpg0", BASE_SC, [](W* s) { s->problem.kpg = 0; }, "gfx1250"},
     {"sc_filter", BASE_SC, [](W* s) { s->problem.KW = 0; }, "gfx1250"},
     {"sc_wave_tile", BASE_SC, [](W* s) { s->wave_tile_c = 32; }, "gfx1250"},
     {"sc_waves_lt1", BASE_SC, [](W* s) { s->waves_c = 0; }, "gfx1250"},
@@ -230,6 +232,7 @@ static const wgrad_case_t k_wgrad_cases[] = {
     {"sk_pad_w", BASE_SK, [](W* s) { s->problem.pad_w = 0; }, "gfx1250"},
     {"sk_pad", BASE_SK, [](W* s) { s->problem.PAD = 3; }, "gfx1250"},
     {"sk_cpg", BASE_SK, [](W* s) { s->problem.cpg = 12; }, "gfx1250"},
+    {"sk_kpg0", BASE_SK, [](W* s) { s->problem.kpg = 0; }, "gfx1250"},
 };
 
 static const dw_case_t k_dw_cases[] = {

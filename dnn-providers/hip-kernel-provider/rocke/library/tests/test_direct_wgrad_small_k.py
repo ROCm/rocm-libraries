@@ -154,41 +154,32 @@ def test_small_k_epilogue_steps_dw_by_channel():
 
 
 def test_small_k_epilogue_writes_dw_transposed():
-    """The dW offset flips the tap (KH * KW - 1 - tap) and steps one input
-    channel by KH * KW * kpg (the kernel's own filter stride is
-    KH * KW * cpg, so these constants come from the remap)."""
+    """The dW offset is ``kk * KH * KW * cpg + (KH * KW - 1 - tap) * cpg``: the
+    remap multiplies the channel by KH * KW * cpg (1600 here; the kernel's own
+    filter stride is KH * KW * kpg = 75, which must not be the one used) and
+    subtracts the tap from KH * KW - 1."""
     problem = DirectConvProblem(
         N=2, H=17, W=23, groups=1, cpg=64, kpg=3, KH=5, KW=5, PAD=2, stride=1
     )
+    kernel = build_direct_conv_wgrad(_sk(problem), arch="gfx1250")
+    ops = list(_walk(kernel.body.ops))
+    const = {
+        id(op.results[0]): op.attrs["value"]
+        for op in ops
+        if op.name == "arith.constant"
+    }
 
-    def consts(spec):
-        kernel = build_direct_conv_wgrad(spec, arch="gfx1250")
-        return {
-            op.attrs["value"]
-            for op in _walk(kernel.body.ops)
-            if op.name == "arith.constant"
-        }
+    def operands(name):
+        return [
+            [const.get(id(v)) for v in op.operands] for op in ops if op.name == name
+        ]
 
-    sk = consts(_sk(problem, wave_tiles_k=1, wave_tiles_c=1))
-    assert {5 * 5 - 1, 5 * 5 * 3} <= sk
-
-
-@pytest.mark.parametrize("bad", [dict(cpg=0), dict(kpg=0), dict(cpg=-8)])
-@pytest.mark.parametrize("small_k", [True, False])
-def test_small_c_refuses_non_positive_channel_counts(small_k, bad):
-    """cpg or kpg of 0 or less would make the builder divide by zero in its
-    column indexing."""
-    problem = DirectConvProblem(
-        **dict(
-            dict(N=2, H=17, W=23, groups=1, cpg=64, kpg=8, KH=3, KW=3, PAD=1, stride=1),
-            **bad,
-        )
-    )
-    spec = DirectConvWgradSpec(
-        problem=problem, wave_size=32, small_c=True, small_k=small_k
-    )
-    ok, why = is_valid_wgrad_spec(spec, arch="gfx1250")
-    assert not ok and "cpg >= 1 and kpg >= 1" in why
+    assert [5 * 5 - 1, None] in operands("arith.subi") or [
+        5 * 5 - 1,
+        None,
+    ] in operands("arith.sub")
+    muls = operands("arith.muli") + operands("arith.mul")
+    assert any(1600 in m for m in muls)
 
 
 def test_direct_wgrad_small_k_variant_builds_the_small_k_spec():

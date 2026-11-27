@@ -1429,6 +1429,11 @@ _SMALL_C4_STEMS = ((3, 1, 1, (320, 512)),)
 # channels to fill an implicit-GEMM grid, so the small_c GEMM (any channel
 # count a multiple of 8, the (s, c) runs loaded as 16 B vectors) serves them.
 _SMALL_C_NARROW = ((3, 2, 1, ((64, 128),)),)
+_SMALL_C_NARROW_CAPS = tuple(
+    DirectCaps(KH=k, PAD=pad, stride=s, cpg=cpg, kpg=kpg)
+    for k, s, pad, chans in _SMALL_C_NARROW
+    for cpg, kpg in chans
+)
 # Their configs, per (dtype, cpg, kpg): (small_c tile, row_blocks) as in
 # WGRAD_SMALL_C_CONFIGS, only the measured winners (few pixels, a short
 # pixel split).
@@ -1912,11 +1917,7 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
             for k, s, pad, kpgs in _SMALL_C4_STEMS
             for kpg in kpgs
         )
-        + tuple(
-            DirectCaps(KH=k, PAD=pad, stride=s, cpg=cpg, kpg=kpg)
-            for k, s, pad, chans in _SMALL_C_NARROW
-            for cpg, kpg in chans
-        ),
+        + _SMALL_C_NARROW_CAPS,
     ),
     # Small-K output layers (groups == 1, kpg == 3 or 4), wave32 only:
     # channel counts baked.
@@ -2764,11 +2765,7 @@ def _knob_grid(
         configs = WGRAD_SMALL_C_CONFIGS
         if variant == "direct_wgrad_small_k":
             configs = _small_c_tiles(WGRAD_SMALL_K_CONFIGS, dtype, caps)
-        elif caps is not None and any(
-            (caps.KH, caps.PAD, caps.stride, (caps.cpg, caps.kpg)) == (k, pad, s, ch)
-            for k, s, pad, chans in _SMALL_C_NARROW
-            for ch in chans
-        ):
+        elif caps in _SMALL_C_NARROW_CAPS:
             # The narrow layers: few pixels, short pixel splits.
             configs = _small_c_tiles(WGRAD_SMALL_C_NARROW_CONFIGS, dtype, caps)
         for (wk, wc, tk, tc, vx, ss, wsr, uw), row_blocks in configs:

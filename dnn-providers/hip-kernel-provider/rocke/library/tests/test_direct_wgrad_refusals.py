@@ -97,6 +97,8 @@ _CASES = [
     ("sc_mfma_k", "sc", {"mfma_k": 16}, {}, "gfx1250"),
     ("sc_groups", "sc", {}, {"groups": 2}, "gfx1250"),
     ("sc_kpg", "sc", {}, {"kpg": 12}, "gfx1250"),
+    ("sc_cpg0", "sc", {}, {"cpg": 0}, "gfx1250"),
+    ("sc_kpg0", "sc", {}, {"kpg": 0}, "gfx1250"),
     ("sc_filter", "sc", {}, {"KW": 0}, "gfx1250"),
     ("sc_wave_tile", "sc", {"wave_tile_c": 32}, {}, "gfx1250"),
     ("sc_waves_lt1", "sc", {"waves_c": 0}, {}, "gfx1250"),
@@ -122,6 +124,7 @@ _CASES = [
     ("sk_pad_w", "sk", {}, {"pad_w": 0}, "gfx1250"),
     ("sk_pad", "sk", {}, {"PAD": 3}, "gfx1250"),
     ("sk_cpg", "sk", {}, {"cpg": 12}, "gfx1250"),
+    ("sk_kpg0", "sk", {}, {"kpg": 0}, "gfx1250"),
     # ---- _depthwise_wgrad_reason
     ("dw_dtype", "dw", {}, {"dtype": "fp32"}, "gfx1250"),
     ("dw_cpg", "dw", {}, {"cpg": 2, "kpg": 2}, "gfx1250"),
