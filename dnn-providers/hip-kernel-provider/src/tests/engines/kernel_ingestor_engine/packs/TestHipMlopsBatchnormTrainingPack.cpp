@@ -518,10 +518,11 @@ INSTANTIATE_TEST_SUITE_P(
         DefaultCase{"FwdVariant0Spatial256", shape(false, {2, 2, 16, 16}), config(0, 1024, 1)},
         DefaultCase{"FwdVariant3", shape(false, {2, 2, 20, 30}), config(3, 1024, 1)},
         DefaultCase{"FwdVariant1LargeSpatial", shape(false, {2, 3, 40, 40}), config(1, 1024, 1)},
-        // Variant 0 beyond its workgroup: refused by the predicate, kept as the heuristics'
-        // choice.
-        DefaultCase{
-            "FwdVariant0LargeSpatial", shape(false, {2, 2, 4096, 4096}), config(0, 1024, 1)},
+        // A channel of 32M values with a spatial size beyond the workgroup of variants 0
+        // and 3
+        DefaultCase{"FwdVariant1LargeSpatialLargeChannel",
+                    shape(false, {2, 2, 4096, 4096}),
+                    config(1, 1024, 1)},
         // Forward, NCHW, spatial multiple keeps the smallest applicable vector size
         DefaultCase{"FwdNchwMultiple", shape(false, {3, 2, 24, 24}), config(2, 0, 1)},
         // Channel last tries spatial multiple by 4, then by 1

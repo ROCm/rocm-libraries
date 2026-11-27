@@ -442,7 +442,11 @@ inline void defaultConfigSpatialSingle(const ProblemDescription& problem, Kernel
                 return;
             }
 
-            if((inChannelSliceSize < 33554432 && inCstride > 1024)
+            // L, H*W, D*H*W > 1024 use variant 1, which loops through NL/NHW/NDHW, whatever
+            // N*L, N*H*W, N*D*H*W: variants 0 and 3 give each thread of their workgroup (at
+            // most 1024) one spatial position and do not loop over the rest. MIOpen tests
+            // N*H*W < 32M here, but its fallback below picks variant 0 only for H*W <= 512.
+            if((inCstride > 1024)
                || ((n >= 256) && (inCstride > 60)
                    && (problem.useFp16Mix() || problem.useBfp16Mix()))
                || ((inCstride > 512) && (problem.useFp16Mix() || problem.useBfp16Mix())))
@@ -602,7 +606,8 @@ inline size_t defaultSpatialSingleGroupSize(const ProblemDescription& problem)
 // Configuration the launch heuristics choose for a problem whose spatial multiple
 // implementation stashes stashValues values per channel: spatial multiple when useMultiple()
 // prefers it and defaultConfigSpatialMultiple() finds an applicable vector size, else the
-// spatial single variant defaultConfigSpatialSingle() picks.
+// spatial single variant defaultConfigSpatialSingle() picks. isSpatialConfigApplicable()
+// accepts it for every problem.
 inline BatchnormSpatialConfig defaultSpatialConfig(const ProblemDescription& problem,
                                                    unsigned int stashValues)
 {
@@ -692,9 +697,6 @@ inline bool isSpatialMultipleConfigApplicable(const ProblemDescription& problem,
 }
 
 // Whether config can run problem, stashValues as for isSpatialMultipleConfigApplicable().
-// NOTE: defaultSpatialConfig() can return variant 0 for a spatial size above its workgroup
-// size (its spatial single fallback for NCHW problems spatial multiple cannot run), which
-// this rejects.
 inline bool isSpatialConfigApplicable(const ProblemDescription& problem,
                                       unsigned int stashValues,
                                       const BatchnormSpatialConfig& config)

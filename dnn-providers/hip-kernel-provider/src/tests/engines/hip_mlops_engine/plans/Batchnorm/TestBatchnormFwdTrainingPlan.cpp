@@ -682,10 +682,10 @@ TEST(TestBatchnormFwdTrainingKernelConfig, DefaultConfigIsTheHeuristicChoice)
               (BatchnormSpatialConfig{2, 0, 1}));
 }
 
-// A channel of 2^25 values or more (N * H * W) keeps the forward heuristics off variant 1 for
-// a spatial size above 1024, and they do not prefer spatial multiple for an fp16 x upcast to
-// an fp32 y with N <= 768, nor for fp32 with N <= 2: the spatial single fallback picks
-// variant 0, whose 1024 threads cover only 1024 of the spatial positions.
+// Spatial multiple is not preferred for an fp16 x upcast to an fp32 y with N <= 768, nor for
+// fp32 with N <= 2, and a spatial size above 1024 takes variant 1 even once a channel holds
+// 2^25 values (N * H * W), where the spatial single fallback once picked variant 0, whose
+// 1024 threads cover only 1024 of the spatial positions.
 // IntegrationGpuBatchnormTrainingSpatialBeyondWorkgroup runs these graphs on a device.
 TEST(TestBatchnormFwdTrainingKernelConfig, DefaultConfigForASpatialSizeBeyondTheWorkgroup)
 {
@@ -693,13 +693,13 @@ TEST(TestBatchnormFwdTrainingKernelConfig, DefaultConfigForASpatialSizeBeyondThe
                                             {32, 2, 1024, 1024},
                                             hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
     const auto upcastConfig = defaultBatchnormFwdTrainingConfig(upcast.params, 60);
-    EXPECT_EQ(upcastConfig, (BatchnormSpatialConfig{0, 1024, 1}));
-    EXPECT_FALSE(isBatchnormFwdTrainingConfigApplicable(upcast.params, 60, upcastConfig));
+    EXPECT_EQ(upcastConfig, (BatchnormSpatialConfig{1, 1024, 1}));
+    EXPECT_TRUE(isBatchnormFwdTrainingConfigApplicable(upcast.params, 60, upcastConfig));
 
     const auto fp32 = createTrainingGraph({33554432, 16777216, 4096, 1}, {2, 2, 4096, 4096});
     const auto fp32Config = defaultBatchnormFwdTrainingConfig(fp32.params, 60);
-    EXPECT_EQ(fp32Config, (BatchnormSpatialConfig{0, 1024, 1}));
-    EXPECT_FALSE(isBatchnormFwdTrainingConfigApplicable(fp32.params, 60, fp32Config));
+    EXPECT_EQ(fp32Config, (BatchnormSpatialConfig{1, 1024, 1}));
+    EXPECT_TRUE(isBatchnormFwdTrainingConfigApplicable(fp32.params, 60, fp32Config));
 }
 
 TEST(TestBatchnormFwdTrainingKernelConfig, BuildTakesTheWorkgroupSizeOfTheConfig)

@@ -1,9 +1,12 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <array>
 #include <cstddef>
 #include <cstdio>
 #include <gtest/gtest.h>
+#include <limits>
+#include <utility>
 #include <vector>
 
 #include "engines/hip_mlops_engine/plans/batchnorm/BatchnormCommon.hpp"
@@ -628,10 +631,17 @@ TEST(TestDefaultSpatialConfig, MatchesTheHeuristicsOnEveryBranch)
          makeProblem(256, 1, 128, false, true, false, 1, fwd),
          2,
          {0, 1024, 1}},
-        {"FwdVariant0LargeSpatial",
+        // A channel of 32M values keeps variant 1 for a spatial size beyond the workgroup of
+        // variants 0 and 3, for fp32 with N <= 2 and an upcast with N <= 768, which spatial
+        // multiple does not take
+        {"FwdVariant1LargeSpatialLargeChannel",
          makeProblem(2, 1, 16777216, false, true, false, 1, fwd),
          2,
-         {0, 1024, 1}},
+         {1, 1024, 1}},
+        {"FwdVariant1UpcastLargeSpatialLargeChannel",
+         makeProblem(32, 2, 1048576, false, false, true, 1, fwd),
+         2,
+         {1, 1024, 1}},
         // Forward NCHW, spatial multiple: the smallest applicable vector size is kept
         {"FwdNchwMultiple", makeProblem(32, 8, 576, false, true, false, 36, fwd), 2, {2, 0, 1}},
         // Backward NCHW, spatial single
@@ -761,14 +771,64 @@ TEST(TestSpatialConfigApplicable, Variant2FollowsIsSpatialMultipleApplicable)
     EXPECT_FALSE(isSpatialConfigApplicable(oddSpatial, 2, {2, 0, 4}));
 }
 
-TEST(TestSpatialConfigApplicable, RejectsTheDefaultVariant0BeyondItsWorkgroup)
+TEST(TestSpatialConfigApplicable, AcceptsTheDefaultOfEveryProblem)
 {
-    // The heuristics fall back to variant 0 for this forward problem although its spatial size
-    // exceeds the workgroup, which variant 0 does not cover.
-    const auto problem = makeProblem(2, 1, 16777216, false, true, false);
-    const auto config = defaultSpatialConfig(problem, 2);
-    EXPECT_EQ(config.variant, 0);
-    EXPECT_FALSE(isSpatialConfigApplicable(problem, 2, config));
+    // Spans the boundaries of useMultiple(), defaultConfigSpatialSingle() and
+    // defaultSpatialSingleGroupSize(), including channels of 32M values or more with a spatial
+    // size beyond 1024, where the forward heuristics once fell back to variant 0.
+    const std::vector<size_t> batches = {1, 2, 3, 31, 32, 64, 65, 255, 256, 257, 768, 769};
+    const std::vector<size_t> spatialSizes
+        = {1,   35,  60,  61,  100,  150,  151,   160,     161,      200,
+           255, 256, 512, 513, 1024, 1025, 43691, 1048576, 16777216, 33554432};
+    // fp16 mix, bf16 mix, fp16 upcast, bf16 upcast; none set is fp32
+    const std::vector<std::array<bool, 4>> precisions = {{false, false, false, false},
+                                                         {true, false, false, false},
+                                                         {false, true, false, false},
+                                                         {false, false, true, false},
+                                                         {false, false, false, true}};
+    const std::vector<std::pair<Direction, unsigned int>> directions
+        = {{Direction::FORWARD_TRAINING, 2}, {Direction::BACKWARD, 2}, {Direction::BACKWARD, 4}};
+    constexpr size_t CHANNELS = 2;
+
+    for(const auto n : batches)
+    {
+        for(const auto spatialSize : spatialSizes)
+        {
+            // The kernels index the tensor with 32-bit unsigned arithmetic
+            if(n * CHANNELS * spatialSize > std::numeric_limits<unsigned int>::max())
+            {
+                continue;
+            }
+            for(const bool channelLast : {false, true})
+            {
+                for(const auto& precision : precisions)
+                {
+                    for(const auto& [direction, stashValues] : directions)
+                    {
+                        const ProblemDescription problem(n,
+                                                         CHANNELS,
+                                                         spatialSize,
+                                                         channelLast,
+                                                         precision[0],
+                                                         precision[1],
+                                                         precision[2],
+                                                         precision[3],
+                                                         direction,
+                                                         36);
+                        const auto config = defaultSpatialConfig(problem, stashValues);
+                        EXPECT_TRUE(isSpatialConfigApplicable(problem, stashValues, config))
+                            << "N " << n << ", spatial size " << spatialSize
+                            << (channelLast ? ", channel last" : ", channel first")
+                            << ", precision flags " << precision[0] << precision[1] << precision[2]
+                            << precision[3] << ", direction " << static_cast<int>(direction)
+                            << ", stash values " << stashValues << ": variant " << config.variant
+                            << " of " << config.groupSize << " threads, vector size "
+                            << config.vectorSize;
+                    }
+                }
+            }
+        }
+    }
 }
 
 // ====================================================================================================

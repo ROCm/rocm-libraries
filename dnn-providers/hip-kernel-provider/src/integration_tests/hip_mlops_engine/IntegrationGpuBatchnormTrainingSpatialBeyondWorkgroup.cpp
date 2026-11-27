@@ -52,11 +52,12 @@ const int64_t SERVING_ENGINE_ID = engineNameToId(SERVING_ENGINE_NAME);
 // Batchnorm forward training of NCHW graphs whose spatial size H * W exceeds the 1024
 // threads of the workgroup the launch heuristics give variants 0 and 3. Those variants give
 // each thread one spatial position and do not loop over the spatial dimension, so positions
-// past the workgroup are never read or written. A channel of N * H * W >= 2^25 values keeps
-// the forward heuristics off variant 1, and spatial multiple is not preferred for an fp16 x
-// upcast to an fp32 y with N <= 768, nor for fp32 with N <= 2, so those graphs reach the
-// spatial single fallback, variant 0. 2^25 values per channel is the least that reaches it:
-// these are the smallest such graphs with two channels (C = 1 gives tied N and C strides).
+// past the workgroup are never read or written. Spatial multiple is not preferred for an
+// fp16 x upcast to an fp32 y with N <= 768, nor for fp32 with N <= 2, and the forward
+// heuristics used to give variant 1 to a spatial size above 1024 only while a channel held
+// fewer than N * H * W = 2^25 values, falling back to variant 0 beyond. These are the
+// smallest graphs that reached that fallback with two channels (C = 1 gives tied N and C
+// strides); the heuristics now give them variant 1, which loops over the spatial dimension.
 //
 // The saved mean and inverse variance and y are compared against a double-precision
 // reference computed from the same (rounded) x values.

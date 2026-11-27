@@ -603,9 +603,7 @@ constexpr std::array<batchnorm::BatchnormSpatialConfig, 9> SPATIAL_CONFIG_ORDER 
                                                                                     {0, 256, 1}}};
 
 /// Kernel-scoped, batchnorm training: the operation, and a configuration that can run the
-/// graph on this device, or the one the launch heuristics choose. That one is admitted even
-/// where isBatchnormFwdTrainingConfigApplicable() refuses it (variant 0 beyond its workgroup,
-/// a fallback the heuristics keep), so the engine builds what HIP_MLOPS_ENGINE builds.
+/// graph on this device, which the launch heuristics' choice always is.
 bool batchnormTrainingKernelMatches(const MatchContext& context,
                                     const BoundTokens& bound,
                                     const KernelDefinition& kernel)
@@ -616,13 +614,10 @@ bool batchnormTrainingKernelMatches(const MatchContext& context,
     }
     try
     {
-        const auto params = trainingParams(context);
-        const auto config = spatialConfigOf(kernel);
-        const int multiProcessorCount = context.deviceProperties.multiProcessorCount;
         return batchnorm::isBatchnormFwdTrainingConfigApplicable(
-                   params, multiProcessorCount, config)
-               || config
-                      == batchnorm::defaultBatchnormFwdTrainingConfig(params, multiProcessorCount);
+            trainingParams(context),
+            context.deviceProperties.multiProcessorCount,
+            spatialConfigOf(kernel));
     }
     catch(const std::exception& error)
     {
@@ -645,7 +640,7 @@ double batchnormTrainingScore(const MatchContext& context,
 }
 
 /// Kernel-scoped, batchnorm backward: the operation, and a configuration that can run the
-/// graph, or the one the launch heuristics choose (as for training).
+/// graph (as for training).
 bool batchnormBackwardKernelMatches(const MatchContext& context,
                                     const BoundTokens& bound,
                                     const KernelDefinition& kernel)
@@ -656,10 +651,8 @@ bool batchnormBackwardKernelMatches(const MatchContext& context,
     }
     try
     {
-        const auto params = backwardParams(context);
-        const auto config = spatialConfigOf(kernel);
-        return batchnorm::isBatchnormBwdConfigApplicable(params, config)
-               || config == batchnorm::defaultBatchnormBwdConfig(params);
+        return batchnorm::isBatchnormBwdConfigApplicable(backwardParams(context),
+                                                         spatialConfigOf(kernel));
     }
     catch(const std::exception& error)
     {
