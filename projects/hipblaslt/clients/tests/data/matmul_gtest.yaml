@@ -2362,7 +2362,7 @@ Tests:
   norm_check: 1
   gpu_arch: '1250'
 
-# MXFP8 with E8M0 scales per 128 K elements (scale mode 1019) and a bf16 D. The gfx1250
+# MXFP8 with E8M0 scales per 128 elements along K (scale mode 1019) and a bf16 D. The gfx1250
 # kernels are pure GEMM: no bias, activation, or scale-alpha vector.
 - name: matmul_mxfp8_b128_dst_bf16_1250
   category: pre_checkin

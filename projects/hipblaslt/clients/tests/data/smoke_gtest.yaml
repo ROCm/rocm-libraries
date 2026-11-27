@@ -720,7 +720,7 @@ Tests:
   norm_check: 1
   gpu_arch: '1250'
 
-# MXFP8 with one E8M0 scale per 128 K elements (scale mode 1019,
+# MXFP8 with one E8M0 scale per 128 elements along K (scale mode 1019,
 # HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_UE8M0_EXT). K is a multiple of 128; 640 is not a
 # multiple of the 256 DepthU, so it runs a partial last iteration.
 - name: matmul_gemm_tn_mxf8_b128_dst_bf16_1250_smoke
