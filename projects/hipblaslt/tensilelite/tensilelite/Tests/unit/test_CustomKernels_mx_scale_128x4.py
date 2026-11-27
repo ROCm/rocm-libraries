@@ -343,7 +343,7 @@ def test_custom_kernel_config_keeps_host_pre_swizzle_128x4(tmp_path):
 
 @pytest.mark.parametrize("fmt", ["e2m3", "e3m2"])
 def test_page24_kernel_takes_the_aid_placement_bit_last(fmt):
-    """The kernel's aidc, the int32 at byte 40, is a CustomArgSemantic the host knows."""
+    """The kernel's die bit, the int32 at byte 40, is a CustomArgSemantic the host knows."""
     name = (
         f"rocke_gemm_mx_{fmt}_{fmt}_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s3"
         "_4096x4096x65536_c0c1p48_ka941ce3864"
@@ -444,7 +444,7 @@ def test_canonical_b_logic_file_predicates(chip, assembler, gfx950_iim):
 def test_swizzle_layout_logic_file_predicates(
     name, fmt, layouts, kernel, chip, assembler, gfx950_iim
 ):
-    """The P48, P16 and page24 kernels sit on their own layout's problem-type row and lazy
+    """The 48-byte, 16-byte and near-die kernels sit on their own layout's problem-type row and lazy
     library, never on the order-104 row at the same key."""
     logic = require_logic_file(f"{_CHIP_DIRS[chip]}/{name}")
     assert L.readYAML(str(logic))["DeviceNames"] == [f"Device {chip}"]

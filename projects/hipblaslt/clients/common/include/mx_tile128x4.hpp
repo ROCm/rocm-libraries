@@ -108,7 +108,7 @@ namespace mx_tile128x4
 
     // The order inside a 24576-byte tile: HIPBLASLT_ORDER_COL256_R128_EXT,
     // HIPBLASLT_ORDER_COL256_R128_P48_EXT or HIPBLASLT_ORDER_COL256_R128_P16_EXT. The
-    // placed orders use P48 tiles.
+    // The near-die orders use the 48-byte tiles.
     enum class TileOrder
     {
         COL256_R128,
