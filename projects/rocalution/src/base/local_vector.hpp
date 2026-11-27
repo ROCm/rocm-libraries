@@ -66,13 +66,21 @@ namespace rocalution
         /** \brief Move all data (i.e. move the vector) to the accelerator */
         ROCALUTION_EXPORT
         virtual void MoveToAccelerator(void);
-        /** \brief Move all data (i.e. move the vector) to the accelerator asynchronously */
+        /** \brief Move all data (i.e. move the vector) to the accelerator asynchronously
+      * \note
+      * Until \p Sync is called, the vector must not be modified. \p Clear, \p Allocate and
+      * the functions that clear the vector first cancel the move instead.
+      */
         ROCALUTION_EXPORT
         virtual void MoveToAcceleratorAsync(void);
         /** \brief Move all data (i.e. move the vector) to the host */
         ROCALUTION_EXPORT
         virtual void MoveToHost(void);
-        /** \brief Move all data (i.e. move the vector) to the host asynchronously */
+        /** \brief Move all data (i.e. move the vector) to the host asynchronously
+      * \note
+      * Until \p Sync is called, the vector must not be modified. \p Clear, \p Allocate and
+      * the functions that clear the vector first cancel the move instead.
+      */
         ROCALUTION_EXPORT
         virtual void MoveToHostAsync(void);
         /** \brief Synchronize the vector */
@@ -177,7 +185,13 @@ namespace rocalution
         ROCALUTION_EXPORT
         void LeaveDataPtr(ValueType** ptr);
 
-        /** \brief Clear (free) the vector */
+        /** \brief Clear (free) the vector
+      * \note
+      * \p Clear first waits for a pending asynchronous transfer. It cancels a pending
+      * \p MoveToAcceleratorAsync or \p MoveToHostAsync: the vector stays on its current
+      * backend, and the next \p Sync does nothing. The destructor and the functions that
+      * clear the vector first, such as \p SetDataPtr, do the same.
+      */
         ROCALUTION_EXPORT
         virtual void Clear();
         /** \brief Set the values of the vector to zero */
@@ -695,6 +709,10 @@ namespace rocalution
         virtual bool is_accel_(void) const;
 
     private:
+        // Waits for a pending async transfer, and frees the target object of a pending
+        // Move*Async(), so that the vector stays on its current backend
+        void CancelAsync_(void);
+
         // Pointer from the base vector class to the current allocated vector (host_ or accel_)
         BaseVector<ValueType>* vector_;
 

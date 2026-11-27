@@ -30,7 +30,6 @@
 #include <cmath>
 #include <complex>
 #include <cstdio>
-#include <cstdlib>
 #include <fstream>
 #include <functional>
 #include <limits>
@@ -1326,55 +1325,55 @@ TEST(local_vector_moves, sync_after_move_to_accelerator_async_ends_on_the_accele
 
 namespace
 {
-    // The destruction follows the device synchronization, so the transfer has ended and
-    // only the backend switch of Sync() is missing. This does not destroy a vector during a
-    // pending transfer.
     template <typename T>
     void destroy_after_async_moves(const std::vector<T>& a)
     {
         auto to_accelerator = make_local_vector(Backend::Host, a);
         to_accelerator->MoveToAcceleratorAsync();
-        rocalution::_rocalution_sync();
         to_accelerator.reset();
 
         auto to_host = make_local_vector(Backend::Accelerator, a);
         to_host->MoveToHostAsync();
-        rocalution::_rocalution_sync();
         to_host.reset();
     }
 }
 
-// The destructor leaks the other backend object (see the next test), so the destruction
-// runs in a child that ends with _Exit, where the leak does not reach LeakSanitizer
-TEST(local_vector_moves, a_vector_can_be_destroyed_after_an_async_move_without_sync)
+// The destructor frees only the current backend object, so Clear() frees the other one
+TEST(local_vector_moves, a_vector_destroyed_during_an_async_move_frees_both_objects)
 {
     REQUIRE_BACKEND(Backend::Accelerator);
     for_each_type<RealTypes>([&](auto type) {
         using T = typename decltype(type)::type;
 
         const std::vector<T> a = x<T>();
-        EXPECT_EXIT(
+        for(const Backend from : {Backend::Host, Backend::Accelerator})
+        {
+            const Backend to = from == Backend::Host ? Backend::Accelerator : Backend::Host;
+            SCOPED_TRACE("to the " + backend_name(to));
+
+            BackendObjectCounter objects;
             {
-                death_test_watchdog();
-                destroy_after_async_moves(a);
-                std::_Exit(0);
-            },
-            testing::ExitedWithCode(0),
-            "");
+                auto v = make_local_vector(from, a);
+                move_async(*v, to);
+                EXPECT_EQ(objects.live("HostVector"), 1);
+                EXPECT_EQ(objects.live("HIPAcceleratorVector"), 1);
+            }
+            EXPECT_EQ(objects.live("HostVector"), 0);
+            EXPECT_EQ(objects.live("HIPAcceleratorVector"), 0);
+        }
     });
 }
 
-// Only LeakSanitizer shows the leak, at the exit of the child. The child stops rocALUTION
-// first, as LeakSanitizer can hang at the exit of a process whose HIP backend still runs.
-// LeakSanitizer reports every leak of the child, so the case also fails on a HIP runtime
-// that leaks at exit, whatever the destructor does.
+// LeakSanitizer also sees the data that the backend objects own, at the exit of the child.
+// The child stops rocALUTION first, as LeakSanitizer can hang at the exit of a process whose
+// HIP backend still runs. LeakSanitizer reports every leak of the child, so the case also
+// fails on a HIP runtime that leaks at exit, whatever the destructor does.
 TEST(local_vector_moves, a_vector_destroyed_after_an_async_move_without_sync_frees_both_objects)
 {
     REQUIRE_BACKEND(Backend::Accelerator);
-    KNOWN_BUG("~LocalVector frees only the current backend object, so a vector destroyed after "
-              "an async move without Sync() leaks the other one");
 #ifndef ROCALUTION_UNIT_ASAN
-    GTEST_SKIP() << "only an ASAN build shows whether the destructor frees both backend objects";
+    GTEST_SKIP() << "only an ASAN build shows whether the destructor frees the data of both "
+                    "backend objects";
 #endif
     for_each_type<RealTypes>([&](auto type) {
         using T = typename decltype(type)::type;
@@ -1386,6 +1385,109 @@ TEST(local_vector_moves, a_vector_destroyed_after_an_async_move_without_sync_fre
                 rocalution::stop_rocalution();
             },
             120);
+    });
+}
+
+// Clear() cancels a pending async move, so the vector stays on its backend, and Sync() then
+// does nothing
+TEST(local_vector_moves, clear_cancels_a_pending_async_move)
+{
+    REQUIRE_BACKEND(Backend::Accelerator);
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
+
+        const std::vector<T> a = x<T>();
+        for(const Backend from : {Backend::Host, Backend::Accelerator})
+        {
+            const Backend to = from == Backend::Host ? Backend::Accelerator : Backend::Host;
+            SCOPED_TRACE("to the " + backend_name(to));
+            const std::string from_objects
+                = from == Backend::Host ? "HostVector" : "HIPAcceleratorVector";
+            const std::string to_objects
+                = to == Backend::Host ? "HostVector" : "HIPAcceleratorVector";
+
+            BackendObjectCounter objects;
+            auto                 v = make_local_vector(from, a);
+            move_async(*v, to);
+            v->Clear();
+            EXPECT_EQ(objects.live(from_objects), 1);
+            EXPECT_EQ(objects.live(to_objects), 0);
+            v->Sync();
+            if(!expect_location(v, from))
+            {
+                continue;
+            }
+            EXPECT_EQ(v->GetSize(), 0);
+        }
+    });
+}
+
+// Allocate() cancels a pending async move as Clear() does, so Sync() does not bring the old
+// entries back
+TEST(local_vector_moves, allocate_cancels_a_pending_async_move)
+{
+    REQUIRE_BACKEND(Backend::Accelerator);
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
+
+        for(const Backend from : {Backend::Host, Backend::Accelerator})
+        {
+            const Backend to = from == Backend::Host ? Backend::Accelerator : Backend::Host;
+            SCOPED_TRACE("to the " + backend_name(to));
+
+            auto v = make_local_vector(from, x<T>());
+            move_async(*v, to);
+            v->Allocate("w", 2);
+            v->Sync();
+            if(!expect_location(v, from))
+            {
+                continue;
+            }
+            EXPECT_EQ(values_of(*v), std::vector<T>(2, T(0)));
+        }
+    });
+}
+
+// Clear() ends a pending CopyFromAsync(), so the next one does not assert. The copy goes to
+// the accelerator, where it is asynchronous.
+TEST(local_vector_moves, clear_ends_a_pending_copy_from_async)
+{
+    REQUIRE_BACKEND(Backend::Accelerator);
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
+
+        const std::vector<T> a   = x<T>();
+        auto                 src = make_local_vector(Backend::Host, a);
+        auto                 v   = std::make_unique<LocalVector<T>>();
+        v->MoveToAccelerator();
+        v->CopyFromAsync(*src);
+        v->Clear();
+        EXPECT_EQ(v->GetSize(), 0);
+        v->CopyFromAsync(*src);
+        v->Sync();
+        EXPECT_EQ(values_of(*v), a);
+    });
+}
+
+// The vector stays on the host, so it takes a host array
+TEST(local_vector_moves, set_data_ptr_during_an_async_move_keeps_the_vector_on_the_host)
+{
+    REQUIRE_BACKEND(Backend::Accelerator);
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
+
+        const std::vector<T> b    = y<T>();
+        T*                   data = nullptr;
+        make_local_vector(Backend::Host, b)->LeaveDataPtr(&data);
+
+        auto v = make_local_vector(Backend::Host, x<T>());
+        v->MoveToAcceleratorAsync();
+        v->SetDataPtr(&data, "v", static_cast<int64_t>(b.size()));
+        v->Sync();
+        if(expect_location(v, Backend::Host))
+        {
+            EXPECT_EQ(values_of(*v), b);
+        }
     });
 }
 
@@ -1437,26 +1539,16 @@ TEST(local_vector_moves, entries_are_readable_after_an_async_move_and_a_device_s
     });
 }
 
-// The destruction runs in a child, so a destructor that rejects the pending Sync() fails
-// this case rather than the whole binary. It also runs in builds without an accelerator.
+// Also runs in builds without an accelerator
 TEST(local_vector_moves, a_copy_from_async_destination_can_be_destroyed_without_sync)
 {
     for_each_type<RealTypes>([&](auto type) {
         using T = typename decltype(type)::type;
 
-        const std::vector<T> a = x<T>();
-        EXPECT_EXIT(
-            {
-                death_test_watchdog();
-                auto src = make_local_vector(Backend::Host, a);
-                auto v   = std::make_unique<LocalVector<T>>();
-                v->CopyFromAsync(*src);
-                rocalution::_rocalution_sync();
-                v.reset();
-                std::_Exit(0);
-            },
-            testing::ExitedWithCode(0),
-            "");
+        auto src = make_local_vector(Backend::Host, x<T>());
+        auto v   = std::make_unique<LocalVector<T>>();
+        v->CopyFromAsync(*src);
+        v.reset();
     });
 }
 

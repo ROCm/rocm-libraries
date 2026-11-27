@@ -275,7 +275,14 @@ namespace rocalution
         void LeaveDataPtrDENSE(ValueType** val);
         /**@}*/
 
-        /** \brief Clear (free) the matrix */
+        /** \brief Clear (free) the matrix
+      * \note
+      * \p Clear first waits for a pending asynchronous transfer. It cancels a pending
+      * \p MoveToAcceleratorAsync or \p MoveToHostAsync: the matrix stays on its current
+      * backend, and the next \p Sync does nothing. The destructor and the functions that
+      * clear the matrix first, such as the \p Allocate and \p SetDataPtr functions, do the
+      * same.
+      */
         ROCALUTION_EXPORT
         void Clear(void);
 
@@ -814,6 +821,7 @@ namespace rocalution
         /** \brief Move all data (i.e. move the matrix) to the accelerator asynchronously
       * \note
       * Until \p Sync is called, further calls do nothing, and the matrix must not be modified.
+      * \p Clear and the functions that clear the matrix first cancel the move instead.
       */
         ROCALUTION_EXPORT
         virtual void MoveToAcceleratorAsync(void);
@@ -823,6 +831,7 @@ namespace rocalution
         /** \brief Move all data (i.e. move the matrix) to the host asynchronously
       * \note
       * Until \p Sync is called, further calls do nothing, and the matrix must not be modified.
+      * \p Clear and the functions that clear the matrix first cancel the move instead.
       */
         ROCALUTION_EXPORT
         virtual void MoveToHostAsync(void);
@@ -1373,6 +1382,10 @@ namespace rocalution
         virtual bool is_accel_(void) const;
 
     private:
+        // Waits for a pending async transfer, and frees the target object of a pending
+        // Move*Async(), so that the matrix stays on its current backend
+        void CancelAsync_(void);
+
         void RSMMExtInterpolation_(const LocalVector<int>&  CFmap,
                                    const LocalVector<bool>& S,
                                    bool                     ext_pe,

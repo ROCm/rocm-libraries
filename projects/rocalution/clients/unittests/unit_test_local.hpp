@@ -27,7 +27,10 @@
 // of the Local* objects and of the solvers on them
 
 #include <algorithm>
+#include <fstream>
 #include <memory>
+#include <set>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -167,4 +170,81 @@ namespace rocalution_unit
         }
         return where == backend_name(b);
     }
+
+    template <typename Object>
+    void move_async(Object& x, Backend to)
+    {
+        if(to == Backend::Accelerator)
+        {
+            x.MoveToAcceleratorAsync();
+        }
+        else
+        {
+            x.MoveToHostAsync();
+        }
+    }
+
+    // The backend objects (HostMatrixCSR, HIPAcceleratorVector, ...) constructed and not
+    // yet destructed while the counter exists, read from the debug trace, which logs every
+    // backend constructor and destructor with the object address. Tests also expect a
+    // positive count, which drops to 0 if the trace changes.
+    class BackendObjectCounter
+    {
+    public:
+        BackendObjectCounter()
+            : saved_(rocalution::_get_backend_descriptor()->log_file)
+        {
+            static_cast<std::ostream&>(log_).rdbuf(&buffer_);
+            rocalution::_get_backend_descriptor()->log_file = &log_;
+        }
+
+        ~BackendObjectCounter()
+        {
+            rocalution::_get_backend_descriptor()->log_file = saved_;
+        }
+
+        BackendObjectCounter(const BackendObjectCounter&)            = delete;
+        BackendObjectCounter& operator=(const BackendObjectCounter&) = delete;
+
+        // The live objects whose class name starts with prefix
+        int live(const std::string& prefix) const
+        {
+            const std::string address = "Obj addr: ";
+            const std::string object  = "; fct: " + prefix;
+
+            std::set<std::string> objects;
+            std::istringstream    trace(buffer_.str());
+            std::string           line;
+            while(std::getline(trace, line))
+            {
+                const size_t a = line.find(address);
+                const size_t f = line.find(object);
+                if(a == std::string::npos || f == std::string::npos || f < a)
+                {
+                    continue;
+                }
+                const std::string obj = line.substr(a + address.size(), f - a - address.size());
+                if(ends_with(line, ", constructor with local_backend"))
+                {
+                    objects.insert(obj);
+                }
+                else if(ends_with(line, ", destructor"))
+                {
+                    objects.erase(obj);
+                }
+            }
+            return static_cast<int>(objects.size());
+        }
+
+    private:
+        static bool ends_with(const std::string& s, const std::string& suffix)
+        {
+            return s.size() >= suffix.size()
+                   && s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
+        }
+
+        std::ofstream* saved_;
+        std::stringbuf buffer_;
+        std::ofstream  log_;
+    };
 }

@@ -1325,69 +1325,17 @@ TYPED_TEST(local_matrix, async_moves_complete_on_sync)
 
 namespace
 {
-    // The backend objects (HostMatrixCSR, HIPAcceleratorMatrixELL, ...) constructed and not
-    // yet destructed while the counter exists, read from the debug trace, which logs every
-    // backend constructor and destructor with the object address. Tests also expect a
-    // positive count, which drops to 0 if the trace changes.
-    class BackendObjectCounter
+    template <typename T>
+    void destroy_after_async_moves(const Csr<T>& ref)
     {
-    public:
-        BackendObjectCounter()
-            : saved_(rocalution::_get_backend_descriptor()->log_file)
-        {
-            static_cast<std::ostream&>(log_).rdbuf(&buffer_);
-            rocalution::_get_backend_descriptor()->log_file = &log_;
-        }
+        auto to_accelerator = make_local_matrix(Backend::Host, ref);
+        to_accelerator->MoveToAcceleratorAsync();
+        to_accelerator.reset();
 
-        ~BackendObjectCounter()
-        {
-            rocalution::_get_backend_descriptor()->log_file = saved_;
-        }
-
-        BackendObjectCounter(const BackendObjectCounter&)            = delete;
-        BackendObjectCounter& operator=(const BackendObjectCounter&) = delete;
-
-        // The live objects whose class name starts with prefix
-        int live(const std::string& prefix) const
-        {
-            const std::string address = "Obj addr: ";
-            const std::string object  = "; fct: " + prefix;
-
-            std::set<std::string> objects;
-            std::istringstream    trace(buffer_.str());
-            std::string           line;
-            while(std::getline(trace, line))
-            {
-                const size_t a = line.find(address);
-                const size_t f = line.find(object);
-                if(a == std::string::npos || f == std::string::npos || f < a)
-                {
-                    continue;
-                }
-                const std::string obj = line.substr(a + address.size(), f - a - address.size());
-                if(ends_with(line, ", constructor with local_backend"))
-                {
-                    objects.insert(obj);
-                }
-                else if(ends_with(line, ", destructor"))
-                {
-                    objects.erase(obj);
-                }
-            }
-            return static_cast<int>(objects.size());
-        }
-
-    private:
-        static bool ends_with(const std::string& s, const std::string& suffix)
-        {
-            return s.size() >= suffix.size()
-                   && s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
-        }
-
-        std::ofstream* saved_;
-        std::stringbuf buffer_;
-        std::ofstream  log_;
-    };
+        auto to_host = make_local_matrix(Backend::Accelerator, ref);
+        to_host->MoveToHostAsync();
+        to_host.reset();
+    }
 }
 
 // The matrix changes its backend in Sync(), not before, and keeps its stored entries
@@ -1547,6 +1495,136 @@ TEST(local_matrix_moves, async_move_of_a_host_matrix_to_the_host_changes_nothing
         const Csr<T> ref = banded<T>();
         auto         A   = make_local_matrix(Backend::Host, ref);
         A->MoveToHostAsync();
+        A->Sync();
+        if(expect_location(A, Backend::Host))
+        {
+            expect_matrix(*A, ref, csr_format, Backend::Host);
+        }
+    });
+}
+
+// The destructor frees only the current backend object, so Clear() frees the other one
+TEST(local_matrix_moves, a_matrix_destroyed_during_an_async_move_frees_both_objects)
+{
+    REQUIRE_BACKEND(Backend::Accelerator);
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
+
+        const Csr<T> ref = banded<T>();
+        for(const Backend from : {Backend::Host, Backend::Accelerator})
+        {
+            const Backend to = from == Backend::Host ? Backend::Accelerator : Backend::Host;
+            SCOPED_TRACE("to the " + backend_name(to));
+
+            BackendObjectCounter objects;
+            {
+                auto A = make_local_matrix(from, ref);
+                move_async(*A, to);
+                EXPECT_EQ(objects.live("HostMatrix"), 1);
+                EXPECT_EQ(objects.live("HIPAcceleratorMatrix"), 1);
+            }
+            EXPECT_EQ(objects.live("HostMatrix"), 0);
+            EXPECT_EQ(objects.live("HIPAcceleratorMatrix"), 0);
+        }
+    });
+}
+
+// LeakSanitizer also sees the data that the backend objects own, at the exit of the child.
+// The child stops rocALUTION first, as LeakSanitizer can hang at the exit of a process whose
+// HIP backend still runs. LeakSanitizer reports every leak of the child, so the case also
+// fails on a HIP runtime that leaks at exit, whatever the destructor does.
+TEST(local_matrix_moves, a_matrix_destroyed_after_an_async_move_without_sync_frees_both_objects)
+{
+    REQUIRE_BACKEND(Backend::Accelerator);
+#ifndef ROCALUTION_UNIT_ASAN
+    GTEST_SKIP() << "only an ASAN build shows whether the destructor frees the data of both "
+                    "backend objects";
+#endif
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
+
+        const Csr<T> ref = banded<T>();
+        expect_in_child(
+            [&] {
+                destroy_after_async_moves(ref);
+                rocalution::stop_rocalution();
+            },
+            120);
+    });
+}
+
+// Clear() cancels a pending async move, so the matrix stays on its backend, and Sync() then
+// does nothing
+TEST(local_matrix_moves, clear_cancels_a_pending_async_move)
+{
+    REQUIRE_BACKEND(Backend::Accelerator);
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
+
+        const Csr<T> ref = banded<T>();
+        for(const Backend from : {Backend::Host, Backend::Accelerator})
+        {
+            const Backend to = from == Backend::Host ? Backend::Accelerator : Backend::Host;
+            SCOPED_TRACE("to the " + backend_name(to));
+            const std::string from_objects
+                = from == Backend::Host ? "HostMatrix" : "HIPAcceleratorMatrix";
+            const std::string to_objects
+                = to == Backend::Host ? "HostMatrix" : "HIPAcceleratorMatrix";
+
+            BackendObjectCounter objects;
+            auto                 A = make_local_matrix(from, ref);
+            move_async(*A, to);
+            A->Clear();
+            EXPECT_EQ(objects.live(from_objects), 1);
+            EXPECT_EQ(objects.live(to_objects), 0);
+            A->Sync();
+            if(!expect_location(A, from))
+            {
+                continue;
+            }
+            EXPECT_EQ(A->GetM(), 0);
+            EXPECT_EQ(A->GetN(), 0);
+            EXPECT_EQ(A->GetNnz(), 0);
+        }
+    });
+}
+
+// Clear() ends a pending CopyFromAsync(), so the next one does not assert. The copy goes to
+// the accelerator, where it is asynchronous.
+TEST(local_matrix_moves, clear_ends_a_pending_copy_from_async)
+{
+    REQUIRE_BACKEND(Backend::Accelerator);
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
+
+        const Csr<T> ref = banded<T>();
+        auto         src = make_local_matrix(Backend::Host, ref);
+        auto         A   = empty_local_matrix<T>(Backend::Accelerator);
+        A->CopyFromAsync(*src);
+        A->Clear();
+        EXPECT_EQ(A->GetNnz(), 0);
+        A->CopyFromAsync(*src);
+        A->Sync();
+        expect_matrix(*A, ref, csr_format, Backend::Accelerator);
+    });
+}
+
+// The matrix stays on the host, so it takes host arrays
+TEST(local_matrix_moves, set_data_ptr_csr_during_an_async_move_keeps_the_matrix_on_the_host)
+{
+    REQUIRE_BACKEND(Backend::Accelerator);
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
+
+        const Csr<T> ref        = rectangular<T>(8, 12);
+        PtrType*     row_offset = nullptr;
+        int*         col        = nullptr;
+        T*           val        = nullptr;
+        make_local_matrix(Backend::Host, ref)->LeaveDataPtrCSR(&row_offset, &col, &val);
+
+        auto A = make_local_matrix(Backend::Host, banded<T>());
+        A->MoveToAcceleratorAsync();
+        A->SetDataPtrCSR(&row_offset, &col, &val, "A", ref.nnz(), ref.n, ref.m);
         A->Sync();
         if(expect_location(A, Backend::Host))
         {
