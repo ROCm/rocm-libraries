@@ -16,11 +16,17 @@ _TESTS_DIR = os.path.dirname(os.path.dirname(__file__))
 if _TESTS_DIR not in sys.path:
     sys.path.insert(0, _TESTS_DIR)
 
-_UNIT_DIR = os.path.dirname(__file__)
+_UNIT_DIR = os.path.dirname(os.path.abspath(__file__))
 if _UNIT_DIR not in sys.path:
     sys.path.insert(0, _UNIT_DIR)
 
 from streamk5_test_helpers import mock_streamk_writer  # noqa: F401
+from gpu_detection import (
+    arch_matches,
+    check_gpu_marks,
+    detect_gpu_target,
+    hip_available,
+)
 from rocisa_test_state import preserve_rocisa_kernel_state
 from toolchain_test_helpers import (
     cxx_compiler as _cxx_compiler,
@@ -28,6 +34,67 @@ from toolchain_test_helpers import (
     shared_full_isa_info_map,
     shared_isa_info_map_or_skip,
 )
+
+# Why the GPU probe failed, stored on each gpu test so pytest_runtest_setup fails it.
+_GPU_PROBE_ERROR = pytest.StashKey[str]()
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_collection_modifyitems(config, items):
+    """Skip ``gpu``-marked tests the GPU can't run.
+
+    ``gpu`` = any GPU; ``gpu("gfx950", ...)`` = one of those (``gfx1250`` covers
+    ``gfx1250-strict``). One ``gpu`` mark per test, on the param, function, class
+    or module, with positional arch strings only (``check_gpu_marks``). A malformed
+    mark, or a HIP error while reading the device, fails the test in
+    ``pytest_runtest_setup`` below instead of skipping it.
+    Runs after ``-m`` deselection, so ``-m "not gpu"`` never probes the GPU.
+    """
+    probe = None  # (arch or None, error or None), read once for the first gpu test
+    for item in items:
+        if not str(item.path).startswith(_UNIT_DIR + os.sep):
+            continue
+        mark = item.get_closest_marker("gpu")
+        if mark is None:
+            continue
+        try:
+            check_gpu_marks(item)
+        except pytest.UsageError:
+            # Not skipped: pytest_runtest_setup below reports it as this test's error.
+            continue
+        if not hip_available():
+            item.add_marker(pytest.mark.skip(reason="needs hip-python"))
+            continue
+        if probe is None:
+            try:
+                probe = (detect_gpu_target(), None)
+            except RuntimeError as error:
+                probe = (None, str(error))
+        found, error = probe
+        if error is not None:
+            item.stash[_GPU_PROBE_ERROR] = error
+        elif found is None:
+            item.add_marker(pytest.mark.skip(reason="needs a GPU (none visible to HIP)"))
+        elif mark.args and not any(arch_matches(found, a) for a in mark.args):
+            item.add_marker(pytest.mark.skip(reason=f"needs {'/'.join(mark.args)}, found {found}"))
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_setup(item):
+    """Report a malformed ``gpu`` mark, or a failed GPU probe, as an error of the test.
+
+    If the collection hook raised them instead, pytest-xdist would turn them into an
+    INTERNALERROR that hides the message and the test's id.
+    """
+    if not str(item.path).startswith(_UNIT_DIR + os.sep) or item.get_closest_marker("gpu") is None:
+        return
+    try:
+        check_gpu_marks(item)
+    except pytest.UsageError as error:
+        pytest.fail(str(error), pytrace=False)
+    error = item.stash.get(_GPU_PROBE_ERROR, None)
+    if error is not None:
+        pytest.fail(f"cannot read the GPU: {error}", pytrace=False)
 
 
 @pytest.fixture(autouse=True)

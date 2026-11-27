@@ -116,11 +116,12 @@ sys.path.insert(0, TENSILE_ROOT)
 # register scanning, kernel launch) instead of re-implementing it here. The
 # wave32-specific bits (gfx1250) are passed as args to the wave-size-aware
 # helpers.
+from gpu_detection import detect_gpu_target, gpu_is  # noqa: E402
 from gpu_test_helpers import (  # noqa: E402
-    GFX_TARGET,
     run_on_gpu,
     init_rocisa,
     assemble_kernel,
+    _assembler_target,
     _scan_register_indices,
 )
 
@@ -129,7 +130,6 @@ from gpu_test_helpers import (  # noqa: E402
 # GPU target (this test is gfx1250-only)
 # ---------------------------------------------------------------------------
 TARGET = "gfx1250"
-HAS_GFX1250 = GFX_TARGET == TARGET
 WAVESIZE = 32
 HOST_PAD_K_BYTES = 64   # host K padding of a swizzled-TDM operand (SwizzledTdmGeometry.PAD_K_BYTES)
 GLOBAL_PREFETCH_SIZE = 256
@@ -831,11 +831,15 @@ def _make_writer(kernel):
 # Kernel assembly generation
 # ---------------------------------------------------------------------------
 
-def build_kernel(cfg, with_prefetch=False):
+def build_kernel(cfg, with_prefetch=False, target=TARGET):
     """Build a kernel computing GL2 addresses for all of cfg.tensors at once.
 
     with_prefetch also emits each stage's issueLoad and a final clearIncrement,
     for assembling only: the dummy base buffer does not back the whole footprint.
+
+    ``target`` names the assembler target (``gfx1250`` or ``gfx1250-strict``);
+    the ``.amdgcn_target`` directive must match the ``-mcpu`` the kernel is
+    assembled with.
 
     The kernel emits cfg.n_inc+1 "stages": stage 0 is the start address after
     the loop-counter-guarded skipPGR, and each later stage calls incrementAddr
@@ -851,7 +855,7 @@ def build_kernel(cfg, with_prefetch=False):
     from rocisa.instruction import SMovB32, SCmpLeU32, SCBranchSCC1
     from tensilelite.KernelWriterAssembly import GL2PrefetchLoad
 
-    init_rocisa(target=TARGET, wavesize=WAVESIZE)
+    init_rocisa(target=target, wavesize=WAVESIZE)
     kernel = _make_kernel(cfg)
     w = _make_writer(kernel)
     comp = GL2PrefetchLoad()
@@ -1179,7 +1183,7 @@ def build_kernel(cfg, with_prefetch=False):
     args_md = "\n".join(args)
 
     asm = f"""\
-.amdgcn_target "amdgcn-amd-amdhsa--{TARGET}"
+.amdgcn_target "amdgcn-amd-amdhsa--{target}"
 {set_dir}
 .text
 .protected test_kernel
@@ -1432,7 +1436,9 @@ def verify_tensor(offsets, spec, cfg, stage, batch=0, group=0, debug=False):
 
 
 def run_config(cfg, tmp_dir, debug=False):
-    asm, layout, n_out = build_kernel(cfg)
+    # The device's own target: on a gfx1250-strict device assemble_kernel passes
+    # -mcpu=gfx1250-strict, which rejects a gfx1250 directive.
+    asm, layout, n_out = build_kernel(cfg, target=_assembler_target())
     co_path = os.path.join(tmp_dir, f"gl2_{cfg.name}.co")
     if debug:
         with open(os.path.join(tmp_dir, f"gl2_{cfg.name}.s"), "w") as f:
@@ -1490,9 +1496,8 @@ def run_config(cfg, tmp_dir, debug=False):
 # ---------------------------------------------------------------------------
 # Pytest
 # ---------------------------------------------------------------------------
-@pytest.mark.gpu
+@pytest.mark.gpu(TARGET)
 @pytest.mark.gfx1250
-@pytest.mark.skipif(not HAS_GFX1250, reason=f"GL2 prefetch tests require gfx1250, found {GFX_TARGET}")
 class TestGL2PrefetchOffset:
 
     @pytest.fixture(params=CONFIGS, ids=lambda c: c.name)
@@ -1506,7 +1511,8 @@ class TestGL2PrefetchOffset:
 
 def _assemble_for_target(asm, obj_path):
     """Assemble for TARGET without a device present. assemble_kernel targets the
-    detected GPU, which a CPU-only runner does not have."""
+    detected GPU, which a CPU-only runner does not have. The caller builds with
+    build_kernel's default target, TARGET, so the directive and -mcpu agree."""
     clang = shutil.which("amdclang++")
     if clang is None:
         pytest.skip("amdclang++ not found")
@@ -1622,6 +1628,41 @@ def test_gl2_prefetch_codegen(cfg, tmp_path):
     _cover_kwa_gl2_hooks(cfg)
 
 
+class _StopBeforeLaunch(Exception):
+    """Raised in place of the assembler call, so run_config stops before the launch."""
+
+
+@pytest.mark.parametrize("arch", ["gfx1250", "gfx1250-strict"])
+def test_gpu_path_builds_for_the_device_it_runs_on(arch, monkeypatch, tmp_path):
+    """run_config's ``.amdgcn_target`` directive matches the ``-mcpu`` assemble_kernel passes.
+
+    Runs on CPU: the assembler command is captured at ``subprocess.check_call``, and the
+    test stops there. The GPU path itself only runs on gfx1250 hardware, so without this
+    a directive hard-coded back to ``gfx1250`` would go unnoticed until a gfx1250-strict
+    runner, where clang rejects a gfx1250 directive under ``-mcpu=gfx1250-strict``.
+    """
+    import gpu_detection
+
+    monkeypatch.setenv("TENSILE_GPU_TARGET", arch)
+    gpu_detection.detect_gpu_target.cache_clear()
+    captured = {}
+
+    def capture_and_stop(cmd, *args, **kwargs):
+        captured["mcpu"] = next(a for a in cmd if a.startswith("-mcpu="))[len("-mcpu="):]
+        with open(cmd[-1]) as source:  # the .s file; assemble_kernel deletes it afterwards
+            captured["asm"] = source.read()
+        raise _StopBeforeLaunch
+
+    monkeypatch.setattr(subprocess, "check_call", capture_and_stop)
+    try:
+        with pytest.raises(_StopBeforeLaunch):
+            run_config(CONFIGS[0], str(tmp_path))
+    finally:
+        gpu_detection.detect_gpu_target.cache_clear()
+    assert captured["mcpu"] == arch
+    assert f'.amdgcn_target "amdgcn-amd-amdhsa--{arch}"' in captured["asm"]
+
+
 # ---------------------------------------------------------------------------
 # Standalone runner
 # ---------------------------------------------------------------------------
@@ -1631,8 +1672,8 @@ if __name__ == "__main__":
     parser.add_argument("--debug", action="store_true")
     args = parser.parse_args()
 
-    if not HAS_GFX1250:
-        print(f"SKIP: requires gfx1250, found {GFX_TARGET}")
+    if not gpu_is(TARGET):
+        print(f"SKIP: requires {TARGET}, found {detect_gpu_target()}")
         sys.exit(0)
 
     total = 0

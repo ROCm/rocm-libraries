@@ -302,21 +302,21 @@ amdhsa.kernels:
 """
 
 
-@pytest.mark.gpu
 @pytest.mark.parametrize(
     "arch,isa,wave",
     [
-        ("gfx1201", (12, 0, 1), 32),
-        ("gfx1201", (12, 0, 1), 64),
-        ("gfx950", (9, 5, 0), 64),
-        ("gfx1250", (12, 5, 0), 32),
+        pytest.param(a, isa, w, marks=pytest.mark.gpu(a))
+        for a, isa, w in [
+            ("gfx1201", (12, 0, 1), 32),
+            ("gfx1201", (12, 0, 1), 64),
+            ("gfx950", (9, 5, 0), 64),
+            ("gfx1250", (12, 5, 0), 32),
+        ]
     ],
 )
 def test_flag_store_has_one_active_writer_and_restores_exec(tmp_path, arch, isa, wave):
-    from gpu_test_helpers import GFX_TARGET, hip, run_on_gpu
+    from gpu_test_helpers import run_on_gpu
 
-    if hip is None or GFX_TARGET != arch:
-        pytest.skip(f"requires HIP and {arch}, found {GFX_TARGET}")
     writer = _FlagWriter(isa, wave)
     source = tmp_path / "flag.s"
     code = tmp_path / "flag.co"

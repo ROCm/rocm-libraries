@@ -16,8 +16,6 @@ import pytest
 from types import SimpleNamespace
 
 from gpu_test_helpers import (
-    HAS_GFX950,
-    GFX_TARGET,
     TileConfig,
     BPE, LOAD_WIDTH, WAVESIZE, NUM_THREADS, NUM_WAVES,
     generate_gra_asm,
@@ -135,8 +133,7 @@ TILE_CONFIGS = [
 
 # `gpu` routes this host-arch roundtrip to the unit lane's native-rocisa pass;
 # stinkytofu only emits gfx1250 ISA and cannot assemble for the host arch.
-@pytest.mark.gpu
-@pytest.mark.skipif(not HAS_GFX950, reason=f"GPU tests require gfx950, found {GFX_TARGET}")
+@pytest.mark.gpu("gfx950")
 class TestGraTileAssignmentGPU:
 
     @pytest.fixture(params=TILE_CONFIGS, ids=lambda c: c.label)

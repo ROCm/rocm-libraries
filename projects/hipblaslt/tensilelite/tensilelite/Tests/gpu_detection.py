@@ -24,11 +24,17 @@
 
 """
 GPU architecture detection for TensileLite unit and common tests.
+
+``get_available_archs``: every arch on the machine, for common-config ``skip-gfxNNNN``.
+``detect_gpu_target``: the device HIP gives this process, for the unit-test ``gpu`` mark.
 """
 
 import contextlib
+import functools
 import os
 import re
+import subprocess
+import sys
 
 from tensilelite.GpuArch import (
     _ROCMINFO_RELPATHS,
@@ -101,6 +107,115 @@ def get_available_archs() -> list[str]:
 def has_arch(target: str) -> bool:
     """Check if a specific GPU architecture is available."""
     return any(target in arch for arch in get_available_archs())
+
+
+# ---- Unit-test device (HIP; lazy, so `-m "not gpu"` never initialises it) ----
+
+@functools.cache
+def _hip():
+    try:
+        from hip import hip
+    except ImportError:
+        return None
+    return hip
+
+
+def hip_available() -> bool:
+    """True when hip-python is importable."""
+    return _hip() is not None
+
+
+# Runs in a child process. Tests/unit/conftest.py calls detect_gpu_target() at collection,
+# before the autouse assign_gpu_to_worker fixture (Tests/conftest.py) sets
+# HIP_VISIBLE_DEVICES, and HIP ignores that variable once it is initialised, so an
+# in-process probe put every pytest-xdist worker on GPU 0. Prints device 0's arch, or
+# nothing when HIP reports no device; any other HIP error exits non-zero with its name.
+_PROBE = """
+import sys
+
+from hip import hip
+
+
+def check(result):
+    error, *rest = result if isinstance(result, tuple) else (result,)
+    if int(error) == int(hip.hipError_t.hipErrorNoDevice):
+        raise SystemExit(0)  # no device: print nothing, so the tests skip
+    if int(error) != 0:
+        sys.exit(f"HIP error {int(error)} ({getattr(error, 'name', error)})")
+    return rest[0] if len(rest) == 1 else rest
+
+
+if int(check(hip.hipGetDeviceCount())) > 0:
+    try:
+        # hip-python 10 (a wrapper over rocm-bindings) returns the struct.
+        props = check(hip.hipGetDeviceProperties(0))
+    except TypeError:
+        # Earlier releases fill a caller-owned struct instead.
+        props = hip.hipDeviceProp_t()
+        check(hip.hipGetDeviceProperties(props, 0))
+    name = props.gcnArchName
+    print(name.decode() if isinstance(name, bytes) else name)
+"""
+
+
+@functools.cache
+def detect_gpu_target() -> str | None:
+    """Arch of HIP device 0 (e.g. ``gfx1250-strict``), or None without hip-python or a device.
+
+    ``TENSILE_GPU_TARGET`` overrides. HIP, unlike rocm_agent_enumerator, honours
+    ROCR_VISIBLE_DEVICES, sees only devices this process can open, and keeps
+    the stepping. HIP is queried in a child process (see ``_PROBE``). RuntimeError for any
+    other HIP error, or if that process crashes or hangs: a machine whose GPU is broken
+    fails its ``gpu`` tests rather than skipping them. HIP also reports ``hipErrorNoDevice``
+    when the driver cannot open the GPU, so only ``--require-gpu`` catches that case.
+    """
+    override = os.environ.get("TENSILE_GPU_TARGET")
+    if override:
+        return override
+    if _hip() is None:
+        return None
+    # The probe takes under a second on a multi-GPU gfx942 node; the timeout only stops a hung
+    # driver from stalling collection.
+    try:
+        probe = subprocess.run([sys.executable, "-c", _PROBE], capture_output=True, text=True,
+                               timeout=120, check=False)
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"GPU probe ({sys.executable}) did not finish in 120 s") from None
+    if probe.returncode != 0:
+        raise RuntimeError(
+            f"GPU probe ({sys.executable}) exited with {probe.returncode}: {probe.stderr.strip()[-500:]}")
+    # gcnArchName carries target features (gfx942:sramecc+:xnack-).
+    return probe.stdout.strip().split(":")[0] or None
+
+
+def arch_matches(found: str, wanted: str) -> bool:
+    """``gfx1250`` matches ``gfx1250`` and ``gfx1250-strict``; ``gfx1250-strict`` only itself."""
+    return found == wanted or found.startswith(wanted + "-")
+
+
+def check_gpu_marks(item) -> None:
+    """One ``gpu`` mark per test, positional arch strings only; raise a usage error otherwise.
+
+    Counted over the whole chain (param, function, class, module). With several,
+    the one ``get_closest_marker`` returns depends on the test's shape and the
+    pytest version, so the gate could run the test on the wrong arch.
+    """
+    import pytest
+
+    marks = list(item.iter_markers("gpu"))
+    if len(marks) > 1:
+        raise pytest.UsageError(
+            f"{item.nodeid}: {len(marks)} gpu marks across its param, function, class and module; use one")
+    for m in marks:
+        if m.kwargs or not all(isinstance(a, str) for a in m.args):
+            raise pytest.UsageError(
+                f"{item.nodeid}: gpu() takes arch strings only, e.g. gpu(\"gfx950\"); got {m.args} {m.kwargs}")
+
+
+def gpu_is(*archs: str) -> bool:
+    """True if the GPU matches any of *archs*. For non-gate code; tests use ``gpu(...)``."""
+    found = detect_gpu_target()
+    return found is not None and any(arch_matches(found, a) for a in archs)
 
 
 # Device tags name a product that shares its gfx architecture with others, which

@@ -7,11 +7,9 @@ import numpy as np
 import pytest
 
 from gpu_test_helpers import (
-    GFX_TARGET,
     assemble_kernel,
     generate_kernel_asm,
     generate_load_params,
-    hip,
     init_rocisa,
     run_on_gpu,
 )
@@ -23,11 +21,7 @@ from tensilelite.KernelWriterAssembly import KernelWriterAssembly
 
 pytestmark = [
     pytest.mark.unit,
-    pytest.mark.gpu,
-    pytest.mark.skipif(
-        hip is None or GFX_TARGET not in ("gfx942", "gfx950"),
-        reason="requires HIP and a wave-search target (gfx942 or gfx950)",
-    ),
+    pytest.mark.gpu("gfx942", "gfx950"),
 ]
 
 TILE = 16

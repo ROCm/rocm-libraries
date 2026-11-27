@@ -17,8 +17,6 @@ import pytest
 import numpy as np
 
 from gpu_test_helpers import (
-    HAS_GFX950,
-    GFX_TARGET,
     TileConfig,
     BPE, WAVESIZE, NUM_THREADS,
     assemble_and_run,

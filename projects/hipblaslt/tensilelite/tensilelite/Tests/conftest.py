@@ -75,6 +75,34 @@ def pytest_addoption(parser):
              "With --build-only: compressed build outputs are written here. "
              "With --use-cache: previously built artifacts are read from here. "
              "Required when either --build-only or --use-cache is set.")
+    parser.addoption("--require-gpu", action="store_true", default=False,
+        help="Fail the run up front when hip-python or a GPU is missing, instead of skipping "
+             "every gpu-marked unit test (TheRock's standard, comprehensive and full tiers set it)")
+
+
+def pytest_configure(config):
+    """``--require-gpu``: fail the run up front when hip-python or a GPU is missing.
+
+    Registered here, in the conftest every run under ``Tests`` loads, so the flag works
+    with any path argument (``Tests``, ``Tests/unit`` or one file). Checked only in the
+    controller: a usage error raised on a pytest-xdist worker becomes an INTERNALERROR
+    that hides the message.
+    """
+    if hasattr(config, "workerinput") or not config.getoption("--require-gpu"):
+        return
+    from gpu_detection import detect_gpu_target, hip_available
+
+    if not hip_available():
+        raise pytest.UsageError(
+            "--require-gpu: hip-python is not importable; install requirements-test.txt")
+    try:
+        found = detect_gpu_target()
+    except RuntimeError as error:
+        raise pytest.UsageError(f"--require-gpu: {error}") from None
+    if found is None:
+        raise pytest.UsageError(
+            "--require-gpu: HIP reports no GPU (hipErrorNoDevice); check that rocminfo lists "
+            "one and that HIP_VISIBLE_DEVICES does not hide it")
 
 @pytest.fixture(scope="session")
 def timing_path(pytestconfig, tmpdir_factory):
