@@ -17,7 +17,7 @@ Read every changed line of your owned files, and the outside code each change de
   - `IsApplicable` accepts exactly what the kernel supports: data types, layouts (NCHW, NHWC, NCDHW, NDHWC), groups, strides,
     dilations, padding, tensor sizes and 32-bit index limits, and the architecture (`StartsWith(device_name, "gfx…")`, wave size,
     XNACK, LDS limit). A solver that returns true for a problem its kernel mis-computes is the worst outcome here: the find step
-    picks it silently.
+    picks it silently. When `APPL` runs, predicate gaps go to it under **Handoffs**.
   - `GetWorkspaceSize` covers what the invoker writes; the invoker uses the workspace it was given, not one it assumes.
   - Tunable solvers (declared in `projects/miopen/src/include/miopen/conv/solvers.hpp` and the other `*/solvers.hpp`): the
     perf config's `IsValid`, `SetNextValue`, `operator==` and serialization agree with `IsValidPerformanceConfig`;

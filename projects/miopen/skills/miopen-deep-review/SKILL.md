@@ -35,6 +35,7 @@ Ask for what is missing; record it in `PIN.md`:
 | `round:<N>` | Default: one more than the highest `$EVIDENCE/r<k>/`; 1 when none |
 | `prior:<dir>` | Optional published record of earlier rounds that `$EVIDENCE` lacks (`LEDGER.md` and `r<k>/`); [RUNBOOK.md](RUNBOOK.md) *Iterate* seeds `$EVIDENCE` from it |
 | Agent limits | Ask the user or the host for `Agents:` (maximum concurrent agents), `Cores:` (CPU cores for builds and tests), `GPU:` (the local `gfx` architecture, or none) and `Mutation:` (a host recipe for mutating a built tree, or none); the skill assumes no values. They go into `dispatch-context.md` ([RUNBOOK.md](RUNBOOK.md) *Fan out*) |
+| Hazard knowledge | Optional: a directory of applicability hazard notes (distinct from `knowledge:`), or none. It goes into `dispatch-context.md` as `Hazard knowledge:` and is read by the `APPL` lane ([lanes/applicability.md](lanes/applicability.md) *Hazard knowledge directory*) |
 | Scope notes | Ask the user for scope notes the change's description does not state, such as areas being deprecated (the rocMLIR solvers), or `none`. Free text; it goes into `dispatch-context.md` as `Scope:` and is informational unless it says "do not file findings in <area>" ([lanes/common.md](lanes/common.md) *Rules*) |
 
 Local builds and host-only tests are allowed. GPU, remote or shared compute, and every write
