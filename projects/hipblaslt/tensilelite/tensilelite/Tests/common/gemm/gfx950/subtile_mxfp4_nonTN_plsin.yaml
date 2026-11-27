@@ -22,7 +22,6 @@ GlobalParameters:
   MXScaleFormat: 1
   BoundsCheck: 0
   KeepBuildTmp: True
-  CpuThreads: 1
   RotatingBufferSize: 0
 
 # PostLoopStoreInNll on the non-TN layouts (NT / NN / TT).

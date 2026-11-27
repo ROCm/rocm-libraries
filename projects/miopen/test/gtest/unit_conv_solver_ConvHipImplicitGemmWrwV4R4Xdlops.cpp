@@ -103,20 +103,20 @@ TEST_P(CPU_UnitTestConvSolverHipImplicitGemmWrwV4R4XdlopsDevApplicabilityWrw_FP3
     this->RunTest(miopen::solver::conv::ConvHipImplicitGemmWrwV4R4Xdlops{});
 };
 
-// Smoke tests
-INSTANTIATE_TEST_SUITE_P(Smoke,
+// Quick tests
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverHipImplicitGemmWrwV4R4XdlopsWrw_FP16,
                          testing::Combine(testing::Values(GetTestParamsFP16()),
                                           testing::Values(miopenConvolutionAlgoImplicitGEMM),
                                           testing::ValuesIn(GetConvTestCases(miopenHalf))));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverHipImplicitGemmWrwV4R4XdlopsWrw_BFP16,
                          testing::Combine(testing::Values(GetTestParamsBFP16()),
                                           testing::Values(miopenConvolutionAlgoImplicitGEMM),
                                           testing::ValuesIn(GetConvTestCases(miopenBFloat16))));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverHipImplicitGemmWrwV4R4XdlopsWrw_FP32,
                          testing::Combine(testing::Values(GetTestParamsFP32()),
                                           testing::Values(miopenConvolutionAlgoImplicitGEMM),
@@ -124,12 +124,12 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 
 // Device applicability test
 INSTANTIATE_TEST_SUITE_P(
-    Smoke,
+    Quick,
     CPU_UnitTestConvSolverHipImplicitGemmWrwV4R4XdlopsDevApplicabilityWrw_BFP16,
     testing::Combine(testing::Values(GetTestParamsBFP16()),
                      testing::Values(GetConvTestCases(miopenBFloat16)[0])));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          CPU_UnitTestConvSolverHipImplicitGemmWrwV4R4XdlopsDevApplicabilityWrw_FP32,
                          testing::Combine(testing::Values(GetTestParamsFP32()),
                                           testing::Values(GetConvTestCases(miopenFloat)[0])));

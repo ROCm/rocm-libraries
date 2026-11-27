@@ -1,0 +1,36 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass=girFrameWaits --print-output
+#
+# A frame contract does not make every barrier in the function a frame fence. Only a barrier
+# GirFencePlacementPass actually placed carries a derived wait, and `GirFenceCoverage` is the
+# record of that -- which is why the token scan asks `girPlacedFence`. Keying the DS and async
+# fallbacks on "the function has a contract" instead exempted every barrier, including ones the
+# frame analysis never placed, and left an untokened read in flight across them.
+#
+# The barrier below was not placed by GIR and the ds_load carries no token, so the drain stands.
+#
+# CHECK-LABEL: @gir_unplaced_barrier_still_drains
+# CHECK: ^loop:
+# CHECK-NEXT: "st.ds_load_b128"(v10)
+# CHECK-NEXT: "st.s_wait_dscnt"(0)
+# CHECK-NEXT: "st.s_barrier_signal"(-1)
+# CHECK-NEXT: "st.s_barrier_wait"(-1)
+
+st.metadata "gir.frame_contract" {
+gir-frame-contract
+
+gen 0  ring=2 entry=0
+}
+
+st.func @gir_unplaced_barrier_still_drains() {
+^entry:
+  "st.s_branch"("loop")
+  Successors: ^loop
+^loop:
+  v[0:3] = "st.ds_load_b128"(v10) { mod.ds = { na = 1, offset = 0, gds = false } }
+  "st.s_barrier_signal"(-1)
+  "st.s_barrier_wait"(-1)
+  "st.tensor_load_to_lds"(s[0:3], s[10:17])
+  "st.s_cbranch_scc1"("loop", SCC0)
+  Successors: ^loop, ^exit
+^exit:
+}

@@ -84,15 +84,19 @@ namespace hiptensor
                                       ContractionUnaryOps const&         unaryOps,
                                       const uint64_t                     workspaceSize)
     {
-        // Make sure that we calculate full element space incase strides are not packed.
-        auto sizeA = elementsFromLengths(a_ms_ks_lengths) * hiptensorDataTypeSize(typeA);
-        auto sizeB = elementsFromLengths(b_ns_ks_lengths) * hiptensorDataTypeSize(typeB);
-        auto sizeD = 0;
+        // Size the buffers from the full element space, since the strides may not be packed.
+        auto sizeA = elementSpaceFromLengthsAndStrides(a_ms_ks_lengths, a_ms_ks_strides)
+                     * hiptensorDataTypeSize(typeA);
+        auto sizeB = elementSpaceFromLengthsAndStrides(b_ns_ks_lengths, b_ns_ks_strides)
+                     * hiptensorDataTypeSize(typeB);
+        std::size_t sizeD = 0;
         if(typeD != NONE_TYPE)
         {
-            sizeD = elementsFromLengths(d_ms_ns_lengths) * hiptensorDataTypeSize(typeD);
+            sizeD = elementSpaceFromLengthsAndStrides(d_ms_ns_lengths, d_ms_ns_strides)
+                    * hiptensorDataTypeSize(typeD);
         }
-        auto sizeE = elementsFromLengths(e_ms_ns_lengths) * hiptensorDataTypeSize(typeE);
+        auto sizeE = elementSpaceFromLengthsAndStrides(e_ms_ns_lengths, e_ms_ns_strides)
+                     * hiptensorDataTypeSize(typeE);
 
         void *A_d, *B_d, *D_d, *E_d, *wspace;
 

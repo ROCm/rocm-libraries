@@ -11,7 +11,6 @@
 #include <cstdint>
 #include <stdexcept>
 #include <string>
-#include <vector>
 
 namespace TensileLite
 {
@@ -81,23 +80,24 @@ namespace TensileLite
 
     // One peer's kernarg group, indexed by FusedA2APeerSlot.
     using FusedA2APeerFields = std::array<void*, FUSED_A2A_SLOT_COUNT>;
+    // One group per rank, in rank order.
+    using FusedA2APeerTable = std::array<FusedA2APeerFields, FUSED_A2A_MAX_RANKS>;
 
     // Append the fixed-size fused-A2A kernarg segment to `args`, in the
     // exact emission order of Signature.py fusedA2AKernArgLayout().
     // peer_0_flagPtr is appendAligned<void*> to land on an 8-byte boundary,
-    // mirroring the kernel metadata; `peers` may be shorter than
-    // FUSED_A2A_MAX_RANKS, with the remaining groups filled with nullptr.
+    // mirroring the kernel metadata. Every group of `peers` is emitted,
+    // including those at or past worldSize.
     // flag and buffer carry no fixed offset from each other.
     template <typename KA>
-    inline void
-        appendFusedSegment(KA&                                    args,
-                           std::vector<FusedA2APeerFields> const& peers, // size W, in rank order
-                           void*                                  counterPtr,
-                           uint32_t                               myRank,
-                           uint32_t                               worldSize,
-                           uint32_t                               drain,
-                           uint32_t                               am,
-                           uint32_t                               numCu)
+    inline void appendFusedSegment(KA&                      args,
+                                   FusedA2APeerTable const& peers,
+                                   void*                    counterPtr,
+                                   uint32_t                 myRank,
+                                   uint32_t                 worldSize,
+                                   uint32_t                 drain,
+                                   uint32_t                 am,
+                                   uint32_t                 numCu)
     {
         if(!fusedA2AWorldSizeValid((int)worldSize))
         {
@@ -105,9 +105,6 @@ namespace TensileLite
                                      + " outside [1, " + std::to_string(FUSED_A2A_MAX_RANKS) + "]");
         }
 
-        if(peers.size() != worldSize)
-            throw std::runtime_error("[fused-a2a] " + std::to_string(peers.size())
-                                     + " peer groups for world " + std::to_string(worldSize));
         if(myRank >= worldSize)
             throw std::runtime_error("[fused-a2a] rank " + std::to_string(myRank)
                                      + " outside world " + std::to_string(worldSize));
@@ -115,12 +112,11 @@ namespace TensileLite
             throw std::runtime_error("[fused-a2a] no CU count for FusedNumCu.");
         size_t before = args.size();
 
-        static const FusedA2APeerFields kAbsent{};
         for(int j = 0; j < FUSED_A2A_MAX_RANKS; j++)
         {
-            const std::string        g = "peer_" + std::to_string(j) + "_";
-            FusedA2APeerFields const& f = j < (int)peers.size() ? peers[j] : kAbsent;
-            const std::string        flagName = g + FUSED_A2A_PEER_FIELD_NAMES[FUSED_A2A_SLOT_FLAG_PTR];
+            const std::string         g = "peer_" + std::to_string(j) + "_";
+            FusedA2APeerFields const& f = peers[j];
+            const std::string flagName  = g + FUSED_A2A_PEER_FIELD_NAMES[FUSED_A2A_SLOT_FLAG_PTR];
             if(j == 0)
                 args.template appendAligned<void*>(flagName, f[FUSED_A2A_SLOT_FLAG_PTR]);
             else
@@ -145,8 +141,7 @@ namespace TensileLite
         }
     }
 
-    inline void checkA2AGemmBufAligned(std::vector<FusedA2APeerFields> const& peers,
-                                       uint32_t                               myRank)
+    inline void checkA2AGemmBufAligned(FusedA2APeerTable const& peers, uint32_t myRank)
     {
         if(myRank < peers.size()
            && reinterpret_cast<uintptr_t>(peers[myRank][FUSED_A2A_SLOT_BUF_PTR]) % 128 != 0)

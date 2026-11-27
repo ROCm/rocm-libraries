@@ -7,6 +7,7 @@
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/utilities/CacheRoot.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <optional>
 #include <string>
@@ -91,6 +92,86 @@ TEST_F(TestCacheRoot, UnsetHomeDoesNotResolveToALiteralTildeDirectory)
 
     EXPECT_TRUE(root.empty());
     EXPECT_FALSE(std::filesystem::exists("~"));
+}
+
+/// The degradation above is reported, naming HIPDNN_CACHE_DIR and its value, once per shared
+/// object rather than on every cache access.
+TEST_F(TestCacheRoot, UnexpandableCacheDirWarnsOnceWithItsValue)
+{
+#if defined(__linux__)
+    const ScopedEnvironmentVariableSetter home("HOME", "");
+#else
+    const ScopedEnvironmentVariableSetter home("USERPROFILE", "");
+#endif
+    const ScopedEnvironmentVariableSetter cacheDir("HIPDNN_CACHE_DIR", "~/hipdnn_unexpanded_root");
+    detail::unexpandedCacheRootWarned().store(false);
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+
+    EXPECT_TRUE(cacheRoot().empty());
+    EXPECT_TRUE(cacheRoot().empty());
+
+    ASSERT_EQ(recorder.getRecordedLogCount(), 1) << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(
+        recorder.hasLogContaining(HIPDNN_SEV_WARN, "HIPDNN_CACHE_DIR='~/hipdnn_unexpanded_root'"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "on-disk caching is disabled"))
+        << recorder.getRecordedLogsAsString();
+}
+
+/// With HIPDNN_CACHE_DIR unset, the warning names the built-in default that could not be expanded
+/// and the unset home variable.
+TEST_F(TestCacheRoot, UnexpandableDefaultRootWarnsWithTheDefaultAndHomeVariable)
+{
+#if defined(__linux__)
+    const char* homeVariable = "HOME";
+#else
+    const char* homeVariable = "USERPROFILE";
+#endif
+    const ScopedEnvironmentVariableSetter home(homeVariable, "");
+    const ScopedEnvironmentVariableSetter cacheDir("HIPDNN_CACHE_DIR", "");
+    detail::unexpandedCacheRootWarned().store(false);
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+
+    EXPECT_TRUE(cacheRoot().empty());
+
+    ASSERT_EQ(recorder.getRecordedLogCount(), 1) << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN,
+                                          std::string("HIPDNN_CACHE_DIR is unset and its default '")
+                                              + HIPDNN_DATA_SDK_CACHE_ROOT_DEFAULT + "'"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, std::string(homeVariable) + " is unset"))
+        << recorder.getRecordedLogsAsString();
+}
+
+/// A `~user` value is never expanded, so with the home variable set the warning must not blame
+/// an unset home variable.
+TEST_F(TestCacheRoot, TildeUserCacheDirWarnsThatTheFormIsNotExpanded)
+{
+    const auto fakeHome = makeUniqueTempDir();
+#if defined(__linux__)
+    const ScopedEnvironmentVariableSetter home("HOME", fakeHome.string());
+#else
+    const ScopedEnvironmentVariableSetter home("USERPROFILE", fakeHome.string());
+#endif
+    const ScopedEnvironmentVariableSetter cacheDir("HIPDNN_CACHE_DIR",
+                                                   "~hipdnn_no_such_user/cache");
+    detail::unexpandedCacheRootWarned().store(false);
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+
+    EXPECT_TRUE(cacheRoot().empty());
+    EXPECT_FALSE(std::filesystem::exists("~hipdnn_no_such_user"));
+
+    ASSERT_EQ(recorder.getRecordedLogCount(), 1) << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(
+        recorder.hasLogContaining(HIPDNN_SEV_WARN, "HIPDNN_CACHE_DIR='~hipdnn_no_such_user/cache'"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "is not expanded"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_FALSE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "is unset"))
+        << recorder.getRecordedLogsAsString();
 }
 
 TEST_F(TestCacheRoot, CustomWritableDirIsUsedAndCreated)
