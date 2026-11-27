@@ -251,7 +251,10 @@ def is_valid_spec(spec: BatchNorm2DSpec, arch: str = "gfx950") -> Tuple[bool, st
         return False, "n, c, h, w must all be positive"
 
     if spec.save_mean_invstd and not spec.training:
-        return False, "save_mean_invstd requires training=True (inference has no batch mean/var to save)"
+        return (
+            False,
+            "save_mean_invstd requires training=True (inference has no batch mean/var to save)",
+        )
 
     if spec.channels_per_block <= 0:
         return False, "channels_per_block must be positive"
@@ -284,7 +287,10 @@ def is_valid_spec(spec: BatchNorm2DSpec, arch: str = "gfx950") -> Tuple[bool, st
     # it, it just must never be dispatched against an N it doesn't divide.
 
     if spec.fast_reduce and not spec.training:
-        return False, "fast_reduce requires training=True (inference has no reduction to speed up)"
+        return (
+            False,
+            "fast_reduce requires training=True (inference has no reduction to speed up)",
+        )
     if spec.fast_reduce and spec.block_size % spec.wave_size != 0:
         return False, (
             f"fast_reduce requires block_size {spec.block_size} divisible by "
@@ -450,9 +456,7 @@ def build_batchnorm2d(spec: BatchNorm2DSpec) -> KernelDef:
     if spec.training:
         lds_mean = make_lds_view(b, dtype=F32, shape=(BS,), name_hint="lds_mean").base
         lds_m2 = make_lds_view(b, dtype=F32, shape=(BS,), name_hint="lds_m2").base
-        lds_count = make_lds_view(
-            b, dtype=F32, shape=(BS,), name_hint="lds_count"
-        ).base
+        lds_count = make_lds_view(b, dtype=F32, shape=(BS,), name_hint="lds_count").base
 
     CPB = spec.channels_per_block
     NG = spec.n_groups
@@ -531,9 +535,7 @@ def build_batchnorm2d(spec: BatchNorm2DSpec) -> KernelDef:
                     # mask is applied to its *value*, so an out-of-range lane
                     # still issues an in-bounds load, just a discarded one.
                     for tc in range(tail_chunks):
-                        idx_col = b.add(
-                            b.const_i32(main_elems_per_row + tc * BS), tid
-                        )
+                        idx_col = b.add(b.const_i32(main_elems_per_row + tc * BS), tid)
                         valid = b.cmp_lt(idx_col, b.const_i32(HW))
                         idx_safe = b.smin(idx_col, b.const_i32(HW - 1))
                         flat = b.add(b.mul(row_n, b.const_i32(HW)), idx_safe)
@@ -1049,9 +1051,7 @@ def _build_batchnorm2d_dynamic(spec: BatchNorm2DSpec) -> KernelDef:
     if spec.training:
         lds_mean = make_lds_view(b, dtype=F32, shape=(BS,), name_hint="lds_mean").base
         lds_m2 = make_lds_view(b, dtype=F32, shape=(BS,), name_hint="lds_m2").base
-        lds_count = make_lds_view(
-            b, dtype=F32, shape=(BS,), name_hint="lds_count"
-        ).base
+        lds_count = make_lds_view(b, dtype=F32, shape=(BS,), name_hint="lds_count").base
 
     # CPB channels, one fully resolved at a time, same shape as
     # build_batchnorm2d's own CPB loop (including the "every lane done
@@ -1151,7 +1151,15 @@ def _build_batchnorm2d_dynamic(spec: BatchNorm2DSpec) -> KernelDef:
                     )
                 else:
                     mean, var = welford_block_reduce_stable(
-                        b, mean_p, m2_p, count_val, lds_mean, lds_m2, lds_count, tid, block_size=BS
+                        b,
+                        mean_p,
+                        m2_p,
+                        count_val,
+                        lds_mean,
+                        lds_m2,
+                        lds_count,
+                        tid,
+                        block_size=BS,
                     )
 
                 with b.scf_if(b.cmp_eq(tid, b.const_i32(0))):
@@ -1164,9 +1172,13 @@ def _build_batchnorm2d_dynamic(spec: BatchNorm2DSpec) -> KernelDef:
                     # Running variance is Bessel-corrected (M / (M - 1));
                     # Y and InvStd use the biased one.
                     m_total = b.sitofp_f32(b.mul(p_n, HW))
-                    unbias = b.fdiv(m_total, b.fmax(b.fsub(m_total, b.const_f32(1.0)), b.const_f32(1.0)))
+                    unbias = b.fdiv(
+                        m_total,
+                        b.fmax(b.fsub(m_total, b.const_f32(1.0)), b.const_f32(1.0)),
+                    )
                     new_running_var = b.fadd(
-                        b.fmul(one_minus_mom, old_var), b.fmul(momentum, b.fmul(var, unbias))
+                        b.fmul(one_minus_mom, old_var),
+                        b.fmul(momentum, b.fmul(var, unbias)),
                     )
                     b.global_store(RunningMean, channel, new_running_mean)
                     b.global_store(RunningVar, channel, new_running_var)
@@ -1331,7 +1343,15 @@ def _build_batchnorm2d_dynamic(spec: BatchNorm2DSpec) -> KernelDef:
                     )
                 else:
                     mean, var = welford_block_reduce_stable(
-                        b, mean_p, m2_p, count_val, lds_mean, lds_m2, lds_count, tid, block_size=BS
+                        b,
+                        mean_p,
+                        m2_p,
+                        count_val,
+                        lds_mean,
+                        lds_m2,
+                        lds_count,
+                        tid,
+                        block_size=BS,
                     )
 
                 with b.scf_if(b.cmp_eq(tid, b.const_i32(0))):
@@ -1344,9 +1364,13 @@ def _build_batchnorm2d_dynamic(spec: BatchNorm2DSpec) -> KernelDef:
                     # Running variance is Bessel-corrected (M / (M - 1));
                     # Y and InvStd use the biased one.
                     m_total = b.sitofp_f32(b.mul(p_n, HW))
-                    unbias = b.fdiv(m_total, b.fmax(b.fsub(m_total, b.const_f32(1.0)), b.const_f32(1.0)))
+                    unbias = b.fdiv(
+                        m_total,
+                        b.fmax(b.fsub(m_total, b.const_f32(1.0)), b.const_f32(1.0)),
+                    )
                     new_running_var = b.fadd(
-                        b.fmul(one_minus_mom, old_var), b.fmul(momentum, b.fmul(var, unbias))
+                        b.fmul(one_minus_mom, old_var),
+                        b.fmul(momentum, b.fmul(var, unbias)),
                     )
                     b.global_store(RunningMean, channel, new_running_mean)
                     b.global_store(RunningVar, channel, new_running_var)
@@ -1365,7 +1389,9 @@ def _build_batchnorm2d_dynamic(spec: BatchNorm2DSpec) -> KernelDef:
             beta_v = load_scalar_as_f32(b, Beta, channel, dtype=spec.dtype)
             scale = b.fmul(inv_std, gamma_v)
 
-            def pass2_body_ng(n_off, x_tile_n, _mean=mean, _scale=scale, _beta_v=beta_v):
+            def pass2_body_ng(
+                n_off, x_tile_n, _mean=mean, _scale=scale, _beta_v=beta_v
+            ):
                 x_scalars = x_tile_n.load_vec_as_f32(b, b.const_i32(0), n_off, n=VEC)
                 return [
                     b.fadd(b.fmul(b.fsub(x_scalars[i], _mean), _scale), _beta_v)
@@ -1394,7 +1420,9 @@ def _build_batchnorm2d_dynamic(spec: BatchNorm2DSpec) -> KernelDef:
                     vec=VEC,
                     main_elems_per_row=main_elems2_ng,
                     trip_count=trip_count2_ng,
-                    body=lambda n_off, _x_tile_n=x_tile_n: pass2_body_ng(n_off, _x_tile_n),
+                    body=lambda n_off, _x_tile_n=x_tile_n: pass2_body_ng(
+                        n_off, _x_tile_n
+                    ),
                     iv_name="hw1_ng",
                 )
                 for tc in range(VEC):
@@ -2056,7 +2084,9 @@ def is_valid_flat_infer_spec(
     return True, ""
 
 
-def flat_infer_admits(spec: BatchNorm2DFlatInferSpec, n: int, c: int, h: int, w: int) -> Tuple[bool, str]:
+def flat_infer_admits(
+    spec: BatchNorm2DFlatInferSpec, n: int, c: int, h: int, w: int
+) -> Tuple[bool, str]:
     """Runtime-shape admission for one flat inference candidate."""
     hw = h * w
     total = n * c * hw
@@ -2075,7 +2105,9 @@ def flat_infer_admits(spec: BatchNorm2DFlatInferSpec, n: int, c: int, h: int, w:
     return True, ""
 
 
-def batchnorm2d_flat_infer_grid(n: int, c: int, h: int, w: int, spec: BatchNorm2DFlatInferSpec) -> Tuple[int, int, int]:
+def batchnorm2d_flat_infer_grid(
+    n: int, c: int, h: int, w: int, spec: BatchNorm2DFlatInferSpec
+) -> Tuple[int, int, int]:
     total = int(n) * int(c) * int(h) * int(w)
     return ((total + spec.tile_elems - 1) // spec.tile_elems, 1, 1)
 
@@ -2091,8 +2123,12 @@ def build_batchnorm2d_flat_infer(spec: BatchNorm2DFlatInferSpec) -> KernelDef:
     b.kernel.attrs["max_workgroup_size"] = BS
 
     X = b.param("X", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16)
-    Gamma = b.param("Gamma", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16)
-    Beta = b.param("Beta", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16)
+    Gamma = b.param(
+        "Gamma", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16
+    )
+    Beta = b.param(
+        "Beta", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16
+    )
     Y = b.param("Y", PtrType(io_ty, "global"), noalias=True, writeonly=True, align=16)
     RunningMean = b.param("RunningMean", PtrType(F32, "global"), noalias=True)
     RunningVar = b.param("RunningVar", PtrType(F32, "global"), noalias=True)
@@ -2107,7 +2143,9 @@ def build_batchnorm2d_flat_infer(spec: BatchNorm2DFlatInferSpec) -> KernelDef:
     total = b.mul(b.mul(p_n, p_c), HW)
     tid = b.thread_id_x()
     tile_base = b.mul(b.block_id_x(), b.const_i32(BS * VEC * U))
-    last_start = b.sub(total, b.const_i32(VEC))  # >= 0: total is a positive multiple of VEC
+    last_start = b.sub(
+        total, b.const_i32(VEC)
+    )  # >= 0: total is a positive multiple of VEC
     c_last = b.sub(p_c, b.const_i32(1))
 
     def load_x(e):
@@ -2138,7 +2176,9 @@ def build_batchnorm2d_flat_infer(spec: BatchNorm2DFlatInferSpec) -> KernelDef:
             lanes = None
         else:
             col0 = b.sub(es, b.mul(row, HW))
-            ch1 = b.select(b.cmp_ge(ch0, c_last), b.const_i32(0), b.add(ch0, b.const_i32(1)))
+            ch1 = b.select(
+                b.cmp_ge(ch0, c_last), b.const_i32(0), b.add(ch0, b.const_i32(1))
+            )
             sc1, sh1 = scale_shift(ch1)
             lanes = (col0, sc1, sh1)
         groups.append((es, valid, xs, sc0, sh0, lanes))
@@ -2269,7 +2309,9 @@ def batchnorm2d_split_dyn_workspace_floats(c: int, plan: BatchNorm2DSplitPlan) -
     return int(c) * plan.splits * 3
 
 
-def batchnorm2d_split_dyn_grid(c: int, plan: BatchNorm2DSplitPlan) -> Tuple[int, int, int]:
+def batchnorm2d_split_dyn_grid(
+    c: int, plan: BatchNorm2DSplitPlan
+) -> Tuple[int, int, int]:
     return (int(c), plan.sh, plan.sn)
 
 
@@ -2309,11 +2351,26 @@ def _split_dyn_block_reduce(b, spec, mean_p, m2_p, count_p, lds, tid):
     lds_mean, lds_m2, lds_count = lds
     if spec.fast_reduce:
         return welford_block_reduce_stable_wave_prologue(
-            b, mean_p, m2_p, count_p, lds_mean, lds_m2, lds_count, tid,
-            block_size=spec.block_size, wave_size=spec.wave_size,
+            b,
+            mean_p,
+            m2_p,
+            count_p,
+            lds_mean,
+            lds_m2,
+            lds_count,
+            tid,
+            block_size=spec.block_size,
+            wave_size=spec.wave_size,
         )
     return welford_block_reduce_stable(
-        b, mean_p, m2_p, count_p, lds_mean, lds_m2, lds_count, tid,
+        b,
+        mean_p,
+        m2_p,
+        count_p,
+        lds_mean,
+        lds_m2,
+        lds_count,
+        tid,
         block_size=spec.block_size,
     )
 
@@ -2386,9 +2443,15 @@ def build_batchnorm2d_split_dyn_reduce(spec: BatchNorm2DSplitDynSpec) -> KernelD
         row_n = b.add(b.mul(n, p_c), channel)
         x_tile_n = make_tile_window(x_view, lengths=(1, 1), origin=(row_n, hw_lo))
         (sum_p, sumsq_p), main_elems, _tail = sweep_row_chunks_dynamic(
-            b, x_tile_n, tid=tid, block_size=BS, vec=VEC, length=seg_len,
+            b,
+            x_tile_n,
+            tid=tid,
+            block_size=BS,
+            vec=VEC,
+            length=seg_len,
             iter_args=[("sum_p_hw", sum_p), ("sumsq_p_hw", sumsq_p)],
-            body=pass1_body, iv_name="hw0",
+            body=pass1_body,
+            iv_name="hw0",
         )
         for tc in range(VEC):
             idx_col = b.add(b.add(main_elems, b.const_i32(tc * BS)), tid)
@@ -2404,9 +2467,14 @@ def build_batchnorm2d_split_dyn_reduce(spec: BatchNorm2DSplitDynSpec) -> KernelD
         return [sum_p, sumsq_p, tail_count_p]
 
     for_op = b.scf_for_iter(
-        n_lo, n_hi, b.const_i32(1),
-        [("sum_p", b.const_f32(0.0)), ("sumsq_p", b.const_f32(0.0)),
-         ("tail_count_p", b.const_f32(0.0))],
+        n_lo,
+        n_hi,
+        b.const_i32(1),
+        [
+            ("sum_p", b.const_f32(0.0)),
+            ("sumsq_p", b.const_f32(0.0)),
+            ("tail_count_p", b.const_f32(0.0)),
+        ],
         iv_name="n0",
     )
     with for_op as (n_iv, outer_iter_vars):
@@ -2450,15 +2518,23 @@ def build_batchnorm2d_split_dyn_apply(spec: BatchNorm2DSplitDynSpec) -> KernelDe
     b.kernel.attrs["max_workgroup_size"] = BS
 
     X = b.param("X", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16)
-    Workspace = b.param("Workspace", PtrType(F32, "global"), noalias=True, readonly=True)
-    Gamma = b.param("Gamma", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16)
-    Beta = b.param("Beta", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16)
+    Workspace = b.param(
+        "Workspace", PtrType(F32, "global"), noalias=True, readonly=True
+    )
+    Gamma = b.param(
+        "Gamma", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16
+    )
+    Beta = b.param(
+        "Beta", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16
+    )
     Y = b.param("Y", PtrType(io_ty, "global"), noalias=True, writeonly=True, align=16)
     RunningMean = b.param("RunningMean", PtrType(F32, "global"), noalias=True)
     RunningVar = b.param("RunningVar", PtrType(F32, "global"), noalias=True)
     if spec.save_mean_invstd:
         Mean = b.param("Mean", PtrType(io_ty, "global"), noalias=True, writeonly=True)
-        InvStd = b.param("InvStd", PtrType(io_ty, "global"), noalias=True, writeonly=True)
+        InvStd = b.param(
+            "InvStd", PtrType(io_ty, "global"), noalias=True, writeonly=True
+        )
     p_n = b.param("N", I32)
     p_c = b.param("C", I32)
     p_h = b.param("H", I32)
@@ -2502,9 +2578,13 @@ def build_batchnorm2d_split_dyn_apply(spec: BatchNorm2DSplitDynSpec) -> KernelDe
         old_mean = b.global_load_f32(RunningMean, channel)
         old_var = b.global_load_f32(RunningVar, channel)
         one_minus_mom = b.fsub(b.const_f32(1.0), momentum)
-        new_running_mean = b.fadd(b.fmul(one_minus_mom, old_mean), b.fmul(momentum, mean))
+        new_running_mean = b.fadd(
+            b.fmul(one_minus_mom, old_mean), b.fmul(momentum, mean)
+        )
         m_total = b.sitofp_f32(b.mul(p_n, HW))
-        unbias = b.fdiv(m_total, b.fmax(b.fsub(m_total, b.const_f32(1.0)), b.const_f32(1.0)))
+        unbias = b.fdiv(
+            m_total, b.fmax(b.fsub(m_total, b.const_f32(1.0)), b.const_f32(1.0))
+        )
         new_running_var = b.fadd(
             b.fmul(one_minus_mom, old_var), b.fmul(momentum, b.fmul(var, unbias))
         )
@@ -2537,9 +2617,15 @@ def build_batchnorm2d_split_dyn_apply(spec: BatchNorm2DSplitDynSpec) -> KernelDe
             ]
 
         pass2_row_chunks_dynamic(
-            b, y_tile_n, tid=tid, block_size=BS, vec=VEC,
-            main_elems_per_row=main_elems, trip_count=trip_count,
-            body=body, iv_name="hw1",
+            b,
+            y_tile_n,
+            tid=tid,
+            block_size=BS,
+            vec=VEC,
+            main_elems_per_row=main_elems,
+            trip_count=trip_count,
+            body=body,
+            iv_name="hw1",
         )
         for tc in range(VEC):
             idx_col = b.add(b.add(main_elems, b.const_i32(tc * BS)), tid)
@@ -2606,7 +2692,9 @@ class BatchNorm2DBwdSpec:
         )
 
 
-def is_valid_bwd_spec(spec: BatchNorm2DBwdSpec, arch: str = "gfx950") -> Tuple[bool, str]:
+def is_valid_bwd_spec(
+    spec: BatchNorm2DBwdSpec, arch: str = "gfx950"
+) -> Tuple[bool, str]:
     from ...core.arch import ArchTarget
 
     try:
@@ -2662,14 +2750,35 @@ def _bwd_params(b, spec):
     """Shared leading kernel params (X, dY, Scale, Mean, InvStd) and dims."""
     io_ty = io_ir_type(spec.dtype)
     P = {}
-    P["X"] = b.param("X", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16)
-    P["dY"] = b.param("dY", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16)
+    P["X"] = b.param(
+        "X", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16
+    )
+    P["dY"] = b.param(
+        "dY", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16
+    )
     return P
 
 
 def _bwd_accumulate(
-    b, spec, *, X, dY, x_view, dy_view, HW, mean_c, invstd_c, tid_row, threads,
-    n_begin, n_end, row_of, hw_lo, length, seg_last, iv_prefix,
+    b,
+    spec,
+    *,
+    X,
+    dY,
+    x_view,
+    dy_view,
+    HW,
+    mean_c,
+    invstd_c,
+    tid_row,
+    threads,
+    n_begin,
+    n_end,
+    row_of,
+    hw_lo,
+    length,
+    seg_last,
+    iv_prefix,
 ):
     """Per-thread partial sums ``(sum(dy), sum(dy * xhat))`` over the rows
     ``n_begin .. n_end`` (runtime loop) of one channel, each swept over
@@ -2695,8 +2804,15 @@ def _bwd_accumulate(
             return [a1, a2]
 
         (s1, s2), main_elems, _tail = sweep_row_chunks_dynamic(
-            b, x_tile, tid=tid_row, block_size=threads, vec=VEC, length=length,
-            iter_args=[("s_dy_in", s1), ("s_dyx_in", s2)], body=body, iv_name=f"{iv_prefix}_hw",
+            b,
+            x_tile,
+            tid=tid_row,
+            block_size=threads,
+            vec=VEC,
+            length=length,
+            iter_args=[("s_dy_in", s1), ("s_dyx_in", s2)],
+            body=body,
+            iv_name=f"{iv_prefix}_hw",
         )
         for tc in range(VEC):
             idx_col = b.add(b.add(main_elems, b.const_i32(tc * threads)), tid_row)
@@ -2711,7 +2827,9 @@ def _bwd_accumulate(
         return [s1, s2]
 
     for_op = b.scf_for_iter(
-        n_begin, n_end, b.const_i32(1),
+        n_begin,
+        n_end,
+        b.const_i32(1),
         [("s_dy", b.const_f32(0.0)), ("s_dyx", b.const_f32(0.0))],
         iv_name=f"{iv_prefix}_n",
     )
@@ -2730,8 +2848,26 @@ def _bwd_coefs(b, s1, s2, scale, mean, invstd, m_f):
 
 
 def _bwd_apply_rows(
-    b, spec, *, X, dY, dX, x_view, dy_view, dx_view, HW, mean_c, coefs, tid_row, threads,
-    n_begin, n_end, row_of, hw_lo, length, iv_prefix,
+    b,
+    spec,
+    *,
+    X,
+    dY,
+    dX,
+    x_view,
+    dy_view,
+    dx_view,
+    HW,
+    mean_c,
+    coefs,
+    tid_row,
+    threads,
+    n_begin,
+    n_end,
+    row_of,
+    hw_lo,
+    length,
+    iv_prefix,
 ):
     """Write ``dx`` for the rows ``n_begin .. n_end`` of one channel."""
     VEC = spec.vec
@@ -2755,8 +2891,14 @@ def _bwd_apply_rows(
             return [dx_of(xs[i], dys[i]) for i in range(VEC)]
 
         pass2_row_chunks_dynamic(
-            b, dx_tile, tid=tid_row, block_size=threads, vec=VEC,
-            main_elems_per_row=main_elems, trip_count=trip_count, body=body,
+            b,
+            dx_tile,
+            tid=tid_row,
+            block_size=threads,
+            vec=VEC,
+            main_elems_per_row=main_elems,
+            trip_count=trip_count,
+            body=body,
             iv_name=f"{iv_prefix}_hw2",
         )
         for tc in range(VEC):
@@ -2765,7 +2907,9 @@ def _bwd_apply_rows(
                 flat = b.add(b.add(b.mul(row_n, HW), hw_lo), idx_col)
                 x_raw = load_scalar_as_f32(b, X, flat, dtype=spec.dtype)
                 dy_raw = load_scalar_as_f32(b, dY, flat, dtype=spec.dtype)
-                store_scalar_from_f32(b, dX, flat, dx_of(x_raw, dy_raw), dtype=spec.dtype)
+                store_scalar_from_f32(
+                    b, dX, flat, dx_of(x_raw, dy_raw), dtype=spec.dtype
+                )
 
 
 def build_batchnorm2d_bwd_dynamic(spec: BatchNorm2DBwdSpec) -> KernelDef:
@@ -2831,10 +2975,24 @@ def build_batchnorm2d_bwd_dynamic(spec: BatchNorm2DBwdSpec) -> KernelDef:
             return b.add(b.mul(n_rt, p_c), _ch)
 
         s1, s2 = _bwd_accumulate(
-            b, spec, X=X, dY=dY, x_view=x_view, dy_view=dy_view, HW=HW,
-            mean_c=mean_c, invstd_c=invstd_c, tid_row=tid_row, threads=hw_threads,
-            n_begin=b.const_i32(0), n_end=n_trip, row_of=row_of, hw_lo=hw_lo,
-            length=HW, seg_last=seg_last, iv_prefix="b1",
+            b,
+            spec,
+            X=X,
+            dY=dY,
+            x_view=x_view,
+            dy_view=dy_view,
+            HW=HW,
+            mean_c=mean_c,
+            invstd_c=invstd_c,
+            tid_row=tid_row,
+            threads=hw_threads,
+            n_begin=b.const_i32(0),
+            n_end=n_trip,
+            row_of=row_of,
+            hw_lo=hw_lo,
+            length=HW,
+            seg_last=seg_last,
+            iv_prefix="b1",
         )
         t1, t2 = _bwd_block_sums(b, spec, s1, s2, lds, tid)
         with b.scf_if(b.cmp_eq(tid, b.const_i32(0))):
@@ -2842,10 +3000,25 @@ def build_batchnorm2d_bwd_dynamic(spec: BatchNorm2DBwdSpec) -> KernelDef:
             b.global_store(dBias, channel, t1)
         coefs = _bwd_coefs(b, t1, t2, scale_c, mean_c, invstd_c, m_f)
         _bwd_apply_rows(
-            b, spec, X=X, dY=dY, dX=dX, x_view=x_view, dy_view=dy_view, dx_view=dx_view,
-            HW=HW, mean_c=mean_c, coefs=coefs, tid_row=tid_row, threads=hw_threads,
-            n_begin=b.const_i32(0), n_end=n_trip, row_of=row_of, hw_lo=hw_lo,
-            length=HW, iv_prefix="b1",
+            b,
+            spec,
+            X=X,
+            dY=dY,
+            dX=dX,
+            x_view=x_view,
+            dy_view=dy_view,
+            dx_view=dx_view,
+            HW=HW,
+            mean_c=mean_c,
+            coefs=coefs,
+            tid_row=tid_row,
+            threads=hw_threads,
+            n_begin=b.const_i32(0),
+            n_end=n_trip,
+            row_of=row_of,
+            hw_lo=hw_lo,
+            length=HW,
+            iv_prefix="b1",
         )
     return b.kernel
 
@@ -2866,7 +3039,11 @@ class _SumSpec:
     """Adapter giving the split spec the fields ``_bwd_block_sums`` reads."""
 
     def __init__(self, s):
-        self.block_size, self.fast_reduce, self.wave_size = s.block_size, s.fast_reduce, s.wave_size
+        self.block_size, self.fast_reduce, self.wave_size = (
+            s.block_size,
+            s.fast_reduce,
+            s.wave_size,
+        )
 
 
 def build_batchnorm2d_bwd_split_reduce(spec: BatchNorm2DBwdSplitSpec) -> KernelDef:
@@ -2910,10 +3087,24 @@ def build_batchnorm2d_bwd_split_reduce(spec: BatchNorm2DBwdSplitSpec) -> KernelD
     invstd_c = b.global_load_f32(InvStd, channel)
 
     s1, s2 = _bwd_accumulate(
-        b, _VecShim(spec), X=X, dY=dY, x_view=x_view, dy_view=dy_view, HW=HW,
-        mean_c=mean_c, invstd_c=invstd_c, tid_row=tid, threads=BS,
-        n_begin=n_lo, n_end=n_hi, row_of=lambda n: b.add(b.mul(n, p_c), channel),
-        hw_lo=hw_lo, length=seg_len, seg_last=seg_last, iv_prefix="r",
+        b,
+        _VecShim(spec),
+        X=X,
+        dY=dY,
+        x_view=x_view,
+        dy_view=dy_view,
+        HW=HW,
+        mean_c=mean_c,
+        invstd_c=invstd_c,
+        tid_row=tid,
+        threads=BS,
+        n_begin=n_lo,
+        n_end=n_hi,
+        row_of=lambda n: b.add(b.mul(n, p_c), channel),
+        hw_lo=hw_lo,
+        length=seg_len,
+        seg_last=seg_last,
+        iv_prefix="r",
     )
     t1, t2 = _bwd_block_sums(b, _SumSpec(spec), s1, s2, lds, tid)
     with b.scf_if(b.cmp_eq(tid, b.const_i32(0))):
@@ -2948,7 +3139,9 @@ def build_batchnorm2d_bwd_split_apply(spec: BatchNorm2DBwdSplitSpec) -> KernelDe
     Scale = b.param("Scale", PtrType(F32, "global"), noalias=True, readonly=True)
     Mean = b.param("Mean", PtrType(F32, "global"), noalias=True, readonly=True)
     InvStd = b.param("InvStd", PtrType(F32, "global"), noalias=True, readonly=True)
-    Workspace = b.param("Workspace", PtrType(F32, "global"), noalias=True, readonly=True)
+    Workspace = b.param(
+        "Workspace", PtrType(F32, "global"), noalias=True, readonly=True
+    )
     dX = b.param("dX", PtrType(io_ty, "global"), noalias=True, writeonly=True, align=16)
     dScale = b.param("dScale", PtrType(F32, "global"), noalias=True, writeonly=True)
     dBias = b.param("dBias", PtrType(F32, "global"), noalias=True, writeonly=True)
@@ -2981,7 +3174,9 @@ def build_batchnorm2d_bwd_split_apply(spec: BatchNorm2DBwdSplitSpec) -> KernelDe
     slot = b.mul(b.add(b.mul(channel, splits), slot_tid), b.const_i32(2))
     p1 = b.select(has_slot, b.global_load_f32(Workspace, slot), b.const_f32(0.0))
     p2 = b.select(
-        has_slot, b.global_load_f32(Workspace, b.add(slot, b.const_i32(1))), b.const_f32(0.0)
+        has_slot,
+        b.global_load_f32(Workspace, b.add(slot, b.const_i32(1))),
+        b.const_f32(0.0),
     )
     t1, t2 = _bwd_block_sums(b, _SumSpec(spec), p1, p2, lds, tid)
 
@@ -2996,10 +3191,25 @@ def build_batchnorm2d_bwd_split_apply(spec: BatchNorm2DBwdSplitSpec) -> KernelDe
     m_f = b.sitofp_f32(b.mul(p_n, HW))
     coefs = _bwd_coefs(b, t1, t2, scale_c, mean_c, invstd_c, m_f)
     _bwd_apply_rows(
-        b, _VecShim(spec), X=X, dY=dY, dX=dX, x_view=x_view, dy_view=dy_view, dx_view=dx_view,
-        HW=HW, mean_c=mean_c, coefs=coefs, tid_row=tid, threads=BS,
-        n_begin=n_lo, n_end=n_hi, row_of=lambda n: b.add(b.mul(n, p_c), channel),
-        hw_lo=hw_lo, length=seg_len, iv_prefix="a",
+        b,
+        _VecShim(spec),
+        X=X,
+        dY=dY,
+        dX=dX,
+        x_view=x_view,
+        dy_view=dy_view,
+        dx_view=dx_view,
+        HW=HW,
+        mean_c=mean_c,
+        coefs=coefs,
+        tid_row=tid,
+        threads=BS,
+        n_begin=n_lo,
+        n_end=n_hi,
+        row_of=lambda n: b.add(b.mul(n, p_c), channel),
+        hw_lo=hw_lo,
+        length=seg_len,
+        iv_prefix="a",
     )
     return b.kernel
 
@@ -3028,7 +3238,11 @@ def build_batchnorm2d_bwd_split_apply(spec: BatchNorm2DBwdSplitSpec) -> KernelDe
 # no initialisation. Training sums are shifted by the channel's first sample
 # to keep ``E[x^2] - E[x]^2`` well conditioned. Kernel names carry ``nhwc``.
 
-_NHWC_KINDS = {"infer": ("infer",), "train": ("fused", "reduce", "apply"), "bwd": ("fused", "reduce", "apply")}
+_NHWC_KINDS = {
+    "infer": ("infer",),
+    "train": ("fused", "reduce", "apply"),
+    "bwd": ("fused", "reduce", "apply"),
+}
 
 
 @dataclass(frozen=True)
@@ -3055,12 +3269,20 @@ class BatchNorm2DNhwcSpec:
 
     def kernel_name(self, kind: str = "fused") -> str:
         return kernel_name_join(
-            self.name, self.mode, kind, self.dtype,
-            f"b{self.block_size}", f"tx{self.tx}", f"v{self.vec}", f"u{self.unroll}",
+            self.name,
+            self.mode,
+            kind,
+            self.dtype,
+            f"b{self.block_size}",
+            f"tx{self.tx}",
+            f"v{self.vec}",
+            f"u{self.unroll}",
         )
 
 
-def is_valid_nhwc_spec(spec: BatchNorm2DNhwcSpec, arch: str = "gfx950") -> Tuple[bool, str]:
+def is_valid_nhwc_spec(
+    spec: BatchNorm2DNhwcSpec, arch: str = "gfx950"
+) -> Tuple[bool, str]:
     from ...core.arch import ArchTarget
 
     try:
@@ -3080,14 +3302,19 @@ def is_valid_nhwc_spec(spec: BatchNorm2DNhwcSpec, arch: str = "gfx950") -> Tuple
     ty = spec.block_size // spec.tx
     if ty & (ty - 1):
         return False, "block_size / tx must be a power of two"
-    if not 0 < spec.block_size <= target.max_threads_per_block or spec.block_size % spec.wave_size:
+    if (
+        not 0 < spec.block_size <= target.max_threads_per_block
+        or spec.block_size % spec.wave_size
+    ):
         return False, "block_size must be a wave multiple within the device limit"
     if not target.fits_lds(2 * spec.block_size * spec.vec * 4):
         return False, "LDS budget exceeded"
     return True, ""
 
 
-def nhwc_admits(spec: BatchNorm2DNhwcSpec, n: int, c: int, h: int, w: int) -> Tuple[bool, str]:
+def nhwc_admits(
+    spec: BatchNorm2DNhwcSpec, n: int, c: int, h: int, w: int
+) -> Tuple[bool, str]:
     """Runtime-shape admission of one NHWC instance."""
     rows = int(n) * int(h) * int(w)
     if rows <= 0 or c <= 0:
@@ -3117,7 +3344,9 @@ class BatchNorm2DNhwcPlan:
 NHWC_MAX_SPLITS = 1024
 NHWC_MIN_SPLIT_CTAS = 128
 NHWC_MIN_FUSED_TILES = 4
-NHWC_FINE_RPC = True  # also try rows-per-CTA at 1.25x, 1.5x and 1.75x of each power-of-two step
+NHWC_FINE_RPC = (
+    True  # also try rows-per-CTA at 1.25x, 1.5x and 1.75x of each power-of-two step
+)
 
 
 def _nhwc_rpc_steps(rpc: int, base: int) -> Tuple[int, ...]:
@@ -3190,7 +3419,10 @@ class _NhwcCtx:
         self.ty = b.div(self.tid, b.const_i32(TX))
         self.split = split
         tile = b.block_id_y()
-        self.ch0 = b.add(b.mul(tile, b.const_i32(spec.tile_channels)), b.mul(self.tx, b.const_i32(VEC)))
+        self.ch0 = b.add(
+            b.mul(tile, b.const_i32(spec.tile_channels)),
+            b.mul(self.tx, b.const_i32(VEC)),
+        )
         self.ch_ok = b.cmp_lt(self.ch0, p_c)
         self.ch0s = b.select(self.ch_ok, self.ch0, b.const_i32(0))
         self.col = b.mul(self.tx, b.const_i32(VEC))
@@ -3204,7 +3436,9 @@ class _NhwcCtx:
 
     def owner(self):
         b = self.b
-        o = b.land(b.cmp_eq(self.split, b.const_i32(0)), b.cmp_eq(self.ty, b.const_i32(0)))
+        o = b.land(
+            b.cmp_eq(self.split, b.const_i32(0)), b.cmp_eq(self.ty, b.const_i32(0))
+        )
         return b.land(o, self.ch_ok)
 
 
@@ -3221,7 +3455,9 @@ def _nhwc_accumulate(b, spec, ctx, r_lo, r_hi, load_rows, accumulate, n_acc):
     TY, U = spec.ty, spec.unroll
     r_last = b.smax(b.sub(r_hi, b.const_i32(1)), b.const_i32(0))
     inits = [(f"nacc{i}", b.const_f32(0.0)) for i in range(n_acc)]
-    for_op = b.scf_for_iter(b.add(r_lo, ctx.ty), r_hi, b.const_i32(TY * U), inits, iv_name="nr")
+    for_op = b.scf_for_iter(
+        b.add(r_lo, ctx.ty), r_hi, b.const_i32(TY * U), inits, iv_name="nr"
+    )
     with for_op as (r_iv, acc):
         loaded, valids = [], []
         for u in range(U):
@@ -3267,7 +3503,9 @@ def _nhwc_tile_totals(b, spec, ctx, acc, lds_a, lds_b):
 
 def _nhwc_lds(b, spec):
     return tuple(
-        make_lds_view(b, dtype=F32, shape=(spec.block_size * spec.vec,), name_hint=nm).base
+        make_lds_view(
+            b, dtype=F32, shape=(spec.block_size * spec.vec,), name_hint=nm
+        ).base
         for nm in ("lds_a", "lds_b")
     )
 
@@ -3277,8 +3515,13 @@ def _nhwc_store_partials(b, spec, ctx, Workspace, acc, p_c):
     VEC = spec.vec
     with b.scf_if(b.land(b.cmp_eq(ctx.ty, b.const_i32(0)), ctx.ch_ok)):
         for k in range(2):
-            idx = b.add(b.mul(b.add(b.mul(ctx.split, b.const_i32(2)), b.const_i32(k)), p_c), ctx.ch0)
-            b.global_store_vN(Workspace, idx, b.vec_pack(acc[k * VEC:(k + 1) * VEC], F32), VEC)
+            idx = b.add(
+                b.mul(b.add(b.mul(ctx.split, b.const_i32(2)), b.const_i32(k)), p_c),
+                ctx.ch0,
+            )
+            b.global_store_vN(
+                Workspace, idx, b.vec_pack(acc[k * VEC : (k + 1) * VEC], F32), VEC
+            )
 
 
 def _nhwc_merge_partials(b, spec, ctx, Workspace, p_c, p_splits):
@@ -3289,7 +3532,9 @@ def _nhwc_merge_partials(b, spec, ctx, Workspace, p_c, p_splits):
     with for_op as (s_iv, acc):
         out = []
         for k in range(2):
-            idx = b.add(b.mul(b.add(b.mul(s_iv, b.const_i32(2)), b.const_i32(k)), p_c), ctx.ch0s)
+            idx = b.add(
+                b.mul(b.add(b.mul(s_iv, b.const_i32(2)), b.const_i32(k)), p_c), ctx.ch0s
+            )
             vals = load_vec(b, Workspace, idx, dtype="f32", n=VEC)
             for v in range(VEC):
                 out.append(b.fadd(acc[k * VEC + v], b.vec_extract(vals, v)))
@@ -3317,7 +3562,10 @@ def _nhwc_apply_rows(b, spec, ctx, r_lo, r_hi, load_rows, compute, store):
 
 
 def _nhwc_f32_scalars(b, ptr, ctx, VEC, dtype):
-    return [load_scalar_as_f32(b, ptr, b.add(ctx.ch0s, b.const_i32(v)), dtype=dtype) for v in range(VEC)]
+    return [
+        load_scalar_as_f32(b, ptr, b.add(ctx.ch0s, b.const_i32(v)), dtype=dtype)
+        for v in range(VEC)
+    ]
 
 
 def _nhwc_x_loader(b, spec, X):
@@ -3337,7 +3585,9 @@ def _nhwc_scale_shift(b, spec, ctx, Gamma, Beta, mean, var, eps):
 def _nhwc_stream_y(b, spec, Y, sc, sh):
     VEC = spec.vec
     compute = lambda xs: [b.fma(xs[v], sc[v], sh[v]) for v in range(VEC)]  # noqa: E731
-    store = lambda idx, ys: store_vec(b, Y, idx, pack_f32_to(b, ys, dtype=spec.dtype), n=VEC)  # noqa: E731
+    store = lambda idx, ys: store_vec(
+        b, Y, idx, pack_f32_to(b, ys, dtype=spec.dtype), n=VEC
+    )  # noqa: E731
     return compute, store
 
 
@@ -3349,8 +3599,12 @@ def build_batchnorm2d_nhwc_infer(spec: BatchNorm2DNhwcSpec) -> KernelDef:
     b = IRBuilder(spec.kernel_name("infer"))
     b.kernel.attrs["max_workgroup_size"] = spec.block_size
     X = b.param("X", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16)
-    Gamma = b.param("Gamma", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16)
-    Beta = b.param("Beta", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16)
+    Gamma = b.param(
+        "Gamma", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16
+    )
+    Beta = b.param(
+        "Beta", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16
+    )
     Y = b.param("Y", PtrType(io_ty, "global"), noalias=True, writeonly=True, align=16)
     RunningMean = b.param("RunningMean", PtrType(F32, "global"), noalias=True)
     RunningVar = b.param("RunningVar", PtrType(F32, "global"), noalias=True)
@@ -3360,16 +3614,25 @@ def build_batchnorm2d_nhwc_infer(spec: BatchNorm2DNhwcSpec) -> KernelDef:
     b.param("momentum", F32)
     p_rpc = b.param("RowsPerCta", I32)
     ctx = _NhwcCtx(b, spec, p_n, p_c, p_h, p_w, b.block_id_x())
-    mean = [b.global_load_f32(RunningMean, b.add(ctx.ch0s, b.const_i32(v))) for v in range(VEC)]
-    var = [b.global_load_f32(RunningVar, b.add(ctx.ch0s, b.const_i32(v))) for v in range(VEC)]
+    mean = [
+        b.global_load_f32(RunningMean, b.add(ctx.ch0s, b.const_i32(v)))
+        for v in range(VEC)
+    ]
+    var = [
+        b.global_load_f32(RunningVar, b.add(ctx.ch0s, b.const_i32(v)))
+        for v in range(VEC)
+    ]
     sc, sh = _nhwc_scale_shift(b, spec, ctx, Gamma, Beta, mean, var, eps)
     r_lo, r_hi = ctx.rows_of_split(p_rpc)
     compute, store = _nhwc_stream_y(b, spec, Y, sc, sh)
-    _nhwc_apply_rows(b, spec, ctx, r_lo, r_hi, _nhwc_x_loader(b, spec, X), compute, store)
+    _nhwc_apply_rows(
+        b, spec, ctx, r_lo, r_hi, _nhwc_x_loader(b, spec, X), compute, store
+    )
     return b.kernel
 
 
 # ---- training ---------------------------------------------------------
+
 
 def _nhwc_train_shift(b, spec, ctx, X):
     """Channel shift = first sample of the channel (row 0)."""
@@ -3416,8 +3679,18 @@ def _nhwc_train_epilogue(
             ch = b.add(ctx.ch0, b.const_i32(v))
             old_m = b.global_load_f32(RunningMean, ch)
             old_v = b.global_load_f32(RunningVar, ch)
-            b.global_store(RunningMean, ch, b.fadd(b.fmul(one_minus, old_m), b.fmul(momentum, mean[v])))
-            b.global_store(RunningVar, ch, b.fadd(b.fmul(one_minus, old_v), b.fmul(momentum, b.fmul(var[v], unbias))))
+            b.global_store(
+                RunningMean,
+                ch,
+                b.fadd(b.fmul(one_minus, old_m), b.fmul(momentum, mean[v])),
+            )
+            b.global_store(
+                RunningVar,
+                ch,
+                b.fadd(
+                    b.fmul(one_minus, old_v), b.fmul(momentum, b.fmul(var[v], unbias))
+                ),
+            )
             store_scalar_from_f32(b, Mean, ch, mean[v], dtype=spec.dtype)
             store_scalar_from_f32(b, InvStd, ch, inv[v], dtype=spec.dtype)
 
@@ -3425,19 +3698,33 @@ def _nhwc_train_epilogue(
 def _nhwc_train_params(b, spec, kind):
     io_ty = io_ir_type(spec.dtype)
     P = {}
-    P["X"] = b.param("X", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16)
+    P["X"] = b.param(
+        "X", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16
+    )
     if kind == "reduce":
         P["Workspace"] = b.param("Workspace", PtrType(F32, "global"), noalias=True)
     else:
         if kind == "apply":
-            P["Workspace"] = b.param("Workspace", PtrType(F32, "global"), noalias=True, readonly=True)
-        P["Gamma"] = b.param("Gamma", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16)
-        P["Beta"] = b.param("Beta", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16)
-        P["Y"] = b.param("Y", PtrType(io_ty, "global"), noalias=True, writeonly=True, align=16)
+            P["Workspace"] = b.param(
+                "Workspace", PtrType(F32, "global"), noalias=True, readonly=True
+            )
+        P["Gamma"] = b.param(
+            "Gamma", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16
+        )
+        P["Beta"] = b.param(
+            "Beta", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16
+        )
+        P["Y"] = b.param(
+            "Y", PtrType(io_ty, "global"), noalias=True, writeonly=True, align=16
+        )
         P["RunningMean"] = b.param("RunningMean", PtrType(F32, "global"), noalias=True)
         P["RunningVar"] = b.param("RunningVar", PtrType(F32, "global"), noalias=True)
-        P["Mean"] = b.param("Mean", PtrType(io_ty, "global"), noalias=True, writeonly=True)
-        P["InvStd"] = b.param("InvStd", PtrType(io_ty, "global"), noalias=True, writeonly=True)
+        P["Mean"] = b.param(
+            "Mean", PtrType(io_ty, "global"), noalias=True, writeonly=True
+        )
+        P["InvStd"] = b.param(
+            "InvStd", PtrType(io_ty, "global"), noalias=True, writeonly=True
+        )
     for nm in ("N", "C", "H", "W"):
         P[nm] = b.param(nm, I32)
     if kind != "reduce":
@@ -3458,7 +3745,15 @@ def build_batchnorm2d_nhwc_train(spec: BatchNorm2DNhwcSpec, kind: str) -> Kernel
     b.kernel.attrs["max_workgroup_size"] = spec.block_size
     P = _nhwc_train_params(b, spec, kind)
     X = P["X"]
-    ctx = _NhwcCtx(b, spec, P["N"], P["C"], P["H"], P["W"], b.block_id_x() if kind != "fused" else b.const_i32(0))
+    ctx = _NhwcCtx(
+        b,
+        spec,
+        P["N"],
+        P["C"],
+        P["H"],
+        P["W"],
+        b.block_id_x() if kind != "fused" else b.const_i32(0),
+    )
     lds_a, lds_b = _nhwc_lds(b, spec)
     shift = _nhwc_train_shift(b, spec, ctx, X)
     loader = _nhwc_x_loader(b, spec, X)
@@ -3469,14 +3764,37 @@ def build_batchnorm2d_nhwc_train(spec: BatchNorm2DNhwcSpec, kind: str) -> Kernel
             r_lo, r_hi = b.const_i32(0), ctx.rows
         else:
             r_lo, r_hi = ctx.rows_of_split(P["RowsPerCta"])
-        acc = _nhwc_accumulate(b, spec, ctx, r_lo, r_hi, loader, _nhwc_train_acc(b, spec, X, shift), 2 * spec.vec)
+        acc = _nhwc_accumulate(
+            b,
+            spec,
+            ctx,
+            r_lo,
+            r_hi,
+            loader,
+            _nhwc_train_acc(b, spec, X, shift),
+            2 * spec.vec,
+        )
     t1, t2 = _nhwc_tile_totals(b, spec, ctx, acc, lds_a, lds_b)
     if kind == "reduce":
         _nhwc_store_partials(b, spec, ctx, P["Workspace"], t1 + t2, P["C"])
         return b.kernel
-    mean, var, inv, m_f = _nhwc_train_stats(b, spec, ctx, shift, t1, t2, P["N"], P["H"], P["W"], P["eps"])
-    _nhwc_train_epilogue(b, spec, ctx, mean, var, inv, m_f, P["RunningMean"], P["RunningVar"],
-                         P["Mean"], P["InvStd"], P["momentum"])
+    mean, var, inv, m_f = _nhwc_train_stats(
+        b, spec, ctx, shift, t1, t2, P["N"], P["H"], P["W"], P["eps"]
+    )
+    _nhwc_train_epilogue(
+        b,
+        spec,
+        ctx,
+        mean,
+        var,
+        inv,
+        m_f,
+        P["RunningMean"],
+        P["RunningVar"],
+        P["Mean"],
+        P["InvStd"],
+        P["momentum"],
+    )
     sc, sh = _nhwc_scale_shift(b, spec, ctx, P["Gamma"], P["Beta"], mean, var, P["eps"])
     compute, store = _nhwc_stream_y(b, spec, P["Y"], sc, sh)
     if kind == "fused":
@@ -3489,21 +3807,39 @@ def build_batchnorm2d_nhwc_train(spec: BatchNorm2DNhwcSpec, kind: str) -> Kernel
 
 # ---- backward ---------------------------------------------------------
 
+
 def _nhwc_bwd_params(b, spec, kind):
     io_ty = io_ir_type(spec.dtype)
     P = {}
-    P["X"] = b.param("X", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16)
-    P["dY"] = b.param("dY", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16)
+    P["X"] = b.param(
+        "X", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16
+    )
+    P["dY"] = b.param(
+        "dY", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16
+    )
     if kind != "reduce":
-        P["Scale"] = b.param("Scale", PtrType(F32, "global"), noalias=True, readonly=True)
+        P["Scale"] = b.param(
+            "Scale", PtrType(F32, "global"), noalias=True, readonly=True
+        )
     P["Mean"] = b.param("Mean", PtrType(F32, "global"), noalias=True, readonly=True)
     P["InvStd"] = b.param("InvStd", PtrType(F32, "global"), noalias=True, readonly=True)
     if kind != "fused":
-        P["Workspace"] = b.param("Workspace", PtrType(F32, "global"), noalias=True, readonly=(kind == "apply"))
+        P["Workspace"] = b.param(
+            "Workspace",
+            PtrType(F32, "global"),
+            noalias=True,
+            readonly=(kind == "apply"),
+        )
     if kind != "reduce":
-        P["dX"] = b.param("dX", PtrType(io_ty, "global"), noalias=True, writeonly=True, align=16)
-        P["dScale"] = b.param("dScale", PtrType(F32, "global"), noalias=True, writeonly=True)
-        P["dBias"] = b.param("dBias", PtrType(F32, "global"), noalias=True, writeonly=True)
+        P["dX"] = b.param(
+            "dX", PtrType(io_ty, "global"), noalias=True, writeonly=True, align=16
+        )
+        P["dScale"] = b.param(
+            "dScale", PtrType(F32, "global"), noalias=True, writeonly=True
+        )
+        P["dBias"] = b.param(
+            "dBias", PtrType(F32, "global"), noalias=True, writeonly=True
+        )
     for nm in ("N", "C", "H", "W"):
         P[nm] = b.param(nm, I32)
     if kind != "fused":
@@ -3523,10 +3859,24 @@ def build_batchnorm2d_nhwc_bwd(spec: BatchNorm2DNhwcSpec, kind: str) -> KernelDe
     b.kernel.attrs["max_workgroup_size"] = spec.block_size
     P = _nhwc_bwd_params(b, spec, kind)
     X, dY = P["X"], P["dY"]
-    ctx = _NhwcCtx(b, spec, P["N"], P["C"], P["H"], P["W"], b.block_id_x() if kind != "fused" else b.const_i32(0))
+    ctx = _NhwcCtx(
+        b,
+        spec,
+        P["N"],
+        P["C"],
+        P["H"],
+        P["W"],
+        b.block_id_x() if kind != "fused" else b.const_i32(0),
+    )
     lds_a, lds_b = _nhwc_lds(b, spec)
-    mean = [b.global_load_f32(P["Mean"], b.add(ctx.ch0s, b.const_i32(v))) for v in range(VEC)]
-    invstd = [b.global_load_f32(P["InvStd"], b.add(ctx.ch0s, b.const_i32(v))) for v in range(VEC)]
+    mean = [
+        b.global_load_f32(P["Mean"], b.add(ctx.ch0s, b.const_i32(v)))
+        for v in range(VEC)
+    ]
+    invstd = [
+        b.global_load_f32(P["InvStd"], b.add(ctx.ch0s, b.const_i32(v)))
+        for v in range(VEC)
+    ]
     if kind == "fused":
         r_lo, r_hi = b.const_i32(0), ctx.rows
     else:
@@ -3535,9 +3885,12 @@ def build_batchnorm2d_nhwc_bwd(spec: BatchNorm2DNhwcSpec, kind: str) -> KernelDe
     if kind == "apply":
         acc = _nhwc_merge_partials(b, spec, ctx, P["Workspace"], P["C"], P["Splits"])
     else:
+
         def load_rows(idx):
-            return (load_vec_as_f32(b, X, idx, dtype=spec.dtype, n=VEC),
-                    load_vec_as_f32(b, dY, idx, dtype=spec.dtype, n=VEC))
+            return (
+                load_vec_as_f32(b, X, idx, dtype=spec.dtype, n=VEC),
+                load_vec_as_f32(b, dY, idx, dtype=spec.dtype, n=VEC),
+            )
 
         def accumulate(acc, loaded, valid):
             xs, dys = loaded
@@ -3550,7 +3903,9 @@ def build_batchnorm2d_nhwc_bwd(spec: BatchNorm2DNhwcSpec, kind: str) -> KernelDe
             return out
 
         acc = _nhwc_accumulate(b, spec, ctx, r_lo, r_hi, load_rows, accumulate, 2 * VEC)
-    t1, t2 = _nhwc_tile_totals(b, spec, ctx, acc, lds_a, lds_b)  # sum(dy), sum(dy * xhat)
+    t1, t2 = _nhwc_tile_totals(
+        b, spec, ctx, acc, lds_a, lds_b
+    )  # sum(dy), sum(dy * xhat)
     if kind == "reduce":
         _nhwc_store_partials(b, spec, ctx, P["Workspace"], t1 + t2, P["C"])
         return b.kernel
@@ -3560,23 +3915,37 @@ def build_batchnorm2d_nhwc_bwd(spec: BatchNorm2DNhwcSpec, kind: str) -> KernelDe
             ch = b.add(ctx.ch0, b.const_i32(v))
             b.global_store(P["dScale"], ch, t2[v])
             b.global_store(P["dBias"], ch, t1[v])
-    scale = [b.global_load_f32(P["Scale"], b.add(ctx.ch0s, b.const_i32(v))) for v in range(VEC)]
+    scale = [
+        b.global_load_f32(P["Scale"], b.add(ctx.ch0s, b.const_i32(v)))
+        for v in range(VEC)
+    ]
     m_f = b.sitofp_f32(ctx.rows)
-    coefs = [_bwd_coefs(b, t1[v], t2[v], scale[v], mean[v], invstd[v], m_f) for v in range(VEC)]
+    coefs = [
+        _bwd_coefs(b, t1[v], t2[v], scale[v], mean[v], invstd[v], m_f)
+        for v in range(VEC)
+    ]
 
     def load_rows2(idx):
-        return (load_vec_as_f32(b, X, idx, dtype=spec.dtype, n=VEC),
-                load_vec_as_f32(b, dY, idx, dtype=spec.dtype, n=VEC))
+        return (
+            load_vec_as_f32(b, X, idx, dtype=spec.dtype, n=VEC),
+            load_vec_as_f32(b, dY, idx, dtype=spec.dtype, n=VEC),
+        )
 
     def compute(loaded):
         xs, dys = loaded
         out = []
         for v in range(VEC):
             a, k2, k3 = coefs[v]
-            out.append(b.fsub(b.fsub(b.fmul(a, dys[v]), b.fmul(k2, b.fsub(xs[v], mean[v]))), k3))
+            out.append(
+                b.fsub(
+                    b.fsub(b.fmul(a, dys[v]), b.fmul(k2, b.fsub(xs[v], mean[v]))), k3
+                )
+            )
         return out
 
-    store = lambda idx, ys: store_vec(b, P["dX"], idx, pack_f32_to(b, ys, dtype=spec.dtype), n=VEC)  # noqa: E731
+    store = lambda idx, ys: store_vec(
+        b, P["dX"], idx, pack_f32_to(b, ys, dtype=spec.dtype), n=VEC
+    )  # noqa: E731
     _nhwc_apply_rows(b, spec, ctx, r_lo, r_hi, load_rows2, compute, store)
     return b.kernel
 
@@ -3635,12 +4004,20 @@ class BatchNorm2DMcwSpec:
 
     def kernel_name(self, kind: str = "fused") -> str:
         return kernel_name_join(
-            self.name, self.mode, self.dtype,
-            f"w{self.waves}", f"cp{self.cpw}", f"n{self.npw}", f"s{self.slots}", f"v{self.vec}" if self.vec != 1 else "",
+            self.name,
+            self.mode,
+            self.dtype,
+            f"w{self.waves}",
+            f"cp{self.cpw}",
+            f"n{self.npw}",
+            f"s{self.slots}",
+            f"v{self.vec}" if self.vec != 1 else "",
         )
 
 
-def is_valid_mcw_spec(spec: BatchNorm2DMcwSpec, arch: str = "gfx950") -> Tuple[bool, str]:
+def is_valid_mcw_spec(
+    spec: BatchNorm2DMcwSpec, arch: str = "gfx950"
+) -> Tuple[bool, str]:
     from ...core.arch import ArchTarget
 
     try:
@@ -3675,7 +4052,9 @@ def _ceil_pow2(v: int) -> int:
     return p
 
 
-def mcw_admits(spec: BatchNorm2DMcwSpec, n: int, c: int, h: int, w: int) -> Tuple[bool, str]:
+def mcw_admits(
+    spec: BatchNorm2DMcwSpec, n: int, c: int, h: int, w: int
+) -> Tuple[bool, str]:
     """Runtime-shape admission of one multi-channel-per-wave instance.
 
     The sample count per wave and the slot count are the smallest power of
@@ -3730,7 +4109,9 @@ class _McwCtx:
             nk = b.add(b.const_i32(k * W), self.wave)
             self.n_ok.append(b.cmp_lt(nk, p_n))
             self.n_idx.append(b.smin(nk, n_last))
-        self.owner = b.land(b.cmp_eq(self.wave, b.const_i32(0)), b.cmp_eq(self.p, b.const_i32(0)))
+        self.owner = b.land(
+            b.cmp_eq(self.wave, b.const_i32(0)), b.cmp_eq(self.p, b.const_i32(0))
+        )
 
     def elems(self):
         """``(flat index, valid)`` of every cached element, sample-major."""
@@ -3739,7 +4120,11 @@ class _McwCtx:
         for k in range(spec.npw):
             base = b.mul(b.add(b.mul(self.n_idx[k], self.p_c), self.channel), self.hw)
             for s in range(spec.slots):
-                col = self.hw_idx[s] if spec.vec == 1 else b.mul(self.hw_idx[s], b.const_i32(spec.vec))
+                col = (
+                    self.hw_idx[s]
+                    if spec.vec == 1
+                    else b.mul(self.hw_idx[s], b.const_i32(spec.vec))
+                )
                 out.append((b.add(base, col), b.land(self.n_ok[k], self.hw_ok[s])))
         return out
 
@@ -3782,7 +4167,9 @@ def _mcw_group_sums(b, spec, ctx, vals, lds):
 
 
 def _mcw_lds(b, spec, n_vals):
-    return make_lds_view(b, dtype=F32, shape=(n_vals * spec.waves * spec.cpw,), name_hint="lds_mcw").base
+    return make_lds_view(
+        b, dtype=F32, shape=(n_vals * spec.waves * spec.cpw,), name_hint="lds_mcw"
+    ).base
 
 
 def build_batchnorm2d_mcw_train(spec: BatchNorm2DMcwSpec) -> KernelDef:
@@ -3793,8 +4180,12 @@ def build_batchnorm2d_mcw_train(spec: BatchNorm2DMcwSpec) -> KernelDef:
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = spec.block_size
     X = b.param("X", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16)
-    Gamma = b.param("Gamma", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16)
-    Beta = b.param("Beta", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16)
+    Gamma = b.param(
+        "Gamma", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16
+    )
+    Beta = b.param(
+        "Beta", PtrType(io_ty, "global"), noalias=True, readonly=True, align=16
+    )
     Y = b.param("Y", PtrType(io_ty, "global"), noalias=True, writeonly=True, align=16)
     RunningMean = b.param("RunningMean", PtrType(F32, "global"), noalias=True)
     RunningVar = b.param("RunningVar", PtrType(F32, "global"), noalias=True)
@@ -3813,7 +4204,11 @@ def build_batchnorm2d_mcw_train(spec: BatchNorm2DMcwSpec) -> KernelDef:
     elems = ctx.elems()
     xs = [_mcw_load(b, spec, X, idx) for idx, _ in elems]
     zero = b.const_f32(0.0)
-    ds = [b.select(ok_, b.fsub(x, shift), zero) for xv, (_, ok_) in zip(xs, elems) for x in xv]
+    ds = [
+        b.select(ok_, b.fsub(x, shift), zero)
+        for xv, (_, ok_) in zip(xs, elems)
+        for x in xv
+    ]
     s1 = tree_reduce(b, b.fadd, list(ds))
     s2 = tree_reduce(b, b.fadd, [b.fmul(d, d) for d in ds])
     t1, t2 = _mcw_group_sums(b, spec, ctx, [s1, s2], lds)
@@ -3829,8 +4224,16 @@ def build_batchnorm2d_mcw_train(spec: BatchNorm2DMcwSpec) -> KernelDef:
         unbias = b.fdiv(m_f, b.fmax(b.fsub(m_f, b.const_f32(1.0)), b.const_f32(1.0)))
         old_m = b.global_load_f32(RunningMean, ctx.channel)
         old_v = b.global_load_f32(RunningVar, ctx.channel)
-        b.global_store(RunningMean, ctx.channel, b.fadd(b.fmul(one_minus, old_m), b.fmul(momentum, mean)))
-        b.global_store(RunningVar, ctx.channel, b.fadd(b.fmul(one_minus, old_v), b.fmul(momentum, b.fmul(var, unbias))))
+        b.global_store(
+            RunningMean,
+            ctx.channel,
+            b.fadd(b.fmul(one_minus, old_m), b.fmul(momentum, mean)),
+        )
+        b.global_store(
+            RunningVar,
+            ctx.channel,
+            b.fadd(b.fmul(one_minus, old_v), b.fmul(momentum, b.fmul(var, unbias))),
+        )
         store_scalar_from_f32(b, Mean, ctx.channel, mean, dtype=spec.dtype)
         store_scalar_from_f32(b, InvStd, ctx.channel, inv, dtype=spec.dtype)
     sc = b.fmul(inv, gamma)
@@ -3869,7 +4272,10 @@ def build_batchnorm2d_mcw_bwd(spec: BatchNorm2DMcwSpec) -> KernelDef:
     dys = [_mcw_load(b, spec, dY, idx) for idx, _ in elems]
     zero = b.const_f32(0.0)
     dym = [b.select(ok_, dy, zero) for dyv, (_, ok_) in zip(dys, elems) for dy in dyv]
-    prods = [b.fmul(d, b.fmul(b.fsub(x, mean), invstd)) for d, x in zip(dym, [x for xv in xs for x in xv])]
+    prods = [
+        b.fmul(d, b.fmul(b.fsub(x, mean), invstd))
+        for d, x in zip(dym, [x for xv in xs for x in xv])
+    ]
     s1 = tree_reduce(b, b.fadd, list(dym))
     s2 = tree_reduce(b, b.fadd, prods)
     t1, t2 = _mcw_group_sums(b, spec, ctx, [s1, s2], lds)
@@ -3880,10 +4286,22 @@ def build_batchnorm2d_mcw_bwd(spec: BatchNorm2DMcwSpec) -> KernelDef:
     a, k2, k3 = _bwd_coefs(b, t1, t2, scale, mean, invstd, m_f)
     for xv, dyv, (idx, ok_) in zip(xs, dys, elems):
         with b.scf_if(ok_):
-            _mcw_store(b, spec, dX, idx, [
-                b.fsub(b.fsub(b.fmul(a, dy), b.fmul(k2, b.fsub(x, mean))), k3) for x, dy in zip(xv, dyv)])
+            _mcw_store(
+                b,
+                spec,
+                dX,
+                idx,
+                [
+                    b.fsub(b.fsub(b.fmul(a, dy), b.fmul(k2, b.fsub(x, mean))), k3)
+                    for x, dy in zip(xv, dyv)
+                ],
+            )
     return b.kernel
 
 
 def build_batchnorm2d_mcw(spec: BatchNorm2DMcwSpec) -> KernelDef:
-    return build_batchnorm2d_mcw_train(spec) if spec.mode == "train" else build_batchnorm2d_mcw_bwd(spec)
+    return (
+        build_batchnorm2d_mcw_train(spec)
+        if spec.mode == "train"
+        else build_batchnorm2d_mcw_bwd(spec)
+    )
