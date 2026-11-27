@@ -34,6 +34,8 @@ For setup and the most common flags in context, see
 | Variable | Values (default) | Purpose |
 |---|---|---|
 | `ROCKE_CONV_SPLIT_K` | `auto` \| `off` \| `<n>` (**auto**) | Read by `library/benchmarks/common/benchmark_implicit_gemm_conv.py` only: forces the split-K degree of implicit-GEMM conv wgrad/dgrad combos that ask for auto (`--split-k -1`, and the resolver's degree in a sweep). The benchmark passes it to `kernels.common.conv_split_k.resolve_conv_split_k` as the explicit `override` argument; the resolver, dispatch and the kernel builders read no environment. `auto` uses the split-K cost model (`library/kernels/conv/split_k_planner.py`) on arches that have one and the CK-formula heuristic (`select_split_k_wgrad`, same module as the resolver) elsewhere. `off` (or `0`/`1`) forces no split. `<n>` (>= 2) forces that degree, held to what the kernel can build (gridDim.z budget, reduction availability, and at most 128 for the packed bf16/fp16 atomic -- wgrad moves above that to the f32 workspace when it can); any other value is an error. An explicit `--split-k` degree is never overridden. Forward conv has no split-K path. |
+| `ROCKE_WGRAD_FOLD_N` | `0` (**on**) | Read by `library/benchmarks/common/direct_kernel_sweep.py`: a one-row-filter wgrad with no row padding, stride 1 and one-row images also gets plans that fold the batch into the rows (`[N, H, W, C]` served as `[1, N*H, W, C]`: same bytes, same dW). `0` turns that route off. |
+| `ROCKE_WGRAD_EXCHANGE_HW` | `0` (**on**) | Read by `library/benchmarks/common/direct_kernel_sweep.py`: a 1xN wgrad on one-row images (no row padding, stride 1) is also served by the cached Nx1 kernels, with H and W swapped (same bytes). `0` turns that route off. |
 
 ## hipDNN provider
 

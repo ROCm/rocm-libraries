@@ -1860,10 +1860,12 @@ def test_run_from_cache_batch_chunks_are_balanced():
         n0 += n
     # One launch over the whole batch (a plan that rebases its activations
     # per segment): the i32 size kernargs take a clamped value.
-    assert _chunk_buffers(ptrs, sizes, inputs, "y", [31], 0) == (
+    assert _chunk_buffers(ptrs, sizes, inputs, "y", [31], 0, True) == (
         ptrs,
         {k: min(v, _TENSOR_LIMIT - 1) for k, v in sizes.items()},
     )
+    # any other plan keeps the true size, which the packer rejects
+    assert _chunk_buffers(ptrs, sizes, inputs, "y", [31], 0) == (ptrs, sizes)
     small = {k: min(v, 4096) for k, v in sizes.items()}
     assert _chunk_buffers(ptrs, small, inputs, "y", [31], 0) == (ptrs, small)
 

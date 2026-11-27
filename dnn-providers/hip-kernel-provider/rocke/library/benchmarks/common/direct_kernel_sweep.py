@@ -453,7 +453,8 @@ class DirectPlan:
     """Everything needed to run one cached kernel (or pipeline) on a problem.
 
     Buffer names: ``x``/``w``/``y`` for forward, ``dy``/``w``/``dx`` for
-    dgrad, ``dy``/``x``/``dw`` (fp32) for wgrad, plus the scratch buffers in
+    dgrad, ``dy``/``x``/``dw`` (fp32) for wgrad (``dw16``, the 16-bit dW, for
+    the tiled kernels that store or add into it), plus the scratch buffers in
     ``workspaces`` (name -> bytes). The caller zeroes the ``zeroed`` ones
     before a run, as it zeroes wgrad's dW.
     """
@@ -482,6 +483,9 @@ def _wgrad_slab_plan(cache, identity, hsaco_path, meta, spec, problem):
     if parts < 2:
         return None, "one split: no slabs to fold"
     n_el = problem.groups * problem.kpg * problem.KH * problem.KW * problem.cpg
+    if n_el % 4:
+        # the fold stores dW in quads and guards only a quad's first element
+        return None, "slab fold needs dW elements in quads (a multiple of 4)"
     ws_bytes = 4 * parts * n_el
     if ws_bytes >= 1 << 31:
         return None, "slab scratch past 2 GiB"
@@ -700,7 +704,9 @@ def plan_for(
             step = _conv_step(
                 identity, hsaco_path, meta, spec, problem, "wgrad", ("dy", "x", out)
             )
-            return DirectPlan(identity, (step,)), "ok"
+            # A pk16 kernel adds into the 16-bit dW: the caller zeroes it.
+            zeroed = ("dw16",) if getattr(spec, "pk16", False) else ()
+            return DirectPlan(identity, (step,), zeroed=zeroed), "ok"
         from kernels.common.conv_wgrad_workspace_reduce import (
             wgrad_reduce_grid,
             wgrad_reduce_signature,

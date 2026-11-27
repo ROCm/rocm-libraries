@@ -309,6 +309,11 @@ class DirectWgradTiledSpec:
         )
 
 
+#: pk16 adds every split's partial into the fp16 dW: past this many splits the
+#: rounding error of the running sum leaves the fp16 accuracy bar.
+_PK16_MAX_SPLITS = 64
+
+
 def is_valid_wgrad_tiled_spec(spec: DirectWgradTiledSpec, arch: str = "gfx950"):
     from rocke.core.arch import ArchTarget
 
@@ -370,6 +375,8 @@ def is_valid_wgrad_tiled_spec(spec: DirectWgradTiledSpec, arch: str = "gfx950"):
         return False, "gpack needs groups > 1 with kpg == wave_k and cpg == wave_c"
     if p.kpg < spec.wave_k or p.cpg < spec.wave_c:
         return False, "wave tile wider than the group's channels"
+    if spec.pk16 and spec.n_splits() > _PK16_MAX_SPLITS:
+        return False, f"pk16 sums its splits in fp16: at most {_PK16_MAX_SPLITS}"
     if spec.acc_vgprs() > 192:
         return False, f"accumulators need {spec.acc_vgprs()} VGPRs (> 192)"
     if spec.slab and (spec.one_split or spec.dw16 or spec.pk16):
@@ -1303,8 +1310,9 @@ class WgradSlabFoldSpec:
     A block owns ``4 * 256 / slices`` consecutive dW elements: its threads are
     ``slices`` slices of quads, each slice loads every ``slices``-th slab as
     16-byte vectors through a buffer descriptor (an index past the last slab
-    loads out of range, i.e. 0), and the slices meet in LDS. Shape-generic: ``parts`` and ``n`` are
-    kernargs.
+    loads out of range, i.e. 0), and the slices meet in LDS. ``parts`` and
+    ``n`` are kernargs; ``n`` must be a multiple of 4 (the one-slice store
+    guards a quad by its first element; the plan refuses other counts).
     """
 
     out: str = "fp16"

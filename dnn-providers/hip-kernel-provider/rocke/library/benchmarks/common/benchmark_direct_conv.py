@@ -2361,7 +2361,13 @@ def _measure_plans(
                     launch_values(
                         st,
                         *_chunk_buffers(
-                            ptrs, sizes, inputs, out_name, plan_chunks(plan), i
+                            ptrs,
+                            sizes,
+                            inputs,
+                            out_name,
+                            plan_chunks(plan),
+                            i,
+                            _one_launch(plan),
                         ),
                     ),
                     LaunchConfig(grid=st.grid, block=st.block, stream=0),
@@ -2624,16 +2630,17 @@ def _batch_chunks(p, direction: str) -> List[int]:
     return [base + (i < extra) for i in range(n_steps)]
 
 
-def _chunk_buffers(ptrs, sizes, inputs, out_name, chunks, i):
+def _chunk_buffers(ptrs, sizes, inputs, out_name, chunks, i, one_launch=False):
     """``(ptrs, sizes)`` with the activations narrowed to batch chunk ``i``
-    of ``chunks`` (images per chunk, in batch order)."""
+    of ``chunks`` (images per chunk, in batch order). ``one_launch``: the plan
+    is a one-launch plan (see :func:`_one_launch`)."""
     if len(chunks) == 1:
-        if all(v <= _I32_MAX for v in sizes.values()):
-            return ptrs, sizes
-        # a one-launch plan (see _one_launch) rebases its activations per
-        # segment and never reads their byte sizes: the i32 kernargs take a
-        # clamped value
-        return ptrs, {k: min(v, _I32_MAX) for k, v in sizes.items()}
+        if one_launch and any(v > _I32_MAX for v in sizes.values()):
+            # a one-launch plan rebases its activations per segment and never
+            # reads their byte sizes: the i32 kernargs take a clamped value.
+            # Any other plan keeps the true size, which the packer rejects.
+            return ptrs, {k: min(v, _I32_MAX) for k, v in sizes.items()}
+        return ptrs, sizes
     ptrs, sizes = dict(ptrs), dict(sizes)
     n_total, n0 = sum(chunks), sum(chunks[:i])
     # wgrad's dW has no batch: every chunk adds into the whole of it.
@@ -2687,8 +2694,11 @@ def _one_launch(plan) -> bool:
     """A plan whose kernels address the activations through a per-segment
     64-bit rebased base (tiled wgrad ``l64``): one launch serves a batch past
     the 2^31-byte buffer range."""
-    return plan.identity.algorithm == "direct_wgrad_tiled" and '"l64": true' in (
-        plan.identity.knobs or ""
+    ident = getattr(plan, "identity", None)
+    return (
+        ident is not None
+        and ident.algorithm == "direct_wgrad_tiled"
+        and '"l64": true' in (ident.knobs or "")
     )
 
 

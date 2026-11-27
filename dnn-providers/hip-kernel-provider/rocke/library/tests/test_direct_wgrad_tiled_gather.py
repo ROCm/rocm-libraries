@@ -38,6 +38,7 @@ from kernels.common.conv_direct_wgrad_gather import (
 from kernels.common.conv_direct_wgrad_tiled import (
     DirectWgradTiledSpec,
     WgradSlabFoldSpec,
+    is_valid_wgrad_tiled_spec,
 )
 from kernels.conv import direct_aot_jobs as jobs_mod
 
@@ -296,6 +297,58 @@ def test_slab_plan_folds_the_slabs_into_the_16bit_dw():
     assert not plan.zeroed
 
 
+def test_pk16_plan_zeroes_its_dw16():
+    _, plan = _first_plan("fp16", _TILED, "pk16", _CASES["pk16"])
+    assert plan.zeroed == ("dw16",)
+    _, dw16 = _first_plan("fp16", _TILED, "dw16", _CASES["dw16"])
+    assert dw16.zeroed == ()
+
+
+def _plain_spec(**over):
+    import dataclasses
+
+    job = next(
+        j
+        for j in _grid("fp16")
+        if j.identity.algorithm == _TILED and _flag(j) == "plain"
+    )
+    spec = DirectWgradTiledSpec(problem=_CASES["plain"], **job.spec_kwargs)
+    assert is_valid_wgrad_tiled_spec(spec)[0]
+    return dataclasses.replace(spec, **over)
+
+
+@pytest.mark.parametrize(
+    "over, message",
+    [
+        (dict(q_groups=3), "q_groups must be 1, 2 or 4"),
+        (dict(pp_sched=True, pingpong=False), "pp_sched needs the ping-pong"),
+        (dict(dw16=True), "dw16 stores dW whole: needs one_split"),
+        (dict(pk16=True, one_split=True), "pk16 adds atomically"),
+        (dict(slab=True, dw16=True, one_split=True), "slab stores fp32 partials"),
+        (dict(unfold_n=3), "unfold_n"),
+    ],
+    ids=lambda v: v if isinstance(v, str) else "-".join(v),
+)
+def test_tiled_validator_refuses_each_bad_knob(over, message):
+    ok, why = is_valid_wgrad_tiled_spec(_plain_spec(**over))
+    assert not ok
+    assert message in why
+
+
+def test_pk16_caps_its_split_count():
+    spec = _plain_spec(pk16=True)
+    ok, _ = is_valid_wgrad_tiled_spec(spec)
+    assert ok == (spec.n_splits() <= 64)
+    import dataclasses
+
+    big = dataclasses.replace(spec.problem, N=64, H=56, W=56)
+    many = dataclasses.replace(spec, problem=big, target_blocks=1 << 16)
+    assert many.n_splits() > 64
+    ok, why = is_valid_wgrad_tiled_spec(many)
+    assert not ok
+    assert "pk16 sums its splits in fp16" in why
+
+
 def test_slab_plan_refuses_one_split():
     job = next(j for j in _grid("fp16") if _flag(j) == "slab")
     # one image strip per tile and a single block: one split
@@ -471,6 +524,7 @@ _GPU_CASES = [
 ]
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize("flag, algorithm, dtype", _GPU_CASES, ids=lambda v: str(v))
 def test_wgrad_matches_the_reference(flag, algorithm, dtype):
     current_device_arch_in(("gfx950",), subject="the tiled and gather wgrad")
@@ -512,3 +566,38 @@ def _case_kwargs(case: str) -> dict:
         PAD=p.PAD,
         stride=p.stride,
     )
+
+
+# ------------------------------------------------- 1xN exchange and batch fold
+
+
+def _wg(**over) -> DirectConvProblem:
+    kw = dict(N=3, H=1, W=40, groups=1, cpg=64, kpg=64, KH=1, KW=3, PAD=0)
+    kw.update(over)
+    return DirectConvProblem(dtype="fp16", **kw)
+
+
+def test_exchanged_hw_problem_swaps_the_axes():
+    from benchmarks.common.direct_kernel_sweep import exchanged_hw_problem
+
+    q = exchanged_hw_problem(_wg(pad_w=0))
+    assert (q.H, q.W, q.KH, q.KW) == (40, 1, 3, 1)
+    assert q.N == 3 and q.cpg == 64 and q.kpg == 64
+    for bad in (
+        dict(H=2),
+        dict(KH=3),
+        dict(KW=1),
+        dict(PAD=1),
+        dict(stride=2),
+        dict(dil_w=2),
+    ):
+        assert exchanged_hw_problem(_wg(**bad)) is None
+
+
+def test_folded_n_wgrad_problem_folds_one_row_images():
+    from benchmarks.common.direct_kernel_sweep import folded_n_wgrad_problem
+
+    q = folded_n_wgrad_problem(_wg(KW=1))
+    assert (q.N, q.H, q.W) == (1, 3, 40)
+    for bad in (dict(N=1), dict(H=2), dict(KH=3), dict(PAD=1), dict(stride=2)):
+        assert folded_n_wgrad_problem(_wg(KW=1, **bad)) is None

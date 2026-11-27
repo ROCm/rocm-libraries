@@ -583,6 +583,10 @@ extern "C" bool rocke_direct_wgrad_tiled_is_valid_spec(const rocke_direct_wgrad_
     {
         ROCKE_SPEC_FAIL(reason, reason_cap, "wave tile wider than the group's channels");
     }
+    if(s->pk16 && rocke_direct_wgrad_tiled_n_splits(s) > 64)
+    {
+        ROCKE_SPEC_FAIL(reason, reason_cap, "pk16 sums its splits in fp16: at most 64");
+    }
     if(rocke_direct_wgrad_tiled_acc_vgprs(s) > 192)
     {
         ROCKE_SPEC_FAIL(reason,

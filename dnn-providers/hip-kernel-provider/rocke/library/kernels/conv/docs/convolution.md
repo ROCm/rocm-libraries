@@ -1787,7 +1787,7 @@ in fp32.
 
 | Spec | Serves | Output |
 |---|---|---|
-| `DirectWgradTiledSpec` | dense and grouped, stride 1, `cpg`/`kpg` multiples of 8 (3x3, 5x5, 1xN / Nx1 filters) | `global_atomic_add` into a zeroed fp32 `dW[K, KH, KW, cpg]`; with `one_split` / `dw16` / `pk16` / `slab` the 16-bit dW directly (see below) |
+| `DirectWgradTiledSpec` | dense and grouped, stride 1, `cpg` a multiple of 8 and `kpg` a multiple of 4 (3x3, 5x5, 1xN / Nx1 filters); the grouped gather takes `kpg` 8 or 16 | `global_atomic_add` into a zeroed fp32 `dW[K, KH, KW, cpg]`; with `one_split` / `dw16` / `pk16` / `slab` the 16-bit dW directly (see below) |
 | `DwWgradLdsSpec` | depthwise, `C % 8 == 0`, 3x3, stride 1/2 | partial slots `ws[part][tap][c]` |
 | `DwWgradColsSpec` | depthwise, `C <= 8` (stem layers), any filter | partial slots `ws[part][tap][c]` |
 | `WgradGatherSpec` | dense, small `C` (`KW * C <= 96`), any stride; with `grouped=True` grouped layers with `cpg = kpg` in 8 / 16, any stride | partial slots `ws[part][(r, s, c)][k]` |

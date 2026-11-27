@@ -638,7 +638,19 @@ def mixed_cache(tmp_path_factory, tf32_jobs):
 def test_plans_serve_only_their_dtype(mixed_cache, direction, shape, dtype):
     p = _problem(dtype=dtype, **shape)
     plans, _ = dks.direct_plans(mixed_cache, p, direction, _ARCH)
-    names = ("x", "w", "y", "dy", "dx", "dw", "ws_t", "ws_coa", "ws_split")
+    names = (
+        "x",
+        "w",
+        "y",
+        "dy",
+        "dx",
+        "dw",
+        "dw16",
+        "ws",
+        "ws_t",
+        "ws_coa",
+        "ws_split",
+    )
     ptrs = {n: 0x1000 * (i + 1) for i, n in enumerate(names)}
     sizes = {n: 1 << 20 for n in names}
     for plan in plans:

@@ -818,6 +818,7 @@ set(_ROCKE_LIBRARY_GPU_TEST_RELPATHS
     "tests/library/tests/test_direct_fwd_flex_mfma.py::test_forward_matches_the_reference"
     "tests/library/tests/test_direct_fwd_pp_mfma.py::test_forward_matches_the_reference"
     "tests/library/tests/test_direct_fwd_wmma.py::TestFwdWmmaGpu"
+    "tests/library/tests/test_direct_wgrad_tiled_gather.py::test_wgrad_matches_the_reference"
     "tests/library/tests/test_fwd_small_mfma.py::TestSmallGpu"
     "tests/library/tests/test_fwd_small_wmma.py::TestSmallGpu"
     "tests/library/tests/test_streamk_sweep_launch.py::TestStreamKSweepLaunchGpu"
