@@ -82,6 +82,14 @@ public:
 
     size_t getWorkspaceSize(const HipdnnEnginePluginHandle& handle) const override;
 
+    // Issues one real hipblasLtMatmul on scratch device buffers, synchronized before
+    // they free, so the code object this GEMM needs loads now instead of on the
+    // caller's first real execute(). Must run only once per plan, from buildPlan():
+    // isApplicable()/getWorkspaceSize() construct and discard throwaway plans, and
+    // calling this there would warm up code nobody executes. Throws on failure, same
+    // as the constructor; a plan whose own GEMM cannot run is not buildable.
+    void warmUpCodeLoad(const HipdnnEnginePluginHandle& handle) const;
+
     void execute(const HipdnnEnginePluginHandle& handle,
                  const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                  uint32_t numDeviceBuffers,

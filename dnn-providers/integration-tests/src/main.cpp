@@ -223,6 +223,17 @@ int main(int argc, char** argv) noexcept
                   "same oracle. Engines that do not report the SUPPORTS_GRAPH_CAPTURE "
                   "behavior note are skipped. Needs a GPU; cannot be combined with "
                   "--benchmark.");
+        parser.add_argument("--graph-capture-first-execute")
+            .default_value(false)
+            .implicit_value(true)
+            .help("After a bundle test verifies the engine's outputs, build a fresh plan "
+                  "for the same graph and capture its first execute (no eager run "
+                  "beforehand) into a HIP graph in each of the Global, ThreadLocal and "
+                  "Relaxed stream capture modes, then replay it and verify the replayed "
+                  "outputs against the same oracle. A change in free device memory across "
+                  "execute() fails the test. Engines that do not report the "
+                  "SUPPORTS_GRAPH_CAPTURE behavior note are skipped. Needs a GPU; cannot "
+                  "be combined with --graph-capture or --benchmark.");
 
         std::vector<std::string> remainingArgs;
         try
@@ -435,6 +446,7 @@ int main(int argc, char** argv) noexcept
 
         hipdnn_integration_tests::CaptureRequest captureRequest;
         captureRequest.enabled = parser.get<bool>("--graph-capture");
+        captureRequest.firstExecute = parser.get<bool>("--graph-capture-first-execute");
         captureRequest.benchmark = benchmarkRequest.enabled;
         captureRequest.skipGraphValidation = skipGraphValidation;
         captureRequest.captureBundles = captureDir.has_value();
@@ -772,7 +784,7 @@ int main(int argc, char** argv) noexcept
                 const auto captures = hipdnn_integration_tests::CaptureTally::get().counts();
                 std::cerr << "Graph capture: replayed " << captures.replayed << ", mismatch "
                           << captures.mismatch << ", declined " << captures.declined << ", failed "
-                          << captures.failed << "\n";
+                          << captures.failed << ", allocated " << captures.allocated << "\n";
 
                 // A pass that never reached the capture step (an enforcement-level rung,
                 // or a C++ graph test) checks nothing --graph-capture asked for. A run
@@ -787,7 +799,11 @@ int main(int argc, char** argv) noexcept
                 const int capturablePasses = passed > rejected ? passed - rejected : 0;
                 if(capturablePasses > 0 && captures.replayed == 0)
                 {
-                    std::cerr << "\nFATAL: --graph-capture is active and " << capturablePasses
+                    std::cerr << "\nFATAL: "
+                              << (graphCapture.settings->firstExecute
+                                      ? "--graph-capture-first-execute"
+                                      : "--graph-capture")
+                              << " is active and " << capturablePasses
                               << " test(s) passed other than expected rejections, but not one "
                                  "graph was captured and replayed.\n";
                     exitCode = 1;

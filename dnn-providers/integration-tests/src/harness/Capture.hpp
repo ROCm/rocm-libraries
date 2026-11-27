@@ -9,6 +9,8 @@
 #include <string>
 #include <utility>
 
+#include <hip/hip_runtime.h>
+
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 
 namespace hipdnn_integration_tests
@@ -20,6 +22,11 @@ struct CaptureSettings
     static constexpr int DEFAULT_REPLAYS = 3;
 
     int replays = DEFAULT_REPLAYS;
+    /// The stream capture mode hipStreamBeginCapture() runs in.
+    hipStreamCaptureMode mode = hipStreamCaptureModeGlobal;
+    /// Set by --graph-capture-first-execute: capture a freshly built plan's first
+    /// execute in every mode instead of replaying the verified one.
+    bool firstExecute = false;
 };
 
 /// The --graph-capture flag as typed, plus the flags that conflict with it.
@@ -31,6 +38,8 @@ struct CaptureRequest
     bool captureBundles = false;
     bool writeSupportClaims = false;
     bool bundlesDisabled = false;
+    /// --graph-capture-first-execute: capture the first execute of a freshly built plan.
+    bool firstExecute = false;
 };
 
 struct CaptureResolution
@@ -47,33 +56,48 @@ struct CaptureResolution
 /// lane checking nothing and the run green.
 inline CaptureResolution resolveCapture(const CaptureRequest& request)
 {
-    if(!request.enabled)
+    if(!request.enabled && !request.firstExecute)
     {
         return {};
     }
 
+    if(request.enabled && request.firstExecute)
+    {
+        return {std::nullopt,
+                "--graph-capture cannot be combined with --graph-capture-first-execute: "
+                "the first runs the replay lane on an already-executed plan, the second "
+                "captures a freshly built plan. Run the two lanes separately"};
+    }
+
+    const char* flag = request.firstExecute ? "--graph-capture-first-execute" : "--graph-capture";
+
     if(request.benchmark)
     {
         return {std::nullopt,
-                "--graph-capture cannot be combined with --benchmark: autotune "
-                "synchronizes and times with events, which a capturing stream forbids. "
-                "Run the two lanes separately"};
+                std::string(flag)
+                    + " cannot be combined with --benchmark: autotune "
+                      "synchronizes and times with events, which a capturing stream forbids. "
+                      "Run the two lanes separately"};
     }
     if(request.skipGraphValidation || request.captureBundles || request.writeSupportClaims)
     {
         return {std::nullopt,
-                "--graph-capture cannot be combined with --skip-graph-validation, "
-                "--capture-bundles or --write-support-claims: those modes do not "
-                "execute the graph"};
+                std::string(flag)
+                    + " cannot be combined with --skip-graph-validation, "
+                      "--capture-bundles or --write-support-claims: those modes do not "
+                      "execute the graph"};
     }
     if(request.bundlesDisabled)
     {
         return {std::nullopt,
-                "--graph-capture cannot be combined with --no-bundles or "
-                "HIPDNN_TEST_ALLOW_BUNDLES=0: only bundle tests are captured, so no "
-                "test would run the lane"};
+                std::string(flag)
+                    + " cannot be combined with --no-bundles or "
+                      "HIPDNN_TEST_ALLOW_BUNDLES=0: only bundle tests are captured, so no "
+                      "test would run the lane"};
     }
-    return {CaptureSettings{}, std::nullopt};
+    CaptureSettings settings;
+    settings.firstExecute = request.firstExecute;
+    return {settings, std::nullopt};
 }
 
 /// What captureGraph() asks of the harness around each replay. Both run outside
@@ -104,6 +128,10 @@ struct CaptureResult
     /// Set when the replayed outputs differed from the oracle. The mismatches are
     /// already on the record, so this carries no message.
     bool outputsMismatched = false;
+    /// Set when the free device memory differed before and after execute() under
+    /// capture: the engine allocated or freed inside execute(). `message` carries
+    /// the byte delta.
+    bool allocatedDuringCapture = false;
 
     static CaptureResult replayed()
     {

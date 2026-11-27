@@ -70,6 +70,13 @@ captured on. Graphs captured from the same handle, or that share a workspace, mu
 same time as each other or as other work on that handle. Order them on one stream, or give each
 graph that you replay concurrently its own handle and workspace.
 
+A captured graph uses resources that the plan owns (loaded kernel code and constant data) and
+resources of the handle that it was captured on. Keep the plans of the graph, that handle, the
+workspace, and every variant-pack buffer alive until the last replay finishes and the
+``hipGraphExec_t`` is destroyed. If you destroy any of them earlier, the replay is undefined.
+
+The workspace is not initialized. An engine must not assume that the workspace contains zeros.
+
 The capture works in ``hipStreamCaptureModeGlobal`` (the PyTorch default),
 ``hipStreamCaptureModeThreadLocal``, and ``hipStreamCaptureModeRelaxed``.
 
@@ -192,8 +199,13 @@ seen on weight-gradient convolutions. One run before the capture is then not eno
 free can fall inside the capture. Run the plan more than once before the capture, and wait
 briefly or synchronize the stream between the runs. Or use ``MIOPEN_FIND_MODE=FAST``.
 
-The fused convolution, bias, and activation plans (the fusion API) and the batchnorm inference
-plans were captured on the first execution with no extra setup.
+The fused convolution, bias, and activation plans (the fusion API) are not safe to capture on a
+fresh plan. The applicability query of this builder runs MIOpen's fusion Find fallback, which
+allocates and frees three tensors and synchronizes around each allocation. This repeats on every
+heuristic query, and it also invalidates the Global-mode capture of another thread. Build the
+plan, and run it before the capture, with the same discipline as for the other engines. The
+batchnorm inference plans are not affected and were captured on the first execution with no extra
+setup.
 
 Test an engine with the integration tests
 =========================================

@@ -95,6 +95,7 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestGraphVerificationHarness.cpp
     TestBenchmark.cpp
     TestCapture.cpp
+    TestCrossThreadCapture.cpp
     TestInputFillRecipes.cpp
     TestFillInputs.cpp
     TestToleranceResolver.cpp
