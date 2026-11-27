@@ -20,7 +20,7 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
-from ..ExecutionPolicy import isStreamKSpatialCluster, isPersistent, isPersistentDataParallel, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment
+from ..ExecutionPolicy import isStreamKSpatialCluster, isPersistent, isPersistentDataParallel, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment, usesStreamKArrivalFixup
 from rocisa.enum import CacheScope
 from rocisa.code import Module, Label, RegSet
 from rocisa.container import vgpr, sgpr, mgpr, SMEMModifiers, MUBUFModifiers, DSModifiers, replaceHolder, EXEC, VOP3PModifiers, ContinuousRegister
@@ -2591,11 +2591,64 @@ class StreamK(TileProcessingStrategy):
 
     def arrivalFixupSupported(self, writer, kernel):
         """Gate for usesArrivalFixup on the strategies with a dynamic path."""
-        # The ticket broadcast borrows LDS[0, 64*4), so LDS must be idle across
-        # the epilogue (no PAP prefetch). Otherwise use per-part ready flags.
-        return (kernel["DebugStreamK"] == 0
-                and writer.states.asmCaps["HasSAtomic"]
-                and not writer.isPrefetchAcrossPersistentEnabled(kernel))
+        # Gating: see usesStreamKArrivalFixup.
+        uses = usesStreamKArrivalFixup(kernel["DebugStreamK"],
+                                       writer.states.asmCaps["HasSAtomic"],
+                                       writer.isPrefetchAcrossPersistentEnabled(kernel))
+        # Must match the SupportStreamKArrivalFixup the host splits on.
+        advertised = kernel.get("InternalSupportParams", {}).get("SupportStreamKArrivalFixup")
+        assert advertised is None or bool(advertised) == uses, \
+            "SupportStreamKArrivalFixup=%s disagrees with the emitted fixup protocol" % advertised
+        return uses
+
+    def dynamicPartRange(self, writer, kernel):
+        """StreamKLocalStart/End of part StreamKPartialIdx of a split tile on the
+        dynamic path, once per work item (StreamK::Dynamic::partIterRange()).
+
+        SKSplit parts of SKItersPerWI iterations; the K units (skKGranularity
+        iterations each) the padded tile has beyond SKSplit*SKItersPerWI go one
+        each to the first parts. Clamped at zero, so an equal-parts split
+        (SKSplit*SKItersPerWI covers the tile) decodes as PartialIdx*SKItersPerWI.
+        """
+        # The host packs uneven parts only for kernels that advertise this decode.
+        advertised = kernel.get("InternalSupportParams", {}).get("SupportStreamKDynamicUnevenParts")
+        assert advertised is None or bool(advertised), \
+            "SupportStreamKDynamicUnevenParts=%s on a kernel that decodes uneven parts" % advertised
+        module = Module("StreamK dynamic part range")
+        g = skKGranularity(kernel)
+        sExtra = writer.sgprPool.checkOut(1, "skExtraUnits")
+        sTmp = writer.sgprPool.checkOut(1, "skPartTmp")
+        module.add(SMulI32(dst=sgpr(sExtra), src0=sgpr("SKSplit"), src1=sgpr("SKItersPerWI"),
+                           comment="iterations of SKSplit base parts"))
+        sIptPad = skPaddedItersPerTile(module, kernel, sTmp, "ItersPerTile")
+        module.add(SSubU32(dst=sgpr(sExtra), src0=sgpr(sIptPad), src1=sgpr(sExtra),
+                           comment="leftover iterations"))
+        module.add(SMaxI32(dst=sgpr(sExtra), src0=sgpr(sExtra), src1=0,
+                           comment="none for an equal-parts split"))
+        if g > 1:
+            module.add(SLShiftRightB32(dst=sgpr(sExtra), src=sgpr(sExtra), shiftHex=log2(g),
+                                       comment="leftover K units"))
+        module.add(SMinU32(dst=sgpr(sTmp), src0=sgpr("StreamKPartialIdx"), src1=sgpr(sExtra),
+                           comment="earlier parts with an extra unit"))
+        if g > 1:
+            module.add(SLShiftLeftB32(dst=sgpr(sTmp), src=sgpr(sTmp), shiftHex=log2(g),
+                                      comment="units -> iterations"))
+        module.add(SMulI32(dst=sgpr("StreamKLocalStart"), src0=sgpr("StreamKPartialIdx"),
+                           src1=sgpr("SKItersPerWI"), comment="PartialIdx * SKItersPerWI"))
+        module.add(SAddU32(dst=sgpr("StreamKLocalStart"), src0=sgpr("StreamKLocalStart"),
+                           src1=sgpr(sTmp), comment="StreamKLocalStart"))
+        module.add(SAddU32(dst=sgpr("StreamKLocalEnd"), src0=sgpr("StreamKLocalStart"),
+                           src1=sgpr("SKItersPerWI"), comment="base part end"))
+        module.add(SCmpLtU32(src0=sgpr("StreamKPartialIdx"), src1=sgpr(sExtra),
+                             comment="part has an extra unit?"))
+        module.add(SCSelectB32(dst=sgpr(sTmp), src0=g, src1=0))
+        module.add(SAddU32(dst=sgpr("StreamKLocalEnd"), src0=sgpr("StreamKLocalEnd"),
+                           src1=sgpr(sTmp), comment="StreamKLocalEnd"))
+        module.add(SMinU32(dst=sgpr("StreamKLocalEnd"), src0=sgpr("StreamKLocalEnd"),
+                           src1=sgpr("ItersPerTile"), comment="Cap ending iter at ItersPerTile"))
+        writer.sgprPool.checkIn(sTmp)
+        writer.sgprPool.checkIn(sExtra)
+        return module
 
     def calculatePartialTile(self, writer, kernel, sPartialTile):
         """sPartialTile = index of the current tile among the split (last
@@ -3972,9 +4025,7 @@ class StreamKDynamic(StreamK):
         tmpVgprRes = None
         writer.vgprPool.checkIn(tmpVgpr)
         module.add(SAddU32(dst=sgpr("StreamKTileIdx"), src0=sgpr("StreamKTileIdx"), src1=sgpr(sFullTile), comment="Offset to first partial tile"))
-        module.add(SMulI32(dst=sgpr("StreamKLocalStart"), src0=sgpr("StreamKPartialIdx"), src1=sgpr("SKItersPerWI"), comment="StreamKLocalStart = PartialIdx * SKItersPerWI"))
-        module.add(SAddU32(dst=sgpr("StreamKLocalEnd"), src0=sgpr("StreamKLocalStart"), src1=sgpr("SKItersPerWI"), comment="StreamKLocalEnd = StreamKLocalStart + SKItersPerWI"))
-        module.add(SMinU32(dst=sgpr("StreamKLocalEnd"), src0=sgpr("StreamKLocalEnd"), src1=sgpr("ItersPerTile"), comment="Cap ending iter at ItersPerTile"))
+        module.add(self.dynamicPartRange(writer, kernel))
 
         module.add(skDone)
         writer.sgprPool.checkIn(sFullTile)
@@ -4073,9 +4124,7 @@ class StreamKDynamic(StreamK):
         tmpVgprRes = None
         writer.vgprPool.checkIn(tmpVgpr)
         module.add(SAddU32(dst=sgpr("StreamKTileIdx"), src0=sgpr("StreamKTileIdx"), src1=sgpr(sFullTile), comment="Offset to first partial tile"))
-        module.add(SMulI32(dst=sgpr("StreamKLocalStart"), src0=sgpr("StreamKPartialIdx"), src1=sgpr("SKItersPerWI"), comment="StreamKLocalStart = PartialIdx * SKItersPerWI"))
-        module.add(SAddU32(dst=sgpr("StreamKLocalEnd"), src0=sgpr("StreamKLocalStart"), src1=sgpr("SKItersPerWI"), comment="StreamKLocalEnd = StreamKLocalStart + SKItersPerWI"))
-        module.add(SMinU32(dst=sgpr("StreamKLocalEnd"), src0=sgpr("StreamKLocalEnd"), src1=sgpr("ItersPerTile"), comment="Cap ending iter at ItersPerTile"))
+        module.add(self.dynamicPartRange(writer, kernel))
 
         module.add(skDone)
         writer.sgprPool.checkIn(sFullTile)
@@ -4550,15 +4599,7 @@ class StreamKHybrid(StreamK):
         writer.vgprPool.checkIn(tmpVgpr)
         module.add(SAddU32(dst=sgpr("StreamKTileIdx"), src0=sgpr("StreamKTileIdx"),
                            src1=sgpr(sFullTile), comment="Offset to first partial tile"))
-        module.add(SMulI32(dst=sgpr("StreamKLocalStart"), src0=sgpr("StreamKPartialIdx"),
-                           src1=sgpr("SKItersPerWI"),
-                           comment="StreamKLocalStart = PartialIdx * SKItersPerWI"))
-        module.add(SAddU32(dst=sgpr("StreamKLocalEnd"), src0=sgpr("StreamKLocalStart"),
-                           src1=sgpr("SKItersPerWI"),
-                           comment="StreamKLocalEnd = StreamKLocalStart + SKItersPerWI"))
-        module.add(SMinU32(dst=sgpr("StreamKLocalEnd"), src0=sgpr("StreamKLocalEnd"),
-                           src1=sgpr("ItersPerTile"),
-                           comment="Cap ending iter at ItersPerTile"))
+        module.add(self.dynamicPartRange(writer, kernel))
 
         module.add(skDone)
         writer.sgprPool.checkIn(sFullTile)

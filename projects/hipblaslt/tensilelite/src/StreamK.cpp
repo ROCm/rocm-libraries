@@ -319,31 +319,126 @@ namespace TensileLite
         });
     }
 
-    StreamK::Dynamic::KernelArguments StreamK::Dynamic::items(Hardware const& hardware,
-                                                              size_t          tiles,
-                                                              size_t          itersPerTile,
-                                                              size_t          kGranularity)
+    StreamK::Dynamic::KernelArguments StreamK::Dynamic::computeSplit(SplitInputs const& in)
     {
-        AMDGPU const*   pAMDGPU       = dynamic_cast<AMDGPU const*>(&hardware);
-        const int       overrideTiles = pAMDGPU ? pAMDGPU->skTiles : -1;
-        const int       overrideSplit = pAMDGPU ? pAMDGPU->skSplit : -1;
-        KernelArguments items;
-        items.tiles = overrideTiles > -1 ? static_cast<uint32_t>(overrideTiles) : 0;
-        items.split = overrideSplit > -1 ? static_cast<uint32_t>(overrideSplit) : 2;
-        // Rounded up to a whole number of K units so that every chunk
-        // boundary p*itersPerWI lands on one (see skKGranularity()). The
-        // tile is measured padded to a whole unit, so the boundaries stay on
-        // units even when its real K is not; the device clamps the last
-        // chunk back to ItersPerTile. A unit of one changes nothing.
-        const uint32_t kGran = static_cast<uint32_t>(std::max(kGranularity, size_t{1}));
-        const uint32_t iters = static_cast<uint32_t>(
-            StreamK::paddedItersPerTile(std::max(size_t{1}, itersPerTile), kGran));
-        // The real split once the iterations are divided up.
-        items.itersPerWI = kGran * CeilDivide(CeilDivide(iters, items.split), kGran);
-        items.split      = CeilDivide(iters, items.itersPerWI);
-        items.totalItems = static_cast<uint32_t>((tiles - items.tiles)
-                                                 + size_t{items.tiles} * items.split);
-        return items;
+        // The tile is measured padded to a whole number of K units and every
+        // part is a whole number of them, so every part boundary lands on a unit
+        // (see skKGranularity()); the device clamps the last part back to
+        // ItersPerTile. A unit of one changes nothing.
+        const size_t kGran = std::max(size_t{1}, in.kGranularity);
+        const size_t itersPerTile
+            = StreamK::paddedItersPerTile(std::max(size_t{1}, in.itersPerTile), kGran);
+
+        // With uneven parts the tile's units are dealt out as evenly as they go
+        // (see partIterRange()), so a tile has exactly `split` parts, at most one
+        // per unit. Without, the split is rounded through SKItersPerWI the way
+        // those kernels decode it, so the packed SKSplit is the number of parts
+        // that exist.
+        auto splitTiles = [&](size_t skTiles, size_t split) {
+            KernelArguments d;
+            split = std::max(size_t{1}, split);
+            if(in.unevenParts)
+            {
+                const size_t units = itersPerTile / kGran;
+                d.split            = static_cast<uint32_t>(std::min(split, units));
+                d.itersPerWI       = static_cast<uint32_t>(kGran * (units / d.split));
+            }
+            else
+            {
+                d.itersPerWI = static_cast<uint32_t>(
+                    kGran * CeilDivide(CeilDivide(itersPerTile, split), kGran));
+                d.split = static_cast<uint32_t>(CeilDivide(itersPerTile, size_t{d.itersPerWI}));
+            }
+            d.tiles = static_cast<uint32_t>(skTiles);
+            d.totalItems
+                = static_cast<uint32_t>((in.totalTiles - skTiles) + skTiles * size_t{d.split});
+            d.grid = static_cast<uint32_t>(
+                in.maxGrid > 0 ? std::min(size_t{d.totalItems}, in.maxGrid) : size_t{d.totalItems});
+            return d;
+        };
+        // Whole tiles are packed with this split.
+        constexpr size_t      defaultSplit = 2;
+        const KernelArguments allWhole     = splitTiles(0, defaultSplit);
+
+        // The partials a split needs must fit the workspace and the flag region.
+        auto partialsFit = [&](size_t skTiles, size_t split) {
+            const size_t slots = skTiles * split;
+            return slots <= in.flagSlots && slots * in.partialTileBytes <= in.workspaceBytes;
+        };
+
+        // Debug overrides replace the policy below. Uniform summation order
+        // ignores those that split only some tiles, or split where the policy
+        // would not, as if unset. An applied override whose partials do not fit
+        // keeps every tile whole rather than taking the policy's split, so a
+        // debug run never launches a split nobody asked for.
+        if(in.overrideTiles > -1 || in.overrideSplit > -1)
+        {
+            const size_t skTiles
+                = std::min(in.totalTiles, size_t(in.overrideTiles > -1 ? in.overrideTiles : 0));
+            const KernelArguments d
+                = splitTiles(skTiles, in.overrideSplit > -1 ? in.overrideSplit : defaultSplit);
+            const bool overrideApplies = !in.uniformSummationOrder || d.tiles == 0
+                                         || (isRowUniform(d, in.totalTiles) && in.allowSplit);
+            if(overrideApplies)
+                return (d.tiles == 0 || partialsFit(d.tiles, d.split)) ? d : allWhole;
+        }
+
+        if(!in.allowSplit || in.totalTiles == 0 || in.splitCUs == 0 || in.totalTiles >= in.splitCUs)
+            return allWhole;
+
+        // Largest factor that fits (origami grid_k_split_aware).
+        for(const size_t split : SplitFactors)
+        {
+            if(in.totalTiles * split > in.splitCUs || itersPerTile / split < MinItersPerWI)
+                continue;
+            const KernelArguments d = splitTiles(in.totalTiles, split);
+            if(d.split >= 2 && partialsFit(d.tiles, d.split))
+                return d;
+        }
+        return allWhole;
+    }
+
+    bool StreamK::Dynamic::isRowUniform(KernelArguments const& d, size_t totalTiles)
+    {
+        return d.tiles == 0 || d.tiles == totalTiles;
+    }
+
+    StreamK::Static::IterRange StreamK::Dynamic::partIterRange(KernelArguments const& d,
+                                                               size_t                 itersPerTile,
+                                                               size_t                 kGranularity,
+                                                               size_t                 part)
+    {
+        // Mirrors StreamK.py's dynamicPartRange: the leftover is clamped at zero,
+        // so an equal-parts split decodes as before.
+        const size_t      g          = std::max(size_t{1}, kGranularity);
+        const size_t      ipt        = std::max(size_t{1}, itersPerTile);
+        const size_t      padded     = StreamK::paddedItersPerTile(ipt, g);
+        const size_t      covered    = size_t{d.split} * d.itersPerWI;
+        const size_t      extraUnits = padded > covered ? (padded - covered) / g : 0;
+        Static::IterRange r;
+        r.start = part * d.itersPerWI + g * std::min(part, extraUnits);
+        r.end   = std::min(r.start + d.itersPerWI + (part < extraUnits ? g : 0), ipt);
+        return r;
+    }
+
+    size_t StreamK::Dynamic::maxGrid(AMDGPU const& gpu, int cuOccupancy)
+    {
+        const size_t occupancy = std::max(cuOccupancy, 1);
+        size_t       maxGrid   = gpu.computeUnitCount * std::min(occupancy, MaxOccupancy);
+        if(gpu.persistentMaxCUs > 0)
+            maxGrid = std::min(maxGrid, static_cast<size_t>(gpu.persistentMaxCUs));
+        if(gpu.persistentFixedGrid > 0)
+            maxGrid = std::min(maxGrid, static_cast<size_t>(gpu.persistentFixedGrid));
+        return maxGrid;
+    }
+
+    bool StreamK::Dynamic::keepsSummationOrder(ContractionSolution const& solution)
+    {
+        auto const& type           = solution.problemType;
+        const bool  widenedPartial = type.highPrecisionAccumulate
+                                    && (type.computeType == rocisa::DataType::Half
+                                        || type.computeType == rocisa::DataType::BFloat16);
+        return solution.sizeMapping.streamKAtomic == 0 && !widenedPartial;
     }
 
     bool StreamK::usePerTileSplit(ContractionSolution const&      solution,

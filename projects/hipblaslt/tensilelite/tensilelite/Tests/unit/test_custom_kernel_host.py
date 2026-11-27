@@ -16,7 +16,12 @@ from tensilelite.Common.DataType import DataType
 from tensilelite.Contractions import CustomKernel
 from tensilelite.Common.Utilities import deriveWaveParams
 from tensilelite.SolutionStructs.Naming import _getName, getKernelFileBase
-from tensilelite.SolutionStructs.Solution import Solution, _supportStreamKPerTileExtraIters
+from tensilelite.SolutionStructs.Solution import (
+    Solution,
+    _supportStreamKArrivalFixup,
+    _supportStreamKDynamicUnevenParts,
+    _supportStreamKPerTileExtraIters,
+)
 from tensilelite.Toolchain.Component import Assembler
 
 pytestmark = pytest.mark.unit
@@ -329,6 +334,47 @@ def test_uso_capability_assignment_survives_missing_custom_kernel_name():
         _supportStreamKPerTileExtraIters(state)
     )
     assert state["InternalSupportParams"]["SupportStreamKPerTileExtraIters"] is True
+
+
+@pytest.mark.parametrize(
+    "state, hasSAtomic, expected",
+    [
+        ({"StreamK": 5}, True, True),
+        ({"StreamK": 5}, False, False),
+        ({"StreamK": 5, "DebugStreamK": 1}, True, False),
+        ({"StreamK": 5, "_PrefetchAcrossPersistentEnabled": True}, True, False),
+        ({"StreamK": 5, "CustomKernel": {"name": "handwritten"}}, True, False),
+        ({"StreamK": 5, "CustomKernel": {"name": "gen", "generated": True}}, True, True),
+        ({"StreamK": 4}, True, True),
+        ({"StreamK": 4}, False, False),
+        ({"StreamK": 4, "DebugStreamK": 1}, True, False),
+        ({"StreamK": 4, "_PrefetchAcrossPersistentEnabled": True}, True, False),
+        ({"StreamK": 4, "CustomKernel": {"name": "handwritten"}}, True, False),
+        ({"StreamK": 4, "CustomKernel": {"name": "gen", "generated": True}}, True, True),
+        ({"StreamK": 3}, True, False),
+        ({"StreamK": 0}, True, False),
+    ],
+)
+def test_arrival_fixup_capability(state, hasSAtomic, expected):
+    assert _supportStreamKArrivalFixup(state, hasSAtomic) is expected
+
+
+@pytest.mark.parametrize(
+    "state, expected",
+    [
+        ({"StreamK": 5}, True),
+        ({"StreamK": 5, "DebugStreamK": 1}, True),
+        ({"StreamK": 5, "CustomKernel": {"name": "handwritten"}}, False),
+        ({"StreamK": 5, "CustomKernel": {"name": "gen", "generated": True}}, True),
+        ({"StreamK": 4}, True),
+        ({"StreamK": 4, "_PrefetchAcrossPersistentEnabled": True}, True),
+        ({"StreamK": 4, "CustomKernel": {"name": "handwritten"}}, False),
+        ({"StreamK": 3}, False),
+        ({"StreamK": 0}, False),
+    ],
+)
+def test_dynamic_uneven_parts_capability(state, expected):
+    assert _supportStreamKDynamicUnevenParts(state) is expected
 
 
 # --------------------------------------------------------------------------- #

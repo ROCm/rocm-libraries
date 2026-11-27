@@ -807,6 +807,35 @@ namespace
         }
     }
 
+    TEST_F(PersistentExecutionPolicySerializationTest, ArrivalFixupRoundTripsAndDefaultsToFalse)
+    {
+        canonical(policies[4]);
+        internalArgs["arrivalFixup"] = object(true);
+        auto loaded                  = readSolution();
+        EXPECT_TRUE(loaded->internalArgsSupport.arrivalFixup);
+        internalArgs = output(loaded->internalArgsSupport);
+        EXPECT_TRUE(readSolution()->internalArgsSupport.arrivalFixup);
+
+        // Older logic files omit the field: no arrival fixup.
+        internalArgs.erase("arrivalFixup");
+        EXPECT_FALSE(readSolution()->internalArgsSupport.arrivalFixup);
+    }
+
+    TEST_F(PersistentExecutionPolicySerializationTest,
+           DynamicUnevenPartsRoundTripsAndDefaultsToFalse)
+    {
+        canonical(policies[4]);
+        internalArgs["dynamicUnevenParts"] = object(true);
+        auto loaded                        = readSolution();
+        EXPECT_TRUE(loaded->internalArgsSupport.dynamicUnevenParts);
+        internalArgs = output(loaded->internalArgsSupport);
+        EXPECT_TRUE(readSolution()->internalArgsSupport.dynamicUnevenParts);
+
+        // Older logic files omit the field: equal parts.
+        internalArgs.erase("dynamicUnevenParts");
+        EXPECT_FALSE(readSolution()->internalArgsSupport.dynamicUnevenParts);
+    }
+
     TEST_F(PersistentExecutionPolicySerializationTest, PrebuiltLegacyMetadataIsPreserved)
     {
         legacy(policies[1]);

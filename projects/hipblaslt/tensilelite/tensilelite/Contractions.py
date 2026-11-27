@@ -1160,6 +1160,8 @@ class InternalArgsSupport:
                    wgm = isp['SupportCustomWGM'],
                    staggerU = isp['SupportCustomStaggerU'],
                    perTileExtraIters = isp.get('SupportStreamKPerTileExtraIters', False),
+                   arrivalFixup = isp.get('SupportStreamKArrivalFixup', False),
+                   dynamicUnevenParts = isp.get('SupportStreamKDynamicUnevenParts', False),
                    occupancyProbe = isp.get('SupportOccupancyProbe', False),
                    useUniversalArgs = isp['UseUniversalArgs'],
                    useSFC = useSFC)
@@ -1169,6 +1171,11 @@ class InternalArgsSupport:
         # Emitted only when set so libraries built without the probe are unchanged.
         if getattr(self, 'occupancyProbe', False):
             rv['occupancyProbe'] = True
+        # Likewise, so libraries without the arrival fixup are unchanged.
+        if getattr(self, 'arrivalFixup', False):
+            rv['arrivalFixup'] = True
+        if getattr(self, 'dynamicUnevenParts', False):
+            rv['dynamicUnevenParts'] = True
         return rv
 
     def __init__(self, **kwargs):

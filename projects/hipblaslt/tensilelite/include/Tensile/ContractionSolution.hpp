@@ -874,6 +874,12 @@ namespace TensileLite
         bool                 deviceScalarAlphaSupported(Problem const& problem) const;
         bool                 deviceScalarAlphaSupported(std::vector<Problem> const& problems) const;
         size_t               partialTileSize(size_t skGrid) const;
+        // StreamK::Dynamic::computeSplit() for this solution, problem and hardware.
+        // Every consumer of the dynamic decomposition calls it, so they agree.
+        // Handwritten kernels (handwrittenCustomKernel()) keep every tile whole.
+        StreamK::Dynamic::KernelArguments streamKDynamicDecomposition(Problem const&  problem,
+                                                                      Hardware const& hardware,
+                                                                      size_t          tiles) const;
 
         // Compute the StreamK launch-parameter DECISIONS for this solution on the
         // given problem/hardware. solve() does NOT consume this on the hot path:
@@ -1164,6 +1170,14 @@ namespace TensileLite
             // newly generated StreamK 3 / SK5 set it true. Uniform-summation-order
             // grid steering consults the same bit.
             bool perTileExtraIters  = false;
+            // SupportStreamKArrivalFixup (GlobalParameters.py): dynamic tiles
+            // are split only for these. Older/custom kernels leave this false.
+            bool arrivalFixup = false;
+            // SupportStreamKDynamicUnevenParts: the dynamic path decodes split
+            // parts of unequal length (StreamK::Dynamic::partIterRange()), so
+            // tiles split into exactly the parts asked for. Older/custom kernels
+            // decode equal parts and leave this false.
+            bool dynamicUnevenParts = false;
             // Kernel takes the ProbeAddr/ProbeEpoch/ProbeGrid tail args (CU-occupancy probe).
             bool occupancyProbe     = false;
             bool useUniversalArgs   = true;
@@ -1350,6 +1364,22 @@ namespace TensileLite
         StreamKSettings resolveStreamKSettings(Problem const&  problem,
                                                Hardware const& hardware,
                                                bool const* effectiveDynamicHint = nullptr) const;
+
+        // streamKDynamicDecomposition() on the dynamic-queue path, else all tiles
+        // whole. Where streamKDynamicSizesPartials() holds, it alone sizes the
+        // partials: partialTileSize(partialSlots()), none when no tile is split,
+        // in requiredWorkspaceSize(), resolveStreamKSettings() and
+        // computeStreamKDecisions() alike.
+        StreamK::Dynamic::KernelArguments resolveStreamKDynamicSplit(Problem const&  problem,
+                                                                     Hardware const& hardware,
+                                                                     size_t          tiles,
+                                                                     bool effectiveDynamic) const;
+
+        // On the dynamic-queue path a work item is a whole tile, which writes no
+        // partial, or one part of a split tile, which writes one, so the
+        // decomposition, not the grid, sizes the partials. Handwritten kernels
+        // keep the grid rule.
+        bool streamKDynamicSizesPartials(bool effectiveDynamic) const;
 
         // Reasons checkUniformSummationOrder() would refuse this launch.
         // Empty means the launch is row-uniform. requireSynchronizer is the
