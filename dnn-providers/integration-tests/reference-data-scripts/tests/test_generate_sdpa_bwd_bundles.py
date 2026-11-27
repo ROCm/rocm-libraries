@@ -361,7 +361,9 @@ def _section_keys(section):
     conv = _CONV_TOLERANCE_SECTION.fullmatch(section)
     if conv is None:
         return None
-    return _CONV_TOLERANCE_KEYS | ({"summation_order"} if conv.group(1) == "float" else set())
+    return _CONV_TOLERANCE_KEYS | (
+        {"summation_order"} if conv.group(1) == "float" else set()
+    )
 
 
 def _toml_entries(path):
@@ -481,7 +483,11 @@ _SYNTHETIC_CONV_TOLERANCE = """\
         ("conv_fwd_tolerance.float", "summation_ordr", "'summation_ordr'"),
         ("conv_fwd_tolerance.half", "summation_order", "'summation_order'"),
         ("conv_dgrad_tolerance.half.gfx90a", "summation_order", "'summation_order'"),
-        ("conv_wrw_tolerance.bfloat16", "lambda_per_quartic_root", "'lambda_per_quartic_root'"),
+        (
+            "conv_wrw_tolerance.bfloat16",
+            "lambda_per_quartic_root",
+            "'lambda_per_quartic_root'",
+        ),
         ("conv_bwd_tolerance.float", "lambda", "'conv_bwd_tolerance.float'"),
         ("conv_fwd_tolerance.double", "lambda", "'conv_fwd_tolerance.double'"),
         ("conv_fwd_tolerance", "summation_order", "'conv_fwd_tolerance'"),
