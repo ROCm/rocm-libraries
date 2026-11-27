@@ -90,10 +90,12 @@
  *
  * Knobs: hipkernel:BatchnormTraining and hipkernel:BatchnormBackward ship a kernel per
  * performance configuration their build takes (`variant`, `block_size`, `vector_size`),
- * hipkernel:BatchnormInference a kernel per vector width of each form (`vector_size`), and
- * hipkernel:LayernormBwd a kernel per scale/bias reduction (`parallel`), so a caller can pin
- * one. Unpinned, each engine's scorer ranks the configuration the hand-written
- * engine's heuristics choose first, and the plan is the hand-written engine's.
+ * hipkernel:BatchnormInference a kernel per vector width of each form (`vector_size`),
+ * hipkernel:LayernormFwd a kernel per workgroup size (`local_size`), and
+ * hipkernel:LayernormBwd a kernel per scale/bias reduction and workgroup size (`parallel`,
+ * `local_size`), so a caller can pin one. Unpinned, each engine's scorer ranks the
+ * configuration the hand-written engine's heuristics choose first, and the plan is the
+ * hand-written engine's.
  *
  * Deliberate difference: a graph with override shapes is declined by every family. Each
  * bakes its shapes into the compiled program; the hand-written Resample builders were the
@@ -125,12 +127,14 @@ constexpr std::string_view BATCHNORM_BACKWARD = "BATCHNORM_BACKWARD";
 
 // The knobs: the kernels' integer metadata naming the performance configuration each builds.
 // Batchnorm training and backward: BatchnormSpatialConfig's variant, groupSize and
-// vectorSize. Batchnorm inference: BatchnormInferenceConfig's vectorSize. Layernorm
-// backward: LayernormBwdConfig's parallel, 0 or 1.
+// vectorSize. Batchnorm inference: BatchnormInferenceConfig's vectorSize. Layernorm forward:
+// LayernormFwdConfig's localSize. Layernorm backward: LayernormBwdConfig's parallel, 0 or 1,
+// and localSize.
 constexpr std::string_view VARIANT_FIELD = "variant";
 constexpr std::string_view BLOCK_SIZE_FIELD = "block_size";
 constexpr std::string_view VECTOR_SIZE_FIELD = "vector_size";
 constexpr std::string_view PARALLEL_FIELD = "parallel";
+constexpr std::string_view LOCAL_SIZE_FIELD = "local_size";
 
 // ---------------------------------------------------------------------------
 // Matching
@@ -761,6 +765,58 @@ double batchnormInferenceScore(const MatchContext& context,
     return heuristicFirstScore(inferenceConfigOf(kernel), heuristic, INFERENCE_CONFIG_ORDER);
 }
 
+/// The layernorm forward params of the graph.
+layernorm::LayernormFwdParams layernormFwdParams(const MatchContext& context)
+{
+    return layernorm::LayernormFwdParams(
+        context.graph.getNodeWrapper(0).attributesAs<data_objects::LayernormAttributes>(),
+        context.graph.getTensorMap());
+}
+
+/// The layernorm forward configuration @p kernel builds: its `local_size` workgroup.
+layernorm::LayernormFwdConfig layernormFwdConfigOf(const KernelDefinition& kernel)
+{
+    return {kernel.getIntMetadata(std::string(LOCAL_SIZE_FIELD))};
+}
+
+/// The order the layernorm forward scorer ranks the workgroups the hand-written plan does not
+/// use: the widest first.
+constexpr std::array<layernorm::LayernormFwdConfig, 3> LAYERNORM_FWD_CONFIG_ORDER
+    = {{{1024}, {512}, {256}}};
+
+/// Kernel-scoped, layernorm forward: the operation, and a workgroup whose launch fits
+/// (isFwdConfigApplicable()). familyOf() has checked the default's launch, the widest.
+bool layernormFwdKernelMatches(const MatchContext& context,
+                               const BoundTokens& bound,
+                               const KernelDefinition& kernel)
+{
+    if(!kernelMatches(context, bound, kernel))
+    {
+        return false;
+    }
+    try
+    {
+        return layernorm::isFwdConfigApplicable(layernormFwdParams(context),
+                                                layernormFwdConfigOf(kernel));
+    }
+    catch(const std::exception& error)
+    {
+        HIPDNN_PLUGIN_LOG_INFO("hipkernel:LayernormFwd declines kernel " << kernel.name << ": "
+                                                                         << error.what());
+        return false;
+    }
+}
+
+/// The hand-written plan's workgroup first, then LAYERNORM_FWD_CONFIG_ORDER.
+double layernormFwdScore(const MatchContext& /*context*/,
+                         const BoundTokens& /*bound*/,
+                         const KernelDefinition& kernel)
+{
+    return heuristicFirstScore(layernormFwdConfigOf(kernel),
+                               layernorm::defaultLayernormFwdConfig(),
+                               LAYERNORM_FWD_CONFIG_ORDER);
+}
+
 /// The layernorm backward params of the graph.
 layernorm::LayernormBwdParams layernormBwdParams(const MatchContext& context)
 {
@@ -770,21 +826,21 @@ layernorm::LayernormBwdParams layernormBwdParams(const MatchContext& context)
 }
 
 /// The layernorm backward configuration @p kernel builds: whether its `parallel` reduction
-/// splits across workgroups.
+/// splits across workgroups, and its `local_size` workgroup.
 layernorm::LayernormBwdConfig layernormBwdConfigOf(const KernelDefinition& kernel)
 {
-    return {kernel.getIntMetadata(std::string(PARALLEL_FIELD)) != 0};
+    return {kernel.getIntMetadata(std::string(PARALLEL_FIELD)) != 0,
+            kernel.getIntMetadata(std::string(LOCAL_SIZE_FIELD))};
 }
 
-/// The layernorm backward reductions for heuristicFirstScore(): with two, the one the launch
-/// heuristics did not choose ranks second whatever this order.
-constexpr std::array<layernorm::LayernormBwdConfig, 2> LAYERNORM_BWD_CONFIG_ORDER
-    = {{{false}, {true}}};
+/// The workgroups the layernorm backward scorer ranks, the widest first.
+constexpr std::array<int64_t, 3> LAYERNORM_BWD_LOCAL_SIZE_ORDER = {1024, 512, 256};
 
-/// Kernel-scoped, layernorm backward: the operation, and a reduction whose launches fit on
-/// this device (isBwdConfigApplicable()). familyOf() has checked the main kernel and the
-/// one-pass reduction, as the hand-written builder does; the parallel reduction's grid grows
-/// with the CU count, so it is checked here, for the device and the kernel's reduction.
+/// Kernel-scoped, layernorm backward: the operation, and a reduction and workgroup whose
+/// launches fit on this device (isBwdConfigApplicable()). familyOf() has checked the main
+/// kernel and the one-pass reduction at the default workgroup, as the hand-written builder
+/// does; the parallel reduction's grid grows with the CU count, so it is checked here, for the
+/// device and the kernel's configuration.
 bool layernormBwdKernelMatches(const MatchContext& context,
                                const BoundTokens& bound,
                                const KernelDefinition& kernel)
@@ -807,16 +863,23 @@ bool layernormBwdKernelMatches(const MatchContext& context,
     }
 }
 
-/// The launch heuristics' reduction first.
+/// The launch heuristics' configuration first, then each workgroup of
+/// LAYERNORM_BWD_LOCAL_SIZE_ORDER with the heuristics' reduction before the other, so a caller
+/// pinning only `local_size` keeps the heuristics' reduction.
 double layernormBwdScore(const MatchContext& context,
                          const BoundTokens& /*bound*/,
                          const KernelDefinition& kernel)
 {
     const auto params = layernormBwdParams(context);
-    return heuristicFirstScore(
-        layernormBwdConfigOf(kernel),
-        layernorm::defaultLayernormBwdConfig(params, context.deviceProperties.multiProcessorCount),
-        LAYERNORM_BWD_CONFIG_ORDER);
+    const auto heuristic = layernorm::defaultLayernormBwdConfig(
+        params, context.deviceProperties.multiProcessorCount);
+    std::array<layernorm::LayernormBwdConfig, 2 * LAYERNORM_BWD_LOCAL_SIZE_ORDER.size()> order{};
+    for(size_t i = 0; i < LAYERNORM_BWD_LOCAL_SIZE_ORDER.size(); ++i)
+    {
+        order[2 * i] = {heuristic.parallel, LAYERNORM_BWD_LOCAL_SIZE_ORDER[i]};
+        order[2 * i + 1] = {!heuristic.parallel, LAYERNORM_BWD_LOCAL_SIZE_ORDER[i]};
+    }
+    return heuristicFirstScore(layernormBwdConfigOf(kernel), heuristic, order);
 }
 
 // ---------------------------------------------------------------------------
@@ -1216,6 +1279,7 @@ class LayernormFwdDispatchHandler : public HipMlopsDispatchHandler
 public:
     using HipMlopsDispatchHandler::HipMlopsDispatchHandler;
 
+    /// Builds the workgroup @p kernel names.
     std::unique_ptr<PreparedDispatch> prepare(const MatchContext& context,
                                               const BoundTokens& /*bound*/,
                                               const KernelDefinition& kernel) const override
@@ -1224,8 +1288,8 @@ public:
             = context.graph.getNodeWrapper(0).attributesAs<data_objects::LayernormAttributes>();
         const auto& tensorMap = context.graph.getTensorMap();
         const layernorm::LayernormFwdParams params(attributes, tensorMap);
-        const auto build
-            = layernorm::buildLayernormFwdKernel(params, context.deviceProperties.gcnArchName);
+        const auto build = layernorm::buildLayernormFwdKernel(
+            params, context.deviceProperties.gcnArchName, layernormFwdConfigOf(kernel));
         auto codes = compileLaunches(_compiler, _loader, context, kernel, build);
 
         return std::make_unique<PreparedLayernormFwd>(
@@ -1251,7 +1315,8 @@ public:
                                                      layernormBwdConfigOf(kernel));
     }
 
-    /// Builds the reduction @p kernel names: two launches, or three for the parallel one.
+    /// Builds the reduction and workgroup @p kernel names: two launches, or three for the
+    /// parallel reduction.
     std::unique_ptr<PreparedDispatch> prepare(const MatchContext& context,
                                               const BoundTokens& /*bound*/,
                                               const KernelDefinition& kernel) const override
@@ -2062,7 +2127,8 @@ void registerHipMlopsResampleBwdSymbols(SymbolScope<Handle>& scope)
 void registerHipMlopsLayernormFwdSymbols(SymbolScope<Handle>& scope)
 {
     scope.add("hipkernel.layernorm_fwd.graph_match", &layernormFwdGraphMatches);
-    scope.add("hipkernel.layernorm_fwd.kernel_match", &kernelMatches);
+    scope.add("hipkernel.layernorm_fwd.kernel_match", &layernormFwdKernelMatches);
+    scope.add("hipkernel.layernorm_fwd.score", &layernormFwdScore);
     scope.add("hipkernel.layernorm_fwd.dispatch", &dispatchHandler<LayernormFwdDispatchHandler>());
 }
 

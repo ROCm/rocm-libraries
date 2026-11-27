@@ -13,18 +13,22 @@ engine:
   # fixed order, so a (graph, configuration, device) gives the same bits every run:
   # TestHipMlopsDeterminism.cpp proves it for every kernel the engine ships.
   numerical_notes: []
-  # Each scale/bias reduction is a kernel of its own, addressed by this knob. The native
-  # scorer ranks the one the launch heuristics choose first.
-  knobs: [parallel]
+  # Each scale/bias reduction at each workgroup size is a kernel of its own, addressed by
+  # these knobs. The native scorer ranks the one the launch heuristics choose first.
+  knobs: [parallel, local_size]
   heuristic: native
 
-# parallel defaults to LayernormBwdConfig's own default, the one-pass reduction.
+# parallel and local_size default to LayernormBwdConfig's own defaults, the one-pass
+# reduction and LayernormBwdParams::MAX_LOCAL_SIZE.
 kmd_fields:
   - name: operation
     type: string
   - name: parallel
     type: int
     default_value: 0
+  - name: local_size
+    type: int
+    default_value: 1024
 
 graph_match:
   shape: shared_shape
@@ -39,11 +43,12 @@ packs:
   # One program, two or three launches: LayernormBwd, then LayernormBwdScaleBias, or
   # LayernormBwdScaleBiasParallel and LayernormBwdScaleBiasReduceSum. The handler launches
   # the entry points after the first by symbol (entryPointKernelDefinition). One kernel per
-  # reduction: parallel 0 runs the one-pass sequence, parallel 1 the parallel one, whose
-  # partial sums need workspace.
+  # reduction and workgroup size: parallel 0 runs the one-pass sequence, parallel 1 the
+  # parallel one, whose partial sums need workspace; local_size, a power of two the kernels'
+  # tree reductions halve, is the workgroup of every launch (256, 512 or 1024 threads).
   - name: layernorm_bwd
     kernels:
-      - name: hip_mlops.layernorm_bwd.one_pass
+      - name: hip_mlops.layernorm_bwd.one_pass_local256
         kernel_source:
           kind: embedded_source
           source_file: kernels/LayernormBwd.cpp
@@ -51,8 +56,9 @@ packs:
         metadata:
           operation: LAYERNORM_BWD
           parallel: 0
+          local_size: 256
         priority: 0
-      - name: hip_mlops.layernorm_bwd.parallel
+      - name: hip_mlops.layernorm_bwd.parallel_local256
         kernel_source:
           kind: embedded_source
           source_file: kernels/LayernormBwd.cpp
@@ -60,11 +66,52 @@ packs:
         metadata:
           operation: LAYERNORM_BWD
           parallel: 1
+          local_size: 256
+        priority: 0
+      - name: hip_mlops.layernorm_bwd.one_pass_local512
+        kernel_source:
+          kind: embedded_source
+          source_file: kernels/LayernormBwd.cpp
+          entry_point: LayernormBwd
+        metadata:
+          operation: LAYERNORM_BWD
+          parallel: 0
+          local_size: 512
+        priority: 0
+      - name: hip_mlops.layernorm_bwd.parallel_local512
+        kernel_source:
+          kind: embedded_source
+          source_file: kernels/LayernormBwd.cpp
+          entry_point: LayernormBwd
+        metadata:
+          operation: LAYERNORM_BWD
+          parallel: 1
+          local_size: 512
+        priority: 0
+      - name: hip_mlops.layernorm_bwd.one_pass_local1024
+        kernel_source:
+          kind: embedded_source
+          source_file: kernels/LayernormBwd.cpp
+          entry_point: LayernormBwd
+        metadata:
+          operation: LAYERNORM_BWD
+          parallel: 0
+          local_size: 1024
+        priority: 0
+      - name: hip_mlops.layernorm_bwd.parallel_local1024
+        kernel_source:
+          kind: embedded_source
+          source_file: kernels/LayernormBwd.cpp
+          entry_point: LayernormBwd
+        metadata:
+          operation: LAYERNORM_BWD
+          parallel: 1
+          local_size: 1024
         priority: 0
 
 # Embedded source compiled at plan build: every field is matcher-only.
 specialization:
   metadata_fields: []
-  matcher_only_fields: [operation, parallel]
+  matcher_only_fields: [operation, parallel, local_size]
   bindings: {}
   vocabulary: {}

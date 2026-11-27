@@ -11,7 +11,8 @@
     "default": "91acd4e0-04bb-4538-8cee-56e16062a88b"
   },
   "knobs": [
-    "parallel"
+    "parallel",
+    "local_size"
   ],
   "behavior_notes": [
     "runtime_compilation",

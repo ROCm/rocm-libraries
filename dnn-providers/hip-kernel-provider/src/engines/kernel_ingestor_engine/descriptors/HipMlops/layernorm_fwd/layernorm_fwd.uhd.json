@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "id": "8b62f730-fa53-472e-ae5f-450795ecded4",
+  "name": "LayernormFwd selector",
+  "adapter": "native",
+  "objective": "max",
+  "native": {
+    "symbol": "hipkernel.layernorm_fwd.score"
+  }
+}

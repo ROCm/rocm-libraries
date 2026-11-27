@@ -41,18 +41,46 @@ struct LayernormKernelBuild
     std::vector<LayernormLaunch> launches;
 };
 
+/// Whether @p localSize is a workgroup the layernorm kernels can run: their tree reductions
+/// halve it down to one lane, so a power of two, of at most 1024 threads.
+inline bool isLocalSizeSupported(int64_t localSize)
+{
+    return localSize >= 1 && localSize <= 1024 && (localSize & (localSize - 1)) == 0;
+}
+
+/// The performance choice of the layernorm forward launch: the workgroup that normalizes each
+/// row (HIP_PLUGIN_LAYERNORM_LOCAL_SIZE). The default is LayernormFwdParams::LOCAL_SIZE.
+struct LayernormFwdConfig
+{
+    int64_t localSize = 1024;
+};
+
+inline bool operator==(const LayernormFwdConfig& lhs, const LayernormFwdConfig& rhs)
+{
+    return lhs.localSize == rhs.localSize;
+}
+
+inline bool operator!=(const LayernormFwdConfig& lhs, const LayernormFwdConfig& rhs)
+{
+    return !(lhs == rhs);
+}
+
 /// The performance choice of the layernorm backward launches: whether the scale/bias
 /// reduction splits across workgroups (LayernormBwdScaleBiasParallel then
-/// LayernormBwdScaleBiasReduceSum) or runs in one pass (LayernormBwdScaleBias). The parallel
-/// size derives from the problem and the device.
+/// LayernormBwdScaleBiasReduceSum) or runs in one pass (LayernormBwdScaleBias), and the
+/// workgroup every launch takes (HIP_PLUGIN_LAYERNORM_LOCAL_SIZE; the default is
+/// LayernormBwdParams::MAX_LOCAL_SIZE). The parallel size derives from the problem and the
+/// device, sized for MAX_LOCAL_SIZE whatever the local size, so the partial sums and the
+/// workspace do not depend on it.
 struct LayernormBwdConfig
 {
     bool parallel = false;
+    int64_t localSize = 1024;
 };
 
 inline bool operator==(const LayernormBwdConfig& lhs, const LayernormBwdConfig& rhs)
 {
-    return lhs.parallel == rhs.parallel;
+    return lhs.parallel == rhs.parallel && lhs.localSize == rhs.localSize;
 }
 
 inline bool operator!=(const LayernormBwdConfig& lhs, const LayernormBwdConfig& rhs)

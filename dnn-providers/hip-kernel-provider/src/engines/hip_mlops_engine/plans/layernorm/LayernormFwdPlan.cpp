@@ -86,9 +86,10 @@ LayernormFwdPlan::LayernormFwdPlan(LayernormFwdParams&& params)
 {
 }
 
-std::vector<KernelLaunchShape> LayernormFwdPlan::launchShapes(int64_t outerSize, int64_t stride)
+std::vector<KernelLaunchShape>
+    LayernormFwdPlan::launchShapes(int64_t outerSize, int64_t stride, int64_t localSize)
 {
-    return {{"LayernormFwd", outerSize * stride, LayernormFwdParams::LOCAL_SIZE}};
+    return {{"LayernormFwd", outerSize * stride, localSize}};
 }
 
 size_t LayernormFwdPlan::getWorkspaceSize([[maybe_unused]] const Handle& handle) const
@@ -97,8 +98,33 @@ size_t LayernormFwdPlan::getWorkspaceSize([[maybe_unused]] const Handle& handle)
     return 0;
 }
 
+namespace
+{
+
+ProblemDescription fwdProblem(const LayernormFwdParams& params)
+{
+    const auto statAttr
+        = params.mean() == nullptr ? std::nullopt : std::make_optional(params.mean());
+    return {params.x(), params.scale(), statAttr, Direction::FORWARD};
+}
+
+} // namespace
+
+LayernormFwdConfig defaultLayernormFwdConfig()
+{
+    return {LayernormFwdParams::LOCAL_SIZE};
+}
+
+std::vector<KernelLaunchShape> layernormFwdLaunchShapes(const LayernormFwdParams& params,
+                                                        const LayernormFwdConfig& config)
+{
+    const auto problem = fwdProblem(params);
+    return LayernormFwdPlan::launchShapes(problem.outerSize(), problem.stride(), config.localSize);
+}
+
 LayernormKernelBuild buildLayernormFwdKernel(const LayernormFwdParams& params,
-                                             const std::string& gcnArchName)
+                                             const std::string& gcnArchName,
+                                             const LayernormFwdConfig& config)
 {
     // Extract dimensions from x tensor
     const auto* xDims = params.x()->dims();
@@ -110,14 +136,12 @@ LayernormKernelBuild buildLayernormFwdKernel(const LayernormFwdParams& params,
                                                            + std::to_string(xDims->size()));
     }
 
-    const auto statAttr
-        = params.mean() == nullptr ? std::nullopt : std::make_optional(params.mean());
-    const ProblemDescription problem(params.x(), params.scale(), statAttr, Direction::FORWARD);
+    const auto problem = fwdProblem(params);
     const int64_t outerSize = problem.outerSize();
     const int64_t innerSize = problem.innerSize();
     const int64_t stride = problem.stride();
 
-    const auto shapes = LayernormFwdPlan::launchShapes(outerSize, stride);
+    const auto shapes = LayernormFwdPlan::launchShapes(outerSize, stride, config.localSize);
     for(const auto& shape : shapes)
     {
         checkLaunchFitsThreadLimit(shape);
@@ -157,7 +181,8 @@ LayernormKernelBuild buildLayernormFwdKernel(const LayernormFwdParams& params,
 void LayernormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
                                const hipDeviceProp_t& deviceProperties)
 {
-    const auto build = buildLayernormFwdKernel(_params, std::string(deviceProperties.gcnArchName));
+    const auto build = buildLayernormFwdKernel(
+        _params, std::string(deviceProperties.gcnArchName), defaultLayernormFwdConfig());
     const auto& launch = build.launches.front();
 
     // Compile kernel and configure launch dimensions

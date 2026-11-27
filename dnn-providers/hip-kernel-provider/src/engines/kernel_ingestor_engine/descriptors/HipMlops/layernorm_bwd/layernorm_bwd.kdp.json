@@ -17,7 +17,8 @@
           "metadata_fields": [],
           "matcher_only_fields": [
             "operation",
-            "parallel"
+            "parallel",
+            "local_size"
           ],
           "bindings": {},
           "vocabulary": {}
@@ -28,8 +29,8 @@
   "kernelDescriptors": [
     {
       "version": "1.0",
-      "id": "d322d7dd-b0ac-4042-a2bc-65a5a7e77383",
-      "name": "hip_mlops.layernorm_bwd.one_pass",
+      "id": "329c575d-5d6f-4366-bfc6-9dec6a8567fb",
+      "name": "hip_mlops.layernorm_bwd.one_pass_local256",
       "kernel_source": {
         "kind": "embedded_source",
         "source_file": "kernels/LayernormBwd.cpp",
@@ -37,14 +38,79 @@
       },
       "metadata": {
         "operation": "LAYERNORM_BWD",
-        "parallel": 0
+        "parallel": 0,
+        "local_size": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "c2c47530-d7fe-4ef9-87be-ba8235c76a86",
+      "name": "hip_mlops.layernorm_bwd.parallel_local256",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/LayernormBwd.cpp",
+        "entry_point": "LayernormBwd"
+      },
+      "metadata": {
+        "operation": "LAYERNORM_BWD",
+        "parallel": 1,
+        "local_size": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "22ec1a62-e5ab-4c3f-a86e-7387295e95f3",
+      "name": "hip_mlops.layernorm_bwd.one_pass_local512",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/LayernormBwd.cpp",
+        "entry_point": "LayernormBwd"
+      },
+      "metadata": {
+        "operation": "LAYERNORM_BWD",
+        "parallel": 0,
+        "local_size": 512
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "22b2b579-1add-4265-86c8-630f97eb8579",
+      "name": "hip_mlops.layernorm_bwd.parallel_local512",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/LayernormBwd.cpp",
+        "entry_point": "LayernormBwd"
+      },
+      "metadata": {
+        "operation": "LAYERNORM_BWD",
+        "parallel": 1,
+        "local_size": 512
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "d322d7dd-b0ac-4042-a2bc-65a5a7e77383",
+      "name": "hip_mlops.layernorm_bwd.one_pass_local1024",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/LayernormBwd.cpp",
+        "entry_point": "LayernormBwd"
+      },
+      "metadata": {
+        "operation": "LAYERNORM_BWD",
+        "parallel": 0,
+        "local_size": 1024
       },
       "priority": 0
     },
     {
       "version": "1.0",
       "id": "f3e0858f-f01e-4350-a4eb-a79057f1fc4b",
-      "name": "hip_mlops.layernorm_bwd.parallel",
+      "name": "hip_mlops.layernorm_bwd.parallel_local1024",
       "kernel_source": {
         "kind": "embedded_source",
         "source_file": "kernels/LayernormBwd.cpp",
@@ -52,7 +118,8 @@
       },
       "metadata": {
         "operation": "LAYERNORM_BWD",
-        "parallel": 1
+        "parallel": 1,
+        "local_size": 1024
       },
       "priority": 0
     }

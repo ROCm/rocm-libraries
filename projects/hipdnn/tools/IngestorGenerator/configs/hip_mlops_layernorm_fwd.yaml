@@ -13,11 +13,18 @@ engine:
   # fixed order, so a (graph, configuration, device) gives the same bits every run:
   # TestHipMlopsDeterminism.cpp proves it for every kernel the engine ships.
   numerical_notes: []
-  heuristic: none
+  # Each workgroup size is a kernel of its own, addressed by this knob. The native scorer
+  # ranks the hand-written plan's first.
+  knobs: [local_size]
+  heuristic: native
 
+# local_size defaults to LayernormFwdConfig's own default, LayernormFwdParams::LOCAL_SIZE.
 kmd_fields:
   - name: operation
     type: string
+  - name: local_size
+    type: int
+    default_value: 1024
 
 graph_match:
   shape: shared_shape
@@ -29,20 +36,41 @@ workspace_policy: none
 authored_subpath: descriptors/HipMlops/layernorm_fwd
 
 packs:
+  # One launch, a workgroup per row. One kernel per workgroup size the build takes: a power
+  # of two the kernel's tree reduction halves, 256, 512 or 1024 threads.
   - name: layernorm_fwd
     kernels:
-      - name: hip_mlops.layernorm_fwd
+      - name: hip_mlops.layernorm_fwd.local256
         kernel_source:
           kind: embedded_source
           source_file: kernels/LayernormFwd.cpp
           entry_point: LayernormFwd
         metadata:
           operation: LAYERNORM_FWD
+          local_size: 256
+        priority: 0
+      - name: hip_mlops.layernorm_fwd.local512
+        kernel_source:
+          kind: embedded_source
+          source_file: kernels/LayernormFwd.cpp
+          entry_point: LayernormFwd
+        metadata:
+          operation: LAYERNORM_FWD
+          local_size: 512
+        priority: 0
+      - name: hip_mlops.layernorm_fwd.local1024
+        kernel_source:
+          kind: embedded_source
+          source_file: kernels/LayernormFwd.cpp
+          entry_point: LayernormFwd
+        metadata:
+          operation: LAYERNORM_FWD
+          local_size: 1024
         priority: 0
 
 # Embedded source compiled at plan build: every field is matcher-only.
 specialization:
   metadata_fields: []
-  matcher_only_fields: [operation]
+  matcher_only_fields: [operation, local_size]
   bindings: {}
   vocabulary: {}

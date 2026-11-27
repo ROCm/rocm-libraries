@@ -11,6 +11,11 @@
       "name": "parallel",
       "type": "int",
       "default_value": 0
+    },
+    {
+      "name": "local_size",
+      "type": "int",
+      "default_value": 1024
     }
   ]
 }

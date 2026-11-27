@@ -80,6 +80,7 @@ public:
         const hipdnn_flatbuffers_sdk::data_objects::LayernormBackwardAttributes& lnAttr);
 };
 
+class LayernormFwdParams;
 class LayernormBwdParams;
 
 // The launch of the Layernorm forward plan for lnAttr, outerSize * stride workgroups, is not
@@ -107,10 +108,17 @@ void checkLaunchShapesFitThreadLimit(
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap);
 
+// Whether the forward launch of config can run params: a supported local size
+// (isLocalSizeSupported()) whose launch (layernormFwdLaunchShapes()) stays below the 2^32
+// threads HIP accepts. checkLaunchShapesFitThreadLimit() checks the default's; a narrower
+// workgroup launches fewer threads.
+bool isFwdConfigApplicable(const LayernormFwdParams& params, const LayernormFwdConfig& config);
+
 // Whether the backward launches of config can run params on a device with
 // multiProcessorCount CUs: both scale/bias reductions handle any shape (at a parallel size of
-// 1 one thread reduces each column over every row), so a config applies when each of its
-// launches (layernormBwdLaunchShapes()) stays below the 2^32 threads HIP accepts.
+// 1 one thread reduces each column over every row), so a config applies when its local size
+// is supported (isLocalSizeSupported()) and each of its launches (layernormBwdLaunchShapes())
+// stays below the 2^32 threads HIP accepts.
 bool isBwdConfigApplicable(const LayernormBwdParams& params,
                            int multiProcessorCount,
                            const LayernormBwdConfig& config);

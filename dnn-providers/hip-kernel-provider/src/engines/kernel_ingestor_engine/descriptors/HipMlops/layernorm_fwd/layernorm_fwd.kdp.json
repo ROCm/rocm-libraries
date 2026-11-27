@@ -16,7 +16,8 @@
           "kmd_id": "5afc1d1b-9a8c-4275-9208-4c6e786630a1",
           "metadata_fields": [],
           "matcher_only_fields": [
-            "operation"
+            "operation",
+            "local_size"
           ],
           "bindings": {},
           "vocabulary": {}
@@ -27,15 +28,46 @@
   "kernelDescriptors": [
     {
       "version": "1.0",
-      "id": "65744264-e76a-41c5-859b-be5628df924a",
-      "name": "hip_mlops.layernorm_fwd",
+      "id": "dd150826-7f68-4837-abaa-61b3ba698d5f",
+      "name": "hip_mlops.layernorm_fwd.local256",
       "kernel_source": {
         "kind": "embedded_source",
         "source_file": "kernels/LayernormFwd.cpp",
         "entry_point": "LayernormFwd"
       },
       "metadata": {
-        "operation": "LAYERNORM_FWD"
+        "operation": "LAYERNORM_FWD",
+        "local_size": 256
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "622145af-879e-48ea-a619-08b6887fc713",
+      "name": "hip_mlops.layernorm_fwd.local512",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/LayernormFwd.cpp",
+        "entry_point": "LayernormFwd"
+      },
+      "metadata": {
+        "operation": "LAYERNORM_FWD",
+        "local_size": 512
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "65744264-e76a-41c5-859b-be5628df924a",
+      "name": "hip_mlops.layernorm_fwd.local1024",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/LayernormFwd.cpp",
+        "entry_point": "LayernormFwd"
+      },
+      "metadata": {
+        "operation": "LAYERNORM_FWD",
+        "local_size": 1024
       },
       "priority": 0
     }

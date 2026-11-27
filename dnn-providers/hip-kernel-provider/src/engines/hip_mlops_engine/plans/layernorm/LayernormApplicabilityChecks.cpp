@@ -526,7 +526,8 @@ void checkLaunchShapesFitThreadLimit(
                                      tensorMap.at(lnAttr.scale_tensor_uid()),
                                      meanAttr,
                                      Direction::FORWARD);
-    for(const auto& shape : LayernormFwdPlan::launchShapes(problem.outerSize(), problem.stride()))
+    for(const auto& shape : LayernormFwdPlan::launchShapes(
+            problem.outerSize(), problem.stride(), LayernormFwdParams::LOCAL_SIZE))
     {
         checkLaunchFitsThreadLimit(shape);
     }
@@ -556,10 +557,26 @@ void checkLaunchShapesFitThreadLimit(
     }
 }
 
+bool isFwdConfigApplicable(const LayernormFwdParams& params, const LayernormFwdConfig& config)
+{
+    if(!isLocalSizeSupported(config.localSize))
+    {
+        return false;
+    }
+    const auto shapes = layernormFwdLaunchShapes(params, config);
+    return std::all_of(shapes.begin(), shapes.end(), [](const KernelLaunchShape& shape) {
+        return launchFitsThreadLimit(shape.blocks, shape.threadsPerBlock);
+    });
+}
+
 bool isBwdConfigApplicable(const LayernormBwdParams& params,
                            int multiProcessorCount,
                            const LayernormBwdConfig& config)
 {
+    if(!isLocalSizeSupported(config.localSize))
+    {
+        return false;
+    }
     const auto shapes = layernormBwdLaunchShapes(params, multiProcessorCount, config);
     return std::all_of(shapes.begin(), shapes.end(), [](const KernelLaunchShape& shape) {
         return launchFitsThreadLimit(shape.blocks, shape.threadsPerBlock);

@@ -7,6 +7,12 @@
     "native": "hipkernel.layernorm_fwd.graph_match"
   },
   "metadata": "5afc1d1b-9a8c-4275-9208-4c6e786630a1",
+  "sort_kernel_catalog": {
+    "default": "8b62f730-fa53-472e-ae5f-450795ecded4"
+  },
+  "knobs": [
+    "local_size"
+  ],
   "behavior_notes": [
     "runtime_compilation",
     "supports_graph_capture"

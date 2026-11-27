@@ -76,7 +76,8 @@ LayernormBwdConfig defaultLayernormBwdConfig(const LayernormBwdParams& params,
 /// The compile options and launches of the LayernormBwd program for @p params on
 /// @p gcnArchName, on a device with @p multiProcessorCount CUs: LayernormBwd, then
 /// LayernormBwdScaleBias, or LayernormBwdScaleBiasParallel and LayernormBwdScaleBiasReduceSum
-/// when @p config splits the reduction across workgroups.
+/// when @p config splits the reduction across workgroups; every launch in workgroups of the
+/// config's local size.
 ///
 /// @throws HipdnnPluginException with BAD_PARAM for a tensor that is not 4D or 5D, or a grid
 ///         that does not fit one launch.

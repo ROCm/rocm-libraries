@@ -195,7 +195,7 @@ LayernormKernelBuild buildLayernormBwdKernel(const LayernormBwdParams& params,
     const int64_t outerSize = problem.outerSize();
     const int64_t innerSize = problem.innerSize();
     const int64_t stride = problem.stride();
-    const int64_t localSize = LayernormBwdParams::MAX_LOCAL_SIZE;
+    const int64_t localSize = config.localSize;
 
     // Determine input/output data type configuration
     const auto inputDataType = params.x()->data_type();
@@ -259,7 +259,7 @@ std::vector<KernelLaunchShape> layernormBwdLaunchShapes(const LayernormBwdParams
         problem.outerSize(),
         problem.innerSize(),
         problem.stride(),
-        LayernormBwdParams::MAX_LOCAL_SIZE,
+        config.localSize,
         config.parallel,
         static_cast<int64_t>(partialSumCount(problem, multiProcessorCount, config)));
 }

@@ -63,12 +63,22 @@ private:
     hipdnn_plugin_sdk::ScalarOperand _epsilon;
 };
 
+/// The configuration the hand-written plan builds: LOCAL_SIZE threads per row.
+LayernormFwdConfig defaultLayernormFwdConfig();
+
+/// The launch buildLayernormFwdKernel() makes for @p params with @p config
+/// (LayernormFwdPlan::launchShapes() at the config's local size).
+std::vector<KernelLaunchShape> layernormFwdLaunchShapes(const LayernormFwdParams& params,
+                                                        const LayernormFwdConfig& config);
+
 /// The compile options and single launch of the LayernormFwd kernel for @p params on
-/// @p gcnArchName.
+/// @p gcnArchName, with the workgroup of @p config.
 ///
-/// @throws HipdnnPluginException with BAD_PARAM for a tensor that is not 4D or 5D.
+/// @throws HipdnnPluginException with BAD_PARAM for a tensor that is not 4D or 5D, or a grid
+///         that does not fit one launch.
 LayernormKernelBuild buildLayernormFwdKernel(const LayernormFwdParams& params,
-                                             const std::string& gcnArchName);
+                                             const std::string& gcnArchName,
+                                             const LayernormFwdConfig& config);
 
 class LayernormFwdPlan : public hipdnn_plugin_sdk::IPlan<Handle>
 {
@@ -85,7 +95,10 @@ public:
 
     size_t getWorkspaceSize(const Handle& handle) const override;
 
-    static std::vector<KernelLaunchShape> launchShapes(int64_t outerSize, int64_t stride);
+    // The launch of a problem of the given outer size and stride, a workgroup of localSize
+    // threads per row.
+    static std::vector<KernelLaunchShape>
+        launchShapes(int64_t outerSize, int64_t stride, int64_t localSize);
 
     void execute(const Handle& handle,
                  const hipdnnPluginDeviceBuffer_t* deviceBuffers,
