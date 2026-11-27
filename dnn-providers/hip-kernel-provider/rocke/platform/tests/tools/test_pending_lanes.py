@@ -114,6 +114,8 @@ from rocke.tests.reference_artifacts import (
     ARTIFACT_CLI,
     published_reference_variants,
 )
+from rocke.tests.run_records import RECORDS_DIR_ENV, read_run_records
+from rocke.tests.subprocess_launcher import rocke_subprocess_env
 
 ROCKE = platform_root().parent
 # The tiers pull-request and push CI select.
@@ -1300,6 +1302,87 @@ def test_a_quarantined_test_is_skipped_with_its_issue(tmp_path):
     assert result.returncode == 0, result.stdout[-4000:] + result.stderr[-4000:]
     assert f"quarantined: {entry.issue}" in result.stdout, result.stdout[-4000:]
     assert " passed" not in result.stdout and " failed" not in result.stdout
+
+
+def _names_cases(node: str, params: tuple[str, ...] = ()) -> bool:
+    """Whether a record's test node names cases by their parameter ids."""
+    return "[" in node or bool(params)
+
+
+# The pending entries that name cases by their parameter ids.
+_PENDING_CASES = tuple(
+    entry for entry in PENDING if entry.node and _names_cases(entry.node)
+)
+
+
+@pytest.fixture(scope="module")
+def collected_cases(tmp_path_factory) -> dict[str, set[str]]:
+    """The cases the test files of every quarantine, and of every pending
+    entry that names cases, collect (:func:`_collected_cases`), once."""
+    return _collected_cases(
+        tmp_path_factory.mktemp("collected_cases"),
+        [entry.path for entry in (*QUARANTINED, *_PENDING_CASES)],
+    )
+
+
+def _collected_cases(tmp_path: Path, paths: Iterable[str]) -> dict[str, set[str]]:
+    """The pytest node names a ``--collect-only`` run collects from each of the
+    test files ``paths`` (relative to the rocke directory), as its run records
+    (``rocke.tests.run_records``) name them."""
+    paths = sorted(set(paths))
+    records = tmp_path / "records"
+    records.mkdir()
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-p",
+            "no:cacheprovider",
+            "-p",
+            "rocke.tests.run_records",
+            f"--basetemp={tmp_path / 'basetemp'}",
+            "--collect-only",
+            "-q",
+            *paths,
+        ],
+        cwd=ROCKE,
+        env={**rocke_subprocess_env(), RECORDS_DIR_ENV: str(records)},
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=120,
+    )
+    assert result.returncode == 0, result.stdout[-4000:] + result.stderr[-4000:]
+    root = ROCKE.resolve().as_posix()
+    cases: dict[str, set[str]] = {path: set() for path in paths}
+    for record in read_run_records(records):
+        if record.event == "collected":
+            cases[record.file.removeprefix(f"{root}/")].add(record.node)
+    return cases
+
+
+def test_every_record_that_names_cases_covers_a_collected_case(collected_cases):
+    """A record that names cases by their parameter ids (``test_x[id]``, or a
+    quarantine's ``params``) covers at least one case its file collects: a
+    renamed parameter leaves a record that covers nothing, which the check of
+    the test function's name alone accepts."""
+    quarantines = [
+        entry for entry in QUARANTINED if _names_cases(entry.node_name, entry.params)
+    ]
+    assert quarantines or _PENDING_CASES, "no record names cases; drop this check"
+    dead = [
+        entry.test_id
+        for entry in quarantines
+        if not any(
+            entry.covers(entry.path, case) for case in collected_cases[entry.path]
+        )
+    ] + [
+        f"{entry.path}::{entry.node}"
+        for entry in _PENDING_CASES
+        if entry.node not in collected_cases[entry.path]
+    ]
+    assert not dead, f"records that name cases no file collects: {dead}"
 
 
 def _defines_test(test_file: Path, node_name: str) -> bool:
