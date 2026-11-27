@@ -23,8 +23,8 @@ checks it before a kernel is built:
 * :meth:`TaskTable.lds_barriers`: the stage boundaries at which a CTA barrier
   is needed because LDS phases overlay each other.
 
-Users: the persistent hipTensor contraction monokernel
-(``library/kernels/gfx950/hiptensor_mono``) validates its pack / GEMM / reduce
+Intended users: persistent multi-stage kernels (for example a contraction
+monokernel that packs, multiplies and reduces in one launch) validate their
 stages with it before building.
 """
 

@@ -18,8 +18,8 @@ computed on the host. This mirrors CK Tile's
 - :func:`calculate_magic_numbers_u31` / :func:`do_magic_division_u31_dynamic`: the
   round-up variant ``umul_hi(n, multiplier) >> shift`` (no add) with the pair as
   runtime values and ``(0, 0)`` for a divisor of 1 (the quotient is then ``n``
-  itself), the form of hipTensor's shape-generic kernels
-  (``kernels.common.hiptensor_aot``), whose host computes the pairs.
+  itself), for shape-generic kernels whose host computes the pairs at
+  launch.
 
 The coordinate-transform DAG in ``rocke.helpers.transforms`` is one caller;
 kernels that split a flat index call it directly.

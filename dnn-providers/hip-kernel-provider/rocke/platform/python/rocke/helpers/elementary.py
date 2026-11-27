@@ -51,9 +51,8 @@ Special values follow C: NaN in gives NaN; ``sin`` / ``cos`` / ``tan`` of an inf
 ``atan(+-inf) = +-pi/2``; odd functions keep the sign of zero.
 
 Placement: both engines. The C++ engine mirrors it (``cpp/helpers/elementary.cpp``,
-``rocke/elementary.h``; the ``elementary`` parity family keeps the two byte-identical) for its
-users, hipTensor's ``kernels.common.hiptensor_aot`` family and the operand operators of
-:mod:`rocke.instances.common.gemm_prologue`.
+``rocke/elementary.h``; the ``elementary`` parity family keeps the two byte-identical) for
+callers that build kernels through C++ only, such as hipTensor's elementwise math kernels.
 """
 
 from __future__ import annotations

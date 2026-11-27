@@ -49,12 +49,16 @@
     "ds.load.tr16.b128.v8bf16": "llvm.amdgcn.ds.load.tr16.b128.v8bf16",
     "ds.load.tr16.b128.v8f16": "llvm.amdgcn.ds.load.tr16.b128.v8f16",
     "ds.read.tr16.b64": "llvm.amdgcn.ds.read.tr16.b64.v4i16",
+    "exp.f32": "llvm.exp.f32",
     "exp2.f32": "llvm.exp2.f32",
     "fabs.bf16": "llvm.fabs.bf16",
     "fabs.f16": "llvm.fabs.f16",
     "fabs.f32": "llvm.fabs.f32",
     "fabs.f64": "llvm.fabs.f64",
     "flat.prefetch": "llvm.amdgcn.flat.prefetch",
+    "fma.f64": "llvm.fma.f64",
+    "fma.v2f64": "llvm.fma.v2f64",
+    "fma.v4f64": "llvm.fma.v4f64",
     "fmuladd.bf16": "llvm.fmuladd.bf16",
     "fmuladd.f16": "llvm.fmuladd.f16",
     "fmuladd.f32": "llvm.fmuladd.f32",
@@ -68,6 +72,7 @@
     "fmuladd.v8bf16": "llvm.fmuladd.v8bf16",
     "fmuladd.v8f16": "llvm.fmuladd.v8f16",
     "fmuladd.v8f32": "llvm.fmuladd.v8f32",
+    "frexp.f64": "llvm.frexp.f64.i32",
     "global.load.async.to.lds.b128": "llvm.amdgcn.global.load.async.to.lds.b128",
     "global.load.async.to.lds.b32": "llvm.amdgcn.global.load.async.to.lds.b32",
     "global.load.async.to.lds.b64": "llvm.amdgcn.global.load.async.to.lds.b64",
@@ -83,6 +88,7 @@
     "global.store.async.from.lds.b8": "llvm.amdgcn.global.store.async.from.lds.b8",
     "iglp.opt": "llvm.amdgcn.iglp.opt",
     "ldexp.f32.i32": "llvm.ldexp.f32.i32",
+    "ldexp.f64": "llvm.ldexp.f64.i32",
     "llvm.amdgcn.mfma.f32.16x16x32.bf8.fp8": "llvm.amdgcn.mfma.f32.16x16x32.bf8.fp8",
     "llvm.amdgcn.mfma.f32.16x16x32.fp8.bf8": "llvm.amdgcn.mfma.f32.16x16x32.fp8.bf8",
     "llvm.amdgcn.mfma.f32.16x16x8bf16": "llvm.amdgcn.mfma.f32.16x16x8bf16",
@@ -125,6 +131,7 @@
     "llvm.amdgcn.wmma.i32.16x16x16.iu8.v8i32.v2i32": "llvm.amdgcn.wmma.i32.16x16x16.iu8.v8i32.v2i32",
     "llvm.amdgcn.wmma.i32.16x16x32.iu4.v8i32.v2i32": "llvm.amdgcn.wmma.i32.16x16x32.iu4.v8i32.v2i32",
     "llvm.amdgcn.wmma.i32.16x16x64.iu8.v8i32.v8i32": "llvm.amdgcn.wmma.i32.16x16x64.iu8.v8i32.v8i32",
+    "log.f32": "llvm.log.f32",
     "log2.f32": "llvm.log2.f32",
     "make.buffer.rsrc.p1": "llvm.amdgcn.make.buffer.rsrc.p8.p1.i64",
     "maxnum.bf16": "llvm.maxnum.bf16",
@@ -181,6 +188,7 @@
     "readlane.f32": "llvm.amdgcn.readlane.f32",
     "readlane.i32": "llvm.amdgcn.readlane.i32",
     "rint.f32": "llvm.rint.f32",
+    "rint.f64": "llvm.rint.f64",
     "rsqrt.f32": "llvm.amdgcn.rsq.f32",
     "s.alloc.vgpr": "llvm.amdgcn.s.alloc.vgpr",
     "s.barrier": "llvm.amdgcn.s.barrier",
@@ -215,6 +223,7 @@
     "smax.i32": "llvm.smax.i32",
     "smin.i32": "llvm.smin.i32",
     "sqrt.f32": "llvm.sqrt.f32",
+    "sqrt.f64": "llvm.sqrt.f64",
     "tensor.load.to.lds": "llvm.amdgcn.tensor.load.to.lds",
     "tensor.store.from.lds": "llvm.amdgcn.tensor.store.from.lds",
     "trap": "llvm.trap",
@@ -4139,6 +4148,80 @@
         "verified_on": "llvm24"
       }
     },
+    "exp.f32": {
+      "gfx11-generic": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1100": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1101": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1102": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1103": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1150": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1152": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1153": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1154": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1200": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1201": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1250": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx908": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx90a": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx942": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx950": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      }
+    },
     "exp2.f32": {
       "gfx11-generic": {
         "status": "ok",
@@ -4597,6 +4680,228 @@
       "gfx950": {
         "evidence": "fatal error: error in backend: Cannot select: intrinsic %llvm.amdgcn.flat.prefetch",
         "status": "arch_absent",
+        "verified_on": "llvm24"
+      }
+    },
+    "fma.f64": {
+      "gfx11-generic": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1100": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1101": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1102": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1103": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1150": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1152": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1153": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1154": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1200": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1201": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1250": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx908": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx90a": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx942": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx950": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      }
+    },
+    "fma.v2f64": {
+      "gfx11-generic": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1100": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1101": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1102": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1103": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1150": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1152": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1153": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1154": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1200": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1201": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1250": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx908": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx90a": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx942": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx950": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      }
+    },
+    "fma.v4f64": {
+      "gfx11-generic": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1100": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1101": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1102": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1103": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1150": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1152": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1153": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1154": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1200": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1201": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1250": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx908": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx90a": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx942": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx950": {
+        "status": "ok",
         "verified_on": "llvm24"
       }
     },
@@ -5490,6 +5795,80 @@
       }
     },
     "fmuladd.v8f32": {
+      "gfx11-generic": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1100": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1101": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1102": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1103": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1150": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1152": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1153": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1154": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1200": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1201": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1250": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx908": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx90a": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx942": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx950": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      }
+    },
+    "frexp.f64": {
       "gfx11-generic": {
         "status": "ok",
         "verified_on": "llvm24"
@@ -6813,6 +7192,80 @@
       }
     },
     "ldexp.f32.i32": {
+      "gfx11-generic": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1100": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1101": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1102": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1103": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1150": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1152": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1153": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1154": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1200": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1201": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1250": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx908": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx90a": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx942": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx950": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      }
+    },
+    "ldexp.f64": {
       "gfx11-generic": {
         "status": "ok",
         "verified_on": "llvm24"
@@ -10659,6 +11112,80 @@
       "gfx950": {
         "evidence": "error: <unknown>:0:0: in function @probe void (ptr addrspace(1), ptr, <8 x i32>, <8 x i32>, <8 x i32>): llvm.amdgcn.wmma.i32.16x16x64.iu8 requires target feature 'wmma-n16-insts'",
         "status": "arch_absent",
+        "verified_on": "llvm24"
+      }
+    },
+    "log.f32": {
+      "gfx11-generic": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1100": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1101": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1102": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1103": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1150": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1152": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1153": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1154": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1200": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1201": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1250": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx908": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx90a": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx942": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx950": {
+        "status": "ok",
         "verified_on": "llvm24"
       }
     },
@@ -15198,6 +15725,80 @@
         "verified_on": "llvm24"
       }
     },
+    "rint.f64": {
+      "gfx11-generic": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1100": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1101": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1102": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1103": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1150": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1152": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1153": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1154": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1200": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1201": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1250": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx908": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx90a": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx942": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx950": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      }
+    },
     "rsqrt.f32": {
       "gfx11-generic": {
         "status": "ok",
@@ -17979,6 +18580,80 @@
       }
     },
     "sqrt.f32": {
+      "gfx11-generic": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1100": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1101": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1102": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1103": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1150": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1151": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1152": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1153": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1154": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx12-generic": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1200": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1201": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx1250": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx908": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx90a": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx942": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      },
+      "gfx950": {
+        "status": "ok",
+        "verified_on": "llvm24"
+      }
+    },
+    "sqrt.f64": {
       "gfx11-generic": {
         "status": "ok",
         "verified_on": "llvm24"
@@ -20863,12 +21538,16 @@
     "ds.load.tr16.b128.v8bf16": {"operands": [{"source": "addrspacecast", "type": "ptr addrspace(3)"}], "return_type": "<8 x bfloat>", "version": 1},
     "ds.load.tr16.b128.v8f16": {"operands": [{"source": "addrspacecast", "type": "ptr addrspace(3)"}], "return_type": "<8 x half>", "version": 1},
     "ds.read.tr16.b64": {"operands": [{"source": "addrspacecast", "type": "ptr addrspace(3)"}], "return_type": "<4 x i16>", "version": 1},
+    "exp.f32": {"operands": [{"source": "argument", "type": "float"}], "return_type": "float", "version": 1},
     "exp2.f32": {"operands": [{"source": "argument", "type": "float"}], "return_type": "float", "version": 1},
     "fabs.bf16": {"operands": [{"source": "argument", "type": "bfloat"}], "return_type": "bfloat", "version": 1},
     "fabs.f16": {"operands": [{"source": "argument", "type": "half"}], "return_type": "half", "version": 1},
     "fabs.f32": {"operands": [{"source": "argument", "type": "float"}], "return_type": "float", "version": 1},
     "fabs.f64": {"operands": [{"source": "argument", "type": "double"}], "return_type": "double", "version": 1},
     "flat.prefetch": {"operands": [{"source": "base_pointer", "type": "ptr"}, {"source": "immediate", "type": "i32", "value": "0"}], "return_type": "void", "version": 1},
+    "fma.f64": {"operands": [{"source": "argument", "type": "double"}, {"source": "argument", "type": "double"}, {"source": "argument", "type": "double"}], "return_type": "double", "version": 1},
+    "fma.v2f64": {"operands": [{"source": "argument", "type": "<2 x double>"}, {"source": "argument", "type": "<2 x double>"}, {"source": "argument", "type": "<2 x double>"}], "return_type": "<2 x double>", "version": 1},
+    "fma.v4f64": {"operands": [{"source": "argument", "type": "<4 x double>"}, {"source": "argument", "type": "<4 x double>"}, {"source": "argument", "type": "<4 x double>"}], "return_type": "<4 x double>", "version": 1},
     "fmuladd.bf16": {"operands": [{"source": "argument", "type": "bfloat"}, {"source": "argument", "type": "bfloat"}, {"source": "argument", "type": "bfloat"}], "return_type": "bfloat", "version": 1},
     "fmuladd.f16": {"operands": [{"source": "argument", "type": "half"}, {"source": "argument", "type": "half"}, {"source": "argument", "type": "half"}], "return_type": "half", "version": 1},
     "fmuladd.f32": {"operands": [{"source": "argument", "type": "float"}, {"source": "argument", "type": "float"}, {"source": "argument", "type": "float"}], "return_type": "float", "version": 1},
@@ -20882,6 +21561,7 @@
     "fmuladd.v8bf16": {"operands": [{"source": "argument", "type": "<8 x bfloat>"}, {"source": "argument", "type": "<8 x bfloat>"}, {"source": "argument", "type": "<8 x bfloat>"}], "return_type": "<8 x bfloat>", "version": 1},
     "fmuladd.v8f16": {"operands": [{"source": "argument", "type": "<8 x half>"}, {"source": "argument", "type": "<8 x half>"}, {"source": "argument", "type": "<8 x half>"}], "return_type": "<8 x half>", "version": 1},
     "fmuladd.v8f32": {"operands": [{"source": "argument", "type": "<8 x float>"}, {"source": "argument", "type": "<8 x float>"}, {"source": "argument", "type": "<8 x float>"}], "return_type": "<8 x float>", "version": 1},
+    "frexp.f64": {"operands": [{"source": "argument", "type": "double"}], "return_type": "{ double, i32 }", "version": 1},
     "global.load.async.to.lds.b128": {"operands": [{"source": "addrspacecast", "type": "ptr addrspace(1)"}, {"source": "addrspacecast", "type": "ptr addrspace(3)"}, {"source": "immediate", "type": "i32", "value": "0"}, {"source": "immediate", "type": "i32", "value": "0"}], "return_type": "void", "version": 1},
     "global.load.async.to.lds.b32": {"operands": [{"source": "addrspacecast", "type": "ptr addrspace(1)"}, {"source": "addrspacecast", "type": "ptr addrspace(3)"}, {"source": "immediate", "type": "i32", "value": "0"}, {"source": "immediate", "type": "i32", "value": "0"}], "return_type": "void", "version": 1},
     "global.load.async.to.lds.b64": {"operands": [{"source": "addrspacecast", "type": "ptr addrspace(1)"}, {"source": "addrspacecast", "type": "ptr addrspace(3)"}, {"source": "immediate", "type": "i32", "value": "0"}, {"source": "immediate", "type": "i32", "value": "0"}], "return_type": "void", "version": 1},
@@ -20897,6 +21577,7 @@
     "global.store.async.from.lds.b8": {"operands": [{"source": "addrspacecast", "type": "ptr addrspace(1)"}, {"source": "addrspacecast", "type": "ptr addrspace(3)"}, {"source": "immediate", "type": "i32", "value": "0"}, {"source": "immediate", "type": "i32", "value": "0"}], "return_type": "void", "version": 1},
     "iglp.opt": {"operands": [{"source": "immediate", "type": "i32", "value": "0"}], "return_type": "void", "version": 1},
     "ldexp.f32.i32": {"operands": [{"source": "argument", "type": "float"}, {"source": "argument", "type": "i32"}], "return_type": "float", "version": 1},
+    "ldexp.f64": {"operands": [{"source": "argument", "type": "double"}, {"source": "argument", "type": "i32"}], "return_type": "double", "version": 1},
     "llvm.amdgcn.mfma.f32.16x16x32.bf8.fp8": {"operands": [{"source": "argument", "type": "i64"}, {"source": "argument", "type": "i64"}, {"source": "argument", "type": "<4 x float>"}, {"source": "immediate", "type": "i32", "value": "0"}, {"source": "immediate", "type": "i32", "value": "0"}, {"source": "immediate", "type": "i32", "value": "0"}], "return_type": "<4 x float>", "version": 1},
     "llvm.amdgcn.mfma.f32.16x16x32.fp8.bf8": {"operands": [{"source": "argument", "type": "i64"}, {"source": "argument", "type": "i64"}, {"source": "argument", "type": "<4 x float>"}, {"source": "immediate", "type": "i32", "value": "0"}, {"source": "immediate", "type": "i32", "value": "0"}, {"source": "immediate", "type": "i32", "value": "0"}], "return_type": "<4 x float>", "version": 1},
     "llvm.amdgcn.mfma.f32.16x16x8bf16": {"operands": [{"source": "argument", "type": "<2 x i16>"}, {"source": "argument", "type": "<2 x i16>"}, {"source": "argument", "type": "<4 x float>"}, {"source": "immediate", "type": "i32", "value": "0"}, {"source": "immediate", "type": "i32", "value": "0"}, {"source": "immediate", "type": "i32", "value": "0"}], "return_type": "<4 x float>", "version": 1},
@@ -20939,6 +21620,7 @@
     "llvm.amdgcn.wmma.i32.16x16x16.iu8.v8i32.v2i32": {"operands": [{"source": "immediate", "type": "i1", "value": "false"}, {"source": "argument", "type": "<2 x i32>"}, {"source": "immediate", "type": "i1", "value": "false"}, {"source": "argument", "type": "<2 x i32>"}, {"source": "argument", "type": "<8 x i32>"}, {"source": "immediate", "type": "i1", "value": "false"}], "return_type": "<8 x i32>", "version": 1},
     "llvm.amdgcn.wmma.i32.16x16x32.iu4.v8i32.v2i32": {"operands": [{"source": "immediate", "type": "i1", "value": "false"}, {"source": "argument", "type": "<2 x i32>"}, {"source": "immediate", "type": "i1", "value": "false"}, {"source": "argument", "type": "<2 x i32>"}, {"source": "argument", "type": "<8 x i32>"}, {"source": "immediate", "type": "i1", "value": "false"}], "return_type": "<8 x i32>", "version": 1},
     "llvm.amdgcn.wmma.i32.16x16x64.iu8.v8i32.v8i32": {"operands": [{"source": "immediate", "type": "i1", "value": "false"}, {"source": "argument", "type": "<8 x i32>"}, {"source": "immediate", "type": "i1", "value": "false"}, {"source": "argument", "type": "<8 x i32>"}, {"source": "argument", "type": "<8 x i32>"}, {"source": "immediate", "type": "i1", "value": "false"}, {"source": "immediate", "type": "i1", "value": "false"}, {"source": "immediate", "type": "i1", "value": "false"}], "return_type": "<8 x i32>", "version": 1},
+    "log.f32": {"operands": [{"source": "argument", "type": "float"}], "return_type": "float", "version": 1},
     "log2.f32": {"operands": [{"source": "argument", "type": "float"}], "return_type": "float", "version": 1},
     "make.buffer.rsrc.p1": {"operands": [{"source": "addrspacecast", "type": "ptr addrspace(1)"}, {"source": "argument", "type": "i16"}, {"source": "argument", "type": "i64"}, {"source": "argument", "type": "i32"}], "return_type": "ptr addrspace(8)", "version": 1},
     "maxnum.bf16": {"operands": [{"source": "argument", "type": "bfloat"}, {"source": "argument", "type": "bfloat"}], "return_type": "bfloat", "version": 1},
@@ -20995,6 +21677,7 @@
     "readlane.f32": {"operands": [{"source": "argument", "type": "float"}, {"source": "argument", "type": "i32"}], "return_type": "float", "version": 1},
     "readlane.i32": {"operands": [{"source": "argument", "type": "i32"}, {"source": "argument", "type": "i32"}], "return_type": "i32", "version": 1},
     "rint.f32": {"operands": [{"source": "argument", "type": "float"}], "return_type": "float", "version": 1},
+    "rint.f64": {"operands": [{"source": "argument", "type": "double"}], "return_type": "double", "version": 1},
     "rsqrt.f32": {"operands": [{"source": "argument", "type": "float"}], "return_type": "float", "version": 1},
     "s.alloc.vgpr": {"operands": [{"source": "argument", "type": "i32"}], "return_type": "i1", "version": 1},
     "s.barrier": {"operands": [], "return_type": "void", "version": 1},
@@ -21029,6 +21712,7 @@
     "smax.i32": {"operands": [{"source": "argument", "type": "i32"}, {"source": "argument", "type": "i32"}], "return_type": "i32", "version": 1},
     "smin.i32": {"operands": [{"source": "argument", "type": "i32"}, {"source": "argument", "type": "i32"}], "return_type": "i32", "version": 1},
     "sqrt.f32": {"operands": [{"source": "argument", "type": "float"}], "return_type": "float", "version": 1},
+    "sqrt.f64": {"operands": [{"source": "argument", "type": "double"}], "return_type": "double", "version": 1},
     "tensor.load.to.lds": {"operands": [{"source": "argument", "type": "<4 x i32>"}, {"source": "argument", "type": "<8 x i32>"}, {"source": "argument", "type": "<4 x i32>"}, {"source": "argument", "type": "<4 x i32>"}, {"source": "argument", "type": "<8 x i32>"}, {"source": "immediate", "type": "i32", "value": "0"}], "return_type": "void", "version": 1},
     "tensor.store.from.lds": {"operands": [{"source": "argument", "type": "<4 x i32>"}, {"source": "argument", "type": "<8 x i32>"}, {"source": "argument", "type": "<4 x i32>"}, {"source": "argument", "type": "<4 x i32>"}, {"source": "argument", "type": "<8 x i32>"}, {"source": "immediate", "type": "i32", "value": "0"}], "return_type": "void", "version": 1},
     "trap": {"operands": [], "return_type": "void", "version": 1},

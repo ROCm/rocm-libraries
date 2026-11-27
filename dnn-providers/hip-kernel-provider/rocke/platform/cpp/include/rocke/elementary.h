@@ -7,17 +7,17 @@
  *
  * Only the IR side (Python IRMath) is mirrored; the host model (HostMath) and
  * the coefficient generator stay Python-only. Every function emits the same
- * builder calls in the same order as the Python program, so the kernels that
- * use it (hipTensor's hiptensor_aot family, the GEMM prologue operand
- * operators) lower to the same LLVM IR in both engines.
+ * builder calls in the same order as the Python program, so a kernel that
+ * uses it (such as hipTensor's elementwise math kernels, which reach rocKE
+ * through C++ only) lowers to the same LLVM IR in both engines.
  *
  * C entry points:
  *
  *   elementary.opaque_zero(b)          rocke_elementary_opaque_zero(b)
  *   elementary.emit(b, name, x, anch)  rocke_elementary_emit(b, name, x, anch)
  *
- * C++ callers that build a family program inside their own control flow (the
- * hiptensor_aot Emit.math_family) use rocke::elementary::Math and family().
+ * C++ callers that build a family program inside their own control flow use
+ * rocke::elementary::Math and family().
  */
 #ifndef ROCKE_ELEMENTARY_H
 #define ROCKE_ELEMENTARY_H
