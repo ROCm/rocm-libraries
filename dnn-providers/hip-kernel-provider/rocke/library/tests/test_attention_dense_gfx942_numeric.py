@@ -691,7 +691,6 @@ def _check_sinks(
     halves of the seed are exercised, which IR goldens cannot do. Eight above
     (``dominates_qk``): the sink takes nearly all of every row's softmax, so the
     non-vacuity check holds even with no causal mask."""
-    tol = attention_tolerance(dtype)
     B, Sq, Skv = 1, sq, sq if sk is None else sk
     scale = 1.0 / math.sqrt(d) if scale is None else scale
     rng = np.random.default_rng(0)
@@ -724,9 +723,15 @@ def _check_sinks(
         spec=spec, q=q, k=k, v=v, out=out, scale=scale, sinks=sinks
     )
 
-    ref, _ = dense_reference(
+    ref, lse = dense_reference(
         q, k, v, scale, causal=causal, window=sliding_window, sinks=sinks
     )
+    # Each row is a weighted mean of V rows whose weights add up to the share
+    # of the softmax the sink leaves; the bound's absolute room shrinks with
+    # the largest such share, so a sink that takes nearly all of every row
+    # does not leave room for a zero output.
+    keys_share = 1.0 - np.exp(values(sinks)[None, :, None, None] - lse)
+    tol = attention_tolerance(dtype, value_scale=float(keys_share.max()))
     label = (
         f"{dtype} D{d} GQA{hq}/{hkv} {'causal' if causal else 'full'} "
         f"sq{Sq} sk{Skv} swa{sliding_window} scale={scale:g} "
