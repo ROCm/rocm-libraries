@@ -30,7 +30,7 @@ from rocke.numeric.batchnorm_reference import (
     batchnorm_forward_reference,
     round_to_dtype,
 )
-from rocke.runtime.device_array import DeviceArray
+from rocke.runtime._norm_buffer import NormBuffer
 from rocke.runtime.hip_module import get_device_arch
 from rocke.runtime.launcher import KernelLauncher, LaunchConfig, synchronize_and_release
 
@@ -104,18 +104,18 @@ class _Fwd:
             self.x, self.gamma, self.beta, self.rm, self.rv,
             training=training, eps=EPS, momentum=MOMENTUM, channel_axis=self.axis,
         )  # fmt: skip
-        d = DeviceArray.from_host
+        d = NormBuffer.from_host
         self.bufs = {
             "x": d(self.x, dtype),
             "gamma": d(self.gamma, dtype),
             "beta": d(self.beta, dtype),
-            "y": DeviceArray(mem, dtype),
+            "y": NormBuffer(mem, dtype),
             "rm": d(self.rm, "f32"),
             "rv": d(self.rv, "f32"),
         }
         if training:
-            self.bufs["mean"] = DeviceArray((c,), dtype)
-            self.bufs["invstd"] = DeviceArray((c,), dtype)
+            self.bufs["mean"] = NormBuffer((c,), dtype)
+            self.bufs["invstd"] = NormBuffer((c,), dtype)
 
     @property
     def dims(self):
@@ -168,16 +168,16 @@ class _Bwd:
         self.ref = batchnorm_backward_reference(
             self.x, self.dy, self.scale, self.mean, self.invstd, channel_axis=axis
         )
-        d = DeviceArray.from_host
+        d = NormBuffer.from_host
         self.bufs = {
             "x": d(self.x, dtype),
             "dy": d(self.dy, dtype),
             "scale": d(self.scale, "f32"),
             "mean": d(self.mean, "f32"),
             "invstd": d(self.invstd, "f32"),
-            "dx": DeviceArray(mem, dtype),
-            "dscale": DeviceArray((c,), "f32"),
-            "dbias": DeviceArray((c,), "f32"),
+            "dx": NormBuffer(mem, dtype),
+            "dscale": NormBuffer((c,), "f32"),
+            "dbias": NormBuffer((c,), "f32"),
         }
 
     @property
@@ -315,7 +315,7 @@ def test_split_forward(arch, dtype, fast_reduce):
     red = _launcher(bn.build_batchnorm2d_split_dyn_reduce(spec), arch)
     app = _launcher(bn.build_batchnorm2d_split_dyn_apply(spec), arch)
     for case, plan in _split_cases(spec, lambda sh: _Fwd(sh, dtype, training=True)):
-        ws = DeviceArray(
+        ws = NormBuffer(
             (bn.batchnorm2d_split_dyn_workspace_floats(case.c, plan),), "f32"
         )
         geom = _geom(plan, case)
@@ -348,7 +348,7 @@ def test_split_backward(arch, dtype, fast_reduce):
     red = _launcher(bn.build_batchnorm2d_bwd_split_reduce(spec), arch)
     app = _launcher(bn.build_batchnorm2d_bwd_split_apply(spec), arch)
     for case, plan in _split_cases(spec, lambda sh: _Bwd(sh, dtype)):
-        ws = DeviceArray(
+        ws = NormBuffer(
             (bn.batchnorm2d_bwd_split_workspace_floats(case.c, plan),), "f32"
         )
         geom = _geom(plan, case)
@@ -428,7 +428,7 @@ def test_nhwc(arch, mode, dtype):
         grid = bn.batchnorm2d_nhwc_grid(_NHWC_SHAPE[1], plan)
         ws = None
         if cand.variant == "split":
-            ws = DeviceArray((cand.workspace_floats(_NHWC_SHAPE[1], plan),), "f32")
+            ws = NormBuffer((cand.workspace_floats(_NHWC_SHAPE[1], plan),), "f32")
         wsp = {"Workspace": ws.data_ptr()} if ws is not None else {}
         geom = {"RowsPerCta": plan.rows_per_cta}
         if mode == "bwd":
@@ -566,8 +566,8 @@ def test_read_once(arch, dtype, backward, geom):
     for plan in plans:
         assert plan.grid <= cap  # co-residency: the barrier would deadlock otherwise
         case = _Bwd(_RO_SHAPE, dtype) if backward else _Fwd(_RO_SHAPE, dtype, True)
-        sync = DeviceArray((ro.batchnorm2d_ro_sync_ints(c) + 64,), "i32")
-        err = DeviceArray((1,), "i32")
+        sync = NormBuffer((ro.batchnorm2d_ro_sync_ints(c) + 64,), "i32")
+        err = NormBuffer((1,), "i32")
         vals = {
             **case.values(), "SyncI": sync.data_ptr(), "SyncF": sync.data_ptr(),
             "Err": err.data_ptr(), "NChunk": plan.n_chunk, "HwChunk": plan.hw_chunk,

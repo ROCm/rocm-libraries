@@ -50,7 +50,7 @@ def _decode(raw, dtype):
     return raw.astype(np.float32)
 
 
-class DeviceArray:
+class NormBuffer:
     """A device array of ``shape`` and storage ``dtype``."""
 
     def __init__(self, shape, dtype="f32", host=None):

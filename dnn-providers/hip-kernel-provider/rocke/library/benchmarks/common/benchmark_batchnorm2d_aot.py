@@ -31,15 +31,13 @@ from __future__ import annotations
 import argparse
 import sys
 
-try:
-    # Imported before any rocke.runtime module: rocke's HIP context and
-    # torch's lazy CUDA init must not race each other -- initializing torch's
-    # first, before compile_candidate/time_candidate touch the runtime,
-    # avoids a segfault on the first torch.empty(..., device="cuda") call
-    # (a real reproduction, not theoretical: see git history for this line).
-    import torch  # noqa: F401
-except ImportError:
-    pass
+import numpy as np
+
+from rocke.numeric.batchnorm_reference import (
+    batchnorm_backward_reference,
+    batchnorm_forward_reference,
+)
+from rocke.runtime._norm_buffer import NormBuffer
 
 from benchmarks.common.norm_bench_common import (
     VALIDATE_TOL,
@@ -56,7 +54,29 @@ from benchmarks.common.norm_sweep_space import (
 )
 
 
-_TORCH_DTYPE = {"fp16": torch.float16, "bf16": torch.bfloat16, "fp32": torch.float32}
+_RNG = np.random.default_rng(0)
+
+
+def _uniform(shape, dtype, lo, hi):
+    return NormBuffer.uniform(shape, dtype, lo, hi, _RNG)
+
+
+def _fwd_bufs(n, c, h, w, dtype, *, layout="NCHW", saved=True):
+    """Device buffers of one forward case (``x gamma beta y rm rv`` + ``mean invstd``)."""
+    shape = (n, c, h, w) if layout == "NCHW" else (n, h, w, c)
+    x = _uniform(shape, dtype, -1.0, 1.0)
+    bufs = {
+        "x": x,
+        "y": NormBuffer(shape, dtype),
+        "gamma": _uniform((c,), dtype, 0.5, 1.5),
+        "beta": _uniform((c,), dtype, -0.5, 0.5),
+        "rm": NormBuffer((c,), "f32"),
+        "rv": NormBuffer.from_host(np.ones(c, dtype=np.float32), "f32"),
+    }
+    if saved:
+        bufs["mean"] = NormBuffer((c,), dtype)
+        bufs["invstd"] = NormBuffer((c,), dtype)
+    return bufs
 
 
 def _parse_args(argv):
@@ -125,7 +145,7 @@ def _parse_args(argv):
         "--validate",
         action="store_true",
         help="after picking the fastest candidate, relaunch it once and check "
-        "its output against a torch.nn.functional.batch_norm reference (the "
+        "its output against a numpy batch-norm reference (the "
         "runbook rule: never report speed without correctness)",
     )
     p.add_argument(
@@ -216,9 +236,8 @@ def _add_saved_stats(values, *, training, c, dtype):
     """
     if not training:
         return ()
-    torch_dtype = _TORCH_DTYPE[dtype]
-    mean = torch.empty(c, dtype=torch_dtype, device="cuda")
-    invstd = torch.empty_like(mean)
+    mean = NormBuffer((c,), dtype)
+    invstd = NormBuffer((c,), dtype)
     values.update({"Mean": mean.data_ptr(), "InvStd": invstd.data_ptr()})
     return mean, invstd
 
@@ -239,14 +258,14 @@ def _validate_batchnorm(
     key,
     writer,
 ) -> None:
-    """Relaunch *artifact* once and check ``y`` against a torch reference.
+    """Relaunch *artifact* once and check ``y`` against a numpy reference.
 
     Only rocke's own output is checked here -- this is not a MIOpen
     comparison (see ``norm_shard_worker.py`` for MIOpen find-mode timing,
     which is timing-only and carries no correctness claim of its own).
-    ``running_mean``/``running_var`` are cloned before the relaunch so the
-    reference sees the same pre-update stats the kernel's own momentum update
-    reads from, whichever mode is being validated.
+    The running statistics are reset to their initial values (zeros / ones)
+    before the relaunch so the reference sees the same pre-update stats the
+    kernel's own momentum update reads from, whichever mode is being validated.
     """
     from rocke.runtime.launcher import (
         KernelLauncher,
@@ -254,8 +273,8 @@ def _validate_batchnorm(
         synchronize_and_release,
     )
 
-    rm_before = running_mean.clone()
-    rv_before = running_var.clone()
+    running_mean.write(np.zeros(running_mean.shape, dtype=np.float32))
+    running_var.write(np.ones(running_var.shape, dtype=np.float32))
     launcher = KernelLauncher.from_artifact(artifact)
     cfg = LaunchConfig(grid=grid, block=block)
     values = {
@@ -276,23 +295,99 @@ def _validate_batchnorm(
     launcher(values, config=cfg)
     synchronize_and_release()
 
-    import torch.nn.functional as F
-
-    ref = F.batch_norm(
-        x.float(),
-        rm_before.clone(),
-        rv_before.clone(),
-        weight=gamma.float(),
-        bias=beta.float(),
+    ref = batchnorm_forward_reference(
+        x.read(),
+        gamma.read(),
+        beta.read(),
+        np.zeros(x.shape[1]),
+        np.ones(x.shape[1]),
         training=training,
-        momentum=0.1,
         eps=1e-5,
-    )
-    max_abs = float((y.float() - ref).abs().max().item())
+        momentum=0.1,
+    )["y"]
+    max_abs = float(np.abs(y.read().astype(np.float64) - ref).max())
     tol = VALIDATE_TOL[dtype]
     ok = max_abs <= tol
     print(f"Validate: {'PASS' if ok else 'FAIL'} max_abs={max_abs:.4e} (tol={tol})")
     writer.row(key=key, candidate="__validate__", validate=True, ok=ok, max_abs=max_abs)
+
+
+def _validate_run(
+    run, bufs, *, mode, layout, dtype, key, writer, label, sync=None
+) -> bool:
+    """Relaunch one runner on freshly reset state and check every output with numpy.
+
+    ``mode`` is ``train`` / ``bwd`` (``infer`` checks ``y`` only).  The running
+    statistics go back to zeros / ones first; ``sync`` (read-once barrier words)
+    is zeroed.  Prints one ``Validate`` line and writes a ``validate`` row."""
+    from rocke.runtime.launcher import synchronize_and_release
+
+    axis = 1 if layout == "NCHW" else -1
+    tol = VALIDATE_TOL[dtype]
+    x = bufs["x"].read()
+    c = bufs["x"].shape[axis]
+    errs = {}
+    if mode == "bwd":
+        run()
+        synchronize_and_release()
+        ref = batchnorm_backward_reference(
+            x,
+            bufs["dy"].read(),
+            bufs["scale"].read(),
+            bufs["mean"].read(),
+            bufs["invstd"].read(),
+            channel_axis=axis,
+        )
+        errs["dx"] = float(np.abs(bufs["dx"].read() - ref["dx"]).max())
+        for k in ("dscale", "dbias"):
+            err = np.abs(bufs[k].read() - ref[k])
+            errs[k] = float((err / np.maximum(1.0, np.abs(ref[k]))).max())
+        limits = {"dx": 2 * tol, "dscale": 1e-3, "dbias": 1e-3}
+    else:
+        training = mode == "train"
+        bufs["rm"].write(np.zeros(c, dtype=np.float32))
+        bufs["rv"].write(np.ones(c, dtype=np.float32))
+        if sync is not None:
+            sync.zero_()
+        run()
+        synchronize_and_release()
+        ref = batchnorm_forward_reference(
+            x,
+            bufs["gamma"].read(),
+            bufs["beta"].read(),
+            np.zeros(c),
+            np.ones(c),
+            training=training,
+            eps=1e-5,
+            momentum=0.1,
+            channel_axis=axis,
+        )
+        errs["y"] = float(np.abs(bufs["y"].read() - ref["y"]).max())
+        limits = {"y": tol}
+        if training:
+            errs["running_mean"] = float(
+                np.abs(bufs["rm"].read() - ref["running_mean"]).max()
+            )
+            errs["running_var"] = float(
+                np.abs(bufs["rv"].read() - ref["running_var"]).max()
+            )
+            errs["mean"] = float(np.abs(bufs["mean"].read() - ref["mean"]).max())
+            errs["invstd"] = float(np.abs(bufs["invstd"].read() - ref["invstd"]).max())
+            limits.update(running_mean=1e-3, running_var=1e-3, mean=tol, invstd=tol)
+    ok = all(errs[k] <= limits[k] for k in errs)
+    worst = max(errs, key=lambda k: errs[k] / limits[k])
+    print(
+        f"Validate {label}: {'PASS' if ok else 'FAIL'} worst={worst} err={errs[worst]:.4e} (tol={limits[worst]})"
+    )
+    writer.row(
+        key=key,
+        candidate="__validate__",
+        validate=True,
+        ok=ok,
+        label=label,
+        **{f"err_{k}": v for k, v in errs.items()},
+    )
+    return ok
 
 
 def _main_split(args) -> int:
@@ -329,28 +424,15 @@ def _main_split(args) -> int:
     writer = JsonlResultsWriter(args.results)
     print(f"batchnorm2d split sweep: {key}, {len(combos)} candidate(s)")
 
-    tdt = _TORCH_DTYPE[args.dtype]
-    x = torch.empty(
-        (args.n, args.c, args.h, args.w), dtype=tdt, device="cuda"
-    ).uniform_(-1.0, 1.0)
-    bufs = {
-        "x": x,
-        "y": torch.empty_like(x),
-        "gamma": torch.empty(args.c, dtype=tdt, device="cuda").uniform_(0.5, 1.5),
-        "beta": torch.empty(args.c, dtype=tdt, device="cuda").uniform_(-0.5, 0.5),
-        "rm": torch.zeros(args.c, dtype=torch.float32, device="cuda"),
-        "rv": torch.ones(args.c, dtype=torch.float32, device="cuda"),
-        "mean": torch.empty(args.c, dtype=tdt, device="cuda"),
-        "invstd": torch.empty(args.c, dtype=tdt, device="cuda"),
-    }
+    bufs = _fwd_bufs(args.n, args.c, args.h, args.w, args.dtype)
     ws = None
     arts = {}
     order = []
-    best = None
+    best, best_run = None, None
     for cand, plan in combos:
         need = batchnorm2d_split_dyn_workspace_floats(args.c, plan)
         if ws is None or ws.numel() < need:
-            ws = torch.empty(need, dtype=torch.float32, device="cuda")
+            ws = NormBuffer((need,), "f32")
         for kind in ("reduce", "apply"):
             if (cand.name, kind) not in arts:
                 arts[(cand.name, kind)] = compile_split_cached(
@@ -389,30 +471,60 @@ def _main_split(args) -> int:
         )
         if best is None or ms < best[1]:
             best = (label, ms)
+            best_run = run
     if args.split_order:
         with open(args.split_order, "w") as fh:
             fh.write("".join(f"{lb}\t{k}\n" for lb, k in order))
+    rc = 0
+    if (
+        args.validate
+        and best is not None
+        and not _validate_run(
+            best_run,
+            bufs,
+            mode="train",
+            layout="NCHW",
+            dtype=args.dtype,
+            key=key,
+            writer=writer,
+            label=best[0],
+        )
+    ):
+        rc = 1
     writer.close()
     if best is not None:
         print(f"Best: {best[0]} ({best[1]:.4f} ms)")
-    return 0
+    return rc
 
 
-def _bwd_bufs(args):
-    tdt = _TORCH_DTYPE[args.dtype]
+def _bwd_bufs(args, layout="NCHW"):
+    dtype = args.dtype
     n, c, h, w = args.n, args.c, args.h, args.w
-    x = torch.empty((n, c, h, w), dtype=tdt, device="cuda").uniform_(-1.0, 1.0)
-    dev = dict(dtype=torch.float32, device="cuda")
+    shape = (n, c, h, w) if layout == "NCHW" else (n, h, w, c)
     return {
-        "x": x,
-        "dy": torch.empty_like(x).uniform_(-1.0, 1.0),
-        "dx": torch.empty_like(x),
-        "scale": torch.empty(c, **dev).uniform_(0.5, 1.5),
-        "mean": torch.empty(c, **dev).uniform_(-0.1, 0.1),
-        "invstd": torch.empty(c, **dev).uniform_(0.8, 1.2),
-        "dscale": torch.empty(c, **dev),
-        "dbias": torch.empty(c, **dev),
+        "x": _uniform(shape, dtype, -1.0, 1.0),
+        "dy": _uniform(shape, dtype, -1.0, 1.0),
+        "dx": NormBuffer(shape, dtype),
+        "scale": _uniform((c,), "f32", 0.5, 1.5),
+        "mean": _uniform((c,), "f32", -0.1, 0.1),
+        "invstd": _uniform((c,), "f32", 0.8, 1.2),
+        "dscale": NormBuffer((c,), "f32"),
+        "dbias": NormBuffer((c,), "f32"),
     }
+
+
+class _BwdLaunch:
+    """One compiled single-launch kernel on fixed arguments, callable without arguments."""
+
+    def __init__(self, artifact, values, grid, block_size):
+        from rocke.runtime.launcher import KernelLauncher, LaunchConfig
+
+        self.launcher = KernelLauncher.from_artifact(artifact)
+        self.values = values
+        self.cfg = LaunchConfig(grid=grid, block=(block_size, 1, 1))
+
+    def __call__(self) -> None:
+        self.launcher(self.values, config=self.cfg)
 
 
 def _main_bwd(args) -> int:
@@ -441,7 +553,7 @@ def _main_bwd(args) -> int:
         family="batchnorm2d",
         extra="backward" + (",split" if args.split else ""),
     )
-    best = None
+    best, best_run = None, None
     if args.split:
         from benchmarks.common.norm_kernel_cache import compile_split_cached
 
@@ -466,7 +578,7 @@ def _main_bwd(args) -> int:
         for cand, plan in combos:
             need = cand.workspace_floats(c, plan)
             if ws is None or ws.numel() < need:
-                ws = torch.empty(need, dtype=torch.float32, device="cuda")
+                ws = NormBuffer((need,), "f32")
             for kind in ("reduce", "apply"):
                 if (cand.name, kind) not in arts:
                     arts[(cand.name, kind)] = compile_split_cached(
@@ -497,6 +609,7 @@ def _main_bwd(args) -> int:
             writer.row(key=key, candidate=label, ms=ms, backward=True, **dims)
             if best is None or ms < best[1]:
                 best = (label, ms)
+                best_run = run
         if args.split_order:
             with open(args.split_order, "w") as fh:
                 fh.write("".join(f"{lb}\t{k}\n" for lb, k in order))
@@ -531,41 +644,44 @@ def _main_bwd(args) -> int:
             writer.row(key=key, candidate=candidate.name, ms=ms, backward=True, **dims)
             if best is None or ms < best[1]:
                 best = (candidate.name, ms)
+                best_run = _BwdLaunch(
+                    artifact, values, batchnorm2d_bwd_grid(c, spec), spec.block_size
+                )
+    rc = 0
+    if (
+        args.validate
+        and best is not None
+        and not _validate_run(
+            best_run,
+            bufs,
+            mode="bwd",
+            layout="NCHW",
+            dtype=args.dtype,
+            key=key,
+            writer=writer,
+            label=best[0],
+        )
+    ):
+        rc = 1
     writer.close()
     if best is not None:
         print(f"Best: {best[0]} ({best[1]:.4f} ms)")
-    return 0
+    return rc
 
 
 def _nhwc_bufs(args, mode):
     """Device tensors of one NHWC case (memory order N, H, W, C)."""
-    tdt = _TORCH_DTYPE[args.dtype]
-    n, c, h, w = args.n, args.c, args.h, args.w
-    dev = dict(dtype=torch.float32, device="cuda")
-    x = torch.empty((n, h, w, c), dtype=tdt, device="cuda").uniform_(-1.0, 1.0)
     if mode == "bwd":
-        return {
-            "x": x,
-            "dy": torch.empty_like(x).uniform_(-1.0, 1.0),
-            "dx": torch.empty_like(x),
-            "scale": torch.empty(c, **dev).uniform_(0.5, 1.5),
-            "mean": torch.empty(c, **dev).uniform_(-0.1, 0.1),
-            "invstd": torch.empty(c, **dev).uniform_(0.8, 1.2),
-            "dscale": torch.empty(c, **dev),
-            "dbias": torch.empty(c, **dev),
-        }
-    bufs = {
-        "x": x,
-        "y": torch.empty_like(x),
-        "gamma": torch.empty(c, dtype=tdt, device="cuda").uniform_(0.5, 1.5),
-        "beta": torch.empty(c, dtype=tdt, device="cuda").uniform_(-0.5, 0.5),
-        "rm": torch.zeros(c, **dev),
-        "rv": torch.ones(c, **dev),
-    }
-    if mode == "train":
-        bufs["mean"] = torch.empty(c, dtype=tdt, device="cuda")
-        bufs["invstd"] = torch.empty(c, dtype=tdt, device="cuda")
-    return bufs
+        return _bwd_bufs(args, layout="NHWC")
+    return _fwd_bufs(
+        args.n,
+        args.c,
+        args.h,
+        args.w,
+        args.dtype,
+        layout="NHWC",
+        saved=(mode == "train"),
+    )
 
 
 def _main_nhwc(args) -> int:
@@ -598,11 +714,11 @@ def _main_nhwc(args) -> int:
     writer = JsonlResultsWriter(args.results)
     print(f"batchnorm2d NHWC {mode} sweep: {key}, {len(combos)} plan(s)")
     bufs = _nhwc_bufs(args, mode)
-    ws, arts, order, best = None, {}, [], None
+    ws, arts, order, best, best_run = None, {}, [], None, None
     for cand, plan in combos:
         need = cand.workspace_floats(c, plan)
         if need and (ws is None or ws.numel() < need):
-            ws = torch.empty(need, dtype=torch.float32, device="cuda")
+            ws = NormBuffer((need,), "f32")
         for kind in cand.kinds:
             if (cand.name, kind) not in arts:
                 arts[(cand.name, kind)] = compile_nhwc_cached(
@@ -632,13 +748,30 @@ def _main_nhwc(args) -> int:
         writer.row(key=key, candidate=label, ms=ms, nhwc=mode, **dims)
         if best is None or ms < best[1]:
             best = (label, ms)
+            best_run = run
     if args.split_order:
         with open(args.split_order, "w") as fh:
             fh.write("".join(f"{lb}\t{k}\t{nk}\n" for lb, k, nk in order))
+    rc = 0
+    if (
+        args.validate
+        and best is not None
+        and not _validate_run(
+            best_run,
+            bufs,
+            mode=mode,
+            layout="NHWC",
+            dtype=args.dtype,
+            key=key,
+            writer=writer,
+            label=best[0],
+        )
+    ):
+        rc = 1
     writer.close()
     if best is not None:
         print(f"Best: {best[0]} ({best[1]:.4f} ms)")
-    return 0
+    return rc
 
 
 def _main_mcw(args) -> int:
@@ -674,19 +807,8 @@ def _main_mcw(args) -> int:
     if mode == "bwd":
         bufs = _bwd_bufs(args)
     else:
-        tdt = _TORCH_DTYPE[args.dtype]
-        x = torch.empty((n, c, h, w), dtype=tdt, device="cuda").uniform_(-1.0, 1.0)
-        bufs = {
-            "x": x,
-            "y": torch.empty_like(x),
-            "gamma": torch.empty(c, dtype=tdt, device="cuda").uniform_(0.5, 1.5),
-            "beta": torch.empty(c, dtype=tdt, device="cuda").uniform_(-0.5, 0.5),
-            "rm": torch.zeros(c, dtype=torch.float32, device="cuda"),
-            "rv": torch.ones(c, dtype=torch.float32, device="cuda"),
-            "mean": torch.empty(c, dtype=tdt, device="cuda"),
-            "invstd": torch.empty(c, dtype=tdt, device="cuda"),
-        }
-    order, best = [], None
+        bufs = _fwd_bufs(n, c, h, w, args.dtype)
+    order, best, best_run = [], None, None
     for cand in combos:
         art = compile_mcw_cached(
             cand, dtype=args.dtype, arch=args.arch, cache_dir=args.cache_dir
@@ -700,13 +822,30 @@ def _main_mcw(args) -> int:
         writer.row(key=key, candidate=cand.name, ms=ms, mcw=mode, **dims)
         if best is None or ms < best[1]:
             best = (cand.name, ms)
+            best_run = run
     if args.split_order:
         with open(args.split_order, "w") as fh:
             fh.write("".join(f"{lb}\t{k}\t{nk}\n" for lb, k, nk in order))
+    rc = 0
+    if (
+        args.validate
+        and best is not None
+        and not _validate_run(
+            best_run,
+            bufs,
+            mode=mode,
+            layout="NCHW",
+            dtype=args.dtype,
+            key=key,
+            writer=writer,
+            label=best[0],
+        )
+    ):
+        rc = 1
     writer.close()
     if best is not None:
         print(f"Best: {best[0]} ({best[1]:.4f} ms)")
-    return 0
+    return rc
 
 
 def main(argv=None) -> int:
@@ -759,14 +898,9 @@ def main(argv=None) -> int:
 
     best = None
     if args.fast_rank:
-        torch_dtype = _TORCH_DTYPE[args.dtype]
-        shape = (args.n, args.c, args.h, args.w)
-        x = torch.empty(shape, dtype=torch_dtype, device="cuda").uniform_(-1.0, 1.0)
-        y = torch.empty_like(x)
-        gamma = torch.empty(args.c, dtype=torch_dtype, device="cuda").uniform_(0.5, 1.5)
-        beta = torch.empty(args.c, dtype=torch_dtype, device="cuda").uniform_(-0.5, 0.5)
-        running_mean = torch.zeros(args.c, dtype=torch.float32, device="cuda")
-        running_var = torch.ones(args.c, dtype=torch.float32, device="cuda")
+        fb = _fwd_bufs(args.n, args.c, args.h, args.w, args.dtype, saved=False)
+        x, y, gamma, beta = fb["x"], fb["y"], fb["gamma"], fb["beta"]
+        running_mean, running_var = fb["rm"], fb["rv"]
         values = {
             "X": x.data_ptr(),
             "Gamma": gamma.data_ptr(),
@@ -837,18 +971,9 @@ def main(argv=None) -> int:
             label = candidate.name
             artifact = _compile(spec, candidate, args=args, dims=dims)
 
-            torch_dtype = _TORCH_DTYPE[args.dtype]
-            shape = (args.n, args.c, args.h, args.w)
-            x = torch.empty(shape, dtype=torch_dtype, device="cuda").uniform_(-1.0, 1.0)
-            y = torch.empty_like(x)
-            gamma = torch.empty(args.c, dtype=torch_dtype, device="cuda").uniform_(
-                0.5, 1.5
-            )
-            beta = torch.empty(args.c, dtype=torch_dtype, device="cuda").uniform_(
-                -0.5, 0.5
-            )
-            running_mean = torch.zeros(args.c, dtype=torch.float32, device="cuda")
-            running_var = torch.ones(args.c, dtype=torch.float32, device="cuda")
+            fb = _fwd_bufs(args.n, args.c, args.h, args.w, args.dtype, saved=False)
+            x, y, gamma, beta = fb["x"], fb["y"], fb["gamma"], fb["beta"]
+            running_mean, running_var = fb["rm"], fb["rv"]
 
             values = {
                 "X": x.data_ptr(),

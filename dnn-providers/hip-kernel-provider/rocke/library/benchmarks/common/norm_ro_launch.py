@@ -89,14 +89,14 @@ def resident_ctas(launcher: KernelLauncher, block_size: int, device: int = 0) ->
     return _occ_cache[key]
 
 
-def new_sync(c: int, device: str = "cuda"):
-    import torch
+def new_sync(c: int):
+    """Zeroed barrier words (``sync``) and a one-element error counter (``err``) on the device."""
+    from rocke.runtime._norm_buffer import NormBuffer
 
-    sync = torch.zeros(
-        batchnorm2d_ro_sync_ints(c) + 64, dtype=torch.int32, device=device
+    return (
+        NormBuffer((batchnorm2d_ro_sync_ints(c) + 64,), "i32"),
+        NormBuffer((1,), "i32"),
     )
-    err = torch.zeros(1, dtype=torch.int32, device=device)
-    return sync, err
 
 
 class RoRun:
