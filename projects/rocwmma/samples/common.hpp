@@ -255,7 +255,7 @@ __host__ static inline void fillRand(DataT* mat, uint32_t m, uint32_t n)
             // Assign random integer values within 0-64, alternating
             // sign if the value is a multiple of 3
             auto value     = (rando + j) % 5u;
-            mat[i * n + j] = ((value % 3u == 0u) && std::is_signed<DataT>::value)
+            mat[i * n + j] = ((value % 3u == 0u) && rocwmma::is_signed<DataT>::value)
                                  ? -static_cast<DataT>(value)
                                  : static_cast<DataT>(value);
         }

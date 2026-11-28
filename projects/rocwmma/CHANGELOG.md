@@ -7,6 +7,7 @@ Documentation for rocWMMA is available at
 
 ### Changed
 
+* `rocwmma::is_arithmetic`, `rocwmma::is_floating_point` and `rocwmma::is_signed` (and `_v`) are now rocWMMA traits, true for the fp8, bf8 and xfloat32 types; the `std::` traits are no longer specialized for them, so use the `rocwmma::` traits. Code with both `using namespace std;` and `using namespace rocwmma;` that names these traits unqualified must now qualify them.
 * int8 WMMA on gfx11, gfx1170, gfx1171, gfx1200 and gfx1201 now wraps on int32 overflow instead of saturating. This matches gfx1250, uint8 inputs, MFMA targets and the reference implementations. Results differ only when an int32 result overflows.
 * Applications using OpenMP must now discover and link it explicitly instead of relying on `roc::rocwmma` to supply OpenMP flags and libraries. Use `find_package(OpenMP REQUIRED COMPONENTS CXX)` and link the application to `OpenMP::OpenMP_CXX`. Without this change, OpenMP loops may execute serially and calls to `omp_*` functions may fail to link.
 
@@ -14,6 +15,7 @@ Documentation for rocWMMA is available at
 
 * Removed the OpenMP requirement from the public CMake target and installed CMake package. OpenMP remains a dependency of samples, tests, and community samples; DEB/RPM OpenMP dependencies are scoped to client packages.
 * Fixed uint8 WMMA with an int32 accumulator at BlockK 8 on gfx1170, gfx1171, gfx1200, gfx1201 and gfx1250. It was reported as unsupported, while a uint32 accumulator was reported as supported but failed to compile.
+* Fixed compilation with recent MSVC STL versions (for example 14.51 and 14.52), which reject specializations of standard type traits such as `std::is_arithmetic`. On MSVC, `rocwmma::is_arithmetic_v`, `rocwmma::is_floating_point_v` and `rocwmma::is_signed_v` are now also true for the fp8, bf8 and xfloat32 types.
 
 ## rocWMMA 2.2.2 for ROCm 10.2
 

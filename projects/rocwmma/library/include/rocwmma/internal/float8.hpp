@@ -28,11 +28,11 @@
 #define ROCWMMA_FLOAT8_HPP
 
 // NOTE:
-// We want to define some type traits such as
-// is_arithmetic, and is_floating_point.
-// Need to define them first before the hip f16 header
-// is included, as it instantiates is_floating_point
-// in class definitions.
+// The fp8 types are classified as arithmetic, floating point and signed
+// through rocWMMA's own traits (rocwmma::is_arithmetic etc., see
+// utility/type_traits.hpp), never by specializing the std:: traits.
+// The specializations below come before the headers included afterwards,
+// so that no use there instantiates the primary templates first.
 #include "utility/type_traits.hpp"
 
 struct __hip_fp8_e4m3;

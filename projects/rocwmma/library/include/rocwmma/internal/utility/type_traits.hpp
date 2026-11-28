@@ -114,16 +114,12 @@ namespace rocwmma
     using std::enable_if_t;
     using std::false_type;
     using std::integral_constant;
-    using std::is_arithmetic;
-    using std::is_arithmetic_v;
     using std::is_array;
     using std::is_array_v;
     using std::is_const;
     using std::is_const_v;
     using std::is_convertible;
     using std::is_convertible_v;
-    using std::is_floating_point;
-    using std::is_floating_point_v;
     using std::is_function;
     using std::is_function_v;
     using std::is_integral;
@@ -136,8 +132,6 @@ namespace rocwmma
     using std::is_rvalue_reference_v;
     using std::is_same;
     using std::is_same_v;
-    using std::is_signed;
-    using std::is_signed_v;
     using std::is_standard_layout;
     using std::is_trivial;
     using std::is_void;
@@ -154,9 +148,37 @@ namespace rocwmma
     using std::remove_volatile_t;
     using std::true_type;
 
+    // rocWMMA-owned traits that rocWMMA extends for its own number types
+    // (fp8 / bf8 / xfloat32). The standard forbids specializing the std:: type
+    // traits ([meta.rqmts]/4) and recent MSVC STL rejects it, so these default to
+    // the std:: answer and are specialized in ROCWMMA_TYPE_TRAITS_IMPL_NAMESPACE.
+    template <typename T>
+    struct is_arithmetic : std::is_arithmetic<T>
+    {
+    };
+
+    template <typename T>
+    struct is_floating_point : std::is_floating_point<T>
+    {
+    };
+
+    template <typename T>
+    struct is_signed : std::is_signed<T>
+    {
+    };
+
+    template <typename T>
+    inline constexpr bool is_arithmetic_v = is_arithmetic<T>::value;
+
+    template <typename T>
+    inline constexpr bool is_floating_point_v = is_floating_point<T>::value;
+
+    template <typename T>
+    inline constexpr bool is_signed_v = is_signed<T>::value;
+
 } // namespace rocwmma
 
-#define ROCWMMA_TYPE_TRAITS_IMPL_NAMESPACE std
+#define ROCWMMA_TYPE_TRAITS_IMPL_NAMESPACE rocwmma
 
 #endif // defined(__HIPCC_RTC__) || defined(__clang__)
 
