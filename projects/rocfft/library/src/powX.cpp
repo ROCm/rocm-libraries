@@ -68,6 +68,13 @@ bool PlanPowX(ExecPlan& execPlan)
             return false;
     }
 
+    SetupPlanGrid(execPlan);
+    return true;
+}
+
+void SetupPlanGrid(ExecPlan& execPlan)
+{
+    execPlan.gridParam.reserve(execPlan.execSeq.size());
     for(const auto& node : execPlan.execSeq)
     {
         GridParam gp;
@@ -90,8 +97,6 @@ bool PlanPowX(ExecPlan& execPlan)
 
         execPlan.gridParam.push_back(gp);
     }
-
-    return true;
 }
 
 bool GetTuningKernelInfo(ExecPlan& execPlan)
@@ -165,11 +170,11 @@ bool GetTuningKernelInfo(ExecPlan& execPlan)
         tuningPacket->factors_str[i]   = factors_str;
 
         // save some data back to kernel-config (to the saved references)
-        // since we've done buffer-assignment and collapse-dim now.
+        // The kernel view is available after buffer assignment and padding.
         if(tuningPacket->is_builtin_kernel[i] == false)
         {
             KernelConfig* sol_kernel_config = execPlan.sol_kernel_configs[i];
-            sol_kernel_config->static_dim   = curNode->GetStaticDim();
+            sol_kernel_config->static_dim   = curNode->getLeafNode().GetStaticDim();
             sol_kernel_config->iAryType     = curNode->inArrayType;
             sol_kernel_config->oAryType     = curNode->outArrayType;
             sol_kernel_config->placement
@@ -616,7 +621,7 @@ void TransformPowX(const rocfft_plan_t&                  plan,
     for(size_t i = 0; i < execPlan.execSeq.size(); i++)
     {
         DeviceCallIn data;
-        data.node          = execPlan.execSeq[i];
+        data.node          = static_cast<LeafNode*>(execPlan.execSeq[i]);
         data.rocfft_stream = execStream;
         //
         data.deviceProp = execPlan.deviceProp;

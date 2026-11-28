@@ -256,6 +256,7 @@ add_custom_command(
 set( rocfft_source
   auxiliary.cpp
   exec_info.cpp
+  field.cpp
   plan.cpp
   transform.cpp
   repo.cpp
@@ -402,6 +403,7 @@ add_executable( rocfft_aot_helper
 )
 
 add_executable( rocfft_kernel_config_search
+  enum_printer.cpp
   rocfft_kernel_config_search.cpp
   rocfft_stub.cpp
 )

@@ -594,7 +594,7 @@ public:
         ROTATE_LEFT_3,
     };
     OutputAxisOrder legacyOutputOrder = OutputAxisOrder::IDENTITY;
-    static void     PermuteOutputAxes(OutputAxisOrder order, std::vector<size_t>& axes);
+    static void     PermuteOutputAxes(OutputAxisOrder order, std::span<size_t> axes);
 
     // Stride of the FFT in each dimension
     std::vector<size_t> inStride, outStride;
@@ -861,23 +861,6 @@ public:
 
     virtual void SanityCheck(SchemeTree*         solution_scheme = nullptr,
                              std::vector<FMKey>& kernel_keys     = EmptyFMKeyVec);
-
-    // used when RTC kernels, and output to solution map for pre-building to AOT-cache
-    // 3D_SBRC will override this
-    virtual unsigned int GetStaticDim() const
-    {
-        return length.size();
-    }
-
-    // If high dims are contiguous, we can collapse them to make offset
-    // calculation simpler
-    void CollapseContiguousDims();
-    // Leaf nodes can override this to say what dims can be collapsed.
-    // Return values are indexes into the length/stride arrays.
-    virtual std::vector<size_t> CollapsibleDims()
-    {
-        return {};
-    }
 
     // Check node scheme to see if partial pass is enabled
     bool isPartialPassEnabled() const
@@ -1206,103 +1189,26 @@ public:
 
 public:
     // leaf node would print additional informations about kernel setting
-    void         Print(rocfft_ostream& os, int indent = 0, bool detailed = false) const override;
-    bool         KernelCheck(std::vector<FMKey>& kernel_keys = EmptyFMKeyVec) override;
-    void         SanityCheck(SchemeTree*         solution_scheme = nullptr,
-                             std::vector<FMKey>& kernel_keys     = EmptyFMKeyVec) override;
-    virtual bool CreateDevKernelArgs() override;
-    bool         CreateDeviceResources() override;
-    void         SetupGridParam(GridParam& gp) override;
-    FMKey        GetKernelKey() const override;
+    void  Print(rocfft_ostream& os, int indent = 0, bool detailed = false) const override;
+    bool  KernelCheck(std::vector<FMKey>& kernel_keys = EmptyFMKeyVec) override;
+    void  SanityCheck(SchemeTree*         solution_scheme = nullptr,
+                      std::vector<FMKey>& kernel_keys     = EmptyFMKeyVec) override;
+    bool  CreateDevKernelArgs() final;
+    bool  CreateDeviceResources() override;
+    void  SetupGridParam(GridParam& gp) override;
+    FMKey GetKernelKey() const override;
 
-    // Return the integer type for this node's kernel.
-    KIntType GetKIntType() const
+    // Called after buffer assignment, fusion, and padding, before RTC.
+    void              BuildKernelView();
+    const KernelView& GetKernelView() const
     {
-        auto idx_limit = static_cast<size_t>(UINT32_MAX);
-
-        // The strides and dists also have to fit, not just the indices the
-        // kernel reaches.  A dist is packed into the argument buffer even
-        // when batch is 1, where it contributes nothing to the max index.
-        if(MaxKernelIndex(io_data_label::INPUT) > idx_limit
-           || MaxKernelIndex(io_data_label::OUTPUT) > idx_limit
-           || MaxKernelStride(io_data_label::INPUT) > idx_limit
-           || MaxKernelStride(io_data_label::OUTPUT) > idx_limit)
-        {
-            return KIntType::U64;
-        }
-        return KIntType::U32;
-    };
-
-    // Max element index the kernel would compute for a given I/O side.
-    size_t MaxKernelIndex(io_data_label io) const
+        return kernelView;
+    }
+    // Used by Stockham RTC and exported tuning configs.
+    virtual unsigned int GetStaticDim() const
     {
-        // Counted in scalar_type units; the complex-as-real x2 for r2c/c2r
-        // callbacks always happens in size_t in the wrapper.
-        // Offsets (iOffset/oOffset) are applied to base pointers before
-        // launch (see powX.cpp) and don't affect kernel index arithmetic.
-        const auto& io_stride = io == io_data_label::INPUT ? inStride : outStride;
-        const auto& io_dist   = io == io_data_label::INPUT ? iDist : oDist;
-        const auto& io_length = io == io_data_label::INPUT ? length : outputLength;
-
-        // compute_ptrdiff returns the buffer size (one-past-the-end).
-        auto ptrdiff = compute_ptrdiff(io_length, io_stride, batch, io_dist) - 1;
-
-        if(!blue || !blue->get_conv_buf_layout(io))
-            return ptrdiff;
-        // Fused Bluestein kernels index the Bluestein work buffer in the same
-        // kernel, over the same lengths but with the Bluestein strides + dist.
-        // Whichever side reaches further decides the integer type.
-        const auto fuse_type = GetBluesteinFuseType();
-
-        // The INV_CHIRP_MUL CC load and FWD_CHIRP_MUL RC store add the padded length to the
-        // index in-kernel, to skip the chirp's FFT stored first in the Bluestein buffer.
-        const bool offset_by_padded_length
-            = (io == io_data_label::INPUT && fuse_type == BFT_INV_CHIRP_MUL
-               && scheme == CS_KERNEL_STOCKHAM_BLOCK_CC)
-              || (io == io_data_label::OUTPUT && fuse_type == BFT_FWD_CHIRP_MUL
-                  && scheme == CS_KERNEL_STOCKHAM_BLOCK_RC);
-
-        return std::max(ptrdiff,
-                        blue->get_conv_buf_layout(io)->buffer_element_count() - 1
-                            + (offset_by_padded_length ? blue->get_padded_length() : 0));
-    };
-
-    // Max stride or dist packed into the kernel argument buffer for a given
-    // I/O side.  Not bounded by MaxKernelIndex: an unused dist can be
-    // arbitrarily large.
-    size_t MaxKernelStride(io_data_label io) const
-    {
-        // These are the values KernelArgsBuffer::create packs into the stride
-        // array, so they must fit in the kernel's integer type regardless of
-        // how far the kernel actually indexes.
-        const auto& io_stride  = io == io_data_label::INPUT ? inStride : outStride;
-        const auto& io_dist    = io == io_data_label::INPUT ? iDist : oDist;
-        auto        max_stride = io_stride.empty() ? static_cast<size_t>(0)
-                                                   : *std::max_element(io_stride.begin(), io_stride.end());
-        max_stride             = std::max(max_stride, io_dist);
-
-        if(GetBluesteinFuseType() == BFT_NONE)
-            return max_stride;
-
-        // Fused Bluestein kernels also take the Bluestein lengths, and the
-        // higher-dimension Bluestein strides + dist, as integer_type.  See
-        // BluesteinData and RTCKernelStockham::get_launch_args.
-        // Note: max(padded_length, transform_length) == padded_length by construction.
-        max_stride = std::max(max_stride, blue->get_padded_length());
-
-        // BFT_FWD_CHIRP does not use the convolution buffer
-        const auto& conv_layout = blue->get_conv_buf_layout(io);
-        if(!conv_layout)
-            return max_stride;
-
-        const auto io_stride_blue = conv_layout->strides();
-        // Only dims 2 and 3 are packed; dims 0 and 1 are implied by
-        // padded_length.
-        for(size_t i = 2; i < io_stride_blue.size() && i < 4; ++i)
-            max_stride = std::max(max_stride, io_stride_blue[i]);
-
-        return std::max(max_stride, conv_layout->distance());
-    };
+        return kernelView.lengths().size();
+    }
 
     virtual void GetKernelFactors();
     virtual void GetKernelPartialPassFactors();
@@ -1311,6 +1217,9 @@ public:
     // resolves off_dim_length because ppOffDim indexes the plan's dimensions,
     // which do not always line up with this node's length vector.
     bool CreatePartialPassDeviceResources(size_t off_dim_length);
+
+private:
+    KernelView kernelView;
 };
 
 /*****************************************************
@@ -2095,9 +2004,8 @@ struct ExecPlan : public MultiPlanItem
     std::vector<FMKey> solution_kernels;
 
     // Keep the references of kernel-solution-nodes during tuning-process.
-    // We have to assign back some values after  buffer-assignment /
-    // colapse-batch-dim , which are not called when enumerating
-    // kernel-configurations.
+    // Save values after buffer assignment and kernel-view preparation, which
+    // are not done when enumerating kernel configurations.
     std::vector<KernelConfig*> sol_kernel_configs;
 
     // scheme decompositions from solution map

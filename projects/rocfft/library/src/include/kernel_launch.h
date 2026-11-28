@@ -30,7 +30,7 @@
 // FIXME: documentation
 struct DeviceCallIn
 {
-    TreeNode* node      = nullptr;
+    LeafNode* node      = nullptr;
     void*     bufIn[2]  = {nullptr, nullptr};
     void*     bufOut[2] = {nullptr, nullptr};
 

@@ -264,15 +264,17 @@ bool Single2DNode::CreateDeviceResources()
 
 void Single2DNode::SetupGridParam_internal(GridParam& gp)
 {
-    auto kernel = GetKernel();
-    bwd         = kernel.transforms_per_block;
-    wgs         = kernel.workgroup_size;
+    const auto& view   = GetKernelView();
+    const auto  lens   = view.lengths();
+    auto        kernel = GetKernel();
+    bwd                = kernel.transforms_per_block;
+    wgs                = kernel.workgroup_size;
 
-    gp.b_x   = (batch + bwd - 1) / bwd;
+    gp.b_x   = (view.batch + bwd - 1) / bwd;
     gp.wgs_x = wgs;
 
-    size_t padded_len0 = length[0];
-    size_t padded_len1 = length[1];
+    size_t padded_len0 = lens[0];
+    size_t padded_len1 = lens[1];
 
     if(ebtype != EmbeddedType::NONE)
         padded_len0 += 1;
@@ -284,6 +286,6 @@ void Single2DNode::SetupGridParam_internal(GridParam& gp)
 
     // if we're doing 3D transform, we need to repeat the 2D
     // transform in the 3rd dimension
-    if(length.size() > 2)
-        gp.b_x *= length[2];
+    if(lens.size() > 2)
+        gp.b_x *= lens[2];
 }

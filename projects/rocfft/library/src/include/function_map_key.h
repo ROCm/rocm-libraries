@@ -57,7 +57,7 @@ struct KernelConfig
     int direction = -1;
     // NB:
     //  when generating candidates in tuning process,
-    //  we haven't done buffer-assignment and CollapseContiguousDims
+    //  we haven't done buffer assignment and built the kernel view
     //  but we should be able to know it when export solutions.
     int               static_dim = 0;
     PlacementCode     placement  = PC_UNSET;

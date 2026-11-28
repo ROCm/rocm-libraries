@@ -26,10 +26,45 @@
 
 #include "../../../shared/gpubuf.h"
 #include "rtc_generator.h"
+#include <array>
 #include <cstddef>
-#include <vector>
+#include <span>
 
 #define KERN_ARGS_ARRAY_WIDTH 16
+
+// The flat geometry shared by kernel generation, grid setup and argument packing.
+// The last surviving batch axis is passed separately as batch and the two dists.
+struct KernelView
+{
+    std::span<const size_t> lengths() const
+    {
+        return {input_lengths.data(), rank};
+    }
+    std::span<const size_t> output_lengths() const
+    {
+        return {output_spans.data(), rank};
+    }
+    std::span<const size_t> in_strides() const
+    {
+        return {input_strides.data(), rank};
+    }
+    std::span<const size_t> out_strides() const
+    {
+        return {output_strides.data(), rank};
+    }
+
+    size_t   batch;
+    size_t   iDist;
+    size_t   oDist;
+    size_t   output_elements;
+    KIntType itype;
+
+private:
+    friend class LeafNode;
+    size_t                                        rank = 0;
+    std::array<size_t, KERN_ARGS_ARRAY_WIDTH - 1> input_lengths, output_spans;
+    std::array<size_t, KERN_ARGS_ARRAY_WIDTH - 1> input_strides, output_strides;
+};
 
 // Device buffer holding the lengths and strides that a node's kernel
 // needs, as three fixed-width arrays of KERN_ARGS_ARRAY_WIDTH
@@ -44,19 +79,12 @@
 // at the wrong width.
 //
 // Lengths ride on the same width as the strides rather than getting a
-// width of their own: a length above 2^32 makes compute_ptrdiff exceed
-// 2^32 for any stride >= 1, so such a node already resolves to U64 via
-// MaxKernelIndex.  One width therefore covers both, and kernel names
-// need no suffix beyond the existing i32/i64.
+// width of their own: the kernel view picks one width using the layout's
+// maximum offset and stride. Kernel names need only the existing i32/i64 suffix.
 class KernelArgsBuffer
 {
 public:
-    bool  create(const std::vector<size_t>& length,
-                 const std::vector<size_t>& inStride,
-                 const std::vector<size_t>& outStride,
-                 size_t                     iDist,
-                 size_t                     oDist,
-                 KIntType                   itype);
+    bool  create(const KernelView& view);
     void* lengths() const
     {
         return buf.data_offset(0);

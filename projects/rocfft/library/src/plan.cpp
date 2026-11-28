@@ -295,11 +295,7 @@ try
 
     for(auto io : {io_data_label::INPUT, io_data_label::OUTPUT})
     {
-        // object's I/O members to (re)set
-        auto& desc_io_array_type
-            = io == io_data_label::INPUT ? description->inArrayType : description->outArrayType;
-        auto& desc_io_offsets
-            = io == io_data_label::INPUT ? description->inOffset : description->outOffset;
+        // object's I/O member to (re)set
         auto& desc_io_layout
             = io == io_data_label::INPUT ? description->input_layout : description->output_layout;
         // user's setting
@@ -313,18 +309,18 @@ try
         // -------------------------------
         // Set/Reset description's members
         // -------------------------------
-        // array type
-        desc_io_array_type = user_io_array_type;
-        // offsets
-        desc_io_offsets[0] = desc_io_offsets[1] = 0; // default if unspecified
+        // array type and offsets (0 if unspecified; offsets[1] only kept for planar types)
+        std::array<size_t, 2> io_offsets = {0, 0};
         if(user_io_offsets != nullptr)
         {
-            desc_io_offsets[0] = user_io_offsets[0];
-            if(array_type_is_planar(desc_io_array_type))
-                desc_io_offsets[1] = user_io_offsets[1];
+            io_offsets[0] = user_io_offsets[0];
+            if(array_type_is_planar(user_io_array_type))
+                io_offsets[1] = user_io_offsets[1];
         }
+        desc_io_layout.set_array_type_and_offsets(user_io_array_type, io_offsets);
         // layout parameters: implicit default strides (resp. distances) to be determined
-        // at plan creation if strides are unspecified here (resp. distances are 0)
+        // at plan creation if strides are unspecified here (resp. distances are 0).
+        // NB: clear() leaves the array type, offsets (and precision) untouched.
         desc_io_layout.clear();
         if(user_io_strides)
         {
@@ -395,24 +391,6 @@ try
 catch(...)
 {
     return rocfft_handle_exception();
-}
-
-std::string rocfft_brick_t::str() const
-{
-    return layout.str() + " " + location.str();
-}
-
-// internal brick-adding API
-void rocfft_field_t::add_brick_internal(rocfft_field_t& field, const rocfft_brick_t& brick)
-{
-    if(!field.empty() && !brick.layout.is_dimensionally_consistent_with(field.get_brick(0).layout))
-    {
-        // could motivate a new "rocfft_status_invalid_brick{_dimensions}" error code
-        throw std::runtime_error(
-            "Brick to be added is not dimensionally consistent with other brick(s) in field.");
-    }
-
-    field.bricks.emplace_back(brick);
 }
 
 // public brick-adding API that logs
@@ -596,6 +574,14 @@ std::vector<size_t> rocfft_plan_t::get_user_facing_lengths() const
     return desc.output_layout.lengths();
 }
 
+// offsets of both planes of `data_set`, 0 for the second plane of non-planar data sets
+static std::vector<size_t> plane_offsets(const data_set_t& data_set)
+{
+    if(data_set.num_planes() == 1)
+        return {data_set.get_offset(), 0};
+    return {data_set.get_offset(data_part::REAL), data_set.get_offset(data_part::IMAGINARY)};
+}
+
 std::string rocfft_bench_command(const rocfft_plan& plan)
 {
     rocfft_params params;
@@ -604,11 +590,11 @@ std::string rocfft_bench_command(const rocfft_plan& plan)
     params.placement      = fft_result_placement_from_rocfft_result_placement(plan->placement);
     params.transform_type = fft_transform_type_from_rocfft_transform_type(plan->transformType);
     params.precision      = fft_precision_from_rocfft_precision(plan->precision);
-    params.itype          = fft_array_type_from_rocfft_array_type(plan->desc.inArrayType);
-    params.otype          = fft_array_type_from_rocfft_array_type(plan->desc.outArrayType);
-    params.idist          = plan->desc.input_layout.distance();
-    params.odist          = plan->desc.output_layout.distance();
-    params.scale_factor   = plan->desc.storeOps.scale_factor;
+    params.itype = fft_array_type_from_rocfft_array_type(plan->desc.input_layout.get_array_type());
+    params.otype = fft_array_type_from_rocfft_array_type(plan->desc.output_layout.get_array_type());
+    params.idist = plan->desc.input_layout.distance();
+    params.odist = plan->desc.output_layout.distance();
+    params.scale_factor = plan->desc.storeOps.scale_factor;
 
     // reverse-copy lengths and strides (col-major to row-major)
     const auto lengths  = plan->get_user_facing_lengths();
@@ -618,8 +604,8 @@ std::string rocfft_bench_command(const rocfft_plan& plan)
     params.istride.assign(istrides.rbegin(), istrides.rend());
     params.ostride.assign(ostrides.rbegin(), ostrides.rend());
     // copy offsets
-    params.ioffset.assign(plan->desc.inOffset.begin(), plan->desc.inOffset.end());
-    params.ooffset.assign(plan->desc.outOffset.begin(), plan->desc.outOffset.end());
+    params.ioffset = plane_offsets(plan->desc.input_layout);
+    params.ooffset = plane_offsets(plan->desc.output_layout);
     // fields:
     auto copy_fields_to_params
         = [&](std::vector<fft_params::fft_field>& dest, const std::vector<rocfft_field_t>& src) {
@@ -665,7 +651,8 @@ rocfft_location_t rocfft_plan_description_t::get_current_location() const
 }
 
 NodeMetaData
-    rocfft_plan_t::get_single_dev_exec_plan_metadata(const rocfft_location_t& exec_plan_location)
+    rocfft_plan_t::get_single_dev_exec_plan_metadata(const rocfft_location_t& exec_plan_location,
+                                                     std::vector<data_set_t>& exec_plan_io_layouts)
 {
     NodeMetaData root_plan(nullptr);
     root_plan.dimension         = desc.rank();
@@ -675,8 +662,8 @@ NodeMetaData
                            || (transformType == rocfft_transform_type_real_forward))
                                       ? -1
                                       : 1;
-    root_plan.inArrayType       = desc.inArrayType;
-    root_plan.outArrayType      = desc.outArrayType;
+    root_plan.inArrayType       = desc.input_layout.get_array_type();
+    root_plan.outArrayType      = desc.output_layout.get_array_type();
     root_plan.rootTransformType = transformType;
     // root plan's data layouts and placement may be different than the calling plan's
     std::optional<data_set_t> root_plan_input_layout, root_plan_output_layout;
@@ -750,16 +737,12 @@ NodeMetaData
                     // in-place is not allowed or it can't be done or it would require a larger buffer
                     // than what's safe to expect from user. Pack results contiguously in a temporary
                     // buffer and work out of place.
-                    root_plan_other_io_layout = data_set_t::default_full_range(
-                        other(io) == io_data_label::INPUT ? desc.input_layout.lengths()
-                                                          : desc.output_layout.lengths(),
-                        desc.batch());
-                    root_plan.placement = rocfft_placement_notinplace;
-                    const auto tmp_size
-                        = root_plan_other_io_layout->buffer_element_count()
-                          * element_size(precision,
-                                         other(io) == io_data_label::INPUT ? desc.inArrayType
-                                                                           : desc.outArrayType);
+                    const auto& other_io_layout = other(io) == io_data_label::INPUT
+                                                      ? desc.input_layout
+                                                      : desc.output_layout;
+                    root_plan_other_io_layout   = other_io_layout.get_packed_data_set();
+                    root_plan.placement         = rocfft_placement_notinplace;
+                    const auto tmp_size         = root_plan_other_io_layout->buffer_size_bytes();
                     root_plan_other_io_buffer
                         = tempBuffers.emplace(desc.get_current_location(), tmp_size);
                 }
@@ -773,20 +756,14 @@ NodeMetaData
         // from the current location. Temporary buffers on current device are used for input
         // and output of the execution plan. In-place default layout operations are
         // used to minimize the library's memory footprint.
-        root_plan.placement = rocfft_placement_inplace;
-        root_plan_input_layout
-            = data_set_t::default_full_range(desc.input_layout.lengths(),
-                                             desc.input_layout.batch(),
-                                             transformType == rocfft_transform_type_real_forward);
-        root_plan_output_layout
-            = data_set_t::default_full_range(desc.output_layout.lengths(),
-                                             desc.output_layout.batch(),
-                                             transformType == rocfft_transform_type_real_inverse);
+        root_plan.placement    = rocfft_placement_inplace;
+        root_plan_input_layout = desc.input_layout.get_packed_data_set(
+            transformType == rocfft_transform_type_real_forward);
+        root_plan_output_layout = desc.output_layout.get_packed_data_set(
+            transformType == rocfft_transform_type_real_inverse);
 
-        const auto tmp_size    = std::max(root_plan_input_layout->buffer_element_count()
-                                           * element_size(precision, desc.inArrayType),
-                                       root_plan_output_layout->buffer_element_count()
-                                           * element_size(precision, desc.outArrayType));
+        const auto tmp_size    = std::max(root_plan_input_layout->buffer_size_bytes(),
+                                       root_plan_output_layout->buffer_size_bytes());
         root_plan.input_buffer = root_plan.output_buffer
             = tempBuffers.emplace(desc.get_current_location(), tmp_size);
     }
@@ -810,6 +787,8 @@ NodeMetaData
     root_plan.oDist        = root_plan_output_layout->distance();
 
     root_plan.deviceProp = get_curr_device_prop();
+
+    exec_plan_io_layouts = {*root_plan_input_layout, *root_plan_output_layout};
 
     return root_plan;
 }
@@ -908,6 +887,7 @@ static std::unique_ptr<ExecPlan> transpose_brick(int                        loca
         return execPlanMultiItem;
 
     rocfft_scoped_device dev(location.device);
+    execPlan.rootPlan->getLeafNode().BuildKernelView();
     execPlan.rootPlan->CreateDevKernelArgs();
 
     execPlan.rootPlan->comments.emplace_back(std::move(description));
@@ -955,143 +935,10 @@ size_t rocfft_plan_description_t::batch() const
     return ret;
 }
 
-rocfft_field_t::rocfft_field_t(std::vector<rocfft_brick_t> field_bricks)
-    : bricks(std::move(field_bricks))
-{
-    if(bricks.empty())
-    {
-        throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION + " cannot operate on empty fields.");
-    }
-    // compute field's global range: set global lengths and batch for the field based
-    // on the bricks's supremum
-    const auto          len_rank   = bricks[0].layout.get_len_rank();
-    const auto          batch_rank = bricks[0].layout.get_batch_rank();
-    std::vector<size_t> global_lengths(len_rank);
-    std::vector<size_t> global_batches(batch_rank);
-    for(const auto& brick : bricks)
-    {
-        if(brick.layout.get_len_rank() != len_rank || brick.layout.get_batch_rank() != batch_rank)
-        {
-            throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION
-                                        + " requires dimensionally-consistent bricks");
-        }
-        const auto brick_upper = brick.layout.upper();
-        for(size_t idx = 0; idx < brick_upper.size(); idx++)
-        {
-            if(idx < len_rank)
-                global_lengths[idx] = std::max(global_lengths[idx], brick_upper[idx]);
-            else
-                global_batches[idx - len_rank]
-                    = std::max(global_batches[idx - len_rank], brick_upper[idx]);
-        }
-    }
-    // note: strides are irrelevant for the global data range.
-    // Default contiguous strides are used here for simplicity.
-    global_data_range = data_set_t::default_full_range(global_lengths, global_batches);
-
-    // verify consistency and validity of the bricks as a field tessellation
-    if(!has_valid_tessellation())
-    {
-        throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION
-                                    + " detected an invalid list of bricks (incomplete or "
-                                      "overlapping coverage of the field's global data range)");
-    }
-    for(size_t dim = 0; dim < global_data_range.get_len_rank(); dim++)
-    {
-        if(std::all_of(bricks.begin(), bricks.end(), [&dim, this](const rocfft_brick_t& b) {
-               return b.layout[dim].has_same_logical_range_as(global_data_range[dim]);
-           }))
-        {
-            undistributed_length_dimensions.insert(dim);
-        }
-    }
-
-    // make sure bricks are sorted by increasing ranks (without modifying
-    // brick ordering within ranks)
-    std::stable_sort(
-        bricks.begin(), bricks.end(), [](const rocfft_brick_t& a, const rocfft_brick_t& b) {
-            return a.location.comm_rank < b.location.comm_rank;
-        });
-}
-
-bool rocfft_field_t::has_valid_tessellation() const
-{
-    size_t total_brick_logical_count = 0;
-    for(auto brickI = bricks.begin(); brickI != bricks.end(); ++brickI)
-    {
-        for(auto brickJ = brickI + 1; brickJ != bricks.end(); ++brickJ)
-        {
-            const auto ij_intersection
-                = data_set_t::make_contiguous_intersection_of(brickI->layout, brickJ->layout);
-            if(!ij_intersection.is_empty())
-                return false;
-        }
-        // Add up the brick's logical count
-        total_brick_logical_count += brickI->layout.logical_count();
-    }
-
-    // The bricks cover the whole index space iff their total number of
-    // logical elements is the same as the full data layout
-    return global_data_range.logical_count() == total_brick_logical_count;
-}
-
-void rocfft_field_t::erase_unit_length_axis(size_t len_dim)
-{
-    if(len_dim >= global_data_range.get_len_rank())
-        throw std::out_of_range(ROCFFT_CURRENT_FUNCTION
-                                + " cannot erase a length dimension that is out of bounds");
-    if(global_data_range[len_dim].logical_span() != 1)
-        throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION
-                                    + " cannot erase a length dimension that is not of length 1");
-    if(!undistributed_length_dimensions.contains(len_dim))
-        throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION
-                                    + " cannot erase a length dimension that is distributed");
-
-    for(auto& brick : bricks)
-    {
-        brick.layout.len_axes.erase(brick.layout.len_axes.begin() + len_dim);
-    }
-    global_data_range.len_axes.erase(global_data_range.len_axes.begin() + len_dim);
-    std::set<size_t> new_undistributed_length_dimensions;
-    for(auto& dim : undistributed_length_dimensions)
-    {
-        if(dim < len_dim)
-            new_undistributed_length_dimensions.insert(dim);
-        else if(dim > len_dim)
-            new_undistributed_length_dimensions.insert(dim - 1);
-    }
-    std::swap(undistributed_length_dimensions, new_undistributed_length_dimensions);
-}
-
-void rocfft_field_t::reorder_length_axes(const std::vector<size_t>& new_order)
-{
-    std::vector<size_t> current_order(global_data_range.get_len_rank());
-    std::iota(current_order.begin(), current_order.end(), 0);
-    if(!std::is_permutation(
-           new_order.begin(), new_order.end(), current_order.begin(), current_order.end()))
-    {
-        throw std::invalid_argument("Invalid re-ordering of length axes requested to "
-                                    + ROCFFT_CURRENT_FUNCTION);
-    }
-    // re-order lengths as requested across all members
-    for(auto& brick : bricks)
-    {
-        brick.layout.reorder_length_axes(new_order);
-    }
-    global_data_range.reorder_length_axes(new_order);
-    std::set<size_t> new_undistributed_length_dimensions;
-    for(auto len_dim : undistributed_length_dimensions)
-    {
-        auto new_len_dim = std::distance(new_order.begin(),
-                                         std::find(new_order.begin(), new_order.end(), len_dim));
-        new_undistributed_length_dimensions.insert(new_len_dim);
-    }
-    std::swap(undistributed_length_dimensions, new_undistributed_length_dimensions);
-}
-
 rocfft_status
     rocfft_plan_description_t::finalize_and_validate_for(rocfft_transform_type   dft_type,
                                                          rocfft_result_placement placement,
+                                                         rocfft_precision        precision,
                                                          const size_t*           user_lengths,
                                                          const size_t            len_rank,
                                                          const size_t number_of_transforms)
@@ -1136,6 +983,7 @@ rocfft_status
                                    {number_of_transforms},
                                    current_distances /* default distances if empty */,
                                    is_real_domain && placement == rocfft_placement_inplace);
+        io_layout.set_precision(precision);
     }
     // -------------------------------------------
     //   Finalize and validate I/O fields if any
@@ -1145,6 +993,46 @@ rocfft_status
     if(rc_mpi != rocfft_status_success)
         return rc_mpi;
 #endif
+    // --------------------------------------------------------------------
+    //   Resolve unset I/O array types and give them (and the precision) to
+    //   all bricks of the I/O fields, prior to validating the fields
+    // --------------------------------------------------------------------
+    for(auto io : {io_data_label::INPUT, io_data_label::OUTPUT})
+    {
+        auto& io_layout = io == io_data_label::INPUT ? input_layout : output_layout;
+        if(io_layout.array_type == rocfft_array_type_unset)
+        {
+            switch(dft_type)
+            {
+            case rocfft_transform_type_complex_forward:
+            case rocfft_transform_type_complex_inverse:
+                io_layout.set_array_type_and_offsets(rocfft_array_type_complex_interleaved,
+                                                     io_layout.offsets);
+                break;
+            case rocfft_transform_type_real_forward:
+            case rocfft_transform_type_real_inverse:
+                io_layout.set_array_type_and_offsets(is_real_domain(dft_type, io)
+                                                         ? rocfft_array_type_real
+                                                         : rocfft_array_type_hermitian_interleaved,
+                                                     io_layout.offsets);
+                break;
+            default:
+                throw std::invalid_argument("Unexpected type of transform given to "
+                                            + ROCFFT_CURRENT_FUNCTION);
+            }
+        }
+        // Bricks (added by users or all-gathered across processes) carry neither an array
+        // type nor a precision until here
+        auto& io_fields = io == io_data_label::INPUT ? inFields : outFields;
+        for(auto& io_field : io_fields)
+        {
+            for(auto& brick : io_field.bricks)
+            {
+                brick.layout.set_array_type_and_offsets(io_layout.array_type, brick.layout.offsets);
+                brick.layout.set_precision(precision);
+            }
+        }
+    }
     for(auto io : {io_data_label::INPUT, io_data_label::OUTPUT})
     {
         const auto& expected_full_range = io == io_data_label::INPUT ? input_layout : output_layout;
@@ -1183,8 +1071,11 @@ rocfft_status
                 // single_dev_ifield and/or single_dev_ofield serve that purpose.
                 auto& single_dev_io_field
                     = io == io_data_label::INPUT ? single_dev_ifield : single_dev_ofield;
+                // brick offsets remain 0 (offsets are a property of the I/O data sets)
+                auto brick_layout = expected_full_range;
+                brick_layout.set_array_type_and_offsets(brick_layout.get_array_type(), {0, 0});
                 std::vector<rocfft_brick_t> single_dev_io_field_bricks(
-                    1, {expected_full_range, get_current_location()});
+                    1, {brick_layout, get_current_location()});
                 single_dev_io_field
                     = std::make_optional<rocfft_field_t>(std::move(single_dev_io_field_bricks));
             }
@@ -1298,36 +1189,18 @@ rocfft_status
     }
 
     // -----------------------------------------
-    //   Finalize and validate I/O array types
+    //   Validate I/O array types
     // -----------------------------------------
     for(auto io : {io_data_label::INPUT, io_data_label::OUTPUT})
     {
-        auto&      io_array_type = io == io_data_label::INPUT ? inArrayType : outArrayType;
+        const auto io_array_type = io == io_data_label::INPUT ? input_layout.get_array_type()
+                                                              : output_layout.get_array_type();
         const bool is_real_domain
             = (dft_type == rocfft_transform_type_real_forward && io == io_data_label::INPUT)
               || (dft_type == rocfft_transform_type_real_inverse && io == io_data_label::OUTPUT);
         const bool is_hermitian_domain
             = (dft_type == rocfft_transform_type_real_forward && io == io_data_label::OUTPUT)
               || (dft_type == rocfft_transform_type_real_inverse && io == io_data_label::INPUT);
-
-        if(io_array_type == rocfft_array_type_unset)
-        {
-            switch(dft_type)
-            {
-            case rocfft_transform_type_complex_forward:
-            case rocfft_transform_type_complex_inverse:
-                io_array_type = rocfft_array_type_complex_interleaved;
-                break;
-            case rocfft_transform_type_real_forward:
-            case rocfft_transform_type_real_inverse:
-                io_array_type = is_real_domain ? rocfft_array_type_real
-                                               : rocfft_array_type_hermitian_interleaved;
-                break;
-            default:
-                throw std::invalid_argument("Unexpected type of transform given to "
-                                            + ROCFFT_CURRENT_FUNCTION);
-            }
-        }
 
         // planar array types only supported if no field is set (on input or output)
         if(array_type_is_planar(io_array_type) && (!inFields.empty() || !outFields.empty()))
@@ -1358,14 +1231,16 @@ rocfft_status
         const auto& io_fields = io == io_data_label::INPUT ? inFields : outFields;
         if(!io_fields.empty())
             continue; // offsets are ignored if fields are used
-        const auto& io_offsets    = io == io_data_label::INPUT ? inOffset : outOffset;
-        const auto  io_array_type = io == io_data_label::INPUT ? inArrayType : outArrayType;
-        if(io_offsets[0] != 0 || (array_type_is_planar(io_array_type) && io_offsets[1] != 0))
+        const auto& io_layout = io == io_data_label::INPUT ? input_layout : output_layout;
+        for(const auto offset : plane_offsets(io_layout))
         {
-            if(LOG_PLAN_ENABLED())
-                *LogSingleton::GetInstance().GetPlanOS()
-                    << "Non-zero offsets are not supported yet" << std::endl;
-            return rocfft_status_invalid_offset;
+            if(offset != 0)
+            {
+                if(LOG_PLAN_ENABLED())
+                    *LogSingleton::GetInstance().GetPlanOS()
+                        << "Non-zero offsets are not supported yet" << std::endl;
+                return rocfft_status_invalid_offset;
+            }
         }
     }
 
@@ -1382,15 +1257,16 @@ rocfft_status
         case rocfft_transform_type_complex_forward:
         case rocfft_transform_type_complex_inverse:
             // We need same array type for input and output
-            if(inArrayType != outArrayType)
+            if(input_layout.get_array_type() != output_layout.get_array_type())
                 return rocfft_status_invalid_array_type;
             break;
         case rocfft_transform_type_real_forward:
         case rocfft_transform_type_real_inverse:
         {
             // Hermitian array must be interleaved
-            const auto hermitian_array_type
-                = dft_type == rocfft_transform_type_real_forward ? outArrayType : inArrayType;
+            const auto hermitian_array_type = dft_type == rocfft_transform_type_real_forward
+                                                  ? output_layout.get_array_type()
+                                                  : input_layout.get_array_type();
             if(!array_type_is_interleaved(hermitian_array_type))
                 return rocfft_status_invalid_array_type;
         }
@@ -1471,35 +1347,16 @@ rocfft_status
             if(*expected_out_layout != out_layout)
                 throw std::runtime_error("Undistributed input and output layout are not compatible "
                                          "for single-device in-place transforms.");
-            // Check offsets if they're not to be ignored
-            if(inFields.empty() && outFields.empty())
+            // Offsets are compared above (all planes; real == 2 * hermitian for real
+            // transforms) unless they're ignored for fields. If input (resp. output) is a
+            // lone-brick field while output (resp. input) has no field set, the input
+            // (resp. output) offset values will be ignored and nonzero offset values on
+            // output (resp. input) cannot be accepted (note: planar array types not
+            // supported if any I/O field is set)
+            if((inFields.empty() && !outFields.empty() && input_layout.get_offset() != 0)
+               || (outFields.empty() && !inFields.empty() && output_layout.get_offset() != 0))
             {
-                if(dft_type == rocfft_transform_type_complex_forward
-                   || dft_type == rocfft_transform_type_complex_inverse)
-                {
-                    if(inOffset[0] != outOffset[0]
-                       || (array_type_is_planar(inArrayType) && inOffset[1] != outOffset[1]))
-                        throw std::runtime_error("Identical offsets are required for single-device "
-                                                 "in-place complex transforms.");
-                }
-                else
-                {
-                    const auto& real_offset
-                        = dft_type == rocfft_transform_type_real_forward ? inOffset : outOffset;
-                    const auto& hermitian_offset
-                        = dft_type == rocfft_transform_type_real_forward ? outOffset : inOffset;
-                    if(real_offset[0] != 2 * hermitian_offset[0])
-                        throw std::runtime_error(
-                            "Inconsistent offsets for single-device in-place real transforms.");
-                }
-            }
-            else if((inFields.empty() && inOffset[0] != 0 && !outFields.empty())
-                    || (outFields.empty() && outOffset[0] != 0 && !inFields.empty()))
-            {
-                // If input (resp. output) is a lone-brick field while output (resp. input) has
-                // no field set, the input (resp. output) offset values will be ignored and nonzero
-                // offset values on output (resp. input) cannot be accepted (note: planar array
-                // types not supported if any I/O field is set)
+                // NB: unreachable while non-zero offsets are rejected above (AIFFT-549)
                 throw std::runtime_error("Nonzero input (resp. output) offset values cannot be "
                                          "used for in-place operations if the output (resp. input) "
                                          "layout is dictated by a lone-brick field.");
@@ -1678,7 +1535,13 @@ std::unique_ptr<ExecPlan>
 
         // Plan is compiled, no need to alloc twiddles + kargs etc
         if(rocfft_getenv("ROCFFT_INTERNAL_COMPILE_ONLY") == "1")
+        {
+            // Grid/block dimensions do not require twiddles. The dry run
+            // can omit the dynamic LDS bytes occupied by large twiddles.
+            if(!execPlan.kernelNames.empty())
+                SetupPlanGrid(execPlan);
             return execPlanMultiItem;
+        }
 
         if(!PlanPowX(execPlan)) // PlanPowX enqueues the GPU kernels by function
         {
@@ -1736,7 +1599,8 @@ const rocfft_field_t& rocfft_plan_description_t::get_field_for(io_data_label io,
 }
 
 std::vector<size_t>
-    rocfft_plan_t::CreateInputGatheringItemsIfNeeded(const NodeMetaData&      exec_plan_metadata,
+    rocfft_plan_t::CreateInputGatheringItemsIfNeeded(const NodeMetaData& exec_plan_metadata,
+                                                     const data_set_t&   exec_plan_input_layout,
                                                      const rocfft_location_t& exec_plan_location)
 {
     std::vector<size_t> gather_plan_items; // to be returned;
@@ -1752,9 +1616,9 @@ std::vector<size_t>
     const auto& input_bricks    = desc.get_field_for(io_data_label::INPUT).get_bricks();
     const auto  local_comm_rank = desc.get_local_comm_rank();
     const auto  input_buffers   = GatherUserBuffers(BufferPtr::user_input, input_bricks);
-    const auto  input_elem_size = element_size(precision, desc.inArrayType);
+    const auto  input_elem_size = element_size(precision, desc.input_layout.get_array_type());
     // data layout to be observed by the final results of the data-gathering steps
-    const auto single_dev_input_layout = exec_plan_metadata.layout_for(io_data_label::INPUT);
+    const auto& single_dev_input_layout = exec_plan_input_layout;
 
     // Load ops must execute in a kernel, so if they're present that
     // means we can't use a communication op as the first thing that
@@ -1773,7 +1637,7 @@ std::vector<size_t>
         // All inputs may and can be copied directly into the execution plan's input buffer
         gather_node              = std::make_unique<CommGather>(local_comm_rank,
                                                    precision,
-                                                   desc.inArrayType,
+                                                   desc.input_layout.get_array_type(),
                                                    exec_plan_location,
                                                    exec_plan_metadata.input_buffer);
         gather_node->description = "Gather input data of " + std::to_string(input_bricks.size())
@@ -1800,8 +1664,11 @@ std::vector<size_t>
             single_dev_input_layout.lengths(), single_dev_input_layout.batch());
         const auto packing_temp_buffer = tempBuffers.emplace(
             exec_plan_location, packed_layout.logical_count() * input_elem_size);
-        gather_node = std::make_unique<CommGather>(
-            local_comm_rank, precision, desc.inArrayType, exec_plan_location, packing_temp_buffer);
+        gather_node = std::make_unique<CommGather>(local_comm_rank,
+                                                   precision,
+                                                   desc.input_layout.get_array_type(),
+                                                   exec_plan_location,
+                                                   packing_temp_buffer);
 
         gather_node->description = "Gather contiguously-packed input data chunks for "
                                    + std::to_string(input_bricks.size()) + " bricks";
@@ -1841,7 +1708,7 @@ std::vector<size_t>
                                     ibrick.location,
                                     ibrick.layout.lengths_and_batches(),
                                     precision,
-                                    desc.inArrayType,
+                                    desc.input_layout.get_array_type(),
                                     input_buffers[b_idx],
                                     0 /* : offsetIn */,
                                     ibrick.layout.strides_and_distances(),
@@ -1868,7 +1735,7 @@ std::vector<size_t>
                                                  exec_plan_location,
                                                  ibrick.layout.lengths_and_batches(),
                                                  precision,
-                                                 desc.inArrayType,
+                                                 desc.input_layout.get_array_type(),
                                                  packing_temp_buffer,
                                                  packed_offset,
                                                  ibrick.layout.contiguous_strides_and_distances(),
@@ -1885,6 +1752,7 @@ std::vector<size_t>
 
 std::vector<size_t> rocfft_plan_t::CreateOutputScatteringItemsIfNeeded(
     const NodeMetaData&            exec_plan_metadata,
+    const data_set_t&              exec_plan_output_layout,
     const rocfft_location_t&       exec_plan_location,
     const std::optional<StoreOps>& dev_specific_store_ops)
 {
@@ -1906,9 +1774,9 @@ std::vector<size_t> rocfft_plan_t::CreateOutputScatteringItemsIfNeeded(
     const auto output_buffers = GatherUserBuffers(
         placement == rocfft_placement_inplace ? BufferPtr::user_input : BufferPtr::user_output,
         output_bricks);
-    const auto output_elem_size = element_size(precision, desc.outArrayType);
+    const auto output_elem_size = element_size(precision, desc.output_layout.get_array_type());
     // data layout of the results to be scattered
-    const auto single_dev_output_layout = exec_plan_metadata.layout_for(io_data_label::OUTPUT);
+    const auto& single_dev_output_layout = exec_plan_output_layout;
 
     // Store ops must execute in a kernel, so if they're present that
     // means we can't use a communication op as the last thing that
@@ -1926,8 +1794,10 @@ std::vector<size_t> rocfft_plan_t::CreateOutputScatteringItemsIfNeeded(
     {
         // All outputs are continuous chunks of the execution plan's output buffer and the
         // chunks may be transferred directly
-        scatter_node = std::make_unique<CommScatter>(
-            precision, desc.outArrayType, exec_plan_location, exec_plan_metadata.output_buffer);
+        scatter_node              = std::make_unique<CommScatter>(precision,
+                                                     desc.output_layout.get_array_type(),
+                                                     exec_plan_location,
+                                                     exec_plan_metadata.output_buffer);
         scatter_node->description = "Scatter single-device plan's output buffer directly to "
                                     + std::to_string(output_bricks.size()) + " bricks";
         for(size_t b_idx = 0; b_idx < output_bricks.size(); ++b_idx)
@@ -1952,8 +1822,10 @@ std::vector<size_t> rocfft_plan_t::CreateOutputScatteringItemsIfNeeded(
             single_dev_output_layout.lengths(), single_dev_output_layout.batch());
         const auto packing_temp_buffer = tempBuffers.emplace(
             exec_plan_location, packed_layout.logical_count() * output_elem_size);
-        scatter_node = std::make_unique<CommScatter>(
-            precision, desc.outArrayType, exec_plan_location, packing_temp_buffer);
+        scatter_node              = std::make_unique<CommScatter>(precision,
+                                                     desc.output_layout.get_array_type(),
+                                                     exec_plan_location,
+                                                     packing_temp_buffer);
         scatter_node->description = "Scatter contiguously-packed output data chunks for "
                                     + std::to_string(output_bricks.size()) + " bricks";
         // save the raw pointer as scatter_node will be moved below
@@ -1976,7 +1848,7 @@ std::vector<size_t> rocfft_plan_t::CreateOutputScatteringItemsIfNeeded(
                                 exec_plan_location,
                                 obrick.layout.lengths_and_batches(),
                                 precision,
-                                desc.outArrayType,
+                                desc.output_layout.get_array_type(),
                                 exec_plan_metadata.output_buffer,
                                 obrick.layout.offset_in(single_dev_output_layout),
                                 single_dev_output_layout.strides_and_distances(),
@@ -2020,7 +1892,7 @@ std::vector<size_t> rocfft_plan_t::CreateOutputScatteringItemsIfNeeded(
                                                  obrick.location,
                                                  obrick.layout.lengths_and_batches(),
                                                  precision,
-                                                 desc.outArrayType,
+                                                 desc.output_layout.get_array_type(),
                                                  local_packed_chunk,
                                                  0 /* : offsetIn */,
                                                  obrick.layout.contiguous_strides_and_distances(),
@@ -2047,9 +1919,11 @@ void rocfft_plan_t::MakeSingleDevPlanWithGatherScatterIfNeeded()
     // should not be instructed to operate on another device, as it may be
     // incapable of accessing any user-provided work buffer if peer-to-peer
     // device access is not enabled.
-    const auto exec_plan_location = rocfft_location_t::rank0_current_device();
-    const bool plan_is_single_dev = desc.has_undistributed_io_on_current_location();
-    auto       exec_plan_metadata = get_single_dev_exec_plan_metadata(exec_plan_location);
+    const auto              exec_plan_location = rocfft_location_t::rank0_current_device();
+    const bool              plan_is_single_dev = desc.has_undistributed_io_on_current_location();
+    std::vector<data_set_t> exec_plan_io_layouts;
+    auto                    exec_plan_metadata
+        = get_single_dev_exec_plan_metadata(exec_plan_location, exec_plan_io_layouts);
     if(plan_is_single_dev
        && (exec_plan_metadata.input_buffer.ptr_type() == BufferPtr::PTR_TEMP
            || exec_plan_metadata.output_buffer.ptr_type() == BufferPtr::PTR_TEMP))
@@ -2062,13 +1936,16 @@ void rocfft_plan_t::MakeSingleDevPlanWithGatherScatterIfNeeded()
     std::vector<size_t> gather_items;
     std::vector<size_t> scatter_items;
     if(!plan_is_single_dev)
-        gather_items = CreateInputGatheringItemsIfNeeded(exec_plan_metadata, exec_plan_location);
+        gather_items = CreateInputGatheringItemsIfNeeded(
+            exec_plan_metadata, exec_plan_io_layouts[0], exec_plan_location);
 
     auto dev_specific_store_ops = StoreOps::copy_device_specific(desc.storeOps);
 
     if(!plan_is_single_dev)
-        scatter_items = CreateOutputScatteringItemsIfNeeded(
-            exec_plan_metadata, exec_plan_location, dev_specific_store_ops);
+        scatter_items = CreateOutputScatteringItemsIfNeeded(exec_plan_metadata,
+                                                            exec_plan_io_layouts[1],
+                                                            exec_plan_location,
+                                                            dev_specific_store_ops);
 
     // If they were created, gather/scatter items will execute load
     // ops and device-specific store ops.  But if they were not
@@ -2151,7 +2028,7 @@ rocfft_plan_t::embarrassingly_parallel_fft::embarrassingly_parallel_fft(
                                     + ROCFFT_CURRENT_FUNCTION);
     }
 
-    if(input.precision != precision || output.precision != precision)
+    if(input.field.get_precision() != precision || output.field.get_precision() != precision)
     {
         throw std::invalid_argument(
             "Input and output field views' precisions must match the precision given to "
@@ -2172,8 +2049,8 @@ rocfft_plan_t::embarrassingly_parallel_fft::embarrassingly_parallel_fft(
                   ? rocfft_array_type_real
                   : (is_hermitian_domain(fft_type, io) ? rocfft_array_type_hermitian_interleaved
                                                        : rocfft_array_type_complex_interleaved);
-        const auto& actual_array_type
-            = io == io_data_label::INPUT ? input.array_type : output.array_type;
+        const auto actual_array_type = io == io_data_label::INPUT ? input.field.get_array_type()
+                                                                  : output.field.get_array_type();
         if(actual_array_type != expected_array_type)
         {
             throw std::invalid_argument("Invalid array type for " + to_str(io)
@@ -2307,8 +2184,8 @@ std::vector<size_t> rocfft_plan_t::create_plan_items_for(
         rootPlanData.rootTransformType = fft_operations.fft_type;
         rootPlanData.placement         = fft_operations.placement;
         rootPlanData.precision         = fft_operations.precision;
-        rootPlanData.inArrayType       = fft_operations.input.array_type;
-        rootPlanData.outArrayType      = fft_operations.output.array_type;
+        rootPlanData.inArrayType       = fft_operations.input.field.get_array_type();
+        rootPlanData.outArrayType      = fft_operations.output.field.get_array_type();
         // scoping device for device properties
         {
             rocfft_scoped_device dev(item_loc.device);
@@ -2501,18 +2378,19 @@ static rocfft_field_t MakeFieldDimContiguous(const rocfft_field_t&      field,
 
         out_bricks[i].layout = data_set_t{brick_lower, brick_upper, brick_strides};
     }
-    return rocfft_field_t{std::move(out_bricks)};
+    return rocfft_field_t{std::move(out_bricks), field.get_array_type(), field.get_precision()};
 }
 
 std::vector<size_t> rocfft_plan_t::GlobalTranspose(const field_view_t&        input,
                                                    const field_view_t&        output,
                                                    const std::vector<size_t>& antecedents)
 {
-    if(input.precision != output.precision)
+    if(input.field.get_precision() != output.field.get_precision())
         throw std::invalid_argument(
             "Inconsistent precisions between input and output field views given to "
             + ROCFFT_CURRENT_FUNCTION);
-    if(array_type_is_complex(input.array_type) != array_type_is_complex(output.array_type))
+    // input and output describe the same data (see data_set_t::make_contiguous_intersection_of)
+    if(input.field.get_array_type() != output.field.get_array_type())
         throw std::invalid_argument(
             "Inconsistent array types between input and output field views given to "
             + ROCFFT_CURRENT_FUNCTION);
@@ -2597,7 +2475,7 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeRCCL(const field_view_t&      
                                                        const field_view_t&        output,
                                                        const std::vector<size_t>& antecedents)
 {
-    const auto        elem_size       = element_size(precision, input.array_type);
+    const auto        elem_size       = element_size(precision, input.field.get_array_type());
     const auto        local_comm_rank = desc.get_local_comm_rank();
     const std::string itemGroup
         = "rccl_transpose_from_" + input.group_name + "_into_" + output.group_name;
@@ -2740,7 +2618,7 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeRCCL(const field_view_t&      
                                                inBrick.location,
                                                info.intersection.lengths_and_batches(),
                                                precision,
-                                               input.array_type,
+                                               input.field.get_array_type(),
                                                input.buffers[info.inBrickIdx],
                                                info.intersection.offset_in(inBrick.layout),
                                                inBrick.layout.strides_and_distances(),
@@ -2789,7 +2667,7 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeRCCL(const field_view_t&      
                                                    inBrick.location,
                                                    info.intersection.lengths_and_batches(),
                                                    precision,
-                                                   input.array_type,
+                                                   input.field.get_array_type(),
                                                    input.buffers[info.inBrickIdx],
                                                    info.intersection.offset_in(inBrick.layout),
                                                    inBrick.layout.strides_and_distances(),
@@ -2812,7 +2690,7 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeRCCL(const field_view_t&      
         }
 
         auto rcclAllToAll = std::make_unique<CommRCCLAllToAll>(
-            rccl, precision, input.array_type, uniform_count, std::move(agents));
+            rccl, precision, input.field.get_array_type(), uniform_count, std::move(agents));
         rcclAllToAll->group       = itemGroup;
         rcclAllToAll->description = "RCCL ncclAlltoAll";
 
@@ -2834,7 +2712,7 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeRCCL(const field_view_t&      
                                                    outBrick.location,
                                                    info.intersection.lengths_and_batches(),
                                                    precision,
-                                                   input.array_type,
+                                                   input.field.get_array_type(),
                                                    a2aRecvBufs[dst_rank],
                                                    src_rank * uniform_count,
                                                    info.intersection.strides_and_distances(),
@@ -2864,8 +2742,9 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeRCCL(const field_view_t&      
         for(const auto& brick : output.field.get_bricks())
             validate_brick_location(brick, "output");
 
-        auto rcclGrouped   = std::make_unique<CommRCCLGrouped>(rccl, precision, input.array_type);
-        rcclGrouped->group = itemGroup;
+        auto rcclGrouped
+            = std::make_unique<CommRCCLGrouped>(rccl, precision, input.field.get_array_type());
+        rcclGrouped->group       = itemGroup;
         rcclGrouped->description = "RCCL grouped send/recv";
 
         std::vector<size_t> packItems;
@@ -2890,7 +2769,7 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeRCCL(const field_view_t&      
                                                    inBrick.location,
                                                    info.intersection.lengths_and_batches(),
                                                    precision,
-                                                   input.array_type,
+                                                   input.field.get_array_type(),
                                                    input.buffers[info.inBrickIdx],
                                                    info.intersection.offset_in(inBrick.layout),
                                                    inBrick.layout.strides_and_distances(),
@@ -2915,7 +2794,7 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeRCCL(const field_view_t&      
                                                    outBrick.location,
                                                    info.intersection.lengths_and_batches(),
                                                    precision,
-                                                   input.array_type,
+                                                   input.field.get_array_type(),
                                                    recv,
                                                    0,
                                                    info.intersection.strides_and_distances(),
@@ -2956,16 +2835,18 @@ void rocfft_plan_t::GlobalTranspose(size_t                     elem_size,
 {
     if(elem_size != element_size(precision, rocfft_array_type_complex_interleaved))
         throw std::invalid_argument("Invalid elem_size given to " + ROCFFT_CURRENT_FUNCTION);
+    // complex-only path: hermitian-labeled fields are explicitly relabeled as complex
+    const auto as_complex = [](rocfft_field_t field) {
+        if(field.get_array_type() == rocfft_array_type_hermitian_interleaved)
+            field.reinterpret_as(rocfft_array_type_complex_interleaved);
+        return field;
+    };
     outputItems = GlobalTranspose(
-        field_view_t(inField,
+        field_view_t(as_complex(inField),
                      input,
-                     rocfft_array_type_complex_interleaved,
-                     precision,
                      "input_field_for_transpose_" + std::to_string(transposeNumber)),
-        field_view_t(outField,
+        field_view_t(as_complex(outField),
                      output,
-                     rocfft_array_type_complex_interleaved,
-                     precision,
                      "output_field_for_transpose_" + std::to_string(transposeNumber)),
         inputAntecedents);
 }
@@ -2974,7 +2855,7 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeP2P(const field_view_t&       
                                                       const field_view_t&        output,
                                                       const std::vector<size_t>& antecedents)
 {
-    const auto elem_size = element_size(precision, input.array_type);
+    const auto elem_size = element_size(precision, input.field.get_array_type());
 
     const auto        local_comm_rank = desc.get_local_comm_rank();
     const std::string itemGroup
@@ -3009,7 +2890,7 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeP2P(const field_view_t&       
                                                             inBrick.location,
                                                             intersection.lengths_and_batches(),
                                                             precision,
-                                                            input.array_type,
+                                                            input.field.get_array_type(),
                                                             input.buffers[inBrickIdx],
                                                             intersection.offset_in(inBrick.layout),
                                                             inBrick.layout.strides_and_distances(),
@@ -3025,7 +2906,7 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeP2P(const field_view_t&       
             // send packed data
             auto sendOp = std::make_unique<CommPointToPoint>(local_comm_rank,
                                                              precision,
-                                                             input.array_type,
+                                                             input.field.get_array_type(),
                                                              intersection.logical_count(),
                                                              inBrick.location,
                                                              pack,
@@ -3051,7 +2932,7 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeP2P(const field_view_t&       
                                                    outBrick.location,
                                                    intersection.lengths_and_batches(),
                                                    precision,
-                                                   output.array_type,
+                                                   output.field.get_array_type(),
                                                    recv,
                                                    0,
                                                    intersection.strides_and_distances(),
@@ -3132,7 +3013,7 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeA2A(const field_view_t&       
                                                       const field_view_t&        output,
                                                       const std::vector<size_t>& antecedents)
 {
-    const auto        elem_size       = element_size(precision, input.array_type);
+    const auto        elem_size       = element_size(precision, input.field.get_array_type());
     const auto        local_comm_rank = desc.get_local_comm_rank();
     const auto        local_comm_size = desc.get_local_comm_size();
     const std::string itemGroup
@@ -3250,7 +3131,7 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeA2A(const field_view_t&       
                                                        inBrick.location,
                                                        intersection.lengths_and_batches(),
                                                        precision,
-                                                       input.array_type,
+                                                       input.field.get_array_type(),
                                                        input.buffers[inBrickIdx],
                                                        intersection.offset_in(inBrick.layout),
                                                        inBrick.layout.strides_and_distances(),
@@ -3281,7 +3162,7 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeA2A(const field_view_t&       
                                                        outBrick.location,
                                                        intersection.lengths_and_batches(),
                                                        precision,
-                                                       output.array_type,
+                                                       output.field.get_array_type(),
                                                        recv_buf,
                                                        recv_offsets[inRank],
                                                        intersection.strides_and_distances(),
@@ -3330,7 +3211,7 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeA2A(const field_view_t&       
 
     // add the all-to-all op itself, which depends on pack ops
     auto alltoall_ptr = std::make_unique<CommAllToAll>(precision,
-                                                       input.array_type,
+                                                       input.field.get_array_type(),
                                                        send_offsets,
                                                        send_counts,
                                                        recv_offsets,
@@ -3437,7 +3318,8 @@ rocfft_field_t MakeFieldWithPencilSplit(const rocfft_field_t&      currentField,
         const auto& ref_brick = currentField.get_brick(i % currentField.num_bricks());
         out_bricks.emplace_back(brick_lower, brick_upper, brick_strides, ref_brick.location);
     }
-    return rocfft_field_t{std::move(out_bricks)};
+    return rocfft_field_t{
+        std::move(out_bricks), currentField.get_array_type(), currentField.get_precision()};
 }
 
 // get transpose plan structure
@@ -3570,15 +3452,10 @@ rocfft_plan_t::embarrassingly_parallel_fft
     // If one of the fft length dimensions is the plan's innermost length dimensions,
     // the type of transform must match the plan's. Otherwise, sub-dimensional transforms
     // are always complex.
-    const auto fft_type         = fft_len_dims.contains(0) ? transformType
-                                                           : (dft_is_forward(transformType)
-                                                                  ? rocfft_transform_type_complex_forward
-                                                                  : rocfft_transform_type_complex_inverse);
-    const auto other_array_type = dft_is_complex(fft_type)
-                                      ? rocfft_array_type_complex_interleaved
-                                      : (is_real_domain(fft_type, other(user_field_io_label))
-                                             ? rocfft_array_type_real
-                                             : rocfft_array_type_hermitian_interleaved);
+    const auto fft_type = fft_len_dims.contains(0) ? transformType
+                                                   : (dft_is_forward(transformType)
+                                                          ? rocfft_transform_type_complex_forward
+                                                          : rocfft_transform_type_complex_inverse);
 
     rocfft_result_placement placement_of_operations
         = prefer_in_place_if_possible ? rocfft_placement_inplace : rocfft_placement_notinplace;
@@ -3613,9 +3490,8 @@ rocfft_plan_t::embarrassingly_parallel_fft
         other_buffers.reserve(other_embedded_io_field->num_bricks());
         for(const auto& brick : other_embedded_io_field->get_bricks())
         {
-            other_buffers.emplace_back(tempBuffers.emplace(
-                brick.location,
-                brick.layout.buffer_element_count() * element_size(precision, other_array_type)));
+            other_buffers.emplace_back(
+                tempBuffers.emplace(brick.location, brick.layout.buffer_size_bytes()));
         }
     }
     std::string group_name = to_str(other(user_field_io_label))
@@ -3625,8 +3501,7 @@ rocfft_plan_t::embarrassingly_parallel_fft
     for(auto dim : fft_len_dims)
         group_name += "_" + std::to_string(dim);
 
-    field_view_t other_embedded_io_field_view(
-        *other_embedded_io_field, other_buffers, other_array_type, precision, group_name);
+    field_view_t other_embedded_io_field_view(*other_embedded_io_field, other_buffers, group_name);
     if constexpr(user_field_io_label == io_data_label::INPUT)
         return embarrassingly_parallel_fft(fft_type,
                                            placement_of_operations,
@@ -3647,12 +3522,10 @@ rocfft_plan_t::field_view_t rocfft_plan_t::make_user_field_view() const
     static_assert(io == io_data_label::INPUT || io == io_data_label::OUTPUT);
     rocfft_field_t         field = desc.get_field_for(io);
     std::vector<BufferPtr> buffers;
-    rocfft_array_type      array_type;
     std::string            group_name = "user_" + to_str(io) + "_field";
     if constexpr(io == io_data_label::INPUT)
     {
-        buffers    = GatherUserBuffers(BufferPtr::user_input, field.get_bricks());
-        array_type = desc.inArrayType;
+        buffers = GatherUserBuffers(BufferPtr::user_input, field.get_bricks());
     }
     else
     {
@@ -3666,20 +3539,15 @@ rocfft_plan_t::field_view_t rocfft_plan_t::make_user_field_view() const
         }
         else
             buffers = GatherUserBuffers(BufferPtr::user_output, field.get_bricks());
-        array_type = desc.outArrayType;
     }
-    return field_view_t(field, buffers, array_type, this->precision, group_name);
+    return field_view_t(field, buffers, group_name);
 }
 
 rocfft_plan_t::field_view_t::field_view_t(const rocfft_field_t&         field_,
                                           const std::vector<BufferPtr>& buffers_,
-                                          rocfft_array_type             array_type_,
-                                          rocfft_precision              precision_,
                                           const std::string&            group_name_)
     : field(field_)
     , buffers(buffers_)
-    , array_type(array_type_)
-    , precision(precision_)
     , group_name(group_name_)
 {
     if(buffers.size() != field.num_bricks())
@@ -3693,7 +3561,7 @@ rocfft_plan_t::field_view_t::field_view_t(const rocfft_field_t&         field_,
                 + " supposedly corresponding to non-empty brick detected in "
                 + ROCFFT_CURRENT_FUNCTION);
     }
-    switch(array_type)
+    switch(field.get_array_type())
     {
     case rocfft_array_type_real:
         [[fallthrough]];
@@ -3707,60 +3575,17 @@ rocfft_plan_t::field_view_t::field_view_t(const rocfft_field_t&         field_,
                                     + ROCFFT_CURRENT_FUNCTION);
         break;
     }
-    switch(precision)
-    {
-    case rocfft_precision_half:
-        [[fallthrough]];
-    case rocfft_precision_single:
-        [[fallthrough]];
-    case rocfft_precision_double:
-        // supported
-        break;
-    default:
-        throw std::invalid_argument("Unsupported/Unknown precision given to "
-                                    + ROCFFT_CURRENT_FUNCTION);
-        break;
-    }
 }
 
 rocfft_plan_t::field_view_t
     rocfft_plan_t::field_view_t::get_view_for_lengths(const std::set<size_t>& len_dims) const
 {
-    std::vector<rocfft_brick_t> embedded_field_bricks;
-    for(const auto& brick : field.get_bricks())
-        embedded_field_bricks.emplace_back(brick.layout.get_data_set_for_len_axes(len_dims),
-                                           brick.location);
-    rocfft_field_t embedded_field(std::move(embedded_field_bricks));
-    // Complex-conjugate symmetry relationships no longer hold upon re-interpretation into
-    // a lower-dimensional data set
-    const auto embedded_array_type
-        = array_type == rocfft_array_type_hermitian_interleaved
-                  && len_dims.size() < field.get_global_data_range().get_len_rank()
-              ? rocfft_array_type_complex_interleaved
-              : array_type;
-
-    return field_view_t(embedded_field, buffers, embedded_array_type, precision, group_name);
+    return field_view_t(field.get_field_for_lengths(len_dims), buffers, group_name);
 }
 
 rocfft_plan_t::field_view_t rocfft_plan_t::field_view_t::get_embedding_view() const
 {
-    if(std::none_of(field.get_bricks().begin(),
-                    field.get_bricks().end(),
-                    [](const rocfft_brick_t& brick) { return brick.layout.is_embedded(); }))
-    {
-        return *this;
-    }
-    std::vector<rocfft_brick_t> embedding_field_bricks;
-    for(const auto& brick : field.get_bricks())
-        embedding_field_bricks.emplace_back(brick.layout.get_embedding_data_set(), brick.location);
-    // Complex-conjugate symmetry relationships no longer hold upon re-interpretation into
-    // a higher-dimensional data set
-    const auto embedding_array_type = array_type == rocfft_array_type_hermitian_interleaved
-                                          ? rocfft_array_type_complex_interleaved
-                                          : array_type;
-
-    rocfft_field_t embedding_field(std::move(embedding_field_bricks));
-    return field_view_t(embedding_field, buffers, embedding_array_type, precision, group_name);
+    return field_view_t(field.get_embedding_field(), buffers, group_name);
 }
 
 #ifdef ROCFFT_RCCL_ENABLE
@@ -3925,7 +3750,7 @@ try
     if(contiguousInputDims.empty() || contiguousOutputDims.empty())
         return false;
 
-    const auto elem_size = element_size(precision, desc.inArrayType);
+    const auto elem_size = element_size(precision, desc.input_layout.get_array_type());
 
     // Past this point any failure must throw (not return false) so that mutated plan's
     // members are cleared (in a catch block) before attempting an alternative strategy.
@@ -4387,8 +4212,6 @@ try
                                     input_view,
                                     field_view_t(rocfft_field_t(std::move(paired_bricks)),
                                                  paired_buffers,
-                                                 output_view.array_type,
-                                                 precision,
                                                  output_view.group_name));
     fft.set_load_ops(desc.loadOps);
     fft.set_store_ops(desc.storeOps);
@@ -4775,56 +4598,6 @@ rocfft_status rocfft_plan_description_t::allgather_brick_params_mpi()
 }
 #endif
 
-std::optional<rocfft_field_t> rocfft_field_t::get_other_embarrassingly_parallel_io_field(
-    io_data_label           other_io,
-    rocfft_transform_type   fft_type,
-    rocfft_result_placement placement,
-    bool                    other_innermost_length_is_odd) const
-{
-    if(bricks.empty())
-    {
-        throw std::logic_error(ROCFFT_CURRENT_FUNCTION + " cannot operate on empty fields");
-    }
-
-    if(!has_undistributed_length_axes())
-    {
-        throw std::logic_error(ROCFFT_CURRENT_FUNCTION
-                               + " requires all bricks in the field to have undistributed lengths");
-    }
-    // copy bricks
-    std::vector<rocfft_brick_t> ret_bricks = bricks;
-    // modify/set brick layouts as needed
-    for(size_t brick_idx = 0; brick_idx < bricks.size(); brick_idx++)
-    {
-        const auto& brick = bricks[brick_idx];
-        if(placement == rocfft_placement_inplace)
-        {
-            const auto tmp = brick.layout.get_other_inplace_data_set_for(
-                other_io, fft_type, other_innermost_length_is_odd);
-            if(!tmp)
-                return std::nullopt; // in-place cannot be done on that brick
-            ret_bricks[brick_idx].layout = *tmp;
-        }
-        else
-        {
-            // use default, packed contiguous layout for the other I/O
-            if(is_hermitian_domain(fft_type, other_io))
-                ret_bricks[brick_idx].layout[0].upper = brick.layout[0].upper / 2 + 1;
-            else if(is_real_domain(fft_type, other_io))
-                ret_bricks[brick_idx].layout[0].upper
-                    = 2 * (brick.layout[0].upper - 1) + (other_innermost_length_is_odd ? 1 : 0);
-            ret_bricks[brick_idx].layout[0].inbuffer_stride = 1;
-            for(size_t dim = 1; dim < brick.layout.get_full_rank(); dim++)
-            {
-                ret_bricks[brick_idx].layout[dim].inbuffer_stride
-                    = ret_bricks[brick_idx].layout[dim - 1].inbuffer_stride
-                      * ret_bricks[brick_idx].layout[dim - 1].logical_span();
-            }
-        }
-    }
-    return rocfft_field_t{std::move(ret_bricks)};
-}
-
 int rocfft_plan_description_t::get_local_comm_rank() const
 {
 #ifdef ROCFFT_MPI_ENABLE
@@ -5020,7 +4793,7 @@ static rocfft_status rocfft_plan_create_internal(rocfft_plan                   p
             plan->desc = *description;
         }
         const auto rcfft = plan->desc.finalize_and_validate_for(
-            transform_type, placement, lengths, dimensions, number_of_transforms);
+            transform_type, placement, precision, lengths, dimensions, number_of_transforms);
         if(rcfft != rocfft_status_success)
             return rcfft;
 
@@ -5202,7 +4975,7 @@ try
     rocfft_cout << std::endl;
 
     rocfft_cout << "input array type: ";
-    switch(plan->desc.inArrayType)
+    switch(plan->desc.input_layout.get_array_type())
     {
     case rocfft_array_type_complex_interleaved:
         rocfft_cout << "complex interleaved";
@@ -5226,7 +4999,7 @@ try
     rocfft_cout << std::endl;
 
     rocfft_cout << "output array type: ";
-    switch(plan->desc.outArrayType)
+    switch(plan->desc.output_layout.get_array_type())
     {
     case rocfft_array_type_complex_interleaved:
         rocfft_cout << "complex interleaved";
@@ -5260,16 +5033,16 @@ try
     rocfft_cout << "batch size: " << plan->desc.batch() << std::endl;
     rocfft_cout << std::endl;
 
-    rocfft_cout << "input offset: " << plan->desc.inOffset[0];
-    if((plan->desc.inArrayType == rocfft_array_type_complex_planar)
-       || (plan->desc.inArrayType == rocfft_array_type_hermitian_planar))
-        rocfft_cout << ", " << plan->desc.inOffset[1];
+    const auto ioffsets = plane_offsets(plan->desc.input_layout);
+    rocfft_cout << "input offset: " << ioffsets[0];
+    if(plan->desc.input_layout.num_planes() == 2)
+        rocfft_cout << ", " << ioffsets[1];
     rocfft_cout << std::endl;
 
-    rocfft_cout << "output offset: " << plan->desc.outOffset[0];
-    if((plan->desc.outArrayType == rocfft_array_type_complex_planar)
-       || (plan->desc.outArrayType == rocfft_array_type_hermitian_planar))
-        rocfft_cout << ", " << plan->desc.outOffset[1];
+    const auto ooffsets = plane_offsets(plan->desc.output_layout);
+    rocfft_cout << "output offset: " << ooffsets[0];
+    if(plan->desc.output_layout.num_planes() == 2)
+        rocfft_cout << ", " << ooffsets[1];
     rocfft_cout << std::endl;
     rocfft_cout << std::endl;
 
@@ -5765,7 +5538,7 @@ void TreeNode::DetermineBufferMemory(size_t& tmpBufSize,
             = blue && blue->get_conv_buf_layout(io_data_label::OUTPUT)
                   ? blue->get_conv_buf_layout(io_data_label::OUTPUT)->buffer_element_count()
                         + (obOut == OB_TEMP_BLUESTEIN ? blue->get_padded_length() : 0)
-                  : compute_ptrdiff(outputLength, outStride, batch, oDist);
+                  : getLeafNode().GetKernelView().output_elements;
 
         if(scheme == CS_KERNEL_CHIRP && blue)
             chirpSize = std::max(blue->get_padded_length(), chirpSize);
@@ -6376,8 +6149,8 @@ std::unique_ptr<SchemeTree>
         execPlan.solution_kernels.push_back(kernel_node.kernel_key);
         curScheme->numKernels = 1;
 
-        // Keep the references, and after buffer-assignment and collapse-batch-dim,
-        // we can save some info back to the kernel-configurations
+        // Keep the references, so we can save the prepared kernel geometry
+        // back to the kernel configurations after buffer assignment.
         if(TuningBenchmarker::GetSingleton().IsProcessingTuning())
         {
             execPlan.sol_kernel_configs.push_back(&(kernel_node.kernel_key.kernel_config));
@@ -6483,8 +6256,8 @@ void ProcessNode(ExecPlan& execPlan)
     // add padding if necessary
     policy.PadPlan(execPlan);
 
-    // Collapse high dims on leaf nodes where possible
-    execPlan.rootPlan->CollapseContiguousDims();
+    for(auto* node : execPlan.execSeq)
+        node->getLeafNode().BuildKernelView();
 
     // Check the buffer, param and tree integrity, Note we do this after fusion
     // rootScheme might be nullptr and solution_kernels might be empty (when no solution)
@@ -6556,6 +6329,34 @@ void PrintNode(rocfft_ostream& os, const ExecPlan& execPlan, const int indent, b
         os << indentStr << "Kernel names:\n";
         for(const auto& name : execPlan.kernelNames)
             os << indentStr << "  " << name << '\n';
+
+        const auto print_vector = [&os](std::span<const size_t> values) {
+            for(size_t index = 0; index < values.size(); ++index)
+            {
+                if(index != 0)
+                    os << ',';
+                os << values[index];
+            }
+        };
+        for(const auto* node : execPlan.execSeq)
+        {
+            const auto& view = node->getLeafNode().GetKernelView();
+            os << indentStr << "Kernel args: " << PrintScheme(node->scheme)
+               << " dim=" << node->dimension << " kint=" << (view.itype == KIntType::U32 ? 32 : 64)
+               << " batch=" << view.batch << " idist=" << view.iDist << " odist=" << view.oDist
+               << " length=";
+            print_vector(view.lengths());
+            os << " output=";
+            print_vector(view.output_lengths());
+            os << " istride=";
+            print_vector(view.in_strides());
+            os << " ostride=";
+            print_vector(view.out_strides());
+            os << '\n';
+        }
+        os << indentStr << "Work buffer parts: " << execPlan.tmpWorkBufSize << ' '
+           << execPlan.copyWorkBufSize << ' ' << execPlan.blueWorkBufSize << ' '
+           << execPlan.chirpWorkBufSize << '\n';
     }
 
     os << indentStr << "GridParams\n";

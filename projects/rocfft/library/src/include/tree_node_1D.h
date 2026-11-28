@@ -92,8 +92,7 @@ protected:
     void SetupGridParam_internal(GridParam& gp) override;
 
 public:
-    bool                CreateDeviceResources() override;
-    std::vector<size_t> CollapsibleDims() override;
+    bool CreateDeviceResources() override;
 };
 
 /*****************************************************
@@ -112,8 +111,7 @@ protected:
     void SetupGridParam_internal(GridParam& gp) override;
 
 public:
-    bool                CreateDeviceResources() override;
-    std::vector<size_t> CollapsibleDims() override;
+    bool CreateDeviceResources() override;
 };
 
 /*****************************************************
@@ -156,7 +154,6 @@ public:
     {
         return true;
     }
-    std::vector<size_t> CollapsibleDims() override;
 };
 
 /*****************************************************
@@ -175,8 +172,7 @@ protected:
     void SetupGridParam_internal(GridParam& gp) override;
 
 public:
-    bool                CreateDeviceResources() override;
-    std::vector<size_t> CollapsibleDims() override;
+    bool CreateDeviceResources() override;
 };
 
 /*****************************************************

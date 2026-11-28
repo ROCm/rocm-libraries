@@ -20,7 +20,9 @@
 
 #include "data_set.h"
 #include "../../shared/arithmetic.h"
+#include "../../shared/array_predicate.h"
 #include "../../shared/ptrdiff.h"
+#include "enum_printer.h"
 #include "rocfft_current_function.h"
 
 #include <algorithm>
@@ -30,19 +32,27 @@
 
 namespace
 {
-    template <typename T>
-    std::vector<T> concatenate(const std::vector<T>& a, const std::vector<T>& b)
+    // true iff a and b are identical or are the hermitian and complex variants
+    // of the same format (interleaved or planar)
+    bool same_format_up_to_hermitian(rocfft_array_type a, rocfft_array_type b)
     {
-        auto ret = a;
-        std::copy(b.begin(), b.end(), std::back_inserter(ret));
-        return ret;
+        return a == b
+               || (array_type_is_complex(a) && array_type_is_complex(b)
+                   && array_type_is_interleaved(a) == array_type_is_interleaved(b));
     }
-    template <typename T>
-    std::vector<T> concatenate(const std::vector<T>& a, const T& b)
+
+    // complex counterpart of a Hermitian array type, other array types unchanged
+    rocfft_array_type complex_counterpart(rocfft_array_type t)
     {
-        auto ret = a;
-        ret.push_back(b);
-        return ret;
+        switch(t)
+        {
+        case rocfft_array_type_hermitian_interleaved:
+            return rocfft_array_type_complex_interleaved;
+        case rocfft_array_type_hermitian_planar:
+            return rocfft_array_type_complex_planar;
+        default:
+            return t;
+        }
     }
 }
 
@@ -128,12 +138,20 @@ data_set_t::data_set_t(const std::vector<size_t>& lower,
 data_set_t data_set_t::full_range(const std::vector<size_t>& lengths,
                                   const std::vector<size_t>& strides,
                                   size_t                     batch,
-                                  size_t                     distance)
+                                  size_t                     distance,
+                                  size_t                     batch_rank)
 {
-    return data_set_t{std::vector<size_t>(lengths.size() + 1, 0),
-                      concatenate(lengths, batch),
-                      concatenate(strides, distance),
-                      1};
+    if(lengths.size() != strides.size() || batch_rank == 0 || batch_rank > lengths.size())
+        throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION
+                                    + " requires matching length/stride "
+                                      "sizes and nonzero ranks.");
+    data_set_t ret;
+    ret.len_axes.resize(lengths.size() + 1 - batch_rank);
+    ret.batch_axes.resize(batch_rank);
+    for(size_t dim = 0; dim < lengths.size(); ++dim)
+        ret[dim] = {0, lengths[dim], strides[dim]};
+    ret.batch_axes.back() = {0, batch, distance};
+    return ret;
 }
 
 data_set_t data_set_t::default_full_range(const std::vector<size_t>& lengths,
@@ -162,6 +180,67 @@ size_t data_set_t::get_batch_rank() const
 size_t data_set_t::get_full_rank() const
 {
     return len_axes.size() + batch_axes.size();
+}
+
+rocfft_array_type data_set_t::get_array_type() const
+{
+    if(!has_array_type())
+    {
+        throw std::logic_error(ROCFFT_CURRENT_FUNCTION
+                               + " called on a data set without array type.");
+    }
+
+    return array_type;
+}
+
+bool data_set_t::has_array_type() const
+{
+    return array_type != rocfft_array_type_unset;
+}
+
+rocfft_precision data_set_t::get_precision() const
+{
+    if(!has_precision())
+    {
+        throw std::logic_error(ROCFFT_CURRENT_FUNCTION
+                               + " called on a data set without precision.");
+    }
+
+    return static_cast<rocfft_precision>(precision);
+}
+
+bool data_set_t::has_precision() const
+{
+    return precision != precision_unset;
+}
+
+void data_set_t::set_precision(rocfft_precision p)
+{
+    precision = static_cast<std::underlying_type_t<rocfft_precision>>(p);
+}
+
+void data_set_t::set_array_type_and_offsets(rocfft_array_type            new_array_type,
+                                            const std::array<size_t, 2>& new_offsets)
+{
+    if(new_offsets[1] != 0 && !array_type_is_planar(new_array_type))
+        throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION
+                                    + " requires a zero second offset for non-planar array types.");
+    array_type = new_array_type;
+    offsets    = new_offsets;
+}
+
+size_t data_set_t::num_planes() const
+{
+    return array_type_is_planar(array_type) ? 2 : 1;
+}
+
+size_t data_set_t::get_offset(data_part part) const
+{
+    if(array_type_is_planar(array_type) == (part == data_part::ALL))
+        throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION
+                                    + " requires data_part::ALL for non-planar data sets, and"
+                                      " data_part::REAL or data_part::IMAGINARY for planar ones.");
+    return offsets[part == data_part::IMAGINARY ? 1 : 0];
 }
 
 std::vector<size_t> data_set_t::lengths_and_batches() const
@@ -282,19 +361,113 @@ size_t data_set_t::logical_count() const
     return product(len_and_batches.begin(), len_and_batches.end());
 }
 
-size_t data_set_t::buffer_element_count() const
+size_t data_set_t::buffer_element_count(data_part part) const
 {
-    return compute_ptrdiff(lengths_and_batches(), strides_and_distances());
+    const auto offset = get_offset(part);
+    const auto count  = compute_ptrdiff(lengths_and_batches(), strides_and_distances());
+    // an empty data set needs no buffer, wherever it would start
+    return count == 0 ? 0 : offset + count;
+}
+
+size_t data_set_t::element_byte_size() const
+{
+    size_t real_bytes = 0;
+    switch(get_precision())
+    {
+    case rocfft_precision_half:
+        real_bytes = 2;
+        break;
+    case rocfft_precision_single:
+        real_bytes = 4;
+        break;
+    case rocfft_precision_double:
+        real_bytes = 8;
+        break;
+    default:
+        throw std::logic_error(ROCFFT_CURRENT_FUNCTION + " found an unexpected precision.");
+    }
+    switch(get_array_type())
+    {
+    case rocfft_array_type_complex_interleaved:
+    case rocfft_array_type_hermitian_interleaved:
+        return 2 * real_bytes;
+    case rocfft_array_type_real:
+    case rocfft_array_type_complex_planar:
+    case rocfft_array_type_hermitian_planar:
+        return real_bytes;
+    default:
+        throw std::logic_error(ROCFFT_CURRENT_FUNCTION + " found an unexpected array type.");
+    }
+}
+
+size_t data_set_t::buffer_size_bytes(data_part part) const
+{
+    return buffer_element_count(part) * element_byte_size();
+}
+
+size_t data_set_t::max_offset() const
+{
+    if(is_empty())
+        throw std::logic_error(ROCFFT_CURRENT_FUNCTION
+                               + " is undefined for an empty logical index range.");
+    size_t ret = *std::max_element(offsets.begin(), offsets.begin() + num_planes());
+    for(size_t dim = 0; dim < get_full_rank(); ++dim)
+    {
+        const auto& axis = (*this)[dim];
+        ret += (axis.logical_span() - 1) * axis.inbuffer_stride;
+    }
+    return ret;
+}
+
+size_t data_set_t::max_stride() const
+{
+    size_t ret = 0;
+    for(size_t dim = 0; dim < get_full_rank(); dim++)
+        ret = std::max(ret, (*this)[dim].inbuffer_stride);
+    return ret;
+}
+
+data_set_t data_set_t::reinterpret_as(rocfft_array_type new_array_type) const
+{
+    if(array_type == rocfft_array_type_unset || new_array_type == rocfft_array_type_unset)
+        throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION + " requires set array types.");
+    if(array_type_is_real(array_type) != array_type_is_real(new_array_type))
+        throw std::logic_error(ROCFFT_CURRENT_FUNCTION
+                               + ": reinterpreting real data as complex data (or vice versa)"
+                                 " is not implemented yet.");
+    if(!same_format_up_to_hermitian(array_type, new_array_type))
+        throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION
+                                    + " cannot switch between interleaved and planar formats.");
+    // allowed relabels keep the number of planes, hence the offsets
+    auto ret = *this;
+    ret.set_array_type_and_offsets(new_array_type, offsets);
+    return ret;
+}
+
+data_set_t data_set_t::get_packed_data_set(bool real_inplace_padding) const
+{
+    // keeps precision and array type; full_range_reset drops the embedding
+    auto ret = *this;
+    ret.full_range_reset(lengths(), {}, batches(), {}, real_inplace_padding);
+    ret.offsets = {0, 0};
+    for(size_t dim = 0; dim < get_full_rank(); dim++)
+    {
+        ret[dim].lower = (*this)[dim].lower;
+        ret[dim].upper = (*this)[dim].upper;
+    }
+    return ret;
 }
 
 bool data_set_t::is_contiguous() const
 {
-    return buffer_element_count() == logical_count();
+    return compute_ptrdiff(lengths_and_batches(), strides_and_distances()) == logical_count();
 }
 
 bool data_set_t::operator==(const data_set_t& other) const
 {
-    return len_axes == other.len_axes && batch_axes == other.batch_axes;
+    return len_axes == other.len_axes && batch_axes == other.batch_axes
+           && array_type == other.array_type && precision == other.precision
+           && offsets == other.offsets;
 }
 
 bool data_set_t::has_same_logical_range_as(const data_set_t& other) const
@@ -334,6 +507,9 @@ data_set_t data_set_t::make_contiguous_intersection_of(const data_set_t& first,
     if(first.embedding != second.embedding)
         throw std::invalid_argument("Different embeddings for arguments of "
                                     + ROCFFT_CURRENT_FUNCTION);
+    if(first.precision != second.precision || first.array_type != second.array_type)
+        throw std::invalid_argument("Different precisions or array types for arguments of "
+                                    + ROCFFT_CURRENT_FUNCTION);
 
     data_set_t ret;
     ret.len_axes.resize(first.len_axes.size());
@@ -347,8 +523,121 @@ data_set_t data_set_t::make_contiguous_intersection_of(const data_set_t& first,
         else
             ret[dim].inbuffer_stride = ret[dim - 1].inbuffer_stride * ret[dim - 1].logical_span();
     }
-    ret.embedding = first.embedding;
+    // zero offsets: the intersection describes a fresh contiguous buffer
+    ret.embedding  = first.embedding;
+    ret.array_type = first.array_type;
+    ret.precision  = first.precision;
     return ret;
+}
+
+std::vector<data_set_t>
+    data_set_t::compress_batch_axes_consistently_in(std::vector<data_set_t> data_sets)
+{
+    compress_batch_axes_consistently_in(data_sets, false);
+    return data_sets;
+}
+
+void data_set_t::compress_batch_axes_consistently_in(std::span<data_set_t> data_sets,
+                                                     bool                  legacy_packed_spans)
+{
+    compress_axes_consistently_in(data_sets, false, legacy_packed_spans);
+}
+
+std::vector<data_set_t>
+    data_set_t::compress_length_axes_consistently_in(std::vector<data_set_t> data_sets)
+{
+    compress_axes_consistently_in(data_sets, true);
+    return data_sets;
+}
+
+void data_set_t::compress_axes_consistently_in(std::span<data_set_t> data_sets,
+                                               bool                  length_axes,
+                                               bool                  legacy_packed_spans)
+{
+    const auto axes = length_axes ? &data_set_t::len_axes : &data_set_t::batch_axes;
+    // flattened index of the first axis of the group being compressed
+    const auto first = [&](const data_set_t& d) { return length_axes ? 0 : d.get_len_rank(); };
+
+    for(const auto& d : data_sets)
+    {
+        if(!d.is_dimensionally_consistent_with(data_sets.front()))
+            throw std::invalid_argument("Dimensionally-inconsistent arguments for "
+                                        + ROCFFT_CURRENT_FUNCTION);
+        // length axes may differ in span (e.g., real vs. complex data); such axes are
+        // simply not merged (see `mergeable` below)
+        for(size_t i = 0; !length_axes && !legacy_packed_spans && i < d.get_batch_rank(); i++)
+            if(d.batch_axes[i].logical_span() != data_sets.front().batch_axes[i].logical_span())
+                throw std::invalid_argument("Different batch spans for arguments of "
+                                            + ROCFFT_CURRENT_FUNCTION);
+    }
+
+    // true iff axis `outer` may be merged over axis `inner` (of the group) in `d`, with
+    // the same spans as in the first data set
+    auto mergeable = [&](const data_set_t& d, size_t outer, size_t inner) {
+        const auto& o         = (d.*axes)[outer];
+        const auto& i         = (d.*axes)[inner];
+        const auto& reference = data_sets.front().*axes;
+        if(legacy_packed_spans)
+        {
+            const auto keep = std::max(outer, inner);
+            const auto del  = std::min(outer, inner);
+            if(keep == reference.size() - 1
+               && (d.*axes)[del].logical_span() != reference[del].logical_span())
+                return false;
+        }
+        else if(o.logical_span() != reference[outer].logical_span()
+                || i.logical_span() != reference[inner].logical_span())
+            return false;
+        if(d.embedding)
+        {
+            const auto& e = *d.embedding;
+            if(std::find(e.begin(), e.end(), first(d) + outer) != e.end()
+               || std::find(e.begin(), e.end(), first(d) + inner) != e.end())
+                return false;
+        }
+        return o.inbuffer_stride == i.inbuffer_stride * i.logical_span()
+               || (o.logical_span() == 1 && o.lower == 0);
+    };
+
+    auto can_merge = [&](size_t outer, size_t inner) {
+        return std::all_of(data_sets.begin(), data_sets.end(), [&](const auto& d) {
+            return mergeable(d, outer, inner);
+        });
+    };
+    bool merged = true;
+    while(merged && !data_sets.empty())
+    {
+        merged         = false;
+        const auto num = (data_sets.front().*axes).size();
+        // Keep original axis order. Try lower-indexed pairs first, preferring
+        // their lower axis as inner when both directions are valid (unit spans).
+        for(size_t del = 0; !merged && del < num; ++del)
+        {
+            for(size_t keep = del + 1; !merged && keep < num; ++keep)
+            {
+                const bool lower_is_inner = can_merge(keep, del);
+                if(!lower_is_inner && !can_merge(del, keep))
+                    continue;
+                for(auto& d : data_sets)
+                {
+                    auto&      group  = d.*axes;
+                    const auto o      = group[lower_is_inner ? keep : del];
+                    const auto i      = group[lower_is_inner ? del : keep];
+                    auto&      k      = group[keep];
+                    k.lower           = i.lower + i.logical_span() * o.lower;
+                    k.upper           = k.lower + i.logical_span() * o.logical_span();
+                    k.inbuffer_stride = i.inbuffer_stride;
+                    const auto erased = first(d) + del;
+                    group.erase(group.begin() + del);
+                    if(d.embedding)
+                        for(auto& axis_idx : *d.embedding)
+                            if(axis_idx > erased)
+                                axis_idx--;
+                }
+                merged = true;
+            }
+        }
+    }
 }
 
 std::vector<size_t> data_set_t::length_axes_by_increasing_strides(bool pin_innermost_axis) const
@@ -422,6 +711,10 @@ size_t data_set_t::offset_in(const data_set_t& other) const
         throw std::invalid_argument(
             "This object is not dimensionally consistent with the argument of "
             + ROCFFT_CURRENT_FUNCTION);
+    if(precision != other.precision || array_type != other.array_type)
+        throw std::invalid_argument(
+            "This object's precision or array type differs from the argument of "
+            + ROCFFT_CURRENT_FUNCTION);
     for(size_t dim = 0; dim < get_full_rank(); dim++)
         if(!other[dim].logically_contains((*this)[dim].lower))
             throw std::invalid_argument(
@@ -440,6 +733,10 @@ bool data_set_t::is_continuous_in(const data_set_t& other) const
     if(!is_dimensionally_consistent_with(other))
         throw std::invalid_argument(
             "This object is not dimensionally consistent with the argument of "
+            + ROCFFT_CURRENT_FUNCTION);
+    if(precision != other.precision || array_type != other.array_type)
+        throw std::invalid_argument(
+            "This object's precision or array type differs from the argument of "
             + ROCFFT_CURRENT_FUNCTION);
 
     bool ret = true;
@@ -480,6 +777,14 @@ std::string data_set_t::str() const
         ret += " ";
         ret += std::to_string(s_or_d);
     }
+
+    ret += " precision ";
+    ret += has_precision() ? PrintPrecision(get_precision()) : "unset";
+    ret += " array type ";
+    ret += PrintArrayType(array_type);
+    ret += " offsets";
+    for(size_t plane = 0; plane < num_planes(); plane++)
+        ret += " " + std::to_string(offsets[plane]);
 
     if(is_embedded())
     {
@@ -571,17 +876,32 @@ std::optional<data_set_t>
             + " is assuming full length axes, non-zero lower bounds are rejected for length axes.");
     }
 
-    if(fft_type == rocfft_transform_type_complex_forward
-       || fft_type == rocfft_transform_type_complex_inverse)
-    {
-        // simple copy
-        return std::make_optional<data_set_t>(*this);
-    }
-    else if(fft_type != rocfft_transform_type_real_forward
-            && fft_type != rocfft_transform_type_real_inverse)
+    const bool complex_fft = fft_type == rocfft_transform_type_complex_forward
+                             || fft_type == rocfft_transform_type_complex_inverse;
+    if(!complex_fft && fft_type != rocfft_transform_type_real_forward
+       && fft_type != rocfft_transform_type_real_inverse)
     {
         throw std::invalid_argument("Unknown type of transform given to "
                                     + ROCFFT_CURRENT_FUNCTION);
+    }
+
+    // a set array type must match this data set's side of the transform
+    const auto io = other(other_io);
+    if(has_array_type()
+       && !(complex_fft ? array_type_is_complex_but_not_hermitian(array_type)
+            : is_real_domain(fft_type, io)
+                ? (array_type == rocfft_array_type_real)
+                : (array_type == rocfft_array_type_hermitian_interleaved)))
+    {
+        throw std::logic_error(ROCFFT_CURRENT_FUNCTION + " found array type "
+                               + PrintArrayType(array_type)
+                               + " on the wrong side of the transform.");
+    }
+
+    if(complex_fft)
+    {
+        // simple copy (identical offsets in all planes)
+        return std::make_optional<data_set_t>(*this);
     }
 
     // a Hermitian innermost length of 1 can only come from a real innermost length of 1
@@ -612,6 +932,16 @@ std::optional<data_set_t>
     }
     // copy data set and modify what needs be
     auto ret = std::make_optional<data_set_t>(*this);
+    // the returned layout is never planar: a second plane's offset cannot be expressed
+    // and real offsets are twice the hermitian ones
+    if(offsets[1] != 0 || (!is_real_domain(fft_type, other_io) && offsets[0] % 2 != 0))
+        return std::nullopt;
+    const auto ret_array_type = !has_array_type() ? array_type
+                                : is_real_domain(fft_type, other_io)
+                                    ? rocfft_array_type_real
+                                    : rocfft_array_type_hermitian_interleaved;
+    ret->set_array_type_and_offsets(
+        ret_array_type, {is_real_domain(fft_type, other_io) ? 2 * offsets[0] : offsets[0] / 2, 0});
     (*ret)[0].upper
         = is_real_domain(fft_type, other_io)
               ? 2 * ((*this)[0].logical_span() - 1) + (other_innermost_length_is_odd ? 1 : 0)
@@ -640,6 +970,9 @@ data_set_t data_set_t::get_data_set_for_len_axes(const std::set<size_t>& len_ind
         return *this;
 
     data_set_t ret;
+    ret.array_type = complex_counterpart(array_type);
+    ret.precision  = precision;
+    ret.offsets    = offsets;
     // map of current object's to returned object's axis indices
     std::vector<size_t> current_to_ret(get_full_rank());
     // Turn non-desired length axes into additional batch axes
@@ -697,6 +1030,9 @@ data_set_t data_set_t::get_embedding_data_set() const
         throw std::logic_error(ROCFFT_CURRENT_FUNCTION + " detected an inconsistent embedding map");
 
     data_set_t ret;
+    ret.array_type = is_embedded() ? complex_counterpart(array_type) : array_type;
+    ret.precision  = precision;
+    ret.offsets    = offsets;
     for(const auto& axis_idx : *embedding)
         ret.len_axes.push_back((*this)[axis_idx]);
     // all other batch axes that aren't part of the embedding remain batch axes

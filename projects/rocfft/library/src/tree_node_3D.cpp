@@ -944,12 +944,14 @@ void SBRCTranspose3DNode::TuneDirectRegType()
  *****************************************************/
 void SBRCTransXY_ZNode::SetupGridParam_internal(GridParam& gp)
 {
+    const auto& view = GetKernelView();
+    const auto  lens = view.lengths();
     // sbrcTransType has already been assigned in KernelCheck();
     auto kernel = GetKernel();
     bwd         = kernel.transforms_per_block;
     wgs         = kernel.workgroup_size;
-    lds         = length[0] * bwd;
-    gp.b_x      = DivRoundingUp(length[2], bwd) * length[1] * batch;
+    lds         = lens[0] * bwd;
+    gp.b_x      = DivRoundingUp(lens[2], bwd) * lens[1] * view.batch;
     gp.wgs_x    = wgs;
 }
 
@@ -959,12 +961,14 @@ void SBRCTransXY_ZNode::SetupGridParam_internal(GridParam& gp)
  *****************************************************/
 void SBRCTransZ_XYNode::SetupGridParam_internal(GridParam& gp)
 {
+    const auto& view = GetKernelView();
+    const auto  lens = view.lengths();
     // sbrcTransType has already been assigned in KernelCheck();
     auto kernel = GetKernel();
     bwd         = kernel.transforms_per_block;
     wgs         = kernel.workgroup_size;
-    lds         = length[0] * bwd;
-    gp.b_x      = DivRoundingUp(length[1], bwd) * length[2] * batch;
+    lds         = lens[0] * bwd;
+    gp.b_x      = DivRoundingUp(lens[1], bwd) * lens[2] * view.batch;
     gp.wgs_x    = wgs;
 }
 
@@ -974,28 +978,15 @@ void SBRCTransZ_XYNode::SetupGridParam_internal(GridParam& gp)
  *****************************************************/
 void RealCmplxTransZ_XYNode::SetupGridParam_internal(GridParam& gp)
 {
+    const auto& view = GetKernelView();
+    const auto  lens = view.lengths();
     // sbrcTransType has already been assigned in KernelCheck();
     auto kernel = pool.get_kernel(GetKernelKey());
     bwd         = kernel.transforms_per_block;
     wgs         = kernel.workgroup_size;
     // this kernel always does real-complex processing and needs one
     // extra element per row
-    lds      = (length[0] + 1) * bwd;
-    gp.b_x   = DivRoundingUp(length[1], bwd) * length[2] * batch;
+    lds      = (lens[0] + 1) * bwd;
+    gp.b_x   = DivRoundingUp(lens[1], bwd) * lens[2] * view.batch;
     gp.wgs_x = wgs;
-}
-
-bool RealCmplxTransZ_XYNode::CreateDevKernelArgs()
-{
-    // We have a case where this 3D kernel is shoehorned into a 2D plan.
-    // If so, add a third dimension when creating kernel args.
-    if(length.size() == 2)
-    {
-        length.push_back(1);
-        outputLength.push_back(1);
-        inStride.push_back(inStride.back());
-        // In input-axis order, axis 0 supplies the legacy dummy output stride.
-        outStride.push_back(outStride.front());
-    }
-    return SBRCTranspose3DNode::CreateDevKernelArgs();
 }

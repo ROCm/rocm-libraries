@@ -31,7 +31,8 @@ RTCKernel::RTCGenerator RTCKernelTranspose::generate_from_node(const LeafNode&  
                                                                const std::string& gpu_arch,
                                                                CallbackType       cbtype)
 {
-    const auto& length = node.length;
+    const auto& view   = node.GetKernelView();
+    const auto  length = view.lengths();
 
     RTCGenerator generator;
     if(node.scheme != CS_KERNEL_TRANSPOSE && node.scheme != CS_KERNEL_TRANSPOSE_XY_Z
@@ -49,7 +50,7 @@ RTCKernel::RTCGenerator RTCKernelTranspose::generate_from_node(const LeafNode&  
     unsigned int gridX = DivRoundingUp<unsigned int>(length[0], tileX);
     unsigned int gridY = DivRoundingUp<unsigned int>(gridYrows, tileX);
     unsigned int gridZ = std::accumulate(
-        length.begin() + highdim, length.end(), node.batch, std::multiplies<unsigned int>());
+        length.begin() + highdim, length.end(), view.batch, std::multiplies<unsigned int>());
 
     // check if it is possible to directly use a 3-D grid of GPUs
     bool grid3D = false;
@@ -85,21 +86,19 @@ RTCKernel::RTCGenerator RTCKernelTranspose::generate_from_node(const LeafNode&  
 
     // check the length along the fast output dimension to decide if
     // we should do diagonal block ordering
-    size_t fastOut = node.length[1];
+    size_t fastOut = length[1];
     // diagonal ordering only seems to help 2D cases, not 3D
-    bool diagonal = (fastOut % 256) == 0 && (node.outStride[0] % 256 == 0)
+    bool diagonal = (fastOut % 256) == 0 && (view.out_strides()[0] % 256 == 0)
                     && node.scheme == CS_KERNEL_TRANSPOSE;
 
-    bool tileAligned = node.length[0] % tileX == 0 && node.length[1] % tileX == 0;
+    bool tileAligned = length[0] % tileX == 0 && length[1] % tileX == 0;
 
-    // GetKIntType runs after buffer assignment, fusion
-    // and padding, so the node's lengths and strides are final.
-    KIntType itype = node.GetKIntType();
+    KIntType itype = view.itype;
 
     TransposeSpecs specs{itype,
                          tileX,
                          tileY,
-                         node.length.size(),
+                         length.size(),
                          node.precision,
                          node.inArrayType,
                          node.outArrayType,
@@ -130,6 +129,7 @@ RTCKernel::RTCGenerator RTCKernelTranspose::generate_from_node(const LeafNode&  
 RTCKernelArgs RTCKernelTranspose::get_launch_args(DeviceCallIn& data)
 {
     RTCKernelArgs kargs = make_launch_args();
+    const auto&   view  = data.node->GetKernelView();
     kargs.append_ptr(data.bufIn[0]);
     if(array_type_is_planar(data.node->inArrayType))
         kargs.append_ptr(data.bufIn[1]);
@@ -142,37 +142,37 @@ RTCKernelArgs RTCKernelTranspose::get_launch_args(DeviceCallIn& data)
     // Kargs appended as index type 32BIT are all bounded by grid limits,
     // and widening them to 64BIT would cost registers for nothing
 
-    auto num_lengths = data.node->length.size();
+    const auto lengths     = view.lengths();
+    const auto in_strides  = view.in_strides();
+    const auto out_strides = view.out_strides();
+    auto       num_lengths = lengths.size();
     kargs.append_kint(num_lengths, KIntType::U32);
-    kargs.append_kint(data.node->length[0]);
-    kargs.append_kint(data.node->length[1]);
-    kargs.append_kint(num_lengths > 2 ? data.node->length[2] : 1);
+    kargs.append_kint(lengths[0]);
+    kargs.append_kint(lengths[1]);
+    kargs.append_kint(num_lengths > 2 ? lengths[2] : 1);
     kargs.append_ptr(data.node->devKernArg.lengths());
 
-    kargs.append_kint(data.node->inStride[0]);
-    kargs.append_kint(data.node->inStride[1]);
-    kargs.append_kint(num_lengths > 2 ? data.node->inStride[2] : 0);
+    kargs.append_kint(in_strides[0]);
+    kargs.append_kint(in_strides[1]);
+    kargs.append_kint(num_lengths > 2 ? in_strides[2] : 0);
     kargs.append_ptr(data.node->devKernArg.stride_in());
-    kargs.append_kint(data.node->iDist);
+    kargs.append_kint(view.iDist);
 
-    kargs.append_kint(data.node->outStride[0]);
-    kargs.append_kint(data.node->outStride[1]);
-    kargs.append_kint(num_lengths > 2 ? data.node->outStride[2] : 0);
+    kargs.append_kint(out_strides[0]);
+    kargs.append_kint(out_strides[1]);
+    kargs.append_kint(num_lengths > 2 ? out_strides[2] : 0);
     kargs.append_ptr(data.node->devKernArg.stride_out());
-    kargs.append_kint(data.node->oDist);
+    kargs.append_kint(view.oDist);
 
     // pass gridX, gridY and gridZ to restore a 3-D GPU grid, if needed for large grids
-    unsigned int tileX = data.node->precision == rocfft_precision_single ? 64 : 32;
-    unsigned int gridYrows
-        = data.node->length[1] * (data.node->length.size() > 2 ? data.node->length[2] : 1);
-    auto highdim = std::min<size_t>(data.node->length.size(), 3);
+    unsigned int tileX     = data.node->precision == rocfft_precision_single ? 64 : 32;
+    unsigned int gridYrows = lengths[1] * (num_lengths > 2 ? lengths[2] : 1);
+    auto         highdim   = std::min<size_t>(num_lengths, 3);
 
-    unsigned int gridX = DivRoundingUp<unsigned int>(data.node->length[0], tileX);
+    unsigned int gridX = DivRoundingUp<unsigned int>(lengths[0], tileX);
     unsigned int gridY = DivRoundingUp<unsigned int>(gridYrows, tileX);
-    unsigned int gridZ = std::accumulate(data.node->length.begin() + highdim,
-                                         data.node->length.end(),
-                                         data.node->batch,
-                                         std::multiplies<unsigned int>());
+    unsigned int gridZ = std::accumulate(
+        lengths.begin() + highdim, lengths.end(), view.batch, std::multiplies<unsigned int>());
 
     kargs.append_kint(gridX, KIntType::U32);
     kargs.append_kint(gridY, KIntType::U32);

@@ -808,10 +808,9 @@ void CRT1DNode::AssignParams_internal()
  *****************************************************/
 void Stockham1DNode::SetupGridParam_internal(GridParam& gp)
 {
-    // get working group size and number of transforms
-    size_t batch_accum = batch;
-    for(size_t j = 1; j < length.size(); j++)
-        batch_accum *= length[j];
+    const auto& view        = GetKernelView();
+    const auto  lens        = view.lengths();
+    const auto  batch_accum = product(lens.begin() + 1, lens.end()) * view.batch;
 
     auto kernel = GetKernel();
 
@@ -830,7 +829,7 @@ void Stockham1DNode::SetupGridParam_internal(GridParam& gp)
     {
         const auto lds_padding = ebtype != EmbeddedType::NONE ? 1 : 0;
 
-        lds = (length[0] + lds_padding) * bwd;
+        lds = (lens[0] + lds_padding) * bwd;
     }
 }
 
@@ -840,27 +839,14 @@ bool Stockham1DNode::CreateDeviceResources()
     return LeafNode::CreateDeviceResources();
 }
 
-std::vector<size_t> Stockham1DNode::CollapsibleDims()
-{
-    // do not collapse on multi-kernel fused Bluestein nodes
-    if(GetBluesteinType() == BT_MULTI_KERNEL_FUSED)
-        return {};
-
-    // fastest dim is FFT, the rest is collapsible
-    std::vector<size_t> ret(length.size() - 1);
-    std::iota(ret.begin(), ret.end(), 1);
-    return ret;
-}
-
 /*****************************************************
  * CS_KERNEL_STOCKHAM_PP  *
  *****************************************************/
 void StockhamPP1DNode::SetupGridParam_internal(GridParam& gp)
 {
-    // get working group size and number of transforms
-    size_t batch_accum = batch;
-    for(size_t j = 1; j < length.size(); j++)
-        batch_accum *= length[j];
+    const auto& view        = GetKernelView();
+    const auto  lens        = view.lengths();
+    const auto  batch_accum = product(lens.begin() + 1, lens.end()) * view.batch;
 
     auto kernel = GetKernel();
 
@@ -871,18 +857,12 @@ void StockhamPP1DNode::SetupGridParam_internal(GridParam& gp)
 
     const auto lds_padding = ebtype != EmbeddedType::NONE ? 1 : 0;
 
-    lds = (length[0] + lds_padding) * bwd;
+    lds = (lens[0] + lds_padding) * bwd;
 }
 
 bool StockhamPP1DNode::CreateDeviceResources()
 {
     return CreatePartialPassDeviceResources(length[ppOffDim]);
-}
-
-std::vector<size_t> StockhamPP1DNode::CollapsibleDims()
-{
-    // do not collapse on partial-pass nodes
-    return {};
 }
 
 /*****************************************************
@@ -963,10 +943,11 @@ void SBCCNode::TuneDirectRegType()
 
 void SBCCNode::InitIntrinsicMode()
 {
+    const auto& view = GetKernelView();
     // 1. General rejections: (Guard) cases we definitely can't use buffer instruction
     // 2. half precision has not been tested yet, disable it for now.
-    if(((uint64_t)iDist * batch * complex_type_size(precision) >= 0xFFFFFFFF)
-       || ((uint64_t)oDist * batch * complex_type_size(precision) >= 0xFFFFFFFF)
+    if(((uint64_t)view.iDist * view.batch * complex_type_size(precision) >= 0xFFFFFFFF)
+       || ((uint64_t)view.oDist * view.batch * complex_type_size(precision) >= 0xFFFFFFFF)
        || (precision == rocfft_precision_half))
     {
         intrinsicMode = IntrinsicAccessType::DISABLE_BOTH;
@@ -1033,27 +1014,17 @@ void SBCCNode::TuneIntrinsicMode()
 
 void SBCCNode::SetupGridParam_internal(GridParam& gp)
 {
-    auto kernel = GetKernel();
-    bwd         = kernel.transforms_per_block;
-    wgs         = kernel.workgroup_size;
+    const auto& view   = GetKernelView();
+    const auto  lens   = view.lengths();
+    auto        kernel = GetKernel();
+    bwd                = kernel.transforms_per_block;
+    wgs                = kernel.workgroup_size;
 
-    lds = length[0] * bwd;
+    lds = lens[0] * bwd;
 
-    gp.b_x = ((length[1]) - 1) / bwd + 1;
-    gp.b_x *= product(length.begin() + 2, length.end()) * batch;
+    gp.b_x = (lens[1] - 1) / bwd + 1;
+    gp.b_x *= product(lens.begin() + 2, lens.end()) * view.batch;
     gp.wgs_x = wgs;
-}
-
-std::vector<size_t> SBCCNode::CollapsibleDims()
-{
-    // do not collapse on multi-kernel fused Bluestein nodes
-    if(GetBluesteinType() == BT_MULTI_KERNEL_FUSED)
-        return {};
-
-    // second-fastest dim is FFT, higher dims are collapsible
-    std::vector<size_t> ret(length.size() - 2);
-    std::iota(ret.begin(), ret.end(), 2);
-    return ret;
 }
 
 /*****************************************************
@@ -1062,15 +1033,17 @@ std::vector<size_t> SBCCNode::CollapsibleDims()
 
 void SBCCPPNode::SetupGridParam_internal(GridParam& gp)
 {
-    auto kernel = GetKernel();
+    const auto& view   = GetKernelView();
+    const auto  lens   = view.lengths();
+    auto        kernel = GetKernel();
 
     bwd = kernel.transforms_per_block;
     wgs = kernel.workgroup_size;
 
-    lds = length[0] * bwd;
+    lds = lens[0] * bwd;
 
-    gp.b_x = ((length[1]) - 1) / bwd + 1;
-    gp.b_x *= product(length.begin() + 2, length.end()) * batch;
+    gp.b_x = (lens[1] - 1) / bwd + 1;
+    gp.b_x *= product(lens.begin() + 2, lens.end()) * view.batch;
     gp.wgs_x = wgs;
 
     // Grid arrangement is different than regular SBCC
@@ -1088,12 +1061,6 @@ bool SBCCPPNode::CreateDeviceResources()
     // this node's length is rotated so that its own transform dimension comes
     // first, which shifts ppOffDim (a plan dimension) one slot to the right
     return CreatePartialPassDeviceResources(length[(ppOffDim + 1) % length.size()]);
-}
-
-std::vector<size_t> SBCCPPNode::CollapsibleDims()
-{
-    // do not collapse on partial-pass nodes
-    return {};
 }
 
 /*****************************************************
@@ -1187,13 +1154,15 @@ void SBRCNode::TuneDirectRegType()
 
 void SBRCNode::SetupGridParam_internal(GridParam& gp)
 {
+    const auto& view = GetKernelView();
+    const auto  lens = view.lengths();
     // sbrcTransType has already been assigned in KernelCheck();
     auto kernel = pool.get_kernel(GetKernelKey());
     bwd         = kernel.transforms_per_block;
     wgs         = kernel.workgroup_size;
-    lds         = length[0] * bwd;
-    gp.b_x      = (length[1] - 1) / bwd + 1;
-    gp.b_x *= product(length.begin() + 2, length.end()) * batch;
+    lds         = lens[0] * bwd;
+    gp.b_x      = (lens[1] - 1) / bwd + 1;
+    gp.b_x *= product(lens.begin() + 2, lens.end()) * view.batch;
     gp.wgs_x = wgs;
 }
 
@@ -1260,10 +1229,11 @@ void SBCRNode::TuneDirectRegType()
 
 void SBCRNode::InitIntrinsicMode()
 {
+    const auto& view = GetKernelView();
     // 1. General rejections: (Guard) cases we definitely can't use buffer instruction
     // 2. half precision has not been tested yet, disable it for now.
-    if(((uint64_t)iDist * batch * complex_type_size(precision) >= 0xFFFFFFFF)
-       || ((uint64_t)oDist * batch * complex_type_size(precision) >= 0xFFFFFFFF)
+    if(((uint64_t)view.iDist * view.batch * complex_type_size(precision) >= 0xFFFFFFFF)
+       || ((uint64_t)view.oDist * view.batch * complex_type_size(precision) >= 0xFFFFFFFF)
        || (precision == rocfft_precision_half))
     {
         intrinsicMode = IntrinsicAccessType::DISABLE_BOTH;
@@ -1304,15 +1274,17 @@ void SBCRNode::TuneIntrinsicMode()
 
 void SBCRNode::SetupGridParam_internal(GridParam& gp)
 {
-    auto kernel = pool.get_kernel(GetKernelKey());
-    wgs         = kernel.workgroup_size;
-    bwd         = kernel.transforms_per_block;
+    const auto& view   = GetKernelView();
+    const auto  lens   = view.lengths();
+    auto        kernel = pool.get_kernel(GetKernelKey());
+    wgs                = kernel.workgroup_size;
+    bwd                = kernel.transforms_per_block;
 
     const auto lds_padding = ebtype != EmbeddedType::NONE ? 1 : 0;
 
-    lds    = (length[0] + lds_padding) * bwd;
-    gp.b_x = ((length[1]) - 1) / bwd + 1;
-    gp.b_x *= product(length.begin() + 2, length.end()) * batch;
+    lds    = (lens[0] + lds_padding) * bwd;
+    gp.b_x = (lens[1] - 1) / bwd + 1;
+    gp.b_x *= product(lens.begin() + 2, lens.end()) * view.batch;
     gp.wgs_x = wgs;
 
     return;
