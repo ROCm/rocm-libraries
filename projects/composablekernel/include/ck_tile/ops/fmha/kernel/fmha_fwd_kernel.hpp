@@ -1723,10 +1723,22 @@ struct FmhaFwdKernel
         if constexpr(kIsGroupMode)
             has_padded_seqlen_k = kargs.seqlen_k_ptr != nullptr;
 
+#if CK_TILE_XCD_REMAP_NUM_XCDS == 0 && (defined(__gfx11__) || defined(__gfx117__))
+#if defined(__gfx115__) || defined(__gfx117__)
+        constexpr bool kReadGridDim = !kHasMask;
+#else
+        constexpr bool kReadGridDim = FmhaPipeline::kK1 == 32 && !kHasMask &&
+                                      (FmhaPipeline::kM0 <= 64 || (!kPadHeadDimQ && !kPadHeadDimV));
+#endif
+        // Preserve lazy gridDim access outside the selected kernels.
+        std::conditional_t<kReadGridDim, const dim3, decltype(gridDim)&> grid_dim = gridDim;
+#else
+        const auto& grid_dim = gridDim;
+#endif
         const FmhaFwdWorkgroupGrid grid{
-            static_cast<index_t>(gridDim.x),
-            static_cast<index_t>(has_padded_seqlen_k ? gridDim.z : gridDim.y),
-            static_cast<index_t>(has_padded_seqlen_k ? gridDim.y : gridDim.z),
+            static_cast<index_t>(grid_dim.x),
+            static_cast<index_t>(has_padded_seqlen_k ? grid_dim.z : grid_dim.y),
+            static_cast<index_t>(has_padded_seqlen_k ? grid_dim.y : grid_dim.z),
             ck_tile::integer_divide_ceil(kargs.hdim_v, FmhaPipeline::kN1),
             has_padded_seqlen_k};
         const FmhaFwdWorkgroup block{
