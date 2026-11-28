@@ -167,7 +167,9 @@ class DirectFwdWmmaSpec:
     # Ping-pong schedule: the waves form two ranks that run one barrier
     # apart, and every step is "read the fragments | barrier | WMMAs |
     # barrier", so one rank reads LDS while the other multiplies. Replaces
-    # the per-chunk barrier and the in-wave fragment prefetch.
+    # the per-chunk barrier and the in-wave fragment prefetch. With row_ring
+    # / tap_ring the ring advances per tap group inside that schedule, so
+    # the ring costs no barriers of its own.
     pingpong: bool = False
     # Steps (k-step, tap) per ping-pong phase: one barrier pair per group.
     pp_group: int = 1
@@ -542,8 +544,8 @@ def fwd_wmma_reason(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> str | Non
     if spec.pingpong:
         nw = spec.waves_k * spec.waves_p
         issuers = 2 * spec.tile_n + 1 if spec.phase_split else spec.tile_n + 1
-        if spec.row_ring or spec.tap_ring or spec.split_barrier or spec.prefetch:
-            return "pingpong replaces the ring variants, split_barrier and prefetch"
+        if spec.split_barrier or spec.prefetch:
+            return "pingpong replaces split_barrier and prefetch"
         if nw % 2 or issuers > nw // 2:
             return "pingpong needs an even wave count with every issuer in rank 0"
         if spec.wave_epilogue:
@@ -1184,21 +1186,14 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
         b.s_barrier_bare(fence="compiler")
         b.sched_barrier(0)
 
-    def _chunk_pp(kc: Value, accs: list[Value]) -> list[Value]:
-        """``pingpong``: multiply chunk ``kc``, which has landed (the issuers
-        waited for it before the barrier that starts it). Rank 1 runs this a
-        barrier behind rank 0."""
-        # Ring slot (kc + NS - 1) % NS held chunk kc - 1, whose last reads
-        # (rank 1's) drained before the barrier rank 0 just passed.
-        nxt = b.add(kc, b.const_i32(NS - 1))
-        with b.scf_if(b.cmp_lt(nxt, n_chunks)):
-            _issue(nxt)
-        stage = b.mod(kc, b.const_i32(NS))
-        halo_base = b.mul(stage, b.const_i32(HALO_STAGE))
-        wei_base = b.mul(stage, b.const_i32(WEI)) if G == 1 else c0
+    def _pp_steps(st_list, halo_base, wei_base, accs, wait_next):
+        """The ping-pong phases of ``st_list`` (``pp_group`` steps each) from
+        one halo slot and one weight slot. ``wait_next`` runs after the last
+        phase's WMMAs: the issuers wait for the next slots to land before the
+        barrier that starts them."""
         accs = list(accs)
         PG = spec.pp_group
-        groups = [steps[i : i + PG] for i in range(0, len(steps), PG)]
+        groups = [st_list[i : i + PG] for i in range(0, len(st_list), PG)]
         for j, grp in enumerate(groups):
             frags = []
             for ks, r, s in grp:
@@ -1226,13 +1221,58 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
                         accs[i] = b.mma(wmma_op, af[m], bf[tn], accs[i])
             b.s_setprio(0)
             if last:
-                # The issuers wait for chunk kc + 1 before the barrier that
-                # starts it.
-                _wait_landed(b.add(kc, c1))
+                wait_next()
             _pp_bar()
         return accs
 
+    def _chunk_pp(kc: Value, accs: list[Value]) -> list[Value]:
+        """``pingpong``: multiply chunk ``kc``, which has landed (the issuers
+        waited for it before the barrier that starts it). Rank 1 runs this a
+        barrier behind rank 0."""
+        # Ring slot (kc + NS - 1) % NS held chunk kc - 1, whose last reads
+        # (rank 1's) drained before the barrier rank 0 just passed.
+        nxt = b.add(kc, b.const_i32(NS - 1))
+        with b.scf_if(b.cmp_lt(nxt, n_chunks)):
+            _issue(nxt)
+        stage = b.mod(kc, b.const_i32(NS))
+        halo_base = b.mul(stage, b.const_i32(HALO_STAGE))
+        wei_base = b.mul(stage, b.const_i32(WEI)) if G == 1 else c0
+        # The issuers wait for chunk kc + 1 before the barrier that starts it.
+        return _pp_steps(
+            steps, halo_base, wei_base, accs, lambda: _wait_landed(b.add(kc, c1))
+        )
+
     n_steps = b.mul(n_chunks, b.const_i32(NG))
+
+    def _ring_wait(u: Value, chunk_end: bool) -> None:
+        """Ring step ``u``: the weight issuer waits for its weights; at a
+        chunk's boundary (``chunk_end``) the halo issuers wait for the halo
+        (their only transfer in flight)."""
+        with b.scf_if(b.cmp_eq(wave_id, b.const_i32(NB))):
+            _tdm_ring_wait(b, u, NS, n_steps)
+        if chunk_end:
+            with b.scf_if(b.cmp_ne(wave_id, b.const_i32(NB))):
+                b.s_wait_tensorcnt(0)
+
+    def _ring_refill(kc: Value, u: Value, r: int) -> None:
+        """Issue the weights of ring step ``u + NS - 1`` (into the slot that
+        held step ``u - 1``) and, at a chunk's first row, the next chunk's
+        halo."""
+        nxt = b.add(u, b.const_i32(NS - 1))
+        with b.scf_if(b.cmp_lt(nxt, n_steps)):
+            nc = b.div(nxt, b.const_i32(NG))
+            _issue_wei(nc, b.mod(nxt, b.const_i32(NS)), b.mod(nxt, b.const_i32(NG)))
+        if r == 0:
+            nc = b.add(kc, c1)
+            with b.scf_if(b.cmp_lt(nc, n_chunks)):
+                _issue_halo(nc, b.mod(nc, c2))
+
+    def _ring_row_steps(r: int):
+        return [
+            (ks, t // KW, t % KW)
+            for ks in range(CK // WMMA_K)
+            for t in range(r * WTAPS, (r + 1) * WTAPS)
+        ]
 
     def _chunk_rr(kc: Value, accs: list[Value]) -> list[Value]:
         """``row_ring`` / ``tap_ring``: chunk ``kc`` as NG (tap group) steps,
@@ -1244,27 +1284,34 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
             # The weight issuer waits for step u's weights; at a chunk's first
             # row the halo issuers wait for its halo (their only transfer in
             # flight: the next chunk's goes out below, after the barrier).
-            with b.scf_if(b.cmp_eq(wave_id, b.const_i32(NB))):
-                _tdm_ring_wait(b, u, NS, n_steps)
-            if r == 0:
-                with b.scf_if(b.cmp_ne(wave_id, b.const_i32(NB))):
-                    b.s_wait_tensorcnt(0)
+            _ring_wait(u, r == 0)
             b.sync_lds_only()
-            nxt = b.add(u, b.const_i32(NS - 1))
-            with b.scf_if(b.cmp_lt(nxt, n_steps)):
-                nc = b.div(nxt, b.const_i32(NG))
-                _issue_wei(nc, b.mod(nxt, b.const_i32(NS)), b.mod(nxt, b.const_i32(NG)))
-            if r == 0:
-                nc = b.add(kc, c1)
-                with b.scf_if(b.cmp_lt(nc, n_chunks)):
-                    _issue_halo(nc, b.mod(nc, c2))
+            _ring_refill(kc, u, r)
             wslot = b.mod(u, b.const_i32(NS))
-            row_steps = [
-                (ks, t // KW, t % KW)
-                for ks in range(CK // WMMA_K)
-                for t in range(r * WTAPS, (r + 1) * WTAPS)
-            ]
+            row_steps = _ring_row_steps(r)
             accs = _multiply(row_steps, halo_base, b.mul(wslot, b.const_i32(WEI)), accs)
+        return accs
+
+    def _chunk_pp_rr(kc: Value, accs: list[Value]) -> list[Value]:
+        """``pingpong`` with ``row_ring`` / ``tap_ring``: chunk ``kc`` as NG
+        ring steps, each a run of ping-pong phases on its own weight slot.
+        A slot is refilled at the start of a step, after the barrier by which
+        both ranks drained the step that held it (as ``_chunk_pp`` per chunk);
+        the next chunk's halo goes out at the chunk's first step."""
+        hslot = b.mod(kc, c2)
+        halo_base = b.mul(hslot, b.const_i32(HALO_STAGE))
+        for r in range(NG):
+            u = b.add(b.mul(kc, b.const_i32(NG)), b.const_i32(r))
+            _ring_refill(kc, u, r)
+            wslot = b.mod(u, b.const_i32(NS))
+            row_steps = _ring_row_steps(r)
+            accs = _pp_steps(
+                row_steps,
+                halo_base,
+                b.mul(wslot, b.const_i32(WEI)),
+                accs,
+                lambda u=u, r=r: _ring_wait(b.add(u, c1), r == NG - 1),
+            )
         return accs
 
     k_out = b.add(k_grp, k_base)  # first output channel of the block
@@ -1422,7 +1469,10 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
         _wait_landed(c0)
         b.s_barrier_signal(0xFFFFFFFF)
     if PP:
-        _wait_landed(c0)
+        if RR:
+            _ring_wait(c0, True)
+        else:
+            _wait_landed(c0)
         b.sync_lds_only()  # chunk 0 and the edge zeroing are visible
         with b.scf_if(b.cmp_eq(rank, c1)):
             _pp_bar()  # rank 1 runs one barrier behind
@@ -1436,7 +1486,11 @@ def build_direct_fwd_wmma(spec: DirectFwdWmmaSpec, arch: str = "gfx1250") -> Ker
     )
     with loop as (kc, carried):
         b.scf_yield(
-            *(_chunk_rr if RR else _chunk_pp if PP else _chunk)(kc, list(carried))
+            *(
+                (_chunk_pp_rr if PP else _chunk_rr)
+                if RR
+                else _chunk_pp if PP else _chunk
+            )(kc, list(carried))
         )
     if SB:
         b.s_barrier_wait(0xFFFF)

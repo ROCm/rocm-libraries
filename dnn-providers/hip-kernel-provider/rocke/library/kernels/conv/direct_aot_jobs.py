@@ -678,6 +678,20 @@ FWD_WMMA_KNOBS = (
     (2, 4, 6, 8, 16, 1, 32, 2, False, False, False, False, True),
     (2, 4, 8, 6, 16, 1, 32, 2, False, False, False, False, True),
 )
+# Ping-pong with a tap_ring on the dense stride-1 3x3 grid: (waves_k,
+# waves_p, tiles_k, tiles_p, tile_w, ck, stages, ring, pp_group), ring 2 =
+# tap_ring, all with the iterative-ilp scheduler. Rows trimmed to measured
+# winners on gfx1250.
+FWD_WMMA_PP_RING_KNOBS = (
+    # wk  wp  tk  tp  tw   ck  st  ring pg
+    (4, 2, 4, 8, 16, 128, 2, 2, 2),
+    (4, 2, 4, 8, 32, 128, 2, 2, 2),
+    (4, 2, 4, 4, 16, 128, 2, 2, 1),
+    (2, 4, 4, 8, 16, 64, 3, 2, 2),
+    (2, 4, 4, 8, 32, 64, 3, 2, 2),
+    (1, 8, 8, 4, 16, 64, 3, 2, 2),
+    (1, 8, 8, 4, 32, 64, 3, 2, 2),
+)
 # Ping-pong (two wave ranks a barrier apart) on the dense stride-1 grid:
 # (waves_k, waves_p, tiles_k, tiles_p, tile_w, tile_n, ck, pp_group, sched).
 # Measured winners on gfx1250: the 240-block SDXL 40x40 layer (c#122) and the
@@ -1134,10 +1148,12 @@ FWD_SMALLC_STEMS = (
 )
 # Small-K rows: (KH, KW, PAD, PAD_W, stride, K). 3x3 K=4: the SD VAE
 # quant_conv; 3x3 K=3: RGB output layers (SD VAE conv_out, Real-ESRGAN);
+# 3x3 K=1: single-channel heads (the Adobe denoiser's 32 -> 1 output conv);
 # 1x7 K=1 with "same" column padding: the HiFi-GAN conv_post on a 1-D signal.
 FWD_SMALLK_LAYERS = (
     (3, 3, 1, 1, 1, 4),
     (3, 3, 1, 1, 1, 3),
+    (3, 3, 1, 1, 1, 1),
     (1, 7, 0, 3, 1, 1),
 )
 # Flattened-pixel implicit-GEMM forward (direct_fwd_flex_mfma, gfx950): the
@@ -1320,6 +1336,19 @@ FWD_SMALLK_KNOBS_BY_LAYER = {
         (1, 8, 1, 2, 1, 250, 32, 2, True),
         (1, 4, 1, 8, 1, 506, 32, 2, True),
         (1, 8, 1, 4, 1, 506, 32, 2, True),
+    ),
+    # 3x3 K=1: 9 GEMM columns in one 16-wide tile; windows fill block_p.
+    (3, 3, 1): (
+        (1, 2, 1, 4, 6, 14, 32, 2, True),
+        (1, 2, 1, 8, 14, 14, 32, 2, True),
+        (1, 4, 1, 4, 14, 14, 32, 2, True),
+        (1, 4, 1, 4, 6, 30, 32, 2, False),
+        (1, 4, 1, 4, 6, 30, 32, 2, True),
+        (1, 4, 1, 8, 14, 30, 32, 2, True),
+        (1, 4, 1, 8, 2, 126, 32, 2, True),
+        (1, 8, 1, 4, 14, 30, 32, 2, True),
+        (1, 8, 1, 8, 30, 30, 32, 2, True),
+        (1, 8, 1, 8, 14, 62, 32, 2, True),
     ),
 }
 
@@ -1906,7 +1935,8 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
             if k * k * c <= 5 * 32
         ),
     ),
-    # Its wave64 MFMA port (gfx950): the same layers.
+    # Its wave64 MFMA port (gfx950): the same layers, except the 3x3 K=1 head,
+    # which is gfx1250 only (no gfx950 numeric case covers it).
     _FWD_SMALLK_MFMA: (
         "fwd",
         tuple(
@@ -1920,6 +1950,7 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
                 kpg=kk,
             )
             for kh, kw, pad, pw, st, kk in FWD_SMALLK_LAYERS
+            if (kh, kw, kk) != (3, 3, 1)
         ),
     ),
     # LDS-DMA ping-pong forward on wave64 MFMA (gfx950): dense, stride 1, odd
@@ -2557,6 +2588,17 @@ def _knob_grid(
             for knobs in _fwd_wmma_knobs(FWD_WMMA_KNOBS):
                 if knobs["tile_n"] == 1 and not knobs.get("row_ring"):
                     yield dict(knobs, tap_reuse=True)
+            for *shape, ck, st, ring, pg in FWD_WMMA_PP_RING_KNOBS:
+                yield _wmma_fwd_knob_row(
+                    *shape,
+                    ck=ck,
+                    stages=st,
+                    row_ring=ring == 1,
+                    tap_ring=ring == 2,
+                    pingpong=True,
+                    pp_group=pg if pg > 1 else None,
+                    sched="iterative-ilp",
+                )
             for *shape, tn, ck, pg, sched in FWD_WMMA_PP_KNOBS:
                 yield _wmma_fwd_knob_row(
                     *shape,

@@ -577,6 +577,9 @@ _SMALLK_CASES = (
         dict(C=64, K=6, H=20, W=23),
         dict(waves_p=3, tiles_c=4, tiles_p=3, out_h=6, out_w=16, ck=32),
     ),
+    # 3x3 K = 1: the single-output-channel heads the cache serves.
+    (dict(N=2, C=32, K=1, H=21, W=19, dtype="fp16"), dict(tiles_c=1, ck=32)),
+    (dict(C=64, K=1, H=17, W=23), dict(tiles_c=1)),
 )
 
 

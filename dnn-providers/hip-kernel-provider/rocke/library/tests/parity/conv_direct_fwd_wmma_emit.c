@@ -371,6 +371,36 @@ static int make_cfg(int idx, rocke_direct_fwd_wmma_spec_t* s, const char** arch)
         knobs(s, 2, 2, 2, 4, 128, 1, 64, 2);
         s->poly_view = true;
         return 0;
+    case 51:
+        s->problem = make_problem(3, 1, 1, 1, 64, 96, 1, 1, "bf16");
+        knobs(s, 2, 4, 4, 4, 16, 1, 32, 2);
+        s->pingpong = true;
+        s->row_ring = true;
+        s->sched = "iterative-ilp";
+        return 0;
+    case 52:
+        s->problem = make_problem(3, 1, 1, 1, 64, 96, 1, 1, "fp16");
+        knobs(s, 2, 4, 4, 4, 32, 1, 64, 2);
+        s->pingpong = true;
+        s->tap_ring = true;
+        s->sched = "iterative-ilp";
+        return 0;
+    case 53:
+        s->problem = make_problem(3, 1, 1, 1, 64, 96, 1, 1, "bf16");
+        knobs(s, 2, 4, 4, 4, 16, 1, 32, 2);
+        s->pingpong = true;
+        s->row_ring = true;
+        s->pp_group = 2;
+        s->sched = "iterative-ilp";
+        return 0;
+    case 54:
+        s->problem = make_problem(3, 1, 2, 1, 64, 96, 1, 1, "bf16");
+        knobs(s, 2, 4, 4, 4, 16, 1, 32, 2);
+        s->phase_split = true;
+        s->pingpong = true;
+        s->row_ring = true;
+        s->sched = "iterative-ilp";
+        return 0;
     default:
         return -1;
     }
