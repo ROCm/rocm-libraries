@@ -81,6 +81,20 @@ namespace rocsparse_ut
         bool m_kernel_launch;
     };
 
+    // Runs fn with argument debugging disabled, then enabled (verbose logging
+    // kept off), and restores the previous state.
+    template <typename F>
+    void in_both_debug_modes(F&& fn)
+    {
+        const debug_state_guard restore;
+
+        rocsparse_disable_debug_arguments();
+        fn();
+        rocsparse_enable_debug_arguments();
+        rocsparse_disable_debug_arguments_verbose();
+        fn();
+    }
+
     // Owns a descriptor or handle and destroys it when the test ends, even
     // after a failed ASSERT. `get` is filled in by the rocsparse_create_* call.
     template <typename D, auto Destroy>

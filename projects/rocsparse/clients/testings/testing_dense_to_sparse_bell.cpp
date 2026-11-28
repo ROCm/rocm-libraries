@@ -164,16 +164,10 @@ void testing_dense_to_sparse_bell(const Arguments& arg)
 
     rocsparse_local_dnmat mat_dense(m, n, ld, d_dense_val, ttype, order);
 
-    rocsparse_local_spmat mat_sparse(mb * ell_block_size,
-                                     nb * ell_block_size,
-                                     rocsparse_direction_row,
-                                     ell_block_size,
-                                     0,
-                                     nullptr,
-                                     nullptr,
-                                     itype,
-                                     base,
-                                     ttype);
+    // The descriptor dimensions equal the dense dimensions, m x n. The
+    // column-index array is allocated from the block-row count mb.
+    rocsparse_local_spmat mat_sparse(
+        m, n, rocsparse_direction_row, ell_block_size, 0, nullptr, nullptr, itype, base, ttype);
 
     // Find size of required temporary buffer
     size_t buffer_size;
@@ -327,7 +321,6 @@ void testing_dense_to_sparse_bell_extra_687(const Arguments& arg)
     const int64_t ld             = m;
 
     const int64_t mb = (m - 1) / ell_block_size + 1;
-    const int64_t nb = (n - 1) / ell_block_size + 1;
 
     const rocsparse_index_base          base  = rocsparse_index_base_one;
     const rocsparse_order               order = rocsparse_order_column;
@@ -358,16 +351,11 @@ void testing_dense_to_sparse_bell_extra_687(const Arguments& arg)
 
     rocsparse_local_dnmat mat_dense(m, n, ld, d_dense_val, ttype, order);
 
-    rocsparse_local_spmat mat_sparse(mb * ell_block_size,
-                                     nb * ell_block_size,
-                                     rocsparse_direction_row,
-                                     ell_block_size,
-                                     0,
-                                     nullptr,
-                                     nullptr,
-                                     itype,
-                                     base,
-                                     ttype);
+    // The descriptor dimensions equal the dense dimensions, m x n. The
+    // column-index array is allocated from the block-row count mb, plus the
+    // spare block-row below.
+    rocsparse_local_spmat mat_sparse(
+        m, n, rocsparse_direction_row, ell_block_size, 0, nullptr, nullptr, itype, base, ttype);
 
     size_t buffer_size;
     CHECK_ROCSPARSE_ERROR(

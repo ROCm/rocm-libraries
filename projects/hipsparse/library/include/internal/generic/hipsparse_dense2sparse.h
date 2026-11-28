@@ -33,7 +33,7 @@ extern "C" {
 *  \details
 *  \p hipsparseDenseToSparse_bufferSize computes the required user-allocated buffer size needed when converting
 *  a dense matrix to a sparse matrix. This routine currently accepts the sparse matrix descriptor \p matB in CSR,
-*  CSC, or COO format. This routine is used to determine the size of the buffer
+*  CSC, COO, or Blocked ELL format. This routine is used to determine the size of the buffer
 *  needed in \ref hipsparseDenseToSparse_analysis and \ref hipsparseDenseToSparse_convert.
 *
 *  \p hipsparseDenseToSparse_bufferSize supports different data types for the dense and sparse matrices. See
@@ -53,7 +53,12 @@ extern "C" {
 *
 *  \retval      HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p matA, \p matB, or \p pBufferSizeInBytes
-*               pointer is invalid.
+*               pointer is invalid, or the rows or columns of \p matA and \p matB differ. For a
+*               blocked ELL \p matB, the same status is returned when
+*               sizeof(int64_t) * ceil(rows / ellBlockSize) does not fit in \p size_t, where
+*               \p ellBlockSize is the block size of \p matB.
+*  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p matB is not in CSR, CSC, COO, or Blocked ELL
+*               format.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseDenseToSparse_bufferSize(hipsparseHandle_t           handle,
@@ -75,7 +80,7 @@ hipsparseStatus_t hipsparseDenseToSparse_bufferSize(hipsparseHandle_t           
 *  \details
 *  \p hipsparseDenseToSparse_analysis performs analysis that is later used in \ref hipsparseDenseToSparse_convert when
 *  converting a dense matrix to sparse matrix. This routine currently accepts the sparse matrix descriptor \p matB in CSR,
-*  CSC, or COO format. This routine takes a user-allocated buffer with a size that must first be computed
+*  CSC, COO, or Blocked ELL format. This routine takes a user-allocated buffer with a size that must first be computed
 *  using \ref hipsparseDenseToSparse_bufferSize.
 *
 *  \p hipsparseDenseToSparse_analysis supports different data types for the dense and sparse matrices. See
@@ -94,7 +99,9 @@ hipsparseStatus_t hipsparseDenseToSparse_bufferSize(hipsparseHandle_t           
 *
 *  \retval      HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p matA, \p matB, or \p externalBuffer
-*               pointer is invalid.
+*               pointer is invalid, or the rows or columns of \p matA and \p matB differ.
+*  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p matB is not in CSR, CSC, COO, or Blocked ELL
+*               format.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseDenseToSparse_analysis(hipsparseHandle_t           handle,
@@ -117,7 +124,7 @@ hipsparseStatus_t hipsparseDenseToSparse_analysis(hipsparseHandle_t           ha
 *
 *  \details
 *  \p hipsparseDenseToSparse_convert converts a dense matrix to a sparse matrix. This routine currently accepts
-*  the sparse matrix descriptor \p matB in CSR, CSC, or COO format. This routine requires a user-allocated buffer
+*  the sparse matrix descriptor \p matB in CSR, CSC, COO, or Blocked ELL format. This routine requires a user-allocated buffer
 *  with a size that must first be determined by calling \ref hipsparseDenseToSparse_bufferSize.
 *
 *  The conversion of a dense matrix into a sparse one involves three steps. First, the user creates the dense and
@@ -182,7 +189,7 @@ hipsparseStatus_t hipsparseDenseToSparse_analysis(hipsparseHandle_t           ha
 *  <tr><td>HIP_C_64F
 *  </table>
 *
-*  \note Currently only the sparse matrix formats CSR, CSC, and COO are supported when converting a dense matrix to a sparse matrix.
+*  \note Currently only the sparse matrix formats CSR, CSC, COO, and Blocked ELL are supported when converting a dense matrix to a sparse matrix.
 *
 *  @param[in]
 *  handle          handle to the hipSPARSE library context queue.
@@ -197,7 +204,9 @@ hipsparseStatus_t hipsparseDenseToSparse_analysis(hipsparseHandle_t           ha
 *
 *  \retval      HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p matA, \p matB, or \p externalBuffer
-*               pointer is invalid.
+*               pointer is invalid, or the rows or columns of \p matA and \p matB differ.
+*  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p matB is not in CSR, CSC, COO, or Blocked ELL
+*               format.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseDenseToSparse_convert(hipsparseHandle_t           handle,

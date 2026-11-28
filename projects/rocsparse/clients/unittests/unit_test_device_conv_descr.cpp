@@ -24,16 +24,20 @@
 
 // Generic-API descriptor and auxiliary entry points: const descriptor constructors and
 // getters, nnz / batch accessors, dense matrix copy and transpose, status strings, color
-// info and the spmat printer. Round trips compare what the public getters return with
-// what was passed in; the constructors are checked with one invalid argument at a time.
+// info, the spmat printer, and the ELL and blocked ELL size-overflow checks. Round trips
+// compare what the public getters return with what was passed in; the constructors are
+// checked with one invalid argument at a time.
 
+#include "rocsparse_spmat_descr.hpp"
 #include "unit_test_device_conv_common.hpp"
+#include "unit_test_host_utils.hpp"
 
 #include "rocsparse_internal_spmat_print.hpp"
 
 #include <algorithm>
 #include <cctype>
 #include <cstring>
+#include <limits>
 #include <map>
 #include <numeric>
 #include <sstream>
@@ -1440,4 +1444,344 @@ namespace
         EXPECT_REJECTED(rocsparse::internal_spmat_print(os, nullptr, true, true));
         EXPECT_TRUE(os.str().empty());
     }
+} // namespace
+
+// ELL and blocked ELL size overflow: rows times the width in the constructors,
+// rocsparse_bell_set_pointers and rocsparse_spmat_get_nnz, and the blocked ELL workspace
+// of the rocsparse_dense_to_sparse buffer-size query.
+namespace
+{
+    constexpr int64_t k_max = std::numeric_limits<int64_t>::max();
+
+    // Non-null and never dereferenced. The size checks run before any array is read, so
+    // sizes far beyond device memory need no allocation.
+    int   g_dummy_storage = 0;
+    void* g_dummy         = &g_dummy_storage;
+
+    void expect_ell(int64_t          rows,
+                    int64_t          cols,
+                    int64_t          width,
+                    void*            arrays,
+                    rocsparse_status want,
+                    int64_t          want_nnz = 0)
+    {
+        SCOPED_TRACE("rows " + std::to_string(rows) + " cols " + std::to_string(cols) + " width "
+                     + std::to_string(width));
+        Spmat d;
+        ASSERT_EQ(
+            rocsparse_create_ell_descr(&d, rows, cols, arrays, arrays, width, i32, base0, f32),
+            want);
+        if(want != st_ok)
+        {
+            EXPECT_EQ(d.get(), nullptr);
+            return;
+        }
+        int64_t r = -1, c = -1, nnz = -1;
+        EXPECT_EQ(rocsparse_spmat_get_size(d, &r, &c, &nnz), st_ok);
+        EXPECT_EQ(std::make_tuple(r, c, nnz), std::make_tuple(rows, cols, want_nnz));
+        nnz = -1;
+        EXPECT_EQ(rocsparse_spmat_get_nnz(d, &nnz), st_ok);
+        EXPECT_EQ(nnz, want_nnz);
+    }
+
+    // Both blocked ELL constructors, which share their size checks.
+    void expect_bell(int64_t          rows,
+                     int64_t          cols,
+                     int64_t          block_dim,
+                     int64_t          ell_cols,
+                     void*            col_ind,
+                     void*            val,
+                     rocsparse_status want)
+    {
+        SCOPED_TRACE("rows " + std::to_string(rows) + " cols " + std::to_string(cols)
+                     + " block_dim " + std::to_string(block_dim) + " ell_cols "
+                     + std::to_string(ell_cols));
+        Spmat d;
+        EXPECT_EQ(rocsparse_create_bell_descr(
+                      &d, rows, cols, dir_r, block_dim, ell_cols, col_ind, val, i32, base0, f32),
+                  want);
+        ConstSpmat c;
+        EXPECT_EQ(rocsparse_create_const_bell_descr(&c,
+                                                    rows,
+                                                    cols,
+                                                    dir_c,
+                                                    block_dim,
+                                                    ell_cols,
+                                                    col_ind,
+                                                    val,
+                                                    i32,
+                                                    base1,
+                                                    rocsparse_datatype_f64_r),
+                  want);
+        if(want != st_ok)
+        {
+            EXPECT_EQ(d.get(), nullptr);
+            EXPECT_EQ(c.get(), nullptr);
+        }
+    }
+
+    // rows * ell_width must fit in int64_t, and a product that does not is rejected before
+    // the null-pointer checks.
+    TEST_F(ConvDescr, EllSizeOverflow)
+    {
+        rocsparse_ut::in_both_debug_modes([] {
+            const int64_t fit = k_max / 4;
+            for(void* arrays : {static_cast<void*>(nullptr), g_dummy})
+            {
+                expect_ell(int64_t(1) << 61, 4, 4, arrays, st_size);
+                expect_ell(int64_t(1) << 62, 4, 4, arrays, st_size);
+                expect_ell(fit + 1, 4, 4, arrays, st_size);
+            }
+            expect_ell(fit, 4, 4, g_dummy, st_ok, fit * 4);
+            expect_ell(k_max, 1, 1, g_dummy, st_ok, k_max);
+            expect_ell(k_max / 2 + 1, 2, 2, nullptr, st_size);
+
+            expect_ell(-1, 4, 2, g_dummy, st_size);
+            expect_ell(4, 4, -1, g_dummy, st_size);
+            expect_ell(3, 4, 5, g_dummy, st_size);
+            expect_ell(3, 4, 2, nullptr, st_ptr);
+
+            expect_ell(int64_t(1) << 62, 0, 0, nullptr, st_ok, 0);
+            expect_ell(0, 4, 4, nullptr, st_ok, 0);
+            expect_ell(3, 4, 2, g_dummy, st_ok, 6);
+        });
+    }
+
+    // rows * ell_cols must fit in int64_t, and the block-row count must not overflow.
+    TEST_F(ConvDescr, BellSizeOverflow)
+    {
+        rocsparse_ut::in_both_debug_modes([] {
+            const int64_t fit = k_max / 4;
+            expect_bell(int64_t(1) << 61, 4, 1, 4, nullptr, nullptr, st_size);
+            expect_bell(int64_t(1) << 62, 4, 1, 4, g_dummy, g_dummy, st_size);
+            expect_bell(fit + 1, 4, 1, 4, nullptr, nullptr, st_size);
+            expect_bell(fit, 4, 1, 4, g_dummy, g_dummy, st_ok);
+
+            // ell_cols must be a whole number of blocks, so this width is rejected
+            // before the pointer checks.
+            expect_bell(k_max, 1, 2, 1, nullptr, g_dummy, st_size);
+            expect_bell(k_max, 1, 2, 1, g_dummy, nullptr, st_size);
+            expect_bell(k_max, 1, 2, 1, g_dummy, g_dummy, st_size);
+
+            // rows * ell_cols = 2^63 - 2 is the largest product that fits with
+            // two-wide blocks, and rocsparse_bell_set_pointers still checks both
+            // arrays.
+            Spmat d;
+            ASSERT_EQ(rocsparse_create_bell_descr(
+                          &d, k_max / 2, 1, dir_r, 2, 2, g_dummy, g_dummy, i32, base0, f32),
+                      st_ok);
+            EXPECT_EQ(rocsparse_bell_set_pointers(d, nullptr, g_dummy), st_ptr);
+            EXPECT_EQ(rocsparse_bell_set_pointers(d, g_dummy, nullptr), st_ptr);
+            EXPECT_EQ(rocsparse_bell_set_pointers(d, g_dummy, g_dummy), st_ok);
+
+            expect_bell(4, 4, 0, 2, g_dummy, g_dummy, st_size);
+            expect_bell(-1, 4, 2, 2, g_dummy, g_dummy, st_size);
+            expect_bell(4, 4, 2, 2, nullptr, nullptr, st_ptr);
+            expect_bell(4, 4, 2, 3, g_dummy, g_dummy, st_size);
+            // A partial last block column rounds ell_cols up to the next block.
+            expect_bell(3, 3, 2, 4, g_dummy, g_dummy, st_ok);
+            expect_bell(3, 3, 2, 6, g_dummy, g_dummy, st_size);
+        });
+
+        // rows need not be a whole number of blocks, so rows = INT64_MAX with
+        // block_dim 2 builds a descriptor. ell_cols is a multiple of block_dim, so it
+        // must be 0 for rows * ell_cols to fit. Both arrays are then empty, and only
+        // the blocked ELL buffer-size query of rocsparse_dense_to_sparse uses the
+        // block-row count. That count is 2^62, and 2^62 int64_t entries do not fit in
+        // size_t. The old (rows + block_dim - 1) / block_dim overflows for this row
+        // count, and the wrapped negative count passed the size check.
+        Spmat max_rows;
+        ASSERT_EQ(rocsparse_create_bell_descr(
+                      &max_rows, k_max, 1, dir_r, 2, 0, nullptr, nullptr, i32, base0, f32),
+                  st_ok);
+        rocsparse_dnmat_descr max_rows_dense = nullptr;
+        ASSERT_EQ(rocsparse_create_dnmat_descr(
+                      &max_rows_dense, k_max, 1, k_max, g_dummy, f32, rocsparse_order_column),
+                  st_ok);
+        size_t max_rows_buffer = 7;
+        EXPECT_EQ(rocsparse_dense_to_sparse(handle,
+                                            max_rows_dense,
+                                            max_rows,
+                                            rocsparse_dense_to_sparse_alg_default,
+                                            &max_rows_buffer,
+                                            nullptr),
+                  st_size);
+        EXPECT_EQ(max_rows_buffer, 7);
+        EXPECT_EQ(rocsparse_destroy_dnmat_descr(max_rows_dense), st_ok);
+
+        // mb = ceil((INT64_MAX/2) / 2) and 8 * mb does not fit in size_t.
+        // ell_cols is 2 so the width is a whole number of blocks and rows * ell_cols fits.
+        Spmat huge;
+        ASSERT_EQ(rocsparse_create_bell_descr(
+                      &huge, k_max / 2, 1, dir_r, 2, 2, g_dummy, g_dummy, i32, base0, f32),
+                  st_ok);
+        rocsparse_dnmat_descr huge_dense = nullptr;
+        ASSERT_EQ(rocsparse_create_dnmat_descr(
+                      &huge_dense, k_max / 2, 1, k_max / 2, g_dummy, f32, rocsparse_order_column),
+                  st_ok);
+        size_t huge_buffer = 7;
+        EXPECT_EQ(rocsparse_dense_to_sparse(handle,
+                                            huge_dense,
+                                            huge,
+                                            rocsparse_dense_to_sparse_alg_default,
+                                            &huge_buffer,
+                                            nullptr),
+                  st_size);
+        EXPECT_EQ(huge_buffer, 7);
+        EXPECT_EQ(rocsparse_destroy_dnmat_descr(huge_dense), st_ok);
+
+        Spmat small;
+        ASSERT_EQ(rocsparse_create_bell_descr(
+                      &small, 4, 4, dir_r, 2, 2, g_dummy, g_dummy, i32, base0, f32),
+                  st_ok);
+        int64_t nnz = -1;
+        EXPECT_EQ(rocsparse_spmat_get_nnz(small, &nnz), st_ok);
+        EXPECT_EQ(nnz, 2 * 4);
+
+        // One block. The values array has rows * ell_cols entries.
+        const int64_t n = int64_t(1) << 16;
+        Spmat         wide;
+        ASSERT_EQ(rocsparse_create_bell_descr(
+                      &wide, n, n, dir_r, n, n, g_dummy, g_dummy, i32, base0, f32),
+                  st_ok);
+        nnz = -1;
+        EXPECT_EQ(rocsparse_spmat_get_nnz(wide, &nnz), st_ok);
+        EXPECT_EQ(nnz, n * n);
+
+        const int64_t fit = k_max / 4;
+        ConstSpmat    c;
+        ASSERT_EQ(rocsparse_create_const_bell_descr(
+                      &c, fit, 4, dir_r, 1, 4, g_dummy, g_dummy, i32, base0, f32),
+                  st_ok);
+        nnz = -1;
+        EXPECT_EQ(rocsparse_spmat_get_nnz(c, &nnz), st_ok);
+        EXPECT_EQ(nnz, fit * 4);
+    }
+
+    // A dense 3x3 matrix with block size 2 fills both block columns, so analysis
+    // reports ell_cols 4. That width is past cols and must still build a descriptor.
+    TEST_F(ConvDescr, BellPartialBlockColumnRoundUp)
+    {
+        constexpr int64_t        m  = 3;
+        constexpr int64_t        n  = 3;
+        constexpr int64_t        bd = 2;
+        const std::vector<float> host(static_cast<size_t>(m * n), 1.0f);
+        DevBuf<float>            values(host);
+        rocsparse_dnmat_descr    dense = nullptr;
+        ASSERT_EQ(rocsparse_create_dnmat_descr(
+                      &dense, m, n, n, values.get(), f32, rocsparse_order_column),
+                  st_ok);
+
+        Spmat analyzed;
+        ASSERT_EQ(rocsparse_create_bell_descr(
+                      &analyzed, m, n, dir_r, bd, 0, nullptr, nullptr, i32, base0, f32),
+                  st_ok);
+        size_t buffer_size = 0;
+        ASSERT_EQ(rocsparse_dense_to_sparse(handle,
+                                            dense,
+                                            analyzed,
+                                            rocsparse_dense_to_sparse_alg_default,
+                                            &buffer_size,
+                                            nullptr),
+                  st_ok);
+        DevBuf<char> buffer(buffer_size == 0 ? size_t{1} : buffer_size);
+        ASSERT_EQ(rocsparse_dense_to_sparse(handle,
+                                            dense,
+                                            analyzed,
+                                            rocsparse_dense_to_sparse_alg_default,
+                                            nullptr,
+                                            buffer.get()),
+                  st_ok);
+
+        int64_t              rows = 0, cols = 0, got_bd = 0, ell_cols = 0;
+        rocsparse_direction  dir{};
+        void *               col_ind = nullptr, *val = nullptr;
+        rocsparse_indextype  it{};
+        rocsparse_index_base base{};
+        rocsparse_datatype   dt{};
+        ASSERT_EQ(
+            rocsparse_bell_get(
+                analyzed, &rows, &cols, &dir, &got_bd, &ell_cols, &col_ind, &val, &it, &base, &dt),
+            st_ok);
+        EXPECT_EQ(std::make_tuple(rows, cols, ell_cols), std::make_tuple(m, n, int64_t{4}));
+
+        const int64_t   brows = (m + bd - 1) / bd;
+        DevBuf<int32_t> rebuilt_ind(static_cast<size_t>(brows * (ell_cols / bd)));
+        DevBuf<float>   rebuilt_val(static_cast<size_t>(m * ell_cols));
+        Spmat           rebuilt;
+        ASSERT_EQ(rocsparse_create_bell_descr(&rebuilt,
+                                              rows,
+                                              cols,
+                                              dir,
+                                              got_bd,
+                                              ell_cols,
+                                              rebuilt_ind.get(),
+                                              rebuilt_val.get(),
+                                              it,
+                                              base,
+                                              dt),
+                  st_ok);
+
+        size_t convert_size = 0;
+        ASSERT_EQ(rocsparse_dense_to_sparse(handle,
+                                            dense,
+                                            rebuilt,
+                                            rocsparse_dense_to_sparse_alg_default,
+                                            &convert_size,
+                                            nullptr),
+                  st_ok);
+        DevBuf<char> convert_buffer(convert_size == 0 ? size_t{1} : convert_size);
+        ASSERT_EQ(rocsparse_dense_to_sparse(handle,
+                                            dense,
+                                            rebuilt,
+                                            rocsparse_dense_to_sparse_alg_default,
+                                            nullptr,
+                                            convert_buffer.get()),
+                  st_ok);
+        ASSERT_EQ(rocsparse_dense_to_sparse(handle,
+                                            dense,
+                                            rebuilt,
+                                            rocsparse_dense_to_sparse_alg_default,
+                                            &convert_size,
+                                            convert_buffer.get()),
+                  st_ok);
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+        EXPECT_EQ(rebuilt_ind.read(), (std::vector<int32_t>{0, 1, 0, 1}));
+        EXPECT_EQ(rebuilt_val.read(), (std::vector<float>{1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0}));
+        EXPECT_EQ(rocsparse_destroy_dnmat_descr(dense), st_ok);
+    }
+
+    // dense2bell_nnz_template writes ell_cols through &mat_B->ell_cols and does not
+    // check it against the descriptor. The analysis buffer is one int64_t per row, so
+    // this test writes the field the same way instead of running dense_to_sparse.
+    TEST_F(ConvDescr, BellNnzAfterWidthUpdate)
+    {
+        Spmat d;
+        ASSERT_EQ(rocsparse_create_bell_descr(
+                      &d, int64_t(1) << 62, 1, dir_r, 1, 0, nullptr, nullptr, i32, base0, f32),
+                  st_ok);
+        d.get()->ell_cols = 16;
+
+        int64_t nnz = 717;
+        EXPECT_EQ(rocsparse_spmat_get_nnz(d, &nnz), st_size);
+        EXPECT_EQ(nnz, 717);
+        EXPECT_EQ(rocsparse_bell_set_pointers(d, nullptr, nullptr), st_size);
+    }
+
+    // ell_width can change after create, so rows * ell_width can overflow in
+    // rocsparse_spmat_get_nnz. The ELL branch of get_nnz must reject it and leave nnz
+    // unchanged. ConvSpmat.CsrToEllWidthOverflow covers the sparse_to_sparse writer.
+    TEST_F(ConvDescr, EllNnzAfterWidthUpdate)
+    {
+        Spmat d;
+        ASSERT_EQ(rocsparse_create_ell_descr(
+                      &d, int64_t(1) << 62, 1, nullptr, nullptr, 0, i32, base0, f32),
+                  st_ok);
+        d.get()->ell_width = 16;
+
+        int64_t nnz = 717;
+        EXPECT_EQ(rocsparse_spmat_get_nnz(d, &nnz), st_size);
+        EXPECT_EQ(nnz, 717);
+    }
+
 } // namespace

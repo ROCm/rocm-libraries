@@ -1231,7 +1231,8 @@ rocsparse_status rocsparse_create_const_csc_descr(rocsparse_const_spmat_descr* d
  *
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_pointer if \p descr, \p ell_col_ind, or \p ell_val is invalid.
- *  \retval rocsparse_status_invalid_size if \p rows, \p cols, \p ell_width is invalid.
+ *  \retval rocsparse_status_invalid_size if \p rows, \p cols, or \p ell_width is invalid,
+ *          or \p rows*ell_width does not fit in int64_t.
  *  \retval rocsparse_status_invalid_value if \p idx_type, \p idx_base, or \p data_type is invalid.
  */
 ROCSPARSE_EXPORT
@@ -1267,7 +1268,8 @@ rocsparse_status rocsparse_create_ell_descr(rocsparse_spmat_descr* descr,
  *  @param[in]
  *  ell_cols      number of columns of the blocked ELL storage, that is, \p ell_block_dim times the
  *                number of blocks stored per block row. Must be a multiple of \p ell_block_dim
- *                and must not exceed \p cols.
+ *                and must not exceed \p cols rounded up to a multiple of \p ell_block_dim.
+ *                A wider value returns \ref rocsparse_status_invalid_size.
  *  @param[in]
  *  ell_col_ind   column indices of the blocked ELL matrix. Must be an array of length
  *                \p mb*ell_cols/ell_block_dim,
@@ -1284,7 +1286,8 @@ rocsparse_status rocsparse_create_ell_descr(rocsparse_spmat_descr* descr,
  *
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_pointer if \p descr, \p ell_col_ind, or \p ell_val is invalid.
- *  \retval rocsparse_status_invalid_size if \p rows, \p cols, \p ell_block_dim, or \p ell_cols is invalid.
+ *  \retval rocsparse_status_invalid_size if \p rows, \p cols, \p ell_block_dim, or \p ell_cols is invalid,
+ *          or \p rows*ell_cols does not fit in int64_t.
  *  \retval rocsparse_status_invalid_value if \p ell_block_dir, \p idx_type, \p idx_base, or \p data_type is invalid.
  */
 /**@{*/
@@ -2908,6 +2911,7 @@ rocsparse_status rocsparse_bsr_set_pointers(rocsparse_spmat_descr descr,
  *
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_pointer if \p descr, \p bell_col_ind, or \p bell_val is invalid.
+ *  \retval rocsparse_status_invalid_size if \p rows*ell_cols does not fit in int64_t.
  *  \retval rocsparse_status_not_initialized if \p descr is not initialized.
  */
 ROCSPARSE_EXPORT
@@ -3016,6 +3020,9 @@ rocsparse_status rocsparse_spmat_set_values(rocsparse_spmat_descr descr, void* v
  *
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_pointer if \p descr or \p nnz is invalid.
+ *  \retval rocsparse_status_invalid_size if the ELL value-array length
+ *          rows*ell_width, or the blocked ELL value-array length rows*ell_cols,
+ *          does not fit in int64_t.
  */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_spmat_get_nnz(rocsparse_const_spmat_descr descr, int64_t* nnz);

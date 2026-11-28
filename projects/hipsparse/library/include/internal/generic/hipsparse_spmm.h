@@ -69,8 +69,11 @@ extern "C" {
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p matA, \p matB, \p matC, \p beta, or
-*          \p pBufferSizeInBytes is nullptr, or \p opA or \p opB is invalid.
-*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p opA, \p opB, \p computeType, or \p alg is currently not supported.
+*          \p pBufferSizeInBytes is nullptr, \p opA or \p opB is invalid, or, for a blocked ELL
+*          \p matA, the rows of \p matC differ from the rows of \p matA when \p opA is
+*          \ref HIPSPARSE_OPERATION_NON_TRANSPOSE, or are not a multiple of the block size.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p opA, \p opB, \p computeType, or \p alg is currently not supported,
+*          or a blocked ELL \p matA has rows or columns that are not a multiple of the block size.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpMM_bufferSize(hipsparseHandle_t           handle,
@@ -138,9 +141,12 @@ hipsparseStatus_t hipsparseSpMM_bufferSize(hipsparseHandle_t           handle,
 *
 *  \retval      HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p matA, \p matB, \p matC, \p beta, or
-*               \p externalBuffer pointer is invalid.
+*               \p externalBuffer pointer is invalid, or, for a blocked ELL \p matA, the rows of
+*               \p matC differ from the rows of \p matA when \p opA is
+*               \ref HIPSPARSE_OPERATION_NON_TRANSPOSE, or are not a multiple of the block size.
 *  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p opA, \p opB, \p computeType, or \p alg is
-*               currently not supported.
+*               currently not supported, or a blocked ELL \p matA has rows or columns that are
+*               not a multiple of the block size.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
@@ -249,6 +255,13 @@ hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
 *  When A is transposed, \p hipsparseSpMM will revert to using \ref HIPSPARSE_SPMM_CSR_ALG2
 *  for CSR format and \ref HIPSPARSE_SPMM_COO_ALG1 for COO format, regardless of the algorithm selected.
 *
+*  For the Blocked ELL format, the rows and columns of A must be multiples of the block size, and C must
+*  have the rows of A. A descriptor whose last block row or column is partial is valid, and
+*  \ref hipsparseDenseToSparse_convert creates one from a dense matrix whose dimensions are not multiples
+*  of the block size, but \p hipsparseSpMM returns HIPSPARSE_STATUS_NOT_SUPPORTED for it. To multiply
+*  such a matrix, pad the dense matrix with zeros to whole blocks before the conversion, and pad B and C
+*  to match.
+*
 *  \p hipsparseSpMM supports multiple combinations of data types and compute types. The tables below indicate the currently
 *  supported different data types that can be used for for the sparse matrix \f$op(A)\f$, the dense matrices \f$op(B)\f$ and
 *  \f$C\f$, and the compute type for \f$\alpha\f$ and \f$\beta\f$. The advantage of using different data types is to save on
@@ -343,9 +356,12 @@ hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
 *
 *  \retval      HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p matA, \p matB, \p matC, \p beta, or
-*               \p externalBuffer pointer is invalid.
+*               \p externalBuffer pointer is invalid, or, for a blocked ELL \p matA, the rows of
+*               \p matC differ from the rows of \p matA when \p opA is
+*               \ref HIPSPARSE_OPERATION_NON_TRANSPOSE, or are not a multiple of the block size.
 *  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p opA, \p opB, \p computeType, or \p alg is
-*               currently not supported.
+*               currently not supported, or a blocked ELL \p matA has rows or columns that are
+*               not a multiple of the block size.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSpMM(hipsparseHandle_t           handle,

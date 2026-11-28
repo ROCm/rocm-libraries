@@ -222,6 +222,14 @@ extern "C" {
 *  Currently, only \p trans_A == \ref rocsparse_operation_none is supported for the COO and blocked ELL formats.
 *
 *  \note
+*  For the blocked ELL format, the rows and columns of \p mat_A must be multiples of the block size, and
+*  \p mat_C must have the rows of \p mat_A. A descriptor whose last block row or column is partial is
+*  valid, and \ref rocsparse_dense_to_sparse creates one from a dense matrix whose dimensions are not
+*  multiples of the block size, but \p rocsparse_spmm returns \ref rocsparse_status_not_implemented for
+*  it. To multiply such a matrix, pad the dense matrix with zeros to whole blocks before the
+*  conversion, and pad \f$B\f$ and \f$C\f$ to match.
+*
+*  \note
 *  Only the \ref rocsparse_spmm_stage_buffer_size stage and the \ref rocsparse_spmm_stage_compute stage
 *  support execution in a hipGraph context. The \ref rocsparse_spmm_stage_preprocess stage does not support hipGraph.
 *
@@ -262,8 +270,12 @@ extern "C" {
 *  \retval      rocsparse_status_invalid_handle the library context was not initialized.
 *  \retval      rocsparse_status_invalid_pointer \p alpha, \p mat_A, \p mat_B, \p mat_C, \p beta, or
 *               \p buffer_size pointer is invalid.
+*  \retval      rocsparse_status_invalid_size for a blocked ELL \p mat_A, the rows of \p mat_C
+*               differ from the rows of \p mat_A when \p trans_A is \ref rocsparse_operation_none,
+*               or are not a multiple of the block size.
 *  \retval      rocsparse_status_not_implemented \p trans_A, \p trans_B, \p compute_type, or \p alg is
-*               currently not supported.
+*               currently not supported, or a blocked ELL \p mat_A has rows or columns that are
+*               not a multiple of the block size.
 *  \par Example
 *  This example performs sparse matrix-dense matrix multiplication, \f$C := \alpha \cdot A \cdot B + \beta \cdot C\f$
 *  \snippet example_rocsparse_spmm.cpp doc example

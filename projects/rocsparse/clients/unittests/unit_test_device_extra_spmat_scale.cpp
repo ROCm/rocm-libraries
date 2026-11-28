@@ -161,9 +161,24 @@ namespace
         }
         case Fmt::bell:
         {
-            lay.val_len = 8;
-            return rocsparse_create_bell_descr(
-                &out.p, 4, 4, rocsparse_direction_row, bdim, 2, lay.add({0, 1}), val, it, base, dt);
+            // One block per block row by default. ell_cols must be a whole number of blocks.
+            const int64_t ell_cols = nnz_override >= 0 ? nnz_override : bdim;
+            const int64_t mb       = (4 + bdim - 1) / bdim;
+            lay.val_len            = 4 * ell_cols;
+            std::vector<int32_t> col(static_cast<size_t>(mb * ell_cols / bdim));
+            for(size_t i = 0; i < col.size(); ++i)
+                col[i] = static_cast<int32_t>(i % mb);
+            return rocsparse_create_bell_descr(&out.p,
+                                               4,
+                                               4,
+                                               rocsparse_direction_row,
+                                               bdim,
+                                               ell_cols,
+                                               lay.add(col),
+                                               val,
+                                               it,
+                                               base,
+                                               dt);
         }
         case Fmt::sell:
         {
@@ -444,7 +459,8 @@ TEST_F(ExtraSpmatScale, argument_errors)
     // rejects it) and the slice size of SELL.
     mismatch(Fmt::bsr, -1, 2, -1, 3);
     mismatch(Fmt::ell, 2, 2, 3, 2);
-    mismatch(Fmt::bell, -1, 2, -1, 4);
+    // Same width, so only the block-size check rejects it.
+    mismatch(Fmt::bell, 4, 2, 4, 4);
     mismatch(Fmt::sell, 2, 2, 4, 2);
     {
         // Same block dimension, different number of ELL columns.

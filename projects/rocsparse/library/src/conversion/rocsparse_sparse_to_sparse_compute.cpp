@@ -394,6 +394,9 @@ FUNCTION_CONVERT(csr, ell)
         RETURN_IF_ROCSPARSE_ERROR(
             rocsparse::spmat_csr2ell_width(handle, source_, target_, &ell_width));
 
+        RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_invalid_size,
+                                  rocsparse::size_product_overflows(source_->rows, ell_width));
+
         //
         // Update target.
         //

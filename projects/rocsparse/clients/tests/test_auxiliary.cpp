@@ -1221,11 +1221,11 @@ TEST(auxiliary_pre_checkin, EllDescrCreateDestroy)
 TEST(auxiliary_pre_checkin, BellDescrCreateDestroy)
 {
     rocsparse_spmat_descr descr;
-    int64_t               rows            = 100;
-    int64_t               cols            = 100;
-    rocsparse_direction   dir             = rocsparse_direction_row;
-    int64_t               block_dim       = 2;
-    int64_t               ell_block_width = 5;
+    int64_t               rows        = 100;
+    int64_t               cols        = 100;
+    rocsparse_direction   dir         = rocsparse_direction_row;
+    int64_t               block_dim   = 2;
+    int64_t               ell_cols    = 6;
     void*                 col_indices = reinterpret_cast<void*>(0x1000); // Non-null dummy pointer
     void*                 values      = reinterpret_cast<void*>(0x2000); // Non-null dummy pointer
 
@@ -1234,7 +1234,7 @@ TEST(auxiliary_pre_checkin, BellDescrCreateDestroy)
                                           cols,
                                           dir,
                                           block_dim,
-                                          ell_block_width,
+                                          ell_cols,
                                           col_indices,
                                           values,
                                           rocsparse_indextype_i32,
@@ -1983,20 +1983,20 @@ TEST(auxiliary_pre_checkin, SpmatSetNnzSell)
 TEST(auxiliary_pre_checkin, SpmatSetNnzBellInvalid)
 {
     rocsparse_spmat_descr descr;
-    int64_t               rows            = 100;
-    int64_t               cols            = 100;
-    rocsparse_direction   dir             = rocsparse_direction_row;
-    int64_t               block_dim       = 2;
-    int64_t               ell_block_width = 5;
-    void*                 col_indices     = reinterpret_cast<void*>(0x2000);
-    void*                 values          = reinterpret_cast<void*>(0x3000);
+    int64_t               rows        = 100;
+    int64_t               cols        = 100;
+    rocsparse_direction   dir         = rocsparse_direction_row;
+    int64_t               block_dim   = 2;
+    int64_t               ell_cols    = 6;
+    void*                 col_indices = reinterpret_cast<void*>(0x2000);
+    void*                 values      = reinterpret_cast<void*>(0x3000);
 
     ASSERT_EQ(rocsparse_create_bell_descr(&descr,
                                           rows,
                                           cols,
                                           dir,
                                           block_dim,
-                                          ell_block_width,
+                                          ell_cols,
                                           col_indices,
                                           values,
                                           rocsparse_indextype_i32,
@@ -2041,11 +2041,11 @@ TEST(auxiliary_pre_checkin, SpmatSetNnzEllInvalid)
 TEST(auxiliary_pre_checkin, SpmatGetNnzBell)
 {
     rocsparse_spmat_descr descr;
-    int64_t               rows            = 100;
-    int64_t               cols            = 100;
-    rocsparse_direction   dir             = rocsparse_direction_row;
-    int64_t               block_dim       = 2;
-    int64_t               ell_block_width = 5;
+    int64_t               rows        = 100;
+    int64_t               cols        = 100;
+    rocsparse_direction   dir         = rocsparse_direction_row;
+    int64_t               block_dim   = 2;
+    int64_t               ell_cols    = 6;
     void*                 col_indices = reinterpret_cast<void*>(0x2000); // Non-null dummy pointer
     void*                 values      = reinterpret_cast<void*>(0x3000); // Non-null dummy pointer
 
@@ -2054,7 +2054,7 @@ TEST(auxiliary_pre_checkin, SpmatGetNnzBell)
                                           cols,
                                           dir,
                                           block_dim,
-                                          ell_block_width,
+                                          ell_cols,
                                           col_indices,
                                           values,
                                           rocsparse_indextype_i32,
@@ -2062,10 +2062,10 @@ TEST(auxiliary_pre_checkin, SpmatGetNnzBell)
                                           rocsparse_datatype_f32_r),
               rocsparse_status_success);
 
-    // Get nnz - should be ell_cols * rows * block_dim * block_dim
+    // The values array has ell_cols * rows elements.
     int64_t nnz_out;
     ASSERT_EQ(rocsparse_spmat_get_nnz(descr, &nnz_out), rocsparse_status_success);
-    int64_t expected_nnz = ell_block_width * rows * block_dim * block_dim;
+    int64_t expected_nnz = ell_cols * rows;
     EXPECT_EQ(nnz_out, expected_nnz);
 
     ASSERT_EQ(rocsparse_destroy_spmat_descr(descr), rocsparse_status_success);
@@ -3402,11 +3402,11 @@ TEST(auxiliary_pre_checkin, EllSetPointersNullVal)
 TEST(auxiliary_pre_checkin, ConstBellDescrCreateDestroy)
 {
     rocsparse_const_spmat_descr descr;
-    int64_t                     rows            = 100;
-    int64_t                     cols            = 100;
-    rocsparse_direction         dir             = rocsparse_direction_row;
-    int64_t                     block_dim       = 2;
-    int64_t                     ell_block_width = 5;
+    int64_t                     rows      = 100;
+    int64_t                     cols      = 100;
+    rocsparse_direction         dir       = rocsparse_direction_row;
+    int64_t                     block_dim = 2;
+    int64_t                     ell_cols  = 6;
     const void* col_indices = reinterpret_cast<void*>(0x2000); // Non-null dummy pointer
     const void* values      = reinterpret_cast<void*>(0x3000); // Non-null dummy pointer
 
@@ -3415,7 +3415,7 @@ TEST(auxiliary_pre_checkin, ConstBellDescrCreateDestroy)
                                                 cols,
                                                 dir,
                                                 block_dim,
-                                                ell_block_width,
+                                                ell_cols,
                                                 col_indices,
                                                 values,
                                                 rocsparse_indextype_i32,
@@ -3429,11 +3429,11 @@ TEST(auxiliary_pre_checkin, ConstBellDescrCreateDestroy)
 TEST(auxiliary_pre_checkin, BellGet)
 {
     rocsparse_spmat_descr descr;
-    int64_t               rows            = 100;
-    int64_t               cols            = 100;
-    rocsparse_direction   dir             = rocsparse_direction_row;
-    int64_t               block_dim       = 2;
-    int64_t               ell_block_width = 5;
+    int64_t               rows        = 100;
+    int64_t               cols        = 100;
+    rocsparse_direction   dir         = rocsparse_direction_row;
+    int64_t               block_dim   = 2;
+    int64_t               ell_cols    = 6;
     void*                 col_indices = reinterpret_cast<void*>(0x2000); // Non-null dummy pointer
     void*                 values      = reinterpret_cast<void*>(0x3000); // Non-null dummy pointer
 
@@ -3442,7 +3442,7 @@ TEST(auxiliary_pre_checkin, BellGet)
                                           cols,
                                           dir,
                                           block_dim,
-                                          ell_block_width,
+                                          ell_cols,
                                           col_indices,
                                           values,
                                           rocsparse_indextype_i32,
@@ -3450,7 +3450,7 @@ TEST(auxiliary_pre_checkin, BellGet)
                                           rocsparse_datatype_f32_r),
               rocsparse_status_success);
 
-    int64_t              rows_out, cols_out, block_dim_out, ell_block_width_out;
+    int64_t              rows_out, cols_out, block_dim_out, ell_cols_out;
     rocsparse_direction  dir_out;
     void*                col_indices_out;
     void*                values_out;
@@ -3463,7 +3463,7 @@ TEST(auxiliary_pre_checkin, BellGet)
                                  &cols_out,
                                  &dir_out,
                                  &block_dim_out,
-                                 &ell_block_width_out,
+                                 &ell_cols_out,
                                  &col_indices_out,
                                  &values_out,
                                  &idx_type,
@@ -3480,11 +3480,11 @@ TEST(auxiliary_pre_checkin, BellGet)
 TEST(auxiliary_pre_checkin, ConstBellGet)
 {
     rocsparse_const_spmat_descr descr;
-    int64_t                     rows            = 100;
-    int64_t                     cols            = 100;
-    rocsparse_direction         dir             = rocsparse_direction_row;
-    int64_t                     block_dim       = 2;
-    int64_t                     ell_block_width = 5;
+    int64_t                     rows      = 100;
+    int64_t                     cols      = 100;
+    rocsparse_direction         dir       = rocsparse_direction_row;
+    int64_t                     block_dim = 2;
+    int64_t                     ell_cols  = 6;
     const void* col_indices = reinterpret_cast<void*>(0x2000); // Non-null dummy pointer
     const void* values      = reinterpret_cast<void*>(0x3000); // Non-null dummy pointer
 
@@ -3493,7 +3493,7 @@ TEST(auxiliary_pre_checkin, ConstBellGet)
                                                 cols,
                                                 dir,
                                                 block_dim,
-                                                ell_block_width,
+                                                ell_cols,
                                                 col_indices,
                                                 values,
                                                 rocsparse_indextype_i32,
@@ -3501,7 +3501,7 @@ TEST(auxiliary_pre_checkin, ConstBellGet)
                                                 rocsparse_datatype_f32_r),
               rocsparse_status_success);
 
-    int64_t              rows_out, cols_out, block_dim_out, ell_block_width_out;
+    int64_t              rows_out, cols_out, block_dim_out, ell_cols_out;
     rocsparse_direction  dir_out;
     const void*          col_indices_out;
     const void*          values_out;
@@ -3514,7 +3514,7 @@ TEST(auxiliary_pre_checkin, ConstBellGet)
                                        &cols_out,
                                        &dir_out,
                                        &block_dim_out,
-                                       &ell_block_width_out,
+                                       &ell_cols_out,
                                        &col_indices_out,
                                        &values_out,
                                        &idx_type,

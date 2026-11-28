@@ -263,6 +263,9 @@ rocsparse_status rocsparse_sparse_to_sparse_buffer_size(rocsparse_handle        
 *  buffer  temporary storage buffer allocated by the user.
 *
 *  \retval      rocsparse_status_success the operation completed successfully.
+*  \retval      rocsparse_status_invalid_size for an ELL \p target, the analysis stage found
+*               an ELL width for which the rows times the width does not fit in \p int64_t.
+*               The ELL width and the number of entries of \p target are left unchanged.
 *  \retval      rocsparse_status_not_implemented the conversion is not supported for the formats or data types of \p source and \p target.
 *  \par Example
 *  This example converts a CSR matrix into an ELL matrix.

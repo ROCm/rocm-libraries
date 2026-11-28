@@ -25,7 +25,9 @@
 //
 // Generic spmm with a blocked ELL matrix that has no stored blocks (the
 // product is zero, so C = beta * C), with a blocked ELL matrix built by
-// dense_to_sparse, and with formats spmm does not support.
+// dense_to_sparse, with formats spmm does not support, and with blocked ELL
+// shapes it rejects: a partial last block row or column, or a C whose rows
+// differ from A.
 //
 #include "unit_test_extra_common.hpp"
 
@@ -276,6 +278,133 @@ TEST_F(ExtraBell, dense_to_sparse_blocked_ell_used_by_spmm)
         if(HasFatalFailure())
             return;
     }
+}
+
+namespace
+{
+    // spmm with a blocked ELL A of rows x cols with block size bd and one stored block per
+    // block row (in the last block column), a column-major B of cols x 1 and a column-major
+    // C of c_rows x 1. A and B hold ones, so a whole-block product puts bd in every row of
+    // C. The index and value arrays of A carry padding past their declared lengths (index
+    // 0, value 5), so a stage that reads past A changes C. A rejected call must leave C and
+    // the buffer size unchanged in every stage.
+    void run_bell_spmm_shape(rocsparse_handle handle,
+                             int64_t          rows,
+                             int64_t          cols,
+                             int64_t          bd,
+                             int64_t          c_rows,
+                             rocsparse_status want)
+    {
+        SCOPED_TRACE("A=" + std::to_string(rows) + "x" + std::to_string(cols)
+                     + " bd=" + std::to_string(bd) + " C rows=" + std::to_string(c_rows));
+        const int64_t mb = (rows + bd - 1) / bd, nb = (cols + bd - 1) / bd, ell_cols = bd;
+
+        std::vector<int32_t> hind(mb, static_cast<int32_t>(nb - 1));
+        hind.resize(hind.size() + 8, 0);
+        std::vector<float> hval(rows * ell_cols, 1.0f);
+        hval.resize(hval.size() + 64, 5.0f);
+        const std::vector<float> C0(c_rows, -1.0f);
+
+        DevBuf<int32_t> ind = up_raw<int32_t>(hind);
+        DevBuf<float>   val = up_raw<float>(hval);
+        DevBuf<float>   dB  = up_raw<float>(std::vector<float>(cols, 1.0f));
+        DevBuf<float>   dC  = up_raw<float>(C0);
+        DevBuf<char>    buffer(size_t{256});
+        ASSERT_TRUE(ind.ptr && val.ptr && dB.ptr && dC.ptr && buffer.ptr);
+
+        SpmatH sp;
+        ASSERT_EQ(rocsparse_create_bell_descr(&sp.p,
+                                              rows,
+                                              cols,
+                                              rocsparse_direction_row,
+                                              bd,
+                                              ell_cols,
+                                              ind.ptr,
+                                              val.ptr,
+                                              rocsparse_indextype_i32,
+                                              rocsparse_index_base_zero,
+                                              rocsparse_datatype_f32_r),
+                  rocsparse_status_success);
+        DnmatH mB, mC;
+        ASSERT_EQ(
+            rocsparse_create_dnmat_descr(
+                &mB.p, cols, 1, cols, dB.ptr, rocsparse_datatype_f32_r, rocsparse_order_column),
+            rocsparse_status_success);
+        ASSERT_EQ(
+            rocsparse_create_dnmat_descr(
+                &mC.p, c_rows, 1, c_rows, dC.ptr, rocsparse_datatype_f32_r, rocsparse_order_column),
+            rocsparse_status_success);
+
+        const float      alpha = 1.0f, beta = 0.0f;
+        PointerModeGuard mode(handle, mode_of(false));
+        size_t           bsz  = 7;
+        auto             spmm = [&](rocsparse_spmm_stage stage, void* temp_buffer) {
+            return rocsparse_spmm(handle,
+                                  rocsparse_operation_none,
+                                  rocsparse_operation_none,
+                                  &alpha,
+                                  sp.p,
+                                  mB.p,
+                                  &beta,
+                                  mC.p,
+                                  rocsparse_datatype_f32_r,
+                                  rocsparse_spmm_alg_bell,
+                                  stage,
+                                  &bsz,
+                                  temp_buffer);
+        };
+
+        if(want != rocsparse_status_success)
+        {
+            EXPECT_EQ(spmm(rocsparse_spmm_stage_buffer_size, nullptr), want);
+            EXPECT_EQ(bsz, size_t{7});
+            EXPECT_EQ(spmm(rocsparse_spmm_stage_preprocess, buffer.ptr), want);
+            EXPECT_EQ(spmm(rocsparse_spmm_stage_compute, buffer.ptr), want);
+            ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+            EXPECT_EQ(dC.host(), C0);
+            return;
+        }
+
+        ASSERT_EQ(spmm(rocsparse_spmm_stage_buffer_size, nullptr), rocsparse_status_success);
+        DevBuf<char> sbuf(bsz > 0 ? bsz : 1);
+        ASSERT_TRUE(sbuf.ptr);
+        for(rocsparse_spmm_stage stage :
+            {rocsparse_spmm_stage_preprocess, rocsparse_spmm_stage_compute})
+            ASSERT_EQ(spmm(stage, sbuf.ptr), rocsparse_status_success);
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+        EXPECT_EQ(dC.host(), std::vector<float>(c_rows, static_cast<float>(bd)));
+    }
+}
+
+// A blocked ELL descriptor whose rows or columns end in a partial block is valid, but
+// the spmm kernel addresses whole blocks. The 4x3 operand has whole block rows and a
+// conforming 4-row C, so only the column condition rejects it.
+TEST_F(ExtraBell, spmm_partial_block_not_implemented)
+{
+    run_bell_spmm_shape(handle, 4, 3, 2, 4, rocsparse_status_not_implemented);
+    if(HasFatalFailure())
+        return;
+    run_bell_spmm_shape(handle, 3, 4, 2, 3, rocsparse_status_not_implemented);
+    if(HasFatalFailure())
+        return;
+    run_bell_spmm_shape(handle, 3, 3, 2, 3, rocsparse_status_not_implemented);
+}
+
+// Every stage takes the block-row count from C, so a C with more rows than A would read
+// the padding past the index and value arrays of A.
+TEST_F(ExtraBell, spmm_result_rows_must_match_A)
+{
+    run_bell_spmm_shape(handle, 2, 2, 2, 2, rocsparse_status_success);
+    if(HasFatalFailure())
+        return;
+    run_bell_spmm_shape(handle, 2, 2, 2, 4, rocsparse_status_invalid_size);
+    if(HasFatalFailure())
+        return;
+    run_bell_spmm_shape(handle, 2, 2, 2, 8, rocsparse_status_invalid_size);
+    if(HasFatalFailure())
+        return;
+    // A mismatched C is a size error even when A also has a partial block.
+    run_bell_spmm_shape(handle, 4, 3, 2, 2, rocsparse_status_invalid_size);
 }
 
 TEST_F(ExtraBell, unsupported_formats_are_rejected)

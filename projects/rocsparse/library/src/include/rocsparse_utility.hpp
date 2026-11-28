@@ -34,8 +34,33 @@
 #include "rocsparse_memstat.hpp"
 #include "rocsparse_scalar.hpp"
 #include "rocsparse_singularity.hpp"
+
+#include <limits>
+
 namespace rocsparse
 {
+    // a and b are non-negative.
+    inline bool size_product_overflows(int64_t a, int64_t b)
+    {
+        return a > 0 && b > std::numeric_limits<int64_t>::max() / a;
+    }
+
+    // A BSR descriptor stores block counts in rows and cols, so compare in
+    // scalar units. Dividing the dense size cannot overflow, unlike
+    // multiplying the block counts by block_dim.
+    inline bool spmat_dnmat_dims_differ(rocsparse_const_spmat_descr sparse,
+                                        rocsparse_const_dnmat_descr dense)
+    {
+        if(sparse->format == rocsparse_format_bsr)
+        {
+            const int64_t block_dim = sparse->block_dim;
+            return (dense->rows % block_dim) != 0 || (dense->cols % block_dim) != 0
+                   || dense->rows / block_dim != sparse->rows
+                   || dense->cols / block_dim != sparse->cols;
+        }
+        return sparse->rows != dense->rows || sparse->cols != dense->cols;
+    }
+
     template <typename T>
     inline size_t align_size(size_t size)
     {

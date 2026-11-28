@@ -24,8 +24,11 @@
 
 // csr2dense / csc2dense / dense2csr / dense2csc: every value type, both index bases, empty
 // matrices and the pointer checks; rocsparse_sparse_to_dense for the CSR, CSC and COO
-// formats, both index types, both index bases and both orders of the dense matrix.
+// formats, both index types, both index bases and both orders of the dense matrix;
+// rocsparse_dense_to_sparse and rocsparse_sparse_to_dense with mismatched dimensions in
+// either direction, BSR shapes compared in scalar units, or an unsupported sparse format.
 
+#include "rocsparse_spmat_descr.hpp"
 #include "unit_test_device_conv_common.hpp"
 
 #include <cstdint>
@@ -248,5 +251,328 @@ namespace
         }
         run_sparse_to_dense<int32_t, int32_t>(handle, rocsparse_format_coo);
         run_sparse_to_dense<int64_t, int64_t>(handle, rocsparse_format_coo);
+    }
+
+    // ------------------------------------------------------------------
+    // rocsparse_dense_to_sparse and rocsparse_sparse_to_dense: dimension and format checks
+    // ------------------------------------------------------------------
+
+    constexpr auto st_ni = rocsparse_status_not_implemented;
+
+    // For BSR, sparse_rows and sparse_cols count blocks.
+    struct DimCase
+    {
+        rocsparse_format format;
+        int64_t          dense_rows, dense_cols;
+        int64_t          sparse_rows, sparse_cols;
+        int64_t          block_dim = 2;
+    };
+
+    // A 2x3 sparse matrix with a dense matrix one row or one column larger or smaller. Each
+    // case differs in one dimension and one direction, so a check of rows alone, of columns
+    // alone, or of one direction alone still fails a case.
+    std::vector<DimCase> dim_mismatches(rocsparse_format format)
+    {
+        return {
+            {format, 3, 3, 2, 3}, {format, 2, 4, 2, 3}, {format, 1, 3, 2, 3}, {format, 2, 2, 2, 3}};
+    }
+
+    // Sentinel-filled arrays, large enough for every case. A rejected call must leave them
+    // unchanged.
+    struct DimArrays
+    {
+        const std::vector<int32_t> idx   = std::vector<int32_t>(8, 0x5a5a5a5a);
+        const std::vector<float>   val   = std::vector<float>(8, 42.0f);
+        const std::vector<float>   dense = std::vector<float>(24, 1.0f);
+        DevBuf<int32_t>            d_idx{idx}, d_col{idx};
+        DevBuf<float>              d_val{val}, d_dense{dense};
+
+        void expect_unchanged() const
+        {
+            EXPECT_EQ(d_idx.read(), idx);
+            EXPECT_EQ(d_col.read(), idx);
+            EXPECT_EQ(d_val.read(), val);
+            EXPECT_EQ(d_dense.read(), dense);
+        }
+    };
+
+    void create_dim_case(const DimCase& c, DimArrays& a, Dnmat& dense, Spmat& sparse)
+    {
+        ASSERT_EQ(rocsparse_create_dnmat_descr(&dense,
+                                               c.dense_rows,
+                                               c.dense_cols,
+                                               c.dense_rows,
+                                               a.d_dense.get(),
+                                               f32,
+                                               rocsparse_order_column),
+                  st_ok);
+
+        const int64_t    rows = c.sparse_rows, cols = c.sparse_cols, nnz = 2;
+        rocsparse_status status = rocsparse_status_invalid_value;
+        switch(c.format)
+        {
+        case rocsparse_format_csr:
+            status = rocsparse_create_csr_descr(
+                &sparse, rows, cols, nnz, a.d_idx, a.d_col, a.d_val, i32, i32, base0, f32);
+            break;
+        case rocsparse_format_csc:
+            status = rocsparse_create_csc_descr(
+                &sparse, rows, cols, nnz, a.d_col, a.d_idx, a.d_val, i32, i32, base0, f32);
+            break;
+        case rocsparse_format_coo:
+            status = rocsparse_create_coo_descr(
+                &sparse, rows, cols, nnz, a.d_idx, a.d_col, a.d_val, i32, base0, f32);
+            break;
+        case rocsparse_format_ell:
+            status = rocsparse_create_ell_descr(
+                &sparse, rows, cols, a.d_col, a.d_val, 2, i32, base0, f32);
+            break;
+        case rocsparse_format_bell:
+            status = rocsparse_create_bell_descr(&sparse,
+                                                 rows,
+                                                 cols,
+                                                 dir_r,
+                                                 c.block_dim,
+                                                 c.block_dim,
+                                                 a.d_col,
+                                                 a.d_val,
+                                                 i32,
+                                                 base0,
+                                                 f32);
+            break;
+        case rocsparse_format_bsr:
+            status = rocsparse_create_bsr_descr(&sparse,
+                                                rows,
+                                                cols,
+                                                nnz,
+                                                dir_r,
+                                                c.block_dim,
+                                                a.d_idx,
+                                                a.d_col,
+                                                a.d_val,
+                                                i32,
+                                                i32,
+                                                base0,
+                                                f32);
+            break;
+        default:
+            break;
+        }
+        ASSERT_EQ(status, st_ok);
+    }
+
+    std::string describe(const DimCase& c)
+    {
+        return "format " + std::to_string(c.format) + " dense " + std::to_string(c.dense_rows) + "x"
+               + std::to_string(c.dense_cols) + " sparse " + std::to_string(c.sparse_rows) + "x"
+               + std::to_string(c.sparse_cols) + " block_dim " + std::to_string(c.block_dim);
+    }
+
+    // Every stage of rocsparse_dense_to_sparse must return `want` and leave buffer_size,
+    // the descriptor and the arrays unchanged.
+    void expect_dense_to_sparse(rocsparse_handle handle, const DimCase& c, rocsparse_status want)
+    {
+        SCOPED_TRACE(describe(c));
+        DimArrays a;
+        Dnmat     dense;
+        Spmat     sparse;
+        create_dim_case(c, a, dense, sparse);
+        if(::testing::Test::HasFatalFailure())
+            return;
+        const int64_t nnz = sparse.get()->nnz, ell_cols = sparse.get()->ell_cols,
+                      ell_width = sparse.get()->ell_width;
+
+        constexpr auto alg      = rocsparse_dense_to_sparse_alg_default;
+        const size_t   sentinel = 0xA5A5A5A5u;
+        DevBuf<char>   temp(64);
+        size_t         buffer_size = sentinel;
+        EXPECT_EQ(rocsparse_dense_to_sparse(handle, dense, sparse, alg, &buffer_size, nullptr),
+                  want)
+            << "buffer-size query";
+        EXPECT_EQ(buffer_size, sentinel);
+        EXPECT_EQ(rocsparse_dense_to_sparse(handle, dense, sparse, alg, nullptr, temp.get()), want)
+            << "analysis";
+        EXPECT_EQ(rocsparse_dense_to_sparse(handle, dense, sparse, alg, &buffer_size, temp.get()),
+                  want)
+            << "conversion";
+        EXPECT_EQ(buffer_size, sentinel);
+
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+        EXPECT_EQ(sparse.get()->nnz, nnz);
+        EXPECT_EQ(sparse.get()->ell_cols, ell_cols);
+        EXPECT_EQ(sparse.get()->ell_width, ell_width);
+        a.expect_unchanged();
+    }
+
+    // rocsparse_sparse_to_dense has no analysis stage: without temp_buffer it is the
+    // buffer-size query, with it the conversion. A rejected stage must leave buffer_size,
+    // the dense matrix and the sparse arrays unchanged.
+    void expect_sparse_to_dense(rocsparse_handle handle,
+                                const DimCase&   c,
+                                rocsparse_status want_buffer_size,
+                                rocsparse_status want_conversion)
+    {
+        SCOPED_TRACE(describe(c));
+        DimArrays a;
+        Dnmat     dense;
+        Spmat     sparse;
+        create_dim_case(c, a, dense, sparse);
+        if(::testing::Test::HasFatalFailure())
+            return;
+
+        constexpr auto alg      = rocsparse_sparse_to_dense_alg_default;
+        const size_t   sentinel = 0xA5A5A5A5u;
+        DevBuf<char>   temp(64);
+        size_t         buffer_size = sentinel;
+        EXPECT_EQ(rocsparse_sparse_to_dense(handle, sparse, dense, alg, &buffer_size, nullptr),
+                  want_buffer_size)
+            << "buffer-size query";
+        if(want_buffer_size != st_ok)
+        {
+            EXPECT_EQ(buffer_size, sentinel);
+        }
+        EXPECT_EQ(rocsparse_sparse_to_dense(handle, sparse, dense, alg, nullptr, temp.get()),
+                  want_conversion)
+            << "conversion";
+
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+        a.expect_unchanged();
+    }
+
+    void expect_dim_mismatches(rocsparse_handle handle, rocsparse_format format, bool to_dense)
+    {
+        for(const DimCase& c : dim_mismatches(format))
+        {
+            if(to_dense)
+                expect_sparse_to_dense(handle, c, st_size, st_size);
+            else
+                expect_dense_to_sparse(handle, c, st_size);
+            if(::testing::Test::HasFatalFailure())
+                return;
+        }
+    }
+
+    TEST_F(ConvDense, DenseToSparseDimMismatchCsr)
+    {
+        expect_dim_mismatches(handle, rocsparse_format_csr, false);
+    }
+
+    TEST_F(ConvDense, DenseToSparseDimMismatchCsc)
+    {
+        expect_dim_mismatches(handle, rocsparse_format_csc, false);
+    }
+
+    TEST_F(ConvDense, DenseToSparseDimMismatchCoo)
+    {
+        expect_dim_mismatches(handle, rocsparse_format_coo, false);
+    }
+
+    // dense_to_sparse has no ELL conversion. This still guards the dimension
+    // check, which runs before the not_implemented return.
+    TEST_F(ConvDense, DenseToSparseDimMismatchEll)
+    {
+        expect_dim_mismatches(handle, rocsparse_format_ell, false);
+    }
+
+    // The last case is a 3x3 dense matrix with a 4x4 descriptor rounded up to whole blocks.
+    TEST_F(ConvDense, DenseToSparseDimMismatchBell)
+    {
+        expect_dim_mismatches(handle, rocsparse_format_bell, false);
+        expect_dense_to_sparse(handle, {rocsparse_format_bell, 3, 3, 4, 4}, st_size);
+    }
+
+    TEST_F(ConvDense, SparseToDenseDimMismatchCsr)
+    {
+        expect_dim_mismatches(handle, rocsparse_format_csr, true);
+    }
+
+    TEST_F(ConvDense, SparseToDenseDimMismatchCsc)
+    {
+        expect_dim_mismatches(handle, rocsparse_format_csc, true);
+    }
+
+    TEST_F(ConvDense, SparseToDenseDimMismatchCoo)
+    {
+        expect_dim_mismatches(handle, rocsparse_format_coo, true);
+    }
+
+    TEST_F(ConvDense, SparseToDenseDimMismatchEll)
+    {
+        expect_dim_mismatches(handle, rocsparse_format_ell, true);
+    }
+
+    TEST_F(ConvDense, SparseToDenseDimMismatchBell)
+    {
+        expect_dim_mismatches(handle, rocsparse_format_bell, true);
+        expect_sparse_to_dense(handle, {rocsparse_format_bell, 3, 3, 4, 4}, st_size, st_size);
+    }
+
+    // 2x2 blocks of size 2 make a 4x4 matrix. Neither routine converts BSR, so the matching
+    // shape fails with not_implemented. The dense matrices that equal the block counts, end
+    // in a partial block, or hold a different number of whole blocks are size errors.
+    std::vector<DimCase> bsr_mismatches()
+    {
+        constexpr auto bsr = rocsparse_format_bsr;
+        return {{bsr, 2, 2, 2, 2}, {bsr, 5, 4, 2, 2}, {bsr, 4, 5, 2, 2}, {bsr, 6, 4, 2, 2}};
+    }
+
+    TEST_F(ConvDense, DenseToSparseBsrScalarShape)
+    {
+        expect_dense_to_sparse(handle, {rocsparse_format_bsr, 4, 4, 2, 2}, st_ni);
+        for(const DimCase& c : bsr_mismatches())
+            expect_dense_to_sparse(handle, c, st_size);
+    }
+
+    // The buffer-size query of rocsparse_sparse_to_dense succeeds for every format.
+    TEST_F(ConvDense, SparseToDenseBsrScalarShape)
+    {
+        expect_sparse_to_dense(handle, {rocsparse_format_bsr, 4, 4, 2, 2}, st_ok, st_ni);
+        for(const DimCase& c : bsr_mismatches())
+            expect_sparse_to_dense(handle, c, st_size, st_size);
+    }
+
+    // The ELL descriptor matches the dense dimensions, so only the format is unsupported.
+    // Every stage must fail and leave buffer_size, the descriptor and its arrays unchanged.
+    TEST_F(ConvDense, DenseToSparseEllNotImplemented)
+    {
+        constexpr auto             alg        = rocsparse_dense_to_sparse_alg_default;
+        const size_t               sentinel_b = 0xA5A5A5A5u;
+        const std::vector<int32_t> idx(6, 0x5a5a5a5a);
+        const std::vector<float>   val(6, 42.0f);
+        DevBuf<int32_t>            d_col(idx);
+        DevBuf<float>              d_val(val);
+        DevBuf<float>              d_dense(std::vector<float>(6, 1.0f));
+
+        Dnmat mat_A;
+        ASSERT_EQ(rocsparse_create_dnmat_descr(
+                      &mat_A, 3, 2, 3, d_dense.get(), f32, rocsparse_order_column),
+                  st_ok);
+        Spmat mat_B;
+        ASSERT_EQ(
+            rocsparse_create_ell_descr(&mat_B, 3, 2, d_col.get(), d_val.get(), 2, i32, base0, f32),
+            st_ok);
+
+        size_t buffer_size = sentinel_b;
+        EXPECT_EQ(rocsparse_dense_to_sparse(handle, mat_A, mat_B, alg, &buffer_size, nullptr),
+                  st_ni)
+            << "buffer-size query";
+        EXPECT_EQ(buffer_size, sentinel_b);
+
+        DevBuf<char> temp(64);
+        EXPECT_EQ(rocsparse_dense_to_sparse(handle, mat_A, mat_B, alg, nullptr, temp.get()), st_ni)
+            << "analysis";
+
+        size_t compute_buffer_size = sentinel_b;
+        EXPECT_EQ(
+            rocsparse_dense_to_sparse(handle, mat_A, mat_B, alg, &compute_buffer_size, temp.get()),
+            st_ni)
+            << "compute";
+        EXPECT_EQ(compute_buffer_size, sentinel_b);
+
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+        EXPECT_EQ(mat_B.get()->nnz, 6);
+        EXPECT_EQ(mat_B.get()->ell_width, 2);
+        EXPECT_EQ(d_col.read(), idx);
+        EXPECT_EQ(d_val.read(), val);
     }
 } // namespace
