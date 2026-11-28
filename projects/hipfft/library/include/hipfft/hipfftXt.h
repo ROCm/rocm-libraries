@@ -345,6 +345,15 @@ HIPFFT_EXPORT hipfftResult hipfftXtExec(hipfftHandle plan,
  */
 HIPFFT_EXPORT hipfftResult hipfftXtSetGPUs(hipfftHandle plan, int count, int* gpus);
 
+/*! @brief Generalized version of ::hipfftSetWorkArea accepting multi-device plans.
+ *
+ *  @param[in] plan Pointer to the (possibly multi-device) FFT plan.
+ *  @param[in] workArea Array of pointer(s) to the plan's work area(s), which must
+ *  be accessible by the plan's used device(s) (in the same order as communicated
+ *  via ::hipfftXtSetGPUs, if used prior).
+ *  */
+HIPFFT_EXPORT hipfftResult hipfftXtSetWorkArea(hipfftHandle plan, void** workArea);
+
 /*! @brief Enumeration type identifying the kind of data distribution, observed by
  *  a multi-device data descriptor (i.e., an instance of ::hipLibXtDesc) for a given
  *  data set.

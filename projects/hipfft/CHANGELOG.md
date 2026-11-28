@@ -11,6 +11,7 @@ Documentation for hipFFT is available at
   `HIPFFT_INTERNAL_ERROR` when direct peer access is unavailable, and no longer
   calls `hipDeviceEnablePeerAccess`. The copy uses `hipMemcpyPeerAsync`. The
   runtime stages through host memory when the devices cannot access each other.
+* Declared `hipfftXtSetWorkArea` in `hipfftXt.h`, where it is documented. The duplicate declaration in `hipfft.h` was added by mistake and will be removed in a future release.
 
 * Fixed the public headers to work in a pure-C (not C++) program.
 
