@@ -85,6 +85,14 @@ __device__ static __attribute__((noinline)) float
         return v;
     }
 }
+
+// ReLU, the common case, inline; the other activations through the call above. `act` is a
+// kernel argument, so the branch is uniform.
+__device__ static inline float apply_activation(float v, int act, float p0, float p1, float p2)
+{
+    return act == ACT_RELU ? (v <= p0 ? p2 * (v - p0) + p0 : (v >= p1 ? p1 : v))
+                           : activate(v, act, p0, p1, p2);
+}
 #endif
 
 #if !DW_GENERIC
@@ -410,7 +418,7 @@ extern "C" __global__ void __launch_bounds__(DW_BLOCK_SIZE)
                 v += bv;
 #endif
 #if DW_HAS_ACT
-                v = activate(v, act, act_p0, act_p1, act_p2);
+                v = apply_activation(v, act, act_p0, act_p1, act_p2);
 #endif
 #if DW_NDHWC
                 out[(((static_cast<long long>(n) * Do + d_o) * Ho + ho) * Wo + wo) * K + k]
@@ -601,7 +609,7 @@ extern "C" __global__ void __launch_bounds__(DWG_BLOCK_SIZE)
         v += bv;
 #endif
 #if DW_HAS_ACT
-        v = activate(v, act, act_p0, act_p1, act_p2);
+        v = apply_activation(v, act, act_p0, act_p1, act_p2);
 #endif
 #if DW_NDHWC
         out[(((static_cast<long long>(n) * Do + d_o) * Ho + ho) * Wo + wo) * K + k] = from_float(v);
