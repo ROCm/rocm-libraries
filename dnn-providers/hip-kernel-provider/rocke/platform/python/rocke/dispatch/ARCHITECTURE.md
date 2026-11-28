@@ -908,6 +908,27 @@ kernel = result.candidate.build(result.spec, req.arch)
 Filters, ranks, returns the winner. Raises `ValueError` listing every
 candidate's rejection reason when nothing matches.
 
+A production entry point runs its selection through
+`registry.cached_dispatch(req, _dispatch, ranker=ranker, context=...)`, which
+keeps the `DispatchResult` of each request it has answered and returns it for an
+equal request instead of filtering every candidate, building the spec and
+hashing it again. The stored result is used only where it cannot differ from a
+fresh one:
+
+- the request is the key, so it must be hashable (a frozen dataclass of
+  hashable fields); one that is not is dispatched directly every time;
+- anything else the family's selection reads goes into `context`, which is part
+  of the key. The GEMM cases pass the `ROCKE_GEMM_SPLIT_K` value, because
+  `select_spec` reads it. Section 6.2 rule 3 already keeps device probes out of
+  selection; a family that still reads one must not use `cached_dispatch`;
+- a call with a `ranker` neither reads nor writes the store;
+- a refusal is never stored, so its reasons are derived on every call;
+- `register` empties the registry's store, and the store is bounded
+  (`RESULT_CACHE_CAPACITY`).
+
+Equal requests receive the same result object. Treat it, its spec and its
+signature entries as read-only. Sweeps (`dispatch_all`) are not stored.
+
 ### 7.2 A list of kernels — autotuning and benchmarking
 
 ```python

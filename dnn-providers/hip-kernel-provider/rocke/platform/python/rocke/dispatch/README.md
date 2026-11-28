@@ -130,6 +130,17 @@ questions:
 (so wrapper metadata such as a debug switch stays out), and every dataclass
 field otherwise. `cache_key` is a deprecated alias for `selection_key`.
 
+### Repeated requests
+
+`dispatch_gemm_fp16`, `dispatch_gemm_bf16`, `dispatch_moe` and `dispatch_norm`
+go through `CandidateRegistry.cached_dispatch`: an equal request dispatched
+again without a `ranker` gets the stored `DispatchResult` rather than a new
+selection. The request must be hashable to be stored, a `ranker` bypasses the
+store, registering a candidate empties it, and whatever the selection reads
+besides the request is part of the key (`ROCKE_GEMM_SPLIT_K` for the GEMM
+cases). The result is shared between callers, so treat it as read-only
+(ARCHITECTURE.md section 7.1).
+
 ### Lookup without dispatching
 
 `CandidateRegistry` answers three questions that need no request:
@@ -282,7 +293,10 @@ PYTHONPATH=python:tests/instances python -m rocke_ir_parity_harness \
 5. If the kernel has knobs worth sweeping, build its candidates on
    `rocke.dispatch.tuning` instead of writing those hooks
    (ARCHITECTURE.md section 14).
-6. Return a `DispatchResult` with a `KernelId` from `core.make_kernel_id`.
+6. Return a `DispatchResult` with a `KernelId` from `core.make_kernel_id`. Run
+   the production entry point through `registry.cached_dispatch` when the
+   selection reads only the request, the registry, and state it can pass as
+   `context` (ARCHITECTURE.md section 7.1).
 7. Add operator-local tests under `platform/tests/dispatch/dispatch_tests/<family>/`
    (or `library/tests/dispatch/<family>/`), including `assert_tuning_contract`
    for tuned candidates.

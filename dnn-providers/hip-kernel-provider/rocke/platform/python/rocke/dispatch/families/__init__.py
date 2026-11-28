@@ -36,7 +36,9 @@ registry exactly the way ``gemm/fp16_rcr.py`` does:
     4. register the candidates, and call ``candidate.admits(req)`` anywhere the
        full verdict is wanted -- the residual predicate is stored as
        ``_supports`` precisely so that calling it alone reads as a mistake,
-    5. point ``dispatch_<family>`` at ``registry.select(req)``.
+    5. point ``dispatch_<family>`` at ``registry.select(req)``, through
+       ``registry.cached_dispatch`` so a repeated request is answered from the
+       registry's store.
 
 Each family also passes a ``dim_vocabulary`` to its registry, which turns a
 misspelled dimension name in a ``ShapeRange`` into an import-time error instead

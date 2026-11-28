@@ -11,6 +11,7 @@ from typing import Callable, Sequence, Tuple
 from ...core.arch import ArchTarget
 from ...helpers.manifest import gemm_args_signature
 from ...helpers.spec import ceil_div_grid
+from ...helpers.split_k import split_k_env_override
 from ...instances.common.gemm_universal import (
     DataSpec,
     TileSpec,
@@ -332,10 +333,7 @@ def dispatch_gemm_fp16_all(req: GemmRequest) -> Tuple[DispatchResult, ...]:
     return GEMM_FP16_REGISTRY.dispatch_all(req, kernel_id=_kernel_id)
 
 
-def dispatch_gemm_fp16(
-    req: GemmRequest, *, ranker: Ranker | None = None
-) -> DispatchResult:
-    """Select a registered FP16 RCR UniversalGemm candidate for ``req``."""
+def _dispatch(req: GemmRequest, ranker: Ranker | None) -> DispatchResult:
     candidate = GEMM_FP16_REGISTRY.select(req, ranker=ranker)
     spec = candidate.select_spec(req)
     kid = _kernel_id(req, candidate, spec)
@@ -354,4 +352,18 @@ def dispatch_gemm_fp16(
             f"spec_hash={kid.spec_hash}",
             f"request_hash={kid.request_hash}",
         ),
+    )
+
+
+def dispatch_gemm_fp16(
+    req: GemmRequest, *, ranker: Ranker | None = None
+) -> DispatchResult:
+    """Select a registered FP16 RCR UniversalGemm candidate for ``req``.
+
+    An equal request dispatched again without a ``ranker`` gets the stored
+    result (:meth:`CandidateRegistry.cached_dispatch`). ``ROCKE_GEMM_SPLIT_K``
+    is part of the key because ``select_spec`` reads it for the split-K degree.
+    """
+    return GEMM_FP16_REGISTRY.cached_dispatch(
+        req, _dispatch, ranker=ranker, context=split_k_env_override()
     )
