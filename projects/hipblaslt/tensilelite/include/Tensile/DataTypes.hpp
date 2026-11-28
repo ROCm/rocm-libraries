@@ -26,16 +26,20 @@
 
 #pragma once
 
+#include <array>
 #include <complex>
+#include <cstddef>
 #include <cstdlib>
 #include <iostream>
 #include <map>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <variant>
 
 #include <Tensile/Comparison.hpp>
 #include <Tensile/DataTypes_BFloat16.hpp>
+#include <Tensile/EnumStrings.hpp>
 #include <rocisa/include/enum.hpp>
 // Using hip header for both NANOO and OCP data types
 #include <tensilelitehost/export.h>
@@ -503,10 +507,36 @@ namespace TensileLite
         CustomArgType_Count,
     };
 
-    TENSILELITEHOST_EXPORT std::string toString(CustomArgType arg);
-    TENSILELITEHOST_EXPORT CustomArgType fromStringCustomArgType(std::string& str);
-    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream& stream, const CustomArgType& t);
-    TENSILELITEHOST_EXPORT std::istream& operator>>(std::istream& stream, CustomArgType& t);
+    template <>
+    struct EnumStringTraits<CustomArgType>
+    {
+        static constexpr std::string_view typeName = "CustomArgType";
+        static constexpr auto entries = std::to_array<EnumStringEntry<CustomArgType>>(
+            {
+                {CustomArgType::int8, "int8"},
+                {CustomArgType::uint8, "uint8"},
+                {CustomArgType::int16, "int16"},
+                {CustomArgType::uint16, "uint16"},
+                {CustomArgType::int32, "int32"},
+                {CustomArgType::uint32, "uint32"},
+                {CustomArgType::int64, "int64"},
+                {CustomArgType::uint64, "uint64"},
+                {CustomArgType::float4, "float4"},
+                {CustomArgType::float6, "float6"},
+                {CustomArgType::float8, "float8"},
+                {CustomArgType::bfloat8, "bfloat8"},
+                {CustomArgType::float16, "float16"},
+                {CustomArgType::bfloat16, "bfloat16"},
+                {CustomArgType::float32, "float32"},
+                {CustomArgType::tfloat32, "tfloat32"},
+                {CustomArgType::float64, "float64"},
+                {CustomArgType::boolean, "boolean"},
+                {CustomArgType::address, "address"},
+            });
+    };
+
+    static_assert(EnumStrings<CustomArgType>::size()
+                  == static_cast<std::size_t>(CustomArgType_Count));
 
     /**
  * @}

@@ -79,6 +79,7 @@ target_sources(tensilelite-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/TestData.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ThreadSafeValue_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/HashmapEnumLookup_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/EnumStrings_test.cpp"
 )
 
 # MasterSolutionLibraryMapping_test exercises TensileLite::LoadLibraryMapping,
