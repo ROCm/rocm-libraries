@@ -164,6 +164,37 @@ TEST_F(Float8Test, TypeTraitsE5M2Fnuz)
     EXPECT_TRUE(is_signed<hip_fp8_e5m2_fnuz>::value);
 }
 
+// rocWMMA classifies its fp8 types through its own traits in every mode. The
+// std:: traits report them as arithmetic, floating point and signed only while
+// the deprecated legacy specializations are enabled, which a rejecting STL
+// (for example, the current MSVC STL) forbids ([meta.rqmts]/4).
+template <typename T>
+void expectRocwmmaFloatTraits()
+{
+    EXPECT_TRUE(rocwmma::is_arithmetic<T>::value);
+    EXPECT_TRUE(rocwmma::is_floating_point<T>::value);
+    EXPECT_TRUE(rocwmma::is_signed<T>::value);
+    EXPECT_TRUE(rocwmma::is_arithmetic_v<T>);
+    EXPECT_TRUE(rocwmma::is_floating_point_v<T>);
+    EXPECT_TRUE(rocwmma::is_signed_v<T>);
+
+    constexpr bool legacy = ROCWMMA_LEGACY_STD_TRAIT_SPECIALIZATIONS;
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    EXPECT_EQ(std::is_arithmetic<T>::value, legacy);
+    EXPECT_EQ(std::is_floating_point<T>::value, legacy);
+    EXPECT_EQ(std::is_signed<T>::value, legacy);
+#pragma clang diagnostic pop
+}
+
+TEST_F(Float8Test, TypeTraitsRocwmmaAndStd)
+{
+    expectRocwmmaFloatTraits<hip_fp8_e4m3>();
+    expectRocwmmaFloatTraits<hip_fp8_e5m2>();
+    expectRocwmmaFloatTraits<hip_fp8_e4m3_fnuz>();
+    expectRocwmmaFloatTraits<hip_fp8_e5m2_fnuz>();
+}
+
 // --- Tests for make_hip_fp8_from_bits functions ---
 TEST_F(Float8Test, MakeHipFp8E4M3FromBits)
 {

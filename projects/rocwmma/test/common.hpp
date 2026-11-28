@@ -244,9 +244,9 @@ namespace rocwmma
                     {
                         // Count up in integers, in ascending order for each row.
                         auto value = ((i - padM) * n + (j - padN)) % 5;
-                        mat[idx]   = ((value % 3) && std::is_signed<DataT>::value)
-                                       ? -static_cast<DataT>(value)
-                                       : static_cast<DataT>(value);
+                        mat[idx]   = ((value % 3) && rocwmma::is_signed<DataT>::value)
+                                         ? -static_cast<DataT>(value)
+                                         : static_cast<DataT>(value);
                     }
                 }
             }
@@ -304,9 +304,9 @@ namespace rocwmma
                     // Count up in integers, in ascending order for each row.
                     auto value = (i * n + j) % 5;
                     auto idx   = index(i, j, ld);
-                    mat[idx]   = ((value % 3) && std::is_signed<DataT>::value)
-                                   ? -static_cast<DataT>(value)
-                                   : static_cast<DataT>(value);
+                    mat[idx]   = ((value % 3) && rocwmma::is_signed<DataT>::value)
+                                     ? -static_cast<DataT>(value)
+                                     : static_cast<DataT>(value);
                 }
             }
         }

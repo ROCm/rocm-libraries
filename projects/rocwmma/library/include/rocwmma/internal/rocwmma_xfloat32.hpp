@@ -390,6 +390,14 @@ namespace ROCWMMA_TYPE_TRAITS_IMPL_NAMESPACE
 
 } // namespace ROCWMMA_TYPE_TRAITS_IMPL_NAMESPACE
 
+#if !defined(__HIPCC_RTC__) && ROCWMMA_DETAIL_LEGACY_STD_TRAITS_ENABLED
+// Temporary compatibility for callers that have not migrated to rocwmma:: traits.
+namespace std
+{
+    ROCWMMA_DETAIL_DECLARE_LEGACY_STD_TRAITS(rocwmma_xfloat32);
+} // namespace std
+#endif
+
 // Define numeric limits traits
 namespace ROCWMMA_NUMERIC_LIMITS_IMPL_NAMESPACE
 {

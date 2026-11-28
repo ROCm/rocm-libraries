@@ -106,7 +106,7 @@ include(ROCMCheckTargetIds)
 include(ROCMClients)
 
 # Versioning via rocm-cmake
-set ( VERSION_STRING "2.2.2" )
+set ( VERSION_STRING "3.0.0" )
 rocm_setup_version( VERSION ${VERSION_STRING} )
 
 # configure a header file to pass the CMake version settings to the source

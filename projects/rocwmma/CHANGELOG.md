@@ -7,6 +7,8 @@ Documentation for rocWMMA is available at
 
 ### Changed
 
+* `rocwmma::is_arithmetic`, `rocwmma::is_floating_point`, and `rocwmma::is_signed`, including their `_v` forms, are now rocWMMA-owned traits rather than aliases of the `std::` traits. Use them to classify the FP8/BF8 types and XF32. Code that imports both `std` and `rocwmma` and names these traits unqualified can become ambiguous, and code that relies on the old aliases' type identity must be updated. On MSVC STL, the `rocwmma::*_v` forms now also report these types correctly. HIPRTC's trait implementation is unchanged.
+* rocWMMA no longer specializes `std::is_arithmetic`, `std::is_floating_point`, or `std::is_signed` by default with libc++ 20 or later, or with an MSVC STL that annotates these traits, when the compiler supports the `no_specializations` attribute. These standard libraries reject such specializations, so rocWMMA now compiles there without extra flags. In this configuration the `std::` traits are false for the FP8/BF8 types and XF32. Other toolchains keep the legacy specializations by default. Define `ROCWMMA_LEGACY_STD_TRAIT_SPECIALIZATIONS` as `0` or `1` to override the selection.
 * int8 WMMA on gfx11, gfx1170, gfx1171, gfx1200 and gfx1201 now wraps on int32 overflow instead of saturating. This matches gfx1250, uint8 inputs, MFMA targets and the reference implementations. Results differ only when an int32 result overflows.
 * Applications using OpenMP must now discover and link it explicitly instead of relying on `roc::rocwmma` to supply OpenMP flags and libraries. Use `find_package(OpenMP REQUIRED COMPONENTS CXX)` and link the application to `OpenMP::OpenMP_CXX`. Without this change, OpenMP loops may execute serially and calls to `omp_*` functions may fail to link.
 
@@ -14,6 +16,10 @@ Documentation for rocWMMA is available at
 
 * Removed the OpenMP requirement from the public CMake target and installed CMake package. OpenMP remains a dependency of samples, tests, and community samples; DEB/RPM OpenMP dependencies are scoped to client packages.
 * Fixed uint8 WMMA with an int32 accumulator at BlockK 8 on gfx1170, gfx1171, gfx1200, gfx1201 and gfx1250. It was reported as unsupported, while a uint32 accumulator was reported as supported but failed to compile.
+
+### Upcoming changes
+
+* The legacy `std::` specializations of `is_arithmetic`, `is_floating_point`, and `is_signed` for the FP8/BF8 types and XF32 are deprecated. The C++ standard forbids them. Uses of the specialized `std::` class traits now emit deprecation warnings; define `ROCWMMA_SUPPRESS_LEGACY_STD_TRAIT_DEPRECATION=1` to suppress them temporarily. Standard-library `_v` forms and traits queried inside system headers might not warn, so the diagnostics cannot find every use. rocWMMA 4.0.0 is planned to disable the specializations by default and rocWMMA 5.0.0 to remove them. Define `ROCWMMA_LEGACY_STD_TRAIT_SPECIALIZATIONS=0` to adopt the permanent behavior now. See the [migration guide](docs/conceptual/migration-guide.rst).
 
 ## rocWMMA 2.2.2 for ROCm 10.2
 
