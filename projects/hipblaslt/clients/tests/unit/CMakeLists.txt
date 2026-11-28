@@ -29,6 +29,15 @@ set(HIPBLASLT_HOST_UNIT_TEST_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/yaml_conversion_gtest.cpp
 )
 
+# The unbuildable-configuration lookup is compiled in from the library, so its
+# table is tested on a machine without a GPU. Only these two sources see the
+# rocRoller ranker's headers and the table.
+set(HIPBLASLT_ROCROLLER_UNBUILDABLE_TEST_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/rocroller_unbuildable_gtest.cpp
+    ${PROJECT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/src/rocroller_unbuildable.cpp
+)
+list(APPEND HIPBLASLT_HOST_UNIT_TEST_SOURCES ${HIPBLASLT_ROCROLLER_UNBUILDABLE_TEST_SOURCES})
+
 # hipblaslt-test is created in clients/CMakeLists.txt before add_subdirectory(tests),
 # so the target already exists here.
 target_sources(hipblaslt-test PRIVATE ${HIPBLASLT_HOST_UNIT_TEST_SOURCES})
@@ -66,3 +75,20 @@ target_link_libraries(hipblaslt-test-hostunit
 target_include_directories(hipblaslt-test-hostunit PRIVATE "${HIPBLASLT_ROCBLASLT_INCLUDE_DIR}")
 
 target_compile_definitions(hipblaslt-test-hostunit PRIVATE GOOGLE_TEST)
+
+# The rocRoller host tests include the ranker headers, which include
+# rocblaslt.h. hipblaslt-test does not otherwise put that directory on the
+# include path. hipblaslt-test already exists (clients/CMakeLists.txt adds it
+# before this directory).
+foreach(hblt_test_target hipblaslt-test hipblaslt-test-hostunit)
+    target_include_directories(${hblt_test_target}
+        PRIVATE
+            "${PROJECT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/include"
+            "${PROJECT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/src/rocroller/include")
+endforeach()
+
+set_source_files_properties(${HIPBLASLT_ROCROLLER_UNBUILDABLE_TEST_SOURCES}
+    TARGET_DIRECTORY hipblaslt-test hipblaslt-test-hostunit
+    PROPERTIES INCLUDE_DIRECTORIES
+        "${PROJECT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/include;${PROJECT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/src/rocroller/include;${PROJECT_SOURCE_DIR}/tensilelite/tensilelite/CustomKernels/rocroller"
+)
