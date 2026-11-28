@@ -848,6 +848,43 @@ The zero-tests guard applies only when bundles are enabled **and** you gave
 | `golden data not pulled; bundle disables both references` skips | The bundle sets `no_cpu_reference` and `no_gpu_reference`, so only golden data can verify it, and the `.bin` files are not on disk. Nothing was verified. Run `dvc pull` and re-run CMake. |
 | `hipdnn_golden_data_tests` registers nothing | Golden `.bin` blobs were not pulled (or were pulled after configure). |
 
+## Optional dnn-benchmarking workloads
+
+`workloads/*.tar.gz.dvc` pin graph archives from the
+[dnn-benchmarking](https://github.com/ROCm/dnn-benchmarking) repo (created with
+`dvc import`). They are not fetched by default. To run them:
+
+```bash
+cd dnn-providers/integration-tests
+dvc pull -R workloads   # fetch the archives (gitignored)
+cmake ...               # re-run configure; archives are extracted into the build tree
+./bin/hipdnn_integration_tests --gtest_filter='workloads_*'
+```
+
+Configure extracts each archive to `integration-test-bundles/workloads/<name>/`
+in the build tree. Discovery registers every graph `.json` as a graph-only
+bundle test named `workloads_<archive>_<subdir>.<graph>`, verified
+against a reference executor. Nothing is committed to the bundle tree.
+
+They run in their own `workloads` category (label `workloads`) in
+each provider's `test_categories_integration.yaml`, not in `quick`, `standard`,
+`comprehensive` or `full`: `full` excludes `workloads_*`. On gfx90a the
+MIOpen share takes about 30 minutes, which alone fills TheRock's 30-minute
+provider job. MIOpen's category runs `conv`, `bnorm` and `rocke_conv`;
+hipBLASLt's runs `hipblaslt_*`. On a GPU machine, run one with
+`ctest -L workloads` in that provider's build. `attn`, `norm`, `moe` and
+`rocke_sdpa` are not in any engine's category yet.
+
+The superbuild CI fetches the archives and extracts them only on pull requests
+that change `workloads/`. Its runners have no GPU, so it proves only that the
+pointers fetch and the archives extract. No CI job runs the `workloads`
+category on a GPU yet; ROCm/TheRock#9959 discusses where it should run.
+
+hipBLASLt matmul graphs verify on the GPU reference (`GpuMatmulPlan`). On gfx90a
+the 578 `hipblaslt_*` graphs took about 4 minutes. `HIPBLASLT_ENGINE.toml` skips
+one shape whose 7.2e9-element operands the harness cannot fill. To take newer
+workloads, run `dvc update workloads/*.dvc` and commit the changed pointers.
+
 ## In CI
 
 - `.github/workflows/hipdnn-superbuild-ci.yml` runs `dvc pull --recursive` on
