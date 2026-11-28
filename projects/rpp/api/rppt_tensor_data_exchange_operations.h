@@ -144,8 +144,10 @@ RppStatus rppt_yuv_to_rgb(RppPtr_t srcYPtr, RppPtr_t srcUVPtr, RpptDescPtr srcDe
 /*! \brief YUV to RGB color conversion with cubic vertical chroma upsampling on HIP backend (NV12
  * 8-bit only) \details Converts semi-planar NV12 (separate Y and interleaved UV planes) to packed
  * RGB24, using Mitchell-Netravali cubic interpolation (B=0, C=0.6) to vertically upsample chroma.
- * Odd luma rows pass through chroma unchanged (identity); even luma rows use a symmetric 4-tap
- * filter. Horizontal chroma upsampling remains nearest-neighbor.
+ * Chroma uses NV12 siting: luma row y samples chroma row (y - 0.5) / 2, so even and odd luma rows
+ * use two alternating asymmetric 4-tap phases (0.75 and 0.25), with folded taps on rows 0 and 2.
+ * Taps and color conversion use FFmpeg swscale's integer arithmetic. Horizontal chroma upsampling
+ * remains nearest-neighbor.
  * - Source: srcYPtr = luma plane, srcUVPtr = interleaved UV
  * - src_y_pitch / src_uv_pitch: row strides in bytes
  * - Destination: packed RGB at dstPtr (RGB24, Rpp8u) with row stride dst_pitch bytes.
@@ -160,7 +162,7 @@ RppStatus rppt_yuv_to_rgb(RppPtr_t srcYPtr, RppPtr_t srcUVPtr, RpptDescPtr srcDe
  * \param [in] dst_pitch row pitch of RGB output in bytes
  * \param [in] width image width in pixels
  * \param [in] height image height in pixels
- * \param [in] col_standard Luma/matrix family: \ref RpptColorStandard (unknown values use BT.709).
+ * \param [in] col_standard Luma/matrix family: \ref RpptColorStandard (unknown values use BT.601).
  * \param [in] color_range Luma range: \ref RpptColorRange_STUDIO or \ref RpptColorRange_FULL (other
  * values behave like studio). \param [in] rppHandle RPP HIP handle created with <tt>\ref
  * rppCreate()</tt> \param [in] executionBackend must be RppBackend::RPP_HIP_BACKEND \return A <tt>
