@@ -141,6 +141,9 @@
         "rocke_tiled_attention_entry_guards",
         "rocke_wgrad_streamk_host",
         "rocke_xf32_bf16x3_lowering"
+      ],
+      "Linux ctest -V run of the installed rocke_library_attention_bwd_cpu_pytest entry on the build host, its four shards, 2026-11-27; to be re-recorded from a CI test job run": [
+        "rocke_library_attention_bwd_cpu_pytest"
       ]
     },
     "seconds": {
@@ -196,6 +199,7 @@
       "rocke_isa_backend_targets": 0.0,
       "rocke_library_attention_bias_gpu_pytest": 4.46,
       "rocke_library_attention_builds_pytest": 21.24,
+      "rocke_library_attention_bwd_cpu_pytest": 76.34,
       "rocke_library_attention_cache_key_pytest": 8.8,
       "rocke_library_attention_cache_key_sweep_pytest": 38.62,
       "rocke_library_attention_cpu_pytest": 54.25,

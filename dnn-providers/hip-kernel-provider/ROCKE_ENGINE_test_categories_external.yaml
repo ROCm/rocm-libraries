@@ -199,6 +199,9 @@ test_categories:
       - "rocke_library_conv_tf32_lowering_pytest"
       - "rocke_library_conv_fwd_aot_packaging_pytest"
       - "rocke_library_attention_cpu_pytest"
+      # Not registered on Windows (see rocke/library/tests/ctest_lists.cmake); the
+      # parser ignores a listed name that has no registered test.
+      - "rocke_library_attention_bwd_cpu_pytest"
       - "rocke_library_attention_cache_key_pytest"
       - "rocke_library_attention_pytest"
       - "rocke_library_mla_pytest"

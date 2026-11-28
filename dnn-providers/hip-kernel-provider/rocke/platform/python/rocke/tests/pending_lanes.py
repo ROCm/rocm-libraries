@@ -170,9 +170,25 @@ ISSUE_PATTERN = re.compile(r"[A-Z][A-Z0-9]+-[0-9]+|ROCm/[A-Za-z0-9._-]+#[0-9]+")
 
 
 # The reasons the attention backward test files wait (AICK-3259).
-_BACKWARD_NOT_REGISTERED = (
-    "the attention backward CTest entries (CPU and gfx942 GPU) are not registered "
-    "yet; their slow tests are cut down first (AICK-3218)"
+_BACKWARD_TOO_SLOW = (
+    "too slow for rocke_library_attention_bwd_cpu_pytest and a pull-request "
+    "tier until its slow tests are cut down (AICK-3218)"
+)
+_BACKWARD_GPU_ONLY = (
+    "every case needs a GPU, and the attention backward gfx942 GPU entry is not "
+    "registered yet"
+)
+_BACKWARD_UNRECORDED_SKIPS = (
+    "some of its cases skip on every CI runner with no recorded lane (parameter "
+    "cases that never apply, or resource-gate cases off the gate's toolchain); "
+    "it joins rocke_library_attention_bwd_cpu_pytest once those cases are "
+    "removed or recorded"
+)
+_BACKWARD_SOURCE_LAYOUT = (
+    "it checks the backward compile cache, whose source roots and source hash "
+    "assume the source tree (platform/python/rocke beside library/kernels): in "
+    "the installed test tree they miss the installed rocke package, so the disk "
+    "cache is always bypassed there; run_all.py runs it"
 )
 _BACKWARD_EXHAUSTIVE = (
     "in the exhaustive cohort (library/tests/_affordable_lane.py): too slow for a "
@@ -698,7 +714,8 @@ def _waiting_tests(
     return tuple(ticket.waiting(path, reason, team, node=node) for node in nodes)
 
 
-# The attention backward CTest entries, not registered yet.
+# The attention backward files outside its CPU entry: the GPU entry, not
+# registered yet, and the files too slow for a pull-request tier.
 _ATTENTION_BWD_ENTRIES = LaneTicket("AICK-3259", TICKET, "2026-12-31")
 # The counted compiler gate, pinned to the resource gate's reference toolchain
 # until the issue unpins it.
@@ -738,68 +755,50 @@ LANE_TICKETS: tuple[LaneTicket, ...] = (
 PENDING: tuple[PendingTest, ...] = (
     *_waiting(
         _ATTENTION_BWD_ENTRIES,
-        _BACKWARD_NOT_REGISTERED,
+        _BACKWARD_TOO_SLOW,
         _LIBRARY,
-        "library/tests/dispatch/attention_bwd/test_dense_tuning_registry.py",
-        "library/tests/dispatch/attention_bwd/test_gfx950_tuning.py",
-        "library/tests/dispatch/attention_bwd/test_known_wrong_knobs.py",
-        "library/tests/dispatch/attention_bwd/test_registry.py",
-        "library/tests/dispatch/attention_bwd/test_serving_policy.py",
-        "library/tests/dispatch/attention_bwd/test_tuned_table_import_check.py",
-        "library/tests/dispatch/attention_bwd/test_tuned_tables.py",
         "library/tests/dispatch/attention_bwd/test_tuning_registry.py",
-        "library/tests/dispatch/attention_bwd/test_unified_tuning.py",
-        "library/tests/test_attention_bwd_addr.py",
-        "library/tests/test_attention_bwd_band.py",
-        "library/tests/test_attention_bwd_barrier_merge.py",
-        "library/tests/test_attention_bwd_bench.py",
-        "library/tests/test_attention_bwd_caps.py",
-        "library/tests/test_attention_bwd_comgr.py",
-        "library/tests/test_attention_bwd_compile.py",
-        "library/tests/test_attention_bwd_dispatch.py",
-        "library/tests/test_attention_bwd_dispatch_numeric.py",
         "library/tests/test_attention_bwd_dq_levers.py",
-        "library/tests/test_attention_bwd_frag.py",
-        "library/tests/test_attention_bwd_fwd_chain.py",
-        "library/tests/test_attention_bwd_host_checks.py",
-        "library/tests/test_attention_bwd_hsaco_cache.py",
-        "library/tests/test_attention_bwd_kernel_cases.py",
-        "library/tests/test_attention_bwd_lds.py",
-        "library/tests/test_attention_bwd_mutations.py",
-        "library/tests/test_attention_bwd_noatomic.py",
-        "library/tests/test_attention_bwd_numeric.py",
-        "library/tests/test_attention_bwd_paged_guard.py",
         "library/tests/test_attention_bwd_perf_gate.py",
-        "library/tests/test_attention_bwd_plan.py",
-        "library/tests/test_attention_bwd_refusals.py",
         "library/tests/test_attention_bwd_rocke_arm.py",
-        "library/tests/test_attention_bwd_run.py",
-        "library/tests/test_attention_bwd_sched.py",
-        "library/tests/test_attention_bwd_shared_helpers.py",
-        "library/tests/test_attention_bwd_sinks.py",
         "library/tests/test_attention_bwd_sweep.py",
-        "library/tests/test_attention_bwd_tiles.py",
+        "library/tests/test_attention_bwd_xt.py",
+        whole_file=True,
+    ),
+    *_waiting(
+        _ATTENTION_BWD_ENTRIES,
+        _BACKWARD_GPU_ONLY,
+        _LIBRARY,
+        "library/tests/test_attention_bwd_dispatch_numeric.py",
+        "library/tests/test_attention_bwd_mutations.py",
+        "library/tests/test_attention_bwd_numeric.py",
         "library/tests/test_attention_bwd_unified_mutations.py",
         "library/tests/test_attention_bwd_unified_numeric.py",
-        "library/tests/test_attention_bwd_unified_plan.py",
-        "library/tests/test_attention_bwd_unit_ops.py",
-        "library/tests/test_attention_bwd_worklist.py",
-        "library/tests/test_attention_bwd_xt.py",
-        "library/tests/test_attention_dense_bwd.py",
         "library/tests/test_attention_dense_bwd_numeric.py",
-        "library/tests/test_attention_dense_bwd_split.py",
-        "library/tests/test_lse_store_ir.py",
         "library/tests/test_lse_store_numeric.py",
         whole_file=True,
     ),
     *_waiting(
         _ATTENTION_BWD_ENTRIES,
-        _with_pinned_resource_gate(_BACKWARD_NOT_REGISTERED),
+        _with_pinned_resource_gate(_BACKWARD_TOO_SLOW),
         _LIBRARY,
         "library/tests/test_attention_bwd.py",
+        "library/tests/test_attention_bwd_mirror.py",
+        whole_file=True,
+    ),
+    *_waiting(
+        _ATTENTION_BWD_ENTRIES,
+        _BACKWARD_UNRECORDED_SKIPS,
+        _LIBRARY,
+        "library/tests/test_attention_bwd_lds.py",
+        whole_file=True,
+    ),
+    *_waiting(
+        _ATTENTION_BWD_ENTRIES,
+        _with_pinned_resource_gate(_BACKWARD_UNRECORDED_SKIPS),
+        _LIBRARY,
         "library/tests/test_attention_bwd_access.py",
         "library/tests/test_attention_bwd_aux.py",
-        "library/tests/test_attention_bwd_mirror.py",
         "library/tests/test_attention_dense_bwd_ir.py",
         whole_file=True,
     ),
@@ -987,6 +986,18 @@ PENDING: tuple[PendingTest, ...] = (
         "its torch cases exercise the runtime's torch interop and skip without torch",
         _PLATFORM,
         "platform/tests/runtime/test_device_array.py",
+    ),
+    _SOURCE_CHECKOUT.waiting(
+        "library/tests/test_attention_bwd_hsaco_cache.py",
+        _BACKWARD_SOURCE_LAYOUT,
+        _LIBRARY,
+        whole_file=True,
+    ),
+    _SOURCE_CHECKOUT.waiting(
+        "library/tests/test_attention_bwd_compile.py",
+        f"rocke_library_attention_bwd_cpu_pytest deselects it: {_BACKWARD_SOURCE_LAYOUT}",
+        _LIBRARY,
+        node="test_source_files_cover_the_lowering_and_the_kernels",
     ),
     *_waiting(
         _SOURCE_CHECKOUT,

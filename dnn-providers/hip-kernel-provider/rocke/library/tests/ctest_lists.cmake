@@ -388,6 +388,68 @@ rocke_library_pytest_entry(rocke_library_attention_cpu_pytest WORKERS
   LABELS ckc python attention host standard
   TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})
 
+# Library attention backward CPU tests (no GPU): the backward tuning registries
+# and serving policy, the plan, tile and worklist models, the host checks
+# and refusals, and the emitted IR of the dense backward kernel. The other
+# backward files are recorded in rocke.tests.pending_lanes: too slow for a
+# pull-request tier, every case needs a GPU, or some cases skip on every CI
+# runner with no recorded lane, or they check the backward compile cache, whose
+# source roots assume the source tree. The entry deselects the one such case of
+# a file it runs. It takes the compiler environment, so a code-object check that
+# reads its kernel with llvm-objdump fails, rather than skips, where the tool is
+# missing.
+#
+# Not registered on Windows: the compiler tool environment is Linux-only (see
+# platform/CMakeLists.txt), and Linux runs these host-only checks.
+set(_ROCKE_LIBRARY_ATTENTION_BWD_CPU_TESTS
+    "dispatch/attention_bwd/test_dense_tuning_registry.py"
+    "dispatch/attention_bwd/test_gfx950_tuning.py"
+    "dispatch/attention_bwd/test_known_wrong_knobs.py"
+    "dispatch/attention_bwd/test_registry.py"
+    "dispatch/attention_bwd/test_serving_policy.py"
+    "dispatch/attention_bwd/test_tuned_table_import_check.py"
+    "dispatch/attention_bwd/test_tuned_tables.py"
+    "dispatch/attention_bwd/test_unified_tuning.py"
+    "test_attention_bwd_addr.py"
+    "test_attention_bwd_band.py"
+    "test_attention_bwd_barrier_merge.py"
+    "test_attention_bwd_bench.py"
+    "test_attention_bwd_caps.py"
+    "test_attention_bwd_comgr.py"
+    "test_attention_bwd_compile.py"
+    "test_attention_bwd_dispatch.py"
+    "test_attention_bwd_frag.py"
+    "test_attention_bwd_fwd_chain.py"
+    "test_attention_bwd_host_checks.py"
+    "test_attention_bwd_kernel_cases.py"
+    "test_attention_bwd_noatomic.py"
+    "test_attention_bwd_paged_guard.py"
+    "test_attention_bwd_plan.py"
+    "test_attention_bwd_refusals.py"
+    "test_attention_bwd_run.py"
+    "test_attention_bwd_sched.py"
+    "test_attention_bwd_shared_helpers.py"
+    "test_attention_bwd_sinks.py"
+    "test_attention_bwd_tiles.py"
+    "test_attention_bwd_unified_plan.py"
+    "test_attention_bwd_unit_ops.py"
+    "test_attention_bwd_worklist.py"
+    "test_attention_dense_bwd.py"
+    "test_attention_dense_bwd_split.py"
+    "test_lse_store_ir.py")
+if(WIN32)
+  message(STATUS "rocKE: rocke_library_attention_bwd_cpu_pytest not registered on Windows (see comment above)")
+else()
+  rocke_library_pytest_entry(rocke_library_attention_bwd_cpu_pytest
+    WORKERS COMPILER_TOOLS COMPILER_REQUIREMENT
+    TESTS ${_ROCKE_LIBRARY_ATTENTION_BWD_CPU_TESTS}
+    ARGUMENTS -m "not gpu"
+              --deselect "test_attention_bwd_compile.py::test_source_files_cover_the_lowering_and_the_kernels"
+              -v -rs --timeout=60
+    LABELS ckc python attention host standard
+    TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})
+endif()
+
 # The rest of test_attention_builds.py (no GPU): the attention builders' compile
 # smoke tests and the HSACO resource budgets of the built kernels (scratch,
 # LDS, waves per SIMD), read with llvm-readelf / llvm-objdump. The entry takes
