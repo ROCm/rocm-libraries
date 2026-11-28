@@ -275,6 +275,7 @@ namespace TensileLite
                     loaded.store(false, std::memory_order_release);
                 });
                 m_helperKernelPath.clear();
+                m_helperCodeObject.clear();
                 m_kernels.forEachValue([](std::atomic<hipFunction_t>& kernel) {
                     kernel.store(nullptr, std::memory_order_release);
                 });
@@ -355,7 +356,10 @@ namespace TensileLite
                 m_loadedModuleNames.push_back(concatenate("File ", path));
 
                 if(fileName.rfind("Kernels.so-000-", 0) == 0)
+                {
                     m_helperKernelPath = path;
+                    m_helperCodeObject = key;
+                }
                 m_loadedCOFiles.insert(key, true).store(true, std::memory_order_release);
             }
             Debug::Instance().markerStop();
@@ -726,10 +730,11 @@ namespace TensileLite
         }
 
         hipError_t SolutionAdapter::initKernel(std::string const& name,
-                                               std::string const& codeObjectFile)
+                                               std::string const& codeObjectFile,
+                                               bool               helperKernel)
         {
             hipFunction_t function;
-            return getKernel(function, name, codeObjectFile);
+            return getKernel(function, name, codeObjectFile, helperKernel);
         }
 
         hipError_t SolutionAdapter::initKernels(std::vector<std::string> const& kernelNames)
@@ -755,7 +760,8 @@ namespace TensileLite
 
         hipError_t SolutionAdapter::getKernel(hipFunction_t&     rv,
                                               std::string const& name,
-                                              std::string const& codeObjectFile)
+                                              std::string const& codeObjectFile,
+                                              bool               helperKernel)
         {
             int copyIdx = m_currentRotationCopy.load();
 
@@ -796,11 +802,13 @@ namespace TensileLite
                 rv = cached;
                 return hipSuccess;
             }
-            else if(!codeObjectFile.empty())
+            else if(helperKernel || !codeObjectFile.empty())
             {
                 // The kernel's own code object first, so a kernel that is there
-                // needs no lookup that fails.
-                auto own = m_moduleByCodeObject.find(removeXnack(codeObjectFile));
+                // needs no lookup that fails. A helper kernel's is the helper
+                // code object, whichever code object its invocation names.
+                auto own = m_moduleByCodeObject.find(helperKernel ? m_helperCodeObject
+                                                                  : removeXnack(codeObjectFile));
                 if(own != m_moduleByCodeObject.end())
                 {
                     err = m_moduleApi.getFunction(&rv, own->second, name.c_str());
@@ -1238,9 +1246,9 @@ namespace TensileLite
             hipFunction_t function;
             auto          findKernel = [&]() {
 #ifdef TENSILELITE_ENABLE_LOCAL_KERNELS
-                // Helper kernels (beta-only, output conversion) carry their
-                // solution's code object name but live in the shipped helpers.
-                if(isLocalCodeObject(kernel.codeObjectFile))
+                // Helper kernels carry their solution's code object name but live
+                // in the shipped helpers, so a local module never has them.
+                if(!kernel.isHelperKernel && isLocalCodeObject(kernel.codeObjectFile))
                 {
                     hipError_t err
                         = getLocalKernel(function, kernel.codeObjectFile, kernel.kernelName);
@@ -1248,7 +1256,8 @@ namespace TensileLite
                         return err;
                 }
 #endif
-                return getKernel(function, kernel.kernelName, kernel.codeObjectFile);
+                return getKernel(
+                    function, kernel.kernelName, kernel.codeObjectFile, kernel.isHelperKernel);
             };
             HIP_CHECK_RETURN_WITH_LOG(
                 findKernel(), [&](hipError_t error) {

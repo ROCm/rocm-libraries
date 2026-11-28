@@ -4,6 +4,7 @@
 #include <Tensile/hip/HipSolutionAdapter.hpp>
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -242,6 +243,52 @@ namespace
         EXPECT_EQ(adapter->launchKernel(kernel), hipErrorNotFound);
         ASSERT_FALSE(loads.functionModules.empty());
         EXPECT_EQ(loads.functionModules.front(), loads.loadedFrom.at(primary))
+            << "the launch looked in another module first";
+    }
+
+    // A helper kernel is looked up in the helper code object first, whichever
+    // code object it names: it is not in its solution's, where a lookup would
+    // fail and replace the caller's error. The solution's code object loads
+    // first here, so the load order does not lead to the helpers either.
+    TEST_F(HipSolutionAdapterTest, smoke_HelperKernelLookupStartsInTheHelperCodeObject)
+    {
+        adapter->setLazyLoadingContext("gfx942", "/library");
+        expectLoad(primary);
+        ASSERT_EQ(adapter->loadCodeObjectFile(primary), hipSuccess);
+        expectLoad(helper);
+        ASSERT_EQ(adapter->initializeLazyLoading("gfx942", "/library"), hipSuccess);
+        const hipModule_t helpers = loads.loadedFrom.at(helper);
+        loads.exports = [helpers](hipModule_t module, const char*) { return module == helpers; };
+
+        loads.lastError = hipErrorOutOfMemory;
+        ASSERT_EQ(adapter->initKernel("helper", "primary.co", true), hipSuccess);
+        EXPECT_EQ(loads.functionModules, std::vector<hipModule_t>{helpers})
+            << "the lookup tried another module first";
+        EXPECT_EQ(loads.lastError, hipErrorOutOfMemory) << "the caller's error was replaced";
+    }
+
+    // A launch passes its kernel's helper mark to the lookup. No module exports
+    // the kernel, so the launch ends at the lookup, before anything could
+    // reach a device.
+    TEST_F(HipSolutionAdapterTest, smoke_LaunchPassesTheHelperMarkToTheLookup)
+    {
+        adapter->setLazyLoadingContext("gfx942", "/library");
+        expectLoad(primary);
+        ASSERT_EQ(adapter->loadCodeObjectFile(primary), hipSuccess);
+        expectLoad(helper);
+        ASSERT_EQ(adapter->initializeLazyLoading("gfx942", "/library"), hipSuccess);
+        loads.exports = [](hipModule_t, const char*) { return false; };
+
+        TensileLite::KernelInvocation kernel;
+        kernel.kernelName     = "helper";
+        kernel.codeObjectFile = "primary.co";
+        kernel.isHelperKernel = true;
+        kernel.workGroupSize  = TensileLite::dim3(256, 1, 1);
+        kernel.numWorkGroups  = TensileLite::dim3(1, 1, 1);
+        kernel.numWorkItems   = TensileLite::dim3(256, 1, 1);
+        EXPECT_EQ(adapter->launchKernel(kernel), hipErrorNotFound);
+        ASSERT_FALSE(loads.functionModules.empty());
+        EXPECT_EQ(loads.functionModules.front(), loads.loadedFrom.at(helper))
             << "the launch looked in another module first";
     }
 
@@ -512,6 +559,34 @@ namespace
         expectLoad(local);
         EXPECT_FALSE(adapter->FindCodeObject(local));
         EXPECT_EQ(adapter->localCodeObjectCount(), 1u);
+    }
+
+    // A local solution's helper kernel names the local code object but lives in
+    // the shipped helpers, so its lookup never tries the local module. No module
+    // exports it, so the launch ends at the lookup.
+    TEST_F(HipSolutionAdapterTest, smoke_LocalSolutionHelperKernelSkipsTheLocalModule)
+    {
+        expectLoad(helper);
+        ASSERT_EQ(adapter->initializeLazyLoading("gfx942", "/library"), hipSuccess);
+        expectLoad(local);
+        ASSERT_EQ(adapter->loadLocalCodeObject(local), hipSuccess);
+        loads.exports = [](hipModule_t, const char*) { return false; };
+
+        TensileLite::KernelInvocation kernel;
+        kernel.kernelName     = "helper";
+        kernel.codeObjectFile = local;
+        kernel.isHelperKernel = true;
+        kernel.workGroupSize  = TensileLite::dim3(256, 1, 1);
+        kernel.numWorkGroups  = TensileLite::dim3(1, 1, 1);
+        kernel.numWorkItems   = TensileLite::dim3(256, 1, 1);
+        EXPECT_EQ(adapter->launchKernel(kernel), hipErrorNotFound);
+        ASSERT_FALSE(loads.functionModules.empty());
+        EXPECT_EQ(loads.functionModules.front(), loads.loadedFrom.at(helper));
+        EXPECT_EQ(std::count(loads.functionModules.begin(),
+                             loads.functionModules.end(),
+                             loads.loadedFrom.at(local)),
+                  0)
+            << "the lookup tried the local module";
     }
 
     TEST_F(HipSolutionAdapterTest, smoke_OnlyAbsolutePathsAreLocalCodeObjects)

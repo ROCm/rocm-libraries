@@ -152,8 +152,11 @@ namespace TensileLite
 #endif
 
             // codeObjectFile, when given, names the code object the kernel is
-            // in, so the lookup can start in that module.
-            hipError_t initKernel(std::string const& name, std::string const& codeObjectFile = {});
+            // in, so the lookup can start in that module. A helper kernel's
+            // lookup starts in the helper code object instead.
+            hipError_t initKernel(std::string const& name,
+                                  std::string const& codeObjectFile = {},
+                                  bool               helperKernel   = false);
 
             hipError_t initKernels(std::vector<std::string> const& kernelNames);
 
@@ -193,7 +196,8 @@ namespace TensileLite
             hipError_t loadCodeObjectFileOnce(std::string const& path);
             hipError_t getKernel(hipFunction_t&     rv,
                                  std::string const& name,
-                                 std::string const& codeObjectFile = {});
+                                 std::string const& codeObjectFile = {},
+                                 bool               helperKernel   = false);
             // Cached function for `name`, or null. Takes no lock.
             hipFunction_t cachedKernel(std::string const& name) const;
 
@@ -249,6 +253,9 @@ namespace TensileLite
             // Actual path of the loaded helper bundle; m_loadedCOFiles keys have
             // the xnack suffix stripped, so the on-disk name cannot be derived.
             std::string m_helperKernelPath;
+            // The helper bundle's key in m_moduleByCodeObject, where getKernel
+            // looks a helper kernel up first. Guarded by m_access.
+            std::string m_helperCodeObject;
 
             // One mutex per code object serializes its load, so two threads
             // cannot both load it: keyed by absolute path for a local code
