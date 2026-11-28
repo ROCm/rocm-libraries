@@ -97,25 +97,42 @@ class philox
 
     CK_TILE_HOST_DEVICE uint2 mulhilo32(const unsigned int a, const unsigned int b) const
     {
-#if defined(__gfx1250__)
-        // gfx1250 lowers the 64-bit product below to v_mul_u64, which is several times
-        // slower than a v_mul_lo_u32 + v_mul_hi_u32 pair. Same result.
-        return make_uint2(a * b, __umulhi(a, b));
-#else
         uint2* res;
         unsigned long long tmp;
         tmp = static_cast<unsigned long long>(a) * b;
         res = reinterpret_cast<uint2*>(&tmp);
         return *res;
-#endif
     }
+
+#if defined(__gfx1250__)
+    // gfx1250: v_mad_u64_u32 returns the lo and the hi word of the 32x32 product in one
+    // instruction, at about the cost of a single v_mul_hi_u32. The compiler does not select it for
+    // a plain 64-bit product (it uses v_mul_u64 or v_mul_lo_u32 and v_mul_hi_u32 instead), but it
+    // does select v_mad_nc_u64_u32 for a product plus an addend it cannot fold. The empty asm hides
+    // the zero addend from the optimizer and emits nothing, so the compiler still schedules the
+    // multiply itself and handles the hazards around it. The result is taken as 2 x 32-bit so that
+    // the xors in philox_single_round stay 32-bit and fuse into v_xor3_b32. Same result as
+    // mulhilo32(M, b).
+    template <unsigned int M>
+    CK_TILE_DEVICE uint2 mulhilo32_const(const unsigned int b) const
+    {
+        uint64_t z = 0;
+        asm("" : "+s"(z));
+        const uint32x2_t p = __builtin_bit_cast(uint32x2_t, uint64_t(M) * b + z);
+        return make_uint2(p[0], p[1]);
+    }
+#endif
 
     CK_TILE_HOST_DEVICE uint4 philox_single_round(const uint4 ctr, const uint2 key) const
     {
-
+#if defined(__gfx1250__)
+        uint2 res0 = mulhilo32_const<kPhiloxSA>(ctr.x);
+        uint2 res1 = mulhilo32_const<kPhiloxSB>(ctr.z);
+#else
         uint2 res0 = mulhilo32(kPhiloxSA, ctr.x);
         uint2 res1 = mulhilo32(kPhiloxSB, ctr.z);
-        uint4 ret  = {res1.y ^ ctr.y ^ key.x, res1.x, res0.y ^ ctr.w ^ key.y, res0.x};
+#endif
+        uint4 ret = {res1.y ^ ctr.y ^ key.x, res1.x, res0.y ^ ctr.w ^ key.y, res0.x};
         return ret;
     }
 
