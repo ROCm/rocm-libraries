@@ -747,9 +747,15 @@ struct radix_merge_compare<Descending, true, T, identity_decomposer>
                                             const unsigned int current_radix_bits,
                                             identity_decomposer = {})
     {
-        T radix_mask_upper  = (T(1) << (current_radix_bits + start_bit)) - 1;
-        T radix_mask_bottom = (T(1) << start_bit) - 1;
-        radix_mask          = radix_mask_upper ^ radix_mask_bottom;
+        // Build the mask in an unsigned type: shifting by the full width of T, or into the sign
+        // bit of a signed T, is undefined. end_bit can equal the width of T.
+        using mask_type            = typename ::rocprim::get_unsigned_bits_type<T>::unsigned_type;
+        const unsigned int end_bit = start_bit + current_radix_bits;
+        const mask_type    radix_mask_upper  = end_bit >= sizeof(T) * 8
+                                                   ? mask_type(~mask_type(0))
+                                                   : mask_type((mask_type(1) << end_bit) - 1);
+        const mask_type    radix_mask_bottom = mask_type((mask_type(1) << start_bit) - 1);
+        radix_mask                           = static_cast<T>(radix_mask_upper ^ radix_mask_bottom);
     }
 
     ROCPRIM_DEVICE
