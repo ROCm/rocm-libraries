@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -613,6 +613,7 @@ void testing_trsm_batched_ex(const Arguments& arg)
 
         hipStream_t stream;
         CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
+        getFrequencyMonitor().start(stream);
         gpu_time_used = get_time_us_sync(stream); // in microseconds
 
         CHECK_ROCBLAS_ERROR(rocblas_trsm_batched_ex_fn(handle,
@@ -633,6 +634,7 @@ void testing_trsm_batched_ex(const Arguments& arg)
                                                        arg.compute_type));
 
         gpu_time_used = get_time_us_sync(stream) - gpu_time_used;
+        getFrequencyMonitor().stop();
 
         // CPU cblas
         cpu_time_used = get_time_us_no_sync();

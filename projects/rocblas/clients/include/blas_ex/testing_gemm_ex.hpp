@@ -732,8 +732,7 @@ void testing_gemm_ex_run(const Arguments& arg)
         hipStream_t stream;
         CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
 
-        FrequencyMonitor& freq_monitor = getFrequencyMonitor();
-        freq_monitor.start();
+        getFrequencyMonitor().start(stream);
         gpu_time_used = get_time_us_sync(stream); // in microseconds
         for(int i = 0; i < number_hot_calls; i++)
         {
@@ -760,7 +759,7 @@ void testing_gemm_ex_run(const Arguments& arg)
             // clang-format on
         }
         gpu_time_used = get_time_us_sync(stream) - gpu_time_used;
-        freq_monitor.stop();
+        getFrequencyMonitor().stop();
 
         if(!arg.outofplace)
         {

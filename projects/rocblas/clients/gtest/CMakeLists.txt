@@ -41,6 +41,8 @@ set(rocblas_no_tensile_test_source
     rocblas_gtest_main.cpp
     rocblas_test.cpp
     asan_helpers_gtest.cpp
+    benchmark_timer_gtest.cpp
+    frequency_monitor_gtest.cpp
     general_gtest.cpp
     host_alloc_gtest.cpp
     set_get_pointer_mode_gtest.cpp

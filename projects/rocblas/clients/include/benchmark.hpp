@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,6 +21,8 @@
  * ************************************************************************ */
 
 #pragma once
+
+#include "frequency_monitor.hpp"
 
 //!
 //! @brief Implementation of a common benchmark code
@@ -63,24 +65,24 @@ private:
 // timer calls m_lambda_to_benchmark in a loop m_arg.iters + m_arg.cold_iters times
 // timer returns the time to call the lambda m_arg.iters times
 // timer rotates through m_flush_batch_count copies of arrays to flush MALL
+// get_time_us_sync is used in start/end pairs: with event timing (the default), the first call of a
+// pair records the start and returns 0, and the second returns the time elapsed since then
 template <typename LAMBDA>
 void Benchmark<LAMBDA>::run_timer()
 {
-    double cold_start, cold_end, hot_end;
-    cold_start = get_time_us_sync(m_stream);
-    for(int iter = 0; iter < m_arg.iters + m_arg.cold_iters; iter++)
-    {
-        if(iter == m_arg.cold_iters)
-            cold_end = get_time_us_sync(m_stream);
+    int iter = 0;
 
-        int flush_index = iter % m_flush_batch_count;
+    double cold_start = get_time_us_sync(m_stream);
+    for(; iter < m_arg.cold_iters; iter++)
+        m_lambda_to_benchmark(iter % m_flush_batch_count);
+    m_cold_time = get_time_us_sync(m_stream) - cold_start;
 
-        m_lambda_to_benchmark(flush_index);
-    }
-
-    hot_end     = get_time_us_sync(m_stream);
-    m_cold_time = cold_end - cold_start;
-    m_hot_time  = hot_end - cold_end;
+    getFrequencyMonitor().start(m_stream);
+    double hot_start = get_time_us_sync(m_stream);
+    for(; iter < m_arg.iters + m_arg.cold_iters; iter++)
+        m_lambda_to_benchmark(iter % m_flush_batch_count);
+    m_hot_time = get_time_us_sync(m_stream) - hot_start;
+    getFrequencyMonitor().stop();
 }
 
 template <typename LAMBDA>

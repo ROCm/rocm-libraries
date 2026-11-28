@@ -138,13 +138,18 @@ void testing_set_get_matrix(const Arguments& arg)
         for(int iter = 0; iter < total_calls; iter++)
         {
             if(iter == number_cold_calls)
+            {
+                // the copies block the host, so nothing is queued: sample from now
+                getFrequencyMonitor().start();
                 gpu_time_used = get_time_us_no_sync();
+            }
 
             DAPI_DISPATCH(rocblas_set_matrix_fn, (rows, cols, sizeof(T), hA, lda, dD, ldd));
             DAPI_DISPATCH(rocblas_get_matrix_fn, (rows, cols, sizeof(T), dD, ldd, hB, ldb));
         }
 
         gpu_time_used = get_time_us_no_sync() - gpu_time_used;
+        getFrequencyMonitor().stop();
 
         ArgumentModel<e_M, e_N, e_lda, e_ldb, e_ldd>{}.log_args<T>(
             rocblas_cout,
