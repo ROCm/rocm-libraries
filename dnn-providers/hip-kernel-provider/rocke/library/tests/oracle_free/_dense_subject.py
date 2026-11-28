@@ -14,8 +14,8 @@ functions that use them, so CPU collection and the analytical contracts need
 neither a GPU nor ROCm.
 
 A lane describes its case through :class:`DenseCase`. Adding an architecture is
-one :data:`DENSE_SUBJECTS` entry plus its cases in :data:`QUICK_SUBJECT_CASES` or
-:data:`PERMUTATION_SUBJECT_CASES`.
+one :data:`DENSE_SUBJECTS` entry plus its cases in :data:`QUICK_SUBJECT_CASES`,
+:data:`PERMUTATION_SUBJECT_CASES` or :data:`VALUE_SHIFT_SUBJECT_CASES`.
 """
 
 from __future__ import annotations
@@ -31,6 +31,7 @@ import numpy as np
 
 from ._analytical import UNIFORM_QUICK_CASES, UniformCase
 from ._permutation import PERMUTATION_QUICK_CASES, PermutationCase
+from ._value_shift import VALUE_SHIFT_QUICK_CASES, ValueShiftCase
 
 _POINTER_ALIGNMENT = 16
 # Quiet-NaN output prefill: a coordinate the kernel never writes reads back as
@@ -104,6 +105,10 @@ QUICK_SUBJECT_CASES: tuple[tuple[str, UniformCase], ...] = tuple(
 # The key-permutation lane's (arch, case) matrix: unmasked cases on gfx942.
 PERMUTATION_SUBJECT_CASES: tuple[tuple[str, PermutationCase], ...] = tuple(
     ("gfx942", case) for case in PERMUTATION_QUICK_CASES
+)
+# The value-shift lane's (arch, case) matrix: unmasked cases on gfx942.
+VALUE_SHIFT_SUBJECT_CASES: tuple[tuple[str, ValueShiftCase], ...] = tuple(
+    ("gfx942", case) for case in VALUE_SHIFT_QUICK_CASES
 )
 
 
@@ -189,14 +194,14 @@ def _validate_supported_case(arch: str, case: DenseCase) -> None:
 def _verify_resolved_spec(arch: str, case: DenseCase, tuning_spec) -> None:
     """Check the dispatch-resolved spec against the scope the lanes derive for.
 
-    The uniform-probability proof and the key-permutation bound both cover every
-    single-pass dense variant, so tile, grid, persistence, fast exp2 and
-    scheduling knobs are deliberately free: a retune keeps running, and a defect
-    in any of them still fails the lane's policy. What they do not cover is
-    refused here, before any launch, as a failure: another candidate, a
-    KV-segment split (its partial-softmax combine), sinks and LSE (extra buffers
-    and epilogues the adapter does not supply), ragged tail tiles, the
-    bottom-right band, and paged or varlen layouts."""
+    The uniform-probability proof, the key-permutation bound and the value-shift
+    tolerance all cover every single-pass dense variant, so tile, grid,
+    persistence, fast exp2 and scheduling knobs are deliberately free: a retune
+    keeps running, and a defect in any of them still fails the lane's policy.
+    What they do not cover is refused here, before any launch, as a failure:
+    another candidate, a KV-segment split (its partial-softmax combine), sinks
+    and LSE (extra buffers and epilogues the adapter does not supply), ragged
+    tail tiles, the bottom-right band, and paged or varlen layouts."""
     subject = DENSE_SUBJECTS[arch]
     if tuning_spec.path != "dense":
         raise AssertionError(f"dispatch returned path={tuning_spec.path!r}")
