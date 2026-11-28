@@ -10,7 +10,9 @@
 # the architectures of the changed logic YAMLs; a changed validator, known-bugs
 # list or this script, or an empty value, checks everything. Each changed logic
 # YAML is also compared with its base revision (git show HEAD^): a new file
-# must be dict format, and a solution that had a SolutionUID must keep one.
+# must be dict format, and a solution that had a SolutionUID must keep one. The
+# single-file checks (dict structure, LibraryType folder) report only the errors
+# that the change adds to an existing file, and every error in a new one.
 # If the current Python is missing deps (e.g. joblib), the script will re-run itself
 # with .venv/bin/python (Unix) or .venv\Scripts\python.exe (Windows) if that venv exists.
 # Requires: a full build first so rocisa exists under build/tensilelite/rocisa
