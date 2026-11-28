@@ -8,7 +8,7 @@
 //
 // The suite name starts with "stress" so the large-memory tier runs it. A normal
 // PR run does not: the allocation is 64 GiB + 2 MiB, and it is skipped unless the
-// GPU is gfx950 chip 0x75a0 or 0x75a3, the driver is amdgpu 6.19 or 7.1, and less
+// GPU is gfx950 chip 0x75a0 or 0x75a3, the driver is amdgpu 6.19 or newer, and less
 // than 2 GiB of device memory is in use.
 
 #include <gtest/gtest.h>
@@ -16,13 +16,18 @@
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/hipblaslt.h>
 
+#include "mxDataGen.hpp"
 #include "mx_tile128x4.hpp"
 
+#include <Tensile/hip/HipHardware.hpp>
+
 #include <algorithm>
+#include <cmath>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -45,15 +50,10 @@ namespace
 
     bool driverSelectsNearDie()
     {
-        int   major = -1, minor = -1;
-        FILE* f     = std::fopen("/sys/module/amdgpu/version", "r");
-        if(f)
-        {
-            if(std::fscanf(f, "%d.%d", &major, &minor) != 2)
-                major = minor = -1;
-            std::fclose(f);
-        }
-        return (major == 6 && minor == 19) || (major == 7 && minor == 1);
+        std::ifstream in("/sys/module/amdgpu/version");
+        std::string   version;
+        std::getline(in, version);
+        return TensileLite::hip::page24RuleHolds(version);
     }
 
     // Bytes of device memory in use, or -1 when the file cannot be read.
@@ -134,40 +134,71 @@ namespace
         std::vector<uint8_t> groupedScaleA;
         std::vector<uint8_t> planarA;
         std::vector<uint8_t> planarB;
+        // Dequantized values, index k + row * K.
+        std::vector<float> refA;
+        std::vector<float> refB;
     };
 
-    Images makeImages()
+    // trig_float, the same fill hipblaslt-bench uses. A constant byte pattern,
+    // and zeros in particular, skips real multiply work and reports a higher rate.
+    Images makeImages(hipDataType type)
     {
-        size_t const                 packed = static_cast<size_t>(kM) * kK * 6 / 8;
-        std::vector<uint8_t>         raw(packed, 0x5a);
-        std::vector<uint8_t>         scales(static_cast<size_t>(kM * kKBlocks), 127);
-        Images                       out;
-        out.nearA      = std::vector<uint8_t>();
-        out.nearB      = std::vector<uint8_t>();
-        // placeFp6Data writes the near-die image from K-contiguous rows.
+        size_t const         packed  = static_cast<size_t>(kM) * kK * 6 / 8;
+        size_t const         nScales = static_cast<size_t>(kM * kKBlocks);
+        std::vector<uint8_t> rawA(packed);
+        std::vector<uint8_t> rawB(packed);
+        std::vector<uint8_t> scalesA(nScales);
+        std::vector<uint8_t> scalesB(nScales);
+        Images               out;
+        out.refA = generateMXInput(type,
+                                   HIP_R_8F_UE8M0,
+                                   rawA.data(),
+                                   scalesA.data(),
+                                   kK,
+                                   kM,
+                                   kK,
+                                   true,
+                                   32,
+                                   1,
+                                   true,
+                                   MXScaleLayout::None,
+                                   "trig_float");
+        out.refB = generateMXInput(type,
+                                   HIP_R_8F_UE8M0,
+                                   rawB.data(),
+                                   scalesB.data(),
+                                   kK,
+                                   kN,
+                                   kK,
+                                   false,
+                                   32,
+                                   1,
+                                   false,
+                                   MXScaleLayout::None,
+                                   "trig_float");
         {
             std::vector<uint8_t> placed(mx_tile128x4::placedFp6Bytes(kM, false), 0);
-            mx_tile128x4::placeFp6Data(placed.data(), raw.data(), kM, kK, false);
+            mx_tile128x4::placeFp6Data(placed.data(), rawA.data(), kM, kK, false);
             out.nearA = std::move(placed);
         }
         {
             std::vector<uint8_t> placed(mx_tile128x4::placedFp6Bytes(kN, true), 0);
-            mx_tile128x4::placeFp6Data(placed.data(), raw.data(), kN, kK, true);
+            mx_tile128x4::placeFp6Data(placed.data(), rawB.data(), kN, kK, true);
             out.nearB = std::move(placed);
         }
-        out.nearScaleA   = mx_tile128x4::placeScales(scales, kKBlocks);
-        out.scaleB       = mx_tile128x4::shuffleScales(scales, kN, kKBlocks);
+        out.nearScaleA = mx_tile128x4::placeScales(scalesA, kKBlocks);
+        out.scaleB     = mx_tile128x4::shuffleScales(scalesB, kN, kKBlocks);
         out.groupedA.resize(packed);
         out.groupedB.resize(packed);
         mx_tile128x4::tileFp6Data(
-            out.groupedA.data(), raw.data(), kM, kK, mx_tile128x4::TileOrder::P48);
+            out.groupedA.data(), rawA.data(), kM, kK, mx_tile128x4::TileOrder::P48);
         mx_tile128x4::tileFp6Data(
-            out.groupedB.data(), raw.data(), kN, kK, mx_tile128x4::TileOrder::P48);
-        out.groupedScaleA = mx_tile128x4::shuffleScales(scales, kM, kKBlocks);
+            out.groupedB.data(), rawB.data(), kN, kK, mx_tile128x4::TileOrder::P48);
+        out.groupedScaleA = mx_tile128x4::shuffleScales(scalesA, kM, kKBlocks);
         out.planarA.resize(packed);
         mx_tile128x4::tileFp6Data(
-            out.planarA.data(), raw.data(), kM, kK, mx_tile128x4::TileOrder::P16);
-        out.planarB = raw;
+            out.planarA.data(), rawA.data(), kM, kK, mx_tile128x4::TileOrder::P16);
+        out.planarB = std::move(rawB);
         return out;
     }
 
@@ -301,6 +332,52 @@ namespace
             ADD_FAILURE() << out.name << " result copy failed";
         return out;
     }
+
+    float bf16ToFloat(uint16_t bits)
+    {
+        uint32_t wide  = static_cast<uint32_t>(bits) << 16;
+        float    value = 0.f;
+        std::memcpy(&value, &wide, sizeof(value));
+        return value;
+    }
+
+    int mismatchCount(std::vector<uint16_t> const& x, std::vector<uint16_t> const& y)
+    {
+        int count = 0;
+        for(size_t i = 0; i < x.size(); ++i)
+            count += x[i] != y[i];
+        return count;
+    }
+
+    // 56 points against a double dot of the dequantized inputs. Checking every
+    // output on the host is a full GEMM of this shape.
+    void checkSample(char const*                 typeName,
+                     char const*                 kernel,
+                     std::vector<float> const&   a,
+                     std::vector<float> const&   b,
+                     std::vector<uint16_t> const& d)
+    {
+        int64_t const rows[] = {0, 1, 16, 31, 128, 255, 1024, 4095};
+        int64_t const cols[] = {0, 1, 17, 64, 256, 1023, 4095};
+        double        maxRel = 0;
+        int           nans   = 0;
+        for(int64_t m : rows)
+            for(int64_t n : cols)
+            {
+                double dot = 0;
+                for(int64_t k = 0; k < kK; ++k)
+                    dot += static_cast<double>(a[static_cast<size_t>(k + m * kK)])
+                           * static_cast<double>(b[static_cast<size_t>(k + n * kK)]);
+                float const got = bf16ToFloat(d[static_cast<size_t>(m + n * kM)]);
+                if(!std::isfinite(got) || !std::isfinite(dot))
+                    ++nans;
+                double const denom = std::max(std::abs(dot), 1.0);
+                maxRel = std::max(maxRel, std::abs(static_cast<double>(got) - dot) / denom);
+            }
+        EXPECT_EQ(nans, 0) << typeName << " " << kernel;
+        // bf16 keeps about three decimal digits, so a long fp32 sum still fits.
+        EXPECT_LT(maxRel, 1e-2) << typeName << " " << kernel << " max relative error " << maxRel;
+    }
 } // namespace
 
 // One launch is enough: the check is that the contiguous allocation and an
@@ -321,7 +398,7 @@ TEST(stress_near_die_arena, SameResultAsOrdinaryAllocation)
     if(chip != 0x75a0 && chip != 0x75a3)
         GTEST_SKIP() << "The near-die kernels are registered for chips 0x75a0 and 0x75a3 only";
     if(!driverSelectsNearDie())
-        GTEST_SKIP() << "The near-die kernels are selected on amdgpu 6.19 and 7.1 only";
+        GTEST_SKIP() << "The near-die kernels are selected on amdgpu 6.19 and newer";
     int64_t const used = vramUsed(prop);
     if(used < 0)
         GTEST_SKIP() << "Could not read device memory in use";
@@ -340,7 +417,7 @@ TEST(stress_near_die_arena, SameResultAsOrdinaryAllocation)
     }
     arena.base = static_cast<char*>(arena.raw);
 
-    Images const images = makeImages();
+    Images const images = makeImages(HIP_R_6F_E2M3);
     char* const  slotA  = arena.slot(static_cast<int64_t>(images.nearA.size()));
     char* const  slotB  = arena.slot(static_cast<int64_t>(images.nearB.size()));
     char* const  slotSA = arena.slot(static_cast<int64_t>(images.nearScaleA.size()));
@@ -498,7 +575,7 @@ TEST(stress_near_die_arena, KernelTimes)
         GTEST_SKIP() << "The contiguous allocation is not aligned to 2 MiB";
     arena.base = static_cast<char*>(arena.raw);
 
-    Images const images = makeImages();
+    Images images = makeImages(HIP_R_6F_E2M3);
     char* const  slotA  = arena.slot(static_cast<int64_t>(images.nearA.size()));
     char* const  slotB  = arena.slot(static_cast<int64_t>(images.nearB.size()));
     char* const  slotSA = arena.slot(static_cast<int64_t>(images.nearScaleA.size()));
@@ -523,16 +600,18 @@ TEST(stress_near_die_arena, KernelTimes)
        || !dNear || !ws)
         GTEST_SKIP() << "An ordinary device allocation failed";
 
-    ASSERT_TRUE(upload(slotA, images.nearA.data(), images.nearA.size()));
-    ASSERT_TRUE(upload(slotB, images.nearB.data(), images.nearB.size()));
-    ASSERT_TRUE(upload(slotSA, images.nearScaleA.data(), images.nearScaleA.size()));
-    ASSERT_TRUE(upload(slotSB, images.scaleB.data(), images.scaleB.size()));
-    ASSERT_TRUE(upload(groupA, images.groupedA.data(), images.groupedA.size()));
-    ASSERT_TRUE(upload(groupB, images.groupedB.data(), images.groupedB.size()));
-    ASSERT_TRUE(upload(groupSA, images.groupedScaleA.data(), images.groupedScaleA.size()));
-    ASSERT_TRUE(upload(groupSB, images.scaleB.data(), images.scaleB.size()));
-    ASSERT_TRUE(upload(planA, images.planarA.data(), images.planarA.size()));
-    ASSERT_TRUE(upload(planB, images.planarB.data(), images.planarB.size()));
+    auto uploadAll = [&](Images const& img) {
+        ASSERT_TRUE(upload(slotA, img.nearA.data(), img.nearA.size()));
+        ASSERT_TRUE(upload(slotB, img.nearB.data(), img.nearB.size()));
+        ASSERT_TRUE(upload(slotSA, img.nearScaleA.data(), img.nearScaleA.size()));
+        ASSERT_TRUE(upload(slotSB, img.scaleB.data(), img.scaleB.size()));
+        ASSERT_TRUE(upload(groupA, img.groupedA.data(), img.groupedA.size()));
+        ASSERT_TRUE(upload(groupB, img.groupedB.data(), img.groupedB.size()));
+        ASSERT_TRUE(upload(groupSA, img.groupedScaleA.data(), img.groupedScaleA.size()));
+        ASSERT_TRUE(upload(groupSB, img.scaleB.data(), img.scaleB.size()));
+        ASSERT_TRUE(upload(planA, img.planarA.data(), img.planarA.size()));
+        ASSERT_TRUE(upload(planB, img.planarB.data(), img.planarB.size()));
+    };
 
     hipblasLtHandle_t handle = nullptr;
     hipStream_t       stream = nullptr;
@@ -561,7 +640,7 @@ TEST(stress_near_die_arena, KernelTimes)
         std::ifstream in("/sys/module/amdgpu/version");
         std::getline(in, driver);
     }
-    std::printf("amdgpu %s  chip 0x%x  cold %d  hot %d  no flush\n",
+    std::printf("amdgpu %s  chip 0x%x  cold %d  hot %d  trig_float  no flush\n",
                 driver.c_str(),
                 chip,
                 kTableCold,
@@ -611,6 +690,11 @@ TEST(stress_near_die_arena, KernelTimes)
 
     for(auto const type : {HIP_R_6F_E2M3, HIP_R_6F_E3M2})
     {
+        if(type != HIP_R_6F_E2M3)
+            images = makeImages(type);
+        uploadAll(images);
+        if(HasFailure())
+            return;
         char const* const typeName = type == HIP_R_6F_E2M3 ? "f6_r" : "bf6_r";
         Timed const       grouped  = timeGemm(handle,
                                        stream,
@@ -627,7 +711,7 @@ TEST(stress_near_die_arena, KernelTimes)
                                        type,
                                        kTableCold,
                                        kTableHot,
-                                       false);
+                                       true);
         Timed const       planar   = timeGemm(handle,
                                       stream,
                                       ws,
@@ -643,7 +727,7 @@ TEST(stress_near_die_arena, KernelTimes)
                                       type,
                                       kTableCold,
                                       kTableHot,
-                                      false);
+                                      true);
         Timed const       near     = timeGemm(handle,
                                     stream,
                                     ws,
@@ -659,11 +743,18 @@ TEST(stress_near_die_arena, KernelTimes)
                                     type,
                                     kTableCold,
                                     kTableHot,
-                                    false);
+                                    true);
         if(HasFailure())
             return;
         report(typeName, "k067cdb88d0", 105, "105", 1018, 1018, grouped);
         report(typeName, "kd2977a1791", 106, "column", 1018, 1018, planar);
         report(typeName, "ka941ce3864", 107, "108", 1019, 1018, near);
+        EXPECT_EQ(mismatchCount(grouped.d, planar.d), 0) << typeName;
+        EXPECT_EQ(mismatchCount(grouped.d, near.d), 0) << typeName;
+        ASSERT_EQ(images.refA.size(), static_cast<size_t>(kM * kK));
+        ASSERT_EQ(images.refB.size(), static_cast<size_t>(kN * kK));
+        checkSample(typeName, "48-byte", images.refA, images.refB, grouped.d);
+        checkSample(typeName, "16-byte", images.refA, images.refB, planar.d);
+        checkSample(typeName, "near-die", images.refA, images.refB, near.d);
     }
 }
