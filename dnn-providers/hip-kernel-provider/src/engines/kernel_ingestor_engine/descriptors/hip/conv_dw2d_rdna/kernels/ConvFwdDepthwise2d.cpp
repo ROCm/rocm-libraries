@@ -255,6 +255,14 @@ __device__ static __attribute__((noinline)) float
         return v;
     }
 }
+
+// ReLU, the common case, inline; the other activations through the call above. `act` is a
+// kernel argument, so the branch is uniform.
+__device__ static inline float apply_activation(float v, int act, float p0, float p1, float p2)
+{
+    return act == ACT_RELU ? (v <= p0 ? p2 * (v - p0) + p0 : (v >= p1 ? p1 : v))
+                           : activate(v, act, p0, p1, p2);
+}
 #endif
 
 extern "C" __global__ void __launch_bounds__(WORKGROUP_SIZE)
@@ -397,7 +405,7 @@ extern "C" __global__ void __launch_bounds__(WORKGROUP_SIZE)
                     acc[o] += bv;
 #endif
 #if HAS_ACT
-                    acc[o] = activate(acc[o], act, act_p0, act_p1, act_p2);
+                    acc[o] = apply_activation(acc[o], act, act_p0, act_p1, act_p2);
 #endif
                     from_float(acc[o], out[o * kColStep]);
                 }
@@ -541,7 +549,7 @@ extern "C" __global__ void __launch_bounds__(WORKGROUP_SIZE)
                     acc[o] += bv;
 #endif
 #if HAS_ACT
-                    acc[o] = activate(acc[o], act, act_p0, act_p1, act_p2);
+                    acc[o] = apply_activation(acc[o], act, act_p0, act_p1, act_p2);
 #endif
                     from_float(acc[o], out[o]);
                 }
