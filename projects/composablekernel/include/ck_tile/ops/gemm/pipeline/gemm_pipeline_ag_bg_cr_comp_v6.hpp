@@ -153,7 +153,10 @@ struct GemmPipelineAgBgCrCompV6 : public BaseGemmPipelineAgBgCrCompV6<Problem>
     static constexpr index_t GetSmemPackA() { return Policy::template GetSmemPackA<Problem>(); }
     static constexpr index_t GetSmemPackB() { return Policy::template GetSmemPackB<Problem>(); }
 
-    static constexpr index_t KRepeat = BlockGemm::WarpGemm::kKPerThread / GetSmemPackA();
+    // Each block_gemm call in the K loop consumes the whole KPerBlock LDS tile: the LDS gemm
+    // windows span KPerBlock (BlockGemm KSubTileNum = 1) and are never moved along K. Running
+    // it more than once per K tile adds the same tile to C again, so the K loop must run once.
+    static constexpr index_t KRepeat = 1;
 
     static constexpr bool kPadM = Problem::kPadM;
     static constexpr bool kPadN = Problem::kPadN;
