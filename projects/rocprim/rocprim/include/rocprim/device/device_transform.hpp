@@ -59,7 +59,8 @@ inline hipError_t transform_impl(InputIterator     input,
                                  const size_t      size,
                                  UnaryFunction     transform_op,
                                  const hipStream_t stream,
-                                 bool              debug_synchronous)
+                                 bool              debug_synchronous,
+                                 const target*     inherited_target = nullptr)
 {
     using input_type  = typename std::iterator_traits<InputIterator>::value_type;
     using result_type = typename ::rocprim::invoke_result<UnaryFunction, input_type>::type;
@@ -69,7 +70,24 @@ inline hipError_t transform_impl(InputIterator     input,
         return hipSuccess;
     }
 
-    const target current_target(stream);
+    const target current_target = inherited_target ? *inherited_target : target(stream);
+
+    // On gfx1150, small FP32 transforms benefit from more concurrent, smaller blocks.
+    if constexpr(IsPointer
+                 && std::is_same_v<Config, default_config> && std::is_same_v<input_type, float>
+                 && std::is_same_v<typename std::iterator_traits<OutputIterator>::value_type,
+                                   float>)
+    {
+        if(current_target.i == target_arch::gfx1150 && size >= 32768 && size <= 65536)
+            return transform_impl<IsPointer, transform_pointer_config<128, 2>, Selector>(
+                input,
+                output,
+                size,
+                transform_op,
+                stream,
+                debug_synchronous,
+                &current_target);
+    }
 
     const auto params = get_config<Selector>(Config{}, current_target);
 
