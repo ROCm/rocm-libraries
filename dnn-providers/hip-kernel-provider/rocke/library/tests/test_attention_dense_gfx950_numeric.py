@@ -648,7 +648,7 @@ class TestDenseNumeric:
                 out,
                 ref,
                 tol,
-                f"{persist_decode} B={B} S={S} Hq={hq} Hkv={hkv}: ",
+                f"{persist_decode} B={B} S={S} Hq={hq} Hkv={hkv}",
             )
 
         assert launchers[0] is not None, "no launcher cached; this test is blind"

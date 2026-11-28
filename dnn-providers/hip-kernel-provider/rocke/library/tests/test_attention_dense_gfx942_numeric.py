@@ -366,7 +366,7 @@ def test_dense_bottom_right_numeric_vs_fp32_sdpa(
         ref,
         tol,
         f"{dtype} D{d} GQA{hq}/{hkv} bottom-right sq={sq} sk={sk} "
-        f"{'persist' if persistent else 'default'} split={diag_split}: ",
+        f"{'persist' if persistent else 'default'} split={diag_split}",
     )
 
 
