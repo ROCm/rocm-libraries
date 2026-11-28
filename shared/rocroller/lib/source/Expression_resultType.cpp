@@ -1,6 +1,8 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include <array>
+#include <span>
 #include <variant>
 
 #include <rocRoller/DataTypes/DataTypes.hpp>
@@ -36,7 +38,7 @@ namespace rocRoller
         //     lhs.valueCount = 8, rhs.valueCount = 1: Valid, return 8
         //     lhs.valueCount = 4, rhs.valueCount = 4: Valid, return 4
         //     lhs.valueCount = 4, rhs.valueCount = 2: INVALID
-        inline size_t broadcastValueCount(std::vector<ResultType> operands)
+        inline size_t broadcastValueCount(std::span<ResultType const> operands)
         {
             size_t valueCount = 1;
             for(auto operand : operands)
@@ -96,7 +98,7 @@ namespace rocRoller
                     varType = VariableType::Promote(lhsVal.varType, rhsVal.varType);
                 }
 
-                auto valueCount = broadcastValueCount({lhsVal, rhsVal});
+                auto valueCount = broadcastValueCount(std::array{lhsVal, rhsVal});
 
                 return {regType, varType, valueCount};
             }
@@ -114,7 +116,7 @@ namespace rocRoller
                 auto varType = VariableType::Promote(lhsVal.varType, r1hsVal.varType);
                 varType      = VariableType::Promote(varType, r2hsVal.varType);
 
-                size_t valueCount = broadcastValueCount({lhsVal, r1hsVal, r2hsVal});
+                size_t valueCount = broadcastValueCount(std::array{lhsVal, r1hsVal, r2hsVal});
 
                 return {regType, varType, valueCount};
             }
@@ -127,7 +129,7 @@ namespace rocRoller
 
                 auto regType    = Register::PromoteType(lhsVal.regType, r1hsVal.regType);
                 auto varType    = VariableType::Promote(lhsVal.varType, r1hsVal.varType);
-                auto valueCount = broadcastValueCount({lhsVal, r1hsVal, r2hsVal});
+                auto valueCount = broadcastValueCount(std::array{lhsVal, r1hsVal, r2hsVal});
 
                 return {regType, varType, valueCount};
             }
@@ -140,7 +142,7 @@ namespace rocRoller
 
                 auto regType    = Register::PromoteType(lhsVal.regType, r2hsVal.regType);
                 auto varType    = VariableType::Promote(lhsVal.varType, r2hsVal.varType);
-                auto valueCount = broadcastValueCount({lhsVal, r1hsVal, r2hsVal});
+                auto valueCount = broadcastValueCount(std::array{lhsVal, r1hsVal, r2hsVal});
 
                 return {regType, varType, valueCount};
             }
@@ -224,7 +226,7 @@ namespace rocRoller
                 auto lhsVal = call(expr.lhs);
                 auto rhsVal = call(expr.rhs);
 
-                size_t valueCount = broadcastValueCount({lhsVal, rhsVal});
+                size_t valueCount = broadcastValueCount(std::array{lhsVal, rhsVal});
 
                 // Can't compare between two different types on the GPU.
                 AssertFatal(lhsVal.regType == Register::Type::Literal
@@ -282,7 +284,7 @@ namespace rocRoller
 
             ResultType logical(ResultType lhsVal, ResultType rhsVal)
             {
-                size_t valueCount = broadcastValueCount({lhsVal, rhsVal});
+                size_t valueCount = broadcastValueCount(std::array{lhsVal, rhsVal});
 
                 if(lhsVal.varType == DataType::Bool
                    && (rhsVal.varType == DataType::Bool32 || rhsVal.varType == DataType::Bool64))
@@ -361,7 +363,7 @@ namespace rocRoller
                             ShowValue(r2hsVal.varType));
                 auto varType = r2hsVal.varType;
 
-                size_t valueCount = broadcastValueCount({lhsVal, r1hsVal, r2hsVal});
+                size_t valueCount = broadcastValueCount(std::array{lhsVal, r1hsVal, r2hsVal});
 
                 if(lhsVal.varType == DataType::Bool32 || lhsVal.varType == DataType::Bool64
                    || lhsVal.regType == Register::Type::Vector
