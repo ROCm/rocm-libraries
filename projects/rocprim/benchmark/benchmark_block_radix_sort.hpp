@@ -100,7 +100,7 @@ void sort_pairs_kernel(const T* input, T* output)
     rocprim::block_load_direct_striped<BlockSize>(lid, input + block_offset, keys);
     for(unsigned int i = 0; i < ItemsPerThread; ++i)
     {
-        values[i] = keys[i] + T(1);
+        values[i] = common::add(keys[i], T(1));
     }
 
     ROCPRIM_NO_UNROLL
@@ -112,7 +112,7 @@ void sort_pairs_kernel(const T* input, T* output)
 
     for(unsigned int i = 0; i < ItemsPerThread; ++i)
     {
-        keys[i] += values[i];
+        keys[i] = common::add(keys[i], values[i]);
     }
     rocprim::block_store_direct_striped<BlockSize>(lid, output + block_offset, keys);
 }
@@ -173,6 +173,32 @@ struct block_radix_sort_benchmark : public primbench::benchmark_interface
 
         state.set_items(items * Trials);
         state.add_reads<T>(items * Trials);
+
+        state.test(
+            [&]
+            {
+                if(items == 0)
+                {
+                    return;
+                }
+                std::vector<T> sorted(input.begin(), input.begin() + items_per_block);
+                std::stable_sort(sorted.begin(), sorted.end(), common::less<T>);
+                std::vector<T> expected(items_per_block);
+                for(size_t i = 0; i < items_per_block; ++i)
+                {
+                    const auto& key   = sorted[i];
+                    const auto  index = i / ItemsPerThread + (i % ItemsPerThread) * BlockSize;
+                    if constexpr(BenchmarkKind == benchmark_kinds::sort_pairs)
+                    {
+                        expected[index] = common::add(key, common::add(key, T(1)));
+                    }
+                    else
+                    {
+                        expected[index] = key;
+                    }
+                }
+                common::check_output(d_output.get(), expected);
+            });
 
         state.run(
             [&]

@@ -63,11 +63,16 @@ void block_run_length_decode_kernel(const ItemT*   d_run_items,
     rocprim::block_load_direct_blocked(global_thread_idx, d_run_items, run_items);
     rocprim::block_load_direct_blocked(global_thread_idx, d_run_offsets, run_offsets);
 
+    const OffsetT block_offset = d_run_offsets[hipBlockIdx_x * BlockSize * RunsPerThread];
+    for(auto& offset : run_offsets)
+    {
+        offset -= block_offset;
+    }
+
     BlockRunLengthDecodeT block_run_length_decode(run_items, run_offsets);
 
     const OffsetT total_decoded_size
-        = d_run_offsets[(hipBlockIdx_x + 1) * BlockSize * RunsPerThread]
-          - d_run_offsets[hipBlockIdx_x * BlockSize * RunsPerThread];
+        = d_run_offsets[(hipBlockIdx_x + 1) * BlockSize * RunsPerThread] - block_offset;
 
 #pragma nounroll
     for(unsigned i = 0; i < Trials; ++i)
@@ -80,9 +85,15 @@ void block_run_length_decode_kernel(const ItemT*   d_run_items,
 
             if(enable_store)
             {
-                rocprim::block_store_direct_blocked(global_thread_idx,
-                                                    d_decoded_items + decoded_window_offset,
-                                                    decoded_items);
+                for(unsigned int j = 0; j < DecodedItemsPerThread; ++j)
+                {
+                    const OffsetT offset
+                        = decoded_window_offset + hipThreadIdx_x * DecodedItemsPerThread + j;
+                    if(offset < total_decoded_size)
+                    {
+                        d_decoded_items[block_offset + offset] = decoded_items[j];
+                    }
+                }
             }
 
             decoded_window_offset += BlockSize * DecodedItemsPerThread;
@@ -125,7 +136,7 @@ struct block_run_length_decode_benchmark : public primbench::benchmark_interface
 
         size_t         N               = bytes / sizeof(ItemT);
         constexpr auto runs_per_block  = BlockSize * RunsPerThread;
-        const auto     target_num_runs = 2 * N / (MinRunLength + MaxRunLength);
+        const auto     target_num_runs = std::max<size_t>(1, 2 * N / (MinRunLength + MaxRunLength));
         const auto     num_runs
             = runs_per_block * ((target_num_runs + runs_per_block - 1) / runs_per_block);
 
@@ -158,6 +169,32 @@ struct block_run_length_decode_benchmark : public primbench::benchmark_interface
 
         state.set_items(output_items * Trials);
         state.add_writes<ItemT>(output_items * Trials);
+
+        state.test(
+            [&]
+            {
+                const auto blocks = std::min<size_t>(2, num_runs / runs_per_block);
+                block_run_length_decode_kernel<ItemT,
+                                               OffsetT,
+                                               BlockSize,
+                                               RunsPerThread,
+                                               DecodedItemsPerThread,
+                                               1>
+                    <<<dim3(blocks), dim3(BlockSize), 0, stream>>>(d_run_items.get(),
+                                                                   d_run_offsets.get(),
+                                                                   d_output.get(),
+                                                                   true);
+                HIP_CHECK(hipStreamSynchronize(stream));
+                std::vector<ItemT> expected;
+                expected.reserve(run_offsets[blocks * runs_per_block]);
+                for(size_t run = 0; run < blocks * runs_per_block; ++run)
+                {
+                    expected.insert(expected.end(),
+                                    run_offsets[run + 1] - run_offsets[run],
+                                    run_items[run]);
+                }
+                common::check_output(d_output.get(), expected);
+            });
 
         state.run(
             [&]

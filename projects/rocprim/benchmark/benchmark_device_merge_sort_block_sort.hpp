@@ -113,9 +113,10 @@ private:
         common::device_ptr<value_type> d_values_input_tmp;
         common::device_ptr<value_type> d_values_output_tmp;
 
+        std::vector<value_type> values_input;
         if constexpr(!std::is_same<val, rocprim::empty_type>::value)
         {
-            std::vector<value_type> values_input(items);
+            values_input.resize(items);
             std::iota(values_input.begin(), values_input.end(), 0);
 
             d_values_input_tmp  = common::device_ptr<value_type>(values_input);
@@ -138,6 +139,22 @@ private:
         {
             state.add_reads<value_type>(items);
         }
+
+        state.test(
+            [&]
+            {
+                if(items == 0)
+                {
+                    return;
+                }
+                const auto count = std::min<size_t>(items, items_per_block);
+                common::check_sorted(keys_input.data(),
+                                     count,
+                                     d_keys_output.get(),
+                                     count,
+                                     values_input.data(),
+                                     d_values_output);
+            });
 
         state.run(
             [&]

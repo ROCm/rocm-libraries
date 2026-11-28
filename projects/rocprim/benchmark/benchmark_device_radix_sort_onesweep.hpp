@@ -189,6 +189,18 @@ private:
             state.add_reads<value_type>(items);
         }
 
+        state.test(
+            [&]
+            {
+                const auto count = std::min<size_t>(items, 128);
+                common::check_sorted(keys_input.data(),
+                                     items,
+                                     d_keys_output.get(),
+                                     count,
+                                     values_input.data(),
+                                     d_values_output_ptr);
+            });
+
         state.run(
             [&]
             {

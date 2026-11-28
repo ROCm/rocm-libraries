@@ -115,6 +115,7 @@ private:
             conditional_t<std::is_same_v<val, rocprim::empty_type>, rocprim::empty_type*, Value*>;
 
         common::device_ptr<Value> d_values_input;
+        std::vector<Value>        values_input;
 
         value_ptr_type values_ptr;
         common::device_ptr<Value> d_values;
@@ -122,7 +123,7 @@ private:
         {
             using value_type = Value;
 
-            std::vector<value_type> values_input(items);
+            values_input.resize(items);
             std::iota(values_input.begin(), values_input.end(), 0);
 
             d_values_input = common::device_ptr<Value>(values_input);
@@ -138,30 +139,15 @@ private:
 
         // Merge_sort_block_merge algorithm expects partially sorted input:
         unsigned int sorted_block_size;
-        if constexpr(std::is_same_v<val, rocprim::empty_type>)
-        {
-            HIP_CHECK(rocprim::detail::merge_sort_block_sort<block_sort_config>(d_keys_input.get(),
-                                                                                d_keys_input.get(),
-                                                                                values_ptr,
-                                                                                values_ptr,
-                                                                                items,
-                                                                                sorted_block_size,
-                                                                                lesser_op,
-                                                                                stream,
-                                                                                false));
-        }
-        {
-            HIP_CHECK(
-                rocprim::detail::merge_sort_block_sort<block_sort_config>(d_keys_input.get(),
-                                                                          d_keys_input.get(),
-                                                                          d_values_input.get(),
-                                                                          d_values_input.get(),
-                                                                          items,
-                                                                          sorted_block_size,
-                                                                          lesser_op,
-                                                                          stream,
-                                                                          false));
-        }
+        HIP_CHECK(rocprim::detail::merge_sort_block_sort<block_sort_config>(d_keys_input.get(),
+                                                                            d_keys_input.get(),
+                                                                            d_values_input.get(),
+                                                                            d_values_input.get(),
+                                                                            items,
+                                                                            sorted_block_size,
+                                                                            lesser_op,
+                                                                            stream,
+                                                                            false));
 
         size_t temporary_storage_bytes = 0;
         HIP_CHECK(rocprim::detail::merge_sort_block_merge<Config>(nullptr,
@@ -175,6 +161,24 @@ private:
                                                                   false));
 
         common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
+
+        const auto reset = [&]
+        {
+            HIP_CHECK(hipMemcpyAsync(d_keys.get(),
+                                     d_keys_input.get(),
+                                     items * sizeof(key_type),
+                                     hipMemcpyDeviceToDevice,
+                                     stream));
+            if constexpr(!std::is_same_v<val, rocprim::empty_type>)
+            {
+                HIP_CHECK(hipMemcpyAsync(values_ptr,
+                                         d_values_input.get(),
+                                         items * sizeof(Value),
+                                         hipMemcpyDeviceToDevice,
+                                         stream));
+            }
+        };
+        reset();
 
         hipError_t err = rocprim::detail::merge_sort_block_merge<Config>(d_temporary_storage.get(),
                                                                          temporary_storage_bytes,
@@ -197,26 +201,22 @@ private:
             exit(err);
         }
 
-        state.run_before_every_iteration(
-            [&]
-            {
-                HIP_CHECK(hipMemcpyAsync(d_keys.get(),
-                                         d_keys_input.get(),
-                                         items * sizeof(key_type),
-                                         hipMemcpyDeviceToDevice,
-                                         stream));
-                if constexpr(!std::is_same_v<val, rocprim::empty_type>)
-                {
-                    HIP_CHECK(hipMemcpyAsync(values_ptr,
-                                             d_values_input.get(),
-                                             items * sizeof(Value),
-                                             hipMemcpyDeviceToDevice,
-                                             stream));
-                }
-            });
+        state.run_before_every_iteration(reset);
 
         state.set_items(items);
         state.add_reads<key_type>(items);
+
+        state.test(
+            [&]
+            {
+                const auto count = std::min<size_t>(items, 128);
+                common::check_sorted(keys_input.data(),
+                                     items,
+                                     d_keys.get(),
+                                     count,
+                                     values_input.data(),
+                                     values_ptr);
+            });
 
         state.run(
             [&]

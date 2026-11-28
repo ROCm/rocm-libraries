@@ -75,7 +75,7 @@ void sort_kernel(const KeyType* input, KeyType* output)
         ROCPRIM_UNROLL
         for(unsigned int item = 0; item < ItemsPerThread; ++item)
         {
-            keys[item] = keys[item] + static_cast<KeyType>(values[item]);
+            keys[item] = common::add(keys[item], static_cast<KeyType>(values[item]));
         }
     }
     else
@@ -201,6 +201,61 @@ struct block_sort_benchmark : public primbench::benchmark_interface
 
         state.set_items(items);
         state.add_reads<KeyType>(items);
+
+        state.test(
+            [&]
+            {
+                if(items == 0)
+                {
+                    return;
+                }
+                std::vector<size_t> indices(items_per_block);
+                std::iota(indices.begin(), indices.end(), 0);
+                const auto key = [&](size_t i) -> const KeyType&
+                { return input[i / ItemsPerThread + i % ItemsPerThread * BlockSize]; };
+                std::stable_sort(indices.begin(),
+                                 indices.end(),
+                                 [&](size_t lhs, size_t rhs)
+                                 { return common::less(key(lhs), key(rhs)); });
+                std::vector<KeyType> expected(items_per_block);
+                for(size_t i = 0; i < items_per_block; ++i)
+                {
+                    if constexpr(with_values && !stable)
+                    {
+                        expected[i]
+                            = common::add(key(indices[i]),
+                                          static_cast<KeyType>(static_cast<ValueType>(indices[i])));
+                    }
+                    else
+                    {
+                        expected[i] = key(indices[i]);
+                    }
+                }
+                auto output = common::read_output(d_output.get(), items_per_block);
+                if constexpr(with_values && !stable)
+                {
+                    for(size_t first = 0, last; first < items_per_block; first = last)
+                    {
+                        last = first + 1;
+                        while(last < items_per_block
+                              && common::equal(key(indices[first]), key(indices[last])))
+                        {
+                            ++last;
+                        }
+                        std::sort(expected.begin() + first,
+                                  expected.begin() + last,
+                                  common::less<KeyType>);
+                        std::sort(output.begin() + first,
+                                  output.begin() + last,
+                                  common::less<KeyType>);
+                    }
+                }
+                PRIMBENCH_ASSERT(std::equal(output.begin(),
+                                            output.end(),
+                                            expected.begin(),
+                                            common::equal<KeyType>),
+                                 true);
+            });
 
         state.run(
             [&] { dispatch_block_sort(stable_tag, items, stream, d_input.get(), d_output.get()); });

@@ -192,6 +192,43 @@ private:
         state.set_items(items);
         state.add_reads<key_type>(items);
 
+        state.test(
+            [&]
+            {
+                const auto              count = std::min<size_t>(items, 4096);
+                std::vector<key_type>   expected_keys;
+                std::vector<value_type> expected_values;
+                size_t                  first  = 0;
+                size_t                  second = 0;
+                for(size_t i = 0; i < count; ++i)
+                {
+                    if(second == size2
+                       || (first != size1 && !compare_op(keys_input2[second], keys_input1[first])))
+                    {
+                        expected_keys.push_back(keys_input1[first]);
+                        if constexpr(!std::is_same_v<val, rocprim::empty_type>)
+                        {
+                            expected_values.push_back(values_input1[first]);
+                        }
+                        ++first;
+                    }
+                    else
+                    {
+                        expected_keys.push_back(keys_input2[second]);
+                        if constexpr(!std::is_same_v<val, rocprim::empty_type>)
+                        {
+                            expected_values.push_back(values_input2[second]);
+                        }
+                        ++second;
+                    }
+                }
+                common::check_output(d_keys_output.get(), expected_keys);
+                if constexpr(!std::is_same_v<val, rocprim::empty_type>)
+                {
+                    common::check_output(d_values_output.get(), expected_values);
+                }
+            });
+
         if constexpr(!std::is_same<val, ::rocprim::empty_type>::value)
         {
             state.add_reads<value_type>(items);

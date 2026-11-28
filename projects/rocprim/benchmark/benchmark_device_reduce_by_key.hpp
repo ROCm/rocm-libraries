@@ -141,7 +141,36 @@ struct device_reduce_by_key_benchmark : public primbench::benchmark_interface
         rocprim::plus<ValueType>   reduce_op;
         rocprim::equal_to<KeyType> key_compare_op;
 
-        const auto dispatch = [&](void* d_temp_storage, size_t& temp_storage_size_bytes)
+        const auto check = [&](const std::vector<KeyType>& keys)
+        {
+            std::vector<KeyType>   expected_keys;
+            std::vector<ValueType> expected_values;
+            unsigned int           count = 0;
+            common::for_each_run(keys,
+                                 [&](size_t first, size_t last)
+                                 {
+                                     if(count < 4096)
+                                     {
+                                         expected_keys.push_back(keys[first]);
+                                         expected_values.push_back(
+                                             common::reduce(value_input.begin() + first,
+                                                            value_input.begin() + last,
+                                                            ValueType{},
+                                                            reduce_op));
+                                     }
+                                     ++count;
+                                 });
+            PRIMBENCH_ASSERT(d_unique_count_output.load_value_at(0), count);
+            common::check_output(d_unique_output.get(), expected_keys);
+            common::check_prefix(
+                d_aggregates_output.get(),
+                expected_values.size(),
+                [&](size_t i) { return expected_values[i]; },
+                common::near<ValueType>);
+        };
+
+        const auto dispatch
+            = [&](void* d_temp_storage, size_t& temp_storage_size_bytes, bool verify = false)
         {
             const auto dispatch_input = [&](KeyType* d_key_input)
             {
@@ -183,6 +212,11 @@ struct device_reduce_by_key_benchmark : public primbench::benchmark_interface
             for(int i = 0; i < num_input_arrays; ++i)
             {
                 dispatch_input(d_key_inputs[i].get());
+                if(verify)
+                {
+                    HIP_CHECK(hipStreamSynchronize(stream));
+                    check(key_inputs[i]);
+                }
             }
         };
 
@@ -194,6 +228,19 @@ struct device_reduce_by_key_benchmark : public primbench::benchmark_interface
         state.set_items(items);
         state.add_reads<KeyType>(items);
         state.add_reads<ValueType>(items);
+
+        state.test(
+            [&]
+            {
+                if(is_tuning)
+                {
+                    dispatch(d_temp_storage.get(), temp_storage_size_bytes, true);
+                }
+                else
+                {
+                    check(key_inputs[0]);
+                }
+            });
 
         state.run([&] { dispatch(d_temp_storage.get(), temp_storage_size_bytes); });
     }

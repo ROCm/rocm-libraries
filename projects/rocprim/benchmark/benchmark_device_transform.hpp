@@ -124,7 +124,7 @@ struct device_transform_benchmark : public primbench::benchmark_interface
         if constexpr(IsBinary)
         {
             const std::vector<T> input2
-                = get_random_data<T>(items, random_range.first, random_range.second, seed);
+                = get_random_data<T>(items, random_range.first, random_range.second, seed + 1);
             common::device_ptr<T> d_input2(input2);
 
             // If it is not a unary operator, it can not make use of the pointer optimization.
@@ -141,6 +141,17 @@ struct device_transform_benchmark : public primbench::benchmark_interface
 
             state.set_items(items);
             state.add_reads<T>(2 * items);
+
+            state.test(
+                [&]
+                {
+                    const auto count = std::min<size_t>(items, 4096);
+                    common::check_prefix(
+                        d_output.get(),
+                        count,
+                        [&](size_t i) { return common::add(input[i], input2[i]); },
+                        common::equal<T>);
+                });
 
             state.run([&] { HIP_CHECK(launch()); });
         }
@@ -161,6 +172,17 @@ struct device_transform_benchmark : public primbench::benchmark_interface
 
             state.set_items(items);
             state.add_reads<T>(items);
+
+            state.test(
+                [&]
+                {
+                    const auto count = std::min<size_t>(items, 4096);
+                    common::check_prefix(
+                        d_output.get(),
+                        count,
+                        [&](size_t i) { return common::add(input[i], T(5)); },
+                        common::equal<T>);
+                });
 
             state.run([&] { HIP_CHECK(launch()); });
         }

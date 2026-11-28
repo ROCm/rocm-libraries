@@ -148,6 +148,62 @@ struct block_radix_rank_benchmark : public primbench::benchmark_interface
         state.set_items(items * Trials);
         state.add_reads<T>(items * Trials);
 
+        state.test(
+            [&]
+            {
+                if(items == 0)
+                {
+                    return;
+                }
+                using codec
+                    = decltype(rocprim::traits::get<T>().template radix_key_codec<Descending>());
+                constexpr unsigned int    end_bit   = sizeof(T) * 8;
+                constexpr unsigned int    begin_bit = (end_bit - 1) / RadixBits * RadixBits;
+                std::vector<unsigned int> indices;
+                indices.reserve(items_per_block);
+                if constexpr(Algorithm == rocprim::block_radix_rank_algorithm::match)
+                {
+                    unsigned int warp_size;
+                    int          device;
+                    HIP_CHECK(hipGetDevice(&device));
+                    HIP_CHECK(rocprim::host_warp_size(device, warp_size));
+                    for(unsigned int warp = 0; warp < BlockSize; warp += warp_size)
+                    {
+                        const auto end = std::min<unsigned int>(warp + warp_size, BlockSize);
+                        for(unsigned int item = 0; item < ItemsPerThread; ++item)
+                        {
+                            for(unsigned int thread = warp; thread < end; ++thread)
+                            {
+                                indices.push_back(thread + item * BlockSize);
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    for(unsigned int i = 0; i < items_per_block; ++i)
+                    {
+                        indices.push_back(i / ItemsPerThread + i % ItemsPerThread * BlockSize);
+                    }
+                }
+                const auto digit = [&](unsigned int i)
+                {
+                    return codec::extract_digit(codec::encode(input[i]),
+                                                begin_bit,
+                                                end_bit - begin_bit);
+                };
+                std::stable_sort(indices.begin(),
+                                 indices.end(),
+                                 [&](unsigned int lhs, unsigned int rhs)
+                                 { return digit(lhs) < digit(rhs); });
+                std::vector<unsigned int> expected(items_per_block);
+                for(unsigned int i = 0; i < items_per_block; ++i)
+                {
+                    expected[indices[i]] = i;
+                }
+                common::check_output(d_output.get(), expected);
+            });
+
         state.run(
             [&]
             {

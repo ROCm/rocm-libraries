@@ -78,8 +78,8 @@ private:
                                         common::generate_limits<key_type>::max(),
                                         seed);
         std::vector<value_type> values_input;
-        value_type*             d_values_input;
-        value_type*             d_values_output;
+        value_type*             d_values_input  = nullptr;
+        value_type*             d_values_output = nullptr;
 
         if constexpr(!std::is_same<val, rocprim::empty_type>::value)
         {
@@ -152,6 +152,18 @@ private:
 
         state.set_items(items);
         state.add_reads<key_type>(items);
+
+        state.test(
+            [&]
+            {
+                const auto count = std::min<size_t>(items, 128);
+                common::check_sorted(keys_input.data(),
+                                     items,
+                                     d_keys_output,
+                                     count,
+                                     values_input.data(),
+                                     d_values_output);
+            });
 
         if constexpr(!std::is_same<val, rocprim::empty_type>::value)
         {

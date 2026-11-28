@@ -172,6 +172,52 @@ struct warp_exchange_benchmark : public primbench::benchmark_interface
         state.set_items(items);
         state.add_reads<T>(trials * items);
 
+        state.test(
+            [&]
+            {
+                int device;
+                HIP_CHECK(hipGetDevice(&device));
+                if(items == 0 || !is_warp_size_supported(LogicalWarpSize, device))
+                {
+                    return;
+                }
+                warp_exchange_kernel<BlockSize, ItemsPerThread, LogicalWarpSize, Op>
+                    <<<dim3(1), dim3(BlockSize), 0, stream>>>(d_output.get(), 1);
+                HIP_CHECK(hipStreamSynchronize(stream));
+                constexpr bool striped_to_blocked
+                    = std::is_same_v<Op, common::StripedToBlockedOp>
+                      || std::is_same_v<Op, common::StripedToBlockedShuffleOp>;
+                constexpr auto items_per_warp = LogicalWarpSize * ItemsPerThread;
+                std::vector<T> expected(items_per_block);
+                for(size_t i = 0; i < items_per_block; ++i)
+                {
+                    const auto base = i / items_per_warp * items_per_warp;
+                    const auto lane = i % items_per_warp / ItemsPerThread;
+                    const auto item = i % ItemsPerThread;
+                    if constexpr(striped_to_blocked)
+                    {
+                        const auto blocked = lane * ItemsPerThread + item;
+                        expected[i]        = T(base + (blocked % LogicalWarpSize) * ItemsPerThread
+                                        + blocked / LogicalWarpSize);
+                    }
+                    else
+                    {
+                        const auto striped     = item * LogicalWarpSize + lane;
+                        auto       source_lane = striped / ItemsPerThread;
+                        if constexpr(std::is_same_v<Op, ScatterToStripedOp>)
+                        {
+                            if(striped % ItemsPerThread % 2 == 0)
+                            {
+                                source_lane = LogicalWarpSize - 1 - source_lane;
+                            }
+                        }
+                        expected[i]
+                            = T(base + source_lane * ItemsPerThread + striped % ItemsPerThread);
+                    }
+                }
+                common::check_output(d_output.get(), expected);
+            });
+
         state.run(
             [&]
             {

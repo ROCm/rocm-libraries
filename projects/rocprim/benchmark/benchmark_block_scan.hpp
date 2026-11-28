@@ -191,6 +191,25 @@ struct block_scan_benchmark : public primbench::benchmark_interface
         state.set_items(items * Trials);
         state.add_reads<T>(items * Trials);
 
+        state.test(
+            [&]
+            {
+                if(items == 0)
+                {
+                    return;
+                }
+                kernel<Benchmark, T, BlockSize, ItemsPerThread, 1>
+                    <<<dim3(1), dim3(BlockSize), 0, stream>>>(d_input.get(), d_output.get());
+                HIP_CHECK(hipStreamSynchronize(stream));
+                constexpr bool inclusive = std::is_same_v<Benchmark, inclusive_scan_uws_t>
+                                           || std::is_same_v<Benchmark, inclusive_scan_rts_t>;
+                common::check_prefix(
+                    d_output.get(),
+                    items_per_block,
+                    [](size_t i) { return T(i + (inclusive ? 1 : 100)); },
+                    common::near<T>);
+            });
+
         state.run(
             [&]
             {

@@ -139,6 +139,19 @@ struct block_reduce_benchmark : public primbench::benchmark_interface
         state.set_items(items * Trials);
         state.add_reads<T>(items * Trials);
 
+        state.test(
+            [&]
+            {
+                if(items == 0)
+                {
+                    return;
+                }
+                kernel<Method, T, BlockSize, ItemsPerThread, 1>
+                    <<<dim3(1), dim3(BlockSize), 0, stream>>>(d_input.get(), d_output.get());
+                HIP_CHECK(hipStreamSynchronize(stream));
+                common::check_output(d_output.get(), std::vector<T>{T(items_per_block)});
+            });
+
         state.run(
             [&]
             {

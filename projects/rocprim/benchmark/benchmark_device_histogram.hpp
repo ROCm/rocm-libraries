@@ -38,6 +38,54 @@
 #include <type_traits>
 #include <vector>
 
+template<typename T, typename Bin>
+void check_histogram(const std::vector<T>& input,
+                     size_t                bins,
+                     unsigned int          channels,
+                     unsigned int          channel,
+                     const unsigned int*   d_histogram,
+                     Bin                   get_bin)
+{
+    std::vector<unsigned int> expected(bins, 0);
+    for(size_t i = channel; i < input.size(); i += channels)
+    {
+        const auto bin = get_bin(input[i]);
+        if(bin < bins)
+        {
+            ++expected[bin];
+        }
+    }
+    common::check_output(d_histogram, expected);
+}
+
+template<typename Level>
+size_t even_histogram_bin(Level sample, Level lower, Level upper, size_t bins)
+{
+    if constexpr(std::is_same_v<Level, rocprim::half>)
+    {
+        return even_histogram_bin(common::half_to_native(sample),
+                                  common::half_to_native(lower),
+                                  common::half_to_native(upper),
+                                  bins);
+    }
+    else
+    {
+        if(sample < lower || !(sample < upper))
+        {
+            return bins;
+        }
+        if constexpr(rocprim::is_integral<Level>::value)
+        {
+            return static_cast<size_t>((sample - lower) / ((upper - lower) / bins));
+        }
+        else
+        {
+            return static_cast<size_t>((sample - lower)
+                                       * (static_cast<Level>(bins) / (upper - lower)));
+        }
+    }
+}
+
 template<typename T>
 std::vector<T> generate(size_t items, int entropy_reduction, int lower_level, int upper_level)
 {
@@ -164,6 +212,23 @@ struct device_histogram_even_benchmark : public primbench::benchmark_interface
         state.set_items(items);
         state.add_reads<T>(items);
 
+        state.test(
+            [&]
+            {
+                check_histogram(input,
+                                m_bins,
+                                1,
+                                0,
+                                d_histogram.get(),
+                                [&](const T& value)
+                                {
+                                    return even_histogram_bin(static_cast<level_type>(value),
+                                                              lower_level,
+                                                              upper_level,
+                                                              m_bins);
+                                });
+            });
+
         state.run(
             [&]
             {
@@ -262,6 +327,26 @@ struct device_multi_histogram_even_benchmark : public primbench::benchmark_inter
         state.set_items(items);
         state.add_reads<T>(items * Channels);
 
+        state.test(
+            [&]
+            {
+                for(unsigned int channel = 0; channel < ActiveChannels; ++channel)
+                {
+                    check_histogram(input,
+                                    m_bins,
+                                    Channels,
+                                    channel,
+                                    d_histogram[channel],
+                                    [&](const T& value)
+                                    {
+                                        return even_histogram_bin(static_cast<level_type>(value),
+                                                                  lower_level[channel],
+                                                                  upper_level[channel],
+                                                                  m_bins);
+                                    });
+                }
+            });
+
         state.run(
             [&]
             {
@@ -349,6 +434,26 @@ struct device_histogram_range_benchmark : public primbench::benchmark_interface
 
         state.set_items(items);
         state.add_reads<T>(items);
+
+        state.test(
+            [&]
+            {
+                check_histogram(input,
+                                m_bins,
+                                1,
+                                0,
+                                d_histogram.get(),
+                                [&](const T& value) -> size_t
+                                {
+                                    const auto& boundaries = levels;
+                                    const auto  it         = std::upper_bound(boundaries.begin(),
+                                                                     boundaries.end(),
+                                                                     static_cast<level_type>(value),
+                                                                     common::less<level_type>);
+                                    return it == boundaries.begin() ? m_bins
+                                                                    : it - boundaries.begin() - 1;
+                                });
+            });
 
         state.run(
             [&]
@@ -452,6 +557,29 @@ struct device_multi_histogram_range_benchmark : public primbench::benchmark_inte
 
         state.set_items(items);
         state.add_reads<T>(items * Channels);
+
+        state.test(
+            [&]
+            {
+                for(unsigned int channel = 0; channel < ActiveChannels; ++channel)
+                {
+                    check_histogram(
+                        input,
+                        m_bins,
+                        Channels,
+                        channel,
+                        d_histogram[channel],
+                        [&](const T& value) -> size_t
+                        {
+                            const auto& boundaries = levels[channel];
+                            const auto  it         = std::upper_bound(boundaries.begin(),
+                                                             boundaries.end(),
+                                                             static_cast<level_type>(value),
+                                                             common::less<level_type>);
+                            return it == boundaries.begin() ? m_bins : it - boundaries.begin() - 1;
+                        });
+                }
+            });
 
         state.run(
             [&]

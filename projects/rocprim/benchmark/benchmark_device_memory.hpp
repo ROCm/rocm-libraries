@@ -96,11 +96,22 @@ struct operation<custom_operation, T, ItemsPerThread, BlockSize>
         ROCPRIM_UNROLL
         for(unsigned int i = 0; i < ItemsPerThread; ++i)
         {
-            input[i] = input[i] + 666;
+            input[i] = common::add(input[i], T(666));
             ROCPRIM_UNROLL
             for(unsigned int j = 0; j < repeats; ++j)
             {
-                input[i] = input[i] * (input[j % ItemsPerThread]);
+                const auto rhs = input[j % ItemsPerThread];
+                if constexpr(rocprim::is_integral<T>::value)
+                {
+                    using unsigned_type = typename decltype(rocprim::traits::get<T>()
+                                                                .radix_key_codec())::bit_key_type;
+                    input[i]            = static_cast<T>(static_cast<unsigned_type>(input[i])
+                                              * static_cast<unsigned_type>(rhs));
+                }
+                else
+                {
+                    input[i] *= rhs;
+                }
             }
         }
     }
@@ -216,7 +227,7 @@ template<typename T,
          typename CustomOp = typename operation<no_operation, T, ItemsPerThread>::value_type,
          typename std::enable_if<MemOp == block_primitive_direct, int>::type = 0>
 __global__ __launch_bounds__(BlockSize)
-void operation_kernel(T* input, T* output, CustomOp op)
+void operation_kernel(T* input, T* output, CustomOp op, T* atomic_output = nullptr)
 {
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
 
@@ -239,7 +250,7 @@ void operation_kernel(T* input, T* output, CustomOp op)
     T items[ItemsPerThread];
     load.load(input + offset, items, storage.load);
     __syncthreads();
-    op(items, &storage, sizeof(storage), output);
+    op(items, &storage, sizeof(storage), atomic_output == nullptr ? output : atomic_output);
     store.store(output + offset, items, storage.store);
 }
 
@@ -251,7 +262,7 @@ template<typename T,
          typename CustomOp = typename operation<no_operation, T, ItemsPerThread>::value_type,
          typename std::enable_if<MemOp == vectorized, int>::type = 0>
 __global__ __launch_bounds__(BlockSize)
-void operation_kernel(T* input, T* output, CustomOp op)
+void operation_kernel(T* input, T* output, CustomOp op, T* atomic_output = nullptr)
 {
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
     int                    offset          = blockIdx.x * items_per_block;
@@ -262,7 +273,7 @@ void operation_kernel(T* input, T* output, CustomOp op)
                                                                         items);
     __syncthreads();
 
-    op(items, nullptr, 0, output);
+    op(items, nullptr, 0, atomic_output == nullptr ? output : atomic_output);
 
     rocprim::block_store_direct_blocked_vectorized<T, T, ItemsPerThread>(threadIdx.x,
                                                                          output + offset,
@@ -277,13 +288,13 @@ template<typename T,
          typename CustomOp = typename operation<no_operation, T, ItemsPerThread>::value_type,
          typename std::enable_if<MemOp == striped, int>::type = 0>
 __global__ __launch_bounds__(BlockSize)
-void operation_kernel(T* input, T* output, CustomOp op)
+void operation_kernel(T* input, T* output, CustomOp op, T* atomic_output = nullptr)
 {
     const unsigned int lid          = threadIdx.x;
     const unsigned int block_offset = blockIdx.x * ItemsPerThread * BlockSize;
     T                  items[ItemsPerThread];
     rocprim::block_load_direct_striped<BlockSize>(lid, input + block_offset, items);
-    op(items, nullptr, 0, output);
+    op(items, nullptr, 0, atomic_output == nullptr ? output : atomic_output);
     rocprim::block_store_direct_striped<BlockSize>(lid, output + block_offset, items);
 }
 
@@ -295,7 +306,7 @@ template<typename T,
          typename CustomOp = typename operation<no_operation, T, ItemsPerThread>::value_type,
          typename std::enable_if<MemOp == block_primitives_transpose, int>::type = 0>
 __global__ __launch_bounds__(BlockSize)
-void operation_kernel(T* input, T* output, CustomOp op)
+void operation_kernel(T* input, T* output, CustomOp op, T* atomic_output = nullptr)
 {
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
 
@@ -321,7 +332,7 @@ void operation_kernel(T* input, T* output, CustomOp op)
     T items[ItemsPerThread];
     load.load(input + offset, items, storage.load);
     __syncthreads();
-    op(items, &storage, sizeof(storage), output);
+    op(items, &storage, sizeof(storage), atomic_output == nullptr ? output : atomic_output);
     store.store(output + offset, items, storage.store);
 }
 
@@ -365,6 +376,144 @@ struct device_memory_benchmark : public primbench::benchmark_interface
 
         state.set_items(items);
         state.add_reads<T>(items);
+
+        state.test(
+            [&]
+            {
+                constexpr size_t items_per_block = BlockSize * ItemsPerThread;
+                if constexpr(MemOp == copy || KernelOp == no_operation)
+                {
+                    const auto count
+                        = std::min<size_t>(MemOp == copy ? items : grid_size * items_per_block,
+                                           4096);
+                    common::check_prefix(
+                        d_output.get(),
+                        count,
+                        [&](size_t i) { return input[i]; },
+                        common::equal<T>);
+                }
+                else
+                {
+                    const auto blocks = std::min<size_t>(grid_size, 2);
+                    if(blocks == 0)
+                    {
+                        return;
+                    }
+                    constexpr bool atomic = KernelOp == atomics_no_collision
+                                            || KernelOp == atomics_inter_block_collision
+                                            || KernelOp == atomics_inter_warp_collision;
+                    const auto     count = blocks * items_per_block;
+                    std::vector<T> values(count);
+                    for(size_t i = 0; i < count; ++i)
+                    {
+                        values[i] = static_cast<T>(static_cast<int>(i % 13) - 6);
+                    }
+                    common::device_ptr<T> d_values(values);
+                    common::device_ptr<T> d_result(count);
+                    common::device_ptr<T> d_atomics;
+                    if constexpr(atomic)
+                    {
+                        d_atomics = common::device_ptr<T>(std::vector<T>(count, T(0)));
+                    }
+                    operation_kernel<T, BlockSize, ItemsPerThread, MemOp>
+                        <<<dim3(blocks), dim3(BlockSize), 0, stream>>>(d_values.get(),
+                                                                       d_result.get(),
+                                                                       selected_operation,
+                                                                       d_atomics.get());
+                    HIP_CHECK(hipStreamSynchronize(stream));
+                    const auto index = [](size_t thread, size_t item)
+                    {
+                        if constexpr(MemOp == striped)
+                        {
+                            return thread + item * BlockSize;
+                        }
+                        else
+                        {
+                            return thread * ItemsPerThread + item;
+                        }
+                    };
+                    auto expected = values;
+                    if constexpr(KernelOp == block_scan)
+                    {
+                        for(size_t block = 0; block < blocks; ++block)
+                        {
+                            T sum{};
+                            for(size_t thread = 0; thread < BlockSize; ++thread)
+                            {
+                                for(size_t item = 0; item < ItemsPerThread; ++item)
+                                {
+                                    const auto i = block * items_per_block + index(thread, item);
+                                    sum          = common::add(sum, values[i]);
+                                    expected[i]  = sum;
+                                }
+                            }
+                        }
+                    }
+                    else if constexpr(KernelOp == custom_operation)
+                    {
+                        for(size_t block = 0; block < blocks; ++block)
+                        {
+                            for(size_t thread = 0; thread < BlockSize; ++thread)
+                            {
+                                T thread_values[ItemsPerThread];
+                                for(size_t item = 0; item < ItemsPerThread; ++item)
+                                {
+                                    thread_values[item]
+                                        = values[block * items_per_block + index(thread, item)];
+                                }
+                                selected_operation(thread_values);
+                                for(size_t item = 0; item < ItemsPerThread; ++item)
+                                {
+                                    expected[block * items_per_block + index(thread, item)]
+                                        = thread_values[item];
+                                }
+                            }
+                        }
+                    }
+                    common::check_prefix(
+                        d_result.get(),
+                        count,
+                        [&](size_t i) { return expected[i]; },
+                        [](const T& actual, const T& reference)
+                        {
+                            if constexpr(std::is_floating_point_v<T>)
+                            {
+                                if(std::isnan(reference))
+                                {
+                                    return std::isnan(actual);
+                                }
+                            }
+                            return common::equal(actual, reference);
+                        });
+                    if constexpr(atomic)
+                    {
+                        std::vector<T> expected_atomics(count, T(0));
+                        const auto     actual = d_atomics.load();
+                        unsigned int   warp_size;
+                        int            device;
+                        HIP_CHECK(hipGetDevice(&device));
+                        HIP_CHECK(rocprim::host_warp_size(device, warp_size));
+                        for(size_t block = 0; block < blocks; ++block)
+                        {
+                            for(size_t thread = 0; thread < BlockSize; ++thread)
+                            {
+                                const auto offset = KernelOp == atomics_inter_block_collision
+                                                        ? 0
+                                                        : block * items_per_block;
+                                const auto lane   = KernelOp == atomics_inter_warp_collision
+                                                        ? thread % warp_size
+                                                        : thread;
+                                for(size_t item = 0; item < ItemsPerThread; ++item)
+                                {
+                                    expected_atomics[offset + lane * ItemsPerThread + item]
+                                        += T(666);
+                                }
+                            }
+                        }
+                        PRIMBENCH_ASSERT(actual, expected_atomics);
+                    }
+                }
+            });
 
         state.run(
             [&]

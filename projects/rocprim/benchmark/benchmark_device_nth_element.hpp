@@ -63,7 +63,7 @@ struct device_nth_element_benchmark : public primbench::benchmark_interface
         using key_type = Key;
 
         size_t items = bytes / sizeof(key_type);
-        size_t nth   = 10;
+        size_t nth   = items == 0 ? 0 : std::min<size_t>(10, items - 1);
 
         if(!m_small_n)
         {
@@ -97,6 +97,31 @@ struct device_nth_element_benchmark : public primbench::benchmark_interface
 
         state.set_items(items);
         state.add_reads<key_type>(items);
+
+        state.test(
+            [&]
+            {
+                if(items < 2)
+                {
+                    return;
+                }
+                std::nth_element(keys_input.begin(),
+                                 keys_input.begin() + nth,
+                                 keys_input.end(),
+                                 common::less<key_type>);
+                const auto expected = keys_input[nth];
+                PRIMBENCH_ASSERT(common::equal(d_keys_output.load_value_at(nth), expected), true);
+                const auto count = std::min<size_t>(nth, 64);
+                for(const auto& key : common::read_output(d_keys_output.get() + nth - count, count))
+                {
+                    PRIMBENCH_ASSERT(!common::less(expected, key), true);
+                }
+                const auto tail = std::min<size_t>(items - nth - 1, 64);
+                for(const auto& key : common::read_output(d_keys_output.get() + nth + 1, tail))
+                {
+                    PRIMBENCH_ASSERT(!common::less(key, expected), true);
+                }
+            });
 
         state.run(
             [&]

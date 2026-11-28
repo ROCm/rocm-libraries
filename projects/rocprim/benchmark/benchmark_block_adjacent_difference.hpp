@@ -327,12 +327,46 @@ struct block_adjacent_difference_benchmark : public primbench::benchmark_interfa
         state.set_items(items * Trials);
         state.add_reads<T>(items * Trials);
 
+        const auto check = [&](const std::vector<T>& input, const T* d_output, size_t valid)
+        {
+            constexpr bool left = std::is_same_v<Subalgo, subtract_left>
+                                  || std::is_same_v<Subalgo, subtract_left_partial>;
+            constexpr bool with_neighbor
+                = WithTile && !std::is_same_v<Subalgo, subtract_right_partial>;
+            const auto index
+                = [](size_t i) { return i / ItemsPerThread + i % ItemsPerThread * BlockSize; };
+            HIP_CHECK(hipStreamSynchronize(stream));
+            const auto output = common::read_output(d_output, items_per_block);
+            for(size_t i = 0; i < items_per_block; ++i)
+            {
+                const T    value      = input[index(i)];
+                const bool boundary   = left ? i == 0 : i + 1 == valid;
+                T          difference = value;
+                if(i < valid && (!boundary || with_neighbor))
+                {
+                    const T neighbor = boundary ? T(123) : input[index(left ? i - 1 : i + 1)];
+                    if constexpr(std::is_same_v<T, rocprim::half>)
+                    {
+                        difference = common::native_to_half(common::half_to_native(value)
+                                                            - common::half_to_native(neighbor));
+                    }
+                    else
+                    {
+                        difference = T(value - neighbor);
+                    }
+                }
+                PRIMBENCH_ASSERT(common::equal(output[index(i)], common::add(value, difference)),
+                                 true);
+            }
+        };
+
         if constexpr(std::is_same_v<Subalgo, subtract_left_partial>
                      || std::is_same_v<Subalgo, subtract_right_partial>)
         {
             // Partial variant (with tile_sizes)
             const auto random_range_input         = limit_random_range<T>(0, 10);
-            const auto random_range_tile_sizes    = limit_random_range<T>(0, items_per_block);
+            const auto random_range_tile_sizes
+                = limit_random_range<unsigned int>(0, items_per_block);
             const std::vector<T>            input = get_random_data<T>(items,
                                                             random_range_input.first,
                                                             random_range_input.second,
@@ -346,6 +380,21 @@ struct block_adjacent_difference_benchmark : public primbench::benchmark_interfa
             common::device_ptr<T>            d_input(input);
             common::device_ptr<unsigned int> d_tile_sizes(tile_sizes);
             common::device_ptr<T>            d_output(input.size());
+
+            state.test(
+                [&]
+                {
+                    if(num_blocks == 0)
+                    {
+                        return;
+                    }
+                    kernel<Subalgo, T, BlockSize, ItemsPerThread, WithTile, Algorithm>
+                        <<<dim3(1), dim3(BlockSize), 0, stream>>>(d_input.get(),
+                                                                  d_tile_sizes.get(),
+                                                                  d_output.get(),
+                                                                  1);
+                    check(input, d_output.get(), tile_sizes[0]);
+                });
 
             state.run(
                 [&]
@@ -366,6 +415,18 @@ struct block_adjacent_difference_benchmark : public primbench::benchmark_interfa
 
             common::device_ptr<T> d_input(input);
             common::device_ptr<T> d_output(input.size());
+
+            state.test(
+                [&]
+                {
+                    if(num_blocks == 0)
+                    {
+                        return;
+                    }
+                    kernel<Subalgo, T, BlockSize, ItemsPerThread, WithTile, Algorithm>
+                        <<<dim3(1), dim3(BlockSize), 0, stream>>>(d_input.get(), d_output.get(), 1);
+                    check(input, d_output.get(), items_per_block);
+                });
 
             state.run(
                 [&]

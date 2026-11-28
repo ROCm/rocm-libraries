@@ -164,10 +164,25 @@ struct device_binary_search_benchmark : public primbench::benchmark_interface
         compare_op_type compare_op;
 
         // Generate data
+        size_t max_key = haystack_items;
+        if constexpr(rocprim::is_integral<T>::value && sizeof(T) <= sizeof(size_t))
+        {
+            max_key = std::min(max_key, static_cast<size_t>(rocprim::numeric_limits<T>::max()));
+        }
+        else if constexpr(std::is_same_v<T, rocprim::half>)
+        {
+            max_key = std::min(
+                max_key,
+                static_cast<size_t>(common::half_to_native(rocprim::numeric_limits<T>::max())));
+        }
         std::vector<T> haystack(haystack_items);
-        std::iota(haystack.begin(), haystack.end(), 0);
+        const auto repeat = max_key < haystack_items ? (haystack_items - 1) / (max_key + 1) + 1 : 1;
+        for(size_t i = 0; i < haystack_items; ++i)
+        {
+            haystack[i] = T(i / repeat);
+        }
 
-        const auto random_range = limit_random_range<T>(0, haystack_items);
+        const auto random_range = limit_random_range<T>(0, max_key);
 
         std::vector<T> needles
             = get_random_data<T>(needles_items, random_range.first, random_range.second, seed);
@@ -197,6 +212,42 @@ struct device_binary_search_benchmark : public primbench::benchmark_interface
 
         state.set_items(needles_items);
         state.add_reads<T>(needles_items);
+
+        state.test(
+            [&]
+            {
+                const auto count = std::min<size_t>(needles_items, 4096);
+                common::check_prefix(
+                    d_output.get(),
+                    count,
+                    [&](size_t i) -> OutputType
+                    {
+                        if constexpr(std::is_same_v<SubAlgorithm, lower_bound_subalgorithm>)
+                        {
+                            return std::lower_bound(haystack.begin(),
+                                                    haystack.end(),
+                                                    needles[i],
+                                                    compare_op)
+                                   - haystack.begin();
+                        }
+                        else if constexpr(std::is_same_v<SubAlgorithm, upper_bound_subalgorithm>)
+                        {
+                            return std::upper_bound(haystack.begin(),
+                                                    haystack.end(),
+                                                    needles[i],
+                                                    compare_op)
+                                   - haystack.begin();
+                        }
+                        else
+                        {
+                            return std::binary_search(haystack.begin(),
+                                                      haystack.end(),
+                                                      needles[i],
+                                                      compare_op);
+                        }
+                    },
+                    common::equal<OutputType>);
+            });
 
         state.run(
             [&]

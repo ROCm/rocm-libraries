@@ -118,6 +118,13 @@ struct device_reduce_benchmark : public primbench::benchmark_interface
         state.set_items(items);
         state.add_reads<T>(items);
 
+        state.test(
+            [&]
+            {
+                const auto expected = common::reduce(input.begin(), input.end(), T{}, reduce_op);
+                PRIMBENCH_ASSERT(common::near(d_output.load_value_at(0), expected), true);
+            });
+
         state.run(
             [&]
             {

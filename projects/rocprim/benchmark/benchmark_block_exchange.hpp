@@ -275,6 +275,70 @@ struct block_exchange_benchmark : public primbench::benchmark_interface
         state.set_items(items * Trials);
         state.add_reads<T>(items * Trials);
 
+        state.test(
+            [&]
+            {
+                if(items == 0)
+                {
+                    return;
+                }
+                kernel<Subalgo, T, BlockSize, ItemsPerThread, 1>
+                    <<<dim3(1), dim3(BlockSize), 0, stream>>>(d_input.get(),
+                                                              d_ranks.get(),
+                                                              d_output.get());
+                HIP_CHECK(hipStreamSynchronize(stream));
+
+                unsigned int warp_size;
+                int          device;
+                HIP_CHECK(hipGetDevice(&device));
+                HIP_CHECK(rocprim::host_warp_size(device, warp_size));
+                warp_size = std::min(warp_size, BlockSize);
+                std::vector<T> expected(items_per_block);
+                for(unsigned int thread = 0; thread < BlockSize; ++thread)
+                {
+                    for(unsigned int item = 0; item < ItemsPerThread; ++item)
+                    {
+                        const auto striped    = thread + item * BlockSize;
+                        const auto blocked    = thread * ItemsPerThread + item;
+                        const auto warp_begin = (thread / warp_size) * warp_size;
+                        const auto warp_width = std::min(warp_size, BlockSize - warp_begin);
+                        const auto warp_striped
+                            = warp_begin * ItemsPerThread + thread % warp_size + item * warp_width;
+                        if constexpr(std::is_same_v<Subalgo, blocked_to_striped>)
+                        {
+                            expected[striped] = input[striped % ItemsPerThread * BlockSize
+                                                      + striped / ItemsPerThread];
+                        }
+                        else if constexpr(std::is_same_v<Subalgo, striped_to_blocked>)
+                        {
+                            expected[striped] = input[blocked];
+                        }
+                        else if constexpr(std::is_same_v<Subalgo, blocked_to_warp_striped>)
+                        {
+                            expected[striped] = input[warp_striped % ItemsPerThread * BlockSize
+                                                      + warp_striped / ItemsPerThread];
+                        }
+                        else if constexpr(std::is_same_v<Subalgo, warp_striped_to_blocked>)
+                        {
+                            expected[warp_striped % ItemsPerThread * BlockSize
+                                     + warp_striped / ItemsPerThread]
+                                = input[striped];
+                        }
+                        else if constexpr(std::is_same_v<Subalgo, scatter_to_blocked>)
+                        {
+                            const auto rank = ranks[striped];
+                            expected[rank % ItemsPerThread * BlockSize + rank / ItemsPerThread]
+                                = input[striped];
+                        }
+                        else
+                        {
+                            expected[ranks[striped]] = input[striped];
+                        }
+                    }
+                }
+                common::check_output(d_output.get(), expected);
+            });
+
         state.run(
             [&]
             {

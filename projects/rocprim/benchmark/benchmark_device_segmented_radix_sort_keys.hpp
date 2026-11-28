@@ -269,6 +269,36 @@ struct device_segmented_radix_sort_keys_benchmark : public primbench::benchmark_
         state.set_items(total_items);
         state.add_reads<key_type>(total_items);
 
+        state.test(
+            [&]
+            {
+                for(int i = 0; i < num_input_arrays; ++i)
+                {
+                    dispatch_input(d_temporary_storage.get(),
+                                   temp_storage_bytes_per_run[i],
+                                   d_keys_input_arrays[i].get(),
+                                   items_per_run[i],
+                                   segments_counts[i],
+                                   d_offsets_arrays[i].get());
+                    HIP_CHECK(hipStreamSynchronize(stream));
+                    const auto& offsets = offsets_arrays[i];
+                    for(size_t segment = 0; segment < std::min<size_t>(segments_counts[i], 3);
+                        ++segment)
+                    {
+                        const auto begin  = offsets[segment];
+                        const auto length = offsets[segment + 1] - begin;
+                        const auto count  = std::min<size_t>(length, 128);
+                        if(count != 0)
+                        {
+                            common::check_sorted(keys_input_arrays[i].data() + begin,
+                                                 length,
+                                                 d_keys_output.get() + begin,
+                                                 count);
+                        }
+                    }
+                }
+            });
+
         state.run(
             [&]
             {

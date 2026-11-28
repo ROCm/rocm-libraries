@@ -199,6 +199,32 @@ struct device_segmented_reduce_benchmark : public primbench::benchmark_interface
         state.set_items(items);
         state.add_reads<T>(items * num_input_arrays);
 
+        state.test(
+            [&]
+            {
+                for(int i = 0; i < num_input_arrays; ++i)
+                {
+                    dispatch_input(d_temp_storage.get(),
+                                   temp_storage_bytes_per_run[i],
+                                   d_offsets_arrays[i].get(),
+                                   segments_counts[i]);
+                    HIP_CHECK(hipStreamSynchronize(stream));
+                    const auto& offsets = offsets_arrays[i];
+                    const auto  count   = std::min<size_t>(segments_counts[i], 16);
+                    common::check_prefix(
+                        d_aggregates_output.get(),
+                        count,
+                        [&](size_t segment)
+                        {
+                            return common::reduce(values_input.begin() + offsets[segment],
+                                                  values_input.begin() + offsets[segment + 1],
+                                                  init,
+                                                  reduce_op);
+                        },
+                        common::near<T>);
+                }
+            });
+
         state.run(
             [&]
             {

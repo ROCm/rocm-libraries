@@ -114,6 +114,19 @@ struct config_dispatch_benchmark : public primbench::benchmark_interface
         state.set_items(1);
         state.add_reads<char>(1);
 
+        state.test(
+            [&]
+            {
+                int             device;
+                hipDeviceProp_t properties;
+                HIP_CHECK(hipGetDevice(&device));
+                HIP_CHECK(hipGetDeviceProperties(&properties, device));
+                rocprim::detail::target_arch arch;
+                HIP_CHECK(rocprim::detail::host_target_arch(local_stream, arch));
+                PRIMBENCH_ASSERT(arch == rocprim::detail::parse_gcn_arch(properties.gcnArchName),
+                                 true);
+            });
+
         state.run(
             [&]
             {

@@ -163,7 +163,17 @@ struct device_select_flag_benchmark : public primbench::benchmark_interface
 
         common::device_ptr<unsigned int> d_selected_count_output(1);
 
-        const auto dispatch = [&](void* d_temp_storage, size_t& temp_storage_size_bytes)
+        const auto check = [&](const std::vector<FlagType>& flags)
+        {
+            common::check_selection(input,
+                                    std::array<const DataType*, 1>{d_output.get()},
+                                    d_selected_count_output.load_to_array<1>(),
+                                    [&](size_t i) -> size_t
+                                    { return !common::equal(flags[i], FlagType(0)) ? 0 : 1; });
+        };
+
+        const auto dispatch
+            = [&](void* d_temp_storage, size_t& temp_storage_size_bytes, bool verify = false)
         {
             const auto dispatch_flags = [&](FlagType* d_flags)
             {
@@ -175,6 +185,13 @@ struct device_select_flag_benchmark : public primbench::benchmark_interface
                                                   d_selected_count_output.get(),
                                                   items,
                                                   stream));
+                if(verify)
+                {
+                    HIP_CHECK(hipStreamSynchronize(stream));
+                    check(d_flags == d_flags_0.get()   ? flags_0
+                          : d_flags == d_flags_1.get() ? flags_1
+                                                       : flags_2);
+                }
             };
 
             dispatch_flags(d_flags_0.get());
@@ -192,6 +209,19 @@ struct device_select_flag_benchmark : public primbench::benchmark_interface
 
         state.set_items(items);
         state.add_reads<DataType>(items);
+
+        state.test(
+            [&]
+            {
+                if(is_tuning)
+                {
+                    dispatch(d_temp_storage.get(), temp_storage_size_bytes, true);
+                }
+                else
+                {
+                    check(flags_0);
+                }
+            });
 
         state.run([&] { dispatch(d_temp_storage.get(), temp_storage_size_bytes); });
     }
@@ -235,7 +265,20 @@ struct device_select_predicate_benchmark : public primbench::benchmark_interface
 
         common::device_ptr<unsigned int> d_selected_count_output(1);
 
-        const auto dispatch = [&](void* d_temp_storage, size_t& temp_storage_size_bytes)
+        const auto check = [&](float probability)
+        {
+            common::check_selection(
+                input,
+                std::array<const DataType*, 1>{d_output.get()},
+                d_selected_count_output.load_to_array<1>(),
+                [&](size_t i) -> size_t
+                {
+                    return common::less(input[i], static_cast<DataType>(127 * probability)) ? 0 : 1;
+                });
+        };
+
+        const auto dispatch
+            = [&](void* d_temp_storage, size_t& temp_storage_size_bytes, bool verify = false)
         {
             const auto dispatch_predicate = [&](float probability)
             {
@@ -249,6 +292,11 @@ struct device_select_predicate_benchmark : public primbench::benchmark_interface
                                                   items,
                                                   predicate,
                                                   stream));
+                if(verify)
+                {
+                    HIP_CHECK(hipStreamSynchronize(stream));
+                    check(probability);
+                }
             };
 
             if(is_tuning)
@@ -269,6 +317,19 @@ struct device_select_predicate_benchmark : public primbench::benchmark_interface
 
         state.set_items(items);
         state.add_reads<DataType>(items);
+
+        state.test(
+            [&]
+            {
+                if(is_tuning)
+                {
+                    dispatch(d_temp_storage.get(), temp_storage_size_bytes, true);
+                }
+                else
+                {
+                    check(get_probability(Probability));
+                }
+            });
 
         state.run([&] { dispatch(d_temp_storage.get(), temp_storage_size_bytes); });
     }
@@ -340,7 +401,17 @@ struct device_select_predicated_flag_benchmark : public primbench::benchmark_int
 
         common::device_ptr<unsigned int> d_selected_count_output(1);
 
-        const auto dispatch = [&](void* d_temp_storage, size_t& temp_storage_size_bytes)
+        const auto check = [&](const std::vector<FlagType>& flags)
+        {
+            common::check_selection(input,
+                                    std::array<const DataType*, 1>{d_output.get()},
+                                    d_selected_count_output.load_to_array<1>(),
+                                    [&](size_t i) -> size_t
+                                    { return !common::equal(flags[i], FlagType(0)) ? 0 : 1; });
+        };
+
+        const auto dispatch
+            = [&](void* d_temp_storage, size_t& temp_storage_size_bytes, bool verify = false)
         {
             const auto dispatch_predicated_flags = [&](FlagType* d_flags)
             {
@@ -354,6 +425,13 @@ struct device_select_predicated_flag_benchmark : public primbench::benchmark_int
                                                   items,
                                                   predicate,
                                                   stream));
+                if(verify)
+                {
+                    HIP_CHECK(hipStreamSynchronize(stream));
+                    check(d_flags == d_flags_0.get()   ? flags_0
+                          : d_flags == d_flags_1.get() ? flags_1
+                                                       : flags_2);
+                }
             };
 
             dispatch_predicated_flags(d_flags_0.get());
@@ -372,6 +450,19 @@ struct device_select_predicated_flag_benchmark : public primbench::benchmark_int
         state.set_items(items);
         state.add_reads<DataType>(items);
 
+        state.test(
+            [&]
+            {
+                if(is_tuning)
+                {
+                    dispatch(d_temp_storage.get(), temp_storage_size_bytes, true);
+                }
+                else
+                {
+                    check(flags_0);
+                }
+            });
+
         state.run([&] { dispatch(d_temp_storage.get(), temp_storage_size_bytes); });
     }
 
@@ -387,7 +478,11 @@ inline std::vector<DataType> get_unique_input(size_t items, float probability, u
     op_type               op;
     std::vector<DataType> input(items);
     auto                  input01 = get_random_data01<DataType>(items, probability, seed);
-    auto                  acc     = input01[0];
+    if(input01.empty())
+    {
+        return input;
+    }
+    auto acc                      = input01[0];
     input[0]                      = acc;
     for(size_t i = 1; i < input01.size(); ++i)
     {
@@ -449,7 +544,18 @@ struct device_select_unique_benchmark : public primbench::benchmark_interface
 
         common::device_ptr<unsigned int> d_selected_count_output(1);
 
-        const auto dispatch = [&](void* d_temp_storage, size_t& temp_storage_size_bytes)
+        const auto check = [&](const std::vector<DataType>& values)
+        {
+            common::check_selection(
+                values,
+                std::array<const DataType*, 1>{d_output.get()},
+                d_selected_count_output.load_to_array<1>(),
+                [&](size_t i) -> size_t
+                { return i == 0 || !common::equal(values[i - 1], values[i]) ? 0 : 1; });
+        };
+
+        const auto dispatch
+            = [&](void* d_temp_storage, size_t& temp_storage_size_bytes, bool verify = false)
         {
             const auto dispatch_flags = [&](DataType* d_input)
             {
@@ -461,6 +567,13 @@ struct device_select_unique_benchmark : public primbench::benchmark_interface
                                                   items,
                                                   rocprim::equal_to<DataType>(),
                                                   stream));
+                if(verify)
+                {
+                    HIP_CHECK(hipStreamSynchronize(stream));
+                    check(d_input == d_input_0.get()   ? input_0
+                          : d_input == d_input_1.get() ? input_1
+                                                       : input_2);
+                }
             };
 
             dispatch_flags(d_input_0.get());
@@ -478,6 +591,19 @@ struct device_select_unique_benchmark : public primbench::benchmark_interface
 
         state.set_items(items);
         state.add_reads<DataType>(items);
+
+        state.test(
+            [&]
+            {
+                if(is_tuning)
+                {
+                    dispatch(d_temp_storage.get(), temp_storage_size_bytes, true);
+                }
+                else
+                {
+                    check(input_0);
+                }
+            });
 
         state.run([&] { dispatch(d_temp_storage.get(), temp_storage_size_bytes); });
     }
@@ -550,7 +676,28 @@ struct device_select_unique_by_key_benchmark : public primbench::benchmark_inter
 
         common::device_ptr<unsigned int> d_selected_count_output(1);
 
-        const auto dispatch = [&](void* d_temp_storage, size_t& temp_storage_size_bytes)
+        const auto check = [&](const std::vector<KeyType>& keys)
+        {
+            std::vector<KeyType>   expected_keys;
+            std::vector<ValueType> expected_values;
+            unsigned int           count = 0;
+            common::for_each_run(keys,
+                                 [&](size_t first, size_t)
+                                 {
+                                     if(count < 4096)
+                                     {
+                                         expected_keys.push_back(keys[first]);
+                                         expected_values.push_back(input_values[first]);
+                                     }
+                                     ++count;
+                                 });
+            PRIMBENCH_ASSERT(d_selected_count_output.load_value_at(0), count);
+            common::check_output(d_keys_output.get(), expected_keys);
+            common::check_output(d_values_output.get(), expected_values);
+        };
+
+        const auto dispatch
+            = [&](void* d_temp_storage, size_t& temp_storage_size_bytes, bool verify = false)
         {
             const auto dispatch_flags = [&](KeyType* d_keys_input)
             {
@@ -564,6 +711,13 @@ struct device_select_unique_by_key_benchmark : public primbench::benchmark_inter
                                                          items,
                                                          rocprim::equal_to<KeyType>(),
                                                          stream));
+                if(verify)
+                {
+                    HIP_CHECK(hipStreamSynchronize(stream));
+                    check(d_keys_input == d_keys_input_0.get()   ? input_keys_0
+                          : d_keys_input == d_keys_input_1.get() ? input_keys_1
+                                                                 : input_keys_2);
+                }
             };
 
             dispatch_flags(d_keys_input_0.get());
@@ -582,6 +736,19 @@ struct device_select_unique_by_key_benchmark : public primbench::benchmark_inter
         state.set_items(items);
         state.add_reads<KeyType>(items);
         state.add_reads<ValueType>(items);
+
+        state.test(
+            [&]
+            {
+                if(is_tuning)
+                {
+                    dispatch(d_temp_storage.get(), temp_storage_size_bytes, true);
+                }
+                else
+                {
+                    check(input_keys_0);
+                }
+            });
 
         state.run([&] { dispatch(d_temp_storage.get(), temp_storage_size_bytes); });
     }

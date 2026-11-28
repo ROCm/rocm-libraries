@@ -67,6 +67,7 @@ template<typename T, typename Predicate, typename Transform>
 struct transform_it
 {
     using value_type = T;
+    using transform_type = Transform;
 
     void operator()(T* d_input, T* d_output, const size_t items, const hipStream_t stream)
     {
@@ -80,6 +81,7 @@ template<typename T, typename Predicate, typename Transform>
 struct read_predicate_it
 {
     using value_type = T;
+    using transform_type = Transform;
 
     void operator()(T* d_input, T* d_output, const size_t items, const hipStream_t stream)
     {
@@ -93,6 +95,7 @@ template<typename T, typename Predicate, typename Transform>
 struct write_predicate_it
 {
     using value_type = T;
+    using transform_type = Transform;
 
     void operator()(T* d_input, T* d_output, const size_t items, const hipStream_t stream)
     {
@@ -169,7 +172,51 @@ struct predicate_iterator_benchmark : public primbench::benchmark_interface
         state.set_items(items);
         state.add_reads<T>(items);
 
-        state.run([&] { IteratorBenchmark{}(d_input.get(), d_output.get(), items, stream); });
+        const auto launch
+            = [&] { IteratorBenchmark{}(d_input.get(), d_output.get(), items, stream); };
+
+        state.test(
+            [&]
+            {
+                const auto count = std::min<size_t>(items, 4096);
+                if(count == 0)
+                {
+                    return;
+                }
+                using transform_type = typename IteratorBenchmark::transform_type;
+                using predicate_type = less_than<T, C>;
+                constexpr bool write_predicate
+                    = std::is_same_v<IteratorBenchmark,
+                                     write_predicate_it<T, predicate_type, transform_type>>;
+                constexpr bool read_predicate
+                    = std::is_same_v<IteratorBenchmark,
+                                     read_predicate_it<T, predicate_type, transform_type>>;
+                std::vector<T> expected(count, T(7));
+                if(write_predicate)
+                {
+                    HIP_CHECK(hipMemcpy(d_output.get(),
+                                        expected.data(),
+                                        count * sizeof(T),
+                                        hipMemcpyHostToDevice));
+                    launch();
+                    HIP_CHECK(hipStreamSynchronize(stream));
+                }
+                for(size_t i = 0; i < count; ++i)
+                {
+                    const auto value = input[i];
+                    if(value < T(C))
+                    {
+                        expected[i] = transform_type{}(value);
+                    }
+                    else if(!write_predicate)
+                    {
+                        expected[i] = read_predicate ? T{} : value;
+                    }
+                }
+                common::check_output(d_output.get(), expected);
+            });
+
+        state.run(launch);
     }
 
 private:
