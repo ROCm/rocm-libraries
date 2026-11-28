@@ -4,6 +4,7 @@
 #pragma once
 #include <stdint.h>
 #include "ck/utility/amd_ck_fp8.hpp"
+#include "ck/utility/dtype_complex.hpp"
 #include "ck/utility/e4m3.hpp"
 #include "ck/utility/e5m3.hpp"
 #include "ck/utility/e8m0.hpp"
@@ -75,6 +76,23 @@ struct scalar_type
     // Basic data type mapping to unsigned _BitInt of appropriate size
     using type                           = unsigned _BitInt(8 * sizeof(T));
     static constexpr index_t vector_size = 1;
+};
+
+// True for an element made of two components of one real type, such as complex_t. Such an
+// element counts as one scalar (scalar_type above) and is loaded and stored as two
+// T::component_type values.
+template <typename T, typename = void>
+struct is_two_component_type
+{
+    static constexpr bool value = false;
+};
+
+template <typename T>
+struct is_two_component_type<T, void_t<typename T::component_type>>
+{
+    static_assert(sizeof(T) == 2 * sizeof(typename T::component_type),
+                  "A type with component_type must be exactly two components wide");
+    static constexpr bool value = true;
 };
 
 /**

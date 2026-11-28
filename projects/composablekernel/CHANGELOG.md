@@ -9,6 +9,7 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 * Added batched GEMM to CK Tile GEMM Stream-K: `StreamKHostArgs` takes a batch count and A, B and C batch strides, and the data-parallel and Stream-K work, persistent or not, is shared over the output tiles of all batches with every reduction strategy.
 * Added the gfx1250 comp_tdm_v3 pipeline to CK Tile batched GEMM, in the CK Tile dispatcher and the Tile Engine.
 * Added batched Stream-K to the CK Tile dispatcher batched GEMM bridge and its Tile Engine benchmark (`batched_gemm_full_benchmark.py`): Stream-K sweep configs for gfx9 and gfx1250 (compv3, compv4, mem, comp_tdm, comp_tdm_v2, comp_tdm_v3) and the `--reduction-strategy` and `--budget-pct` options.
+* Added the `complex_t` type (`complex_float_t`, `complex_double_t`): a complex number with float or double parts and the same layout as `hipFloatComplex` and `hipDoubleComplex`, with `+`, `-`, `*` (each part within twice the unit roundoff when nothing underflows, also when the products cancel; infinities and overflow as in C11 Annex G) and `conj`. Kernels load and store it with the buffer load and store functions (clang 20 or later).
 
 ### Changed
 

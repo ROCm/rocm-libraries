@@ -324,10 +324,23 @@ template <typename T, index_t N>
 struct scalar_type<non_native_vector_base<
     T,
     N,
-    ck::enable_if_t<sizeof(T) == 12 || sizeof(T) == 16 || sizeof(T) == 24 || sizeof(T) == 32>>>
+    ck::enable_if_t<(sizeof(T) == 12 || sizeof(T) == 16 || sizeof(T) == 24 || sizeof(T) == 32) &&
+                    !is_two_component_type<T>::value>>>
 {
     using type                           = typename non_native_vector_base<T, N>::element_t;
     static constexpr index_t vector_size = N * non_native_vector_base<T, N>::size_factor;
+};
+
+// A 16-byte two-component element (complex_double_t) counts as one scalar. complex_float_t
+// (8 bytes) takes the 1/2/4/8-byte case above.
+template <typename T, index_t N>
+struct scalar_type<
+    non_native_vector_base<T,
+                           N,
+                           ck::enable_if_t<sizeof(T) == 16 && is_two_component_type<T>::value>>>
+{
+    using type                           = typename non_native_vector_base<T, N>::data_t;
+    static constexpr index_t vector_size = N;
 };
 
 /**

@@ -843,6 +843,9 @@ amd_buffer_load_invalid_element_return_zero(const T* p_src_wave,
                                             bool src_thread_element_valid,
                                             index_t src_element_space_size)
 {
+    static_assert(!is_two_component_type<T>::value,
+                  "complex_t needs the buffer functions of "
+                  "amd_buffer_addressing_builtins.hpp (clang 20 or later)");
     const int32x4_t src_wave_buffer_resource =
         make_wave_buffer_resource(p_src_wave, src_element_space_size);
 
@@ -881,6 +884,9 @@ amd_buffer_load_invalid_element_return_customized_value(const T* p_src_wave,
                                                         index_t src_element_space_size,
                                                         T customized_value)
 {
+    static_assert(!is_two_component_type<T>::value,
+                  "complex_t needs the buffer functions of "
+                  "amd_buffer_addressing_builtins.hpp (clang 20 or later)");
     const int32x4_t src_wave_buffer_resource =
         make_wave_buffer_resource(p_src_wave, src_element_space_size);
 
@@ -910,6 +916,9 @@ __device__ void amd_buffer_store(const typename vector_type_maker<T, N>::type::t
                                  const bool dst_thread_element_valid,
                                  const index_t dst_element_space_size)
 {
+    static_assert(!is_two_component_type<T>::value,
+                  "complex_t needs the buffer functions of "
+                  "amd_buffer_addressing_builtins.hpp (clang 20 or later)");
     const int32x4_t dst_wave_buffer_resource =
         make_wave_buffer_resource(p_dst_wave, dst_element_space_size);
 

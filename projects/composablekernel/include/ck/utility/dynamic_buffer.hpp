@@ -159,7 +159,14 @@ struct DynamicBuffer
             }
             else
             {
-                if constexpr(InvalidElementUseNumericalZeroValue)
+                if constexpr(InvalidElementUseNumericalZeroValue &&
+                             is_two_component_type<remove_cvref_t<T>>::value)
+                {
+                    // For a vector of complex_double_t, X{0} would be ambiguous: 0 converts as
+                    // well to its 16-byte storage type as to double.
+                    return X{remove_cvref_t<T>{0}};
+                }
+                else if constexpr(InvalidElementUseNumericalZeroValue)
                 {
                     return X{0};
                 }
@@ -217,8 +224,23 @@ struct DynamicBuffer
         {
             auto tmp       = this->template Get<X>(i, is_valid_element);
             using scalar_t = typename scalar_type<remove_cvref_t<T>>::type;
+            if constexpr(is_two_component_type<remove_cvref_t<T>>::value)
+            {
+                // A vector of complex_t has no addition of its own (for complex_float_t it would
+                // add the bits as integers), so its elements are added one by one.
+                using elem_t        = remove_cvref_t<T>;
+                constexpr index_t n = scalar_type<remove_cvref_t<X>>::vector_size;
+                const vector_type<elem_t, n> a{tmp};
+                const vector_type<elem_t, n> b{x};
+                vector_type<elem_t, n> sum;
+                static_for<0, n, 1>{}([&](auto k) {
+                    sum.template AsType<elem_t>()(k) =
+                        a.template AsType<elem_t>()[k] + b.template AsType<elem_t>()[k];
+                });
+                this->template Set<X>(i, is_valid_element, sum.template AsType<X>()[Number<0>{}]);
+            }
             // handle bfloat addition
-            if constexpr(is_same_v<scalar_t, bhalf_t>)
+            else if constexpr(is_same_v<scalar_t, bhalf_t>)
             {
                 if constexpr(is_scalar_type<X>::value)
                 {
@@ -480,6 +502,11 @@ struct DynamicBuffer
                                  bool>::type = false>
     __host__ __device__ void AtomicAdd(IndexType i, bool is_valid_element, const X& x)
     {
+        // Temporary: atomic add for complex_t comes with the complex sum reduction, which
+        // replaces this check.
+        static_assert(!is_two_component_type<remove_cvref_t<T>>::value,
+                      "complex_t has no atomic add yet");
+
         using scalar_t = typename scalar_type<remove_cvref_t<T>>::type;
 
         // X contains multiple T
@@ -505,7 +532,7 @@ struct DynamicBuffer
 #elif CK_USE_AMD_BUFFER_ATOMIC_ADD_INTEGER && (!CK_USE_AMD_BUFFER_ATOMIC_ADD_FLOAT)
         bool constexpr use_amd_buffer_addressing =
             sizeof(IndexType) <= sizeof(int32_t) && is_same_v<remove_cvref_t<scalar_t>, int32_t>;
-#elif(!CK_USE_AMD_BUFFER_ATOMIC_ADD_INTEGER) && CK_USE_AMD_BUFFER_ATOMIC_ADD_FLOAT
+#elif (!CK_USE_AMD_BUFFER_ATOMIC_ADD_INTEGER) && CK_USE_AMD_BUFFER_ATOMIC_ADD_FLOAT
         bool constexpr use_amd_buffer_addressing =
             sizeof(IndexType) <= sizeof(int32_t) &&
             (is_same_v<remove_cvref_t<scalar_t>, float> ||
@@ -541,6 +568,9 @@ struct DynamicBuffer
                                  bool>::type = false>
     __host__ __device__ void AtomicMax(IndexType i, bool is_valid_element, const X& x)
     {
+        static_assert(!is_two_component_type<remove_cvref_t<T>>::value,
+                      "complex_t has no atomic max: complex numbers have no order");
+
         // X contains multiple T
         constexpr IndexType scalar_per_t_vector = scalar_type<remove_cvref_t<T>>::vector_size;
 
