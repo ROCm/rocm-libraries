@@ -34,7 +34,6 @@ exclude: |
     projects/rocblas/.*|
     projects/rocfft/.*|
     projects/rocprim/.*|
-    projects/rocsolver/.*|
     projects/rocthrust/.*|
     projects/rocwmma/.*|
     shared/mxdatagenerator/.*|
@@ -95,6 +94,8 @@ repos:
           (?x)
           projects/hipblaslt/.*|
           projects/hipsparse/.*|
+          # rocSOLVER is opted in to clang-format; see that hook below.
+          projects/rocsolver/.*|
           projects/rocsparse/.*|
           shared/tensile/.*|
           # Vendored AOTriton test sources, kept byte-identical to their pin
@@ -107,6 +108,7 @@ repos:
           (?x)
           projects/hipblaslt/.*|
           projects/hipsparse/.*|
+          projects/rocsolver/.*|
           projects/rocsparse/.*|
           shared/tensile/.*|
           ^projects/hipdnn/\.clang-format$|
@@ -151,7 +153,18 @@ repos:
         name: clang-format (C/C++/ObjC)
         entry: clang-format -i -style=file
         files: '\.(c|cpp|cc|h|hpp|m|mm|cl)$|\.(h|hpp|cpp)\.in$'
-        exclude: *opted_out_but_scanned
+        # *opted_out_but_scanned without projects/rocsolver, which is opted in
+        # to this hook only (its math-ci format check moved here). Keep the
+        # two lists in sync.
+        exclude: |
+          (?x)
+          projects/hipblaslt/.*|
+          projects/hipsparse/.*|
+          projects/rocsparse/.*|
+          shared/tensile/.*|
+          projects/hipdnn/tools/sdpa_conformance/aotriton/vendor/.*|
+          # MATLAB scripts, not Objective-C.
+          ^projects/rocsolver/.*\.m$
 
   # Blocks new unsafe yaml.load (arbitrary-object deserialization) from landing.
   # Intentionally outside the opted-out projects list: this is a security
@@ -445,6 +458,7 @@ repos:
           (?x)
           projects/hipblaslt/.*|
           projects/hipsparse/.*|
+          projects/rocsolver/.*|
           projects/rocsparse/.*|
           shared/tensile/.*|
           # MIOpen CMake files have not been audited for cmake-lint compliance yet.

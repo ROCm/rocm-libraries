@@ -1375,26 +1375,11 @@ __device__ I laed4_alt(I n,
                        I MAXIT = 50)
 {
     i = i + 1;
-    auto lam_abs = [](auto x) -> auto
-    {
-        return std::abs(x);
-    };
-    auto lam_sqr = [](auto x) -> auto
-    {
-        return x * x;
-    };
-    auto lam_sqrt = [](auto x) -> auto
-    {
-        return std::sqrt(x);
-    };
-    auto lam_max = [](auto x, auto y) -> auto
-    {
-        return std::max(x, y);
-    };
-    auto lam_min = [](auto x, auto y) -> auto
-    {
-        return std::min(x, y);
-    };
+    auto lam_abs = [](auto x) -> auto { return std::abs(x); };
+    auto lam_sqr = [](auto x) -> auto { return x * x; };
+    auto lam_sqrt = [](auto x) -> auto { return std::sqrt(x); };
+    auto lam_max = [](auto x, auto y) -> auto { return std::max(x, y); };
+    auto lam_min = [](auto x, auto y) -> auto { return std::min(x, y); };
 
     S zz[3]{};
     struct X_t

@@ -58,7 +58,8 @@ template <typename T,
           typename U,
           std::enable_if_t<std::is_trivial<T>::value && std::is_standard_layout<T>::value
                                && !std::is_pointer<T>::value,
-                           int> = 0>
+                           int>
+          = 0>
 struct rocsolver_hybrid_storage
 {
     I dim, batch_count;
