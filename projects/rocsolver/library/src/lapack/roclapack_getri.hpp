@@ -328,8 +328,7 @@ rocblas_status rocsolver_getri_template(rocblas_handle handle,
     if(n == 0)
     {
         rocblas_int blocks = (batch_count - 1) / 32 + 1;
-        ROCSOLVER_LAUNCH_KERNEL(reset_info, dim3(blocks, 1, 1), dim3(32, 1, 1), 0, stream, info,
-                                batch_count, 0);
+        reset_info(handle, info, batch_count, 0);
         return rocblas_status_success;
     }
 

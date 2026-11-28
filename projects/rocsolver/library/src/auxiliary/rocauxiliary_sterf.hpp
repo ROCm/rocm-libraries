@@ -390,7 +390,7 @@ rocblas_status rocsolver_sterf_template(rocblas_handle handle,
     dim3 threads(BS1, 1, 1);
 
     // info = 0
-    ROCSOLVER_LAUNCH_KERNEL(reset_info, gridReset, threads, 0, stream, info, batch_count, 0);
+    reset_info(handle, info, batch_count, 0);
 
     // quick return
     if(n <= 1)

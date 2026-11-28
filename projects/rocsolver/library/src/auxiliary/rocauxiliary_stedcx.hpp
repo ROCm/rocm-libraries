@@ -300,7 +300,7 @@ rocblas_status rocsolver_stedcx_template(rocblas_handle handle,
     rocblas_int bcblocks = std::min(65536, batch_count);
 
     // info = 0
-    ROCSOLVER_LAUNCH_KERNEL(reset_info, gridReset, threads, 0, stream, info, batch_count, 0);
+    reset_info(handle, info, batch_count, 0);
 
     // quick return
     if(n == 1)
