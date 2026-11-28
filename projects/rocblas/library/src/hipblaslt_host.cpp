@@ -566,8 +566,10 @@ namespace
 
         if(query_failure)
             return rocblas_status_invalid_value;
-        else
-            return rocblas_status_success;
+
+        // Pass the GEMM workspace size to initialize(), excluding user arguments.
+        gemm.setMaxWorkspaceBytes(workspace_size - extra_malloc);
+        return rocblas_status_success;
     }
 
 } // namespace
