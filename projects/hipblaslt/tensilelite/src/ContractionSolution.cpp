@@ -2111,6 +2111,23 @@ namespace TensileLite
         internalArg0 = 0;
         internalArg1 = 0;
 
+        // MBSK solutions (globalAccumulation == 3) at GSU <= GSUOn.gsuThreshold (2, tensilelite/Components/GSU.py)
+        // let the last workgroup of each tile busy-wait on the synchronizer for the other K slice
+        // (lastGsuWgBusyWaiting). With the wgmXCC remap, two such launches in flight on shared CUs can deadlock:
+        // each launch's waiting workgroups hold the CU slots that the other launch's not-yet-dispatched producers
+        // need (rocm-libraries#14746). Launching them without the remap removed the deadlock in all our tests;
+        // it lowers the risk and does not prove an ordering. It takes precedence over a WGMXCC set by the
+        // solution or TENSILE_FIXED_WGMXCC, since a WGMXCC above 1 reintroduces the deadlock. Every launch that is
+        // MBSK at run time has globalAccumulation == 3 here (getAccumulation only lowers it), so all busy-waiting
+        // launches are covered; an AdaptiveGemmGSUA solution lowered to MB for a launch keeps the override though
+        // it does not wait. GSU, kernel and workspace are unchanged. Keep the 2 in step with gsuThreshold.
+        if(gsu == 2 && wgmxcc != 1 && sizeMapping.globalAccumulation == 3)
+        {
+            if(T_Debug)
+                std::cout << "GSU=2 MBSK: WGMXCC " << wgmxcc << " -> 1 (wgmXCC remap skipped)" << std::endl;
+            wgmxcc = 1;
+        }
+
         // GSU bit-width depends on InternalArgsSupport.version and alpha support:
         //   v <  3: GSU occupies bits 0..13 (mask 0x3FFF, max 16383)
         //   v >= 3: GSU narrowed to bits 0..11 (mask 0x0FFF, max 4095);
