@@ -34,7 +34,7 @@ from builders.common.conv_reference import (
     tf32_reference_tol,
 )
 from rocke.numeric import storage
-from rocke.numeric.compare import tolerance_excess
+from rocke.numeric.compare import peak_relative_error, tolerance_excess
 from rocke.numeric.tolerance import sum_of_products_tolerance
 from rocke.runtime.hip_module import get_device_arch
 from rocke.tests.lanes import skip_needing_arch
@@ -226,7 +226,7 @@ def _verdict(out, ref, magnitude, dtype: str, arch: str) -> tuple[bool, str]:
         excess = tolerance_excess(out, ref, sum_of_products_tolerance(dtype, magnitude))
         return excess <= 1.0, f"error/bound={excess:.2e}"
     tol = 1e-4 if dtype == "fp32" else tf32_reference_tol(arch)
-    rel_err = float(np.abs(out - ref).max()) / max(1.0, float(np.abs(ref).max()))
+    rel_err = peak_relative_error(out, ref, floor=1.0)
     return rel_err < tol, f"rel_err={rel_err:.2e} (tol {tol:.1e})"
 
 
