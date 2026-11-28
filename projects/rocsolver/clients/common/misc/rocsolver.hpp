@@ -2195,6 +2195,104 @@ inline rocblas_status
 }
 /*****************************************************/
 
+/******************** LACPY ********************/
+inline rocblas_status rocsolver_lacpy(rocblas_handle handle,
+                                      rocblas_fill uplo,
+                                      rocblas_int m,
+                                      rocblas_int n,
+                                      float* A,
+                                      rocblas_int lda,
+                                      float* B,
+                                      rocblas_int ldb)
+{
+    return rocsolver_slacpy(handle, uplo, m, n, A, lda, B, ldb);
+}
+
+inline rocblas_status rocsolver_lacpy(rocblas_handle handle,
+                                      rocblas_fill uplo,
+                                      rocblas_int m,
+                                      rocblas_int n,
+                                      double* A,
+                                      rocblas_int lda,
+                                      double* B,
+                                      rocblas_int ldb)
+{
+    return rocsolver_dlacpy(handle, uplo, m, n, A, lda, B, ldb);
+}
+
+inline rocblas_status rocsolver_lacpy(rocblas_handle handle,
+                                      rocblas_fill uplo,
+                                      rocblas_int m,
+                                      rocblas_int n,
+                                      rocblas_float_complex* A,
+                                      rocblas_int lda,
+                                      rocblas_float_complex* B,
+                                      rocblas_int ldb)
+{
+    return rocsolver_clacpy(handle, uplo, m, n, A, lda, B, ldb);
+}
+
+inline rocblas_status rocsolver_lacpy(rocblas_handle handle,
+                                      rocblas_fill uplo,
+                                      rocblas_int m,
+                                      rocblas_int n,
+                                      rocblas_double_complex* A,
+                                      rocblas_int lda,
+                                      rocblas_double_complex* B,
+                                      rocblas_int ldb)
+{
+    return rocsolver_zlacpy(handle, uplo, m, n, A, lda, B, ldb);
+}
+
+inline rocblas_status rocsolver_lacpy(rocblas_handle handle,
+                                      rocblas_fill uplo,
+                                      int64_t m,
+                                      int64_t n,
+                                      float* A,
+                                      int64_t lda,
+                                      float* B,
+                                      int64_t ldb)
+{
+    return rocsolver_slacpy_64(handle, uplo, m, n, A, lda, B, ldb);
+}
+
+inline rocblas_status rocsolver_lacpy(rocblas_handle handle,
+                                      rocblas_fill uplo,
+                                      int64_t m,
+                                      int64_t n,
+                                      double* A,
+                                      int64_t lda,
+                                      double* B,
+                                      int64_t ldb)
+{
+    return rocsolver_dlacpy_64(handle, uplo, m, n, A, lda, B, ldb);
+}
+
+inline rocblas_status rocsolver_lacpy(rocblas_handle handle,
+                                      rocblas_fill uplo,
+                                      int64_t m,
+                                      int64_t n,
+                                      rocblas_float_complex* A,
+                                      int64_t lda,
+                                      rocblas_float_complex* B,
+                                      int64_t ldb)
+{
+    return rocsolver_clacpy_64(handle, uplo, m, n, A, lda, B, ldb);
+}
+
+inline rocblas_status rocsolver_lacpy(rocblas_handle handle,
+                                      rocblas_fill uplo,
+                                      int64_t m,
+                                      int64_t n,
+                                      rocblas_double_complex* A,
+                                      int64_t lda,
+                                      rocblas_double_complex* B,
+                                      int64_t ldb)
+{
+    return rocsolver_zlacpy_64(handle, uplo, m, n, A, lda, B, ldb);
+}
+/*****************************************************/
+
 /******************** LASWP ********************/
 inline rocblas_status rocsolver_laswp(rocblas_handle handle,
                                       rocblas_int n,
