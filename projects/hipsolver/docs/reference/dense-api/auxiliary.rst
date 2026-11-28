@@ -12,6 +12,7 @@ These functions support more :ref:`advanced LAPACK routines <dense_lapackfunc>`.
 The auxiliary functions are divided into the following categories:
 
 * :ref:`dense_householder`: Generation and application of Householder matrices.
+* :ref:`dense_tridiag`: Computations specialized in tridiagonal matrices.
 * :ref:`dense_orthonormal`: Generation and application of orthonormal matrices.
 * :ref:`dense_unitary`: Generation and application of unitary matrices.
 
@@ -37,6 +38,29 @@ hipsolverDn<type>larft_bufferSize()
 hipsolverDn<type>larft()
 ---------------------------------------
 .. doxygenfunction:: hipsolverDnXlarft
+
+
+
+.. _dense_tridiag:
+
+Tridiagonal forms
+==================================
+
+.. contents:: List of functions for tridiagonal forms
+   :local:
+   :backlinks: top
+
+.. _dense_stedc_bufferSize:
+
+hipsolverDn<type>stedc_bufferSize()
+---------------------------------------
+.. doxygenfunction:: hipsolverDnXstedc_bufferSize
+
+.. _dense_stedc:
+
+hipsolverDn<type>stedc()
+---------------------------------------
+.. doxygenfunction:: hipsolverDnXstedc
 
 
 
