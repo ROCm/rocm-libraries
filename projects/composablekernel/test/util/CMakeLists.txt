@@ -31,3 +31,8 @@ add_gtest_executable(unit_tensor_descriptor_element_space_size
 if(result EQUAL 0)
   target_link_libraries(unit_tensor_descriptor_element_space_size PRIVATE utility)
 endif()
+
+add_gtest_executable(unit_math_double unit_math_double.cpp)
+if(result EQUAL 0)
+  target_link_libraries(unit_math_double PRIVATE utility)
+endif()

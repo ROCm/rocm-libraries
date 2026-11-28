@@ -889,7 +889,7 @@ inline __device__ float exp<float>(float x)
 template <>
 inline __device__ double exp<double>(double x)
 {
-    return exp(x);
+    return ::exp(x);
 };
 
 template <typename T>
@@ -913,7 +913,7 @@ inline __device__ float log<float>(float x)
 template <>
 inline __device__ double log<double>(double x)
 {
-    return log(x);
+    return ::log(x);
 };
 
 template <typename T>
@@ -931,7 +931,7 @@ inline __device__ float pow<float>(float x, float gamma)
 template <>
 inline __device__ double pow<double>(double x, double gamma)
 {
-    return pow(x, gamma);
+    return ::pow(x, gamma);
 };
 
 template <typename T>
@@ -949,7 +949,7 @@ inline __device__ float expm1<float>(float x)
 template <>
 inline __device__ double expm1<double>(double x)
 {
-    return expm1(x);
+    return ::expm1(x);
 };
 
 template <typename T>
@@ -967,7 +967,7 @@ inline __device__ float cos<float>(float x)
 template <>
 inline __device__ double cos<double>(double x)
 {
-    return cos(x);
+    return ::cos(x);
 };
 
 } // namespace math
